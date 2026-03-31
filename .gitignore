@@ -30,3 +30,6 @@ api/db/*.sqlite3
 # python caches
 __pycache__/
 *.pyc
+
+IronLogMobile/
+IronLogCloud/
