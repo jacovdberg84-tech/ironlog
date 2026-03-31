@@ -1,0 +1,4 @@
+part_code,part_name,critical,min_stock
+HOS-010,Hydraulic Hose 1/2,1,2
+FLT-001,Oil Filter,1,5
+GRS-020,Grease Cartridge,0,10

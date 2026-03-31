@@ -1,0 +1,83 @@
+{
+  "name": "ironlog-api",
+  "version": "1.0.0",
+  "main": "desktop/main.cjs",
+  "type": "module",
+  "private": true,
+  "description": "IRONLOG Asset & Maintenance API (SQLite)",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon --watch . --ext js,json,sql --exec node index.js",
+    "desktop": "electron desktop/main.cjs",
+    "desktop:dev": "electron desktop/main.cjs --devtools",
+    "desktop:status": "node desktop/status.cjs",
+    "desktop:dist": "node desktop/build-desktop.cjs",
+    "desktop:dist:safe": "node desktop/build-desktop-safe.cjs",
+    "desktop:dist:plain": "electron-builder --win nsis --x64",
+    "db:migrate": "node db/migrate.js",
+    "db:seed": "node db/seed.js",
+    "db:reset": "npm run db:migrate && npm run db:seed",
+    "db:upgrade": "node db/upgrade.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@fastify/multipart": "^7.7.3",
+    "@fastify/static": "^6.12.0",
+    "better-sqlite3": "^11.1.0",
+    "csv-parse": "^6.1.0",
+    "date-fns": "^4.1.0",
+    "docx": "^9.6.1",
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "fastify": "^4.26.2",
+    "openai": "^6.33.0",
+    "pdfkit": "^0.17.2"
+  },
+  "devDependencies": {
+    "electron": "^28.3.3",
+    "electron-builder": "^26.8.1",
+    "nodemon": "^3.0.3",
+    "png-to-ico": "^3.0.1",
+    "sharp": "^0.34.5"
+  },
+  "build": {
+    "appId": "com.aml.ironlog",
+    "productName": "IRONLOG",
+    "artifactName": "${productName} Setup ${version}-${env.BUILD_TAG}-${arch}.${ext}",
+    "directories": {
+      "output": "desktop-dist"
+    },
+    "extraResources": [
+      {
+        "from": "../web",
+        "to": "web"
+      }
+    ],
+    "files": [
+      "**/*",
+      "!desktop-dist/**",
+      "!dist/**",
+      "!node_modules/.cache/**"
+    ],
+    "win": {
+      "icon": "desktop/icon.ico",
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "desktop/icon.ico",
+      "uninstallerIcon": "desktop/icon.ico",
+      "installerHeaderIcon": "desktop/icon.ico"
+    }
+  }
+}

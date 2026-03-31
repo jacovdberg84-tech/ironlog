@@ -1,0 +1,3 @@
+ALTER TABLE assets ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE assets ADD COLUMN archive_reason TEXT;
+ALTER TABLE assets ADD COLUMN archived_at TEXT;

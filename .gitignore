@@ -1,0 +1,32 @@
+﻿# dependencies/build
+**/node_modules/
+**/dist/
+**/desktop-dist/
+**/.next/
+**/build/
+
+# env/secrets
+.env
+.env.*
+!.env.example
+
+# local IDE/system
+.vscode/
+.DS_Store
+Thumbs.db
+
+# logs/temp
+*.log
+tmp_*.pdf
+*.tmp
+
+# runtime data/backups/uploads
+**/uploads/
+**/backups/
+api/db/*.db
+api/db/*.sqlite
+api/db/*.sqlite3
+
+# python caches
+__pycache__/
+*.pyc
