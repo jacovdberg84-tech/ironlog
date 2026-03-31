@@ -341,8 +341,6 @@ ALTER TABLE breakdowns ADD COLUMN get_used INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE breakdowns ADD COLUMN get_hours_fitted REAL;
 ALTER TABLE breakdowns ADD COLUMN get_hours_changed REAL;
 ALTER TABLE assets ADD COLUMN baseline_fuel_l_per_hour REAL DEFAULT 5.0;
-ALTER TABLE inspections ADD COLUMN checklist_json TEXT;cd
-ALTER TABLE inspections ADD COLUMN hour_meter_reading REAL;
 
 CREATE TABLE IF NOT EXISTS asset_hours (
   asset_id INTEGER PRIMARY KEY,

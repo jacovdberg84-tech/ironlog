@@ -6,13 +6,22 @@ export function isAuthRequired() {
   return v === "1" || String(v).toLowerCase() === "true";
 }
 
-const resolveSession = db.prepare(`
-  SELECT u.username, u.role, u.roles_json, u.active
-  FROM auth_sessions s
-  JOIN users u ON u.id = s.user_id
-  WHERE s.token = ?
-    AND datetime(s.expires_at) > datetime('now')
-`);
+function resolveSession(token) {
+  try {
+    return db
+      .prepare(`
+        SELECT u.username, u.role, u.roles_json, u.active
+        FROM auth_sessions s
+        JOIN users u ON u.id = s.user_id
+        WHERE s.token = ?
+          AND datetime(s.expires_at) > datetime('now')
+      `)
+      .get(token);
+  } catch {
+    // Fresh DBs may not have auth tables yet during early startup.
+    return null;
+  }
+}
 
 const VALID_ROLES = ["admin", "supervisor", "stores", "artisan", "operator"];
 
@@ -40,7 +49,7 @@ export async function ironlogAuthHook(req, reply) {
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
 
   if (token) {
-    const row = resolveSession.get(token);
+    const row = resolveSession(token);
     if (row && Number(row.active) === 1) {
       const roles = parseRoles(row.roles_json, row.role);
       req.headers["x-user-name"] = row.username;
