@@ -3749,6 +3749,16 @@ async function saveManualStock() {
       if (!window.__partNameByCode) window.__partNameByCode = {};
       window.__partNameByCode[part_code] = part_name;
     }
+    // Clear form for fast consecutive entries.
+    if (qs("msPart")) qs("msPart").value = "";
+    if (qs("msPartDesc")) qs("msPartDesc").value = "";
+    if (qs("msQty")) qs("msQty").value = "1";
+    if (qs("msRef")) qs("msRef").value = "";
+    if (qs("msUnitCost")) qs("msUnitCost").value = "";
+    if (qs("msType")) qs("msType").value = "in";
+    if (qs("msCostCurrency")) qs("msCostCurrency").value = "USD";
+    updateManualStockCostUi();
+    qs("msPart")?.focus();
     await loadDashboard().catch(() => {});
   } catch (e) {
     setText("manualStockResult", String(e.message || e));
