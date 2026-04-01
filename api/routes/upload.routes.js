@@ -19,7 +19,7 @@ export default async function uploadRoutes(app) {
 
   // Helper: get asset id by code
   const getAssetIdByCode = db.prepare(`SELECT id FROM assets WHERE asset_code = ?`);
-  const getPartIdByCode = db.prepare(`SELECT id FROM parts WHERE part_code = ?`);
+  const getPartIdByCode = db.prepare(`SELECT id, unit_cost FROM parts WHERE part_code = ?`);
   const getWorkOrderById = db.prepare(`SELECT id, asset_id FROM work_orders WHERE id = ?`);
 
   db.prepare(`
@@ -587,6 +587,7 @@ export default async function uploadRoutes(app) {
   // POST /api/upload/store_allocations
   // Columns:
   // part_code, quantity, allocation_date, asset_code, work_order_id, issued_by, notes
+  // Pricing comes from parts.unit_cost and is returned in upload summary.
   // Rules:
   // - asset_code or work_order_id required per row
   // - if work_order_id provided, asset_code optional; if both provided they must match
@@ -620,6 +621,8 @@ export default async function uploadRoutes(app) {
     const tx = db.transaction(() => {
       let imported = 0;
       let skipped = 0;
+      let total_value_usd = 0;
+      const imported_rows = [];
 
       for (const r of rows) {
         const partCode = String(r.part_code || "").trim();
@@ -699,10 +702,22 @@ export default async function uploadRoutes(app) {
           issuedBy,
           notes
         );
+        const unit_cost_usd = Number(part.unit_cost || 0);
+        const line_value_usd = Number((unit_cost_usd * quantity).toFixed(2));
+        total_value_usd = Number((total_value_usd + line_value_usd).toFixed(2));
+        imported_rows.push({
+          part_code: partCode,
+          quantity: Number(quantity),
+          unit_cost_usd,
+          line_value_usd,
+          asset_id: assetId,
+          work_order_id: wo ? Number(wo.id) : null,
+          allocation_date: allocationDate,
+        });
         imported++;
       }
 
-      return { imported, skipped };
+      return { imported, skipped, total_value_usd, imported_rows };
     });
 
     const result = tx();
