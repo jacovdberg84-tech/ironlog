@@ -214,6 +214,7 @@ export default async function stockRoutes(app) {
         p.part_name,
         p.critical,
         p.min_stock,
+        p.unit_cost,
         IFNULL(SUM(sm.quantity), 0) AS on_hand
       FROM parts p
       LEFT JOIN stock_movements sm ON sm.part_id = p.id
@@ -225,6 +226,8 @@ export default async function stockRoutes(app) {
       ...r,
       critical: Boolean(r.critical),
       on_hand: Number(r.on_hand),
+      unit_cost: Number(r.unit_cost || 0),
+      stock_value: Number((Number(r.on_hand || 0) * Number(r.unit_cost || 0)).toFixed(2)),
       below_min: Number(r.on_hand) < Number(r.min_stock)
     }));
   });
@@ -293,6 +296,7 @@ export default async function stockRoutes(app) {
         p.part_name,
         p.critical,
         p.min_stock,
+        p.unit_cost,
         IFNULL(SUM(sm.quantity), 0) AS on_hand
       FROM parts p
       LEFT JOIN stock_movements sm ON sm.part_id = p.id
@@ -304,6 +308,8 @@ export default async function stockRoutes(app) {
       ...r,
       critical: Boolean(r.critical),
       on_hand: Number(r.on_hand || 0),
+      unit_cost: Number(r.unit_cost || 0),
+      stock_value: Number((Number(r.on_hand || 0) * Number(r.unit_cost || 0)).toFixed(2)),
       below_min: Number(r.on_hand || 0) < Number(r.min_stock || 0),
     }));
 
@@ -312,6 +318,7 @@ export default async function stockRoutes(app) {
       below_min: rows.filter((r) => r.below_min).length,
       critical_below_min: rows.filter((r) => r.below_min && r.critical).length,
       total_on_hand: Number(rows.reduce((acc, r) => acc + Number(r.on_hand || 0), 0).toFixed(2)),
+      total_stock_value: Number(rows.reduce((acc, r) => acc + Number(r.stock_value || 0), 0).toFixed(2)),
     };
 
     const movementDateExpr = hasColumn("stock_movements", "created_at")

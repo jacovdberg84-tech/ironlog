@@ -597,6 +597,7 @@
           <div class="pill red">Below Min: <span id="spBelowMin">0</span></div>
           <div class="pill orange">Critical Below: <span id="spCriticalBelow">0</span></div>
           <div class="pill blue">Total On Hand: <span id="spTotalOnHand">0</span></div>
+          <div class="pill blue">Stock Value: <span id="spTotalValue">$0.00</span></div>
         </div>
         <div class="list" id="spList"></div>
         <h4>Recent Stock Movements</h4>
@@ -1428,8 +1429,16 @@
           <label class="chk">Cost Month
             <input id="costMonth" type="month" />
           </label>
+          <label class="chk">From
+            <input id="maintCostStart" type="date" />
+          </label>
+          <label class="chk">To
+            <input id="maintCostEnd" type="date" />
+          </label>
           <button id="downloadCostMonthlyXlsx">Download Monthly Cost Excel</button>
           <button id="downloadMaintenanceCostByEquipmentXlsx">Maintenance Cost per Equipment Excel</button>
+          <button id="openMaintenanceCostByEquipmentPdf">Open Maintenance Cost per Equipment PDF</button>
+          <button id="downloadMaintenanceCostByEquipmentPdf">Download Maintenance Cost per Equipment PDF</button>
         </div>
         <p class="muted">PDF outputs are generated from selected date.</p>
       </div>

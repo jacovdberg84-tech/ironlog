@@ -2477,6 +2477,7 @@ async function loadStockOnHandPage() {
   setText("spBelowMin", Number(data.summary?.below_min || 0));
   setText("spCriticalBelow", Number(data.summary?.critical_below_min || 0));
   setText("spTotalOnHand", Number(data.summary?.total_on_hand || 0).toFixed(1));
+  setText("spTotalValue", `$${Number(data.summary?.total_stock_value || 0).toFixed(2)}`);
 
   const list = qs("spList");
   if (list) {
@@ -2498,7 +2499,7 @@ async function loadStockOnHandPage() {
           `<b>${r.part_code}</b> – ${Number(r.on_hand || 0).toFixed(1)} on hand ${
             r.below_min ? "<span class='pill red'>LOW</span>" : ""
           }${r.critical ? " <span class='pill orange'>CRITICAL</span>" : ""}` +
-          `<br><small>${r.part_name || ""} | Min: ${Number(r.min_stock || 0).toFixed(1)}</small>` +
+          `<br><small>${r.part_name || ""} | Min: ${Number(r.min_stock || 0).toFixed(1)} | Unit: $${Number(r.unit_cost || 0).toFixed(2)} | Value: $${Number(r.stock_value || 0).toFixed(2)}</small>` +
           `</div>`
         )
       );
@@ -2533,13 +2534,15 @@ function exportStockOnHandCsv() {
   const rows = onlyLow ? baseRows.filter((r) => Boolean(r.below_min)) : baseRows;
   if (!rows.length) return alert("Load stock data first.");
 
-  const header = "part_code,part_name,on_hand,min_stock,critical,below_min";
+  const header = "part_code,part_name,on_hand,min_stock,unit_cost,stock_value,critical,below_min";
   const lines = rows.map((r) =>
     [
       r.part_code || "",
       `"${String(r.part_name || "").replace(/"/g, '""')}"`,
       Number(r.on_hand || 0),
       Number(r.min_stock || 0),
+      Number(r.unit_cost || 0),
+      Number(r.stock_value || 0),
       r.critical ? 1 : 0,
       r.below_min ? 1 : 0,
     ].join(",")
@@ -3205,11 +3208,31 @@ function downloadCostMonthlyXlsx() {
 
 function downloadMaintenanceCostByEquipmentXlsx() {
   const month = (qs("costMonth")?.value || "").trim();
-  if (!month) {
-    alert("Select a month first.");
+  const start = (qs("maintCostStart")?.value || "").trim();
+  const end = (qs("maintCostEnd")?.value || "").trim();
+  if (!month && (!start || !end)) {
+    alert("Select a month or a start/end range first.");
     return;
   }
-  window.open(`${API}/api/reports/maintenance-cost-by-equipment.xlsx?month=${encodeURIComponent(month)}`, "_blank");
+  const q = month
+    ? `month=${encodeURIComponent(month)}`
+    : `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+  window.open(`${API}/api/reports/maintenance-cost-by-equipment.xlsx?${q}`, "_blank");
+}
+
+function openMaintenanceCostByEquipmentPdf(download = false) {
+  const month = (qs("costMonth")?.value || "").trim();
+  const start = (qs("maintCostStart")?.value || "").trim();
+  const end = (qs("maintCostEnd")?.value || "").trim();
+  if (!month && (!start || !end)) {
+    alert("Select a month or a start/end range first.");
+    return;
+  }
+  const qBase = month
+    ? `month=${encodeURIComponent(month)}`
+    : `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+  const q = `${qBase}${download ? "&download=1" : ""}`;
+  window.open(`${API}/api/reports/maintenance-cost-by-equipment.pdf?${q}`, "_blank");
 }
 
 function openDailyPdf() {
@@ -6676,6 +6699,8 @@ async function init() {
   qs("openGmWeeklyXlsx")?.addEventListener("click", openGmWeeklyXlsx);
   qs("downloadCostMonthlyXlsx")?.addEventListener("click", downloadCostMonthlyXlsx);
   qs("downloadMaintenanceCostByEquipmentXlsx")?.addEventListener("click", downloadMaintenanceCostByEquipmentXlsx);
+  qs("openMaintenanceCostByEquipmentPdf")?.addEventListener("click", () => openMaintenanceCostByEquipmentPdf(false));
+  qs("downloadMaintenanceCostByEquipmentPdf")?.addEventListener("click", () => openMaintenanceCostByEquipmentPdf(true));
 
   qs("makeBreakdown")?.addEventListener("click", () =>
     createBreakdown().catch((e) => setStatus("Breakdown error: " + e.message))

@@ -4009,18 +4009,14 @@ export default async function reportsRoutes(app) {
   });
 
   // =========================
-  // MAINTENANCE COST BY EQUIPMENT XLSX
+  // MAINTENANCE COST BY EQUIPMENT (XLSX/PDF)
   // =========================
   // GET /api/reports/maintenance-cost-by-equipment.xlsx?month=YYYY-MM
-  app.get("/maintenance-cost-by-equipment.xlsx", async (req, reply) => {
-    const month = String(req.query?.month || "").trim();
-    if (!isMonth(month)) {
-      return reply.code(400).send({ error: "month (YYYY-MM) required" });
-    }
-
-    const period = monthRange(month);
+  // GET /api/reports/maintenance-cost-by-equipment.xlsx?start=YYYY-MM-DD&end=YYYY-MM-DD
+  // GET /api/reports/maintenance-cost-by-equipment.pdf?month=YYYY-MM&download=1
+  // GET /api/reports/maintenance-cost-by-equipment.pdf?start=YYYY-MM-DD&end=YYYY-MM-DD&download=1
+  const buildMaintenanceCostByEquipment = (period) => {
     const defaults = costDefaults();
-
     const smCols = db.prepare(`PRAGMA table_info(stock_movements)`).all();
     const hasCreatedAt = smCols.some((c) => String(c.name) === "created_at");
     const smDateExpr = hasCreatedAt ? "DATE(sm.created_at)" : "DATE(sm.movement_date)";
@@ -4120,6 +4116,26 @@ export default async function reportsRoutes(app) {
       return acc;
     }, { parts_cost: 0, labor_cost: 0, downtime_cost: 0, maintenance_total_cost: 0 });
 
+    return { rows, totals };
+  };
+
+  const resolveMaintenancePeriod = (req) => {
+    const month = String(req.query?.month || "").trim();
+    const start = String(req.query?.start || "").trim();
+    const end = String(req.query?.end || "").trim();
+    if (isMonth(month)) return { period: monthRange(month), label: month };
+    if (isDate(start) && isDate(end)) return { period: { start, end }, label: `${start}_to_${end}` };
+    return null;
+  };
+
+  app.get("/maintenance-cost-by-equipment.xlsx", async (req, reply) => {
+    const resolved = resolveMaintenancePeriod(req);
+    if (!resolved) {
+      return reply.code(400).send({ error: "Provide month=YYYY-MM or start/end=YYYY-MM-DD" });
+    }
+    const { period, label } = resolved;
+    const { rows, totals } = buildMaintenanceCostByEquipment(period);
+
     const wb = new ExcelJS.Workbook();
     wb.creator = "IRONLOG";
     wb.created = new Date();
@@ -4130,7 +4146,6 @@ export default async function reportsRoutes(app) {
       { header: "Value", key: "v", width: 24 },
     ];
     wsSummary.getRow(1).font = { bold: true };
-    wsSummary.addRow({ k: "Month", v: month });
     wsSummary.addRow({ k: "Period", v: `${period.start} to ${period.end}` });
     wsSummary.addRow({ k: "Equipment with maintenance cost", v: rows.length });
     wsSummary.addRow({ k: "Parts cost total", v: Number(totals.parts_cost.toFixed(2)) });
@@ -4154,7 +4169,7 @@ export default async function reportsRoutes(app) {
     if (rows.length) ws.addRows(rows);
     else ws.addRow({
       asset_code: "-",
-      asset_name: "No maintenance cost records for selected month",
+      asset_name: "No maintenance cost records for selected period",
       category: "",
       parts_cost: 0,
       labor_hours: 0,
@@ -4167,8 +4182,81 @@ export default async function reportsRoutes(app) {
     const buffer = await wb.xlsx.writeBuffer();
     reply
       .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-      .header("Content-Disposition", `attachment; filename="IRONLOG_Maintenance_Cost_By_Equipment_${month}.xlsx"`)
+      .header("Content-Disposition", `attachment; filename="IRONLOG_Maintenance_Cost_By_Equipment_${label}.xlsx"`)
       .send(Buffer.from(buffer));
+  });
+
+  app.get("/maintenance-cost-by-equipment.pdf", async (req, reply) => {
+    const resolved = resolveMaintenancePeriod(req);
+    if (!resolved) {
+      return reply.code(400).send({ error: "Provide month=YYYY-MM or start/end=YYYY-MM-DD" });
+    }
+    const { period, label } = resolved;
+    const download = String(req.query?.download || "").trim() === "1";
+    const { rows, totals } = buildMaintenanceCostByEquipment(period);
+    const logoPath = path.join(process.cwd(), "branding", "logo.png");
+
+    const pdf = await buildPdfBuffer(
+      (doc) => {
+        tryDrawLogo(doc, logoPath);
+        sectionTitle(doc, "Maintenance Cost per Equipment");
+        kvGrid(doc, [
+          { k: "Period", v: `${period.start} to ${period.end}` },
+          { k: "Equipment with maintenance cost", v: fmtNum(rows.length, 0) },
+          { k: "Parts cost total", v: fmtNum(totals.parts_cost, 2) },
+          { k: "Labor cost total", v: fmtNum(totals.labor_cost, 2) },
+          { k: "Downtime cost total", v: fmtNum(totals.downtime_cost, 2) },
+          { k: "Maintenance total cost", v: fmtNum(totals.maintenance_total_cost, 2) },
+        ], 2);
+
+        sectionTitle(doc, "By Equipment");
+        table(
+          doc,
+          [
+            { key: "asset_code", label: "Asset", width: 0.13 },
+            { key: "asset_name", label: "Name", width: 0.20 },
+            { key: "category", label: "Category", width: 0.12 },
+            { key: "parts_cost", label: "Parts", width: 0.11, align: "right" },
+            { key: "labor_hours", label: "Labor Hrs", width: 0.10, align: "right" },
+            { key: "labor_cost", label: "Labor", width: 0.10, align: "right" },
+            { key: "downtime_cost", label: "Downtime", width: 0.12, align: "right" },
+            { key: "maintenance_total_cost", label: "Total", width: 0.12, align: "right" },
+          ],
+          rows.length
+            ? rows.map((r) => ({
+                asset_code: r.asset_code,
+                asset_name: compactCell(r.asset_name || "", 28),
+                category: compactCell(r.category || "", 20),
+                parts_cost: fmtNum(r.parts_cost, 2),
+                labor_hours: fmtNum(r.labor_hours, 1),
+                labor_cost: fmtNum(r.labor_cost, 2),
+                downtime_cost: fmtNum(r.downtime_cost, 2),
+                maintenance_total_cost: fmtNum(r.maintenance_total_cost, 2),
+              }))
+            : [{
+                asset_code: "-",
+                asset_name: "No maintenance cost records for selected period",
+                category: "",
+                parts_cost: "-",
+                labor_hours: "-",
+                labor_cost: "-",
+                downtime_cost: "-",
+                maintenance_total_cost: "-",
+              }]
+        );
+      },
+      {
+        title: "IRONLOG",
+        subtitle: "Maintenance Cost by Equipment",
+        rightText: `${period.start} to ${period.end}`,
+        showPageNumbers: true,
+      }
+    );
+
+    reply
+      .header("Content-Type", "application/pdf")
+      .header("Content-Disposition", `${download ? "attachment" : "inline"}; filename="IRONLOG_Maintenance_Cost_By_Equipment_${label}.pdf"`)
+      .send(pdf);
   });
 
   // =========================
