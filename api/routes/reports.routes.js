@@ -4009,6 +4009,169 @@ export default async function reportsRoutes(app) {
   });
 
   // =========================
+  // MAINTENANCE COST BY EQUIPMENT XLSX
+  // =========================
+  // GET /api/reports/maintenance-cost-by-equipment.xlsx?month=YYYY-MM
+  app.get("/maintenance-cost-by-equipment.xlsx", async (req, reply) => {
+    const month = String(req.query?.month || "").trim();
+    if (!isMonth(month)) {
+      return reply.code(400).send({ error: "month (YYYY-MM) required" });
+    }
+
+    const period = monthRange(month);
+    const defaults = costDefaults();
+
+    const smCols = db.prepare(`PRAGMA table_info(stock_movements)`).all();
+    const hasCreatedAt = smCols.some((c) => String(c.name) === "created_at");
+    const smDateExpr = hasCreatedAt ? "DATE(sm.created_at)" : "DATE(sm.movement_date)";
+
+    const partsRows = db.prepare(`
+      SELECT
+        a.asset_code,
+        a.asset_name,
+        a.category,
+        COALESCE(SUM(ABS(sm.quantity) * COALESCE(p.unit_cost, 0)), 0) AS parts_cost
+      FROM stock_movements sm
+      JOIN parts p ON p.id = sm.part_id
+      JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
+      JOIN assets a ON a.id = w.asset_id
+      WHERE sm.movement_type = 'out'
+        AND ${smDateExpr} BETWEEN ? AND ?
+      GROUP BY a.id
+    `).all(period.start, period.end);
+
+    const laborRows = db.prepare(`
+      SELECT
+        a.asset_code,
+        a.asset_name,
+        a.category,
+        COALESCE(SUM(COALESCE(w.labor_hours, 0)), 0) AS labor_hours,
+        COALESCE(SUM(COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, ?)), 0) AS labor_cost
+      FROM work_orders w
+      JOIN assets a ON a.id = w.asset_id
+      WHERE DATE(COALESCE(w.completed_at, w.closed_at)) BETWEEN ? AND ?
+        AND w.status IN ('completed', 'approved', 'closed')
+      GROUP BY a.id
+    `).all(defaults.labor_cost_per_hour_default, period.start, period.end);
+
+    const downtimeRows = db.prepare(`
+      SELECT
+        a.asset_code,
+        a.asset_name,
+        a.category,
+        COALESCE(SUM(l.hours_down), 0) AS downtime_hours,
+        COALESCE(SUM(l.hours_down * COALESCE(a.downtime_cost_per_hour, ?)), 0) AS downtime_cost
+      FROM breakdown_downtime_logs l
+      JOIN breakdowns b ON b.id = l.breakdown_id
+      JOIN assets a ON a.id = b.asset_id
+      WHERE l.log_date BETWEEN ? AND ?
+      GROUP BY a.id
+    `).all(defaults.downtime_cost_per_hour_default, period.start, period.end);
+
+    const byAsset = new Map();
+    const ensure = (r) => {
+      const code = String(r.asset_code || "UNLINKED");
+      if (!byAsset.has(code)) {
+        byAsset.set(code, {
+          asset_code: code,
+          asset_name: r.asset_name || "Unlinked",
+          category: r.category || "Unassigned",
+          parts_cost: 0,
+          labor_hours: 0,
+          labor_cost: 0,
+          downtime_hours: 0,
+          downtime_cost: 0,
+          maintenance_total_cost: 0,
+        });
+      }
+      return byAsset.get(code);
+    };
+
+    for (const r of partsRows) ensure(r).parts_cost += Number(r.parts_cost || 0);
+    for (const r of laborRows) {
+      const row = ensure(r);
+      row.labor_hours += Number(r.labor_hours || 0);
+      row.labor_cost += Number(r.labor_cost || 0);
+    }
+    for (const r of downtimeRows) {
+      const row = ensure(r);
+      row.downtime_hours += Number(r.downtime_hours || 0);
+      row.downtime_cost += Number(r.downtime_cost || 0);
+    }
+
+    const rows = Array.from(byAsset.values())
+      .map((r) => ({
+        ...r,
+        parts_cost: Number(r.parts_cost.toFixed(2)),
+        labor_hours: Number(r.labor_hours.toFixed(2)),
+        labor_cost: Number(r.labor_cost.toFixed(2)),
+        downtime_hours: Number(r.downtime_hours.toFixed(2)),
+        downtime_cost: Number(r.downtime_cost.toFixed(2)),
+        maintenance_total_cost: Number((r.parts_cost + r.labor_cost + r.downtime_cost).toFixed(2)),
+      }))
+      .filter((r) => r.maintenance_total_cost > 0)
+      .sort((a, b) => b.maintenance_total_cost - a.maintenance_total_cost);
+
+    const totals = rows.reduce((acc, r) => {
+      acc.parts_cost += Number(r.parts_cost || 0);
+      acc.labor_cost += Number(r.labor_cost || 0);
+      acc.downtime_cost += Number(r.downtime_cost || 0);
+      acc.maintenance_total_cost += Number(r.maintenance_total_cost || 0);
+      return acc;
+    }, { parts_cost: 0, labor_cost: 0, downtime_cost: 0, maintenance_total_cost: 0 });
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "IRONLOG";
+    wb.created = new Date();
+
+    const wsSummary = wb.addWorksheet("Summary");
+    wsSummary.columns = [
+      { header: "Key", key: "k", width: 34 },
+      { header: "Value", key: "v", width: 24 },
+    ];
+    wsSummary.getRow(1).font = { bold: true };
+    wsSummary.addRow({ k: "Month", v: month });
+    wsSummary.addRow({ k: "Period", v: `${period.start} to ${period.end}` });
+    wsSummary.addRow({ k: "Equipment with maintenance cost", v: rows.length });
+    wsSummary.addRow({ k: "Parts cost total", v: Number(totals.parts_cost.toFixed(2)) });
+    wsSummary.addRow({ k: "Labor cost total", v: Number(totals.labor_cost.toFixed(2)) });
+    wsSummary.addRow({ k: "Downtime cost total", v: Number(totals.downtime_cost.toFixed(2)) });
+    wsSummary.addRow({ k: "Maintenance total cost", v: Number(totals.maintenance_total_cost.toFixed(2)) });
+
+    const ws = wb.addWorksheet("By Equipment");
+    ws.columns = [
+      { header: "Asset Code", key: "asset_code", width: 16 },
+      { header: "Asset Name", key: "asset_name", width: 30 },
+      { header: "Category", key: "category", width: 18 },
+      { header: "Parts Cost", key: "parts_cost", width: 14 },
+      { header: "Labor Hours", key: "labor_hours", width: 12 },
+      { header: "Labor Cost", key: "labor_cost", width: 14 },
+      { header: "Downtime Hours", key: "downtime_hours", width: 14 },
+      { header: "Downtime Cost", key: "downtime_cost", width: 15 },
+      { header: "Maintenance Total", key: "maintenance_total_cost", width: 18 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    if (rows.length) ws.addRows(rows);
+    else ws.addRow({
+      asset_code: "-",
+      asset_name: "No maintenance cost records for selected month",
+      category: "",
+      parts_cost: 0,
+      labor_hours: 0,
+      labor_cost: 0,
+      downtime_hours: 0,
+      downtime_cost: 0,
+      maintenance_total_cost: 0,
+    });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header("Content-Disposition", `attachment; filename="IRONLOG_Maintenance_Cost_By_Equipment_${month}.xlsx"`)
+      .send(Buffer.from(buffer));
+  });
+
+  // =========================
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {

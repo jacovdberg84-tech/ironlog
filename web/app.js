@@ -3203,6 +3203,15 @@ function downloadCostMonthlyXlsx() {
   window.open(`${API}/api/reports/cost-monthly.xlsx?month=${encodeURIComponent(month)}`, "_blank");
 }
 
+function downloadMaintenanceCostByEquipmentXlsx() {
+  const month = (qs("costMonth")?.value || "").trim();
+  if (!month) {
+    alert("Select a month first.");
+    return;
+  }
+  window.open(`${API}/api/reports/maintenance-cost-by-equipment.xlsx?month=${encodeURIComponent(month)}`, "_blank");
+}
+
 function openDailyPdf() {
   const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
   const scheduled = qs("scheduled")?.value || 10;
@@ -6666,6 +6675,7 @@ async function init() {
   qs("openDailyXlsx")?.addEventListener("click", openDailyXlsx);
   qs("openGmWeeklyXlsx")?.addEventListener("click", openGmWeeklyXlsx);
   qs("downloadCostMonthlyXlsx")?.addEventListener("click", downloadCostMonthlyXlsx);
+  qs("downloadMaintenanceCostByEquipmentXlsx")?.addEventListener("click", downloadMaintenanceCostByEquipmentXlsx);
 
   qs("makeBreakdown")?.addEventListener("click", () =>
     createBreakdown().catch((e) => setStatus("Breakdown error: " + e.message))
