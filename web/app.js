@@ -3439,10 +3439,12 @@ async function loadStoreAllocations() {
   list.innerHTML = "";
   data.slice(0, 20).forEach((r) => {
     const ref = r.work_order_id ? `WO #${r.work_order_id}` : r.asset_code;
+    const unitCost = Number(r.unit_cost || 0);
+    const lineValue = Number((unitCost * Number(r.quantity || 0)).toFixed(2));
     list.appendChild(
       item(
         `<b>${r.allocation_date}</b> — ${r.part_code} x ${Number(r.quantity || 0).toFixed(1)}<br>` +
-        `<small>${ref} | ${r.location_code || "NO-LOC"} | ${r.issued_by || "No issuer"}${r.notes ? ` | ${r.notes}` : ""}</small>`
+        `<small>${ref} | ${r.location_code || "NO-LOC"} | Unit: $${unitCost.toFixed(2)} | Value: $${lineValue.toFixed(2)} | ${r.issued_by || "No issuer"}${r.notes ? ` | ${r.notes}` : ""}</small>`
       )
     );
   });

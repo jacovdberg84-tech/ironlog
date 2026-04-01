@@ -161,7 +161,7 @@ export default async function stockRoutes(app) {
     WHERE asset_code = ?
   `);
   const getPartByCode = db.prepare(`
-    SELECT id, part_code, part_name
+    SELECT id, part_code, part_name, unit_cost
     FROM parts
     WHERE part_code = ?
   `);
@@ -1151,6 +1151,8 @@ export default async function stockRoutes(app) {
       asset_id: resolvedAssetId,
       work_order_id: wo ? Number(wo.id) : null,
       part_code,
+      unit_cost_usd: Number(part.unit_cost || 0),
+      line_value_usd: Number((Number(part.unit_cost || 0) * Number(quantity || 0)).toFixed(2)),
       issued: quantity,
       location_code: location ? location.location_code : null,
       on_hand_before: onHand,
@@ -1194,6 +1196,7 @@ export default async function stockRoutes(app) {
         sa.work_order_id,
         p.part_code,
         p.part_name,
+        p.unit_cost,
         l.location_code,
         l.location_name,
         sa.quantity,

@@ -56,6 +56,9 @@ export default async function uploadRoutes(app) {
   if (!hasColumn("fuel_logs", "meter_unit")) {
     db.prepare(`ALTER TABLE fuel_logs ADD COLUMN meter_unit TEXT`).run();
   }
+  if (!hasColumn("parts", "unit_cost")) {
+    db.prepare(`ALTER TABLE parts ADD COLUMN unit_cost REAL DEFAULT 0`).run();
+  }
 
   function getRole(req) {
     return String(req.headers["x-user-role"] || "admin").trim().toLowerCase();
@@ -501,7 +504,7 @@ export default async function uploadRoutes(app) {
 
   // -------------------------
   // POST /api/upload/parts
-  // Columns: part_code, part_name, critical, min_stock
+  // Columns: part_code, part_name, critical, min_stock, unit_cost(optional, USD per unit)
   // -------------------------
   app.post("/parts", async (req, reply) => {
     if (!requireUploadWrite(req, reply)) return;
@@ -514,12 +517,13 @@ export default async function uploadRoutes(app) {
     requireHeaders(rows, ["part_code", "part_name"]);
 
     const upsert = db.prepare(`
-      INSERT INTO parts (part_code, part_name, critical, min_stock)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO parts (part_code, part_name, critical, min_stock, unit_cost)
+      VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(part_code) DO UPDATE SET
         part_name = excluded.part_name,
         critical = excluded.critical,
-        min_stock = excluded.min_stock
+        min_stock = excluded.min_stock,
+        unit_cost = excluded.unit_cost
     `);
 
     const tx = db.transaction(() => {
@@ -528,9 +532,10 @@ export default async function uploadRoutes(app) {
         const name = String(r.part_name).trim();
         const critical = asBool01(r.critical, 0);
         const min = asInt(r.min_stock, 0);
+        const unitCost = asFloat(r.unit_cost, 0);
 
         if (!code || !name) continue;
-        upsert.run(code, name, critical, min);
+        upsert.run(code, name, critical, min, unitCost);
       }
     });
 
