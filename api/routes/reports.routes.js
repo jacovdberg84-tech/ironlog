@@ -2,6 +2,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import ExcelJS from "exceljs";
+import PptxGenJS from "pptxgenjs";
 import { db } from "../db/client.js";
 import {
   buildPdfBuffer,
@@ -833,6 +834,16 @@ export default async function reportsRoutes(app) {
   upsertCostSetting.run("lube_cost_per_qty_default", 4.0);
   upsertCostSetting.run("labor_cost_per_hour_default", 35.0);
   upsertCostSetting.run("downtime_cost_per_hour_default", 120.0);
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS site_rain_days (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      site_code TEXT NOT NULL DEFAULT 'default',
+      rain_date TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(site_code, rain_date)
+    )
+  `).run();
   db.prepare(`
     CREATE TABLE IF NOT EXISTS operations_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3216,17 +3227,18 @@ export default async function reportsRoutes(app) {
       ORDER BY a.asset_code
     `).all(date);
 
+    const breakdownDowntimeCol = getBreakdownDowntimeColumn();
     const breakdowns = db.prepare(`
       SELECT
         a.asset_code,
         a.asset_name,
         b.description,
-        b.downtime_hours,
+        COALESCE(b.${breakdownDowntimeCol}, 0) AS downtime_hours,
         b.critical
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
       WHERE b.breakdown_date = ?
-      ORDER BY b.downtime_hours DESC
+      ORDER BY downtime_hours DESC
     `).all(date).map(r => ({ ...r, critical: Boolean(r.critical) }));
 
     const upcoming = db.prepare(`
@@ -4128,6 +4140,47 @@ export default async function reportsRoutes(app) {
     return null;
   };
 
+  const getSiteCode = (req) => String(req.headers["x-site-code"] || "default").trim().toLowerCase() || "default";
+
+  // Rain-day calendar (site-level)
+  app.get("/rain-days", async (req, reply) => {
+    const start = String(req.query?.start || "").trim();
+    const end = String(req.query?.end || "").trim();
+    const site_code = String(req.query?.site_code || getSiteCode(req)).trim().toLowerCase() || "default";
+    if (!isDate(start) || !isDate(end)) {
+      return reply.code(400).send({ error: "start and end must be YYYY-MM-DD" });
+    }
+    const rows = db.prepare(`
+      SELECT rain_date, notes, created_at
+      FROM site_rain_days
+      WHERE site_code = ?
+        AND rain_date BETWEEN ? AND ?
+      ORDER BY rain_date ASC
+    `).all(site_code, start, end);
+    return reply.send({ ok: true, site_code, start, end, count: rows.length, rows });
+  });
+
+  app.post("/rain-days", async (req, reply) => {
+    const rain_date = String(req.body?.date || req.body?.rain_date || "").trim();
+    const site_code = String(req.body?.site_code || getSiteCode(req)).trim().toLowerCase() || "default";
+    const notes = String(req.body?.notes || "").trim() || null;
+    if (!isDate(rain_date)) return reply.code(400).send({ error: "date must be YYYY-MM-DD" });
+    db.prepare(`
+      INSERT INTO site_rain_days (site_code, rain_date, notes)
+      VALUES (?, ?, ?)
+      ON CONFLICT(site_code, rain_date) DO UPDATE SET notes = excluded.notes
+    `).run(site_code, rain_date, notes);
+    return reply.send({ ok: true, site_code, rain_date, notes });
+  });
+
+  app.delete("/rain-days/:date", async (req, reply) => {
+    const rain_date = String(req.params?.date || "").trim();
+    const site_code = String(req.query?.site_code || getSiteCode(req)).trim().toLowerCase() || "default";
+    if (!isDate(rain_date)) return reply.code(400).send({ error: "date must be YYYY-MM-DD" });
+    const out = db.prepare(`DELETE FROM site_rain_days WHERE site_code = ? AND rain_date = ?`).run(site_code, rain_date);
+    return reply.send({ ok: true, site_code, rain_date, deleted: Number(out.changes || 0) });
+  });
+
   app.get("/maintenance-cost-by-equipment.xlsx", async (req, reply) => {
     const resolved = resolveMaintenancePeriod(req);
     if (!resolved) {
@@ -4259,6 +4312,217 @@ export default async function reportsRoutes(app) {
       .send(pdf);
   });
 
+  app.get("/maintenance-exec.pptx", async (req, reply) => {
+    const resolved = resolveMaintenancePeriod(req);
+    if (!resolved) {
+      return reply.code(400).send({ error: "Provide month=YYYY-MM or start/end=YYYY-MM-DD" });
+    }
+    const { period, label } = resolved;
+    const site_code = getSiteCode(req);
+    const defaults = costDefaults();
+    const { rows, totals } = buildMaintenanceCostByEquipment(period);
+
+    const rainRows = db.prepare(`
+      SELECT rain_date
+      FROM site_rain_days
+      WHERE site_code = ?
+        AND rain_date BETWEEN ? AND ?
+      ORDER BY rain_date ASC
+    `).all(site_code, period.start, period.end);
+    const rainDates = rainRows.map((r) => String(r.rain_date || "").trim()).filter(Boolean);
+    const rainCount = rainDates.length;
+    const rainPlaceholders = rainDates.length ? rainDates.map(() => "?").join(",") : "";
+
+    const runRow = db.prepare(`
+      SELECT COALESCE(SUM(hours_run), 0) AS run_hours
+      FROM daily_hours
+      WHERE work_date BETWEEN ? AND ?
+        AND is_used = 1
+        AND hours_run > 0
+    `).get(period.start, period.end);
+    const schedRow = db.prepare(`
+      SELECT COALESCE(SUM(scheduled_hours), 0) AS scheduled_hours
+      FROM daily_hours
+      WHERE work_date BETWEEN ? AND ?
+    `).get(period.start, period.end);
+    let rainSchedHours = 0;
+    if (rainDates.length) {
+      const rainSched = db.prepare(`
+        SELECT COALESCE(SUM(scheduled_hours), 0) AS h
+        FROM daily_hours
+        WHERE work_date IN (${rainPlaceholders})
+      `).get(...rainDates);
+      rainSchedHours = Number(rainSched?.h || 0);
+    }
+    const runHours = Number(runRow?.run_hours || 0);
+    const scheduledHours = Number(schedRow?.scheduled_hours || 0);
+    const adjustedScheduled = Math.max(0, scheduledHours - rainSchedHours);
+    const utilRaw = scheduledHours > 0 ? (runHours / scheduledHours) * 100 : null;
+    const utilAdj = adjustedScheduled > 0 ? (runHours / adjustedScheduled) * 100 : null;
+
+    const availByTypeBase = db.prepare(`
+      SELECT
+        LOWER(IFNULL(a.category, 'uncategorized')) AS equipment_type,
+        COALESCE(SUM(dh.scheduled_hours), 0) AS scheduled_hours,
+        COALESCE(SUM(CASE WHEN dh.is_used = 1 THEN dh.hours_run ELSE 0 END), 0) AS run_hours
+      FROM daily_hours dh
+      JOIN assets a ON a.id = dh.asset_id
+      WHERE dh.work_date BETWEEN ? AND ?
+      GROUP BY LOWER(IFNULL(a.category, 'uncategorized'))
+      ORDER BY equipment_type ASC
+    `).all(period.start, period.end);
+
+    const availByTypeDowntime = db.prepare(`
+      SELECT
+        LOWER(IFNULL(a.category, 'uncategorized')) AS equipment_type,
+        COALESCE(SUM(l.hours_down), 0) AS downtime_hours
+      FROM breakdown_downtime_logs l
+      JOIN breakdowns b ON b.id = l.breakdown_id
+      JOIN assets a ON a.id = b.asset_id
+      WHERE l.log_date BETWEEN ? AND ?
+      GROUP BY LOWER(IFNULL(a.category, 'uncategorized'))
+    `).all(period.start, period.end);
+    const downtimeByType = new Map(availByTypeDowntime.map((r) => [String(r.equipment_type || ""), Number(r.downtime_hours || 0)]));
+
+    const rainSchedByType = new Map();
+    if (rainDates.length) {
+      const rowsRainType = db.prepare(`
+        SELECT
+          LOWER(IFNULL(a.category, 'uncategorized')) AS equipment_type,
+          COALESCE(SUM(dh.scheduled_hours), 0) AS rain_scheduled_hours
+        FROM daily_hours dh
+        JOIN assets a ON a.id = dh.asset_id
+        WHERE dh.work_date IN (${rainPlaceholders})
+        GROUP BY LOWER(IFNULL(a.category, 'uncategorized'))
+      `).all(...rainDates);
+      for (const r of rowsRainType) rainSchedByType.set(String(r.equipment_type || ""), Number(r.rain_scheduled_hours || 0));
+    }
+
+    const availabilityByType = availByTypeBase.map((r) => {
+      const key = String(r.equipment_type || "");
+      const scheduled = Number(r.scheduled_hours || 0);
+      const rainH = Number(rainSchedByType.get(key) || 0);
+      const adjusted = Math.max(0, scheduled - rainH);
+      const downtime = Number(downtimeByType.get(key) || 0);
+      const availability_pct = adjusted > 0 ? Math.max(0, ((adjusted - downtime) / adjusted) * 100) : null;
+      return {
+        equipment_type: key.toUpperCase(),
+        scheduled_hours: Number(scheduled.toFixed(1)),
+        rain_adjustment_hours: Number(rainH.toFixed(1)),
+        adjusted_hours: Number(adjusted.toFixed(1)),
+        downtime_hours: Number(downtime.toFixed(1)),
+        availability_pct: availability_pct == null ? null : Number(availability_pct.toFixed(2)),
+      };
+    });
+
+    const oilTotal = db.prepare(`
+      SELECT COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS oil_cost
+      FROM oil_logs ol
+      WHERE ol.log_date BETWEEN ? AND ?
+    `).get(defaults.lube_cost_per_qty_default, period.start, period.end);
+    const oilByType = db.prepare(`
+      SELECT
+        LOWER(IFNULL(a.category, 'uncategorized')) AS equipment_type,
+        COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS oil_cost
+      FROM oil_logs ol
+      JOIN assets a ON a.id = ol.asset_id
+      WHERE ol.log_date BETWEEN ? AND ?
+      GROUP BY LOWER(IFNULL(a.category, 'uncategorized'))
+      ORDER BY oil_cost DESC
+    `).all(defaults.lube_cost_per_qty_default, period.start, period.end);
+
+    const pptx = new PptxGenJS();
+    pptx.layout = "LAYOUT_WIDE";
+    pptx.author = "IRONLOG";
+    pptx.subject = "Maintenance executive report";
+    pptx.title = `Maintenance Executive - ${label}`;
+
+    const s1 = pptx.addSlide();
+    s1.addText("IRONLOG Maintenance Executive Report", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 24, bold: true });
+    s1.addText(`Period: ${period.start} to ${period.end} | Site: ${site_code}`, { x: 0.4, y: 0.9, w: 12.4, h: 0.4, fontSize: 12 });
+    s1.addText(
+      [
+        { text: `Rain days recorded: ${rainCount}\n`, options: { bold: true } },
+        { text: `Scheduled hours: ${scheduledHours.toFixed(1)}\n` },
+        { text: `Rain-adjusted scheduled hours: ${adjustedScheduled.toFixed(1)}\n` },
+        { text: `Run hours: ${runHours.toFixed(1)}\n` },
+        { text: `Utilisation (raw): ${utilRaw == null ? "N/A" : `${utilRaw.toFixed(2)}%`}\n` },
+        { text: `Utilisation (rain-adjusted): ${utilAdj == null ? "N/A" : `${utilAdj.toFixed(2)}%`}` },
+      ],
+      { x: 0.6, y: 1.6, w: 6.4, h: 2.6, fontSize: 15 }
+    );
+    s1.addText(
+      [
+        { text: `Maintenance Cost Totals\n`, options: { bold: true } },
+        { text: `Parts: ${totals.parts_cost.toFixed(2)}\n` },
+        { text: `Labor: ${totals.labor_cost.toFixed(2)}\n` },
+        { text: `Downtime: ${totals.downtime_cost.toFixed(2)}\n` },
+        { text: `Total Services: ${(totals.parts_cost + totals.labor_cost + totals.downtime_cost).toFixed(2)}\n` },
+        { text: `Oil/Lube Cost: ${Number(oilTotal?.oil_cost || 0).toFixed(2)}` },
+      ],
+      { x: 7.2, y: 1.6, w: 5.6, h: 2.8, fontSize: 15 }
+    );
+
+    const s2 = pptx.addSlide();
+    s2.addText("Availability % by Equipment Type (Rain-adjusted)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 20, bold: true });
+    const availTable = [
+      [
+        { text: "Type", options: { bold: true } },
+        { text: "Adjusted Hours", options: { bold: true } },
+        { text: "Downtime Hrs", options: { bold: true } },
+        { text: "Availability %", options: { bold: true } },
+      ],
+      ...availabilityByType.slice(0, 16).map((r) => [
+        r.equipment_type,
+        r.adjusted_hours.toFixed(1),
+        r.downtime_hours.toFixed(1),
+        r.availability_pct == null ? "N/A" : `${r.availability_pct.toFixed(2)}%`,
+      ]),
+    ];
+    s2.addTable(availTable, { x: 0.5, y: 1.1, w: 12.3, h: 5.6, fontSize: 12, border: { pt: 1, color: "C8C8C8" } });
+
+    const s3 = pptx.addSlide();
+    s3.addText("Maintenance Costs by Equipment (Top)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 20, bold: true });
+    const costTable = [
+      [
+        { text: "Asset", options: { bold: true } },
+        { text: "Type", options: { bold: true } },
+        { text: "Parts", options: { bold: true } },
+        { text: "Labor", options: { bold: true } },
+        { text: "Downtime", options: { bold: true } },
+        { text: "Total", options: { bold: true } },
+      ],
+      ...rows.slice(0, 14).map((r) => [
+        `${r.asset_code} ${compactCell(r.asset_name, 20)}`,
+        r.category || "",
+        r.parts_cost.toFixed(2),
+        r.labor_cost.toFixed(2),
+        r.downtime_cost.toFixed(2),
+        r.maintenance_total_cost.toFixed(2),
+      ]),
+    ];
+    s3.addTable(costTable, { x: 0.5, y: 1.1, w: 12.3, h: 5.6, fontSize: 11, border: { pt: 1, color: "C8C8C8" } });
+
+    const s4 = pptx.addSlide();
+    s4.addText("Oil/Lube Cost by Equipment Type", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 20, bold: true });
+    const oilTable = [
+      [
+        { text: "Type", options: { bold: true } },
+        { text: "Oil/Lube Cost", options: { bold: true } },
+      ],
+      ...oilByType.slice(0, 18).map((r) => [String(r.equipment_type || "").toUpperCase(), Number(r.oil_cost || 0).toFixed(2)]),
+    ];
+    s4.addTable(oilTable, { x: 0.9, y: 1.2, w: 7.0, h: 5.4, fontSize: 13, border: { pt: 1, color: "C8C8C8" } });
+    s4.addText(`Total Oil/Lube Cost: ${Number(oilTotal?.oil_cost || 0).toFixed(2)}`, { x: 8.2, y: 1.4, w: 4.2, h: 0.6, fontSize: 16, bold: true });
+    s4.addText("Note: Costs are used (not volumes), aligned to maintenance activity period.", { x: 8.2, y: 2.1, w: 4.3, h: 1.5, fontSize: 11, color: "666666" });
+
+    const buffer = await pptx.write({ outputType: "nodebuffer" });
+    reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+      .header("Content-Disposition", `attachment; filename="IRONLOG_Maintenance_Executive_${label}.pptx"`)
+      .send(Buffer.from(buffer));
+  });
+
   // =========================
   // DAILY PDF
   // =========================
@@ -4293,12 +4557,13 @@ export default async function reportsRoutes(app) {
       ORDER BY a.asset_code
     `).all(date);
 
+    const breakdownDowntimeCol = getBreakdownDowntimeColumn();
     const breakdowns = db.prepare(`
-      SELECT a.asset_code, b.description, b.downtime_hours, b.critical
+      SELECT a.asset_code, b.description, COALESCE(b.${breakdownDowntimeCol}, 0) AS downtime_hours, b.critical
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
       WHERE b.breakdown_date = ?
-      ORDER BY b.downtime_hours DESC
+      ORDER BY downtime_hours DESC
     `).all(date).map(r => ({ ...r, critical: Boolean(r.critical) }));
 
     const openWOs = db.prepare(`
@@ -4548,12 +4813,13 @@ export default async function reportsRoutes(app) {
     const kpi = kpiRange(start, end, scheduled);
     const defaults = costDefaults();
 
+    const breakdownDowntimeCol = getBreakdownDowntimeColumn();
     const majorDowntime = db.prepare(`
-      SELECT a.asset_code, b.breakdown_date, b.downtime_hours, b.critical, b.description
+      SELECT a.asset_code, b.breakdown_date, COALESCE(b.${breakdownDowntimeCol}, 0) AS downtime_hours, b.critical, b.description
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
       WHERE b.breakdown_date BETWEEN ? AND ?
-      ORDER BY b.downtime_hours DESC
+      ORDER BY downtime_hours DESC
       LIMIT 25
     `).all(start, end).map(r => ({ ...r, critical: Boolean(r.critical) }));
 
