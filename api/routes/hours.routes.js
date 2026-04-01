@@ -18,18 +18,41 @@ function numOrNull(v) {
 }
 
 export default async function hoursRoutes(app) {
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS asset_input_units (
+      asset_id INTEGER PRIMARY KEY,
+      input_unit TEXT NOT NULL DEFAULT 'hours',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    )
+  `).run();
+
+  const getAssetInputUnit = db.prepare(`
+    SELECT input_unit
+    FROM asset_input_units
+    WHERE asset_id = ?
+  `);
+
+  const upsertAssetInputUnit = db.prepare(`
+    INSERT INTO asset_input_units (asset_id, input_unit, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(asset_id) DO UPDATE SET
+      input_unit = excluded.input_unit,
+      updated_at = datetime('now')
+  `);
+
   function getCarryForwardRow(assetId, workDate) {
     // Prefer exact yesterday; if missing, fall back to latest prior day.
     const y = prevDate(workDate);
     const yRow = db.prepare(`
-      SELECT closing_hours, scheduled_hours, work_date AS source_date
+      SELECT closing_hours, scheduled_hours, work_date AS source_date, COALESCE(NULLIF(TRIM(input_unit), ''), 'hours') AS input_unit
       FROM daily_hours
       WHERE asset_id = ? AND work_date = ?
     `).get(assetId, y);
     if (yRow && (yRow.closing_hours != null || yRow.scheduled_hours != null)) return yRow;
 
     const prevRow = db.prepare(`
-      SELECT closing_hours, scheduled_hours, work_date AS source_date
+      SELECT closing_hours, scheduled_hours, work_date AS source_date, COALESCE(NULLIF(TRIM(input_unit), ''), 'hours') AS input_unit
       FROM daily_hours
       WHERE asset_id = ?
         AND work_date < ?
@@ -62,7 +85,8 @@ export default async function hoursRoutes(app) {
         dh.opening_hours,
         dh.closing_hours,
         dh.hours_run,
-        COALESCE(NULLIF(TRIM(dh.input_unit), ''), 'hours') AS input_unit,
+        COALESCE(ai.input_unit, COALESCE(NULLIF(TRIM(dh.input_unit), ''), 'hours')) AS input_unit,
+        CASE WHEN ai.input_unit IS NOT NULL THEN 1 ELSE 0 END AS input_unit_locked,
         dh.is_used,
         dh.operator,
         dh.notes,
@@ -72,6 +96,7 @@ export default async function hoursRoutes(app) {
         a.is_standby
       FROM daily_hours dh
       JOIN assets a ON a.id = dh.asset_id
+      LEFT JOIN asset_input_units ai ON ai.asset_id = dh.asset_id
       WHERE dh.work_date = ?
       ORDER BY a.asset_code
     `).all(date);
@@ -106,7 +131,9 @@ export default async function hoursRoutes(app) {
       work_date,
       suggested_opening_hours: yRow?.closing_hours ?? null,
       suggested_scheduled_hours: yRow?.scheduled_hours ?? null,
-      suggested_opening_from_date: yRow?.source_date ?? null
+      suggested_opening_from_date: yRow?.source_date ?? null,
+      suggested_input_unit: (getAssetInputUnit.get(asset.id)?.input_unit || yRow?.input_unit || "hours"),
+      input_unit_locked: Boolean(getAssetInputUnit.get(asset.id)?.input_unit)
     };
   });
 
@@ -149,7 +176,11 @@ export default async function hoursRoutes(app) {
 
     const is_used = (body.is_used === false || Number(asset.is_standby) === 1) ? 0 : 1;
     const input_unit_raw = String(body.input_unit || "hours").trim().toLowerCase();
-    const input_unit = input_unit_raw === "km" ? "km" : "hours";
+    const requested_input_unit = input_unit_raw === "km" ? "km" : "hours";
+    const lockedInputUnit = String(getAssetInputUnit.get(asset.id)?.input_unit || "").trim().toLowerCase();
+    const input_unit = lockedInputUnit === "km" || lockedInputUnit === "hours"
+      ? lockedInputUnit
+      : requested_input_unit;
 
     // scheduled_hours variable per day
     let scheduled_hours = numOrNull(body.scheduled_hours);
@@ -269,6 +300,9 @@ export default async function hoursRoutes(app) {
       notes
     );
 
+    // Persist selected input unit per asset; later daily rows are locked to this choice.
+    upsertAssetInputUnit.run(asset.id, input_unit);
+
     return reply.send({
       ok: true,
       asset_code,
@@ -278,6 +312,7 @@ export default async function hoursRoutes(app) {
       closing_hours,
       hours_run,
       input_unit,
+      input_unit_locked: true,
       is_used: Boolean(is_used)
     });
   });

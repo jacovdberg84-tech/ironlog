@@ -5490,8 +5490,12 @@ function renderDailyTable() {
       if (String(r.input_unit || "hours").toLowerCase() === u) op.selected = true;
       unitSel.appendChild(op);
     });
-    unitSel.disabled = !!(r.is_down && r.down_lock);
+    unitSel.disabled = Boolean(r.input_unit_locked) || !!(r.is_down && r.down_lock);
     unitSel.addEventListener("change", () => {
+      if (r.input_unit_locked) {
+        unitSel.value = String(r.input_unit || "hours").toLowerCase();
+        return;
+      }
       r.input_unit = String(unitSel.value || "hours").toLowerCase();
       validateDailyRows();
       renderDailyTable();
@@ -5646,6 +5650,7 @@ function renderDailyTable() {
 
 async function loadDailyInput() {
   const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
+  const y = prevDateStr(date);
   setStatus("Loading daily input...");
   setText("dailyResult", "");
 
@@ -5660,6 +5665,15 @@ async function loadDailyInput() {
 
   const existingByCode = new Map();
   for (const r of existing) existingByCode.set(r.asset_code, r);
+
+  let yRows = [];
+  try {
+    yRows = await fetchJson(`${API}/api/hours/${y}`);
+  } catch {
+    yRows = [];
+  }
+  const yByCode = new Map();
+  for (const r of yRows) yByCode.set(r.asset_code, r);
 
   dailyRows = [];
 
@@ -5707,6 +5721,7 @@ async function loadDailyInput() {
       input_unit: ex?.input_unit
         ? String(ex.input_unit).toLowerCase()
         : (String(a.category || "").toLowerCase().includes("truck") || String(a.category || "").toLowerCase().includes("vehicle") ? "km" : "hours"),
+      input_unit_locked: Boolean(ex?.input_unit_locked),
 
       scheduled_hours: ex ? toNum(ex.scheduled_hours) : null,
       opening_hours: ex ? toNum(ex.opening_hours) : null,
@@ -5726,11 +5741,25 @@ async function loadDailyInput() {
     if (row.is_master_standby) row.is_used = false;
 
     if (forceOpenFromYesterday) row.opening_hours = null;
+    const yr = yByCode.get(row.asset_code);
+    if (yr) {
+      const yClose = toNum(yr.closing_hours);
+      if ((row.opening_hours == null || forceOpenFromYesterday) && yClose != null) {
+        row.opening_hours = yClose;
+        row.opening_from_date = y;
+      }
+      if (row.scheduled_hours == null) {
+        const ySched = toNum(yr.scheduled_hours);
+        if (ySched != null) row.scheduled_hours = ySched;
+      }
+    }
     if (row.opening_hours == null || row.scheduled_hours == null) {
       try {
         const d = await fetchJson(
           `${API}/api/hours/defaults?asset_code=${encodeURIComponent(row.asset_code)}&work_date=${date}`
         );
+        if (d?.suggested_input_unit) row.input_unit = String(d.suggested_input_unit).toLowerCase() === "km" ? "km" : "hours";
+        if (typeof d?.input_unit_locked === "boolean") row.input_unit_locked = d.input_unit_locked;
         if ((row.opening_hours == null || forceOpenFromYesterday) && d.suggested_opening_hours != null) {
           row.opening_hours = Number(d.suggested_opening_hours);
           row.opening_from_date = String(d.suggested_opening_from_date || "").trim() || null;
