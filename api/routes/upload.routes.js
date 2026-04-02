@@ -17,11 +17,6 @@ export default async function uploadRoutes(app) {
     limits: { fileSize: 20 * 1024 * 1024 } // 20MB
   });
 
-  // Helper: get asset id by code
-  const getAssetIdByCode = db.prepare(`SELECT id FROM assets WHERE asset_code = ?`);
-  const getPartIdByCode = db.prepare(`SELECT id, unit_cost FROM parts WHERE part_code = ?`);
-  const getWorkOrderById = db.prepare(`SELECT id, asset_id FROM work_orders WHERE id = ?`);
-
   db.prepare(`
     CREATE TABLE IF NOT EXISTS store_allocations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,6 +54,11 @@ export default async function uploadRoutes(app) {
   if (!hasColumn("parts", "unit_cost")) {
     db.prepare(`ALTER TABLE parts ADD COLUMN unit_cost REAL DEFAULT 0`).run();
   }
+
+  // Helper prepared statements (after schema checks/column additions).
+  const getAssetIdByCode = db.prepare(`SELECT id FROM assets WHERE asset_code = ?`);
+  const getPartIdByCode = db.prepare(`SELECT id, unit_cost FROM parts WHERE part_code = ?`);
+  const getWorkOrderById = db.prepare(`SELECT id, asset_id FROM work_orders WHERE id = ?`);
 
   function getRole(req) {
     return String(req.headers["x-user-role"] || "admin").trim().toLowerCase();
