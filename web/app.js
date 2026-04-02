@@ -6467,8 +6467,23 @@ async function init() {
   qs("generateDocDraftFromRequestBtn")?.addEventListener("click", () =>
     generateDocDraftFromRequest().catch((e) => setStatus("Draft request generate error: " + e.message))
   );
+  qs("aiSmartRunBtn")?.addEventListener("click", () =>
+    runAiSmart().catch((e) => setStatus("Smart AI error: " + e.message))
+  );
   qs("askJakesBtn")?.addEventListener("click", () =>
     askJakes().catch((e) => setStatus("Ask Jakes error: " + e.message))
+  );
+  qs("askJakesPresetHydraulics")?.addEventListener("click", () =>
+    applyAskJakesPreset("hydraulics")
+  );
+  qs("askJakesPresetStarting")?.addEventListener("click", () =>
+    applyAskJakesPreset("starting")
+  );
+  qs("askJakesPresetOverheat")?.addEventListener("click", () =>
+    applyAskJakesPreset("overheat")
+  );
+  qs("askJakesUseAsNotesBtn")?.addEventListener("click", () =>
+    useAskJakesAnswerAsNotes()
   );
   qs("speakDocDraftBtn")?.addEventListener("click", () =>
     speakDocDraft()
@@ -7416,10 +7431,110 @@ async function generateDocDraftFromRequest() {
   await loadDocDrafts();
 }
 
-async function askJakes() {
-  const machine = String(qs("askJakesMachine")?.value || "").trim();
-  const problem = String(qs("askJakesProblem")?.value || "").trim();
-  const context = String(qs("askJakesContext")?.value || "").trim();
+function inferDocTypeFromPrompt(prompt) {
+  const s = String(prompt || "").toLowerCase();
+  if (s.includes("checklist")) return "Checklist";
+  if (s.includes("method statement")) return "Method Statement";
+  if (s.includes("site instruction")) return "Site Instruction";
+  if (s.includes("risk")) return "Risk Note";
+  if (s.includes("sop") || s.includes("procedure")) return "SOP";
+  return "";
+}
+
+function parseMachineProblemFromPrompt(prompt) {
+  const src = String(prompt || "").trim();
+  if (!src) return { machine: "", problem: "" };
+  const m = src.match(/^(.+?)\s+(?:has|have|with|showing|shows|no)\s+(.+)$/i);
+  if (m) {
+    const machine = String(m[1] || "").replace(/\s+$/, "").trim();
+    const problem = src.slice(machine.length).replace(/^\s*(has|have|with|showing|shows)?\s*/i, "").trim();
+    return { machine, problem };
+  }
+  return { machine: "", problem: src };
+}
+
+async function runAiSmart() {
+  const smartPrompt = String(qs("aiSmartPrompt")?.value || "").trim();
+  const machineTyped = String(qs("askJakesMachine")?.value || "").trim();
+  const problemTyped = String(qs("askJakesProblem")?.value || "").trim();
+
+  if (machineTyped || problemTyped) {
+    await askJakes();
+    return;
+  }
+
+  if (!smartPrompt) {
+    alert("Enter a question or document request first.");
+    return;
+  }
+
+  const faultKeywords = /(fault|error|not working|no\s+hydraulic|no\s+hydraulics|no\s+start|won't start|wont start|leak|overheat|pressure|engine|starter|battery|transmission|brake)/i;
+  const docKeywords = /(sop|checklist|method statement|site instruction|risk note|document|procedure|policy|template)/i;
+
+  if (faultKeywords.test(smartPrompt) && !docKeywords.test(smartPrompt)) {
+    const parsed = parseMachineProblemFromPrompt(smartPrompt);
+    const machineEl = qs("askJakesMachine");
+    const problemEl = qs("askJakesProblem");
+    if (machineEl && parsed.machine) machineEl.value = parsed.machine;
+    if (problemEl) problemEl.value = parsed.problem;
+    await askJakes();
+    return;
+  }
+
+  const inferred = inferDocTypeFromPrompt(smartPrompt);
+  const reqEl = qs("docAskRequest");
+  if (reqEl) reqEl.value = smartPrompt;
+  const titleEl = qs("docTitle");
+  if (titleEl && !String(titleEl.value || "").trim()) titleEl.value = smartPrompt.slice(0, 80);
+  if (inferred) {
+    const typeEl = qs("docType");
+    if (typeEl) typeEl.value = inferred;
+  }
+  await generateDocDraftFromRequest();
+}
+
+function applyAskJakesPreset(type) {
+  const machineEl = qs("askJakesMachine");
+  const problemEl = qs("askJakesProblem");
+  const contextEl = qs("askJakesContext");
+  if (!machineEl || !problemEl || !contextEl) return;
+
+  if (type === "hydraulics") {
+    machineEl.value = machineEl.value || "CAT 950 Loader";
+    problemEl.value = "No hydraulics";
+    contextEl.value = "Engine starts, steering weak, no bucket lift.";
+    return;
+  }
+  if (type === "starting") {
+    machineEl.value = machineEl.value || "CAT 950 Loader";
+    problemEl.value = "Will not start";
+    contextEl.value = "Battery indicator low, starter clicking.";
+    return;
+  }
+  if (type === "overheat") {
+    machineEl.value = machineEl.value || "CAT 950 Loader";
+    problemEl.value = "Engine overheating";
+    contextEl.value = "Temperature rises under load, fan noise normal.";
+  }
+}
+
+function useAskJakesAnswerAsNotes() {
+  const answer = String(qs("askJakesOutput")?.textContent || "").trim();
+  if (!answer) {
+    alert("Ask Jakes first to get an answer.");
+    return;
+  }
+  const notesEl = qs("docInputs");
+  if (!notesEl) return;
+  const existing = String(notesEl.value || "").trim();
+  notesEl.value = existing ? `${existing}\n\nAsk Jakes notes:\n${answer}` : `Ask Jakes notes:\n${answer}`;
+  setStatus("Ask Jakes answer copied to draft notes.");
+}
+
+async function askJakes(override = {}) {
+  const machine = String(override.machine ?? qs("askJakesMachine")?.value ?? "").trim();
+  const problem = String(override.problem ?? qs("askJakesProblem")?.value ?? "").trim();
+  const context = String(override.context ?? qs("askJakesContext")?.value ?? "").trim();
   if (!problem) {
     alert("Enter a machine problem first.");
     return;

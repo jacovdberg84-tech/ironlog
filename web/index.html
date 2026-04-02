@@ -1503,6 +1503,15 @@
           </div>
           <div class="docs-request-box">
             <div class="row">
+              <input id="aiSmartPrompt" class="minw-260" placeholder="Ask Jakes or request a document (e.g. CAT 950 has no hydraulics / Create checklist for pre-start)" />
+              <button id="aiSmartRunBtn">Run Smart AI</button>
+            </div>
+            <div class="row">
+              <button id="askJakesPresetHydraulics">Hydraulics Preset</button>
+              <button id="askJakesPresetStarting">Starting Preset</button>
+              <button id="askJakesPresetOverheat">Overheating Preset</button>
+            </div>
+            <div class="row">
               <input id="docAskRequest" class="minw-260" placeholder="Ask AI for a specific document (e.g. SOP for diesel spill response)" />
               <button id="generateDocDraftFromRequestBtn">Generate from Request</button>
             </div>
@@ -1513,6 +1522,7 @@
             </div>
             <div class="row">
               <input id="askJakesContext" class="minw-260" placeholder="Optional context (e.g. engine starts, steering weak)" />
+              <button id="askJakesUseAsNotesBtn">Use Answer in Notes</button>
             </div>
             <small class="muted">Generate full drafts or use Ask Jakes for quick numbered troubleshooting checks.</small>
             <pre class="output" id="askJakesOutput"></pre>
