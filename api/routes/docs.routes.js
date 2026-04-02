@@ -311,6 +311,7 @@ async function fetchWebSearchContext(query, limit = 3, trustedDomains = []) {
 async function generateAIDraftBody({ language, docType, scope, hazards, controls, extraNotes, preferFoundry = false }) {
   const cfg = getAiConfig(preferFoundry ? "foundry" : "");
   if (!cfg.provider) return null;
+  const isChecklist = String(docType || "").toLowerCase() === "checklist";
 
   const langInstruction =
     language === "af"
@@ -321,6 +322,30 @@ async function generateAIDraftBody({ language, docType, scope, hazards, controls
           ? "Write the content in Portuguese."
           : "Write the content in English.";
 
+  const structureInstruction = isChecklist
+    ? [
+        "Generate the body of the document ONLY (no header).",
+        "Use a practical checklist format with short checkbox-ready items.",
+        "Suggested sections:",
+        "1. Purpose",
+        "2. Scope",
+        "3. Pre-Start Checks",
+        "4. During Task Checks",
+        "5. Post-Task Close-Out",
+        "6. Sign-Off",
+      ].join("\n")
+    : [
+        "Generate the body of the document ONLY (no header). Use sections 1 to 8 with the following headings in the selected language:",
+        "1. Purpose (or Doel/Inhloso/Objetivo)",
+        "2. Scope (or Omvang/Ububanzi/Escopo)",
+        "3. Responsibilities",
+        "4. Hazards / Risks",
+        "5. Controls",
+        "6. Procedure",
+        "7. Records and Evidence",
+        "8. Revision Control",
+      ].join("\n");
+
   const user = [
     `Document Type: ${docType}`,
     `Scope / objective: ${scope || "-"}`,
@@ -328,20 +353,14 @@ async function generateAIDraftBody({ language, docType, scope, hazards, controls
     `Controls / PPE: ${controls || "-"}`,
     `Extra notes / requirements: ${extraNotes || "-"}`,
     "",
-    "Generate the body of the document ONLY (no header). Use sections 1 to 8 with the following headings in the selected language:",
-    "1. Purpose (or Doel/Inhloso/Objetivo)",
-    "2. Scope (or Omvang/Ububanzi/Escopo)",
-    "3. Responsibilities",
-    "4. Hazards / Risks",
-    "5. Controls",
-    "6. Procedure",
-    "7. Records and Evidence",
-    "8. Revision Control",
+    structureInstruction,
     "",
     "Rules:",
     "- Keep it compliance-focused and practical.",
-    "- Use short bullet points and numbered sections.",
+    "- Use short bullet points and clear section headings.",
     "- Do not include any meta commentary.",
+    "- Do not include the literal labels 'User request', 'Related legal docs', or 'Web sources' in the output.",
+    "- Do not copy prompt instructions into the final document.",
   ].join("\n");
 
   try {
@@ -548,6 +567,143 @@ function draftWithTemplate({
   extraNotes,
 }) {
   const top = buildDraftHeaderText({ docType, title, header });
+  const isChecklist = String(docType || "").toLowerCase() === "checklist";
+
+  if (isChecklist) {
+    const checklistEn = `
+1. Purpose
+${scope || "Confirm readiness and safe execution before, during, and after work."}
+
+2. Scope
+Applies to relevant personnel and contractors performing this task.
+
+3. Pre-Start Checks
+- [ ] Permit and authorization confirmed.
+- [ ] Toolbox talk completed and understood.
+- [ ] PPE and isolation controls in place.
+- [ ] Hazards reviewed: ${hazards || "site/task hazards identified"}.
+
+4. During Task Checks
+- [ ] Work follows approved method.
+- [ ] Controls maintained: ${controls || "PPE, barricading, and lockout controls"}.
+- [ ] Deviations stopped and reported immediately.
+
+5. Post-Task Close-Out
+- [ ] Work area cleaned and made safe.
+- [ ] Equipment returned to normal safe condition.
+- [ ] Findings and actions recorded.
+
+6. Sign-Off
+- Supervisor: ____________________  Date: __________
+- Team Lead: _____________________  Date: __________
+
+Additional Notes
+${extraNotes || "-"}
+`.trim();
+
+    const checklistAf = `
+1. Doel
+${scope || "Bevestig gereedheid en veilige uitvoering voor, tydens en na werk."}
+
+2. Omvang
+Van toepassing op relevante personeel en kontrakteurs wat hierdie taak uitvoer.
+
+3. Voor-Begin Kontroles
+- [ ] Permit en magtiging bevestig.
+- [ ] Toolbox-gesprek voltooi en verstaan.
+- [ ] PPE en isolasiebeheer is in plek.
+- [ ] Gevare hersien: ${hazards || "terrein-/taakgevare geidentifiseer"}.
+
+4. Tydens Taak Kontroles
+- [ ] Werk volg goedgekeurde metode.
+- [ ] Beheermaatreels gehandhaaf: ${controls || "PPE, afbakening en lockout-beheer"}.
+- [ ] Afwykings onmiddellik gestop en gerapporteer.
+
+5. Na-Taak Afsluiting
+- [ ] Werkarea skoongemaak en veilig gemaak.
+- [ ] Toerusting terug na normale veilige toestand.
+- [ ] Bevindings en aksies aangeteken.
+
+6. Aftekening
+- Toesighouer: ____________________  Datum: __________
+- Spanleier: ______________________  Datum: __________
+
+Bykomende Notas
+${extraNotes || "-"}
+`.trim();
+
+    const checklistZu = `
+1. Inhloso
+${scope || "Qinisekisa ukulungela nokusebenza ngokuphepha ngaphambi, ngesikhathi nangemuva komsebenzi."}
+
+2. Ububanzi
+Kusebenza kubasebenzi nakonkontileka abafanele abenza lo msebenzi.
+
+3. Ukuhlola Ngaphambi Kokuqala
+- [ ] Imvume negunya kuqinisekisiwe.
+- [ ] Toolbox talk yenziwe futhi yaqondwa.
+- [ ] I-PPE nezilawuli zokuhlukanisa zikho.
+- [ ] Izingozi zibuyekeziwe: ${hazards || "izingozi zesiza/umsebenzi zikhonjwe"}.
+
+4. Ukuhlola Ngesikhathi Somsebenzi
+- [ ] Umsebenzi ulandela indlela evunyelwe.
+- [ ] Izilawuli zigcinwa: ${controls || "PPE, ukwahlukanisa indawo, ne-lockout controls"}.
+- [ ] Ukuphambuka kumiswa futhi kubikwe ngokushesha.
+
+5. Ukuvala Ngemuva Komsebenzi
+- [ ] Indawo yomsebenzi ihlanzekile futhi iphephile.
+- [ ] Imishini ibuyiselwe esimweni esiphephile.
+- [ ] Okutholakele nezinyathelo kuqoshiwe.
+
+6. Ukusayina
+- Umphathi: ____________________  Usuku: __________
+- Umholi wethimba: _____________  Usuku: __________
+
+Amanothi Engeziwe
+${extraNotes || "-"}
+`.trim();
+
+    const checklistPt = `
+1. Objetivo
+${scope || "Confirmar prontidao e execucao segura antes, durante e apos o trabalho."}
+
+2. Escopo
+Aplica-se ao pessoal e contratados relevantes que executam esta tarefa.
+
+3. Verificacoes Pre-Inicio
+- [ ] Permissao e autorizacao confirmadas.
+- [ ] Conversa de seguranca (toolbox) concluida e compreendida.
+- [ ] EPI e controles de isolamento em vigor.
+- [ ] Perigos revistos: ${hazards || "perigos do local/tarefa identificados"}.
+
+4. Verificacoes Durante a Tarefa
+- [ ] Trabalho segue o metodo aprovado.
+- [ ] Controles mantidos: ${controls || "EPI, isolamento de area e lockout"}.
+- [ ] Desvios interrompidos e reportados imediatamente.
+
+5. Encerramento Pos-Tarefa
+- [ ] Area de trabalho limpa e segura.
+- [ ] Equipamento devolvido a condicao segura normal.
+- [ ] Registos de achados e acoes atualizados.
+
+6. Assinatura
+- Supervisor: ____________________  Data: __________
+- Lider de Equipa: _______________  Data: __________
+
+Notas Adicionais
+${extraNotes || "-"}
+`.trim();
+
+    const checklistBody = language === "af"
+      ? checklistAf
+      : language === "zu"
+        ? checklistZu
+        : language === "pt"
+          ? checklistPt
+          : checklistEn;
+
+    return `${top}\n\n${checklistBody}`;
+  }
 
   const bodyEn = `
 1. Purpose
@@ -976,6 +1132,12 @@ export default async function docsRoutes(app) {
       : "- No web context used.";
 
     const mergedNotes = `User request:\n${requestText}\n\nRelated legal docs:\n${contextText}\n\nWeb sources:\n${webText}`;
+    const authorNotes = String(body.extra_notes || "").trim();
+    const aiNotes = [
+      authorNotes,
+      "The following context is guidance only and should not be copied verbatim into the final document:",
+      mergedNotes,
+    ].filter(Boolean).join("\n\n");
     const scope = String(body.scope || "").trim();
     const hazards = String(body.hazards || "").trim();
     const controls = String(body.controls || "").trim();
@@ -985,10 +1147,10 @@ export default async function docsRoutes(app) {
     const aiBody = await generateAIDraftBody({
       language,
       docType,
-      scope: scope || requestText,
+      scope: scope || "",
       hazards,
       controls,
-      extraNotes: mergedNotes,
+      extraNotes: aiNotes,
       preferFoundry: useFoundry,
     });
 
@@ -1000,10 +1162,10 @@ export default async function docsRoutes(app) {
           docType,
           title,
           header,
-          scope: scope || requestText,
+          scope: scope || "",
           hazards,
           controls,
-          extraNotes: mergedNotes,
+          extraNotes: authorNotes,
         });
 
     const res = db.prepare(`
@@ -1016,10 +1178,10 @@ export default async function docsRoutes(app) {
       docType,
       title,
       language,
-      scope || requestText,
+      scope || "",
       hazards,
       controls,
-      mergedNotes,
+      authorNotes,
       draftText,
       getUser(req),
       nowIso()
