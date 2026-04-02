@@ -747,6 +747,7 @@ export default async function docsRoutes(app) {
 
   // Simple diagnostics: which AI provider is configured (without exposing secrets).
   app.get("/ai/status", async () => {
+    const useFoundry = toBool(process.env.USE_FOUNDRY || process.env.AI_USE_FOUNDRY || "false");
     const cfg = getAiConfig(useFoundry ? "foundry" : "");
     return {
       ok: true,
