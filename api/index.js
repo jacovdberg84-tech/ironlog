@@ -2,6 +2,7 @@
 import { buildServer } from "./server.js";
 import { runHybridPhase1Migration } from "./db/hybridPhase1.js";
 import { runHybridPhase2Migration } from "./db/hybridPhase2.js";
+import "./db/migrate.js"; // Run schema migration first
 
 import dotenv from "dotenv";
 import fastifyStatic from "@fastify/static";
