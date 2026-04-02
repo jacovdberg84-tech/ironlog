@@ -6467,6 +6467,9 @@ async function init() {
   qs("generateDocDraftFromRequestBtn")?.addEventListener("click", () =>
     generateDocDraftFromRequest().catch((e) => setStatus("Draft request generate error: " + e.message))
   );
+  qs("askJakesBtn")?.addEventListener("click", () =>
+    askJakes().catch((e) => setStatus("Ask Jakes error: " + e.message))
+  );
   qs("speakDocDraftBtn")?.addEventListener("click", () =>
     speakDocDraft()
   );
@@ -7411,6 +7414,28 @@ async function generateDocDraftFromRequest() {
   if (idEl) idEl.value = String(res.id || "");
   setStatus(`Draft generated from request (#${res.id})${res.ai_used ? " with AI" : " (template fallback)"}.`);
   await loadDocDrafts();
+}
+
+async function askJakes() {
+  const machine = String(qs("askJakesMachine")?.value || "").trim();
+  const problem = String(qs("askJakesProblem")?.value || "").trim();
+  const context = String(qs("askJakesContext")?.value || "").trim();
+  if (!problem) {
+    alert("Enter a machine problem first.");
+    return;
+  }
+
+  const res = await fetchJson(`${API}/api/docs/ai/ask`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ machine, problem, context }),
+  });
+
+  const out = qs("askJakesOutput");
+  if (out) {
+    out.textContent = String(res.answer || "No answer returned.");
+  }
+  setStatus("Ask Jakes answered.");
 }
 
 function speakDocDraft() {
