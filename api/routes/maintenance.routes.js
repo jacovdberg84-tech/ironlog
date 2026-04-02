@@ -254,9 +254,19 @@ export default async function maintenanceRoutes(app) {
         ORDER BY a.asset_code ASC, mp.service_name ASC
       `).all();
 
+      const plans = rows.map((r) => {
+        const current_hours = getAssetCurrentHours(r.asset_id);
+        return {
+          ...r,
+          current_hours: Number(current_hours.toFixed(2)),
+          next_due_hours: Number((Number(r.last_service_hours || 0) + Number(r.interval_hours || 0)).toFixed(2)),
+          remaining_hours: Number((Number(r.last_service_hours || 0) + Number(r.interval_hours || 0) - current_hours).toFixed(2)),
+        };
+      });
+
       return reply.send({
         ok: true,
-        plans: rows
+        plans
       });
     } catch (err) {
       req.log.error(err);
@@ -423,6 +433,73 @@ export default async function maintenanceRoutes(app) {
         ok: false,
         error: err.message
       });
+    }
+  });
+
+  // =====================================================
+  // MAINTENANCE PLANS - DELETE
+  // DELETE /api/maintenance/plans/:id
+  // =====================================================
+  app.delete("/plans/:id", async (req, reply) => {
+    try {
+      const id = Number(req.params?.id || 0);
+      if (!id) {
+        return reply.code(400).send({ ok: false, error: "Invalid plan id" });
+      }
+
+      const existing = db.prepare(`
+        SELECT id
+        FROM maintenance_plans
+        WHERE id = ?
+      `).get(id);
+
+      if (!existing) {
+        return reply.code(404).send({ ok: false, error: "Maintenance plan not found" });
+      }
+
+      db.prepare(`
+        DELETE FROM maintenance_plans WHERE id = ?
+      `).run(id);
+
+      return reply.send({ ok: true });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  // =====================================================
+  // MAINTENANCE PLANS - TOGGLE ACTIVE
+  // PATCH /api/maintenance/plans/:id/toggle
+  // =====================================================
+  app.patch("/plans/:id/toggle", async (req, reply) => {
+    try {
+      const id = Number(req.params?.id || 0);
+      if (!id) {
+        return reply.code(400).send({ ok: false, error: "Invalid plan id" });
+      }
+
+      const plan = db.prepare(`
+        SELECT id, active
+        FROM maintenance_plans
+        WHERE id = ?
+      `).get(id);
+
+      if (!plan) {
+        return reply.code(404).send({ ok: false, error: "Maintenance plan not found" });
+      }
+
+      const newActive = plan.active ? 0 : 1;
+      db.prepare(`
+        UPDATE maintenance_plans
+        SET active = ?
+        WHERE id = ?
+      `).run(newActive, id);
+
+      return reply.send({ ok: true, id, active: newActive });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
     }
   });
 

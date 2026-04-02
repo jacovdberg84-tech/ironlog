@@ -34,6 +34,32 @@ function compactCell(v, max = 140) {
   return s.length > max ? `${s.slice(0, Math.max(1, max - 1))}...` : s;
 }
 
+function parseIsoDate(d) {
+  if (!d) return null;
+  const s = String(d || "").trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+function daysDownForBreakdown(bd, reportDate) {
+  const logged = Number(bd.logged_days || 0);
+  if (logged > 0) return logged;
+
+  const startDate = parseIsoDate(bd.start_at) || parseIsoDate(bd.breakdown_date);
+  if (!startDate) return 1;
+
+  const endDate = parseIsoDate(bd.end_at);
+  if (endDate) {
+    return inclusiveDaysBetween(startDate, endDate);
+  }
+
+  const asOf = parseIsoDate(reportDate);
+  if (asOf) {
+    return inclusiveDaysBetween(startDate, asOf);
+  }
+
+  return 1;
+}
+
 function isMonth(m) {
   return /^\d{4}-\d{2}$/.test(String(m || "").trim());
 }
@@ -3202,9 +3228,7 @@ export default async function reportsRoutes(app) {
         dh.scheduled_hours,
         dh.opening_hours,
         dh.closing_hours,
-        dh.hours_run,
-        dh.operator,
-        dh.notes
+        dh.hours_run
       FROM daily_hours dh
       JOIN assets a ON a.id = dh.asset_id
       WHERE dh.work_date = ?
@@ -3426,8 +3450,6 @@ export default async function reportsRoutes(app) {
         { header: "Opening meter (h)", key: "opening_hours", width: 14 },
         { header: "Closing meter (h)", key: "closing_hours", width: 14 },
         { header: "Run hours", key: "hours_run", width: 12 },
-        { header: "Operator", key: "operator", width: 16 },
-        { header: "Notes", key: "notes", width: 30 },
       ],
       hours.map(r => ({ ...r, is_used: r.is_used ? "Y" : "N" })),
       dirTbl,
@@ -4548,16 +4570,18 @@ export default async function reportsRoutes(app) {
         a.category,
         COALESCE(dh.hours_run, 0) AS hours_run,
         dh.is_used,
-        dh.operator,
-        dh.notes,
-        CASE WHEN dh.id IS NULL THEN 0 ELSE 1 END AS has_daily_entry
+        dh.opening_hours,
+        dh.closing_hours,
+        CASE WHEN dh.id IS NULL THEN 0 ELSE 1 END AS has_daily_entry,
+        (SELECT dh2.opening_hours FROM daily_hours dh2 WHERE dh2.asset_id = a.id AND dh2.work_date = date(?, '-1 day') LIMIT 1) AS prev_opening_hours,
+        (SELECT dh2.closing_hours FROM daily_hours dh2 WHERE dh2.asset_id = a.id AND dh2.work_date = date(?, '-1 day') LIMIT 1) AS prev_closing_hours
       FROM assets a
       LEFT JOIN daily_hours dh ON dh.asset_id = a.id AND dh.work_date = ?
       WHERE COALESCE(a.is_standby, 0) = 0
         ${activeClause}
         ${archivedClause}
       ORDER BY a.asset_code
-    `).all(date);
+    `).all(date, date, date);
 
     const fuel = db.prepare(`
       SELECT a.asset_code, fl.liters, fl.source
@@ -4577,12 +4601,29 @@ export default async function reportsRoutes(app) {
 
     const breakdownDowntimeCol = getBreakdownDowntimeColumn();
     const breakdowns = db.prepare(`
-      SELECT a.asset_code, b.description, COALESCE(b.${breakdownDowntimeCol}, 0) AS downtime_hours, b.critical
+      SELECT
+        b.id,
+        a.asset_code,
+        b.description,
+        COALESCE(b.${breakdownDowntimeCol}, 0) AS downtime_hours,
+        b.critical,
+        b.breakdown_date,
+        b.start_at,
+        b.end_at,
+        COALESCE((
+          SELECT COUNT(DISTINCT l.log_date)
+          FROM breakdown_downtime_logs l
+          WHERE l.breakdown_id = b.id
+        ), 0) AS logged_days
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
       WHERE b.breakdown_date = ?
       ORDER BY downtime_hours DESC
-    `).all(date).map(r => ({ ...r, critical: Boolean(r.critical) }));
+    `).all(date).map(r => ({
+      ...r,
+      critical: Boolean(r.critical),
+      days_down: daysDownForBreakdown(r, date),
+    }));
 
     const openWOs = db.prepare(`
       SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
@@ -4700,28 +4741,32 @@ export default async function reportsRoutes(app) {
         table(
           doc,
           [
-            { key: "asset", label: "Asset", width: 0.14 },
-            { key: "type", label: "Type", width: 0.12 },
-            { key: "name", label: "Name", width: 0.20 },
+            { key: "asset", label: "Asset", width: 0.10 },
+            { key: "type", label: "Type", width: 0.09 },
+            { key: "name", label: "Name", width: 0.18 },
+            { key: "prev_open", label: "Prev open", width: 0.10, align: "right" },
+            { key: "prev_close", label: "Prev close", width: 0.10, align: "right" },
+            { key: "open", label: "Open", width: 0.09, align: "right" },
+            { key: "close", label: "Close", width: 0.09, align: "right" },
             { key: "hours", label: "Run Hrs", width: 0.10, align: "right" },
-            { key: "used", label: "Prod", width: 0.07, align: "center" },
-            { key: "operator", label: "Operator", width: 0.15 },
-            { key: "notes", label: "Notes", width: 0.22 },
+            { key: "used", label: "Prod", width: 0.08, align: "center" },
           ],
-          hoursPdf.map((r) => ({
-            asset: r.asset_code,
-            type: compactCell(r.category ?? "", 14),
-            name: r.asset_name ?? "",
-            hours: fmtNum(r.hours_run, 1),
-            used:
-              !r.has_daily_entry
-                ? "—"
-                : r.is_used
-                  ? "Y"
-                  : "N",
-            operator: compactCell(r.operator ?? "", 40),
-            notes: !r.has_daily_entry ? "No daily entry" : compactCell(r.notes ?? "", 90),
-          }))
+          hoursPdf.map((r) => {
+            const noEntry = !r.has_daily_entry;
+            const fmtHm = (v) =>
+              v == null || v === "" || !Number.isFinite(Number(v)) ? "—" : fmtNum(v, 1);
+            return {
+              asset: r.asset_code,
+              type: compactCell(r.category ?? "", 12),
+              name: r.asset_name ?? "",
+              prev_open: r.prev_opening_hours == null || r.prev_opening_hours === "" ? "—" : fmtHm(r.prev_opening_hours),
+              prev_close: r.prev_closing_hours == null || r.prev_closing_hours === "" ? "—" : fmtHm(r.prev_closing_hours),
+              open: noEntry ? "—" : fmtHm(r.opening_hours),
+              close: noEntry ? "—" : fmtHm(r.closing_hours),
+              hours: fmtNum(r.hours_run, 1),
+              used: noEntry ? "—" : r.is_used ? "Y" : "N",
+            };
+          })
         );
 
         sectionTitle(doc, "Fuel");
@@ -4758,13 +4803,15 @@ export default async function reportsRoutes(app) {
         table(
           doc,
           [
-            { key: "asset", label: "Asset", width: 0.16 },
-            { key: "hrs", label: "Downtime (hrs)", width: 0.14, align: "right" },
-            { key: "crit", label: "Critical", width: 0.12, align: "center" },
-            { key: "desc", label: "Description", width: 0.58 },
+            { key: "asset", label: "Asset", width: 0.14 },
+            { key: "days", label: "Days down", width: 0.12, align: "right" },
+            { key: "hrs", label: "Downtime (hrs)", width: 0.12, align: "right" },
+            { key: "crit", label: "Critical", width: 0.10, align: "center" },
+            { key: "desc", label: "Description", width: 0.52 },
           ],
           breakdownsPdf.map(r => ({
             asset: r.asset_code,
+            days: fmtNum(r.days_down || 0, 0),
             hrs: fmtNum(r.downtime_hours, 1),
             crit: r.critical ? "YES" : "NO",
             desc: compactCell(r.description ?? "", 140),
