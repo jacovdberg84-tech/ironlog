@@ -7388,7 +7388,7 @@ async function generateDocDraft() {
 }
 
 async function generateDocDraftFromRequest() {
-  const requestText = String(qs("docAskRequest")?.value || "").trim();
+  const requestText = String(arguments[0] || qs("aiSmartPrompt")?.value || "").trim();
   if (!requestText) return alert("Enter what document you want first.");
   let headerId = Number(qs("docHeaderId")?.value || 0);
   if (!headerId) {
@@ -7455,13 +7455,6 @@ function parseMachineProblemFromPrompt(prompt) {
 
 async function runAiSmart() {
   const smartPrompt = String(qs("aiSmartPrompt")?.value || "").trim();
-  const machineTyped = String(qs("askJakesMachine")?.value || "").trim();
-  const problemTyped = String(qs("askJakesProblem")?.value || "").trim();
-
-  if (machineTyped || problemTyped) {
-    await askJakes();
-    return;
-  }
 
   if (!smartPrompt) {
     alert("Enter a question or document request first.");
@@ -7473,24 +7466,22 @@ async function runAiSmart() {
 
   if (faultKeywords.test(smartPrompt) && !docKeywords.test(smartPrompt)) {
     const parsed = parseMachineProblemFromPrompt(smartPrompt);
-    const machineEl = qs("askJakesMachine");
-    const problemEl = qs("askJakesProblem");
-    if (machineEl && parsed.machine) machineEl.value = parsed.machine;
-    if (problemEl) problemEl.value = parsed.problem;
-    await askJakes();
+    await askJakes({ machine: parsed.machine, problem: parsed.problem, context: "" });
     return;
   }
 
   const inferred = inferDocTypeFromPrompt(smartPrompt);
-  const reqEl = qs("docAskRequest");
-  if (reqEl) reqEl.value = smartPrompt;
   const titleEl = qs("docTitle");
   if (titleEl && !String(titleEl.value || "").trim()) titleEl.value = smartPrompt.slice(0, 80);
   if (inferred) {
     const typeEl = qs("docType");
     if (typeEl) typeEl.value = inferred;
   }
-  await generateDocDraftFromRequest();
+  await generateDocDraftFromRequest(smartPrompt);
+  const out = qs("askJakesOutput");
+  if (out) {
+    out.textContent = "Document draft generated. See the Draft Output box below for the full text.";
+  }
 }
 
 function applyAskJakesPreset(type) {
@@ -7532,11 +7523,11 @@ function useAskJakesAnswerAsNotes() {
 }
 
 async function askJakes(override = {}) {
-  const machine = String(override.machine ?? qs("askJakesMachine")?.value ?? "").trim();
-  const problem = String(override.problem ?? qs("askJakesProblem")?.value ?? "").trim();
-  const context = String(override.context ?? qs("askJakesContext")?.value ?? "").trim();
+  const machine = String(override.machine || "").trim();
+  const problem = String(override.problem || "").trim();
+  const context = String(override.context || "").trim();
   if (!problem) {
-    alert("Enter a machine problem first.");
+    alert("Please describe the machine problem in the smart prompt box.");
     return;
   }
 
