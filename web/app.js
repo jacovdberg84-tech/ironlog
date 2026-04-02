@@ -4765,6 +4765,264 @@ function renderSupplyFlowBoard(rows) {
   setText("sfCountReceive", String(laneCounts.receive));
 }
 
+function getSiteOpsFrom() {
+  return (qs("opFrom")?.value || "").trim();
+}
+
+function getSiteOpsTo() {
+  return (qs("opTo")?.value || "").trim();
+}
+
+async function loadSiteZones() {
+  const data = await fetchJson(`${API}/api/operations/site/zones`);
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  const zoneSelect = qs("opSiteZone");
+  const zoneList = qs("siteZoneList");
+  if (zoneSelect) {
+    zoneSelect.innerHTML = `<option value="">Select zone</option>`;
+    rows
+      .filter((r) => Number(r.active || 0) === 1)
+      .forEach((r) => {
+        const opt = document.createElement("option");
+        opt.value = String(r.id || "");
+        opt.textContent = `${r.name || "Zone"} (#${r.id})`;
+        zoneSelect.appendChild(opt);
+      });
+  }
+  if (zoneList) {
+    zoneList.innerHTML = "";
+    if (!rows.length) {
+      zoneList.appendChild(item("<small>No zones configured.</small>"));
+    } else {
+      rows.forEach((r) => {
+        zoneList.appendChild(item(`<b>#${r.id}</b> ${r.name || "-"} <span class="pill ${Number(r.active || 0) ? "blue" : "orange"}">${Number(r.active || 0) ? "active" : "inactive"}</span>`));
+      });
+    }
+  }
+}
+
+async function saveSiteZone() {
+  const name = String(qs("opZoneName")?.value || "").trim();
+  if (!name) {
+    alert("Zone name is required.");
+    return;
+  }
+  const active = Boolean(qs("opZoneActive")?.checked);
+  const res = await fetchJson(`${API}/api/operations/site/zones`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, active }),
+  });
+  setText("siteDailyResult", JSON.stringify(res, null, 2));
+  await loadSiteZones();
+  setStatus("Site zone saved.");
+}
+
+async function saveSiteDailyEntry() {
+  const payload = {
+    op_date: (qs("opSiteDate")?.value || "").trim(),
+    shift: (qs("opSiteShift")?.value || "day").trim(),
+    material_type: (qs("opSiteMaterial")?.value || "").trim(),
+    zone_id: (qs("opSiteZone")?.value || "").trim() === "" ? undefined : Number(qs("opSiteZone")?.value || 0),
+    planned_tonnage: (qs("opSitePlanned")?.value || "").trim() === "" ? undefined : Number(qs("opSitePlanned")?.value || 0),
+    actual_tonnage: (qs("opSiteActual")?.value || "").trim() === "" ? undefined : Number(qs("opSiteActual")?.value || 0),
+    loads_count: (qs("opSiteLoads")?.value || "").trim() === "" ? undefined : Number(qs("opSiteLoads")?.value || 0),
+    avg_cycle_time: (qs("opSiteCycle")?.value || "").trim() === "" ? undefined : Number(qs("opSiteCycle")?.value || 0),
+    operator_name: (qs("opSiteOperator")?.value || "").trim() || undefined,
+    notes: (qs("opSiteNotes")?.value || "").trim() || undefined,
+  };
+  if (!payload.op_date || !payload.material_type) {
+    alert("Date and material type are required.");
+    return;
+  }
+  const res = await fetchJson(`${API}/api/operations/site/daily`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  setText("siteDailyResult", JSON.stringify(res, null, 2));
+  if (qs("opSiteDailyId") && res?.id) qs("opSiteDailyId").value = String(res.id);
+  await loadSiteDailyEntries();
+  await loadSiteDashboard();
+  setStatus("Site daily entry saved.");
+}
+
+async function loadSiteDailyEntries() {
+  const list = qs("siteDailyList");
+  if (!list) return;
+  const from = getSiteOpsFrom();
+  const to = getSiteOpsTo();
+  const q = new URLSearchParams();
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  const data = await fetchJson(`${API}/api/operations/site/daily${q.toString() ? `?${q.toString()}` : ""}`);
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  list.innerHTML = "";
+  if (!rows.length) {
+    list.appendChild(item("<small>No site daily entries found.</small>"));
+    return;
+  }
+  rows.forEach((r) => {
+    list.appendChild(
+      item(
+        `<b>#${r.id}</b> ${r.op_date || "-"} <span class="pill blue">${String(r.shift || "-").toUpperCase()}</span> <span class="pill">${r.material_type || "-"}</span>` +
+          `<br><small>Zone: ${r.zone_name || "-"} | Planned: ${Number(r.planned_tonnage || 0).toFixed(2)} | Actual: ${Number(r.actual_tonnage || 0).toFixed(2)} | Loads: ${Number(r.loads_count || 0)}</small>` +
+          `<br><small>Operator: ${r.operator_name || "-"}${r.notes ? ` | ${r.notes}` : ""}</small>`
+      )
+    );
+  });
+}
+
+async function saveSiteEquipmentUsage() {
+  const dailyId = Number(qs("opSiteDailyId")?.value || 0);
+  const assetId = Number(qs("opSiteEqAssetId")?.value || 0);
+  const role = String(qs("opSiteEqRole")?.value || "").trim();
+  const hours = (qs("opSiteEqHours")?.value || "").trim() === "" ? undefined : Number(qs("opSiteEqHours")?.value || 0);
+  if (!dailyId || !assetId || !role) {
+    alert("Daily ID, Asset ID, and role are required.");
+    return;
+  }
+  const res = await fetchJson(`${API}/api/operations/site/daily/${dailyId}/equipment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ asset_id: assetId, role, hours_used: hours }),
+  });
+  setText("siteDailyResult", JSON.stringify(res, null, 2));
+  await loadSiteEquipmentUsage();
+  setStatus("Equipment linked to production.");
+}
+
+async function loadSiteEquipmentUsage() {
+  const dailyId = Number(qs("opSiteDailyId")?.value || 0);
+  const list = qs("siteEquipmentUsageList");
+  if (!list) return;
+  if (!dailyId) {
+    list.innerHTML = "";
+    list.appendChild(item("<small>Select a daily entry ID to view equipment usage.</small>"));
+    return;
+  }
+  const data = await fetchJson(`${API}/api/operations/site/daily/${dailyId}/equipment`);
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  list.innerHTML = "";
+  if (!rows.length) {
+    list.appendChild(item("<small>No equipment usage linked yet.</small>"));
+    return;
+  }
+  rows.forEach((r) => {
+    list.appendChild(item(`<b>#${r.id}</b> Asset ${r.asset_code || r.asset_id} (${r.asset_name || "-"}) | Role: ${r.role || "-"} | Hours: ${Number(r.hours_used || 0).toFixed(2)}`));
+  });
+}
+
+async function saveSiteTarget() {
+  const payload = {
+    target_date: (qs("opTargetDate")?.value || "").trim(),
+    material_type: (qs("opTargetMaterial")?.value || "").trim(),
+    target_tonnage: (qs("opTargetTonnage")?.value || "").trim() === "" ? undefined : Number(qs("opTargetTonnage")?.value || 0),
+  };
+  if (!payload.target_date || !payload.material_type || payload.target_tonnage == null) {
+    alert("Target date, material, and tonnage are required.");
+    return;
+  }
+  const res = await fetchJson(`${API}/api/operations/site/targets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  setText("siteDailyResult", JSON.stringify(res, null, 2));
+  await loadSiteTargets();
+  await loadSiteDashboard();
+  setStatus("Site target saved.");
+}
+
+async function loadSiteTargets() {
+  const list = qs("siteTargetList");
+  if (!list) return;
+  const from = getSiteOpsFrom();
+  const to = getSiteOpsTo();
+  const q = new URLSearchParams();
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  const data = await fetchJson(`${API}/api/operations/site/targets${q.toString() ? `?${q.toString()}` : ""}`);
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  list.innerHTML = "";
+  if (!rows.length) {
+    list.appendChild(item("<small>No targets found.</small>"));
+    return;
+  }
+  rows.forEach((r) => {
+    list.appendChild(item(`<b>${r.target_date}</b> ${r.material_type || "-"} <span class="pill blue">${Number(r.target_tonnage || 0).toFixed(2)} t</span>`));
+  });
+}
+
+async function saveSiteDelay() {
+  const payload = {
+    delay_date: (qs("opDelayDate")?.value || "").trim(),
+    delay_type: (qs("opDelayType")?.value || "").trim(),
+    hours_lost: (qs("opDelayHours")?.value || "").trim() === "" ? undefined : Number(qs("opDelayHours")?.value || 0),
+    impact_tonnage: (qs("opDelayImpact")?.value || "").trim() === "" ? undefined : Number(qs("opDelayImpact")?.value || 0),
+    notes: (qs("opDelayNotes")?.value || "").trim() || undefined,
+  };
+  if (!payload.delay_date || !payload.delay_type || payload.hours_lost == null) {
+    alert("Delay date, type and hours lost are required.");
+    return;
+  }
+  const res = await fetchJson(`${API}/api/operations/site/delays`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  setText("siteDailyResult", JSON.stringify(res, null, 2));
+  await loadSiteDelays();
+  await loadSiteDashboard();
+  setStatus("Operational delay saved.");
+}
+
+async function loadSiteDelays() {
+  const list = qs("siteDelayList");
+  if (!list) return;
+  const from = getSiteOpsFrom();
+  const to = getSiteOpsTo();
+  const q = new URLSearchParams();
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  const data = await fetchJson(`${API}/api/operations/site/delays${q.toString() ? `?${q.toString()}` : ""}`);
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  list.innerHTML = "";
+  if (!rows.length) {
+    list.appendChild(item("<small>No operational delays found.</small>"));
+    return;
+  }
+  rows.forEach((r) => {
+    list.appendChild(item(`<b>${r.delay_date}</b> <span class="pill orange">${r.delay_type}</span> | Hours lost: ${Number(r.hours_lost || 0).toFixed(2)} | Impact: ${Number(r.impact_tonnage || 0).toFixed(2)}t${r.notes ? `<br><small>${r.notes}</small>` : ""}`));
+  });
+}
+
+async function loadSiteDashboard() {
+  const date = (qs("opSiteDashDate")?.value || qs("opSiteDate")?.value || "").trim();
+  if (!date) return;
+  const data = await fetchJson(`${API}/api/operations/site/dashboard?date=${encodeURIComponent(date)}`);
+  const today = data?.today || {};
+  const week = data?.week || {};
+  const losses = data?.losses || {};
+  setText("opSiteKpiTodayTons", Number(today.total_tons_produced || 0).toFixed(2));
+  setText("opSiteKpiAchieved", Number(today.achieved_pct || 0).toFixed(1));
+  setText("opSiteKpiLoads", String(Number(today.loads_moved || 0)));
+  setText("opSiteKpiZones", String(Number(today.active_zones || 0)));
+  setText("opSiteKpiWeekTotal", Number(week.total_production || 0).toFixed(2));
+  setText("opSiteKpiBreakdownLoss", Number(losses.breakdown_hours || 0).toFixed(2));
+  setText("opSiteKpiOpsLoss", Number(losses.operational_delay_hours || 0).toFixed(2));
+
+  const list = qs("siteDashboardList");
+  if (list) {
+    list.innerHTML = "";
+    const best = week.best_day ? `${week.best_day.date} (${Number(week.best_day.tons || 0).toFixed(2)}t)` : "-";
+    const worst = week.worst_day ? `${week.worst_day.date} (${Number(week.worst_day.tons || 0).toFixed(2)}t)` : "-";
+    list.appendChild(item(`<b>Best day:</b> ${best}`));
+    list.appendChild(item(`<b>Worst day:</b> ${worst}`));
+    list.appendChild(item(`<b>Today target:</b> ${Number(today.target_tonnage || 0).toFixed(2)}t | <b>Shortfall:</b> ${Math.max(0, Number(today.target_tonnage || 0) - Number(today.total_tons_produced || 0)).toFixed(2)}t`));
+  }
+}
+
 async function saveOperationEntry() {
   const payload = {
     op_date: (qs("opDate")?.value || "").trim() || undefined,
@@ -6661,6 +6919,39 @@ async function init() {
   qs("saveOperationEntry")?.addEventListener("click", () =>
     saveOperationEntry().catch((e) => setStatus("Operations save error: " + e.message))
   );
+  qs("saveSiteDailyEntry")?.addEventListener("click", () =>
+    saveSiteDailyEntry().catch((e) => setStatus("Site daily save error: " + e.message))
+  );
+  qs("loadSiteDailyEntries")?.addEventListener("click", () =>
+    loadSiteDailyEntries().catch((e) => setStatus("Site daily load error: " + e.message))
+  );
+  qs("saveSiteEquipmentUsage")?.addEventListener("click", () =>
+    saveSiteEquipmentUsage().catch((e) => setStatus("Site equipment link error: " + e.message))
+  );
+  qs("loadSiteEquipmentUsage")?.addEventListener("click", () =>
+    loadSiteEquipmentUsage().catch((e) => setStatus("Site equipment load error: " + e.message))
+  );
+  qs("saveSiteTarget")?.addEventListener("click", () =>
+    saveSiteTarget().catch((e) => setStatus("Site target save error: " + e.message))
+  );
+  qs("loadSiteTargets")?.addEventListener("click", () =>
+    loadSiteTargets().catch((e) => setStatus("Site target load error: " + e.message))
+  );
+  qs("saveSiteDelay")?.addEventListener("click", () =>
+    saveSiteDelay().catch((e) => setStatus("Site delay save error: " + e.message))
+  );
+  qs("loadSiteDelays")?.addEventListener("click", () =>
+    loadSiteDelays().catch((e) => setStatus("Site delay load error: " + e.message))
+  );
+  qs("saveSiteZone")?.addEventListener("click", () =>
+    saveSiteZone().catch((e) => setStatus("Site zone save error: " + e.message))
+  );
+  qs("loadSiteZones")?.addEventListener("click", () =>
+    loadSiteZones().catch((e) => setStatus("Site zone load error: " + e.message))
+  );
+  qs("loadSiteDashboard")?.addEventListener("click", () =>
+    loadSiteDashboard().catch((e) => setStatus("Site dashboard load error: " + e.message))
+  );
   qs("saveOperationsClosingDraft")?.addEventListener("click", () =>
     saveOperationsClosing(false).catch((e) => setStatus("Operations closing error: " + e.message))
   );
@@ -7013,6 +7304,14 @@ async function init() {
   if (fuelSnapEnd && !fuelSnapEnd.value) fuelSnapEnd.value = fuelEnd?.value || date.value;
   const opDate = qs("opDate");
   if (opDate && !opDate.value) opDate.value = new Date().toISOString().slice(0, 10);
+  const opSiteDate = qs("opSiteDate");
+  if (opSiteDate && !opSiteDate.value) opSiteDate.value = new Date().toISOString().slice(0, 10);
+  const opSiteDashDate = qs("opSiteDashDate");
+  if (opSiteDashDate && !opSiteDashDate.value) opSiteDashDate.value = opSiteDate?.value || new Date().toISOString().slice(0, 10);
+  const opDelayDate = qs("opDelayDate");
+  if (opDelayDate && !opDelayDate.value) opDelayDate.value = new Date().toISOString().slice(0, 10);
+  const opTargetDate = qs("opTargetDate");
+  if (opTargetDate && !opTargetDate.value) opTargetDate.value = new Date().toISOString().slice(0, 10);
   const opFrom = qs("opFrom");
   const opTo = qs("opTo");
   if (opFrom && !opFrom.value) opFrom.value = new Date(Date.now() - 1000 * 60 * 60 * 24 * 30).toISOString().slice(0, 10);
@@ -7048,6 +7347,11 @@ async function init() {
   setProcurementKpiFilter("all");
   loadRequisitions().catch(() => {});
   loadOperations().catch(() => {});
+  loadSiteZones().catch(() => {});
+  loadSiteDailyEntries().catch(() => {});
+  loadSiteTargets().catch(() => {});
+  loadSiteDelays().catch(() => {});
+  loadSiteDashboard().catch(() => {});
   loadDispatchTrips().catch(() => {});
   loadQualityCenter().catch(() => {});
   loadFuelBenchmark().catch(() => {});

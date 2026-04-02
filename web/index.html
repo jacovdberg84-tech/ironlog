@@ -1053,6 +1053,99 @@
     <section class="panel" id="tab-operations">
       <div class="card stack-12">
         <h3>Site Operations (Quarry)</h3>
+        <div class="card">
+          <h4>Daily Entry</h4>
+          <div class="row">
+            <label class="chk">Date <input id="opSiteDate" type="date" /></label>
+            <label class="chk">Shift
+              <select id="opSiteShift" class="w-140">
+                <option value="day">Day</option>
+                <option value="night">Night</option>
+              </select>
+            </label>
+            <label class="chk">Zone
+              <select id="opSiteZone" class="w-200"></select>
+            </label>
+            <input id="opSiteMaterial" class="w-200" placeholder="Material type (granite/sand)" />
+            <input id="opSitePlanned" class="w-140" type="number" min="0" step="0.01" placeholder="Planned tonnage" />
+            <input id="opSiteActual" class="w-140" type="number" min="0" step="0.01" placeholder="Actual tonnage" />
+            <input id="opSiteLoads" class="w-140" type="number" min="0" step="1" placeholder="Loads count" />
+            <input id="opSiteCycle" class="w-140" type="number" min="0" step="0.01" placeholder="Avg cycle time" />
+            <input id="opSiteOperator" class="w-200" placeholder="Operator" />
+            <input id="opSiteNotes" class="minw-260" placeholder="Notes" />
+            <button id="saveSiteDailyEntry">Save Daily Entry</button>
+            <button id="loadSiteDailyEntries">Load Daily Entries</button>
+          </div>
+          <div class="row">
+            <input id="opSiteDailyId" class="w-140" type="number" min="1" placeholder="Daily entry ID" />
+            <input id="opSiteEqAssetId" class="w-140" type="number" min="1" placeholder="Asset ID" />
+            <input id="opSiteEqRole" class="w-200" placeholder="Role (loader/truck/dozer)" />
+            <input id="opSiteEqHours" class="w-140" type="number" min="0" step="0.01" placeholder="Hours used" />
+            <button id="saveSiteEquipmentUsage">Link Equipment Usage</button>
+            <button id="loadSiteEquipmentUsage">Load Equipment Links</button>
+          </div>
+          <div class="list" id="siteEquipmentUsageList"></div>
+          <div class="list" id="siteDailyList"></div>
+          <pre class="output" id="siteDailyResult"></pre>
+        </div>
+
+        <div class="card">
+          <h4>Dashboard</h4>
+          <div class="row">
+            <label class="chk">As at <input id="opSiteDashDate" type="date" /></label>
+            <button id="loadSiteDashboard">Load Site Dashboard</button>
+          </div>
+          <div class="row">
+            <div class="pill blue">Today Tons: <span id="opSiteKpiTodayTons">0</span></div>
+            <div class="pill orange">Target vs Actual %: <span id="opSiteKpiAchieved">0</span></div>
+            <div class="pill blue">Loads Moved: <span id="opSiteKpiLoads">0</span></div>
+            <div class="pill">Active Zones: <span id="opSiteKpiZones">0</span></div>
+            <div class="pill blue">Week Total: <span id="opSiteKpiWeekTotal">0</span></div>
+            <div class="pill red">Breakdown Hrs: <span id="opSiteKpiBreakdownLoss">0</span></div>
+            <div class="pill red">Ops Delay Hrs: <span id="opSiteKpiOpsLoss">0</span></div>
+          </div>
+          <div class="list" id="siteDashboardList"></div>
+        </div>
+
+        <div class="card">
+          <h4>Operational Delays</h4>
+          <div class="row">
+            <label class="chk">Date <input id="opDelayDate" type="date" /></label>
+            <select id="opDelayType" class="w-200">
+              <option value="weather">weather</option>
+              <option value="logistics">logistics</option>
+              <option value="blasting">blasting</option>
+              <option value="staffing">staffing</option>
+              <option value="no_trucks">no_trucks</option>
+            </select>
+            <input id="opDelayHours" class="w-140" type="number" min="0" step="0.01" placeholder="Hours lost" />
+            <input id="opDelayImpact" class="w-140" type="number" min="0" step="0.01" placeholder="Impact tonnage" />
+            <input id="opDelayNotes" class="minw-260" placeholder="Delay notes" />
+            <button id="saveSiteDelay">Save Delay</button>
+            <button id="loadSiteDelays">Load Delays</button>
+          </div>
+          <div class="list" id="siteDelayList"></div>
+        </div>
+
+        <div class="card">
+          <h4>Targets and Zones</h4>
+          <div class="row">
+            <label class="chk">Target Date <input id="opTargetDate" type="date" /></label>
+            <input id="opTargetMaterial" class="w-200" placeholder="Material" />
+            <input id="opTargetTonnage" class="w-140" type="number" min="0" step="0.01" placeholder="Target tonnage" />
+            <button id="saveSiteTarget">Save Target</button>
+            <button id="loadSiteTargets">Load Targets</button>
+          </div>
+          <div class="row">
+            <input id="opZoneName" class="w-200" placeholder="Zone name (Pit A / Bench 2)" />
+            <label class="chk"><input id="opZoneActive" type="checkbox" checked /> Active</label>
+            <button id="saveSiteZone">Save Zone</button>
+            <button id="loadSiteZones">Load Zones</button>
+          </div>
+          <div class="list" id="siteTargetList"></div>
+          <div class="list" id="siteZoneList"></div>
+        </div>
+
         <div class="row">
           <label class="chk">Date <input id="opDate" type="date" /></label>
           <input id="opTonnesMoved" class="w-140" type="number" min="0" step="0.01" placeholder="Tonnes moved" />
