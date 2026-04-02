@@ -1854,28 +1854,23 @@ async function loadIronmindInsight(options = {}) {
     const report = res?.report || null;
     if (!report) {
       if (summaryEl) {
-        summaryEl.textContent = [
-          "IRONMIND DAILY INSIGHT",
-          "",
-          "Repairs Needed",
-          "- Insufficient data",
-          "",
-          "Operational Risks",
-          "- Insufficient data",
-          "",
-          "Suggestions",
-          "- Insufficient data",
-          "",
-          "Data Gaps",
-          "- Insufficient data",
-        ].join("\n");
+        const emptySections = parseIronmindSections(
+          ["IRONMIND DAILY INSIGHT", "", "Repairs Needed", "- Insufficient data",
+           "", "Operational Risks", "- Insufficient data",
+           "", "Suggestions", "- Insufficient data",
+           "", "Data Gaps", "- Insufficient data"].join("\n")
+        );
+        renderIronmindSections(summaryEl, emptySections);
       }
       if (metaEl) metaEl.textContent = "No report generated yet.";
       if (!silent) setStatus("IRONMIND insight not available yet.");
       return;
     }
 
-    if (summaryEl) summaryEl.textContent = String(report.summary || "").trim();
+    if (summaryEl) {
+      const sections = parseIronmindSections(String(report.summary || ""));
+      renderIronmindSections(summaryEl, sections);
+    }
     if (metaEl) {
       const created = report.created_at ? String(report.created_at).replace("T", " ").slice(0, 16) : "-";
       metaEl.textContent = `Report date: ${report.report_date || "-"} | Updated: ${created}`;
@@ -1902,6 +1897,83 @@ async function refreshIronmindInsight() {
     setStatus("IRONMIND insight refreshed.");
   } finally {
     if (btn) btn.disabled = false;
+  }
+}
+
+function parseIronmindSections(text) {
+  const defs = [
+    { key: "repairs", name: "Repairs Needed" },
+    { key: "risks", name: "Operational Risks" },
+    { key: "suggestions", name: "Suggestions" },
+    { key: "data_gaps", name: "Data Gaps" },
+  ];
+  const src = String(text || "");
+  return defs.map((sec, i) => {
+    const next = defs[i + 1];
+    const start = src.indexOf(sec.name);
+    if (start === -1) return { key: sec.key, name: sec.name, items: [] };
+    const end = next ? src.indexOf(next.name, start + sec.name.length) : src.length;
+    const block = src.slice(start + sec.name.length, end === -1 ? src.length : end);
+    const items = block
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("-"))
+      .map((l) => l.slice(1).trim())
+      .filter(Boolean);
+    return { key: sec.key, name: sec.name, items: items.length ? items : ["Insufficient data"] };
+  });
+}
+
+function renderIronmindSections(summaryEl, sections) {
+  if (!summaryEl) return;
+  const navMap = {
+    repairs: { label: "\u2192 View Assets", key: "repairs" },
+    risks: { label: "\u2192 View Stock", key: "risks" },
+  };
+  // Pattern: UPPERCASE asset code at start of item before ":"
+  const assetPat = /^([A-Z][A-Z0-9_-]{1,9}):\s/;
+  let html = `<div class="ironmind-header-line">IRONMIND DAILY INSIGHT</div>`;
+  for (const sec of sections) {
+    const nav = navMap[sec.key];
+    const drillBtn = nav
+      ? `<button class="ironmind-drill" data-ironmind-drill="${sec.key}">${escapeHtml(nav.label)}</button>`
+      : "";
+    html += `<div class="ironmind-title-row"><span class="ironmind-section-name">${escapeHtml(sec.name)}</span>${drillBtn}</div>`;
+    html += `<ul class="ironmind-items">`;
+    for (const itm of sec.items) {
+      const m = sec.key === "repairs" ? itm.match(assetPat) : null;
+      if (m) {
+        const code = m[1];
+        const rest = escapeHtml(itm.slice(m[0].length));
+        html += `<li class="ironmind-item">- <button class="ironmind-asset-link" data-ironmind-asset="${escapeHtml(code)}">${escapeHtml(code)}</button>: ${rest}</li>`;
+      } else {
+        html += `<li class="ironmind-item">- ${escapeHtml(itm)}</li>`;
+      }
+    }
+    html += `</ul>`;
+  }
+  summaryEl.innerHTML = html;
+}
+
+function ironmindDrillDown(sectionKey) {
+  if (sectionKey === "repairs") {
+    switchTab("assets");
+  } else if (sectionKey === "risks") {
+    switchTab("stock");
+  }
+}
+
+async function ironmindGoToAsset(assetCode) {
+  switchTab("assets");
+  const sel = qs("histAsset");
+  if (!sel) return;
+  if (sel.options.length <= 1) {
+    await populateHistoryAssets().catch(() => {});
+  }
+  const exists = Array.from(sel.options).some((o) => o.value === assetCode);
+  if (exists) {
+    sel.value = assetCode;
+    await loadAssetHistory().catch(() => {});
   }
 }
 
@@ -6789,6 +6861,14 @@ async function init() {
   qs("ironmindRefreshBtn")?.addEventListener("click", () =>
     refreshIronmindInsight().catch((e) => setStatus("IRONMIND refresh error: " + e.message))
   );
+  qs("ironmindSummary")?.addEventListener("click", (e) => {
+    const el = e.target instanceof HTMLElement ? e.target : null;
+    if (!el) return;
+    const drillKey = el.dataset.ironmindDrill;
+    const assetCode = el.dataset.ironmindAsset;
+    if (drillKey) ironmindDrillDown(drillKey);
+    if (assetCode) ironmindGoToAsset(assetCode).catch(() => {});
+  });
   qs("saveDocHeaderBtn")?.addEventListener("click", () =>
     saveDocHeader().catch((e) => setStatus("Header save error: " + e.message))
   );
