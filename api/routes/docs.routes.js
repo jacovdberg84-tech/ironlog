@@ -556,6 +556,106 @@ async function generateAiDocumentReview({ content, docType, instructions, prefer
   return null;
 }
 
+async function generateAiTechAnswer({ machine, problem, context = "", preferFoundry = false }) {
+  const cfg = getAiConfig(preferFoundry ? "foundry" : "");
+  if (!cfg.provider) return null;
+
+  const requestUser = [
+    `Machine/Asset: ${machine || "Unknown machine"}`,
+    `Problem: ${problem || "No problem provided"}`,
+    context ? `Context: ${context}` : "",
+    "",
+    "Return practical troubleshooting steps as a numbered list.",
+    "Keep steps short and actionable.",
+    "Start with safe checks, then fluid/electrical/mechanical checks, then escalation.",
+    "Do not include markdown code blocks.",
+  ].filter(Boolean).join("\n");
+
+  const systemInstruction =
+    "You are a heavy equipment diagnostic assistant for site mechanics. Provide concise, safe, practical troubleshooting steps. Use numbered steps only.";
+
+  try {
+    if (cfg.provider === "openai") {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${cfg.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: cfg.model,
+          temperature: Number(process.env.DOC_AI_TEMPERATURE ?? 0.2),
+          max_tokens: Number(process.env.DOC_AI_MAX_TOKENS ?? 900),
+          messages: [
+            { role: "system", content: systemInstruction },
+            { role: "user", content: requestUser },
+          ],
+        }),
+      });
+
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content;
+      return typeof text === "string" && text.trim() ? text.trim() : null;
+    }
+
+    if (cfg.provider === "azure_openai") {
+      const url = `${cfg.endpoint.replace(/\/$/, "")}/openai/deployments/${encodeURIComponent(
+        cfg.deployment
+      )}/chat/completions?api-version=${encodeURIComponent(cfg.apiVersion)}`;
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "api-key": cfg.apiKey,
+        },
+        body: JSON.stringify({
+          temperature: Number(process.env.DOC_AI_TEMPERATURE ?? 0.2),
+          max_tokens: Number(process.env.DOC_AI_MAX_TOKENS ?? 900),
+          messages: [
+            { role: "system", content: systemInstruction },
+            { role: "user", content: requestUser },
+          ],
+        }),
+      });
+
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content;
+      return typeof text === "string" && text.trim() ? text.trim() : null;
+    }
+
+    if (cfg.provider === "foundry") {
+      const url = normalizeFoundryChatEndpoint(cfg.endpoint);
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "api-key": cfg.apiKey,
+          Authorization: `Bearer ${cfg.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: cfg.model,
+          temperature: Number(process.env.DOC_AI_TEMPERATURE ?? 0.2),
+          max_tokens: Number(process.env.DOC_AI_MAX_TOKENS ?? 900),
+          messages: [
+            { role: "system", content: systemInstruction },
+            { role: "user", content: requestUser },
+          ],
+        }),
+      });
+
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content || data?.output_text;
+      return typeof text === "string" && text.trim() ? text.trim() : null;
+    }
+  } catch (e) {
+    console.error("[docs ai] ask failed:", e?.message || e);
+    return null;
+  }
+
+  return null;
+}
+
 function draftWithTemplate({
   language,
   docType,
@@ -957,6 +1057,41 @@ export default async function docsRoutes(app) {
         reviewed_text: reviewed,
         download_url: `/uploads/ai-reviewed/${outFileName}`,
         file_path: outFile,
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  app.post("/ai/ask", async (req, reply) => {
+    try {
+      const body = req.body || {};
+      const machine = String(body.machine || body.asset || "").trim();
+      const problem = String(body.problem || body.question || "").trim();
+      const context = String(body.context || "").trim();
+      const preferred = toBool(body.use_foundry);
+
+      if (!problem) {
+        return reply.code(400).send({ ok: false, error: "problem (or question) is required" });
+      }
+
+      const answer = await generateAiTechAnswer({
+        machine,
+        problem,
+        context,
+        preferFoundry: preferred,
+      });
+
+      if (!answer) {
+        return reply.code(500).send({ ok: false, error: "AI ask failed or no output from provider" });
+      }
+
+      return reply.send({
+        ok: true,
+        machine: machine || null,
+        problem,
+        answer,
       });
     } catch (err) {
       req.log.error(err);
