@@ -1,6 +1,8 @@
 import { db } from "../db/client.js";
 import { buildPdfBuffer, sectionTitle, kvGrid, ensurePageSpace } from "../utils/pdfGenerator.js";
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
+import fs from "fs";
+import path from "path";
 
 const LANGS = new Set(["en", "af", "zu", "pt"]);
 const DOC_TYPES = new Set(["SOP", "Site Instruction", "Method Statement", "Checklist", "Risk Note"]);
@@ -436,6 +438,105 @@ async function generateAIDraftBody({ language, docType, scope, hazards, controls
   return null;
 }
 
+async function generateAiDocumentReview({ content, docType, instructions, preferFoundry = false }) {
+  const cfg = getAiConfig(preferFoundry ? "foundry" : "");
+  if (!cfg.provider) return null;
+
+  const cleanContent = String(content || "").trim();
+  if (!cleanContent) return null;
+
+  const requestUser = [
+    `Document Type: ${docType || "General compliance document"}`,
+    `Instructions: ${instructions || "Suggest corrections, improve clarity, and provide a clean final text output. Mark proposed changes clearly if possible."}`,
+    "\nOriginal Content:\n",
+    cleanContent,
+  ].join("\n");
+
+  const systemInstruction =
+    "You are an expert compliance document editor. Review the text and suggest corrections. Output a finalized corrected document and a brief change summary.";
+
+  try {
+    if (cfg.provider === "openai") {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${cfg.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: cfg.model,
+          temperature: Number(process.env.DOC_AI_TEMPERATURE ?? 0.2),
+          max_tokens: Number(process.env.DOC_AI_MAX_TOKENS ?? 1200),
+          messages: [
+            { role: "system", content: systemInstruction },
+            { role: "user", content: requestUser },
+          ],
+        }),
+      });
+
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content;
+      return typeof text === "string" && text.trim() ? text.trim() : null;
+    }
+
+    if (cfg.provider === "azure_openai") {
+      const url = `${cfg.endpoint.replace(/\/$/, "")}/openai/deployments/${encodeURIComponent(
+        cfg.deployment
+      )}/chat/completions?api-version=${encodeURIComponent(cfg.apiVersion)}`;
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "api-key": cfg.apiKey,
+        },
+        body: JSON.stringify({
+          temperature: Number(process.env.DOC_AI_TEMPERATURE ?? 0.2),
+          max_tokens: Number(process.env.DOC_AI_MAX_TOKENS ?? 1200),
+          messages: [
+            { role: "system", content: systemInstruction },
+            { role: "user", content: requestUser },
+          ],
+        }),
+      });
+
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content;
+      return typeof text === "string" && text.trim() ? text.trim() : null;
+    }
+
+    if (cfg.provider === "foundry") {
+      const url = normalizeFoundryChatEndpoint(cfg.endpoint);
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "api-key": cfg.apiKey,
+          Authorization: `Bearer ${cfg.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: cfg.model,
+          temperature: Number(process.env.DOC_AI_TEMPERATURE ?? 0.2),
+          max_tokens: Number(process.env.DOC_AI_MAX_TOKENS ?? 1200),
+          messages: [
+            { role: "system", content: systemInstruction },
+            { role: "user", content: requestUser },
+          ],
+        }),
+      });
+
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content || data?.output_text;
+      return typeof text === "string" && text.trim() ? text.trim() : null;
+    }
+  } catch (e) {
+    console.error("[docs ai] review failed:", e?.message || e);
+    return null;
+  }
+
+  return null;
+}
+
 function draftWithTemplate({
   language,
   docType,
@@ -593,6 +694,7 @@ ${extraNotes || "-"}
 }
 
 export default async function docsRoutes(app) {
+  const dataRoot = process.env.IRONLOG_DATA_DIR || process.cwd();
   db.exec(`
     CREATE TABLE IF NOT EXISTS doc_headers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -659,6 +761,50 @@ export default async function docsRoutes(app) {
       model: process.env.OPENAI_MODEL || "gpt-4o-mini",
       azureApiVersion: process.env.AZURE_OPENAI_API_VERSION || "2024-02-15-preview",
     };
+  });
+
+  app.post("/ai/review", async (req, reply) => {
+    try {
+      const body = req.body || {};
+      let text = String(body.text || "").trim();
+      const filePath = String(body.file_path || "").trim();
+      const docType = String(body.doc_type || "General legal/compliance").trim();
+      const instructions = String(body.instructions || "Please suggest corrections, retain compliance meaning, and return corrected final text.").trim();
+      const preferred = toBool(body.use_foundry);
+
+      if (!text && filePath) {
+        const candidatePath = path.isAbsolute(filePath) ? filePath : path.join(dataRoot, filePath);
+        if (fs.existsSync(candidatePath) && fs.statSync(candidatePath).isFile()) {
+          text = fs.readFileSync(candidatePath, "utf8");
+        }
+      }
+
+      if (!text) {
+        return reply.code(400).send({ ok: false, error: "text or file_path is required" });
+      }
+
+      const reviewed = await generateAiDocumentReview({ content: text, docType, instructions, preferFoundry: preferred });
+      if (!reviewed) {
+        return reply.code(500).send({ ok: false, error: "AI review failed or no output from provider" });
+      }
+
+      const outDir = path.join(dataRoot, "uploads", "ai-reviewed");
+      fs.mkdirSync(outDir, { recursive: true });
+
+      const outFileName = `${safeFileName(body.filename || docType || "ai-reviewed")}_${Date.now()}.txt`;
+      const outFile = path.join(outDir, outFileName);
+      fs.writeFileSync(outFile, reviewed, "utf8");
+
+      return reply.send({
+        ok: true,
+        reviewed_text: reviewed,
+        download_url: `/uploads/ai-reviewed/${outFileName}`,
+        file_path: outFile,
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
   });
 
   app.get("/headers", async () => {
