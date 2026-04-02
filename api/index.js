@@ -9,6 +9,7 @@ import fastifyStatic from "@fastify/static";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { runIronmindAutoScheduler } from "./utils/ironmind.js";
 
 // Load environment variables from .env in the API root.
 dotenv.config({ path: path.join(process.cwd(), ".env") });
@@ -81,6 +82,7 @@ async function listenWithFallback() {
 
 try {
   const effectivePort = await listenWithFallback();
+  await runIronmindAutoScheduler(app.log);
   app.log.info(`IRONLOG API running on http://${HOST}:${effectivePort}`);
   app.log.info(`IRONLOG UI  running on http://${HOST}:${effectivePort}/web/index.html`);
 } catch (err) {
