@@ -168,6 +168,19 @@
           <div class="output ironmind-body" id="ironmindSummary">
             <small class="muted">Loading IRONMIND insight...</small>
           </div>
+          <details class="ironmind-history-pane">
+            <summary>IRONMIND history (last 7 days)</summary>
+            <div class="row stack-6 ironmind-history-controls">
+              <label class="chk">
+                <input id="ironmindShowMissingDays" type="checkbox" />
+                Include missing days
+              </label>
+              <button id="ironmindReloadHistory">Reload history</button>
+            </div>
+            <div class="list" id="ironmindHistoryList">
+              <small class="muted">No history loaded yet.</small>
+            </div>
+          </details>
         </div>
       </div>
 

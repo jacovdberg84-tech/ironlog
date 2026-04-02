@@ -1919,6 +1919,7 @@ async function loadDashboard() {
 
   await loadStockMonitor().catch(() => {});
   await loadIronmindInsight({ silent: true }).catch(() => {});
+  await loadIronmindHistory({ silent: true }).catch(() => {});
 
   setStatus("Dashboard ready.");
 }
@@ -1946,18 +1947,104 @@ async function loadIronmindInsight(options = {}) {
       return;
     }
 
-    if (summaryEl) {
-      const sections = parseIronmindSections(String(report.summary || ""));
-      renderIronmindSections(summaryEl, sections);
-    }
-    if (metaEl) {
-      const created = report.created_at ? String(report.created_at).replace("T", " ").slice(0, 16) : "-";
-      metaEl.textContent = `Report date: ${report.report_date || "-"} | Updated: ${created}`;
-    }
+    renderIronmindReport(report);
     if (!silent) setStatus("IRONMIND insight loaded.");
   } catch (err) {
     if (metaEl) metaEl.textContent = "Insight unavailable right now.";
     if (!silent) setStatus("IRONMIND load error: " + err.message);
+    throw err;
+  }
+}
+
+function summarizeIronmindText(text) {
+  const oneLine = String(text || "")
+    .replace(/\s+/g, " ")
+    .replace(/^IRONMIND DAILY INSIGHT\s*/i, "")
+    .trim();
+  if (!oneLine) return "No summary text.";
+  return oneLine.length > 150 ? `${oneLine.slice(0, 147)}...` : oneLine;
+}
+
+function toYmd(date) {
+  const d = new Date(date);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function buildRecentYmds(days) {
+  const out = [];
+  const now = new Date();
+  for (let i = 0; i < days; i += 1) {
+    const d = new Date(now);
+    d.setDate(now.getDate() - i);
+    out.push(toYmd(d));
+  }
+  return out;
+}
+
+function renderIronmindReport(report) {
+  const summaryEl = qs("ironmindSummary");
+  const metaEl = qs("ironmindMeta");
+  if (summaryEl) {
+    const sections = parseIronmindSections(String(report?.summary || ""));
+    renderIronmindSections(summaryEl, sections);
+  }
+  if (metaEl) {
+    const created = report?.created_at ? String(report.created_at).replace("T", " ").slice(0, 16) : "-";
+    metaEl.textContent = `Report date: ${report?.report_date || "-"} | Updated: ${created}`;
+  }
+}
+
+async function loadIronmindHistory(options = {}) {
+  const silent = Boolean(options.silent);
+  const listEl = qs("ironmindHistoryList");
+  const includeMissing = Boolean(qs("ironmindShowMissingDays")?.checked);
+  if (!listEl) return;
+  try {
+    const res = await fetchJson(`${API}/api/ironmind/history?report_type=daily_admin&days=7`);
+    const rowsRaw = Array.isArray(res?.reports) ? res.reports : [];
+    const rowsByDate = new Map(rowsRaw.map((r) => [String(r.report_date || "").trim(), r]));
+    const rows = includeMissing
+      ? buildRecentYmds(7).map((ymd) => {
+          if (rowsByDate.has(ymd)) return rowsByDate.get(ymd);
+          return {
+            id: 0,
+            report_date: ymd,
+            report_type: "daily_admin",
+            created_at: "-",
+            summary: "IRONMIND DAILY INSIGHT\n\nRepairs Needed\n- Insufficient data\n\nOperational Risks\n- Insufficient data\n\nSuggestions\n- Insufficient data\n\nData Gaps\n- Insufficient data",
+            synthetic_missing: true,
+          };
+        })
+      : rowsRaw;
+    listEl.innerHTML = "";
+    if (!rows.length) {
+      listEl.appendChild(item("<small>No IRONMIND history yet.</small>"));
+      if (!silent) setStatus("No IRONMIND history found.");
+      return;
+    }
+
+    rows.forEach((r) => {
+      const created = r?.created_at && r.created_at !== "-" ? String(r.created_at).replace("T", " ").slice(0, 16) : "-";
+      const preview = summarizeIronmindText(r?.summary || "");
+      const previewClass = r?.synthetic_missing ? "ironmind-history-preview missing" : "ironmind-history-preview";
+      const updatedText = r?.synthetic_missing ? "No generated report" : `Updated ${escapeHtml(created)}`;
+      const node = item(
+        `<div class="ironmind-history-item">` +
+          `<div class="ironmind-history-meta"><b>${escapeHtml(r.report_date || "-")}</b> · ${updatedText}</div>` +
+          `<div class="${previewClass}">${escapeHtml(preview)}</div>` +
+          `<button class="ironmind-history-open" data-ironmind-history-id="${Number(r.id || 0)}">${r?.synthetic_missing ? "Open placeholder" : "Open report"}</button>` +
+        `</div>`
+      );
+      node.dataset.ironmindRow = JSON.stringify(r);
+      listEl.appendChild(node);
+    });
+    if (!silent) setStatus("IRONMIND history loaded.");
+  } catch (err) {
+    listEl.innerHTML = `<small class="muted">History unavailable right now.</small>`;
+    if (!silent) setStatus("IRONMIND history error: " + err.message);
     throw err;
   }
 }
@@ -1973,6 +2060,7 @@ async function refreshIronmindInsight() {
       body: JSON.stringify({ force: true, report_type: "daily_admin" }),
     });
     await loadIronmindInsight({ silent: true });
+    await loadIronmindHistory({ silent: true });
     setStatus("IRONMIND insight refreshed.");
   } finally {
     if (btn) btn.disabled = false;
@@ -6948,6 +7036,25 @@ async function init() {
     const assetCode = el.dataset.ironmindAsset;
     if (drillKey) ironmindDrillDown(drillKey);
     if (assetCode) ironmindGoToAsset(assetCode).catch(() => {});
+  });
+  qs("ironmindHistoryList")?.addEventListener("click", (e) => {
+    const el = e.target instanceof HTMLElement ? e.target.closest("button[data-ironmind-history-id]") : null;
+    if (!el) return;
+    const rowEl = el.closest(".item");
+    if (!rowEl?.dataset?.ironmindRow) return;
+    try {
+      const row = JSON.parse(rowEl.dataset.ironmindRow);
+      renderIronmindReport(row);
+      setStatus(`Opened IRONMIND report for ${row?.report_date || "-"}.`);
+    } catch (_) {
+      setStatus("Unable to open selected IRONMIND report.");
+    }
+  });
+  qs("ironmindShowMissingDays")?.addEventListener("change", () => {
+    loadIronmindHistory({ silent: true }).catch(() => {});
+  });
+  qs("ironmindReloadHistory")?.addEventListener("click", () => {
+    loadIronmindHistory().catch((e) => setStatus("IRONMIND history error: " + e.message));
   });
   qs("saveDocHeaderBtn")?.addEventListener("click", () =>
     saveDocHeader().catch((e) => setStatus("Header save error: " + e.message))
