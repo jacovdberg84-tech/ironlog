@@ -1839,8 +1839,70 @@ async function loadDashboard() {
   }
 
   await loadStockMonitor().catch(() => {});
+  await loadIronmindInsight({ silent: true }).catch(() => {});
 
   setStatus("Dashboard ready.");
+}
+
+async function loadIronmindInsight(options = {}) {
+  const silent = Boolean(options.silent);
+  const summaryEl = qs("ironmindSummary");
+  const metaEl = qs("ironmindMeta");
+
+  try {
+    const res = await fetchJson(`${API}/api/ironmind/latest?report_type=daily_admin`);
+    const report = res?.report || null;
+    if (!report) {
+      if (summaryEl) {
+        summaryEl.textContent = [
+          "IRONMIND DAILY INSIGHT",
+          "",
+          "Repairs Needed",
+          "- Insufficient data",
+          "",
+          "Operational Risks",
+          "- Insufficient data",
+          "",
+          "Suggestions",
+          "- Insufficient data",
+          "",
+          "Data Gaps",
+          "- Insufficient data",
+        ].join("\n");
+      }
+      if (metaEl) metaEl.textContent = "No report generated yet.";
+      if (!silent) setStatus("IRONMIND insight not available yet.");
+      return;
+    }
+
+    if (summaryEl) summaryEl.textContent = String(report.summary || "").trim();
+    if (metaEl) {
+      const created = report.created_at ? String(report.created_at).replace("T", " ").slice(0, 16) : "-";
+      metaEl.textContent = `Report date: ${report.report_date || "-"} | Updated: ${created}`;
+    }
+    if (!silent) setStatus("IRONMIND insight loaded.");
+  } catch (err) {
+    if (metaEl) metaEl.textContent = "Insight unavailable right now.";
+    if (!silent) setStatus("IRONMIND load error: " + err.message);
+    throw err;
+  }
+}
+
+async function refreshIronmindInsight() {
+  const btn = qs("ironmindRefreshBtn");
+  if (btn) btn.disabled = true;
+  setStatus("Refreshing IRONMIND insight...");
+  try {
+    await fetchJson(`${API}/api/ironmind/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force: true, report_type: "daily_admin" }),
+    });
+    await loadIronmindInsight({ silent: true });
+    setStatus("IRONMIND insight refreshed.");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function getDefaultLubeRange() {
@@ -6723,6 +6785,9 @@ async function init() {
   );
   qs("loadReliability")?.addEventListener("click", () =>
     loadDashboard().catch((e) => setStatus("Dashboard error: " + e.message))
+  );
+  qs("ironmindRefreshBtn")?.addEventListener("click", () =>
+    refreshIronmindInsight().catch((e) => setStatus("IRONMIND refresh error: " + e.message))
   );
   qs("saveDocHeaderBtn")?.addEventListener("click", () =>
     saveDocHeader().catch((e) => setStatus("Header save error: " + e.message))
