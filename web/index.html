@@ -72,7 +72,7 @@
           <option value="reports">📄 Reports</option>
           <option value="approvals">✅ Approvals</option>
           <option value="procurement">🏗️ Supply Flow</option>
-          <option value="operations">🏭 Operations</option>
+          <option value="operations">🏭 Site Operations</option>
           <option value="dispatch">🚚 Dispatch</option>
           <option value="quality">🧪 Data Quality</option>
           <option value="audit">🔎 Audit Trail</option>
@@ -85,6 +85,7 @@
       <button id="openDailyXlsx">Download Daily Excel</button>
       <button id="openGmWeeklyXlsx">GM Weekly (M&amp;E) Excel</button>
       <button id="openMaintenanceBtn" onclick="location.href='maintenance.html'">Maintenance</button>
+      <button id="openSiteOpsBtn" onclick="document.getElementById('tabSelect').value='operations';document.getElementById('tabSelect').dispatchEvent(new Event('change'))">Site</button>
     </nav>
 
     <!-- STATUS -->
@@ -1051,13 +1052,18 @@
     <!-- OPERATIONS -->
     <section class="panel" id="tab-operations">
       <div class="card stack-12">
-        <h3>Operations</h3>
+        <h3>Site Operations (Quarry)</h3>
         <div class="row">
           <label class="chk">Date <input id="opDate" type="date" /></label>
           <input id="opTonnesMoved" class="w-140" type="number" min="0" step="0.01" placeholder="Tonnes moved" />
-          <input id="opProductType" class="w-200" placeholder="Type of product produced" />
-          <input id="opProductProduced" class="w-140" type="number" min="0" step="0.01" placeholder="Amount produced" />
+          <input id="opProductType" class="w-200" placeholder="Product (e.g. 19mm, dust)" />
+          <input id="opProductProduced" class="w-140" type="number" min="0" step="0.01" placeholder="Product produced" />
           <input id="opTrucksLoaded" class="w-140" type="number" min="0" step="1" placeholder="Trucks loaded" />
+          <input id="opLoadsCount" class="w-140" type="number" min="0" step="1" placeholder="Load cycles" />
+          <input id="opCrusherFeedTonnes" class="w-140" type="number" min="0" step="0.01" placeholder="Crusher feed t" />
+          <input id="opCrusherOutputTonnes" class="w-140" type="number" min="0" step="0.01" placeholder="Crusher output t" />
+          <input id="opCrusherHours" class="w-140" type="number" min="0" step="0.01" placeholder="Crusher hours" />
+          <input id="opCrusherDowntime" class="w-140" type="number" min="0" step="0.01" placeholder="Crusher downtime h" />
           <input id="opWeighbridgeAmount" class="w-140" type="number" min="0" step="0.01" placeholder="Weighbridge amount" />
           <input id="opTrucksDelivered" class="w-140" type="number" min="0" step="1" placeholder="Trucks delivered" />
           <input id="opProductDelivered" class="w-140" type="number" min="0" step="0.01" placeholder="Product delivered" />
@@ -1077,7 +1083,9 @@
           <div class="pill blue">Tonnes Moved: <span id="opKpiTonnes">0</span></div>
           <div class="pill blue">Produced: <span id="opKpiProduced">0</span></div>
           <div class="pill orange">Trucks Loaded: <span id="opKpiLoaded">0</span></div>
+          <div class="pill orange">Load Cycles: <span id="opKpiLoads">0</span></div>
           <div class="pill orange">Trucks Delivered: <span id="opKpiDelivered">0</span></div>
+          <div class="pill blue">Crusher Perf %: <span id="opKpiCrusherPerf">0</span></div>
           <div class="pill">Weighbridge: <span id="opKpiWeighbridge">0</span></div>
           <div class="pill" id="opCloseStatusPill">Day Status: OPEN</div>
         </div>

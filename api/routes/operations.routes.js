@@ -37,6 +37,11 @@ export default async function operationsRoutes(app) {
       product_type TEXT,
       product_produced REAL,
       trucks_loaded INTEGER,
+      loads_count INTEGER,
+      crusher_feed_tonnes REAL,
+      crusher_output_tonnes REAL,
+      crusher_hours REAL,
+      crusher_downtime_hours REAL,
       weighbridge_amount REAL,
       trucks_delivered INTEGER,
       product_delivered REAL,
@@ -48,6 +53,21 @@ export default async function operationsRoutes(app) {
   const opCols = db.prepare(`PRAGMA table_info(operations_logs)`).all();
   if (!opCols.some((c) => String(c.name || "") === "site_code")) {
     db.prepare(`ALTER TABLE operations_logs ADD COLUMN site_code TEXT`).run();
+  }
+  if (!opCols.some((c) => String(c.name || "") === "loads_count")) {
+    db.prepare(`ALTER TABLE operations_logs ADD COLUMN loads_count INTEGER`).run();
+  }
+  if (!opCols.some((c) => String(c.name || "") === "crusher_feed_tonnes")) {
+    db.prepare(`ALTER TABLE operations_logs ADD COLUMN crusher_feed_tonnes REAL`).run();
+  }
+  if (!opCols.some((c) => String(c.name || "") === "crusher_output_tonnes")) {
+    db.prepare(`ALTER TABLE operations_logs ADD COLUMN crusher_output_tonnes REAL`).run();
+  }
+  if (!opCols.some((c) => String(c.name || "") === "crusher_hours")) {
+    db.prepare(`ALTER TABLE operations_logs ADD COLUMN crusher_hours REAL`).run();
+  }
+  if (!opCols.some((c) => String(c.name || "") === "crusher_downtime_hours")) {
+    db.prepare(`ALTER TABLE operations_logs ADD COLUMN crusher_downtime_hours REAL`).run();
   }
   db.prepare(`
     CREATE TABLE IF NOT EXISTS operations_daily_closing (
@@ -73,6 +93,11 @@ export default async function operationsRoutes(app) {
     const product_type = String(req.body?.product_type || "").trim() || null;
     const product_produced = toNumberOrNull(req.body?.product_produced);
     const trucks_loaded = toNumberOrNull(req.body?.trucks_loaded);
+    const loads_count = toNumberOrNull(req.body?.loads_count);
+    const crusher_feed_tonnes = toNumberOrNull(req.body?.crusher_feed_tonnes);
+    const crusher_output_tonnes = toNumberOrNull(req.body?.crusher_output_tonnes);
+    const crusher_hours = toNumberOrNull(req.body?.crusher_hours);
+    const crusher_downtime_hours = toNumberOrNull(req.body?.crusher_downtime_hours);
     const weighbridge_amount = toNumberOrNull(req.body?.weighbridge_amount);
     const trucks_delivered = toNumberOrNull(req.body?.trucks_delivered);
     const product_delivered = toNumberOrNull(req.body?.product_delivered);
@@ -81,15 +106,21 @@ export default async function operationsRoutes(app) {
 
     const ins = db.prepare(`
       INSERT INTO operations_logs (
-        op_date, tonnes_moved, product_type, product_produced, trucks_loaded, weighbridge_amount,
+        op_date, tonnes_moved, product_type, product_produced, trucks_loaded, loads_count,
+        crusher_feed_tonnes, crusher_output_tonnes, crusher_hours, crusher_downtime_hours, weighbridge_amount,
         trucks_delivered, product_delivered, client_delivered_to, notes, site_code
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       op_date,
       tonnes_moved,
       product_type,
       product_produced,
       trucks_loaded == null ? null : Math.round(trucks_loaded),
+      loads_count == null ? null : Math.round(loads_count),
+      crusher_feed_tonnes,
+      crusher_output_tonnes,
+      crusher_hours,
+      crusher_downtime_hours,
       weighbridge_amount,
       trucks_delivered == null ? null : Math.round(trucks_delivered),
       product_delivered,
@@ -123,7 +154,8 @@ export default async function operationsRoutes(app) {
 
     const rows = db.prepare(`
       SELECT
-        id, site_code, op_date, tonnes_moved, product_type, product_produced, trucks_loaded, weighbridge_amount,
+        id, site_code, op_date, tonnes_moved, product_type, product_produced, trucks_loaded, loads_count,
+        crusher_feed_tonnes, crusher_output_tonnes, crusher_hours, crusher_downtime_hours, weighbridge_amount,
         trucks_delivered, product_delivered, client_delivered_to, notes, created_at
       FROM operations_logs
       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
