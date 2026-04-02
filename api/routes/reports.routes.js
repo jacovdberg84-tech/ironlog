@@ -4533,11 +4533,29 @@ export default async function reportsRoutes(app) {
 
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
 
+    const archivedClause = hasColumn("assets", "archived")
+      ? "AND COALESCE(a.archived, 0) = 0"
+      : "";
+    const activeClause = hasColumn("assets", "active")
+      ? "AND COALESCE(a.active, 1) = 1"
+      : "";
+
+    // Full active fleet (non-standby): every asset gets a row; hours from daily_hours when present.
     const hours = db.prepare(`
-      SELECT a.asset_code, a.asset_name, dh.hours_run, dh.is_used, dh.operator, dh.notes
-      FROM daily_hours dh
-      JOIN assets a ON a.id = dh.asset_id
-      WHERE dh.work_date = ?
+      SELECT
+        a.asset_code,
+        a.asset_name,
+        a.category,
+        COALESCE(dh.hours_run, 0) AS hours_run,
+        dh.is_used,
+        dh.operator,
+        dh.notes,
+        CASE WHEN dh.id IS NULL THEN 0 ELSE 1 END AS has_daily_entry
+      FROM assets a
+      LEFT JOIN daily_hours dh ON dh.asset_id = a.id AND dh.work_date = ?
+      WHERE COALESCE(a.is_standby, 0) = 0
+        ${activeClause}
+        ${archivedClause}
       ORDER BY a.asset_code
     `).all(date);
 
@@ -4588,7 +4606,7 @@ export default async function reportsRoutes(app) {
       on_hand: Number(r.on_hand),
       below_min: Number(r.on_hand) < Number(r.min_stock),
     }));
-    const hoursPdf = hours.slice(0, 40);
+    const hoursPdf = hours.slice(0, 500);
     const fuelPdf = fuel.slice(0, 40);
     const oilPdf = oil.slice(0, 40);
     const breakdownsPdf = breakdowns.slice(0, 40);
@@ -4678,24 +4696,31 @@ export default async function reportsRoutes(app) {
           { k: "Cost / Run Hour", v: costPerRunHour == null ? "N/A" : fmtNum(costPerRunHour, 2) },
         ], 2);
 
-        sectionTitle(doc, "Hours Logged");
+        sectionTitle(doc, "Hours by asset (active fleet, non-standby)");
         table(
           doc,
           [
-            { key: "asset", label: "Asset", width: 0.16 },
-            { key: "name", label: "Name", width: 0.24 },
+            { key: "asset", label: "Asset", width: 0.14 },
+            { key: "type", label: "Type", width: 0.12 },
+            { key: "name", label: "Name", width: 0.20 },
             { key: "hours", label: "Run Hrs", width: 0.10, align: "right" },
-            { key: "used", label: "Used", width: 0.08, align: "center" },
-            { key: "operator", label: "Operator", width: 0.18 },
-            { key: "notes", label: "Notes", width: 0.24 },
+            { key: "used", label: "Prod", width: 0.07, align: "center" },
+            { key: "operator", label: "Operator", width: 0.15 },
+            { key: "notes", label: "Notes", width: 0.22 },
           ],
-          hoursPdf.map(r => ({
+          hoursPdf.map((r) => ({
             asset: r.asset_code,
+            type: compactCell(r.category ?? "", 14),
             name: r.asset_name ?? "",
             hours: fmtNum(r.hours_run, 1),
-            used: r.is_used ? "Y" : "N",
+            used:
+              !r.has_daily_entry
+                ? "—"
+                : r.is_used
+                  ? "Y"
+                  : "N",
             operator: compactCell(r.operator ?? "", 40),
-            notes: compactCell(r.notes ?? "", 90),
+            notes: !r.has_daily_entry ? "No daily entry" : compactCell(r.notes ?? "", 90),
           }))
         );
 

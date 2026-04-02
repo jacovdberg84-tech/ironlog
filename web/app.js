@@ -3235,6 +3235,83 @@ function openMaintenanceCostByEquipmentPdf(download = false) {
   window.open(`${API}/api/reports/maintenance-cost-by-equipment.pdf?${q}`, "_blank");
 }
 
+function downloadMaintenanceExecutivePptx() {
+  const month = (qs("costMonth")?.value || "").trim();
+  const start = (qs("maintCostStart")?.value || "").trim();
+  const end = (qs("maintCostEnd")?.value || "").trim();
+  if (!month && (!start || !end)) {
+    alert("Select a month or a start/end range first.");
+    return;
+  }
+  const q = month
+    ? `month=${encodeURIComponent(month)}`
+    : `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+  window.open(`${API}/api/reports/maintenance-exec.pptx?${q}`, "_blank");
+}
+
+async function saveRainDay() {
+  const rainDate = (qs("rainDayDate")?.value || "").trim();
+  if (!rainDate) return alert("Pick a rain day first.");
+  setStatus("Saving rain day...");
+  try {
+    const res = await fetchJson(`${API}/api/reports/rain-days`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: rainDate }),
+    });
+    setText("rainDaysResult", JSON.stringify(res, null, 2));
+    setStatus("Rain day saved.");
+  } catch (e) {
+    setText("rainDaysResult", String(e.message || e));
+    setStatus("Save rain day failed.");
+  }
+}
+
+async function removeRainDay() {
+  const rainDate = (qs("rainDayDate")?.value || "").trim();
+  if (!rainDate) return alert("Pick a rain day first.");
+  setStatus("Removing rain day...");
+  try {
+    const res = await fetchJson(`${API}/api/reports/rain-days/${encodeURIComponent(rainDate)}`, {
+      method: "DELETE",
+    });
+    setText("rainDaysResult", JSON.stringify(res, null, 2));
+    setStatus("Rain day removed.");
+  } catch (e) {
+    setText("rainDaysResult", String(e.message || e));
+    setStatus("Remove rain day failed.");
+  }
+}
+
+async function loadRainDays() {
+  const month = (qs("costMonth")?.value || "").trim();
+  const start = (qs("maintCostStart")?.value || "").trim();
+  const end = (qs("maintCostEnd")?.value || "").trim();
+  let q = "";
+  if (month) {
+    const d = new Date(`${month}-01T00:00:00`);
+    const y = d.getFullYear();
+    const m = d.getMonth();
+    const startMonth = `${month}-01`;
+    const endMonth = new Date(y, m + 1, 0).toISOString().slice(0, 10);
+    q = `start=${encodeURIComponent(startMonth)}&end=${encodeURIComponent(endMonth)}`;
+  } else if (start && end) {
+    q = `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+  } else {
+    alert("Select month or start/end first.");
+    return;
+  }
+  setStatus("Loading rain days...");
+  try {
+    const res = await fetchJson(`${API}/api/reports/rain-days?${q}`);
+    setText("rainDaysResult", JSON.stringify(res, null, 2));
+    setStatus("Rain days loaded.");
+  } catch (e) {
+    setText("rainDaysResult", String(e.message || e));
+    setStatus("Load rain days failed.");
+  }
+}
+
 function openDailyPdf() {
   const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
   const scheduled = qs("scheduled")?.value || 10;
@@ -3757,7 +3834,7 @@ async function saveManualStock() {
     if (qs("msUnitCost")) qs("msUnitCost").value = "";
     if (qs("msType")) qs("msType").value = "in";
     if (qs("msCostCurrency")) qs("msCostCurrency").value = "USD";
-    updateManualStockCostUi();
+    updateManualStockCostRowVisibility();
     qs("msPart")?.focus();
     await loadDashboard().catch(() => {});
   } catch (e) {
@@ -6711,6 +6788,10 @@ async function init() {
   qs("downloadMaintenanceCostByEquipmentXlsx")?.addEventListener("click", downloadMaintenanceCostByEquipmentXlsx);
   qs("openMaintenanceCostByEquipmentPdf")?.addEventListener("click", () => openMaintenanceCostByEquipmentPdf(false));
   qs("downloadMaintenanceCostByEquipmentPdf")?.addEventListener("click", () => openMaintenanceCostByEquipmentPdf(true));
+  qs("downloadMaintenanceExecutivePptx")?.addEventListener("click", downloadMaintenanceExecutivePptx);
+  qs("saveRainDayBtn")?.addEventListener("click", () => saveRainDay().catch((e) => setStatus("Rain day save error: " + e.message)));
+  qs("removeRainDayBtn")?.addEventListener("click", () => removeRainDay().catch((e) => setStatus("Rain day remove error: " + e.message)));
+  qs("loadRainDaysBtn")?.addEventListener("click", () => loadRainDays().catch((e) => setStatus("Rain day load error: " + e.message)));
 
   qs("makeBreakdown")?.addEventListener("click", () =>
     createBreakdown().catch((e) => setStatus("Breakdown error: " + e.message))

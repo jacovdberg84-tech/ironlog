@@ -31,7 +31,8 @@
     "exceljs": "^4.4.0",
     "fastify": "^4.26.2",
     "openai": "^6.33.0",
-    "pdfkit": "^0.17.2"
+    "pdfkit": "^0.17.2",
+    "pptxgenjs": "^4.0.1"
   },
   "devDependencies": {
     "electron": "^28.3.3",
