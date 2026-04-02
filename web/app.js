@@ -5188,8 +5188,6 @@ async function loadOperations() {
   let produced = 0;
   let loaded = 0;
   let loadCycles = 0;
-  let delivered = 0;
-  let weighbridge = 0;
   let crusherFeed = 0;
   let crusherOutput = 0;
   const clientTotalsDelivered = new Map();
@@ -5200,8 +5198,6 @@ async function loadOperations() {
     produced += Number(r.product_produced || 0);
     loaded += Number(r.trucks_loaded || 0);
     loadCycles += Number(r.loads_count || 0);
-    delivered += Number(r.trucks_delivered || 0);
-    weighbridge += Number(r.weighbridge_amount || 0);
     crusherFeed += Number(r.crusher_feed_tonnes || 0);
     crusherOutput += Number(r.crusher_output_tonnes || 0);
     const client = String(r.client_delivered_to || "").trim() || "Unspecified";
@@ -5214,10 +5210,10 @@ async function loadOperations() {
     list.appendChild(
       item(
         `<b>${r.op_date || "-"}</b> <span class="pill blue">${r.product_type || "product"}</span>` +
-          `<br><small>Tonnes moved: ${Number(r.tonnes_moved || 0).toFixed(2)} | Produced: ${Number(r.product_produced || 0).toFixed(2)} | Delivered: ${Number(r.product_delivered || 0).toFixed(2)}</small>` +
-          `<br><small>Trucks loaded: ${Number(r.trucks_loaded || 0)} | Load cycles: ${Number(r.loads_count || 0)} | Trucks delivered: ${Number(r.trucks_delivered || 0)} | Weighbridge: ${Number(r.weighbridge_amount || 0).toFixed(2)}</small>` +
+          `<br><small>Tonnes moved: ${Number(r.tonnes_moved || 0).toFixed(2)} | Produced: ${Number(r.product_produced || 0).toFixed(2)}</small>` +
+          `<br><small>Trucks loaded: ${Number(r.trucks_loaded || 0)} | Load cycles: ${Number(r.loads_count || 0)}</small>` +
           `<br><small>Crusher feed: ${Number(r.crusher_feed_tonnes || 0).toFixed(2)}t | Crusher output: ${Number(r.crusher_output_tonnes || 0).toFixed(2)}t | Crusher h: ${Number(r.crusher_hours || 0).toFixed(2)} | Downtime h: ${Number(r.crusher_downtime_hours || 0).toFixed(2)}</small>` +
-          `<br><small>Client: ${r.client_delivered_to || "-"}${r.notes ? ` | Notes: ${r.notes}` : ""}</small>`
+          `${r.notes ? `<br><small>Notes: ${r.notes}</small>` : ""}`
       )
     );
   });
@@ -5226,10 +5222,8 @@ async function loadOperations() {
   setText("opKpiProduced", produced.toFixed(2));
   setText("opKpiLoaded", String(loaded));
   setText("opKpiLoads", String(loadCycles));
-  setText("opKpiDelivered", String(delivered));
   const crusherPerf = crusherFeed > 0 ? (crusherOutput / crusherFeed) * 100 : 0;
   setText("opKpiCrusherPerf", crusherPerf.toFixed(1));
-  setText("opKpiWeighbridge", weighbridge.toFixed(2));
   const metric = String(qs("opClientMetric")?.value || "delivered").toLowerCase();
   const metricMap =
     metric === "trucks" ? clientTotalsTrucks :
