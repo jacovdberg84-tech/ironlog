@@ -38,12 +38,33 @@ function safeFileName(v, fallback = "document") {
     .slice(0, 80) || fallback;
 }
 
+function sanitizePromptEchoLines(text, maxScanLines = 12) {
+  const lines = splitLines(text);
+  const filtered = lines.filter((raw, idx) => {
+    const line = String(raw || "").trim();
+    if (!line) return true;
+    if (idx > maxScanLines) return true;
+
+    if (/^(user\s*)?request\s*:/i.test(line)) return false;
+    if (/^question\s*:/i.test(line)) return false;
+    if (/^prompt\s*:/i.test(line)) return false;
+    if (/^machine\/asset\s*:/i.test(line)) return false;
+
+    return true;
+  });
+
+  return filtered.join("\n").trim();
+}
+
 function stripHeaderFromDraftText(fullText) {
   const source = String(fullText || "-");
-  return source.replace(
+  let cleaned = source.replace(
     /^Document Type:[\s\S]*?Date:\s*[0-9]{4}-[0-9]{2}-[0-9]{2}\s*/i,
     ""
-  ).trim() || source;
+  );
+
+  cleaned = sanitizePromptEchoLines(cleaned, 12);
+  return cleaned || source;
 }
 
 function splitLines(text) {
@@ -388,7 +409,7 @@ async function generateAIDraftBody({ language, docType, scope, hazards, controls
 
       const data = await res.json();
       const text = data?.choices?.[0]?.message?.content;
-      return typeof text === "string" && text.trim() ? text.trim() : null;
+      return typeof text === "string" && text.trim() ? sanitizePromptEchoLines(text, 20) : null;
     }
 
     // Azure OpenAI
@@ -419,7 +440,7 @@ async function generateAIDraftBody({ language, docType, scope, hazards, controls
 
       const data = await res.json();
       const text = data?.choices?.[0]?.message?.content;
-      return typeof text === "string" && text.trim() ? text.trim() : null;
+      return typeof text === "string" && text.trim() ? sanitizePromptEchoLines(text, 20) : null;
     }
     if (cfg.provider === "foundry") {
       const url = normalizeFoundryChatEndpoint(cfg.endpoint);
@@ -446,7 +467,7 @@ async function generateAIDraftBody({ language, docType, scope, hazards, controls
       });
       const data = await res.json();
       const text = data?.choices?.[0]?.message?.content || data?.output_text;
-      return typeof text === "string" && text.trim() ? text.trim() : null;
+      return typeof text === "string" && text.trim() ? sanitizePromptEchoLines(text, 20) : null;
     }
   } catch (e) {
     // Keep logs safe: do not print API keys.

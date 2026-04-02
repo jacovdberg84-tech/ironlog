@@ -7387,8 +7387,8 @@ async function generateDocDraft() {
   await loadDocDrafts();
 }
 
-async function generateDocDraftFromRequest() {
-  const requestText = String(arguments[0] || qs("aiSmartPrompt")?.value || "").trim();
+async function generateDocDraftFromRequest(requestArg) {
+  const requestText = String(requestArg || qs("aiSmartPrompt")?.value || "").trim();
   if (!requestText) return alert("Enter what document you want first.");
   let headerId = Number(qs("docHeaderId")?.value || 0);
   if (!headerId) {
@@ -7454,6 +7454,7 @@ function parseMachineProblemFromPrompt(prompt) {
 }
 
 async function runAiSmart() {
+  const out = qs("askJakesOutput");
   const smartPrompt = String(qs("aiSmartPrompt")?.value || "").trim();
 
   if (!smartPrompt) {
@@ -7461,26 +7462,35 @@ async function runAiSmart() {
     return;
   }
 
+  if (out) {
+    out.textContent = "⏳ Thinking...";
+    out.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
   const faultKeywords = /(fault|error|not working|no\s+hydraulic|no\s+hydraulics|no\s+start|won't start|wont start|leak|overheat|pressure|engine|starter|battery|transmission|brake)/i;
   const docKeywords = /(sop|checklist|method statement|site instruction|risk note|document|procedure|policy|template)/i;
 
-  if (faultKeywords.test(smartPrompt) && !docKeywords.test(smartPrompt)) {
-    const parsed = parseMachineProblemFromPrompt(smartPrompt);
-    await askJakes({ machine: parsed.machine, problem: parsed.problem, context: "" });
-    return;
-  }
+  try {
+    if (faultKeywords.test(smartPrompt) && !docKeywords.test(smartPrompt)) {
+      const parsed = parseMachineProblemFromPrompt(smartPrompt);
+      await askJakes({ machine: parsed.machine, problem: parsed.problem, context: "" });
+      return;
+    }
 
-  const inferred = inferDocTypeFromPrompt(smartPrompt);
-  const titleEl = qs("docTitle");
-  if (titleEl && !String(titleEl.value || "").trim()) titleEl.value = smartPrompt.slice(0, 80);
-  if (inferred) {
-    const typeEl = qs("docType");
-    if (typeEl) typeEl.value = inferred;
-  }
-  await generateDocDraftFromRequest(smartPrompt);
-  const out = qs("askJakesOutput");
-  if (out) {
-    out.textContent = "Document draft generated. See the Draft Output box below for the full text.";
+    const inferred = inferDocTypeFromPrompt(smartPrompt);
+    const titleEl = qs("docTitle");
+    if (titleEl && !String(titleEl.value || "").trim()) titleEl.value = smartPrompt.slice(0, 80);
+    if (inferred) {
+      const typeEl = qs("docType");
+      if (typeEl) typeEl.value = inferred;
+    }
+    await generateDocDraftFromRequest(smartPrompt);
+    if (out) {
+      out.textContent = "Document draft generated — see the Draft Output box below.";
+    }
+  } catch (err) {
+    if (out) out.textContent = "❌ Error: " + (err.message || String(err));
+    setStatus("Smart AI error: " + err.message);
   }
 }
 
@@ -7526,22 +7536,29 @@ async function askJakes(override = {}) {
   const machine = String(override.machine || "").trim();
   const problem = String(override.problem || "").trim();
   const context = String(override.context || "").trim();
+  const out = qs("askJakesOutput");
+
   if (!problem) {
-    alert("Please describe the machine problem in the smart prompt box.");
+    if (out) out.textContent = "❌ Please describe the machine problem.";
     return;
   }
 
-  const res = await fetchJson(`${API}/api/docs/ai/ask`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ machine, problem, context }),
-  });
+  try {
+    const res = await fetchJson(`${API}/api/docs/ai/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ machine, problem, context }),
+    });
 
-  const out = qs("askJakesOutput");
-  if (out) {
-    out.textContent = String(res.answer || "No answer returned.");
+    if (out) {
+      out.textContent = String(res.answer || "No answer returned.");
+      out.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    setStatus("Ask Jakes answered.");
+  } catch (err) {
+    if (out) out.textContent = "❌ Error: " + (err.message || String(err));
+    setStatus("Ask Jakes error: " + err.message);
   }
-  setStatus("Ask Jakes answered.");
 }
 
 function speakDocDraft() {
