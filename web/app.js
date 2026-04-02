@@ -1312,7 +1312,7 @@ function item(html) {
   d.innerHTML = html;
   return d;
 }
-function setSpeedo(needleEl, valEl, pct) {
+function setSpeedo(needleEl, valEl, pct, opts) {
   if (!needleEl || !valEl) return;
 
   const face = needleEl.parentElement; // .speedo-face
@@ -1343,9 +1343,12 @@ function item(html) {
   const deg = -90 + (clamped * 180) / 100;
 
   // KPI lighting thresholds
+  // KPI lighting thresholds (configurable via setSpeedo opts)
+  const _goodAt = Number(opts?.goodAt ?? 85);
+  const _warnAt = Number(opts?.warnAt ?? 60);
   let kpiClass = "kpi-bad";
-  if (clamped >= 85) kpiClass = "kpi-good";
-  else if (clamped >= 60) kpiClass = "kpi-warn";
+  if (clamped >= _goodAt) kpiClass = "kpi-good";
+  else if (clamped >= _warnAt) kpiClass = "kpi-warn";
 
   clearKpiClasses(needleEl);
   clearKpiClasses(face);
@@ -1366,6 +1369,80 @@ function item(html) {
 
   valEl.textContent = clamped.toFixed(2) + "%";
 }
+
+function getThresholds() {
+  const safeNum = (k, def) => {
+    const v = Number(localStorage.getItem(k));
+    return Number.isFinite(v) && v >= 0 && v <= 100 ? v : def;
+  };
+  return {
+    availTarget: safeNum("th_avail_target", 85),
+    availCrit:   safeNum("th_avail_crit",   70),
+    utilTarget:  safeNum("th_util_target",  70),
+    utilCrit:    safeNum("th_util_crit",    55),
+  };
+}
+
+function populateThresholdInputs() {
+  const th = getThresholds();
+  const set = (id, v) => { const el = qs(id); if (el) el.value = v; };
+  set("thAvailTarget", th.availTarget);
+  set("thAvailCrit",   th.availCrit);
+  set("thUtilTarget",  th.utilTarget);
+  set("thUtilCrit",    th.utilCrit);
+}
+
+function saveThresholdsFromUI() {
+  const getNum = (id, def) => {
+    const v = Number(qs(id)?.value);
+    return Number.isFinite(v) && v >= 0 && v <= 100 ? v : def;
+  };
+  localStorage.setItem("th_avail_target", getNum("thAvailTarget", 85));
+  localStorage.setItem("th_avail_crit",   getNum("thAvailCrit",   70));
+  localStorage.setItem("th_util_target",  getNum("thUtilTarget",  70));
+  localStorage.setItem("th_util_crit",    getNum("thUtilCrit",    55));
+  setStatus("Thresholds saved.");
+  loadDashboard().catch(() => {});
+}
+
+function updateKpiAlertBanner(availPct, utilPct) {
+  const banner = qs("kpiAlertBanner");
+  if (!banner) return;
+  const th = getThresholds();
+  const issues = [];
+  if (availPct != null && !Number.isNaN(Number(availPct))) {
+    const a = Number(availPct);
+    if (a < th.availCrit) {
+      issues.push({ label: "AVAILABILITY CRITICAL", value: a, target: th.availTarget, cls: "kpi-alert-crit" });
+    } else if (a < th.availTarget) {
+      issues.push({ label: "AVAILABILITY BELOW TARGET", value: a, target: th.availTarget, cls: "kpi-alert-warn" });
+    }
+  }
+  if (utilPct != null && !Number.isNaN(Number(utilPct))) {
+    const u = Number(utilPct);
+    if (u < th.utilCrit) {
+      issues.push({ label: "UTILIZATION CRITICAL", value: u, target: th.utilTarget, cls: "kpi-alert-crit" });
+    } else if (u < th.utilTarget) {
+      issues.push({ label: "UTILIZATION BELOW TARGET", value: u, target: th.utilTarget, cls: "kpi-alert-warn" });
+    }
+  }
+  if (!issues.length) {
+    banner.style.display = "none";
+    banner.innerHTML = "";
+    return;
+  }
+  banner.style.display = "";
+  banner.innerHTML = issues
+    .map(
+      (i) =>
+        `<div class="kpi-alert-item ${i.cls}">` +
+        `<span class="kpi-alert-icon">${i.cls === "kpi-alert-crit" ? "\u26D4" : "\u26A0\uFE0F"}</span>` +
+        `<span class="kpi-alert-text"><b>${escapeHtml(i.label)}</b> \u2014 ${Number(i.value).toFixed(1)}% (target ${i.target}%)</span>` +
+        `</div>`
+    )
+    .join("");
+}
+
 /* =========================
    OFFLINE QUEUE STORAGE
 ========================= */
@@ -1531,8 +1608,10 @@ async function loadDashboard() {
   const sqDateEl = qs("sqDate");
   if (sqDateEl && !sqDateEl.value) sqDateEl.value = date;
 
-  setSpeedo(qs("availNeedle"), qs("gAvailVal"), data?.kpi?.availability);
-  setSpeedo(qs("utilNeedle"), qs("gUtilVal"), data?.kpi?.utilization);
+  const _kpiTh = getThresholds();
+  setSpeedo(qs("availNeedle"), qs("gAvailVal"), data?.kpi?.availability, { goodAt: _kpiTh.availTarget, warnAt: _kpiTh.availCrit });
+  setSpeedo(qs("utilNeedle"), qs("gUtilVal"), data?.kpi?.utilization, { goodAt: _kpiTh.utilTarget, warnAt: _kpiTh.utilCrit });
+  updateKpiAlertBanner(data?.kpi?.availability, data?.kpi?.utilization);
 
   const mtdRange =
     data.kpi?.mtd_start && data.kpi?.mtd_end
@@ -6861,6 +6940,7 @@ async function init() {
   qs("ironmindRefreshBtn")?.addEventListener("click", () =>
     refreshIronmindInsight().catch((e) => setStatus("IRONMIND refresh error: " + e.message))
   );
+  qs("saveThresholds")?.addEventListener("click", () => saveThresholdsFromUI());
   qs("ironmindSummary")?.addEventListener("click", (e) => {
     const el = e.target instanceof HTMLElement ? e.target : null;
     if (!el) return;
@@ -7504,6 +7584,7 @@ async function init() {
     loadApprovalRequests().catch(() => {});
   }
   loadCodePickers().catch(() => {});
+  populateThresholdInputs();
   loadDashboard().catch((e) => setStatus("Dashboard error: " + e.message));
 
   const legalList = qs("legalList");

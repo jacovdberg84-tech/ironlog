@@ -147,6 +147,16 @@
             <div class="pill blue">Open WO: <span id="aOpenWO">0</span></div>
           </div>
           <p class="muted">Quick snapshot of today’s risk.</p>
+          <details class="threshold-pane">
+            <summary>⚙ Threshold settings</summary>
+            <div class="row stack-6">
+              <label class="chk">Avail target %<input id="thAvailTarget" class="w-80" type="number" min="0" max="100" step="1" value="85" /></label>
+              <label class="chk">Avail critical %<input id="thAvailCrit" class="w-80" type="number" min="0" max="100" step="1" value="70" /></label>
+              <label class="chk">Util target %<input id="thUtilTarget" class="w-80" type="number" min="0" max="100" step="1" value="70" /></label>
+              <label class="chk">Util critical %<input id="thUtilCrit" class="w-80" type="number" min="0" max="100" step="1" value="55" /></label>
+              <button id="saveThresholds">Save</button>
+            </div>
+          </details>
         </div>
 
         <div class="card">
@@ -161,7 +171,9 @@
         </div>
       </div>
 
-      <div class="grid stack-12">
+        <div id="kpiAlertBanner" class="kpi-alert-banner" style="display:none;"></div>
+
+        <div class="grid stack-12">
         <div class="card">
           <h3>Major Downtime</h3>
           <div class="list" id="downtimeList"></div>
