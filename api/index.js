@@ -3,10 +3,14 @@ import { buildServer } from "./server.js";
 import { runHybridPhase1Migration } from "./db/hybridPhase1.js";
 import { runHybridPhase2Migration } from "./db/hybridPhase2.js";
 
+import dotenv from "dotenv";
 import fastifyStatic from "@fastify/static";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+
+// Load environment variables from .env in the API root.
+dotenv.config({ path: path.join(process.cwd(), ".env") });
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 const HOST = process.env.HOST || "0.0.0.0";
