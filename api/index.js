@@ -10,6 +10,7 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { runIronmindAutoScheduler } from "./utils/ironmind.js";
+import { startDbAutoBackup } from "./db/autoBackup.js";
 
 // Load environment variables from .env in the API root.
 dotenv.config({ path: path.join(process.cwd(), ".env") });
@@ -94,6 +95,9 @@ async function listenWithFallback() {
 
 try {
   const effectivePort = await listenWithFallback();
+  const stopDbAutoBackup = startDbAutoBackup(app.log);
+  process.once("SIGINT", stopDbAutoBackup);
+  process.once("SIGTERM", stopDbAutoBackup);
   await runIronmindAutoScheduler(app.log);
   app.log.info(`IRONLOG API running on http://${HOST}:${effectivePort}`);
   app.log.info(`IRONLOG UI  running on http://${HOST}:${effectivePort}/web/index.html`);
