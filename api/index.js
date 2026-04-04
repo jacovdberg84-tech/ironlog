@@ -20,8 +20,20 @@ const DESKTOP_PORT_MAX = process.env.IRONLOG_DESKTOP_PORT_MAX
   ? Number(process.env.IRONLOG_DESKTOP_PORT_MAX)
   : PORT;
 
-runHybridPhase1Migration();
-runHybridPhase2Migration();
+function runStartupMigrationsSafely() {
+  try {
+    runHybridPhase1Migration();
+  } catch (err) {
+    console.error("[startup] phase1 migration skipped:", err?.message || err);
+  }
+  try {
+    runHybridPhase2Migration();
+  } catch (err) {
+    console.error("[startup] phase2 migration skipped:", err?.message || err);
+  }
+}
+
+runStartupMigrationsSafely();
 
 const app = buildServer();
 
