@@ -774,8 +774,32 @@ async function submitLoginForm() {
   const remember = qs("loginRemember")?.checked !== false;
   const errEl = qs("loginError");
   if (errEl) errEl.textContent = "";
-  if (!u || !p) {
-    if (errEl) errEl.textContent = "Enter username and password.";
+  if (!u) {
+    if (errEl) errEl.textContent = "Enter username.";
+    return;
+  }
+  if (!p) {
+    if (setupCode && setupPassword.length >= 6) {
+      try {
+        const setupRes = await fetch(`${API}/api/auth/setup-password`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: u, setup_code: setupCode, new_password: setupPassword }),
+        });
+        const setupData = await setupRes.json().catch(() => ({}));
+        if (!setupRes.ok) {
+          if (errEl) errEl.textContent = setupData.error || setupData.message || "Setup code failed.";
+          return;
+        }
+        if (qs("loginSetupCode")) qs("loginSetupCode").value = "";
+        if (qs("loginNewPassword")) qs("loginNewPassword").value = "";
+        if (errEl) errEl.textContent = "Password created. Enter your password and sign in.";
+      } catch (e) {
+        if (errEl) errEl.textContent = String(e.message || e);
+      }
+      return;
+    }
+    if (errEl) errEl.textContent = "Enter password, or use setup code with a new password.";
     return;
   }
   try {
