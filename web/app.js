@@ -1501,6 +1501,19 @@ function refreshNetBanner() {
   setNetBanner("idle", getQueuedHoursCount());
 }
 
+async function disableLegacyServiceWorkers() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    if (!Array.isArray(regs) || !regs.length) return;
+    for (const reg of regs) {
+      await reg.unregister();
+    }
+  } catch {
+    // non-fatal: app keeps working if SW API is blocked
+  }
+}
+
 /* =========================
    OFFLINE QUEUE (HOURS ONLY)
 ========================= */
@@ -7018,6 +7031,7 @@ async function unarchiveSelectedAsset() {
 ========================= */
 
 async function init() {
+  await disableLegacyServiceWorkers();
   await tryInitialSession();
   initTabs();
   initSessionControls();
