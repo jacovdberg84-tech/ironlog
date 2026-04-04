@@ -4370,9 +4370,11 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
+    const reportRevision = "daily-pdf-no-cost-r2026-04-04b";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
+    reply.header("X-IRONLOG-Report-Revision", reportRevision);
 
     const date = String(req.query?.date || "").trim();
     const scheduled = Number(req.query?.scheduled ?? 10);
@@ -4612,7 +4614,7 @@ export default async function reportsRoutes(app) {
       },
       {
         title: "IRONLOG",
-        subtitle: "Daily Operations Report",
+        subtitle: `Daily Operations Report (${reportRevision})`,
         rightText: `Date: ${date}`,
         showPageNumbers: true,
       }
@@ -4900,9 +4902,14 @@ export default async function reportsRoutes(app) {
 
   // GET /api/reports/operations.pdf?start=YYYY-MM-DD&end=YYYY-MM-DD&download=1
   app.get("/operations.pdf", async (req, reply) => {
+    const reportRevision = "ops-pdf-r2026-04-04b";
     const start = String(req.query?.start || "").trim();
     const end = String(req.query?.end || "").trim();
     const download = String(req.query?.download || "").trim() === "1";
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
+    reply.header("X-IRONLOG-Report-Revision", reportRevision);
     if (!isDate(start) || !isDate(end)) {
       return reply.code(400).send({ error: "start and end must be YYYY-MM-DD" });
     }
@@ -5035,7 +5042,7 @@ export default async function reportsRoutes(app) {
       },
       {
         title: "IRONLOG",
-        subtitle: "Operations Report",
+        subtitle: `Operations Report (${reportRevision})`,
         rightText: `Period: ${start} to ${end}`,
         showPageNumbers: true,
       }
