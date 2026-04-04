@@ -5964,6 +5964,14 @@ function prevDateStr(dateStr) {
   return `${y}-${m}-${day}`;
 }
 
+function todayLocalYmd() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function validateDailyRows() {
   for (const r of dailyRows) {
     r.error = null;
@@ -6343,7 +6351,7 @@ function renderDailyTable() {
 }
 
 async function loadDailyInput() {
-  const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
+  const date = qs("date")?.value || todayLocalYmd();
   const y = prevDateStr(date);
   setStatus("Loading daily input...");
   setText("dailyResult", "");
@@ -6492,7 +6500,7 @@ async function loadDailyInput() {
 /* -------- Copy Yesterday + Bulk Scheduled -------- */
 
 async function copyYesterdayToToday() {
-  const today = qs("date")?.value || new Date().toISOString().slice(0, 10);
+  const today = qs("date")?.value || todayLocalYmd();
   const y = prevDateStr(today);
 
   setStatus(`Copying from ${y}...`);
@@ -6565,7 +6573,7 @@ function applyBulkScheduled() {
 }
 
 async function saveDailyInput() {
-  const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
+  const date = qs("date")?.value || todayLocalYmd();
 
   validateDailyRows();
   renderDailyPreview();
@@ -6644,7 +6652,7 @@ renderDailyTable(); // re-render so errorRow highlighting appears
 }
 
 async function runShiftSelfCheck() {
-  const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
+  const date = qs("date")?.value || todayLocalYmd();
   const out = qs("shiftSelfCheckResult");
   if (out) out.textContent = "Running checks...";
   const checks = [];
@@ -6691,7 +6699,7 @@ async function runShiftSelfCheck() {
 }
 
 function exportShiftSelfCheckTxt() {
-  const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
+  const date = qs("date")?.value || todayLocalYmd();
   const content = String(qs("shiftSelfCheckResult")?.textContent || "").trim();
   if (!content) {
     alert("Run Shift Self-Check first, then export.");
@@ -7017,7 +7025,7 @@ async function init() {
   applyGlobalPageTranslation();
 
   const dateEl = qs("date");
-  if (dateEl) dateEl.value = new Date().toISOString().slice(0, 10);
+  if (dateEl) dateEl.value = todayLocalYmd();
 
   qs("refresh")?.addEventListener("click", () =>
     loadDashboard().catch((e) => setStatus("Dashboard error: " + e.message))
