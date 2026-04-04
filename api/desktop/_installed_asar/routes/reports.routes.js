@@ -2124,6 +2124,10 @@ export default async function reportsRoutes(app) {
   // DAILY XLSX
   // =========================
   app.get("/daily.xlsx", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
+
     const date = String(req.query?.date || "").trim();
     const scheduled = Number(req.query?.scheduled ?? 10);
 
@@ -2347,14 +2351,6 @@ export default async function reportsRoutes(app) {
     wsSummary.addRow({ k: "Fuel total (L)", v: Number(fuel_total.toFixed(2)) });
     wsSummary.addRow({ k: "Oil total (Qty)", v: Number(oil_total.toFixed(2)) });
     wsSummary.addRow({ k: "Downtime total (hrs)", v: Number(breakdown_total.toFixed(2)) });
-    wsSummary.addRow({ k: "Fuel cost", v: fuelCostTotal });
-    wsSummary.addRow({ k: "Oil/Lube cost", v: lubeCostTotal });
-    wsSummary.addRow({ k: "Parts cost", v: partsCostTotal });
-    wsSummary.addRow({ k: "Labor cost", v: laborCostTotal });
-    wsSummary.addRow({ k: "Labor hours", v: laborHoursTotal });
-    wsSummary.addRow({ k: "Downtime cost", v: downtimeCostTotal });
-    wsSummary.addRow({ k: "Total cost", v: totalCost });
-    wsSummary.addRow({ k: "Cost per run hour", v: costPerRunHour == null ? "N/A" : costPerRunHour });
     wsSummary.views = [{ state: "frozen", ySplit: 1 }];
     wsSummary.getCell("A1").font = { bold: true };
 
@@ -2474,37 +2470,6 @@ export default async function reportsRoutes(app) {
       }))
       .filter((r) => r.total_cost > 0)
       .sort((a, b) => b.total_cost - a.total_cost);
-
-    addTableSheet(
-      wb,
-      "Cost by Asset",
-      [
-        { header: "Asset Code", key: "asset_code", width: 14 },
-        { header: "Asset Name", key: "asset_name", width: 24 },
-        { header: "Fuel Cost", key: "fuel_cost", width: 12 },
-        { header: "Lube Cost", key: "lube_cost", width: 12 },
-        { header: "Parts Cost", key: "parts_cost", width: 12 },
-        { header: "Labor Hours", key: "labor_hours", width: 12 },
-        { header: "Labor Cost", key: "labor_cost", width: 12 },
-        { header: "Downtime Hrs", key: "downtime_hours", width: 12 },
-        { header: "Downtime Cost", key: "downtime_cost", width: 13 },
-        { header: "Total Cost", key: "total_cost", width: 12 },
-      ],
-      costRows.length
-        ? costRows
-        : [{
-            asset_code: "-",
-            asset_name: "No cost activity for date",
-            fuel_cost: 0,
-            lube_cost: 0,
-            parts_cost: 0,
-            labor_hours: 0,
-            labor_cost: 0,
-            downtime_hours: 0,
-            downtime_cost: 0,
-            total_cost: 0,
-          }]
-    );
 
     const buffer = await wb.xlsx.writeBuffer();
 
@@ -2804,6 +2769,10 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
+
     const date = String(req.query?.date || "").trim();
     const scheduled = Number(req.query?.scheduled ?? 10);
     if (!isDate(date)) return reply.code(400).send({ error: "date (YYYY-MM-DD) required" });
@@ -2940,18 +2909,6 @@ export default async function reportsRoutes(app) {
           { k: "Downtime hours", v: fmtNum(kpi.downtime_hours, 1) },
           { k: "Availability %", v: kpi.availability == null ? "N/A" : `${fmtNum(kpi.availability, 2)}%` },
           { k: "Utilization %", v: kpi.utilization == null ? "N/A" : `${fmtNum(kpi.utilization, 2)}%` },
-        ], 2);
-
-        sectionTitle(doc, "Cost Engine (Daily)");
-        kvGrid(doc, [
-          { k: "Fuel Cost", v: fmtNum(fuelCostRow?.value || 0, 2) },
-          { k: "Oil/Lube Cost", v: fmtNum(lubeCostRow?.value || 0, 2) },
-          { k: "Parts Cost", v: fmtNum(partsCostRow?.value || 0, 2) },
-          { k: "Labor Cost", v: fmtNum(laborRow?.labor_cost || 0, 2) },
-          { k: "Labor Hours", v: fmtNum(laborRow?.labor_hours || 0, 1) },
-          { k: "Downtime Cost", v: fmtNum(downtimeCostRow?.value || 0, 2) },
-          { k: "Total Cost", v: fmtNum(totalCost, 2) },
-          { k: "Cost / Run Hour", v: costPerRunHour == null ? "N/A" : fmtNum(costPerRunHour, 2) },
         ], 2);
 
         sectionTitle(doc, "Hours Logged");

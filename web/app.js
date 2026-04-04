@@ -3487,7 +3487,8 @@ function getLastNDaysRange(endDate, days) {
 function openDailyXlsx() {
   const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
   const scheduled = qs("scheduled")?.value || 10;
-  window.open(`${API}/api/reports/daily.xlsx?date=${date}&scheduled=${scheduled}`, "_blank");
+  const ts = Date.now();
+  window.open(`${API}/api/reports/daily.xlsx?date=${date}&scheduled=${scheduled}&_ts=${ts}`, "_blank");
 }
 
 /** GM weekly pack: Maintenance & Engineering KPIs (same date field as daily / weekly PDF). */
@@ -3618,7 +3619,8 @@ async function loadRainDays() {
 function openDailyPdf() {
   const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
   const scheduled = qs("scheduled")?.value || 10;
-  window.open(`${API}/api/reports/daily.pdf?date=${date}&scheduled=${scheduled}`, "_blank");
+  const ts = Date.now();
+  window.open(`${API}/api/reports/daily.pdf?date=${date}&scheduled=${scheduled}&_ts=${ts}`, "_blank");
 }
 
 function openWeeklyPdf() {

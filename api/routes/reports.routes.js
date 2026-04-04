@@ -3217,6 +3217,10 @@ export default async function reportsRoutes(app) {
   // DAILY XLSX
   // =========================
   app.get("/daily.xlsx", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
+
     const date = String(req.query?.date || "").trim();
     const scheduled = Number(req.query?.scheduled ?? 10);
 
@@ -4366,6 +4370,10 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
+
     const date = String(req.query?.date || "").trim();
     const scheduled = Number(req.query?.scheduled ?? 10);
     if (!isDate(date)) return reply.code(400).send({ error: "date (YYYY-MM-DD) required" });
