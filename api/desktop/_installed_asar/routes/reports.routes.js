@@ -628,7 +628,8 @@ export default async function reportsRoutes(app) {
         w.closed_at
       FROM work_orders w
       WHERE w.asset_id = ?
-        AND LOWER(COALESCE(w.status, '')) NOT IN ('closed', 'completed', 'approved', 'cancelled', 'canceled')
+        AND w.closed_at IS NULL
+        AND TRIM(LOWER(COALESCE(w.status, ''))) NOT IN ('closed', 'completed', 'approved', 'cancelled', 'canceled')
         ${woF.sql}
       ORDER BY w.id DESC
       LIMIT 300
@@ -822,8 +823,7 @@ export default async function reportsRoutes(app) {
             { key: "date", label: "Date", width: 0.16 },
             { key: "source", label: "Source", width: 0.16 },
             { key: "status", label: "Status", width: 0.16 },
-            { key: "opened", label: "Opened", width: 0.20 },
-            { key: "closed", label: "Closed", width: 0.20 },
+            { key: "opened", label: "Opened", width: 0.40 },
           ],
           workOrdersPdf.length
             ? workOrdersPdf.map((r) => ({
@@ -832,9 +832,8 @@ export default async function reportsRoutes(app) {
                 source: String(r.source || ""),
                 status: String(r.status || ""),
                 opened: r.opened_at || "",
-                closed: r.closed_at || "-",
               }))
-            : [{ id: "-", date: "-", source: "-", status: "-", opened: "-", closed: "-" }]
+            : [{ id: "-", date: "-", source: "-", status: "-", opened: "-" }]
         );
 
         sectionTitle(doc, "GET Change Slips");
@@ -2819,7 +2818,8 @@ export default async function reportsRoutes(app) {
       SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
-      WHERE w.status != 'closed'
+      WHERE w.closed_at IS NULL
+        AND TRIM(LOWER(COALESCE(w.status, ''))) NOT IN ('closed', 'completed', 'approved', 'cancelled', 'canceled')
       ORDER BY w.id DESC
       LIMIT 30
     `).all();
