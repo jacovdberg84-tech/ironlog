@@ -5,6 +5,7 @@ DRY_RUN=0
 YES=0
 PM2_APP="${PM2_APP:-ironlog-api}"
 HEALTH_URL="${IRONLOG_HEALTH_URL:-http://127.0.0.1:3001/health}"
+BACKUP_FILE="${IRONLOG_RESTORE_FILE:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -20,9 +21,13 @@ while [[ $# -gt 0 ]]; do
       PM2_APP="${2:-}"
       shift 2
       ;;
+    --file)
+      BACKUP_FILE="${2:-}"
+      shift 2
+      ;;
     --help|-h)
       cat <<'EOF'
-Usage: restore-latest-backup.sh [--dry-run] [--yes] [--pm2-app <name>]
+Usage: restore-latest-backup.sh [--dry-run] [--yes] [--pm2-app <name>] [--file <path>]
 
 Restores SQLite from the newest auto-backup in db/backups, validates integrity,
 restarts PM2 app, and checks health endpoint.
@@ -31,6 +36,7 @@ Options:
   --dry-run       Print planned actions without making changes
   --yes, -y       Skip confirmation prompt
   --pm2-app NAME  PM2 process name (default: ironlog-api)
+  --file PATH     Restore a specific backup file instead of latest
   --help, -h      Show this help
 EOF
       exit 0
@@ -53,10 +59,18 @@ ROOT_DB_FILE="$API_DIR/ironlog.db"
 WAL_FILE="$DB_DIR/ironlog.db-wal"
 SHM_FILE="$DB_DIR/ironlog.db-shm"
 
-LATEST_BACKUP="$(ls -1t "$BACKUP_DIR"/ironlog_*.db 2>/dev/null | head -n 1 || true)"
-if [[ -z "$LATEST_BACKUP" ]]; then
-  echo "No backup files found in $BACKUP_DIR" >&2
-  exit 1
+if [[ -n "$BACKUP_FILE" ]]; then
+  if [[ ! -f "$BACKUP_FILE" ]]; then
+    echo "Specified backup file not found: $BACKUP_FILE" >&2
+    exit 1
+  fi
+  LATEST_BACKUP="$BACKUP_FILE"
+else
+  LATEST_BACKUP="$(ls -1t "$BACKUP_DIR"/ironlog_*.db 2>/dev/null | head -n 1 || true)"
+  if [[ -z "$LATEST_BACKUP" ]]; then
+    echo "No backup files found in $BACKUP_DIR" >&2
+    exit 1
+  fi
 fi
 
 TS="$(date +%Y%m%d_%H%M%S)"

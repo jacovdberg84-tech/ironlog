@@ -19,7 +19,9 @@
     "db:reset": "npm run db:migrate && npm run db:seed",
     "db:upgrade": "node db/upgrade.js",
     "db:restore:latest": "bash ./scripts/restore-latest-backup.sh --yes",
-    "db:restore:latest:dry": "bash ./scripts/restore-latest-backup.sh --dry-run"
+    "db:restore:latest:dry": "bash ./scripts/restore-latest-backup.sh --dry-run",
+    "db:restore:file": "bash ./scripts/restore-latest-backup.sh --yes --file \"$IRONLOG_RESTORE_FILE\"",
+    "db:restore:file:dry": "bash ./scripts/restore-latest-backup.sh --dry-run --file \"$IRONLOG_RESTORE_FILE\""
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
