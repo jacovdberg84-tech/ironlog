@@ -83,9 +83,13 @@ function kpiDaily(date, scheduled) {
   const run_hours = Number(runRow.run_hours || 0);
 
   const dtRow = db.prepare(`
-    SELECT IFNULL(SUM(b.downtime_hours), 0) AS downtime_hours
-    FROM breakdowns b
-    WHERE b.breakdown_date = ?
+    SELECT IFNULL(SUM(l.hours_down), 0) AS downtime_hours
+    FROM breakdown_downtime_logs l
+    JOIN breakdowns b ON b.id = l.breakdown_id
+    JOIN assets a ON a.id = b.asset_id
+    WHERE l.log_date = ?
+      AND a.active = 1
+      AND a.is_standby = 0
       AND b.asset_id IN (
         SELECT DISTINCT dh.asset_id
         FROM daily_hours dh
