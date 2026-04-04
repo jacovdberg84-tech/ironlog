@@ -4653,59 +4653,6 @@ export default async function reportsRoutes(app) {
     const stockCriticalPdf = stockCritical.slice(0, 40);
 
     const kpi = kpiDaily(date, scheduled);
-    const defaults = costDefaults();
-
-    const fuelCostRow = db.prepare(`
-      SELECT COALESCE(SUM(fl.liters * COALESCE(fl.unit_cost_per_liter, a.fuel_cost_per_liter, ?)), 0) AS value
-      FROM fuel_logs fl
-      JOIN assets a ON a.id = fl.asset_id
-      WHERE fl.log_date = ?
-    `).get(defaults.fuel_cost_per_liter_default, date);
-
-    const lubeCostRow = db.prepare(`
-      SELECT COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS value
-      FROM oil_logs ol
-      WHERE ol.log_date = ?
-    `).get(defaults.lube_cost_per_qty_default, date);
-
-    const smCols = db.prepare(`PRAGMA table_info(stock_movements)`).all();
-    const hasCreatedAt = smCols.some((c) => String(c.name) === "created_at");
-    const smDateExpr = hasCreatedAt ? "DATE(sm.created_at)" : "DATE(sm.movement_date)";
-    const partsCostRow = db.prepare(`
-      SELECT COALESCE(SUM(ABS(sm.quantity) * COALESCE(p.unit_cost, 0)), 0) AS value
-      FROM stock_movements sm
-      JOIN parts p ON p.id = sm.part_id
-      WHERE sm.movement_type = 'out'
-        AND ${smDateExpr} = ?
-    `).get(date);
-
-    const laborRow = db.prepare(`
-      SELECT
-        COALESCE(SUM(COALESCE(w.labor_hours, 0)), 0) AS labor_hours,
-        COALESCE(SUM(COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, ?)), 0) AS labor_cost
-      FROM work_orders w
-      WHERE DATE(COALESCE(w.completed_at, w.closed_at)) = ?
-        AND w.status IN ('completed', 'approved', 'closed')
-    `).get(defaults.labor_cost_per_hour_default, date);
-
-    const downtimeCostRow = db.prepare(`
-      SELECT COALESCE(SUM(l.hours_down * COALESCE(a.downtime_cost_per_hour, ?)), 0) AS value
-      FROM breakdown_downtime_logs l
-      JOIN breakdowns b ON b.id = l.breakdown_id
-      JOIN assets a ON a.id = b.asset_id
-      WHERE l.log_date = ?
-    `).get(defaults.downtime_cost_per_hour_default, date);
-
-    const totalCost = Number(
-      (
-        Number(fuelCostRow?.value || 0) +
-        Number(lubeCostRow?.value || 0) +
-        Number(partsCostRow?.value || 0) +
-        Number(laborRow?.labor_cost || 0) +
-        Number(downtimeCostRow?.value || 0)
-      ).toFixed(2)
-    );
-    const costPerRunHour = Number(kpi.run_hours || 0) > 0 ? totalCost / Number(kpi.run_hours || 1) : null;
 
     const pdf = await buildPdfBuffer(
       (doc) => {
@@ -4721,18 +4668,6 @@ export default async function reportsRoutes(app) {
           { k: "Downtime hours", v: fmtNum(kpi.downtime_hours, 1) },
           { k: "Availability %", v: kpi.availability == null ? "N/A" : `${fmtNum(kpi.availability, 2)}%` },
           { k: "Utilization %", v: kpi.utilization == null ? "N/A" : `${fmtNum(kpi.utilization, 2)}%` },
-        ], 2);
-
-        sectionTitle(doc, "Cost Engine (Daily)");
-        kvGrid(doc, [
-          { k: "Fuel Cost", v: fmtNum(fuelCostRow?.value || 0, 2) },
-          { k: "Oil/Lube Cost", v: fmtNum(lubeCostRow?.value || 0, 2) },
-          { k: "Parts Cost", v: fmtNum(partsCostRow?.value || 0, 2) },
-          { k: "Labor Cost", v: fmtNum(laborRow?.labor_cost || 0, 2) },
-          { k: "Labor Hours", v: fmtNum(laborRow?.labor_hours || 0, 1) },
-          { k: "Downtime Cost", v: fmtNum(downtimeCostRow?.value || 0, 2) },
-          { k: "Total Cost", v: fmtNum(totalCost, 2) },
-          { k: "Cost / Run Hour", v: costPerRunHour == null ? "N/A" : fmtNum(costPerRunHour, 2) },
         ], 2);
 
         sectionTitle(doc, "Hours by asset (active fleet, non-standby)");
