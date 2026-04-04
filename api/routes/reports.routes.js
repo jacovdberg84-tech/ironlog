@@ -1265,7 +1265,9 @@ export default async function reportsRoutes(app) {
         w.opened_at,
         w.closed_at
       FROM work_orders w
-      WHERE w.asset_id = ? ${woF.sql}
+      WHERE w.asset_id = ?
+        AND LOWER(COALESCE(w.status, '')) NOT IN ('closed', 'completed', 'approved', 'cancelled', 'canceled')
+        ${woF.sql}
       ORDER BY w.id DESC
       LIMIT 300
     `).all(asset.id, ...woF.params);
