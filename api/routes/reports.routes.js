@@ -4572,16 +4572,14 @@ export default async function reportsRoutes(app) {
         dh.is_used,
         dh.opening_hours,
         dh.closing_hours,
-        CASE WHEN dh.id IS NULL THEN 0 ELSE 1 END AS has_daily_entry,
-        (SELECT dh2.opening_hours FROM daily_hours dh2 WHERE dh2.asset_id = a.id AND dh2.work_date = date(?, '-1 day') LIMIT 1) AS prev_opening_hours,
-        (SELECT dh2.closing_hours FROM daily_hours dh2 WHERE dh2.asset_id = a.id AND dh2.work_date = date(?, '-1 day') LIMIT 1) AS prev_closing_hours
+        CASE WHEN dh.id IS NULL THEN 0 ELSE 1 END AS has_daily_entry
       FROM assets a
       LEFT JOIN daily_hours dh ON dh.asset_id = a.id AND dh.work_date = ?
       WHERE COALESCE(a.is_standby, 0) = 0
         ${activeClause}
         ${archivedClause}
       ORDER BY a.asset_code
-    `).all(date, date, date);
+    `).all(date);
 
     const fuel = db.prepare(`
       SELECT a.asset_code, fl.liters, fl.source
@@ -4741,15 +4739,13 @@ export default async function reportsRoutes(app) {
         table(
           doc,
           [
-            { key: "asset", label: "Asset", width: 0.10 },
-            { key: "type", label: "Type", width: 0.09 },
-            { key: "name", label: "Name", width: 0.18 },
-            { key: "prev_open", label: "Prev open", width: 0.10, align: "right" },
-            { key: "prev_close", label: "Prev close", width: 0.10, align: "right" },
-            { key: "open", label: "Open", width: 0.09, align: "right" },
-            { key: "close", label: "Close", width: 0.09, align: "right" },
-            { key: "hours", label: "Run Hrs", width: 0.10, align: "right" },
-            { key: "used", label: "Prod", width: 0.08, align: "center" },
+            { key: "asset", label: "Asset", width: 0.14 },
+            { key: "type", label: "Type", width: 0.12 },
+            { key: "name", label: "Name", width: 0.25 },
+            { key: "open", label: "Open", width: 0.13, align: "right" },
+            { key: "close", label: "Close", width: 0.13, align: "right" },
+            { key: "hours", label: "Run Hrs", width: 0.13, align: "right" },
+            { key: "used", label: "Prod", width: 0.10, align: "center" },
           ],
           hoursPdf.map((r) => {
             const noEntry = !r.has_daily_entry;
@@ -4759,8 +4755,6 @@ export default async function reportsRoutes(app) {
               asset: r.asset_code,
               type: compactCell(r.category ?? "", 12),
               name: r.asset_name ?? "",
-              prev_open: r.prev_opening_hours == null || r.prev_opening_hours === "" ? "—" : fmtHm(r.prev_opening_hours),
-              prev_close: r.prev_closing_hours == null || r.prev_closing_hours === "" ? "—" : fmtHm(r.prev_closing_hours),
               open: noEntry ? "—" : fmtHm(r.opening_hours),
               close: noEntry ? "—" : fmtHm(r.closing_hours),
               hours: fmtNum(r.hours_run, 1),
