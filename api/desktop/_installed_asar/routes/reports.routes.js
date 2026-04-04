@@ -629,7 +629,7 @@ export default async function reportsRoutes(app) {
       FROM work_orders w
       WHERE w.asset_id = ?
         AND w.closed_at IS NULL
-        AND TRIM(LOWER(COALESCE(w.status, ''))) NOT IN ('closed', 'completed', 'approved', 'cancelled', 'canceled')
+        AND TRIM(LOWER(COALESCE(w.status, ''))) IN ('open', 'in_progress')
         ${woF.sql}
       ORDER BY w.id DESC
       LIMIT 300
@@ -2819,7 +2819,7 @@ export default async function reportsRoutes(app) {
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
       WHERE w.closed_at IS NULL
-        AND TRIM(LOWER(COALESCE(w.status, ''))) NOT IN ('closed', 'completed', 'approved', 'cancelled', 'canceled')
+        AND TRIM(LOWER(COALESCE(w.status, ''))) IN ('open', 'in_progress')
       ORDER BY w.id DESC
       LIMIT 30
     `).all();
