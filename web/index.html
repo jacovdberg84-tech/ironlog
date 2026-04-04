@@ -1501,6 +1501,7 @@
                 <th align="left">Name</th>
                 <th align="left">Dept / workstation</th>
                 <th align="left">Role</th>
+                <th align="left">Locations</th>
                 <th align="left">Active</th>
                 <th align="left">Password set</th>
               </tr>
@@ -1516,6 +1517,7 @@
           <input id="adminPassword" class="w-140" type="password" placeholder="Password (if blank, keep)" autocomplete="new-password" />
           <input id="adminFullName" class="w-180" placeholder="Display name" />
           <input id="adminDepartment" class="w-180" placeholder="Department / PC name" />
+          <input id="adminAllowedLocations" class="w-220" placeholder="Allowed locations (csv, e.g. main,workshop)" />
           <label class="chk">Roles
             <select id="adminRoles" class="w-180" multiple size="5">
               <option value="admin">admin</option>
@@ -1529,6 +1531,10 @@
         <div class="row">
           <label class="chk">Sections (empty = role default)
             <select id="adminUserTabs" multiple size="8" class="w-200" style="vertical-align:top"></select>
+          </label>
+          <label class="chk" style="align-items:center;gap:6px">
+            <input id="adminIssueSetupCode" type="checkbox" checked />
+            Issue setup code (user creates own password)
           </label>
           <button type="button" id="saveAdminUserBtn">Save user</button>
         </div>
@@ -1739,6 +1745,12 @@
       </label>
       <label>Password
         <input id="loginPassword" class="minw-260" style="width:100%;max-width:320px" type="password" autocomplete="current-password" />
+      </label>
+      <label>Setup code (first-time only)
+        <input id="loginSetupCode" class="minw-260" style="width:100%;max-width:320px" autocomplete="one-time-code" placeholder="Only needed when password not set" />
+      </label>
+      <label>New password (for first-time setup)
+        <input id="loginNewPassword" class="minw-260" style="width:100%;max-width:320px" type="password" autocomplete="new-password" placeholder="6+ characters" />
       </label>
       <label class="chk" style="justify-content:flex-start;gap:8px;">
         <input id="loginRemember" type="checkbox" checked />

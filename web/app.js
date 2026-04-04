@@ -731,7 +731,10 @@ function applySessionFromMeUser(user) {
   const u = String(user.username || DEFAULT_USER).trim() || DEFAULT_USER;
   const r = String(user.role || DEFAULT_ROLE).trim().toLowerCase() || DEFAULT_ROLE;
   const roles = normalizeRoles(user.roles, r);
-  setSessionContext(u, r, getSessionSite(), roles);
+  const allowedLoc = Array.isArray(user.allowed_locations) ? user.allowed_locations.map((x) => String(x || "").trim().toLowerCase()).filter(Boolean) : [];
+  const currentSite = getSessionSite();
+  const nextSite = allowedLoc.length ? (allowedLoc.includes(currentSite) ? currentSite : allowedLoc[0]) : currentSite;
+  setSessionContext(u, r, nextSite, roles);
   if (user.allowed_tabs && Array.isArray(user.allowed_tabs) && user.allowed_tabs.length) {
     localStorage.setItem(TABS_OVERRIDE_KEY, JSON.stringify(user.allowed_tabs));
   } else {
@@ -766,6 +769,8 @@ async function tryInitialSession() {
 async function submitLoginForm() {
   const u = String(qs("loginUsername")?.value || "").trim();
   const p = String(qs("loginPassword")?.value || "");
+  const setupCode = String(qs("loginSetupCode")?.value || "").trim();
+  const setupPassword = String(qs("loginNewPassword")?.value || "").trim();
   const remember = qs("loginRemember")?.checked !== false;
   const errEl = qs("loginError");
   if (errEl) errEl.textContent = "";
@@ -781,6 +786,26 @@ async function submitLoginForm() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
+      if (data.error === "password_not_set") {
+        if (!setupCode || setupPassword.length < 6) {
+          if (errEl) errEl.textContent = "First-time setup: enter setup code and new password (6+ chars).";
+          return;
+        }
+        const setupRes = await fetch(`${API}/api/auth/setup-password`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: u, setup_code: setupCode, new_password: setupPassword }),
+        });
+        const setupData = await setupRes.json().catch(() => ({}));
+        if (!setupRes.ok) {
+          if (errEl) errEl.textContent = setupData.error || setupData.message || "Setup code failed.";
+          return;
+        }
+        if (qs("loginSetupCode")) qs("loginSetupCode").value = "";
+        if (qs("loginNewPassword")) qs("loginNewPassword").value = "";
+        if (errEl) errEl.textContent = "Password created. Please click Sign in again.";
+        return;
+      }
       if (errEl) errEl.textContent = data.message || data.error || "Login failed.";
       return;
     }
@@ -846,12 +871,17 @@ async function loadAdminUsers() {
     rows.forEach((r) => {
       const tr = document.createElement("tr");
       const rolesText = Array.isArray(r.roles) && r.roles.length ? r.roles.join(", ") : String(r.role || "operator");
-      tr.innerHTML = `<td>${escapeHtml(r.username)}</td><td>${escapeHtml(r.full_name || "")}</td><td>${escapeHtml(r.department || "")}</td><td>${escapeHtml(rolesText)}</td><td>${r.active ? "yes" : "no"}</td><td>${r.has_password ? "yes" : "no"}</td>`;
+      const locText = Array.isArray(r.allowed_locations) && r.allowed_locations.length ? r.allowed_locations.join(", ") : "all";
+      tr.innerHTML = `<td>${escapeHtml(r.username)}</td><td>${escapeHtml(r.full_name || "")}</td><td>${escapeHtml(r.department || "")}</td><td>${escapeHtml(rolesText)}</td><td>${escapeHtml(locText)}</td><td>${r.active ? "yes" : "no"}</td><td>${r.has_password ? "yes" : "no"}</td>`;
       tr.style.cursor = "pointer";
       tr.addEventListener("click", () => {
         if (qs("adminUsername")) qs("adminUsername").value = r.username;
         if (qs("adminFullName")) qs("adminFullName").value = r.full_name || "";
         if (qs("adminDepartment")) qs("adminDepartment").value = r.department || "";
+        if (qs("adminAllowedLocations")) {
+          const loc = Array.isArray(r.allowed_locations) ? r.allowed_locations.join(",") : "";
+          qs("adminAllowedLocations").value = loc;
+        }
         const rolesSel = qs("adminRoles");
         if (rolesSel) {
           const selectedRoles = Array.isArray(r.roles) && r.roles.length ? r.roles : [String(r.role || "operator")];
@@ -896,22 +926,39 @@ async function saveAdminUser() {
   const password = String(qs("adminPassword")?.value || "");
   const full_name = String(qs("adminFullName")?.value || "").trim();
   const department = String(qs("adminDepartment")?.value || "").trim();
+  const allowedLocationsRaw = String(qs("adminAllowedLocations")?.value || "").trim();
+  const issueSetup = qs("adminIssueSetupCode")?.checked !== false;
   const rolesSel = qs("adminRoles");
   const roles = rolesSel ? Array.from(rolesSel.selectedOptions).map((o) => String(o.value || "").trim().toLowerCase()).filter(Boolean) : [];
   if (!roles.length) return alert("Select at least one role.");
   const tabsSel = qs("adminUserTabs");
   const allowed_tabs = tabsSel ? Array.from(tabsSel.selectedOptions).map((o) => o.value) : [];
   if (!username) return alert("Username is required.");
-  const body = { username, full_name: full_name || null, department: department || null, roles, role: roles[0], allowed_tabs };
+  const body = {
+    username,
+    full_name: full_name || null,
+    department: department || null,
+    roles,
+    role: roles[0],
+    allowed_tabs,
+    allowed_locations: allowedLocationsRaw || null,
+    issue_setup_code: issueSetup,
+  };
   if (password) body.password = password;
   setStatus("Saving user…");
   try {
-    await fetchJson(`${API}/api/auth/users`, {
+    const saved = await fetchJson(`${API}/api/auth/users`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    setStatus("User saved.");
+    const pre = qs("adminUsersResult");
+    if (saved?.setup_code) {
+      if (pre) pre.textContent = `Setup code for ${username}: ${saved.setup_code}\nExpires: ${saved.setup_code_expires_at || "7 days"}`;
+      setStatus("User saved. Share setup code with user.");
+    } else {
+      setStatus("User saved.");
+    }
     await loadAdminUsers();
   } catch (e) {
     setStatus("Save user failed: " + (e.message || e));
@@ -3929,7 +3976,8 @@ async function loadCodePickers() {
       rows.forEach((l) => {
         const code = String(l.location_code || "").trim();
         if (!code) return;
-        const opt = document.createElement("option");
+        const locText = Array.isArray(r.allowed_locations) && r.allowed_locations.length ? r.allowed_locations.join(", ") : "all";
+        tr.innerHTML = `<td>${escapeHtml(r.username)}</td><td>${escapeHtml(r.full_name || "")}</td><td>${escapeHtml(r.department || "")}</td><td>${escapeHtml(rolesText)}</td><td>${escapeHtml(locText)}</td><td>${r.active ? "yes" : "no"}</td><td>${r.has_password ? "yes" : "no"}</td>`;
         opt.value = code;
         opt.textContent = `${code}${l.location_name ? ` - ${l.location_name}` : ""}`;
         locationList.appendChild(opt);
@@ -5137,7 +5185,6 @@ async function saveSiteZone() {
 async function saveSiteDailyEntry() {
   const payload = {
     op_date: (qs("opSiteDate")?.value || "").trim(),
-    shift: (qs("opSiteShift")?.value || "day").trim(),
     material_type: (qs("opSiteMaterial")?.value || "").trim(),
     zone_id: (qs("opSiteZone")?.value || "").trim() === "" ? undefined : Number(qs("opSiteZone")?.value || 0),
     planned_tonnage: (qs("opSitePlanned")?.value || "").trim() === "" ? undefined : Number(qs("opSitePlanned")?.value || 0),

@@ -70,6 +70,25 @@ function parseAllowedTabs(raw) {
   }
 }
 
+function parseAllowedLocations(raw) {
+  if (raw == null || raw === "") return null;
+  let arr = [];
+  if (Array.isArray(raw)) {
+    arr = raw;
+  } else {
+    arr = String(raw)
+      .split(",")
+      .map((x) => String(x || "").trim().toLowerCase())
+      .filter(Boolean);
+  }
+  const out = Array.from(new Set(arr));
+  return out.length ? out : null;
+}
+
+function issueSetupCode() {
+  return crypto.randomBytes(4).toString("hex").toUpperCase();
+}
+
 function parseRoles(raw, fallbackRole = "operator") {
   let arr = [];
   if (raw != null && raw !== "") {
@@ -120,6 +139,15 @@ export default async function authRoutes(app) {
   if (!hasColumn("users", "roles_json")) {
     db.prepare(`ALTER TABLE users ADD COLUMN roles_json TEXT`).run();
   }
+  if (!hasColumn("users", "allowed_locations")) {
+    db.prepare(`ALTER TABLE users ADD COLUMN allowed_locations TEXT`).run();
+  }
+  if (!hasColumn("users", "setup_code_hash")) {
+    db.prepare(`ALTER TABLE users ADD COLUMN setup_code_hash TEXT`).run();
+  }
+  if (!hasColumn("users", "setup_code_expires_at")) {
+    db.prepare(`ALTER TABLE users ADD COLUMN setup_code_expires_at TEXT`).run();
+  }
 
   db.prepare(`
     CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -143,7 +171,8 @@ export default async function authRoutes(app) {
   ensureAdmin.run();
 
   const getByUsername = db.prepare(`
-    SELECT id, username, full_name, role, active, created_at, password_hash, department, allowed_tabs, roles_json
+    SELECT id, username, full_name, role, active, created_at, password_hash, department, allowed_tabs, roles_json,
+      allowed_locations, setup_code_hash, setup_code_expires_at
     FROM users
     WHERE username = ?
   `);
@@ -197,6 +226,7 @@ export default async function authRoutes(app) {
       active: Number(row.active),
       department: row.department || null,
       allowed_tabs: parseAllowedTabs(row.allowed_tabs),
+      allowed_locations: parseAllowedLocations(row.allowed_locations),
       has_password: Boolean(row.password_hash && String(row.password_hash).length > 0),
     };
   }
@@ -225,7 +255,7 @@ export default async function authRoutes(app) {
     if (!row.password_hash) {
       return reply.code(403).send({
         error: "password_not_set",
-        message: "This account has no password yet. An admin must set one under User admin.",
+        message: "Password not set yet. Use your setup code to create your own password.",
       });
     }
     if (!verifyPassword(password, row.password_hash)) {
@@ -293,6 +323,7 @@ export default async function authRoutes(app) {
       .prepare(
         `
       SELECT id, username, full_name, role, active, created_at, department, allowed_tabs, roles_json,
+        allowed_locations,
         CASE WHEN password_hash IS NOT NULL AND length(trim(password_hash)) > 0 THEN 1 ELSE 0 END AS has_password
       FROM users
       ORDER BY username ASC
@@ -309,13 +340,14 @@ export default async function authRoutes(app) {
         created_at: r.created_at,
         department: r.department || null,
         allowed_tabs: parseAllowedTabs(r.allowed_tabs),
+        allowed_locations: parseAllowedLocations(r.allowed_locations),
         has_password: Number(r.has_password) === 1,
       }));
     return { ok: true, rows };
   });
 
   // POST /api/auth/users (admin only)
-  // Body: { username, full_name?, role?, roles?: string[], active?, password?, department?, allowed_tabs?: string[] }
+  // Body: { username, full_name?, role?, roles?: string[], active?, password?, department?, allowed_tabs?: string[], allowed_locations?: string[]|csv, issue_setup_code?: boolean }
   app.post("/users", async (req, reply) => {
     if (!requireAdmin(req, reply)) return;
     const body = req.body || {};
@@ -329,6 +361,11 @@ export default async function authRoutes(app) {
     const role = pickPrimaryRole(roles);
     const active = body.active === 0 || body.active === false ? 0 : 1;
     const password = String(body.password || "").trim();
+    const issueSetup = body.issue_setup_code === true || !password;
+    const allowedLocParsed = Object.prototype.hasOwnProperty.call(body, "allowed_locations")
+      ? parseAllowedLocations(body.allowed_locations)
+      : null;
+    const allowedLocStored = allowedLocParsed ? JSON.stringify(allowedLocParsed) : null;
 
     if (!username) return reply.code(400).send({ error: "username is required" });
     if (!roles.length) {
@@ -350,25 +387,82 @@ export default async function authRoutes(app) {
 
     db.prepare(
       `
-      INSERT INTO users (username, full_name, role, active, department, allowed_tabs, roles_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO users (username, full_name, role, active, department, allowed_tabs, roles_json, allowed_locations)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(username) DO UPDATE SET
         full_name = COALESCE(excluded.full_name, users.full_name),
         role = excluded.role,
         active = excluded.active,
         department = excluded.department,
         allowed_tabs = excluded.allowed_tabs,
-        roles_json = excluded.roles_json
+        roles_json = excluded.roles_json,
+        allowed_locations = excluded.allowed_locations
     `
-    ).run(username, full_name, role, active, department, tabsStored, JSON.stringify(roles));
+    ).run(username, full_name, role, active, department, tabsStored, JSON.stringify(roles), allowedLocStored);
 
     if (password) {
       const h = hashPassword(password);
-      db.prepare(`UPDATE users SET password_hash = ? WHERE username = ?`).run(h, username);
+      db.prepare(`UPDATE users SET password_hash = ?, setup_code_hash = NULL, setup_code_expires_at = NULL WHERE username = ?`).run(h, username);
+    }
+
+    let setup_code = null;
+    if (issueSetup) {
+      setup_code = issueSetupCode();
+      const codeHash = hashPassword(setup_code);
+      db.prepare(`
+        UPDATE users
+        SET setup_code_hash = ?, setup_code_expires_at = datetime('now', '+7 days')
+        WHERE username = ?
+      `).run(codeHash, username);
     }
 
     const user = getByUsername.get(username);
-    return { ok: true, user: userPayload(user) };
+    return {
+      ok: true,
+      user: userPayload(user),
+      setup_code,
+      setup_code_expires_at: setup_code ? user?.setup_code_expires_at || null : null,
+    };
+  });
+
+  // POST /api/auth/setup-password (first-time self-service)
+  // Body: { username, setup_code, new_password }
+  app.post("/setup-password", async (req, reply) => {
+    const body = req.body || {};
+    const username = String(body.username || "").trim();
+    const setupCode = String(body.setup_code || "").trim();
+    const newPassword = String(body.new_password || "").trim();
+
+    if (!username || !setupCode || !newPassword) {
+      return reply.code(400).send({ error: "username, setup_code and new_password are required" });
+    }
+    if (newPassword.length < 6) {
+      return reply.code(400).send({ error: "new_password must be at least 6 characters" });
+    }
+
+    const row = getByUsername.get(username);
+    if (!row || Number(row.active) !== 1) return reply.code(404).send({ error: "user not found" });
+    if (row.password_hash) return reply.code(409).send({ error: "password already set" });
+    if (!row.setup_code_hash) return reply.code(403).send({ error: "setup code not issued" });
+
+    const exp = String(row.setup_code_expires_at || "").trim();
+    const expOk = exp
+      ? Number(
+          db.prepare(`SELECT CASE WHEN datetime(?) > datetime('now') THEN 1 ELSE 0 END AS ok`).get(exp)?.ok || 0,
+        ) === 1
+      : false;
+    if (!expOk) return reply.code(403).send({ error: "setup code expired" });
+    if (!verifyPassword(setupCode, row.setup_code_hash)) {
+      return reply.code(403).send({ error: "invalid setup code" });
+    }
+
+    db.prepare(`
+      UPDATE users
+      SET password_hash = ?, setup_code_hash = NULL, setup_code_expires_at = NULL
+      WHERE username = ?
+    `).run(hashPassword(newPassword), username);
+
+    return { ok: true };
   });
 
   // POST /api/auth/change-password (logged-in user changes own password)
