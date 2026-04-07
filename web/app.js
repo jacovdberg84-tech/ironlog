@@ -2164,6 +2164,31 @@ async function refreshIronmindInsight() {
   }
 }
 
+async function askIronmindQuestion() {
+  const input = qs("ironmindAskInput");
+  const out = qs("ironmindAskResult");
+  const date = qs("date")?.value || todayLocalYmd();
+  const question = String(input?.value || "").trim();
+  if (!question) {
+    if (out) out.innerHTML = `<small class="muted">Type a question first.</small>`;
+    return;
+  }
+  if (out) out.innerHTML = `<small class="muted">Asking IRONMIND...</small>`;
+  try {
+    const res = await fetchJson(`${API}/api/ironmind/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, date }),
+    });
+    const short = String(res?.short_answer || "No answer returned.");
+    if (out) out.innerHTML = `<div>${escapeHtml(short)}</div>`;
+    setStatus("IRONMIND question answered.");
+  } catch (e) {
+    if (out) out.innerHTML = `<small class="muted">Question failed: ${escapeHtml(e.message || String(e))}</small>`;
+    setStatus("IRONMIND ask error: " + (e.message || e));
+  }
+}
+
 function parseIronmindSections(text) {
   const defs = [
     { key: "repairs", name: "Repairs Needed" },
@@ -7191,6 +7216,15 @@ async function init() {
   qs("ironmindRefreshBtn")?.addEventListener("click", () =>
     refreshIronmindInsight().catch((e) => setStatus("IRONMIND refresh error: " + e.message))
   );
+  qs("ironmindAskBtn")?.addEventListener("click", () =>
+    askIronmindQuestion().catch((e) => setStatus("IRONMIND ask error: " + e.message))
+  );
+  qs("ironmindAskInput")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      askIronmindQuestion().catch((err) => setStatus("IRONMIND ask error: " + err.message));
+    }
+  });
   qs("saveThresholds")?.addEventListener("click", () => saveThresholdsFromUI());
   qs("ironmindSummary")?.addEventListener("click", (e) => {
     const el = e.target instanceof HTMLElement ? e.target : null;
