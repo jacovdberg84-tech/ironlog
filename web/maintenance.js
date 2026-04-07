@@ -365,12 +365,35 @@ async function loadDue() {
   }
 }
 
-function openUpcomingServicesPdf(download = false) {
+async function openUpcomingServicesPdf(download = false) {
   const nearDueHours = getDueThresholdHours();
   const q = new URLSearchParams();
   q.set("near_due_hours", String(nearDueHours));
-  if (download) q.set("download", "1");
-  window.open(`${API}/maintenance/due-upcoming.pdf?${q.toString()}`, "_blank");
+  const url = `${API}/maintenance/due-upcoming.pdf?${q.toString()}`;
+  try {
+    const res = await fetch(url, { headers: authHeaders() });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(t || `PDF request failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    if (download) {
+      const a = document.createElement("a");
+      const dateTag = new Date().toISOString().slice(0, 10);
+      a.href = blobUrl;
+      a.download = `maintenance-upcoming-services-${dateTag}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
+      return;
+    }
+    window.open(blobUrl, "_blank");
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
+  } catch (err) {
+    alert(`Could not open PDF: ${err.message || err}`);
+  }
 }
 
 function getDueThresholdHours() {
