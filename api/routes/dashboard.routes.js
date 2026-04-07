@@ -138,7 +138,13 @@ export default async function dashboardRoutes(app) {
       a.category,
       COALESCE(NULLIF(TRIM(dh.input_unit), ''), '') AS input_unit,
       COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
-        WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%' OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
+        WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
+          OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
+          OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
+          OR LOWER(COALESCE(a.category, '')) LIKE '%pickup%'
+          OR LOWER(COALESCE(a.category, '')) LIKE '%bakkie%'
+          OR LOWER(COALESCE(a.asset_code, '')) LIKE 'ldv%'
+          OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
           THEN 'km'
         ELSE 'hours'
       END) AS utilization_mode,
@@ -1279,7 +1285,13 @@ export default async function dashboardRoutes(app) {
           COALESCE(a.baseline_fuel_l_per_hour, 5.0) AS baseline_fuel_l_per_hour,
           COALESCE(a.baseline_fuel_km_per_l, 2.0) AS baseline_fuel_km_per_l,
           COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
-            WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%' OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
+            WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
+              OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
+              OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
+              OR LOWER(COALESCE(a.category, '')) LIKE '%pickup%'
+              OR LOWER(COALESCE(a.category, '')) LIKE '%bakkie%'
+              OR LOWER(COALESCE(a.asset_code, '')) LIKE 'ldv%'
+              OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
               THEN 'km'
             ELSE 'hours'
           END) AS metric_mode
@@ -1298,7 +1310,13 @@ export default async function dashboardRoutes(app) {
         COALESCE(a.baseline_fuel_l_per_hour, 5.0) AS baseline_fuel_l_per_hour,
         COALESCE(a.baseline_fuel_km_per_l, 2.0) AS baseline_fuel_km_per_l,
         COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
-          WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%' OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
+          WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
+            OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
+            OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
+            OR LOWER(COALESCE(a.category, '')) LIKE '%pickup%'
+            OR LOWER(COALESCE(a.category, '')) LIKE '%bakkie%'
+            OR LOWER(COALESCE(a.asset_code, '')) LIKE 'ldv%'
+            OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
             THEN 'km'
           ELSE 'hours'
         END) AS metric_mode
@@ -1400,7 +1418,13 @@ export default async function dashboardRoutes(app) {
         a.asset_name,
         a.category,
         COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
-          WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%' OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
+          WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
+            OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
+            OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
+            OR LOWER(COALESCE(a.category, '')) LIKE '%pickup%'
+            OR LOWER(COALESCE(a.category, '')) LIKE '%bakkie%'
+            OR LOWER(COALESCE(a.asset_code, '')) LIKE 'ldv%'
+            OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
             THEN 'km'
           ELSE 'hours'
         END) AS metric_mode,
@@ -1624,7 +1648,13 @@ export default async function dashboardRoutes(app) {
           COALESCE(fl.hours_run, -1) AS hours_run,
           COALESCE(TRIM(fl.source), '') AS source,
           COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
-            WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%' OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
+            WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
+              OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
+              OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
+              OR LOWER(COALESCE(a.category, '')) LIKE '%pickup%'
+              OR LOWER(COALESCE(a.category, '')) LIKE '%bakkie%'
+              OR LOWER(COALESCE(a.asset_code, '')) LIKE 'ldv%'
+              OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
               THEN 'km'
             ELSE 'hours'
           END) AS metric_mode
