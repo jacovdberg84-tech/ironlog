@@ -6190,7 +6190,6 @@ function validateDailyRows() {
         r.closing_hours = r.opening_hours;
         r.hours_run = 0;
       }
-      r.is_used = true;
       continue;
     }
 
@@ -6444,7 +6443,6 @@ function renderDailyTable() {
       r.is_down = chkDown.checked;
 
       if (r.is_down) {
-        r.is_used = true;
         if (r.opening_hours != null) r.closing_hours = r.opening_hours;
         r.hours_run = 0;
         if (r.down_hours == null) r.down_hours = Number(r.scheduled_hours || 0);
@@ -6694,7 +6692,6 @@ async function loadDailyInput() {
     if (bd) {
       row.is_down = true;
       row.down_lock = true;
-      row.is_used = true;
       row.down_reason = parseDownReasonFromDesc(bd.description);
         row.lock_wo_status = bd.primary_work_order_status || "";
       const downForDate = Number(bd.hours_down_for_date);
@@ -6828,7 +6825,6 @@ renderDailyTable(); // re-render so errorRow highlighting appears
     if (r.is_down && r.opening_hours != null) {
       r.closing_hours = r.opening_hours;
       r.hours_run = 0;
-      r.is_used = true;
     }
 
     const payload = {
