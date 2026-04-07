@@ -253,7 +253,6 @@ function kpiDaily(date, scheduled) {
     JOIN assets a ON a.id = dh.asset_id
     WHERE dh.work_date = ?
       AND dh.is_used = 1
-      AND dh.hours_run > 0
       AND a.active = 1
       AND a.is_standby = 0
   `).get(date);
@@ -267,7 +266,6 @@ function kpiDaily(date, scheduled) {
     JOIN assets a ON a.id = dh.asset_id
     WHERE dh.work_date = ?
       AND dh.is_used = 1
-      AND dh.hours_run > 0
       AND a.active = 1
       AND a.is_standby = 0
   `).get(date);
@@ -297,7 +295,6 @@ function kpiDaily(date, scheduled) {
             FROM daily_hours dh
             WHERE dh.work_date = ?
               AND dh.is_used = 1
-              AND dh.hours_run > 0
           )
       `).get(date, date);
       downtime_hours = Number(dtRow?.downtime_hours || 0);
@@ -317,7 +314,6 @@ function kpiDaily(date, scheduled) {
           FROM daily_hours dh
           WHERE dh.work_date = ?
             AND dh.is_used = 1
-            AND dh.hours_run > 0
         )
     `).get(date, date);
     downtime_hours = Number(dtRow?.downtime_hours || 0);

@@ -159,6 +159,18 @@ export default async function dashboardRoutes(app) {
       AND a.is_standby = 0
     GROUP BY b.asset_id
   `);
+  const breakdownDowntimeCol = getBreakdownDowntimeColumn();
+  const getDayAssetDowntimeFallback = db.prepare(`
+    SELECT
+      b.asset_id,
+      COALESCE(SUM(COALESCE(b.${breakdownDowntimeCol}, 0)), 0) AS downtime_hours
+    FROM breakdowns b
+    JOIN assets a ON a.id = b.asset_id
+    WHERE b.breakdown_date = ?
+      AND a.active = 1
+      AND a.is_standby = 0
+    GROUP BY b.asset_id
+  `);
 
   // Downtime reasons summary (from downtime log notes)
   const getDowntimeReasons = db.prepare(`
@@ -184,7 +196,10 @@ export default async function dashboardRoutes(app) {
   function computeFleetKpiForDay(dayStr, scheduledFallback, opts = {}) {
     const includePerAsset = Boolean(opts.includePerAsset);
     const assetRows = getDayAssetHours.all(dayStr);
-    const downtimeRows = getDayAssetDowntime.all(dayStr);
+    const logDowntimeRows = getDayAssetDowntime.all(dayStr);
+    const downtimeRows = logDowntimeRows.length
+      ? logDowntimeRows
+      : getDayAssetDowntimeFallback.all(dayStr);
     const downtimeByAsset = new Map(
       downtimeRows.map((r) => [Number(r.asset_id || 0), Number(r.downtime_hours || 0)])
     );
