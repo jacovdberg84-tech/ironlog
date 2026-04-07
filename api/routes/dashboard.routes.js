@@ -172,6 +172,15 @@ export default async function dashboardRoutes(app) {
       AND a.is_standby = 0
     GROUP BY b.asset_id
   `);
+  const getOpenBreakdownAssetIdsByDay = db.prepare(`
+    SELECT DISTINCT b.asset_id
+    FROM breakdowns b
+    JOIN assets a ON a.id = b.asset_id
+    WHERE b.status = 'OPEN'
+      AND b.breakdown_date <= ?
+      AND a.active = 1
+      AND a.is_standby = 0
+  `);
   const breakdownDowntimeCol = getBreakdownDowntimeColumn();
   const getDayAssetDowntimeFallback = db.prepare(`
     SELECT
@@ -216,6 +225,9 @@ export default async function dashboardRoutes(app) {
     const downtimeByAsset = new Map(
       downtimeRows.map((r) => [Number(r.asset_id || 0), Number(r.downtime_hours || 0)])
     );
+    const openBreakdownAssets = new Set(
+      getOpenBreakdownAssetIdsByDay.all(dayStr).map((r) => Number(r.asset_id || 0))
+    );
     const assetIdsInHours = new Set(assetRows.map((r) => Number(r.asset_id || 0)));
 
     let scheduled_hours = 0;
@@ -238,7 +250,10 @@ export default async function dashboardRoutes(app) {
       const mode = rowUnit === "km" ? "km" : String(r.utilization_mode || "hours").toLowerCase();
       const kmPerHour = Math.max(0.1, Number(r.km_per_hour_factor || 10));
       const run = mode === "km" ? (runRaw / kmPerHour) : runRaw;
-      const loggedDown = Math.max(0, Number(downtimeByAsset.get(assetId) || 0));
+      const loggedDownRaw = Math.max(0, Number(downtimeByAsset.get(assetId) || 0));
+      const loggedDown = loggedDownRaw > 0
+        ? loggedDownRaw
+        : (openBreakdownAssets.has(assetId) ? scheduled : 0);
       const cappedDown = Math.min(loggedDown, scheduled);
       const contributes_to_kpi = true;
       const runEff = Math.min(run, scheduled);
@@ -285,7 +300,10 @@ export default async function dashboardRoutes(app) {
       for (const a of extraAssets) {
         const assetId = Number(a.asset_id || 0);
         const scheduled = Math.max(0, Number(scheduledFallback || 0));
-        const loggedDown = Math.max(0, Number(downtimeByAsset.get(assetId) || 0));
+        const loggedDownRaw = Math.max(0, Number(downtimeByAsset.get(assetId) || 0));
+        const loggedDown = loggedDownRaw > 0
+          ? loggedDownRaw
+          : (openBreakdownAssets.has(assetId) ? scheduled : 0);
         const cappedDown = Math.min(loggedDown, scheduled);
         const cat = String(a.category || "");
         const mode = String(a.utilization_mode || "").trim()

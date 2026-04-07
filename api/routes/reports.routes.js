@@ -279,40 +279,38 @@ function kpiDaily(date, scheduled) {
 
   const run_hours = Number(runRow.run_hours || 0);
 
-  let downtime_hours = 0;
-  if (hasBreakdownDowntimeLogsTable()) {
-    const logsCountRow = db.prepare(`
-      SELECT COUNT(*) AS n
-      FROM breakdown_downtime_logs
-      WHERE log_date = ?
-    `).get(date);
-    const hasDailyDowntimeLogs = Number(logsCountRow?.n || 0) > 0;
-
-    if (hasDailyDowntimeLogs) {
-      const dtRow = db.prepare(`
-        SELECT IFNULL(SUM(l.hours_down), 0) AS downtime_hours
+  const dtLogsRow = db.prepare(`
+    SELECT IFNULL(SUM(l.hours_down), 0) AS downtime_hours
+    FROM breakdown_downtime_logs l
+    JOIN breakdowns b ON b.id = l.breakdown_id
+    JOIN assets a ON a.id = b.asset_id
+    WHERE l.log_date = ?
+      AND a.active = 1
+      AND a.is_standby = 0
+  `).get(date);
+  let downtime_hours = Number(dtLogsRow?.downtime_hours || 0);
+  const openNoLogRow = db.prepare(`
+    SELECT IFNULL(SUM(
+      CASE
+        WHEN COALESCE(dh.scheduled_hours, 0) > 0 THEN dh.scheduled_hours
+        ELSE ?
+      END
+    ), 0) AS assumed_down_hours
+    FROM breakdowns b
+    JOIN assets a ON a.id = b.asset_id
+    LEFT JOIN daily_hours dh ON dh.asset_id = b.asset_id AND dh.work_date = ?
+    WHERE b.status = 'OPEN'
+      AND b.breakdown_date <= ?
+      AND a.active = 1
+      AND a.is_standby = 0
+      AND NOT EXISTS (
+        SELECT 1
         FROM breakdown_downtime_logs l
-        JOIN breakdowns b ON b.id = l.breakdown_id
-        JOIN assets a ON a.id = b.asset_id
-        WHERE l.log_date = ?
-          AND a.active = 1
-          AND a.is_standby = 0
-      `).get(date);
-      downtime_hours = Number(dtRow?.downtime_hours || 0);
-    }
-  }
-  if (downtime_hours <= 0) {
-    const dtCol = getBreakdownDowntimeColumn();
-    const dtRow = db.prepare(`
-      SELECT IFNULL(SUM(COALESCE(b.${dtCol}, 0)), 0) AS downtime_hours
-      FROM breakdowns b
-      JOIN assets a ON a.id = b.asset_id
-      WHERE b.breakdown_date = ?
-        AND a.active = 1
-        AND a.is_standby = 0
-    `).get(date);
-    downtime_hours = Number(dtRow?.downtime_hours || 0);
-  }
+        WHERE l.breakdown_id = b.id
+          AND l.log_date = ?
+      )
+  `).get(Number(scheduled || 0), date, date, date);
+  downtime_hours += Number(openNoLogRow?.assumed_down_hours || 0);
 
   const availability = available_hours > 0 ? ((available_hours - downtime_hours) / available_hours) * 100 : null;
   const utilization = available_hours > 0 ? (run_hours / available_hours) * 100 : null;

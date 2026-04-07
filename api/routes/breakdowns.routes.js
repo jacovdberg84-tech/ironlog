@@ -97,9 +97,33 @@ export default async function breakdownRoutes(app) {
       b.id,
       b.asset_id,
       a.asset_code,
+      b.breakdown_date,
       b.description,
       b.primary_work_order_id,
       wo.status AS primary_work_order_status
+    FROM breakdowns b
+    JOIN assets a ON a.id = b.asset_id
+    LEFT JOIN work_orders wo ON wo.id = b.primary_work_order_id
+    WHERE b.status = 'OPEN'
+      AND (wo.status IS NULL OR wo.status NOT IN ('completed','approved','closed'))
+    ORDER BY b.id DESC
+    LIMIT 500
+  `);
+  const listOpenBreakdownsAllForDate = db.prepare(`
+    SELECT
+      b.id,
+      b.asset_id,
+      a.asset_code,
+      b.breakdown_date,
+      b.description,
+      b.primary_work_order_id,
+      wo.status AS primary_work_order_status,
+      COALESCE((
+        SELECT SUM(l.hours_down)
+        FROM breakdown_downtime_logs l
+        WHERE l.breakdown_id = b.id
+          AND l.log_date = ?
+      ), 0) AS hours_down_for_date
     FROM breakdowns b
     JOIN assets a ON a.id = b.asset_id
     LEFT JOIN work_orders wo ON wo.id = b.primary_work_order_id
@@ -382,7 +406,10 @@ export default async function breakdownRoutes(app) {
   // GET /api/breakdowns/open-all
   // ---------------------------
   app.get("/open-all", async (req, reply) => {
-    const rows = listOpenBreakdownsAll.all();
+    const date = String(req.query?.date || "").trim();
+    const rows = isDate(date)
+      ? listOpenBreakdownsAllForDate.all(date)
+      : listOpenBreakdownsAll.all();
     return { ok: true, rows: rows.map((r) => ({ ...r })) };
   });
 

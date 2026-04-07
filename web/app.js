@@ -6528,7 +6528,7 @@ async function loadDailyInput() {
 
   let openBreakdownByAsset = new Map();
   try {
-    const openData = await fetchJson(`${API}/api/breakdowns/open-all`);
+    const openData = await fetchJson(`${API}/api/breakdowns/open-all?date=${encodeURIComponent(date)}`);
     const rows = Array.isArray(openData?.rows) ? openData.rows : [];
     for (const bd of rows) {
       const code = String(bd.asset_code || "").trim();
@@ -6628,7 +6628,10 @@ async function loadDailyInput() {
       row.is_used = true;
       row.down_reason = parseDownReasonFromDesc(bd.description);
         row.lock_wo_status = bd.primary_work_order_status || "";
-      row.down_hours = Number(row.scheduled_hours || 0);
+      const downForDate = Number(bd.hours_down_for_date);
+      row.down_hours = Number.isFinite(downForDate) && downForDate >= 0
+        ? downForDate
+        : Number(row.scheduled_hours || 0);
       if (row.opening_hours != null) {
         row.closing_hours = row.opening_hours;
         row.hours_run = 0;
@@ -6679,6 +6682,7 @@ async function copyYesterdayToToday() {
     }
 
     r.scheduled_hours = toNum(yr.scheduled_hours) ?? r.scheduled_hours ?? 0;
+    r.input_unit = String(yr.input_unit || r.input_unit || "hours").toLowerCase() === "km" ? "km" : "hours";
 
     const yClose = toNum(yr.closing_hours);
     if (yClose != null) r.opening_hours = yClose;
