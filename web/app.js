@@ -6323,11 +6323,11 @@ function renderDailyTable() {
     tdP.className = "toggle";
 
     const prodWrap = document.createElement("label");
-    prodWrap.className = "prodToggle" + (r.is_down ? " prodDim" : "");
+    prodWrap.className = "prodToggle";
     const chkProd = document.createElement("input");
     chkProd.type = "checkbox";
     chkProd.checked = !!r.is_used;
-    chkProd.disabled = r.is_master_standby || r.is_down;
+    chkProd.disabled = r.is_master_standby;
     const prodTxt = document.createElement("span");
     prodTxt.textContent = "PROD";
     prodWrap.appendChild(chkProd);
