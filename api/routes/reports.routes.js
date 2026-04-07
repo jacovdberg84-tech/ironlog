@@ -1665,7 +1665,14 @@ export default async function reportsRoutes(app) {
         a.asset_name,
         a.category,
         COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
-          WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%' OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
+          WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
+            OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
+            OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
+            OR LOWER(COALESCE(a.category, '')) LIKE '%pickup%'
+            OR LOWER(COALESCE(a.category, '')) LIKE '%bakkie%'
+            OR LOWER(COALESCE(a.asset_code, '')) LIKE 'ldv%'
+            OR UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM'
+            OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
             THEN 'km'
           ELSE 'hours'
         END) AS metric_mode,
