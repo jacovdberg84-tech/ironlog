@@ -38,8 +38,16 @@ export default async function ironmindRoutes(app) {
       const reportDate = String(body.report_date || "").trim() || undefined;
       const reportType = String(body.report_type || "daily_admin").trim() || "daily_admin";
       const force = toBool(body.force);
+      const contextNotes = String(body.context_notes || "").trim();
+      const detailMode = toBool(body.detail_mode);
 
-      const report = await generateIronmindReport({ reportDate, reportType, force });
+      const report = await generateIronmindReport({
+        reportDate,
+        reportType,
+        force,
+        contextNotes: contextNotes || undefined,
+        detailMode,
+      });
       return reply.send({ ok: true, report });
     } catch (err) {
       req.log.error(err);

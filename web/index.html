@@ -146,6 +146,18 @@
           <button id="ironmindRefreshBtn">Refresh Insight</button>
           <small class="muted" id="ironmindMeta">No report loaded yet.</small>
         </div>
+        <div class="row stack-6">
+          <textarea
+            id="ironmindContext"
+            class="ironmind-context"
+            rows="4"
+            placeholder="Optional extra context for IRONMIND (weather, incidents, priorities, planned constraints)..."
+          ></textarea>
+          <label class="chk">
+            <input id="ironmindDetailMode" type="checkbox" />
+            More detailed insight
+          </label>
+        </div>
         <div class="output ironmind-body" id="ironmindSummary">
           <small class="muted">Loading IRONMIND insight...</small>
         </div>

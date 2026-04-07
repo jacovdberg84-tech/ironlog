@@ -266,6 +266,7 @@ select, input{
 .ironmind-history-meta{font-size:12px; color:var(--muted);}
 .ironmind-history-preview{font-size:12px; color:var(--text); opacity:.9;}
 .ironmind-history-preview.missing{color:var(--muted); font-style:italic;}
+.ironmind-context{width:100%; min-height:96px; resize:vertical;}
 .kpi-alert-banner{margin:8px 0 0; display:flex; flex-direction:column; gap:6px;}
 .kpi-alert-item{display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:10px; font-size:13px;}
 .kpi-alert-crit{background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.35); color:#f87171;}

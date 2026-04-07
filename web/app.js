@@ -2141,13 +2141,20 @@ async function loadIronmindHistory(options = {}) {
 
 async function refreshIronmindInsight() {
   const btn = qs("ironmindRefreshBtn");
+  const contextNotes = String(qs("ironmindContext")?.value || "").trim();
+  const detailMode = Boolean(qs("ironmindDetailMode")?.checked);
   if (btn) btn.disabled = true;
   setStatus("Refreshing IRONMIND insight...");
   try {
     await fetchJson(`${API}/api/ironmind/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ force: true, report_type: "daily_admin" }),
+      body: JSON.stringify({
+        force: true,
+        report_type: "daily_admin",
+        context_notes: contextNotes || undefined,
+        detail_mode: detailMode,
+      }),
     });
     await loadIronmindInsight({ silent: true });
     await loadIronmindHistory({ silent: true });

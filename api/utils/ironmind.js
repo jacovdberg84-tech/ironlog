@@ -181,9 +181,11 @@ function parseJsonObject(text) {
   }
 }
 
-async function callIronmindAi(structuredData) {
+async function callIronmindAi(structuredData, opts = {}) {
   const cfg = getAiConfig();
   if (!cfg.provider) return null;
+  const contextNotes = String(opts.contextNotes || "").trim();
+  const detailMode = Boolean(opts.detailMode);
 
   const systemPrompt = [
     "You are IRONMIND, the operational intelligence layer for IRONLOG.",
@@ -196,10 +198,12 @@ async function callIronmindAi(structuredData) {
     "- No motivational language.",
     "- No chit-chat.",
     "- Respond as JSON only with keys: repairs_needed, operational_risks, suggestions, data_gaps.",
-    "- Each key must be an array of short strings.",
+    detailMode
+      ? "- Each key should contain 4-8 concise but specific bullets with asset codes, magnitudes, and action intent where possible."
+      : "- Each key must be an array of short strings.",
   ].join("\n");
-
-  const userPrompt = `Structured plant data for report date ${structuredData.report_date}:\n${JSON.stringify(structuredData, null, 2)}`;
+  const contextBlock = contextNotes ? `\n\nAdditional operator context:\n${contextNotes}` : "";
+  const userPrompt = `Structured plant data for report date ${structuredData.report_date}:\n${JSON.stringify(structuredData, null, 2)}${contextBlock}`;
 
   try {
     if (cfg.provider === "openai") {
@@ -421,7 +425,13 @@ function buildStructuredData(reportDate) {
   };
 }
 
-export async function generateIronmindReport({ reportDate, reportType = "daily_admin", force = false }) {
+export async function generateIronmindReport({
+  reportDate,
+  reportType = "daily_admin",
+  force = false,
+  contextNotes = "",
+  detailMode = false,
+}) {
   ensureIronmindTable();
 
   const targetDate = String(reportDate || ymdOffsetFromNow(1)).trim();
@@ -448,7 +458,7 @@ export async function generateIronmindReport({ reportDate, reportType = "daily_a
   }
 
   const structuredData = buildStructuredData(targetDate);
-  const aiJson = await callIronmindAi(structuredData);
+  const aiJson = await callIronmindAi(structuredData, { contextNotes, detailMode });
 
   const parsed = aiJson && typeof aiJson === "object"
     ? {
