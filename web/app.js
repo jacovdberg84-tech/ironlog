@@ -1384,12 +1384,20 @@ function item(html) {
   return d;
 }
 function setSpeedo(needleEl, valEl, pct, opts) {
-  if (!needleEl || !valEl) return;
+  if (!valEl) return;
 
-  const face = needleEl.parentElement; // .speedo-face
+  const face = needleEl ? needleEl.parentElement : null; // .speedo-face
   const clearKpiClasses = (el) => {
     if (!el) return;
     el.classList.remove("kpi-good", "kpi-warn", "kpi-bad");
+  };
+  const barFill =
+    valEl.id === "gAvailVal"
+      ? qs("gAvailBarFill")
+      : (valEl.id === "gUtilVal" ? qs("gUtilBarFill") : null);
+  const clearBarClasses = () => {
+    if (!barFill) return;
+    barFill.classList.remove("kpi-good", "kpi-warn", "kpi-bad");
   };
 
   // --- Ensure item() exists (used by dashboard lists) ---
@@ -1404,8 +1412,9 @@ function item(html) {
   if (pct == null || Number.isNaN(pct)) {
     clearKpiClasses(needleEl);
     clearKpiClasses(face);
-
-    needleEl.style.transform = "translateX(-50%) rotate(-90deg)";
+    clearBarClasses();
+    if (barFill) barFill.style.width = "0%";
+    if (needleEl) needleEl.style.transform = "translateX(-50%) rotate(-90deg)";
     valEl.textContent = "N/A";
     return;
   }
@@ -1423,18 +1432,23 @@ function item(html) {
 
   clearKpiClasses(needleEl);
   clearKpiClasses(face);
-  needleEl.classList.add(kpiClass);
+  if (needleEl) needleEl.classList.add(kpiClass);
   if (face) face.classList.add(kpiClass);
+  clearBarClasses();
+  if (barFill) {
+    barFill.classList.add(kpiClass);
+    barFill.style.width = `${clamped.toFixed(2)}%`;
+  }
 
   // Needle sweep on first render (per needle)
-  if (!needleEl.dataset.swept) {
+  if (needleEl && !needleEl.dataset.swept) {
     needleEl.dataset.swept = "1";
     needleEl.style.transform = "translateX(-50%) rotate(-90deg)";
     // next frame -> sweep to target
     requestAnimationFrame(() => {
       needleEl.style.transform = `translateX(-50%) rotate(${deg}deg)`;
     });
-  } else {
+  } else if (needleEl) {
     needleEl.style.transform = `translateX(-50%) rotate(${deg}deg)`;
   }
 

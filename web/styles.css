@@ -28,6 +28,23 @@
   color: var(--accent);
   margin-bottom: 4px;
 }
+.metric-progress{
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+  margin: 6px 0 8px;
+}
+.metric-progress-fill{
+  height: 100%;
+  width: 0%;
+  background: #9ca3af;
+  transition: width 220ms ease;
+}
+.metric-progress-fill.kpi-good{ background: #16a34a; }
+.metric-progress-fill.kpi-warn{ background: #f59e0b; }
+.metric-progress-fill.kpi-bad{ background: #dc2626; }
 .metric-label {
   font-size: 1rem;
   color: var(--muted);
