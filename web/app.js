@@ -2645,6 +2645,21 @@ async function loadFuelBenchmark() {
 
   const list = qs("fuelBenchmarkList");
   if (list) {
+    const isRowFlagged = (r) => {
+      const mode = String(r?.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
+      if (mode === "km") {
+        const actual = Number(r?.actual_km_per_l);
+        const benchmark = Number(r?.oem_km_per_l);
+        if (!Number.isFinite(actual) || actual <= 0) return false; // no entries -> OK
+        if (!Number.isFinite(benchmark) || benchmark <= 0) return false;
+        return actual < benchmark;
+      }
+      const actual = Number(r?.actual_lph);
+      const benchmark = Number(r?.oem_lph);
+      if (!Number.isFinite(actual) || actual <= 0) return false; // no entries -> OK
+      if (!Number.isFinite(benchmark) || benchmark <= 0) return false;
+      return actual > benchmark;
+    };
     list.innerHTML = "";
     (data.rows || []).forEach((r) => {
       if (duplicatesOnly) {
@@ -2663,7 +2678,7 @@ async function loadFuelBenchmark() {
         return;
       }
       const isKm = String(r.metric_mode || "hours") === "km";
-      const flag = r.is_excessive
+      const flag = isRowFlagged(r)
         ? `<span class='pill red'>${isKm ? "UNDER BENCHMARK" : "EXCESSIVE"}</span>`
         : "<span class='pill blue'>OK</span>";
       const machineKey = String(r.asset_code || "").replace(/[^A-Za-z0-9_-]/g, "_");
@@ -2826,10 +2841,25 @@ async function loadFuelMachineDailyInline(assetCode, mountEl) {
   const rows = Array.isArray(data.rows) ? data.rows : [];
   mountEl.setAttribute("data-code", String(assetCode));
   const mode = String(data.summary?.metric_mode || "hours");
+  const isInlineFlagged = (r) => {
+    if (mode === "km") {
+      const actual = Number(r?.actual_km_per_l);
+      const benchmark = Number(r?.oem_km_per_l);
+      if (!Number.isFinite(actual) || actual <= 0) return false; // no entries -> OK
+      if (!Number.isFinite(benchmark) || benchmark <= 0) return false;
+      return actual < benchmark;
+    }
+    const actual = Number(r?.actual_lph);
+    const benchmark = Number(r?.oem_lph);
+    if (!Number.isFinite(actual) || actual <= 0) return false; // no entries -> OK
+    if (!Number.isFinite(benchmark) || benchmark <= 0) return false;
+    return actual > benchmark;
+  };
   const top = `<div class="fuel-inline-summary"><small><b>Fill days:</b> ${Number(data.summary?.days || 0)} | <b>Fuel:</b> ${Number(data.summary?.fuel_liters || 0).toFixed(2)}L | <b>Fill ${mode === "km" ? "distance" : "hours"}:</b> ${Number(mode === "km" ? (data.summary?.km_run || 0) : (data.summary?.hours_run || 0)).toFixed(2)} | <b>Avg:</b> ${mode === "km" ? (data.summary?.avg_km_per_l == null ? "-" : Number(data.summary.avg_km_per_l).toFixed(3) + " km/L") : (data.summary?.avg_lph == null ? "-" : Number(data.summary.avg_lph).toFixed(3) + " L/hr")} | <b>${mode === "km" ? "Under benchmark days" : "Over benchmark days"}:</b> ${Number(data.summary?.excessive_days || 0)}</small></div>`;
   const tableRows = rows.map((r) => {
-    const statusClass = r.is_excessive ? "fh-status-excessive" : "fh-status-ok";
-    const statusText = r.is_excessive ? (mode === "km" ? "UNDER BENCHMARK" : "EXCESSIVE") : "OK";
+    const flagged = isInlineFlagged(r);
+    const statusClass = flagged ? "fh-status-excessive" : "fh-status-ok";
+    const statusText = flagged ? (mode === "km" ? "UNDER BENCHMARK" : "EXCESSIVE") : "OK";
     return (
       `<tr>` +
       `<td class="fh-col-date">${r.log_date}</td>` +
