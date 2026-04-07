@@ -2794,6 +2794,8 @@ async function deleteFuelLogEntry(logId) {
 
 async function loadStockMonitor() {
   const filter = (qs("stockPartFilter")?.value || "").trim();
+  const page = window.stockMonitorPage || 1;
+  const pageSize = 20;
   const q = filter ? `?part_code=${encodeURIComponent(filter)}` : "";
   const data = await fetchJson(`${API}/api/stock/monitor${q}`);
 
@@ -2804,7 +2806,10 @@ async function loadStockMonitor() {
   const list = qs("stockMonitorList");
   if (!list) return;
   list.innerHTML = "";
-  (data.rows || []).slice(0, 20).forEach((r) => {
+  const rows = data.rows || [];
+  const start = (page - 1) * pageSize;
+  const end = start + pageSize;
+  rows.slice(start, end).forEach((r) => {
     list.appendChild(
       item(
         `<b>${r.part_code}</b> – ${Number(r.on_hand || 0).toFixed(1)} on hand ${
@@ -2813,8 +2818,51 @@ async function loadStockMonitor() {
       )
     );
   });
-  if (!data.rows?.length) list.appendChild(item("<small>No parts found for current filter.</small>"));
+  if (!rows.length) list.appendChild(item("<small>No parts found for current filter.</small>"));
+
+  // Update paging info
+  const pageInfo = qs("stockPageInfo");
+  if (pageInfo) {
+    const total = rows.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    pageInfo.textContent = `Page ${page} of ${totalPages}`;
+  }
 }
+
+// Paging controls
+window.stockMonitorPage = 1;
+function updateStockMonitorPage(delta) {
+  const rows = window.lastStockMonitorRows || [];
+  const pageSize = 20;
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  window.stockMonitorPage = Math.max(1, Math.min(window.stockMonitorPage + delta, totalPages));
+  loadStockMonitor();
+}
+
+// Live filter
+const stockPartFilter = qs("stockPartFilter");
+if (stockPartFilter) {
+  stockPartFilter.addEventListener("input", () => {
+    window.stockMonitorPage = 1;
+    loadStockMonitor();
+  });
+}
+
+const prevBtn = qs("prevStockPage");
+if (prevBtn) prevBtn.onclick = () => updateStockMonitorPage(-1);
+const nextBtn = qs("nextStockPage");
+if (nextBtn) nextBtn.onclick = () => updateStockMonitorPage(1);
+
+// Save last rows for paging
+const origLoadStockMonitor = loadStockMonitor;
+loadStockMonitor = async function() {
+  const filter = (qs("stockPartFilter")?.value || "").trim();
+  const q = filter ? `?part_code=${encodeURIComponent(filter)}` : "";
+  const data = await fetchJson(`${API}/api/stock/monitor${q}`);
+  window.lastStockMonitorRows = data.rows || [];
+  // Call original logic
+  await origLoadStockMonitor.apply(this, arguments);
+};
 
 let stockPageData = { rows: [], recent: [], summary: null };
 

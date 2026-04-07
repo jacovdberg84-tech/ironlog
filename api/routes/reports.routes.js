@@ -274,24 +274,54 @@ function kpiDaily(date, scheduled) {
 
   const run_hours = Number(runRow.run_hours || 0);
 
-  const dtRow = db.prepare(`
-    SELECT IFNULL(SUM(l.hours_down), 0) AS downtime_hours
-    FROM breakdown_downtime_logs l
-    JOIN breakdowns b ON b.id = l.breakdown_id
-    JOIN assets a ON a.id = b.asset_id
-    WHERE l.log_date = ?
-      AND a.active = 1
-      AND a.is_standby = 0
-      AND b.asset_id IN (
-        SELECT DISTINCT dh.asset_id
-        FROM daily_hours dh
-        WHERE dh.work_date = ?
-          AND dh.is_used = 1
-          AND dh.hours_run > 0
-      )
-  `).get(date, date);
+  let downtime_hours = 0;
+  if (hasBreakdownDowntimeLogsTable()) {
+    const logsCountRow = db.prepare(`
+      SELECT COUNT(*) AS n
+      FROM breakdown_downtime_logs
+      WHERE log_date = ?
+    `).get(date);
+    const hasDailyDowntimeLogs = Number(logsCountRow?.n || 0) > 0;
 
-  const downtime_hours = Number(dtRow.downtime_hours || 0);
+    if (hasDailyDowntimeLogs) {
+      const dtRow = db.prepare(`
+        SELECT IFNULL(SUM(l.hours_down), 0) AS downtime_hours
+        FROM breakdown_downtime_logs l
+        JOIN breakdowns b ON b.id = l.breakdown_id
+        JOIN assets a ON a.id = b.asset_id
+        WHERE l.log_date = ?
+          AND a.active = 1
+          AND a.is_standby = 0
+          AND b.asset_id IN (
+            SELECT DISTINCT dh.asset_id
+            FROM daily_hours dh
+            WHERE dh.work_date = ?
+              AND dh.is_used = 1
+              AND dh.hours_run > 0
+          )
+      `).get(date, date);
+      downtime_hours = Number(dtRow?.downtime_hours || 0);
+    }
+  }
+  if (downtime_hours <= 0) {
+    const dtCol = getBreakdownDowntimeColumn();
+    const dtRow = db.prepare(`
+      SELECT IFNULL(SUM(COALESCE(b.${dtCol}, 0)), 0) AS downtime_hours
+      FROM breakdowns b
+      JOIN assets a ON a.id = b.asset_id
+      WHERE b.breakdown_date = ?
+        AND a.active = 1
+        AND a.is_standby = 0
+        AND b.asset_id IN (
+          SELECT DISTINCT dh.asset_id
+          FROM daily_hours dh
+          WHERE dh.work_date = ?
+            AND dh.is_used = 1
+            AND dh.hours_run > 0
+        )
+    `).get(date, date);
+    downtime_hours = Number(dtRow?.downtime_hours || 0);
+  }
 
   const availability = available_hours > 0 ? ((available_hours - downtime_hours) / available_hours) * 100 : null;
   const utilization = available_hours > 0 ? (run_hours / available_hours) * 100 : null;

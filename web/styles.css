@@ -1,3 +1,65 @@
+.dashboard-metrics {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 24px;
+  justify-content: flex-start;
+  align-items: stretch;
+}
+.metric-main {
+  flex: 1 1 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 180px;
+  min-height: 160px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+}
+.metric-header {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.metric-value {
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.metric-label {
+  font-size: 1rem;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.metric-alerts {
+  flex: 1 1 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  min-width: 220px;
+  min-height: 160px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+}
+.metric-alert-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.dashboard-details {
+  margin-top: 32px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+.dashboard-details summary {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--muted);
+  margin-bottom: 12px;
+  cursor: pointer;
+}
 :root{
   --bg:#f6f8fb;
   --bg-soft:#eef2f7;

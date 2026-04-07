@@ -98,57 +98,30 @@
 
     <!-- DASHBOARD -->
     <section class="panel show" id="tab-dash">
-      <div class="grid stack-12">
-        <div class="card speedo">
-          <h3>Availability</h3>
-          <div class="speedo-face">
-            <div class="speedo-arc"></div>
-            <div class="speedo-ticks"></div>
-            <div class="speedo-mark m0">0</div>
-            <div class="speedo-mark m50">50</div>
-            <div class="speedo-mark m100">100</div>
-            <div class="speedo-needle" id="availNeedle"></div>
-            <div class="speedo-cap"></div>
-          </div>
-          <div class="speedo-readout">
-            <div class="speedo-value" id="gAvailVal">N/A</div>
-            <div class="speedo-label">MTD AVAIL</div>
-          </div>
-          <div class="mini" id="availMeta"></div>
-          <div class="row">
-            <label class="chk"><input id="kpiDebugToggle" type="checkbox" /> KPI debug per asset</label>
-          </div>
-          <div class="list" id="kpiDebugList" style="display:none;"></div>
-        </div>
 
-        <div class="card speedo">
-          <h3>Utilization</h3>
-          <div class="speedo-face">
-            <div class="speedo-arc"></div>
-            <div class="speedo-ticks"></div>
-            <div class="speedo-mark m0">0</div>
-            <div class="speedo-mark m50">50</div>
-            <div class="speedo-mark m100">100</div>
-            <div class="speedo-needle" id="utilNeedle"></div>
-            <div class="speedo-cap"></div>
-          </div>
-          <div class="speedo-readout">
-            <div class="speedo-value" id="gUtilVal">N/A</div>
-            <div class="speedo-label">MTD UTIL</div>
-          </div>
+      <!-- Key Metrics Section -->
+      <div class="dashboard-metrics">
+        <div class="card metric-main">
+          <div class="metric-header">Availability</div>
+          <div class="metric-value" id="gAvailVal">N/A</div>
+          <div class="metric-label">MTD AVAIL</div>
+          <div class="mini" id="availMeta"></div>
+        </div>
+        <div class="card metric-main">
+          <div class="metric-header">Utilization</div>
+          <div class="metric-value" id="gUtilVal">N/A</div>
+          <div class="metric-label">MTD UTIL</div>
           <div class="mini" id="utilMeta"></div>
         </div>
-
-        <div class="card">
-          <h3>Alerts</h3>
-          <div class="row">
-            <div class="pill red">Low stock: <span id="aLowStock">0</span></div>
-            <div class="pill orange">Overdue: <span id="aOverdue">0</span></div>
-            <div class="pill blue">Open WO: <span id="aOpenWO">0</span></div>
+        <div class="card metric-alerts">
+          <div class="metric-header">Alerts</div>
+          <div class="metric-alert-row">
+            <span class="pill red">Low stock: <span id="aLowStock">0</span></span>
+            <span class="pill orange">Overdue: <span id="aOverdue">0</span></span>
+            <span class="pill blue">Open WO: <span id="aOpenWO">0</span></span>
           </div>
-          <p class="muted">Quick snapshot of today’s risk.</p>
           <details class="threshold-pane">
-            <summary>⚙ Threshold settings</summary>
+            <summary>⚙ Thresholds</summary>
             <div class="row stack-6">
               <label class="chk">Avail target %<input id="thAvailTarget" class="w-80" type="number" min="0" max="100" step="1" value="85" /></label>
               <label class="chk">Avail critical %<input id="thAvailCrit" class="w-80" type="number" min="0" max="100" step="1" value="70" /></label>
@@ -158,31 +131,108 @@
             </div>
           </details>
         </div>
-
-        <div class="card">
-          <h3>IRONMIND Daily Insight</h3>
-          <div class="row">
-            <button id="ironmindRefreshBtn">Refresh Insight</button>
-            <small class="muted" id="ironmindMeta">No report loaded yet.</small>
-          </div>
-          <div class="output ironmind-body" id="ironmindSummary">
-            <small class="muted">Loading IRONMIND insight...</small>
-          </div>
-          <details class="ironmind-history-pane">
-            <summary>IRONMIND history (last 7 days)</summary>
-            <div class="row stack-6 ironmind-history-controls">
-              <label class="chk">
-                <input id="ironmindShowMissingDays" type="checkbox" />
-                Include missing days
-              </label>
-              <button id="ironmindReloadHistory">Reload history</button>
-            </div>
-            <div class="list" id="ironmindHistoryList">
-              <small class="muted">No history loaded yet.</small>
-            </div>
-          </details>
-        </div>
       </div>
+
+      <!-- Insights Section -->
+      <div class="card" style="margin:24px 0;">
+        <div class="metric-header">IRONMIND Daily Insight</div>
+        <div class="row">
+          <button id="ironmindRefreshBtn">Refresh Insight</button>
+          <small class="muted" id="ironmindMeta">No report loaded yet.</small>
+        </div>
+        <div class="output ironmind-body" id="ironmindSummary">
+          <small class="muted">Loading IRONMIND insight...</small>
+        </div>
+        <details class="ironmind-history-pane">
+          <summary>IRONMIND history (last 7 days)</summary>
+          <div class="row stack-6 ironmind-history-controls">
+            <label class="chk">
+              <input id="ironmindShowMissingDays" type="checkbox" />
+              Include missing days
+            </label>
+            <button id="ironmindReloadHistory">Reload history</button>
+          </div>
+          <div class="list" id="ironmindHistoryList">
+            <small class="muted">No history loaded yet.</small>
+          </div>
+        </details>
+      </div>
+
+      <!-- Collapsible Details Section -->
+      <details class="dashboard-details" open>
+        <summary>More Details</summary>
+        <div class="grid stack-12">
+          <div class="card">
+            <h3>Major Downtime</h3>
+            <div class="list" id="downtimeList"></div>
+            <p class="muted">Top 5 downtime items for selected date.</p>
+          </div>
+          <div class="card">
+            <h3>Downtime Reasons</h3>
+            <div class="list" id="downtimeReasonsList"></div>
+            <p class="muted">Top reasons (hours + incidents) for selected date.</p>
+          </div>
+          <div class="card">
+            <h3>Critical Low Stock</h3>
+            <div class="list" id="stockList"></div>
+            <p class="muted">Critical parts below min stock.</p>
+          </div>
+        </div>
+        <div class="grid stack-12">
+          <div class="card">
+            <h3>Open Work Orders</h3>
+            <div class="list" id="woList"></div>
+            <p class="muted">Most recent open work orders.</p>
+          </div>
+          <div class="card">
+            <h3>WO SLA Escalations</h3>
+            <div class="row">
+              <div class="pill orange">Open >24h: <span id="slaOpen24">0</span></div>
+              <div class="pill red">In Progress >48h: <span id="slaProgress48">0</span></div>
+              <div class="pill red">Completed >12h: <span id="slaCompleted12">0</span></div>
+            </div>
+            <div class="row">
+              <label class="chk">
+                <input id="slaOpenSameTab" type="checkbox" />
+                Open WO in same tab
+              </label>
+            </div>
+            <div class="list" id="slaList"></div>
+            <p class="muted">Escalation list by SLA threshold breach.</p>
+          </div>
+          <div class="card">
+            <h3>Reliability (MTBF / LTTR)</h3>
+            <div class="row">
+              <label class="chk">Window (days)
+                <input id="relDays" class="w-110" type="number" min="1" max="365" step="1" value="30" />
+              </label>
+              <button id="loadReliability">Refresh Reliability</button>
+            </div>
+            <div class="row">
+              <div class="pill blue">MTBF (hrs): <span id="relMtbf">-</span></div>
+              <div class="pill orange">LTTR (hrs): <span id="relLttr">-</span></div>
+              <div class="pill">Failures: <span id="relFailures">0</span></div>
+            </div>
+            <div class="row">
+              <small id="relWindow" class="muted">Window: -</small>
+            </div>
+            <div id="relTrendChart" class="cost-trend-chart"></div>
+            <div class="list" id="relTrendList"></div>
+            <p class="muted">MTBF uses run hours per failure. LTTR uses downtime per failure.</p>
+          </div>
+          <div class="card">
+            <h3>Cost Trend (12 Months)</h3>
+            <div class="row">
+              <div class="pill blue">Current Month: <span id="ctCurrentMonth">-</span></div>
+              <div class="pill blue">Current Total: <span id="ctCurrentTotal">0</span></div>
+              <div class="pill orange">MoM Change: <span id="ctMoM">0</span></div>
+            </div>
+            <div id="costTrendChart" class="cost-trend-chart"></div>
+            <div class="list" id="costTrendList"></div>
+            <p class="muted">Monthly cost trend for last 12 months.</p>
+          </div>
+        </div>
+      </details>
 
         <div id="kpiAlertBanner" class="kpi-alert-banner" style="display:none;"></div>
 
@@ -290,8 +340,10 @@
         <div class="card">
           <h3>Stock Monitor</h3>
           <div class="row">
-            <input id="stockPartFilter" class="w-200" placeholder="Filter part code..." />
-            <button id="loadStockMonitor">Load Stock</button>
+            <input id="stockPartFilter" class="w-200" placeholder="Filter part code or name..." />
+            <button id="prevStockPage">Prev</button>
+            <span id="stockPageInfo" style="margin:0 8px;"></span>
+            <button id="nextStockPage">Next</button>
           </div>
           <div class="row">
             <div class="pill red">Below Min: <span id="smBelowMin">0</span></div>
