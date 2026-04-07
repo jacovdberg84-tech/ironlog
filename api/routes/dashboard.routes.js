@@ -137,7 +137,9 @@ export default async function dashboardRoutes(app) {
       a.asset_name,
       a.category,
       COALESCE(NULLIF(TRIM(dh.input_unit), ''), '') AS input_unit,
-      COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
+      CASE
+        WHEN UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM' THEN 'km'
+        ELSE COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
         WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
           OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
           OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
@@ -148,7 +150,8 @@ export default async function dashboardRoutes(app) {
           OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
           THEN 'km'
         ELSE 'hours'
-      END) AS utilization_mode,
+      END)
+      END AS utilization_mode,
       COALESCE(NULLIF(a.km_per_hour_factor, 0), 10.0) AS km_per_hour_factor,
       COALESCE(dh.scheduled_hours, 0) AS scheduled_hours,
       COALESCE(dh.hours_run, 0) AS run_hours
@@ -1285,7 +1288,9 @@ export default async function dashboardRoutes(app) {
           a.asset_name,
           COALESCE(a.baseline_fuel_l_per_hour, 5.0) AS baseline_fuel_l_per_hour,
           COALESCE(a.baseline_fuel_km_per_l, 2.0) AS baseline_fuel_km_per_l,
-          COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
+          CASE
+            WHEN UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM' THEN 'km'
+            ELSE COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
             WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
               OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
               OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
@@ -1296,7 +1301,8 @@ export default async function dashboardRoutes(app) {
               OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
               THEN 'km'
             ELSE 'hours'
-          END) AS metric_mode
+          END)
+          END AS metric_mode
         FROM assets a
         WHERE a.asset_code = ?
       `).get(asset_code);
@@ -1311,7 +1317,9 @@ export default async function dashboardRoutes(app) {
         a.asset_name,
         COALESCE(a.baseline_fuel_l_per_hour, 5.0) AS baseline_fuel_l_per_hour,
         COALESCE(a.baseline_fuel_km_per_l, 2.0) AS baseline_fuel_km_per_l,
-        COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
+        CASE
+          WHEN UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM' THEN 'km'
+          ELSE COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
           WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
             OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
             OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
@@ -1322,7 +1330,8 @@ export default async function dashboardRoutes(app) {
             OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
             THEN 'km'
           ELSE 'hours'
-        END) AS metric_mode
+        END)
+        END AS metric_mode
       FROM assets a
       WHERE a.active = 1
       ORDER BY a.asset_code ASC
@@ -1346,11 +1355,21 @@ export default async function dashboardRoutes(app) {
     const asset = db.prepare(`
       SELECT
         id, asset_code, asset_name, category,
-        COALESCE(NULLIF(TRIM(utilization_mode), ''), CASE
-          WHEN LOWER(COALESCE(category, '')) LIKE '%truck%' OR LOWER(COALESCE(category, '')) LIKE '%vehicle%'
-            THEN 'km'
-          ELSE 'hours'
-        END) AS metric_mode
+        CASE
+          WHEN UPPER(COALESCE(asset_code, '')) GLOB 'V[0-9][0-9]AM' THEN 'km'
+          ELSE COALESCE(NULLIF(TRIM(utilization_mode), ''), CASE
+            WHEN LOWER(COALESCE(category, '')) LIKE '%truck%'
+              OR LOWER(COALESCE(category, '')) LIKE '%vehicle%'
+              OR LOWER(COALESCE(category, '')) LIKE '%ldv%'
+              OR LOWER(COALESCE(category, '')) LIKE '%pickup%'
+              OR LOWER(COALESCE(category, '')) LIKE '%bakkie%'
+              OR LOWER(COALESCE(asset_code, '')) LIKE 'ldv%'
+              OR UPPER(COALESCE(asset_code, '')) GLOB 'V[0-9][0-9]AM'
+              OR LOWER(COALESCE(asset_name, '')) LIKE '%ldv%'
+              THEN 'km'
+            ELSE 'hours'
+          END)
+        END AS metric_mode
       FROM assets
       WHERE asset_code = ?
     `).get(asset_code);
@@ -1420,7 +1439,9 @@ export default async function dashboardRoutes(app) {
         a.asset_code,
         a.asset_name,
         a.category,
-        COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
+        CASE
+          WHEN UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM' THEN 'km'
+          ELSE COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
           WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
             OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
             OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
@@ -1431,7 +1452,8 @@ export default async function dashboardRoutes(app) {
             OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
             THEN 'km'
           ELSE 'hours'
-        END) AS metric_mode,
+        END)
+        END AS metric_mode,
         COALESCE(NULLIF(a.km_per_hour_factor, 0), 10.0) AS km_per_hour_factor,
         COALESCE(a.baseline_fuel_l_per_hour, 5.0) AS oem_lph,
         COALESCE(a.baseline_fuel_km_per_l, 2.0) AS oem_kmpl,
@@ -1756,18 +1778,21 @@ export default async function dashboardRoutes(app) {
         id, asset_code, asset_name, category,
         COALESCE(baseline_fuel_l_per_hour, 5.0) AS oem_lph,
         COALESCE(baseline_fuel_km_per_l, 2.0) AS oem_kmpl,
-        COALESCE(NULLIF(TRIM(utilization_mode), ''), CASE
-          WHEN LOWER(COALESCE(category, '')) LIKE '%truck%'
-            OR LOWER(COALESCE(category, '')) LIKE '%vehicle%'
-            OR LOWER(COALESCE(category, '')) LIKE '%ldv%'
-            OR LOWER(COALESCE(category, '')) LIKE '%pickup%'
-            OR LOWER(COALESCE(category, '')) LIKE '%bakkie%'
-            OR LOWER(COALESCE(asset_code, '')) LIKE 'ldv%'
-            OR UPPER(COALESCE(asset_code, '')) GLOB 'V[0-9][0-9]AM'
-            OR LOWER(COALESCE(asset_name, '')) LIKE '%ldv%'
-            THEN 'km'
-          ELSE 'hours'
-        END) AS metric_mode,
+        CASE
+          WHEN UPPER(COALESCE(asset_code, '')) GLOB 'V[0-9][0-9]AM' THEN 'km'
+          ELSE COALESCE(NULLIF(TRIM(utilization_mode), ''), CASE
+            WHEN LOWER(COALESCE(category, '')) LIKE '%truck%'
+              OR LOWER(COALESCE(category, '')) LIKE '%vehicle%'
+              OR LOWER(COALESCE(category, '')) LIKE '%ldv%'
+              OR LOWER(COALESCE(category, '')) LIKE '%pickup%'
+              OR LOWER(COALESCE(category, '')) LIKE '%bakkie%'
+              OR LOWER(COALESCE(asset_code, '')) LIKE 'ldv%'
+              OR UPPER(COALESCE(asset_code, '')) GLOB 'V[0-9][0-9]AM'
+              OR LOWER(COALESCE(asset_name, '')) LIKE '%ldv%'
+              THEN 'km'
+            ELSE 'hours'
+          END)
+        END AS metric_mode,
         COALESCE(NULLIF(km_per_hour_factor, 0), 10.0) AS km_per_hour_factor
       FROM assets
       WHERE asset_code = ?
