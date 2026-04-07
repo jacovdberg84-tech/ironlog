@@ -1,4 +1,4 @@
-﻿# dependencies/build
+# dependencies/build
 **/node_modules/
 **/dist/
 **/desktop-dist/
@@ -26,6 +26,8 @@ tmp_*.pdf
 api/db/*.db
 api/db/*.sqlite
 api/db/*.sqlite3
+api/db/*.db-wal
+api/db/*.db-shm
 
 # python caches
 __pycache__/
