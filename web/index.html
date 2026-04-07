@@ -72,7 +72,7 @@
           <option value="reports">📄 Reports</option>
           <option value="approvals">✅ Approvals</option>
           <option value="procurement">🏗️ Supply Flow</option>
-          <option value="operations">🏭 Operations</option>
+          <option value="operations">🏭 Site Operations</option>
           <option value="dispatch">🚚 Dispatch</option>
           <option value="quality">🧪 Data Quality</option>
           <option value="audit">🔎 Audit Trail</option>
@@ -85,6 +85,7 @@
       <button id="openDailyXlsx">Download Daily Excel</button>
       <button id="openGmWeeklyXlsx">GM Weekly (M&amp;E) Excel</button>
       <button id="openMaintenanceBtn" onclick="location.href='maintenance.html'">Maintenance</button>
+      <button id="openSiteOpsBtn" onclick="document.getElementById('tabSelect').value='operations';document.getElementById('tabSelect').dispatchEvent(new Event('change'))">Site</button>
     </nav>
 
     <!-- STATUS -->
@@ -97,59 +98,145 @@
 
     <!-- DASHBOARD -->
     <section class="panel show" id="tab-dash">
-      <div class="grid stack-12">
-        <div class="card speedo">
-          <h3>Availability</h3>
-          <div class="speedo-face">
-            <div class="speedo-arc"></div>
-            <div class="speedo-ticks"></div>
-            <div class="speedo-mark m0">0</div>
-            <div class="speedo-mark m50">50</div>
-            <div class="speedo-mark m100">100</div>
-            <div class="speedo-needle" id="availNeedle"></div>
-            <div class="speedo-cap"></div>
-          </div>
-          <div class="speedo-readout">
-            <div class="speedo-value" id="gAvailVal">N/A</div>
-            <div class="speedo-label">MTD AVAIL</div>
-          </div>
-          <div class="mini" id="availMeta"></div>
-          <div class="row">
-            <label class="chk"><input id="kpiDebugToggle" type="checkbox" /> KPI debug per asset</label>
-          </div>
-          <div class="list" id="kpiDebugList" style="display:none;"></div>
-        </div>
 
-        <div class="card speedo">
-          <h3>Utilization</h3>
-          <div class="speedo-face">
-            <div class="speedo-arc"></div>
-            <div class="speedo-ticks"></div>
-            <div class="speedo-mark m0">0</div>
-            <div class="speedo-mark m50">50</div>
-            <div class="speedo-mark m100">100</div>
-            <div class="speedo-needle" id="utilNeedle"></div>
-            <div class="speedo-cap"></div>
-          </div>
-          <div class="speedo-readout">
-            <div class="speedo-value" id="gUtilVal">N/A</div>
-            <div class="speedo-label">MTD UTIL</div>
-          </div>
+      <!-- Key Metrics Section -->
+      <div class="dashboard-metrics">
+        <div class="card metric-main">
+          <div class="metric-header">Availability</div>
+          <div class="metric-value" id="gAvailVal">N/A</div>
+          <div class="metric-label">MTD AVAIL</div>
+          <div class="mini" id="availMeta"></div>
+        </div>
+        <div class="card metric-main">
+          <div class="metric-header">Utilization</div>
+          <div class="metric-value" id="gUtilVal">N/A</div>
+          <div class="metric-label">MTD UTIL</div>
           <div class="mini" id="utilMeta"></div>
         </div>
-
-        <div class="card">
-          <h3>Alerts</h3>
-          <div class="row">
-            <div class="pill red">Low stock: <span id="aLowStock">0</span></div>
-            <div class="pill orange">Overdue: <span id="aOverdue">0</span></div>
-            <div class="pill blue">Open WO: <span id="aOpenWO">0</span></div>
+        <div class="card metric-alerts">
+          <div class="metric-header">Alerts</div>
+          <div class="metric-alert-row">
+            <span class="pill red">Low stock: <span id="aLowStock">0</span></span>
+            <span class="pill orange">Overdue: <span id="aOverdue">0</span></span>
+            <span class="pill blue">Open WO: <span id="aOpenWO">0</span></span>
           </div>
-          <p class="muted">Quick snapshot of today’s risk.</p>
+          <details class="threshold-pane">
+            <summary>⚙ Thresholds</summary>
+            <div class="row stack-6">
+              <label class="chk">Avail target %<input id="thAvailTarget" class="w-80" type="number" min="0" max="100" step="1" value="85" /></label>
+              <label class="chk">Avail critical %<input id="thAvailCrit" class="w-80" type="number" min="0" max="100" step="1" value="70" /></label>
+              <label class="chk">Util target %<input id="thUtilTarget" class="w-80" type="number" min="0" max="100" step="1" value="70" /></label>
+              <label class="chk">Util critical %<input id="thUtilCrit" class="w-80" type="number" min="0" max="100" step="1" value="55" /></label>
+              <button id="saveThresholds">Save</button>
+            </div>
+          </details>
         </div>
       </div>
 
-      <div class="grid stack-12">
+      <!-- Insights Section -->
+      <div class="card" style="margin:24px 0;">
+        <div class="metric-header">IRONMIND Daily Insight</div>
+        <div class="row">
+          <button id="ironmindRefreshBtn">Refresh Insight</button>
+          <small class="muted" id="ironmindMeta">No report loaded yet.</small>
+        </div>
+        <div class="output ironmind-body" id="ironmindSummary">
+          <small class="muted">Loading IRONMIND insight...</small>
+        </div>
+        <details class="ironmind-history-pane">
+          <summary>IRONMIND history (last 7 days)</summary>
+          <div class="row stack-6 ironmind-history-controls">
+            <label class="chk">
+              <input id="ironmindShowMissingDays" type="checkbox" />
+              Include missing days
+            </label>
+            <button id="ironmindReloadHistory">Reload history</button>
+          </div>
+          <div class="list" id="ironmindHistoryList">
+            <small class="muted">No history loaded yet.</small>
+          </div>
+        </details>
+      </div>
+
+      <!-- Collapsible Details Section -->
+      <details class="dashboard-details" open>
+        <summary>More Details</summary>
+        <div class="grid stack-12">
+          <div class="card">
+            <h3>Major Downtime</h3>
+            <div class="list" id="downtimeList"></div>
+            <p class="muted">Top 5 downtime items for selected date.</p>
+          </div>
+          <div class="card">
+            <h3>Downtime Reasons</h3>
+            <div class="list" id="downtimeReasonsList"></div>
+            <p class="muted">Top reasons (hours + incidents) for selected date.</p>
+          </div>
+          <div class="card">
+            <h3>Critical Low Stock</h3>
+            <div class="list" id="stockList"></div>
+            <p class="muted">Critical parts below min stock.</p>
+          </div>
+        </div>
+        <div class="grid stack-12">
+          <div class="card">
+            <h3>Open Work Orders</h3>
+            <div class="list" id="woList"></div>
+            <p class="muted">Most recent open work orders.</p>
+          </div>
+          <div class="card">
+            <h3>WO SLA Escalations</h3>
+            <div class="row">
+              <div class="pill orange">Open >24h: <span id="slaOpen24">0</span></div>
+              <div class="pill red">In Progress >48h: <span id="slaProgress48">0</span></div>
+              <div class="pill red">Completed >12h: <span id="slaCompleted12">0</span></div>
+            </div>
+            <div class="row">
+              <label class="chk">
+                <input id="slaOpenSameTab" type="checkbox" />
+                Open WO in same tab
+              </label>
+            </div>
+            <div class="list" id="slaList"></div>
+            <p class="muted">Escalation list by SLA threshold breach.</p>
+          </div>
+          <div class="card">
+            <h3>Reliability (MTBF / LTTR)</h3>
+            <div class="row">
+              <label class="chk">Window (days)
+                <input id="relDays" class="w-110" type="number" min="1" max="365" step="1" value="30" />
+              </label>
+              <button id="loadReliability">Refresh Reliability</button>
+            </div>
+            <div class="row">
+              <div class="pill blue">MTBF (hrs): <span id="relMtbf">-</span></div>
+              <div class="pill orange">LTTR (hrs): <span id="relLttr">-</span></div>
+              <div class="pill">Failures: <span id="relFailures">0</span></div>
+            </div>
+            <div class="row">
+              <small id="relWindow" class="muted">Window: -</small>
+            </div>
+            <div id="relTrendChart" class="cost-trend-chart"></div>
+            <div class="list" id="relTrendList"></div>
+            <p class="muted">MTBF uses run hours per failure. LTTR uses downtime per failure.</p>
+          </div>
+          <div class="card">
+            <h3>Cost Trend (12 Months)</h3>
+            <div class="row">
+              <div class="pill blue">Current Month: <span id="ctCurrentMonth">-</span></div>
+              <div class="pill blue">Current Total: <span id="ctCurrentTotal">0</span></div>
+              <div class="pill orange">MoM Change: <span id="ctMoM">0</span></div>
+            </div>
+            <div id="costTrendChart" class="cost-trend-chart"></div>
+            <div class="list" id="costTrendList"></div>
+            <p class="muted">Monthly cost trend for last 12 months.</p>
+          </div>
+        </div>
+      </details>
+
+        <div id="kpiAlertBanner" class="kpi-alert-banner" style="display:none;"></div>
+
+        <div class="grid stack-12">
         <div class="card">
           <h3>Major Downtime</h3>
           <div class="list" id="downtimeList"></div>
@@ -253,8 +340,10 @@
         <div class="card">
           <h3>Stock Monitor</h3>
           <div class="row">
-            <input id="stockPartFilter" class="w-200" placeholder="Filter part code..." />
-            <button id="loadStockMonitor">Load Stock</button>
+            <input id="stockPartFilter" class="w-200" placeholder="Filter part code or name..." />
+            <button id="prevStockPage">Prev</button>
+            <span id="stockPageInfo" style="margin:0 8px;"></span>
+            <button id="nextStockPage">Next</button>
           </div>
           <div class="row">
             <div class="pill red">Below Min: <span id="smBelowMin">0</span></div>
@@ -1051,18 +1140,111 @@
     <!-- OPERATIONS -->
     <section class="panel" id="tab-operations">
       <div class="card stack-12">
-        <h3>Operations</h3>
+        <h3>Site Operations (Quarry)</h3>
+        <div class="card">
+          <h4>Daily Entry</h4>
+          <div class="row">
+            <label class="chk">Date <input id="opSiteDate" type="date" /></label>
+            <label class="chk">Shift
+              <select id="opSiteShift" class="w-140">
+                <option value="day">Day</option>
+                <option value="night">Night</option>
+              </select>
+            </label>
+            <label class="chk">Zone
+              <select id="opSiteZone" class="w-200"></select>
+            </label>
+            <input id="opSiteMaterial" class="w-200" placeholder="Material type (granite/sand)" />
+            <input id="opSitePlanned" class="w-140" type="number" min="0" step="0.01" placeholder="Planned tonnage" />
+            <input id="opSiteActual" class="w-140" type="number" min="0" step="0.01" placeholder="Actual tonnage" />
+            <input id="opSiteLoads" class="w-140" type="number" min="0" step="1" placeholder="Loads count" />
+            <input id="opSiteCycle" class="w-140" type="number" min="0" step="0.01" placeholder="Avg cycle time" />
+            <input id="opSiteOperator" class="w-200" placeholder="Operator" />
+            <input id="opSiteNotes" class="minw-260" placeholder="Notes" />
+            <button id="saveSiteDailyEntry">Save Daily Entry</button>
+            <button id="loadSiteDailyEntries">Load Daily Entries</button>
+          </div>
+          <div class="row">
+            <input id="opSiteDailyId" class="w-140" type="number" min="1" placeholder="Daily entry ID" />
+            <input id="opSiteEqAssetId" class="w-140" type="number" min="1" placeholder="Asset ID" />
+            <input id="opSiteEqRole" class="w-200" placeholder="Role (loader/truck/dozer)" />
+            <input id="opSiteEqHours" class="w-140" type="number" min="0" step="0.01" placeholder="Hours used" />
+            <button id="saveSiteEquipmentUsage">Link Equipment Usage</button>
+            <button id="loadSiteEquipmentUsage">Load Equipment Links</button>
+          </div>
+          <div class="list" id="siteEquipmentUsageList"></div>
+          <div class="list" id="siteDailyList"></div>
+          <pre class="output" id="siteDailyResult"></pre>
+        </div>
+
+        <div class="card">
+          <h4>Dashboard</h4>
+          <div class="row">
+            <label class="chk">As at <input id="opSiteDashDate" type="date" /></label>
+            <button id="loadSiteDashboard">Load Site Dashboard</button>
+          </div>
+          <div class="row">
+            <div class="pill blue">Today Tons: <span id="opSiteKpiTodayTons">0</span></div>
+            <div class="pill orange">Target vs Actual %: <span id="opSiteKpiAchieved">0</span></div>
+            <div class="pill blue">Loads Moved: <span id="opSiteKpiLoads">0</span></div>
+            <div class="pill">Active Zones: <span id="opSiteKpiZones">0</span></div>
+            <div class="pill blue">Week Total: <span id="opSiteKpiWeekTotal">0</span></div>
+            <div class="pill red">Breakdown Hrs: <span id="opSiteKpiBreakdownLoss">0</span></div>
+            <div class="pill red">Ops Delay Hrs: <span id="opSiteKpiOpsLoss">0</span></div>
+          </div>
+          <div class="list" id="siteDashboardList"></div>
+        </div>
+
+        <div class="card">
+          <h4>Operational Delays</h4>
+          <div class="row">
+            <label class="chk">Date <input id="opDelayDate" type="date" /></label>
+            <select id="opDelayType" class="w-200">
+              <option value="weather">weather</option>
+              <option value="logistics">logistics</option>
+              <option value="blasting">blasting</option>
+              <option value="staffing">staffing</option>
+              <option value="no_trucks">no_trucks</option>
+            </select>
+            <input id="opDelayHours" class="w-140" type="number" min="0" step="0.01" placeholder="Hours lost" />
+            <input id="opDelayImpact" class="w-140" type="number" min="0" step="0.01" placeholder="Impact tonnage" />
+            <input id="opDelayNotes" class="minw-260" placeholder="Delay notes" />
+            <button id="saveSiteDelay">Save Delay</button>
+            <button id="loadSiteDelays">Load Delays</button>
+          </div>
+          <div class="list" id="siteDelayList"></div>
+        </div>
+
+        <div class="card">
+          <h4>Targets and Zones</h4>
+          <div class="row">
+            <label class="chk">Target Date <input id="opTargetDate" type="date" /></label>
+            <input id="opTargetMaterial" class="w-200" placeholder="Material" />
+            <input id="opTargetTonnage" class="w-140" type="number" min="0" step="0.01" placeholder="Target tonnage" />
+            <button id="saveSiteTarget">Save Target</button>
+            <button id="loadSiteTargets">Load Targets</button>
+          </div>
+          <div class="row">
+            <input id="opZoneName" class="w-200" placeholder="Zone name (Pit A / Bench 2)" />
+            <label class="chk"><input id="opZoneActive" type="checkbox" checked /> Active</label>
+            <button id="saveSiteZone">Save Zone</button>
+            <button id="loadSiteZones">Load Zones</button>
+          </div>
+          <div class="list" id="siteTargetList"></div>
+          <div class="list" id="siteZoneList"></div>
+        </div>
+
         <div class="row">
           <label class="chk">Date <input id="opDate" type="date" /></label>
           <input id="opTonnesMoved" class="w-140" type="number" min="0" step="0.01" placeholder="Tonnes moved" />
-          <input id="opProductType" class="w-200" placeholder="Type of product produced" />
-          <input id="opProductProduced" class="w-140" type="number" min="0" step="0.01" placeholder="Amount produced" />
+          <input id="opProductType" class="w-200" placeholder="Product (e.g. 19mm, dust)" />
+          <input id="opProductProduced" class="w-140" type="number" min="0" step="0.01" placeholder="Product produced" />
           <input id="opTrucksLoaded" class="w-140" type="number" min="0" step="1" placeholder="Trucks loaded" />
-          <input id="opWeighbridgeAmount" class="w-140" type="number" min="0" step="0.01" placeholder="Weighbridge amount" />
-          <input id="opTrucksDelivered" class="w-140" type="number" min="0" step="1" placeholder="Trucks delivered" />
-          <input id="opProductDelivered" class="w-140" type="number" min="0" step="0.01" placeholder="Product delivered" />
-          <input id="opClientDeliveredTo" class="w-200" placeholder="Client delivered to" />
-          <input id="opNotes" class="minw-260" placeholder="Notes (optional)" />
+          <input id="opLoadsCount" class="w-140" type="number" min="0" step="1" placeholder="Load cycles" />
+          <input id="opCrusherFeedTonnes" class="w-140" type="number" min="0" step="0.01" placeholder="Crusher feed t" />
+          <input id="opCrusherOutputTonnes" class="w-140" type="number" min="0" step="0.01" placeholder="Crusher output t" />
+          <input id="opCrusherHours" class="w-140" type="number" min="0" step="0.01" placeholder="Crusher hours" />
+          <input id="opCrusherDowntime" class="w-140" type="number" min="0" step="0.01" placeholder="Crusher downtime h" />
           <button id="saveOperationEntry">Save Operations Entry</button>
         </div>
         <div class="row">
@@ -1077,8 +1259,8 @@
           <div class="pill blue">Tonnes Moved: <span id="opKpiTonnes">0</span></div>
           <div class="pill blue">Produced: <span id="opKpiProduced">0</span></div>
           <div class="pill orange">Trucks Loaded: <span id="opKpiLoaded">0</span></div>
-          <div class="pill orange">Trucks Delivered: <span id="opKpiDelivered">0</span></div>
-          <div class="pill">Weighbridge: <span id="opKpiWeighbridge">0</span></div>
+          <div class="pill orange">Load Cycles: <span id="opKpiLoads">0</span></div>
+          <div class="pill blue">Crusher Perf %: <span id="opKpiCrusherPerf">0</span></div>
           <div class="pill" id="opCloseStatusPill">Day Status: OPEN</div>
         </div>
         <div class="card">
@@ -1371,6 +1553,7 @@
                 <th align="left">Name</th>
                 <th align="left">Dept / workstation</th>
                 <th align="left">Role</th>
+                <th align="left">Locations</th>
                 <th align="left">Active</th>
                 <th align="left">Password set</th>
               </tr>
@@ -1386,6 +1569,7 @@
           <input id="adminPassword" class="w-140" type="password" placeholder="Password (if blank, keep)" autocomplete="new-password" />
           <input id="adminFullName" class="w-180" placeholder="Display name" />
           <input id="adminDepartment" class="w-180" placeholder="Department / PC name" />
+          <input id="adminAllowedLocations" class="w-220" placeholder="Allowed locations (csv, e.g. main,workshop)" />
           <label class="chk">Roles
             <select id="adminRoles" class="w-180" multiple size="5">
               <option value="admin">admin</option>
@@ -1399,6 +1583,10 @@
         <div class="row">
           <label class="chk">Sections (empty = role default)
             <select id="adminUserTabs" multiple size="8" class="w-200" style="vertical-align:top"></select>
+          </label>
+          <label class="chk" style="align-items:center;gap:6px">
+            <input id="adminIssueSetupCode" type="checkbox" checked />
+            Issue setup code (user creates own password)
           </label>
           <button type="button" id="saveAdminUserBtn">Save user</button>
         </div>
@@ -1503,10 +1691,11 @@
           </div>
           <div class="docs-request-box">
             <div class="row">
-              <input id="docAskRequest" class="minw-260" placeholder="Ask AI for a specific document (e.g. SOP for diesel spill response)" />
-              <button id="generateDocDraftFromRequestBtn">Generate from Request</button>
+              <input id="aiSmartPrompt" class="minw-260" placeholder="Ask Jakes or request a document (e.g. CAT 950 has no hydraulics / Create checklist for pre-start)" />
+              <button id="aiSmartRunBtn">Run Smart AI</button>
             </div>
-            <small class="muted">Uses your legal docs for context and creates a full draft.</small>
+            <small class="muted">One prompt box for both Ask Jakes troubleshooting and document generation. Response appears below.</small>
+            <pre class="output" id="askJakesOutput"></pre>
           </div>
         </div>
         <pre class="output" id="docDraftOutput"></pre>
@@ -1608,6 +1797,12 @@
       </label>
       <label>Password
         <input id="loginPassword" class="minw-260" style="width:100%;max-width:320px" type="password" autocomplete="current-password" />
+      </label>
+      <label>Setup code (first-time only)
+        <input id="loginSetupCode" class="minw-260" style="width:100%;max-width:320px" autocomplete="one-time-code" placeholder="Only needed when password not set" />
+      </label>
+      <label>New password (for first-time setup)
+        <input id="loginNewPassword" class="minw-260" style="width:100%;max-width:320px" type="password" autocomplete="new-password" placeholder="6+ characters" />
       </label>
       <label class="chk" style="justify-content:flex-start;gap:8px;">
         <input id="loginRemember" type="checkbox" checked />

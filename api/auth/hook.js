@@ -10,7 +10,7 @@ function resolveSession(token) {
   try {
     return db
       .prepare(`
-        SELECT u.username, u.role, u.roles_json, u.active
+        SELECT u.username, u.role, u.roles_json, u.active, u.allowed_locations
         FROM auth_sessions s
         JOIN users u ON u.id = s.user_id
         WHERE s.token = ?
@@ -19,6 +19,20 @@ function resolveSession(token) {
       .get(token);
   } catch {
     // Fresh DBs may not have auth tables yet during early startup.
+    return null;
+  }
+}
+
+function parseAllowedLocations(raw) {
+  if (!raw) return null;
+  try {
+    const arr = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!Array.isArray(arr)) return null;
+    const out = arr
+      .map((x) => String(x || "").trim().toLowerCase())
+      .filter(Boolean);
+    return out.length ? Array.from(new Set(out)) : null;
+  } catch {
     return null;
   }
 }
@@ -52,6 +66,18 @@ export async function ironlogAuthHook(req, reply) {
     const row = resolveSession(token);
     if (row && Number(row.active) === 1) {
       const roles = parseRoles(row.roles_json, row.role);
+      const allowedLocations = parseAllowedLocations(row.allowed_locations);
+      const requestedSite = String(req.headers["x-site-code"] || "").trim().toLowerCase();
+      if (Array.isArray(allowedLocations) && allowedLocations.length) {
+        const effective = requestedSite || allowedLocations[0];
+        if (!allowedLocations.includes(effective)) {
+          return reply.code(403).send({
+            error: "site access denied",
+            allowed_locations: allowedLocations,
+          });
+        }
+        req.headers["x-site-code"] = effective;
+      }
       req.headers["x-user-name"] = row.username;
       req.headers["x-user-role"] = roles[0];
       req.headers["x-user-roles"] = roles.join(",");

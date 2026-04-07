@@ -34,6 +34,32 @@ function compactCell(v, max = 140) {
   return s.length > max ? `${s.slice(0, Math.max(1, max - 1))}...` : s;
 }
 
+function parseIsoDate(d) {
+  if (!d) return null;
+  const s = String(d || "").trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+function daysDownForBreakdown(bd, reportDate) {
+  const logged = Number(bd.logged_days || 0);
+  if (logged > 0) return logged;
+
+  const startDate = parseIsoDate(bd.start_at) || parseIsoDate(bd.breakdown_date);
+  if (!startDate) return 1;
+
+  const endDate = parseIsoDate(bd.end_at);
+  if (endDate) {
+    return inclusiveDaysBetween(startDate, endDate);
+  }
+
+  const asOf = parseIsoDate(reportDate);
+  if (asOf) {
+    return inclusiveDaysBetween(startDate, asOf);
+  }
+
+  return 1;
+}
+
 function isMonth(m) {
   return /^\d{4}-\d{2}$/.test(String(m || "").trim());
 }
@@ -248,21 +274,54 @@ function kpiDaily(date, scheduled) {
 
   const run_hours = Number(runRow.run_hours || 0);
 
-  const dtCol = getBreakdownDowntimeColumn();
-  const dtRow = db.prepare(`
-    SELECT IFNULL(SUM(b.${dtCol}), 0) AS downtime_hours
-    FROM breakdowns b
-    WHERE b.breakdown_date = ?
-      AND b.asset_id IN (
-        SELECT DISTINCT dh.asset_id
-        FROM daily_hours dh
-        WHERE dh.work_date = ?
-          AND dh.is_used = 1
-          AND dh.hours_run > 0
-      )
-  `).get(date, date);
+  let downtime_hours = 0;
+  if (hasBreakdownDowntimeLogsTable()) {
+    const logsCountRow = db.prepare(`
+      SELECT COUNT(*) AS n
+      FROM breakdown_downtime_logs
+      WHERE log_date = ?
+    `).get(date);
+    const hasDailyDowntimeLogs = Number(logsCountRow?.n || 0) > 0;
 
-  const downtime_hours = Number(dtRow.downtime_hours || 0);
+    if (hasDailyDowntimeLogs) {
+      const dtRow = db.prepare(`
+        SELECT IFNULL(SUM(l.hours_down), 0) AS downtime_hours
+        FROM breakdown_downtime_logs l
+        JOIN breakdowns b ON b.id = l.breakdown_id
+        JOIN assets a ON a.id = b.asset_id
+        WHERE l.log_date = ?
+          AND a.active = 1
+          AND a.is_standby = 0
+          AND b.asset_id IN (
+            SELECT DISTINCT dh.asset_id
+            FROM daily_hours dh
+            WHERE dh.work_date = ?
+              AND dh.is_used = 1
+              AND dh.hours_run > 0
+          )
+      `).get(date, date);
+      downtime_hours = Number(dtRow?.downtime_hours || 0);
+    }
+  }
+  if (downtime_hours <= 0) {
+    const dtCol = getBreakdownDowntimeColumn();
+    const dtRow = db.prepare(`
+      SELECT IFNULL(SUM(COALESCE(b.${dtCol}, 0)), 0) AS downtime_hours
+      FROM breakdowns b
+      JOIN assets a ON a.id = b.asset_id
+      WHERE b.breakdown_date = ?
+        AND a.active = 1
+        AND a.is_standby = 0
+        AND b.asset_id IN (
+          SELECT DISTINCT dh.asset_id
+          FROM daily_hours dh
+          WHERE dh.work_date = ?
+            AND dh.is_used = 1
+            AND dh.hours_run > 0
+        )
+    `).get(date, date);
+    downtime_hours = Number(dtRow?.downtime_hours || 0);
+  }
 
   const availability = available_hours > 0 ? ((available_hours - downtime_hours) / available_hours) * 100 : null;
   const utilization = available_hours > 0 ? (run_hours / available_hours) * 100 : null;
@@ -512,26 +571,29 @@ function buildDailyExecutiveSummarySheet(wb, p) {
   rowPair("Lubricants / oil issued (qty)", Number(p.oil_total.toFixed(2)));
   rowPair("Breakdown downtime (hours)", Number(p.breakdown_total.toFixed(2)));
 
-  r += 1;
-  section("Estimated direct cost (configured rates — validate for finance)");
-  rowPair("Fuel", p.fuelCostTotal, true);
-  rowPair("Oil / lube", p.lubeCostTotal, true);
-  rowPair("Parts (issues linked to work orders)", p.partsCostTotal, true);
-  rowPair("Labour (completed work orders)", p.laborCostTotal, true);
-  rowPair("Labour hours (completed work orders)", p.laborHoursTotal);
-  rowPair("Downtime (estimated cost)", p.downtimeCostTotal, true);
-  rowPair("Total estimated direct cost", p.totalCost, true);
-  rowPair(
-    "Cost per run hour (total cost ÷ run hours)",
-    p.costPerRunHour == null ? "N/A" : p.costPerRunHour,
-    p.costPerRunHour != null,
-  );
+  if (p.includeCostEngine !== false) {
+    r += 1;
+    section("Estimated direct cost (configured rates — validate for finance)");
+    rowPair("Fuel", p.fuelCostTotal, true);
+    rowPair("Oil / lube", p.lubeCostTotal, true);
+    rowPair("Parts (issues linked to work orders)", p.partsCostTotal, true);
+    rowPair("Labour (completed work orders)", p.laborCostTotal, true);
+    rowPair("Labour hours (completed work orders)", p.laborHoursTotal);
+    rowPair("Downtime (estimated cost)", p.downtimeCostTotal, true);
+    rowPair("Total estimated direct cost", p.totalCost, true);
+    rowPair(
+      "Cost per run hour (total cost ÷ run hours)",
+      p.costPerRunHour == null ? "N/A" : p.costPerRunHour,
+      p.costPerRunHour != null,
+    );
+  }
 
   r += 1;
   ws.mergeCells(`B${r}:D${r + 1}`);
   const foot = ws.getCell(`B${r}`);
-  foot.value =
-    "Notes: KPIs use production assets with recorded run hours and the scheduled hours shown in the app header. Cost lines are indicative from unit rates in IRONLOG; use your finance rules for board packs.";
+  foot.value = p.includeCostEngine === false
+    ? "Notes: KPIs use production assets with recorded run hours and the scheduled hours shown in the app header."
+    : "Notes: KPIs use production assets with recorded run hours and the scheduled hours shown in the app header. Cost lines are indicative from unit rates in IRONLOG; use your finance rules for board packs.";
   foot.font = { size: 9, italic: true, color: { argb: "FF64748B" } };
   foot.alignment = { wrapText: true, vertical: "top" };
 
@@ -1236,7 +1298,10 @@ export default async function reportsRoutes(app) {
         w.opened_at,
         w.closed_at
       FROM work_orders w
-      WHERE w.asset_id = ? ${woF.sql}
+      WHERE w.asset_id = ?
+        AND w.closed_at IS NULL
+        AND TRIM(LOWER(COALESCE(w.status, ''))) IN ('open', 'in_progress')
+        ${woF.sql}
       ORDER BY w.id DESC
       LIMIT 300
     `).all(asset.id, ...woF.params);
@@ -1429,8 +1494,7 @@ export default async function reportsRoutes(app) {
             { key: "date", label: "Date", width: 0.16 },
             { key: "source", label: "Source", width: 0.16 },
             { key: "status", label: "Status", width: 0.16 },
-            { key: "opened", label: "Opened", width: 0.20 },
-            { key: "closed", label: "Closed", width: 0.20 },
+            { key: "opened", label: "Opened", width: 0.40 },
           ],
           workOrdersPdf.length
             ? workOrdersPdf.map((r) => ({
@@ -1439,9 +1503,8 @@ export default async function reportsRoutes(app) {
                 source: String(r.source || ""),
                 status: String(r.status || ""),
                 opened: r.opened_at || "",
-                closed: r.closed_at || "-",
               }))
-            : [{ id: "-", date: "-", source: "-", status: "-", opened: "-", closed: "-" }]
+            : [{ id: "-", date: "-", source: "-", status: "-", opened: "-" }]
         );
 
         sectionTitle(doc, "GET Change Slips");
@@ -3188,6 +3251,10 @@ export default async function reportsRoutes(app) {
   // DAILY XLSX
   // =========================
   app.get("/daily.xlsx", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
+
     const date = String(req.query?.date || "").trim();
     const scheduled = Number(req.query?.scheduled ?? 10);
 
@@ -3202,9 +3269,7 @@ export default async function reportsRoutes(app) {
         dh.scheduled_hours,
         dh.opening_hours,
         dh.closing_hours,
-        dh.hours_run,
-        dh.operator,
-        dh.notes
+        dh.hours_run
       FROM daily_hours dh
       JOIN assets a ON a.id = dh.asset_id
       WHERE dh.work_date = ?
@@ -3284,112 +3349,10 @@ export default async function reportsRoutes(app) {
     }).sort((a, b) => a.hours_left - b.hours_left);
 
     const kpi = kpiDaily(date, scheduled);
-    const defaults = costDefaults();
 
     const fuel_total = fuel.reduce((a, r) => a + Number(r.liters || 0), 0);
     const oil_total = oil.reduce((a, r) => a + Number(r.quantity || 0), 0);
     const breakdown_total = breakdowns.reduce((a, r) => a + Number(r.downtime_hours || 0), 0);
-
-    const fuelCostRows = db.prepare(`
-      SELECT
-        a.asset_code,
-        a.asset_name,
-        COALESCE(SUM(fl.liters * COALESCE(fl.unit_cost_per_liter, a.fuel_cost_per_liter, ?)), 0) AS fuel_cost
-      FROM fuel_logs fl
-      JOIN assets a ON a.id = fl.asset_id
-      WHERE fl.log_date = ?
-      GROUP BY a.id
-      ORDER BY a.asset_code
-    `).all(defaults.fuel_cost_per_liter_default, date).map((r) => ({
-      asset_code: r.asset_code,
-      asset_name: r.asset_name,
-      fuel_cost: Number(r.fuel_cost || 0),
-    }));
-
-    const lubeCostRows = db.prepare(`
-      SELECT
-        a.asset_code,
-        a.asset_name,
-        COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS lube_cost
-      FROM oil_logs ol
-      JOIN assets a ON a.id = ol.asset_id
-      WHERE ol.log_date = ?
-      GROUP BY a.id
-      ORDER BY a.asset_code
-    `).all(defaults.lube_cost_per_qty_default, date).map((r) => ({
-      asset_code: r.asset_code,
-      asset_name: r.asset_name,
-      lube_cost: Number(r.lube_cost || 0),
-    }));
-
-    const laborRows = db.prepare(`
-      SELECT
-        a.asset_code,
-        a.asset_name,
-        COALESCE(SUM(COALESCE(w.labor_hours, 0)), 0) AS labor_hours,
-        COALESCE(SUM(COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, ?)), 0) AS labor_cost
-      FROM work_orders w
-      JOIN assets a ON a.id = w.asset_id
-      WHERE DATE(COALESCE(w.completed_at, w.closed_at)) = ?
-        AND w.status IN ('completed', 'approved', 'closed')
-      GROUP BY a.id
-      ORDER BY a.asset_code
-    `).all(defaults.labor_cost_per_hour_default, date).map((r) => ({
-      asset_code: r.asset_code,
-      asset_name: r.asset_name,
-      labor_hours: Number(r.labor_hours || 0),
-      labor_cost: Number(r.labor_cost || 0),
-    }));
-
-    const downtimeRows = db.prepare(`
-      SELECT
-        a.asset_code,
-        a.asset_name,
-        COALESCE(SUM(l.hours_down), 0) AS downtime_hours,
-        COALESCE(SUM(l.hours_down * COALESCE(a.downtime_cost_per_hour, ?)), 0) AS downtime_cost
-      FROM breakdown_downtime_logs l
-      JOIN breakdowns b ON b.id = l.breakdown_id
-      JOIN assets a ON a.id = b.asset_id
-      WHERE l.log_date = ?
-      GROUP BY a.id
-      ORDER BY a.asset_code
-    `).all(defaults.downtime_cost_per_hour_default, date).map((r) => ({
-      asset_code: r.asset_code,
-      asset_name: r.asset_name,
-      downtime_hours: Number(r.downtime_hours || 0),
-      downtime_cost: Number(r.downtime_cost || 0),
-    }));
-
-    const smCols = db.prepare(`PRAGMA table_info(stock_movements)`).all();
-    const hasCreatedAt = smCols.some((c) => String(c.name) === "created_at");
-    const smDateExpr = hasCreatedAt ? "DATE(sm.created_at)" : "DATE(sm.movement_date)";
-    const partsRows = db.prepare(`
-      SELECT
-        COALESCE(a.asset_code, 'UNLINKED') AS asset_code,
-        COALESCE(a.asset_name, 'Unlinked') AS asset_name,
-        COALESCE(SUM(ABS(sm.quantity) * COALESCE(p.unit_cost, 0)), 0) AS parts_cost
-      FROM stock_movements sm
-      JOIN parts p ON p.id = sm.part_id
-      LEFT JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
-      LEFT JOIN assets a ON a.id = w.asset_id
-      WHERE sm.movement_type = 'out'
-        AND ${smDateExpr} = ?
-      GROUP BY a.id
-      ORDER BY asset_code
-    `).all(date).map((r) => ({
-      asset_code: r.asset_code,
-      asset_name: r.asset_name,
-      parts_cost: Number(r.parts_cost || 0),
-    }));
-
-    const fuelCostTotal = Number(fuelCostRows.reduce((a, r) => a + Number(r.fuel_cost || 0), 0).toFixed(2));
-    const lubeCostTotal = Number(lubeCostRows.reduce((a, r) => a + Number(r.lube_cost || 0), 0).toFixed(2));
-    const laborCostTotal = Number(laborRows.reduce((a, r) => a + Number(r.labor_cost || 0), 0).toFixed(2));
-    const laborHoursTotal = Number(laborRows.reduce((a, r) => a + Number(r.labor_hours || 0), 0).toFixed(2));
-    const downtimeCostTotal = Number(downtimeRows.reduce((a, r) => a + Number(r.downtime_cost || 0), 0).toFixed(2));
-    const partsCostTotal = Number(partsRows.reduce((a, r) => a + Number(r.parts_cost || 0), 0).toFixed(2));
-    const totalCost = Number((fuelCostTotal + lubeCostTotal + laborCostTotal + downtimeCostTotal + partsCostTotal).toFixed(2));
-    const costPerRunHour = Number(kpi.run_hours || 0) > 0 ? Number((totalCost / Number(kpi.run_hours || 1)).toFixed(2)) : null;
 
     const wb = new ExcelJS.Workbook();
     wb.creator = "IRONLOG";
@@ -3402,14 +3365,7 @@ export default async function reportsRoutes(app) {
       fuel_total,
       oil_total,
       breakdown_total,
-      fuelCostTotal,
-      lubeCostTotal,
-      partsCostTotal,
-      laborCostTotal,
-      laborHoursTotal,
-      downtimeCostTotal,
-      totalCost,
-      costPerRunHour,
+      includeCostEngine: false,
     });
 
     const dirTbl = { directorStyle: true };
@@ -3426,8 +3382,6 @@ export default async function reportsRoutes(app) {
         { header: "Opening meter (h)", key: "opening_hours", width: 14 },
         { header: "Closing meter (h)", key: "closing_hours", width: 14 },
         { header: "Run hours", key: "hours_run", width: 12 },
-        { header: "Operator", key: "operator", width: 16 },
-        { header: "Notes", key: "notes", width: 30 },
       ],
       hours.map(r => ({ ...r, is_used: r.is_used ? "Y" : "N" })),
       dirTbl,
@@ -3488,83 +3442,6 @@ export default async function reportsRoutes(app) {
         { header: "Status", key: "status", width: 12 },
       ],
       upcoming,
-      dirTbl,
-    );
-
-    const costByAsset = new Map();
-    const mergeCostRows = (rows, key) => {
-      for (const r of rows) {
-        const code = String(r.asset_code || "UNLINKED");
-        if (!costByAsset.has(code)) {
-          costByAsset.set(code, {
-            asset_code: code,
-            asset_name: r.asset_name || "Unlinked",
-            fuel_cost: 0,
-            lube_cost: 0,
-            parts_cost: 0,
-            labor_hours: 0,
-            labor_cost: 0,
-            downtime_hours: 0,
-            downtime_cost: 0,
-            total_cost: 0,
-          });
-        }
-        const row = costByAsset.get(code);
-        row[key] += Number(r[key] || 0);
-      }
-    };
-    mergeCostRows(fuelCostRows, "fuel_cost");
-    mergeCostRows(lubeCostRows, "lube_cost");
-    mergeCostRows(partsRows, "parts_cost");
-    mergeCostRows(laborRows, "labor_hours");
-    mergeCostRows(laborRows, "labor_cost");
-    mergeCostRows(downtimeRows, "downtime_hours");
-    mergeCostRows(downtimeRows, "downtime_cost");
-
-    const costRows = Array.from(costByAsset.values())
-      .map((r) => ({
-        ...r,
-        fuel_cost: Number(r.fuel_cost.toFixed(2)),
-        lube_cost: Number(r.lube_cost.toFixed(2)),
-        parts_cost: Number(r.parts_cost.toFixed(2)),
-        labor_hours: Number(r.labor_hours.toFixed(2)),
-        labor_cost: Number(r.labor_cost.toFixed(2)),
-        downtime_hours: Number(r.downtime_hours.toFixed(2)),
-        downtime_cost: Number(r.downtime_cost.toFixed(2)),
-        total_cost: Number((r.fuel_cost + r.lube_cost + r.parts_cost + r.labor_cost + r.downtime_cost).toFixed(2)),
-      }))
-      .filter((r) => r.total_cost > 0)
-      .sort((a, b) => b.total_cost - a.total_cost);
-
-    addTableSheet(
-      wb,
-      "Cost by asset",
-      [
-        { header: "Asset code", key: "asset_code", width: 14 },
-        { header: "Asset name", key: "asset_name", width: 24 },
-        { header: "Fuel (R)", key: "fuel_cost", width: 12 },
-        { header: "Lube (R)", key: "lube_cost", width: 12 },
-        { header: "Parts (R)", key: "parts_cost", width: 12 },
-        { header: "Labour hours", key: "labor_hours", width: 12 },
-        { header: "Labour (R)", key: "labor_cost", width: 12 },
-        { header: "Downtime (h)", key: "downtime_hours", width: 12 },
-        { header: "Downtime (R)", key: "downtime_cost", width: 13 },
-        { header: "Total (R)", key: "total_cost", width: 12 },
-      ],
-      costRows.length
-        ? costRows
-        : [{
-            asset_code: "-",
-            asset_name: "No cost activity for date",
-            fuel_cost: 0,
-            lube_cost: 0,
-            parts_cost: 0,
-            labor_hours: 0,
-            labor_cost: 0,
-            downtime_hours: 0,
-            downtime_cost: 0,
-            total_cost: 0,
-          }],
       dirTbl,
     );
 
@@ -4527,6 +4404,12 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
+    const reportRevision = "daily-pdf-no-cost-r2026-04-04b";
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
+    reply.header("X-IRONLOG-Report-Revision", reportRevision);
+
     const date = String(req.query?.date || "").trim();
     const scheduled = Number(req.query?.scheduled ?? 10);
     if (!isDate(date)) return reply.code(400).send({ error: "date (YYYY-MM-DD) required" });
@@ -4548,8 +4431,8 @@ export default async function reportsRoutes(app) {
         a.category,
         COALESCE(dh.hours_run, 0) AS hours_run,
         dh.is_used,
-        dh.operator,
-        dh.notes,
+        dh.opening_hours,
+        dh.closing_hours,
         CASE WHEN dh.id IS NULL THEN 0 ELSE 1 END AS has_daily_entry
       FROM assets a
       LEFT JOIN daily_hours dh ON dh.asset_id = a.id AND dh.work_date = ?
@@ -4577,18 +4460,36 @@ export default async function reportsRoutes(app) {
 
     const breakdownDowntimeCol = getBreakdownDowntimeColumn();
     const breakdowns = db.prepare(`
-      SELECT a.asset_code, b.description, COALESCE(b.${breakdownDowntimeCol}, 0) AS downtime_hours, b.critical
+      SELECT
+        b.id,
+        a.asset_code,
+        b.description,
+        COALESCE(b.${breakdownDowntimeCol}, 0) AS downtime_hours,
+        b.critical,
+        b.breakdown_date,
+        b.start_at,
+        b.end_at,
+        COALESCE((
+          SELECT COUNT(DISTINCT l.log_date)
+          FROM breakdown_downtime_logs l
+          WHERE l.breakdown_id = b.id
+        ), 0) AS logged_days
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
       WHERE b.breakdown_date = ?
       ORDER BY downtime_hours DESC
-    `).all(date).map(r => ({ ...r, critical: Boolean(r.critical) }));
+    `).all(date).map(r => ({
+      ...r,
+      critical: Boolean(r.critical),
+      days_down: daysDownForBreakdown(r, date),
+    }));
 
     const openWOs = db.prepare(`
       SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
-      WHERE w.status != 'closed'
+      WHERE w.closed_at IS NULL
+        AND TRIM(LOWER(COALESCE(w.status, ''))) IN ('open', 'in_progress')
       ORDER BY w.id DESC
       LIMIT 30
     `).all();
@@ -4614,59 +4515,6 @@ export default async function reportsRoutes(app) {
     const stockCriticalPdf = stockCritical.slice(0, 40);
 
     const kpi = kpiDaily(date, scheduled);
-    const defaults = costDefaults();
-
-    const fuelCostRow = db.prepare(`
-      SELECT COALESCE(SUM(fl.liters * COALESCE(fl.unit_cost_per_liter, a.fuel_cost_per_liter, ?)), 0) AS value
-      FROM fuel_logs fl
-      JOIN assets a ON a.id = fl.asset_id
-      WHERE fl.log_date = ?
-    `).get(defaults.fuel_cost_per_liter_default, date);
-
-    const lubeCostRow = db.prepare(`
-      SELECT COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS value
-      FROM oil_logs ol
-      WHERE ol.log_date = ?
-    `).get(defaults.lube_cost_per_qty_default, date);
-
-    const smCols = db.prepare(`PRAGMA table_info(stock_movements)`).all();
-    const hasCreatedAt = smCols.some((c) => String(c.name) === "created_at");
-    const smDateExpr = hasCreatedAt ? "DATE(sm.created_at)" : "DATE(sm.movement_date)";
-    const partsCostRow = db.prepare(`
-      SELECT COALESCE(SUM(ABS(sm.quantity) * COALESCE(p.unit_cost, 0)), 0) AS value
-      FROM stock_movements sm
-      JOIN parts p ON p.id = sm.part_id
-      WHERE sm.movement_type = 'out'
-        AND ${smDateExpr} = ?
-    `).get(date);
-
-    const laborRow = db.prepare(`
-      SELECT
-        COALESCE(SUM(COALESCE(w.labor_hours, 0)), 0) AS labor_hours,
-        COALESCE(SUM(COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, ?)), 0) AS labor_cost
-      FROM work_orders w
-      WHERE DATE(COALESCE(w.completed_at, w.closed_at)) = ?
-        AND w.status IN ('completed', 'approved', 'closed')
-    `).get(defaults.labor_cost_per_hour_default, date);
-
-    const downtimeCostRow = db.prepare(`
-      SELECT COALESCE(SUM(l.hours_down * COALESCE(a.downtime_cost_per_hour, ?)), 0) AS value
-      FROM breakdown_downtime_logs l
-      JOIN breakdowns b ON b.id = l.breakdown_id
-      JOIN assets a ON a.id = b.asset_id
-      WHERE l.log_date = ?
-    `).get(defaults.downtime_cost_per_hour_default, date);
-
-    const totalCost = Number(
-      (
-        Number(fuelCostRow?.value || 0) +
-        Number(lubeCostRow?.value || 0) +
-        Number(partsCostRow?.value || 0) +
-        Number(laborRow?.labor_cost || 0) +
-        Number(downtimeCostRow?.value || 0)
-      ).toFixed(2)
-    );
-    const costPerRunHour = Number(kpi.run_hours || 0) > 0 ? totalCost / Number(kpi.run_hours || 1) : null;
 
     const pdf = await buildPdfBuffer(
       (doc) => {
@@ -4684,44 +4532,32 @@ export default async function reportsRoutes(app) {
           { k: "Utilization %", v: kpi.utilization == null ? "N/A" : `${fmtNum(kpi.utilization, 2)}%` },
         ], 2);
 
-        sectionTitle(doc, "Cost Engine (Daily)");
-        kvGrid(doc, [
-          { k: "Fuel Cost", v: fmtNum(fuelCostRow?.value || 0, 2) },
-          { k: "Oil/Lube Cost", v: fmtNum(lubeCostRow?.value || 0, 2) },
-          { k: "Parts Cost", v: fmtNum(partsCostRow?.value || 0, 2) },
-          { k: "Labor Cost", v: fmtNum(laborRow?.labor_cost || 0, 2) },
-          { k: "Labor Hours", v: fmtNum(laborRow?.labor_hours || 0, 1) },
-          { k: "Downtime Cost", v: fmtNum(downtimeCostRow?.value || 0, 2) },
-          { k: "Total Cost", v: fmtNum(totalCost, 2) },
-          { k: "Cost / Run Hour", v: costPerRunHour == null ? "N/A" : fmtNum(costPerRunHour, 2) },
-        ], 2);
-
         sectionTitle(doc, "Hours by asset (active fleet, non-standby)");
         table(
           doc,
           [
             { key: "asset", label: "Asset", width: 0.14 },
             { key: "type", label: "Type", width: 0.12 },
-            { key: "name", label: "Name", width: 0.20 },
-            { key: "hours", label: "Run Hrs", width: 0.10, align: "right" },
-            { key: "used", label: "Prod", width: 0.07, align: "center" },
-            { key: "operator", label: "Operator", width: 0.15 },
-            { key: "notes", label: "Notes", width: 0.22 },
+            { key: "name", label: "Name", width: 0.25 },
+            { key: "open", label: "Open", width: 0.13, align: "right" },
+            { key: "close", label: "Close", width: 0.13, align: "right" },
+            { key: "hours", label: "Run Hrs", width: 0.13, align: "right" },
+            { key: "used", label: "Prod", width: 0.10, align: "center" },
           ],
-          hoursPdf.map((r) => ({
-            asset: r.asset_code,
-            type: compactCell(r.category ?? "", 14),
-            name: r.asset_name ?? "",
-            hours: fmtNum(r.hours_run, 1),
-            used:
-              !r.has_daily_entry
-                ? "—"
-                : r.is_used
-                  ? "Y"
-                  : "N",
-            operator: compactCell(r.operator ?? "", 40),
-            notes: !r.has_daily_entry ? "No daily entry" : compactCell(r.notes ?? "", 90),
-          }))
+          hoursPdf.map((r) => {
+            const noEntry = !r.has_daily_entry;
+            const fmtHm = (v) =>
+              v == null || v === "" || !Number.isFinite(Number(v)) ? "—" : fmtNum(v, 1);
+            return {
+              asset: r.asset_code,
+              type: compactCell(r.category ?? "", 12),
+              name: r.asset_name ?? "",
+              open: noEntry ? "—" : fmtHm(r.opening_hours),
+              close: noEntry ? "—" : fmtHm(r.closing_hours),
+              hours: fmtNum(r.hours_run, 1),
+              used: noEntry ? "—" : r.is_used ? "Y" : "N",
+            };
+          })
         );
 
         sectionTitle(doc, "Fuel");
@@ -4758,13 +4594,15 @@ export default async function reportsRoutes(app) {
         table(
           doc,
           [
-            { key: "asset", label: "Asset", width: 0.16 },
-            { key: "hrs", label: "Downtime (hrs)", width: 0.14, align: "right" },
-            { key: "crit", label: "Critical", width: 0.12, align: "center" },
-            { key: "desc", label: "Description", width: 0.58 },
+            { key: "asset", label: "Asset", width: 0.14 },
+            { key: "days", label: "Days down", width: 0.12, align: "right" },
+            { key: "hrs", label: "Downtime (hrs)", width: 0.12, align: "right" },
+            { key: "crit", label: "Critical", width: 0.10, align: "center" },
+            { key: "desc", label: "Description", width: 0.52 },
           ],
           breakdownsPdf.map(r => ({
             asset: r.asset_code,
+            days: fmtNum(r.days_down || 0, 0),
             hrs: fmtNum(r.downtime_hours, 1),
             crit: r.critical ? "YES" : "NO",
             desc: compactCell(r.description ?? "", 140),
@@ -4811,7 +4649,7 @@ export default async function reportsRoutes(app) {
       },
       {
         title: "IRONLOG",
-        subtitle: "Daily Operations Report",
+        subtitle: `Daily Operations Report (${reportRevision})`,
         rightText: `Date: ${date}`,
         showPageNumbers: true,
       }
@@ -5099,9 +4937,14 @@ export default async function reportsRoutes(app) {
 
   // GET /api/reports/operations.pdf?start=YYYY-MM-DD&end=YYYY-MM-DD&download=1
   app.get("/operations.pdf", async (req, reply) => {
+    const reportRevision = "ops-pdf-r2026-04-04b";
     const start = String(req.query?.start || "").trim();
     const end = String(req.query?.end || "").trim();
     const download = String(req.query?.download || "").trim() === "1";
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
+    reply.header("X-IRONLOG-Report-Revision", reportRevision);
     if (!isDate(start) || !isDate(end)) {
       return reply.code(400).send({ error: "start and end must be YYYY-MM-DD" });
     }
@@ -5234,7 +5077,7 @@ export default async function reportsRoutes(app) {
       },
       {
         title: "IRONLOG",
-        subtitle: "Operations Report",
+        subtitle: `Operations Report (${reportRevision})`,
         rightText: `Period: ${start} to ${end}`,
         showPageNumbers: true,
       }

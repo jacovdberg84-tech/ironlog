@@ -2,11 +2,18 @@
 import { buildServer } from "./server.js";
 import { runHybridPhase1Migration } from "./db/hybridPhase1.js";
 import { runHybridPhase2Migration } from "./db/hybridPhase2.js";
+import "./db/migrate.js"; // Run schema migration first
 
+import dotenv from "dotenv";
 import fastifyStatic from "@fastify/static";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { runIronmindAutoScheduler } from "./utils/ironmind.js";
+import { startDbAutoBackup } from "./db/autoBackup.js";
+
+// Load environment variables from .env in the API root.
+dotenv.config({ path: path.join(process.cwd(), ".env") });
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -14,8 +21,20 @@ const DESKTOP_PORT_MAX = process.env.IRONLOG_DESKTOP_PORT_MAX
   ? Number(process.env.IRONLOG_DESKTOP_PORT_MAX)
   : PORT;
 
-runHybridPhase1Migration();
-runHybridPhase2Migration();
+function runStartupMigrationsSafely() {
+  try {
+    runHybridPhase1Migration();
+  } catch (err) {
+    console.error("[startup] phase1 migration skipped:", err?.message || err);
+  }
+  try {
+    runHybridPhase2Migration();
+  } catch (err) {
+    console.error("[startup] phase2 migration skipped:", err?.message || err);
+  }
+}
+
+runStartupMigrationsSafely();
 
 const app = buildServer();
 
@@ -76,6 +95,10 @@ async function listenWithFallback() {
 
 try {
   const effectivePort = await listenWithFallback();
+  const stopDbAutoBackup = startDbAutoBackup(app.log);
+  process.once("SIGINT", stopDbAutoBackup);
+  process.once("SIGTERM", stopDbAutoBackup);
+  await runIronmindAutoScheduler(app.log);
   app.log.info(`IRONLOG API running on http://${HOST}:${effectivePort}`);
   app.log.info(`IRONLOG UI  running on http://${HOST}:${effectivePort}/web/index.html`);
 } catch (err) {

@@ -83,9 +83,13 @@ function kpiDaily(date, scheduled) {
   const run_hours = Number(runRow.run_hours || 0);
 
   const dtRow = db.prepare(`
-    SELECT IFNULL(SUM(b.downtime_hours), 0) AS downtime_hours
-    FROM breakdowns b
-    WHERE b.breakdown_date = ?
+    SELECT IFNULL(SUM(l.hours_down), 0) AS downtime_hours
+    FROM breakdown_downtime_logs l
+    JOIN breakdowns b ON b.id = l.breakdown_id
+    JOIN assets a ON a.id = b.asset_id
+    WHERE l.log_date = ?
+      AND a.active = 1
+      AND a.is_standby = 0
       AND b.asset_id IN (
         SELECT DISTINCT dh.asset_id
         FROM daily_hours dh
@@ -627,7 +631,10 @@ export default async function reportsRoutes(app) {
         w.opened_at,
         w.closed_at
       FROM work_orders w
-      WHERE w.asset_id = ? ${woF.sql}
+      WHERE w.asset_id = ?
+        AND w.closed_at IS NULL
+        AND TRIM(LOWER(COALESCE(w.status, ''))) IN ('open', 'in_progress')
+        ${woF.sql}
       ORDER BY w.id DESC
       LIMIT 300
     `).all(asset.id, ...woF.params);
@@ -820,8 +827,7 @@ export default async function reportsRoutes(app) {
             { key: "date", label: "Date", width: 0.16 },
             { key: "source", label: "Source", width: 0.16 },
             { key: "status", label: "Status", width: 0.16 },
-            { key: "opened", label: "Opened", width: 0.20 },
-            { key: "closed", label: "Closed", width: 0.20 },
+            { key: "opened", label: "Opened", width: 0.40 },
           ],
           workOrdersPdf.length
             ? workOrdersPdf.map((r) => ({
@@ -830,9 +836,8 @@ export default async function reportsRoutes(app) {
                 source: String(r.source || ""),
                 status: String(r.status || ""),
                 opened: r.opened_at || "",
-                closed: r.closed_at || "-",
               }))
-            : [{ id: "-", date: "-", source: "-", status: "-", opened: "-", closed: "-" }]
+            : [{ id: "-", date: "-", source: "-", status: "-", opened: "-" }]
         );
 
         sectionTitle(doc, "GET Change Slips");
@@ -2124,6 +2129,10 @@ export default async function reportsRoutes(app) {
   // DAILY XLSX
   // =========================
   app.get("/daily.xlsx", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
+
     const date = String(req.query?.date || "").trim();
     const scheduled = Number(req.query?.scheduled ?? 10);
 
@@ -2347,14 +2356,6 @@ export default async function reportsRoutes(app) {
     wsSummary.addRow({ k: "Fuel total (L)", v: Number(fuel_total.toFixed(2)) });
     wsSummary.addRow({ k: "Oil total (Qty)", v: Number(oil_total.toFixed(2)) });
     wsSummary.addRow({ k: "Downtime total (hrs)", v: Number(breakdown_total.toFixed(2)) });
-    wsSummary.addRow({ k: "Fuel cost", v: fuelCostTotal });
-    wsSummary.addRow({ k: "Oil/Lube cost", v: lubeCostTotal });
-    wsSummary.addRow({ k: "Parts cost", v: partsCostTotal });
-    wsSummary.addRow({ k: "Labor cost", v: laborCostTotal });
-    wsSummary.addRow({ k: "Labor hours", v: laborHoursTotal });
-    wsSummary.addRow({ k: "Downtime cost", v: downtimeCostTotal });
-    wsSummary.addRow({ k: "Total cost", v: totalCost });
-    wsSummary.addRow({ k: "Cost per run hour", v: costPerRunHour == null ? "N/A" : costPerRunHour });
     wsSummary.views = [{ state: "frozen", ySplit: 1 }];
     wsSummary.getCell("A1").font = { bold: true };
 
@@ -2474,37 +2475,6 @@ export default async function reportsRoutes(app) {
       }))
       .filter((r) => r.total_cost > 0)
       .sort((a, b) => b.total_cost - a.total_cost);
-
-    addTableSheet(
-      wb,
-      "Cost by Asset",
-      [
-        { header: "Asset Code", key: "asset_code", width: 14 },
-        { header: "Asset Name", key: "asset_name", width: 24 },
-        { header: "Fuel Cost", key: "fuel_cost", width: 12 },
-        { header: "Lube Cost", key: "lube_cost", width: 12 },
-        { header: "Parts Cost", key: "parts_cost", width: 12 },
-        { header: "Labor Hours", key: "labor_hours", width: 12 },
-        { header: "Labor Cost", key: "labor_cost", width: 12 },
-        { header: "Downtime Hrs", key: "downtime_hours", width: 12 },
-        { header: "Downtime Cost", key: "downtime_cost", width: 13 },
-        { header: "Total Cost", key: "total_cost", width: 12 },
-      ],
-      costRows.length
-        ? costRows
-        : [{
-            asset_code: "-",
-            asset_name: "No cost activity for date",
-            fuel_cost: 0,
-            lube_cost: 0,
-            parts_cost: 0,
-            labor_hours: 0,
-            labor_cost: 0,
-            downtime_hours: 0,
-            downtime_cost: 0,
-            total_cost: 0,
-          }]
-    );
 
     const buffer = await wb.xlsx.writeBuffer();
 
@@ -2804,6 +2774,12 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
+    const reportRevision = "daily-pdf-no-cost-r2026-04-04b";
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
+    reply.header("X-IRONLOG-Report-Revision", reportRevision);
+
     const date = String(req.query?.date || "").trim();
     const scheduled = Number(req.query?.scheduled ?? 10);
     if (!isDate(date)) return reply.code(400).send({ error: "date (YYYY-MM-DD) required" });
@@ -2846,7 +2822,8 @@ export default async function reportsRoutes(app) {
       SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
-      WHERE w.status != 'closed'
+      WHERE w.closed_at IS NULL
+        AND TRIM(LOWER(COALESCE(w.status, ''))) IN ('open', 'in_progress')
       ORDER BY w.id DESC
       LIMIT 30
     `).all();
@@ -2940,18 +2917,6 @@ export default async function reportsRoutes(app) {
           { k: "Downtime hours", v: fmtNum(kpi.downtime_hours, 1) },
           { k: "Availability %", v: kpi.availability == null ? "N/A" : `${fmtNum(kpi.availability, 2)}%` },
           { k: "Utilization %", v: kpi.utilization == null ? "N/A" : `${fmtNum(kpi.utilization, 2)}%` },
-        ], 2);
-
-        sectionTitle(doc, "Cost Engine (Daily)");
-        kvGrid(doc, [
-          { k: "Fuel Cost", v: fmtNum(fuelCostRow?.value || 0, 2) },
-          { k: "Oil/Lube Cost", v: fmtNum(lubeCostRow?.value || 0, 2) },
-          { k: "Parts Cost", v: fmtNum(partsCostRow?.value || 0, 2) },
-          { k: "Labor Cost", v: fmtNum(laborRow?.labor_cost || 0, 2) },
-          { k: "Labor Hours", v: fmtNum(laborRow?.labor_hours || 0, 1) },
-          { k: "Downtime Cost", v: fmtNum(downtimeCostRow?.value || 0, 2) },
-          { k: "Total Cost", v: fmtNum(totalCost, 2) },
-          { k: "Cost / Run Hour", v: costPerRunHour == null ? "N/A" : fmtNum(costPerRunHour, 2) },
         ], 2);
 
         sectionTitle(doc, "Hours Logged");
@@ -3062,7 +3027,7 @@ export default async function reportsRoutes(app) {
       },
       {
         title: "IRONLOG",
-        subtitle: "Daily Operations Report",
+        subtitle: `Daily Operations Report (${reportRevision})`,
         rightText: `Date: ${date}`,
         showPageNumbers: true,
       }
@@ -3349,6 +3314,11 @@ export default async function reportsRoutes(app) {
 
   // GET /api/reports/operations.pdf?start=YYYY-MM-DD&end=YYYY-MM-DD&download=1
   app.get("/operations.pdf", async (req, reply) => {
+    const reportRevision = "ops-pdf-r2026-04-04b";
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
+    reply.header("X-IRONLOG-Report-Revision", reportRevision);
     const start = String(req.query?.start || "").trim();
     const end = String(req.query?.end || "").trim();
     const download = String(req.query?.download || "").trim() === "1";
@@ -3484,7 +3454,7 @@ export default async function reportsRoutes(app) {
       },
       {
         title: "IRONLOG",
-        subtitle: "Operations Report",
+        subtitle: `Operations Report (${reportRevision})`,
         rightText: `Period: ${start} to ${end}`,
         showPageNumbers: true,
       }

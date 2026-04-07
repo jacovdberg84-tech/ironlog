@@ -641,6 +641,8 @@ function applyRoleVisibility() {
 
   const maintBtn = qs("openMaintenanceBtn");
   if (maintBtn) maintBtn.style.display = allowed.has("maintenance") ? "" : "none";
+  const siteBtn = qs("openSiteOpsBtn");
+  if (siteBtn) siteBtn.style.display = allowed.has("operations") ? "" : "none";
   const reopenBtn = qs("reopenOperationsDay");
   if (reopenBtn) reopenBtn.style.display = roles.some((r) => ["admin", "supervisor"].includes(r)) ? "" : "none";
 
@@ -729,7 +731,10 @@ function applySessionFromMeUser(user) {
   const u = String(user.username || DEFAULT_USER).trim() || DEFAULT_USER;
   const r = String(user.role || DEFAULT_ROLE).trim().toLowerCase() || DEFAULT_ROLE;
   const roles = normalizeRoles(user.roles, r);
-  setSessionContext(u, r, getSessionSite(), roles);
+  const allowedLoc = Array.isArray(user.allowed_locations) ? user.allowed_locations.map((x) => String(x || "").trim().toLowerCase()).filter(Boolean) : [];
+  const currentSite = getSessionSite();
+  const nextSite = allowedLoc.length ? (allowedLoc.includes(currentSite) ? currentSite : allowedLoc[0]) : currentSite;
+  setSessionContext(u, r, nextSite, roles);
   if (user.allowed_tabs && Array.isArray(user.allowed_tabs) && user.allowed_tabs.length) {
     localStorage.setItem(TABS_OVERRIDE_KEY, JSON.stringify(user.allowed_tabs));
   } else {
@@ -764,11 +769,37 @@ async function tryInitialSession() {
 async function submitLoginForm() {
   const u = String(qs("loginUsername")?.value || "").trim();
   const p = String(qs("loginPassword")?.value || "");
+  const setupCode = String(qs("loginSetupCode")?.value || "").trim();
+  const setupPassword = String(qs("loginNewPassword")?.value || "").trim();
   const remember = qs("loginRemember")?.checked !== false;
   const errEl = qs("loginError");
   if (errEl) errEl.textContent = "";
-  if (!u || !p) {
-    if (errEl) errEl.textContent = "Enter username and password.";
+  if (!u) {
+    if (errEl) errEl.textContent = "Enter username.";
+    return;
+  }
+  if (!p) {
+    if (setupCode && setupPassword.length >= 6) {
+      try {
+        const setupRes = await fetch(`${API}/api/auth/setup-password`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: u, setup_code: setupCode, new_password: setupPassword }),
+        });
+        const setupData = await setupRes.json().catch(() => ({}));
+        if (!setupRes.ok) {
+          if (errEl) errEl.textContent = setupData.error || setupData.message || "Setup code failed.";
+          return;
+        }
+        if (qs("loginSetupCode")) qs("loginSetupCode").value = "";
+        if (qs("loginNewPassword")) qs("loginNewPassword").value = "";
+        if (errEl) errEl.textContent = "Password created. Enter your password and sign in.";
+      } catch (e) {
+        if (errEl) errEl.textContent = String(e.message || e);
+      }
+      return;
+    }
+    if (errEl) errEl.textContent = "Enter password, or use setup code with a new password.";
     return;
   }
   try {
@@ -779,6 +810,26 @@ async function submitLoginForm() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
+      if (data.error === "password_not_set") {
+        if (!setupCode || setupPassword.length < 6) {
+          if (errEl) errEl.textContent = "First-time setup: enter setup code and new password (6+ chars).";
+          return;
+        }
+        const setupRes = await fetch(`${API}/api/auth/setup-password`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: u, setup_code: setupCode, new_password: setupPassword }),
+        });
+        const setupData = await setupRes.json().catch(() => ({}));
+        if (!setupRes.ok) {
+          if (errEl) errEl.textContent = setupData.error || setupData.message || "Setup code failed.";
+          return;
+        }
+        if (qs("loginSetupCode")) qs("loginSetupCode").value = "";
+        if (qs("loginNewPassword")) qs("loginNewPassword").value = "";
+        if (errEl) errEl.textContent = "Password created. Please click Sign in again.";
+        return;
+      }
       if (errEl) errEl.textContent = data.message || data.error || "Login failed.";
       return;
     }
@@ -844,12 +895,17 @@ async function loadAdminUsers() {
     rows.forEach((r) => {
       const tr = document.createElement("tr");
       const rolesText = Array.isArray(r.roles) && r.roles.length ? r.roles.join(", ") : String(r.role || "operator");
-      tr.innerHTML = `<td>${escapeHtml(r.username)}</td><td>${escapeHtml(r.full_name || "")}</td><td>${escapeHtml(r.department || "")}</td><td>${escapeHtml(rolesText)}</td><td>${r.active ? "yes" : "no"}</td><td>${r.has_password ? "yes" : "no"}</td>`;
+      const locText = Array.isArray(r.allowed_locations) && r.allowed_locations.length ? r.allowed_locations.join(", ") : "all";
+      tr.innerHTML = `<td>${escapeHtml(r.username)}</td><td>${escapeHtml(r.full_name || "")}</td><td>${escapeHtml(r.department || "")}</td><td>${escapeHtml(rolesText)}</td><td>${escapeHtml(locText)}</td><td>${r.active ? "yes" : "no"}</td><td>${r.has_password ? "yes" : "no"}</td>`;
       tr.style.cursor = "pointer";
       tr.addEventListener("click", () => {
         if (qs("adminUsername")) qs("adminUsername").value = r.username;
         if (qs("adminFullName")) qs("adminFullName").value = r.full_name || "";
         if (qs("adminDepartment")) qs("adminDepartment").value = r.department || "";
+        if (qs("adminAllowedLocations")) {
+          const loc = Array.isArray(r.allowed_locations) ? r.allowed_locations.join(",") : "";
+          qs("adminAllowedLocations").value = loc;
+        }
         const rolesSel = qs("adminRoles");
         if (rolesSel) {
           const selectedRoles = Array.isArray(r.roles) && r.roles.length ? r.roles : [String(r.role || "operator")];
@@ -894,22 +950,39 @@ async function saveAdminUser() {
   const password = String(qs("adminPassword")?.value || "");
   const full_name = String(qs("adminFullName")?.value || "").trim();
   const department = String(qs("adminDepartment")?.value || "").trim();
+  const allowedLocationsRaw = String(qs("adminAllowedLocations")?.value || "").trim();
+  const issueSetup = qs("adminIssueSetupCode")?.checked !== false;
   const rolesSel = qs("adminRoles");
   const roles = rolesSel ? Array.from(rolesSel.selectedOptions).map((o) => String(o.value || "").trim().toLowerCase()).filter(Boolean) : [];
   if (!roles.length) return alert("Select at least one role.");
   const tabsSel = qs("adminUserTabs");
   const allowed_tabs = tabsSel ? Array.from(tabsSel.selectedOptions).map((o) => o.value) : [];
   if (!username) return alert("Username is required.");
-  const body = { username, full_name: full_name || null, department: department || null, roles, role: roles[0], allowed_tabs };
+  const body = {
+    username,
+    full_name: full_name || null,
+    department: department || null,
+    roles,
+    role: roles[0],
+    allowed_tabs,
+    allowed_locations: allowedLocationsRaw || null,
+    issue_setup_code: issueSetup,
+  };
   if (password) body.password = password;
   setStatus("Saving user…");
   try {
-    await fetchJson(`${API}/api/auth/users`, {
+    const saved = await fetchJson(`${API}/api/auth/users`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    setStatus("User saved.");
+    const pre = qs("adminUsersResult");
+    if (saved?.setup_code) {
+      if (pre) pre.textContent = `Setup code for ${username}: ${saved.setup_code}\nExpires: ${saved.setup_code_expires_at || "7 days"}`;
+      setStatus("User saved. Share setup code with user.");
+    } else {
+      setStatus("User saved.");
+    }
     await loadAdminUsers();
   } catch (e) {
     setStatus("Save user failed: " + (e.message || e));
@@ -1310,7 +1383,7 @@ function item(html) {
   d.innerHTML = html;
   return d;
 }
-function setSpeedo(needleEl, valEl, pct) {
+function setSpeedo(needleEl, valEl, pct, opts) {
   if (!needleEl || !valEl) return;
 
   const face = needleEl.parentElement; // .speedo-face
@@ -1341,9 +1414,12 @@ function item(html) {
   const deg = -90 + (clamped * 180) / 100;
 
   // KPI lighting thresholds
+  // KPI lighting thresholds (configurable via setSpeedo opts)
+  const _goodAt = Number(opts?.goodAt ?? 85);
+  const _warnAt = Number(opts?.warnAt ?? 60);
   let kpiClass = "kpi-bad";
-  if (clamped >= 85) kpiClass = "kpi-good";
-  else if (clamped >= 60) kpiClass = "kpi-warn";
+  if (clamped >= _goodAt) kpiClass = "kpi-good";
+  else if (clamped >= _warnAt) kpiClass = "kpi-warn";
 
   clearKpiClasses(needleEl);
   clearKpiClasses(face);
@@ -1364,6 +1440,80 @@ function item(html) {
 
   valEl.textContent = clamped.toFixed(2) + "%";
 }
+
+function getThresholds() {
+  const safeNum = (k, def) => {
+    const v = Number(localStorage.getItem(k));
+    return Number.isFinite(v) && v >= 0 && v <= 100 ? v : def;
+  };
+  return {
+    availTarget: safeNum("th_avail_target", 85),
+    availCrit:   safeNum("th_avail_crit",   70),
+    utilTarget:  safeNum("th_util_target",  70),
+    utilCrit:    safeNum("th_util_crit",    55),
+  };
+}
+
+function populateThresholdInputs() {
+  const th = getThresholds();
+  const set = (id, v) => { const el = qs(id); if (el) el.value = v; };
+  set("thAvailTarget", th.availTarget);
+  set("thAvailCrit",   th.availCrit);
+  set("thUtilTarget",  th.utilTarget);
+  set("thUtilCrit",    th.utilCrit);
+}
+
+function saveThresholdsFromUI() {
+  const getNum = (id, def) => {
+    const v = Number(qs(id)?.value);
+    return Number.isFinite(v) && v >= 0 && v <= 100 ? v : def;
+  };
+  localStorage.setItem("th_avail_target", getNum("thAvailTarget", 85));
+  localStorage.setItem("th_avail_crit",   getNum("thAvailCrit",   70));
+  localStorage.setItem("th_util_target",  getNum("thUtilTarget",  70));
+  localStorage.setItem("th_util_crit",    getNum("thUtilCrit",    55));
+  setStatus("Thresholds saved.");
+  loadDashboard().catch(() => {});
+}
+
+function updateKpiAlertBanner(availPct, utilPct) {
+  const banner = qs("kpiAlertBanner");
+  if (!banner) return;
+  const th = getThresholds();
+  const issues = [];
+  if (availPct != null && !Number.isNaN(Number(availPct))) {
+    const a = Number(availPct);
+    if (a < th.availCrit) {
+      issues.push({ label: "AVAILABILITY CRITICAL", value: a, target: th.availTarget, cls: "kpi-alert-crit" });
+    } else if (a < th.availTarget) {
+      issues.push({ label: "AVAILABILITY BELOW TARGET", value: a, target: th.availTarget, cls: "kpi-alert-warn" });
+    }
+  }
+  if (utilPct != null && !Number.isNaN(Number(utilPct))) {
+    const u = Number(utilPct);
+    if (u < th.utilCrit) {
+      issues.push({ label: "UTILIZATION CRITICAL", value: u, target: th.utilTarget, cls: "kpi-alert-crit" });
+    } else if (u < th.utilTarget) {
+      issues.push({ label: "UTILIZATION BELOW TARGET", value: u, target: th.utilTarget, cls: "kpi-alert-warn" });
+    }
+  }
+  if (!issues.length) {
+    banner.style.display = "none";
+    banner.innerHTML = "";
+    return;
+  }
+  banner.style.display = "";
+  banner.innerHTML = issues
+    .map(
+      (i) =>
+        `<div class="kpi-alert-item ${i.cls}">` +
+        `<span class="kpi-alert-icon">${i.cls === "kpi-alert-crit" ? "\u26D4" : "\u26A0\uFE0F"}</span>` +
+        `<span class="kpi-alert-text"><b>${escapeHtml(i.label)}</b> \u2014 ${Number(i.value).toFixed(1)}% (target ${i.target}%)</span>` +
+        `</div>`
+    )
+    .join("");
+}
+
 /* =========================
    OFFLINE QUEUE STORAGE
 ========================= */
@@ -1420,6 +1570,19 @@ function getQueuedHoursCount() {
 
 function refreshNetBanner() {
   setNetBanner("idle", getQueuedHoursCount());
+}
+
+async function disableLegacyServiceWorkers() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    if (!Array.isArray(regs) || !regs.length) return;
+    for (const reg of regs) {
+      await reg.unregister();
+    }
+  } catch {
+    // non-fatal: app keeps working if SW API is blocked
+  }
 }
 
 /* =========================
@@ -1529,8 +1692,10 @@ async function loadDashboard() {
   const sqDateEl = qs("sqDate");
   if (sqDateEl && !sqDateEl.value) sqDateEl.value = date;
 
-  setSpeedo(qs("availNeedle"), qs("gAvailVal"), data?.kpi?.availability);
-  setSpeedo(qs("utilNeedle"), qs("gUtilVal"), data?.kpi?.utilization);
+  const _kpiTh = getThresholds();
+  setSpeedo(qs("availNeedle"), qs("gAvailVal"), data?.kpi?.availability, { goodAt: _kpiTh.availTarget, warnAt: _kpiTh.availCrit });
+  setSpeedo(qs("utilNeedle"), qs("gUtilVal"), data?.kpi?.utilization, { goodAt: _kpiTh.utilTarget, warnAt: _kpiTh.utilCrit });
+  updateKpiAlertBanner(data?.kpi?.availability, data?.kpi?.utilization);
 
   const mtdRange =
     data.kpi?.mtd_start && data.kpi?.mtd_end
@@ -1837,8 +2002,230 @@ async function loadDashboard() {
   }
 
   await loadStockMonitor().catch(() => {});
+  await loadIronmindInsight({ silent: true }).catch(() => {});
+  await loadIronmindHistory({ silent: true }).catch(() => {});
 
   setStatus("Dashboard ready.");
+}
+
+async function loadIronmindInsight(options = {}) {
+  const silent = Boolean(options.silent);
+  const summaryEl = qs("ironmindSummary");
+  const metaEl = qs("ironmindMeta");
+
+  try {
+    const res = await fetchJson(`${API}/api/ironmind/latest?report_type=daily_admin`);
+    const report = res?.report || null;
+    if (!report) {
+      if (summaryEl) {
+        const emptySections = parseIronmindSections(
+          ["IRONMIND DAILY INSIGHT", "", "Repairs Needed", "- Insufficient data",
+           "", "Operational Risks", "- Insufficient data",
+           "", "Suggestions", "- Insufficient data",
+           "", "Data Gaps", "- Insufficient data"].join("\n")
+        );
+        renderIronmindSections(summaryEl, emptySections);
+      }
+      if (metaEl) metaEl.textContent = "No report generated yet.";
+      if (!silent) setStatus("IRONMIND insight not available yet.");
+      return;
+    }
+
+    renderIronmindReport(report);
+    if (!silent) setStatus("IRONMIND insight loaded.");
+  } catch (err) {
+    if (metaEl) metaEl.textContent = "Insight unavailable right now.";
+    if (!silent) setStatus("IRONMIND load error: " + err.message);
+    throw err;
+  }
+}
+
+function summarizeIronmindText(text) {
+  const oneLine = String(text || "")
+    .replace(/\s+/g, " ")
+    .replace(/^IRONMIND DAILY INSIGHT\s*/i, "")
+    .trim();
+  if (!oneLine) return "No summary text.";
+  return oneLine.length > 150 ? `${oneLine.slice(0, 147)}...` : oneLine;
+}
+
+function toYmd(date) {
+  const d = new Date(date);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function buildRecentYmds(days) {
+  const out = [];
+  const now = new Date();
+  for (let i = 0; i < days; i += 1) {
+    const d = new Date(now);
+    d.setDate(now.getDate() - i);
+    out.push(toYmd(d));
+  }
+  return out;
+}
+
+function renderIronmindReport(report) {
+  const summaryEl = qs("ironmindSummary");
+  const metaEl = qs("ironmindMeta");
+  if (summaryEl) {
+    const sections = parseIronmindSections(String(report?.summary || ""));
+    renderIronmindSections(summaryEl, sections);
+  }
+  if (metaEl) {
+    const created = report?.created_at ? String(report.created_at).replace("T", " ").slice(0, 16) : "-";
+    metaEl.textContent = `Report date: ${report?.report_date || "-"} | Updated: ${created}`;
+  }
+}
+
+async function loadIronmindHistory(options = {}) {
+  const silent = Boolean(options.silent);
+  const listEl = qs("ironmindHistoryList");
+  const includeMissing = Boolean(qs("ironmindShowMissingDays")?.checked);
+  if (!listEl) return;
+  try {
+    const res = await fetchJson(`${API}/api/ironmind/history?report_type=daily_admin&days=7`);
+    const rowsRaw = Array.isArray(res?.reports) ? res.reports : [];
+    const rowsByDate = new Map(rowsRaw.map((r) => [String(r.report_date || "").trim(), r]));
+    const rows = includeMissing
+      ? buildRecentYmds(7).map((ymd) => {
+          if (rowsByDate.has(ymd)) return rowsByDate.get(ymd);
+          return {
+            id: 0,
+            report_date: ymd,
+            report_type: "daily_admin",
+            created_at: "-",
+            summary: "IRONMIND DAILY INSIGHT\n\nRepairs Needed\n- Insufficient data\n\nOperational Risks\n- Insufficient data\n\nSuggestions\n- Insufficient data\n\nData Gaps\n- Insufficient data",
+            synthetic_missing: true,
+          };
+        })
+      : rowsRaw;
+    listEl.innerHTML = "";
+    if (!rows.length) {
+      listEl.appendChild(item("<small>No IRONMIND history yet.</small>"));
+      if (!silent) setStatus("No IRONMIND history found.");
+      return;
+    }
+
+    rows.forEach((r) => {
+      const created = r?.created_at && r.created_at !== "-" ? String(r.created_at).replace("T", " ").slice(0, 16) : "-";
+      const preview = summarizeIronmindText(r?.summary || "");
+      const previewClass = r?.synthetic_missing ? "ironmind-history-preview missing" : "ironmind-history-preview";
+      const updatedText = r?.synthetic_missing ? "No generated report" : `Updated ${escapeHtml(created)}`;
+      const node = item(
+        `<div class="ironmind-history-item">` +
+          `<div class="ironmind-history-meta"><b>${escapeHtml(r.report_date || "-")}</b> · ${updatedText}</div>` +
+          `<div class="${previewClass}">${escapeHtml(preview)}</div>` +
+          `<button class="ironmind-history-open" data-ironmind-history-id="${Number(r.id || 0)}">${r?.synthetic_missing ? "Open placeholder" : "Open report"}</button>` +
+        `</div>`
+      );
+      node.dataset.ironmindRow = JSON.stringify(r);
+      listEl.appendChild(node);
+    });
+    if (!silent) setStatus("IRONMIND history loaded.");
+  } catch (err) {
+    listEl.innerHTML = `<small class="muted">History unavailable right now.</small>`;
+    if (!silent) setStatus("IRONMIND history error: " + err.message);
+    throw err;
+  }
+}
+
+async function refreshIronmindInsight() {
+  const btn = qs("ironmindRefreshBtn");
+  if (btn) btn.disabled = true;
+  setStatus("Refreshing IRONMIND insight...");
+  try {
+    await fetchJson(`${API}/api/ironmind/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force: true, report_type: "daily_admin" }),
+    });
+    await loadIronmindInsight({ silent: true });
+    await loadIronmindHistory({ silent: true });
+    setStatus("IRONMIND insight refreshed.");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function parseIronmindSections(text) {
+  const defs = [
+    { key: "repairs", name: "Repairs Needed" },
+    { key: "risks", name: "Operational Risks" },
+    { key: "suggestions", name: "Suggestions" },
+    { key: "data_gaps", name: "Data Gaps" },
+  ];
+  const src = String(text || "");
+  return defs.map((sec, i) => {
+    const next = defs[i + 1];
+    const start = src.indexOf(sec.name);
+    if (start === -1) return { key: sec.key, name: sec.name, items: [] };
+    const end = next ? src.indexOf(next.name, start + sec.name.length) : src.length;
+    const block = src.slice(start + sec.name.length, end === -1 ? src.length : end);
+    const items = block
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("-"))
+      .map((l) => l.slice(1).trim())
+      .filter(Boolean);
+    return { key: sec.key, name: sec.name, items: items.length ? items : ["Insufficient data"] };
+  });
+}
+
+function renderIronmindSections(summaryEl, sections) {
+  if (!summaryEl) return;
+  const navMap = {
+    repairs: { label: "\u2192 View Assets", key: "repairs" },
+    risks: { label: "\u2192 View Stock", key: "risks" },
+  };
+  // Pattern: UPPERCASE asset code at start of item before ":"
+  const assetPat = /^([A-Z][A-Z0-9_-]{1,9}):\s/;
+  let html = `<div class="ironmind-header-line">IRONMIND DAILY INSIGHT</div>`;
+  for (const sec of sections) {
+    const nav = navMap[sec.key];
+    const drillBtn = nav
+      ? `<button class="ironmind-drill" data-ironmind-drill="${sec.key}">${escapeHtml(nav.label)}</button>`
+      : "";
+    html += `<div class="ironmind-title-row"><span class="ironmind-section-name">${escapeHtml(sec.name)}</span>${drillBtn}</div>`;
+    html += `<ul class="ironmind-items">`;
+    for (const itm of sec.items) {
+      const m = sec.key === "repairs" ? itm.match(assetPat) : null;
+      if (m) {
+        const code = m[1];
+        const rest = escapeHtml(itm.slice(m[0].length));
+        html += `<li class="ironmind-item">- <button class="ironmind-asset-link" data-ironmind-asset="${escapeHtml(code)}">${escapeHtml(code)}</button>: ${rest}</li>`;
+      } else {
+        html += `<li class="ironmind-item">- ${escapeHtml(itm)}</li>`;
+      }
+    }
+    html += `</ul>`;
+  }
+  summaryEl.innerHTML = html;
+}
+
+function ironmindDrillDown(sectionKey) {
+  if (sectionKey === "repairs") {
+    switchTab("assets");
+  } else if (sectionKey === "risks") {
+    switchTab("stock");
+  }
+}
+
+async function ironmindGoToAsset(assetCode) {
+  switchTab("assets");
+  const sel = qs("histAsset");
+  if (!sel) return;
+  if (sel.options.length <= 1) {
+    await populateHistoryAssets().catch(() => {});
+  }
+  const exists = Array.from(sel.options).some((o) => o.value === assetCode);
+  if (exists) {
+    sel.value = assetCode;
+    await loadAssetHistory().catch(() => {});
+  }
 }
 
 function getDefaultLubeRange() {
@@ -2407,6 +2794,8 @@ async function deleteFuelLogEntry(logId) {
 
 async function loadStockMonitor() {
   const filter = (qs("stockPartFilter")?.value || "").trim();
+  const page = window.stockMonitorPage || 1;
+  const pageSize = 20;
   const q = filter ? `?part_code=${encodeURIComponent(filter)}` : "";
   const data = await fetchJson(`${API}/api/stock/monitor${q}`);
 
@@ -2417,7 +2806,10 @@ async function loadStockMonitor() {
   const list = qs("stockMonitorList");
   if (!list) return;
   list.innerHTML = "";
-  (data.rows || []).slice(0, 20).forEach((r) => {
+  const rows = data.rows || [];
+  const start = (page - 1) * pageSize;
+  const end = start + pageSize;
+  rows.slice(start, end).forEach((r) => {
     list.appendChild(
       item(
         `<b>${r.part_code}</b> – ${Number(r.on_hand || 0).toFixed(1)} on hand ${
@@ -2426,8 +2818,51 @@ async function loadStockMonitor() {
       )
     );
   });
-  if (!data.rows?.length) list.appendChild(item("<small>No parts found for current filter.</small>"));
+  if (!rows.length) list.appendChild(item("<small>No parts found for current filter.</small>"));
+
+  // Update paging info
+  const pageInfo = qs("stockPageInfo");
+  if (pageInfo) {
+    const total = rows.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    pageInfo.textContent = `Page ${page} of ${totalPages}`;
+  }
 }
+
+// Paging controls
+window.stockMonitorPage = 1;
+function updateStockMonitorPage(delta) {
+  const rows = window.lastStockMonitorRows || [];
+  const pageSize = 20;
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  window.stockMonitorPage = Math.max(1, Math.min(window.stockMonitorPage + delta, totalPages));
+  loadStockMonitor();
+}
+
+// Live filter
+const stockPartFilter = qs("stockPartFilter");
+if (stockPartFilter) {
+  stockPartFilter.addEventListener("input", () => {
+    window.stockMonitorPage = 1;
+    loadStockMonitor();
+  });
+}
+
+const prevBtn = qs("prevStockPage");
+if (prevBtn) prevBtn.onclick = () => updateStockMonitorPage(-1);
+const nextBtn = qs("nextStockPage");
+if (nextBtn) nextBtn.onclick = () => updateStockMonitorPage(1);
+
+// Save last rows for paging
+const origLoadStockMonitor = loadStockMonitor;
+loadStockMonitor = async function() {
+  const filter = (qs("stockPartFilter")?.value || "").trim();
+  const q = filter ? `?part_code=${encodeURIComponent(filter)}` : "";
+  const data = await fetchJson(`${API}/api/stock/monitor${q}`);
+  window.lastStockMonitorRows = data.rows || [];
+  // Call original logic
+  await origLoadStockMonitor.apply(this, arguments);
+};
 
 let stockPageData = { rows: [], recent: [], summary: null };
 
@@ -3184,7 +3619,8 @@ function getLastNDaysRange(endDate, days) {
 function openDailyXlsx() {
   const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
   const scheduled = qs("scheduled")?.value || 10;
-  window.open(`${API}/api/reports/daily.xlsx?date=${date}&scheduled=${scheduled}`, "_blank");
+  const ts = Date.now();
+  window.open(`${API}/api/reports/daily.xlsx?date=${date}&scheduled=${scheduled}&_ts=${ts}`, "_blank");
 }
 
 /** GM weekly pack: Maintenance & Engineering KPIs (same date field as daily / weekly PDF). */
@@ -3315,7 +3751,8 @@ async function loadRainDays() {
 function openDailyPdf() {
   const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
   const scheduled = qs("scheduled")?.value || 10;
-  window.open(`${API}/api/reports/daily.pdf?date=${date}&scheduled=${scheduled}`, "_blank");
+  const ts = Date.now();
+  window.open(`${API}/api/reports/daily.pdf?date=${date}&scheduled=${scheduled}&_ts=${ts}`, "_blank");
 }
 
 function openWeeklyPdf() {
@@ -3611,7 +4048,8 @@ async function loadCodePickers() {
       rows.forEach((l) => {
         const code = String(l.location_code || "").trim();
         if (!code) return;
-        const opt = document.createElement("option");
+        const locText = Array.isArray(r.allowed_locations) && r.allowed_locations.length ? r.allowed_locations.join(", ") : "all";
+        tr.innerHTML = `<td>${escapeHtml(r.username)}</td><td>${escapeHtml(r.full_name || "")}</td><td>${escapeHtml(r.department || "")}</td><td>${escapeHtml(rolesText)}</td><td>${escapeHtml(locText)}</td><td>${r.active ? "yes" : "no"}</td><td>${r.has_password ? "yes" : "no"}</td>`;
         opt.value = code;
         opt.textContent = `${code}${l.location_name ? ` - ${l.location_name}` : ""}`;
         locationList.appendChild(opt);
@@ -4763,6 +5201,263 @@ function renderSupplyFlowBoard(rows) {
   setText("sfCountReceive", String(laneCounts.receive));
 }
 
+function getSiteOpsFrom() {
+  return (qs("opFrom")?.value || "").trim();
+}
+
+function getSiteOpsTo() {
+  return (qs("opTo")?.value || "").trim();
+}
+
+async function loadSiteZones() {
+  const data = await fetchJson(`${API}/api/operations/site/zones`);
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  const zoneSelect = qs("opSiteZone");
+  const zoneList = qs("siteZoneList");
+  if (zoneSelect) {
+    zoneSelect.innerHTML = `<option value="">Select zone</option>`;
+    rows
+      .filter((r) => Number(r.active || 0) === 1)
+      .forEach((r) => {
+        const opt = document.createElement("option");
+        opt.value = String(r.id || "");
+        opt.textContent = `${r.name || "Zone"} (#${r.id})`;
+        zoneSelect.appendChild(opt);
+      });
+  }
+  if (zoneList) {
+    zoneList.innerHTML = "";
+    if (!rows.length) {
+      zoneList.appendChild(item("<small>No zones configured.</small>"));
+    } else {
+      rows.forEach((r) => {
+        zoneList.appendChild(item(`<b>#${r.id}</b> ${r.name || "-"} <span class="pill ${Number(r.active || 0) ? "blue" : "orange"}">${Number(r.active || 0) ? "active" : "inactive"}</span>`));
+      });
+    }
+  }
+}
+
+async function saveSiteZone() {
+  const name = String(qs("opZoneName")?.value || "").trim();
+  if (!name) {
+    alert("Zone name is required.");
+    return;
+  }
+  const active = Boolean(qs("opZoneActive")?.checked);
+  const res = await fetchJson(`${API}/api/operations/site/zones`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, active }),
+  });
+  setText("siteDailyResult", JSON.stringify(res, null, 2));
+  await loadSiteZones();
+  setStatus("Site zone saved.");
+}
+
+async function saveSiteDailyEntry() {
+  const payload = {
+    op_date: (qs("opSiteDate")?.value || "").trim(),
+    material_type: (qs("opSiteMaterial")?.value || "").trim(),
+    zone_id: (qs("opSiteZone")?.value || "").trim() === "" ? undefined : Number(qs("opSiteZone")?.value || 0),
+    planned_tonnage: (qs("opSitePlanned")?.value || "").trim() === "" ? undefined : Number(qs("opSitePlanned")?.value || 0),
+    actual_tonnage: (qs("opSiteActual")?.value || "").trim() === "" ? undefined : Number(qs("opSiteActual")?.value || 0),
+    loads_count: (qs("opSiteLoads")?.value || "").trim() === "" ? undefined : Number(qs("opSiteLoads")?.value || 0),
+    avg_cycle_time: (qs("opSiteCycle")?.value || "").trim() === "" ? undefined : Number(qs("opSiteCycle")?.value || 0),
+    operator_name: (qs("opSiteOperator")?.value || "").trim() || undefined,
+    notes: (qs("opSiteNotes")?.value || "").trim() || undefined,
+  };
+  if (!payload.op_date || !payload.material_type) {
+    alert("Date and material type are required.");
+    return;
+  }
+  const res = await fetchJson(`${API}/api/operations/site/daily`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  setText("siteDailyResult", JSON.stringify(res, null, 2));
+  if (qs("opSiteDailyId") && res?.id) qs("opSiteDailyId").value = String(res.id);
+  await loadSiteDailyEntries();
+  await loadSiteDashboard();
+  setStatus("Site daily entry saved.");
+}
+
+async function loadSiteDailyEntries() {
+  const list = qs("siteDailyList");
+  if (!list) return;
+  const from = getSiteOpsFrom();
+  const to = getSiteOpsTo();
+  const q = new URLSearchParams();
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  const data = await fetchJson(`${API}/api/operations/site/daily${q.toString() ? `?${q.toString()}` : ""}`);
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  list.innerHTML = "";
+  if (!rows.length) {
+    list.appendChild(item("<small>No site daily entries found.</small>"));
+    return;
+  }
+  rows.forEach((r) => {
+    list.appendChild(
+      item(
+        `<b>#${r.id}</b> ${r.op_date || "-"} <span class="pill blue">${String(r.shift || "-").toUpperCase()}</span> <span class="pill">${r.material_type || "-"}</span>` +
+          `<br><small>Zone: ${r.zone_name || "-"} | Planned: ${Number(r.planned_tonnage || 0).toFixed(2)} | Actual: ${Number(r.actual_tonnage || 0).toFixed(2)} | Loads: ${Number(r.loads_count || 0)}</small>` +
+          `<br><small>Operator: ${r.operator_name || "-"}${r.notes ? ` | ${r.notes}` : ""}</small>`
+      )
+    );
+  });
+}
+
+async function saveSiteEquipmentUsage() {
+  const dailyId = Number(qs("opSiteDailyId")?.value || 0);
+  const assetId = Number(qs("opSiteEqAssetId")?.value || 0);
+  const role = String(qs("opSiteEqRole")?.value || "").trim();
+  const hours = (qs("opSiteEqHours")?.value || "").trim() === "" ? undefined : Number(qs("opSiteEqHours")?.value || 0);
+  if (!dailyId || !assetId || !role) {
+    alert("Daily ID, Asset ID, and role are required.");
+    return;
+  }
+  const res = await fetchJson(`${API}/api/operations/site/daily/${dailyId}/equipment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ asset_id: assetId, role, hours_used: hours }),
+  });
+  setText("siteDailyResult", JSON.stringify(res, null, 2));
+  await loadSiteEquipmentUsage();
+  setStatus("Equipment linked to production.");
+}
+
+async function loadSiteEquipmentUsage() {
+  const dailyId = Number(qs("opSiteDailyId")?.value || 0);
+  const list = qs("siteEquipmentUsageList");
+  if (!list) return;
+  if (!dailyId) {
+    list.innerHTML = "";
+    list.appendChild(item("<small>Select a daily entry ID to view equipment usage.</small>"));
+    return;
+  }
+  const data = await fetchJson(`${API}/api/operations/site/daily/${dailyId}/equipment`);
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  list.innerHTML = "";
+  if (!rows.length) {
+    list.appendChild(item("<small>No equipment usage linked yet.</small>"));
+    return;
+  }
+  rows.forEach((r) => {
+    list.appendChild(item(`<b>#${r.id}</b> Asset ${r.asset_code || r.asset_id} (${r.asset_name || "-"}) | Role: ${r.role || "-"} | Hours: ${Number(r.hours_used || 0).toFixed(2)}`));
+  });
+}
+
+async function saveSiteTarget() {
+  const payload = {
+    target_date: (qs("opTargetDate")?.value || "").trim(),
+    material_type: (qs("opTargetMaterial")?.value || "").trim(),
+    target_tonnage: (qs("opTargetTonnage")?.value || "").trim() === "" ? undefined : Number(qs("opTargetTonnage")?.value || 0),
+  };
+  if (!payload.target_date || !payload.material_type || payload.target_tonnage == null) {
+    alert("Target date, material, and tonnage are required.");
+    return;
+  }
+  const res = await fetchJson(`${API}/api/operations/site/targets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  setText("siteDailyResult", JSON.stringify(res, null, 2));
+  await loadSiteTargets();
+  await loadSiteDashboard();
+  setStatus("Site target saved.");
+}
+
+async function loadSiteTargets() {
+  const list = qs("siteTargetList");
+  if (!list) return;
+  const from = getSiteOpsFrom();
+  const to = getSiteOpsTo();
+  const q = new URLSearchParams();
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  const data = await fetchJson(`${API}/api/operations/site/targets${q.toString() ? `?${q.toString()}` : ""}`);
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  list.innerHTML = "";
+  if (!rows.length) {
+    list.appendChild(item("<small>No targets found.</small>"));
+    return;
+  }
+  rows.forEach((r) => {
+    list.appendChild(item(`<b>${r.target_date}</b> ${r.material_type || "-"} <span class="pill blue">${Number(r.target_tonnage || 0).toFixed(2)} t</span>`));
+  });
+}
+
+async function saveSiteDelay() {
+  const payload = {
+    delay_date: (qs("opDelayDate")?.value || "").trim(),
+    delay_type: (qs("opDelayType")?.value || "").trim(),
+    hours_lost: (qs("opDelayHours")?.value || "").trim() === "" ? undefined : Number(qs("opDelayHours")?.value || 0),
+    impact_tonnage: (qs("opDelayImpact")?.value || "").trim() === "" ? undefined : Number(qs("opDelayImpact")?.value || 0),
+    notes: (qs("opDelayNotes")?.value || "").trim() || undefined,
+  };
+  if (!payload.delay_date || !payload.delay_type || payload.hours_lost == null) {
+    alert("Delay date, type and hours lost are required.");
+    return;
+  }
+  const res = await fetchJson(`${API}/api/operations/site/delays`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  setText("siteDailyResult", JSON.stringify(res, null, 2));
+  await loadSiteDelays();
+  await loadSiteDashboard();
+  setStatus("Operational delay saved.");
+}
+
+async function loadSiteDelays() {
+  const list = qs("siteDelayList");
+  if (!list) return;
+  const from = getSiteOpsFrom();
+  const to = getSiteOpsTo();
+  const q = new URLSearchParams();
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  const data = await fetchJson(`${API}/api/operations/site/delays${q.toString() ? `?${q.toString()}` : ""}`);
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  list.innerHTML = "";
+  if (!rows.length) {
+    list.appendChild(item("<small>No operational delays found.</small>"));
+    return;
+  }
+  rows.forEach((r) => {
+    list.appendChild(item(`<b>${r.delay_date}</b> <span class="pill orange">${r.delay_type}</span> | Hours lost: ${Number(r.hours_lost || 0).toFixed(2)} | Impact: ${Number(r.impact_tonnage || 0).toFixed(2)}t${r.notes ? `<br><small>${r.notes}</small>` : ""}`));
+  });
+}
+
+async function loadSiteDashboard() {
+  const date = (qs("opSiteDashDate")?.value || qs("opSiteDate")?.value || "").trim();
+  if (!date) return;
+  const data = await fetchJson(`${API}/api/operations/site/dashboard?date=${encodeURIComponent(date)}`);
+  const today = data?.today || {};
+  const week = data?.week || {};
+  const losses = data?.losses || {};
+  setText("opSiteKpiTodayTons", Number(today.total_tons_produced || 0).toFixed(2));
+  setText("opSiteKpiAchieved", Number(today.achieved_pct || 0).toFixed(1));
+  setText("opSiteKpiLoads", String(Number(today.loads_moved || 0)));
+  setText("opSiteKpiZones", String(Number(today.active_zones || 0)));
+  setText("opSiteKpiWeekTotal", Number(week.total_production || 0).toFixed(2));
+  setText("opSiteKpiBreakdownLoss", Number(losses.breakdown_hours || 0).toFixed(2));
+  setText("opSiteKpiOpsLoss", Number(losses.operational_delay_hours || 0).toFixed(2));
+
+  const list = qs("siteDashboardList");
+  if (list) {
+    list.innerHTML = "";
+    const best = week.best_day ? `${week.best_day.date} (${Number(week.best_day.tons || 0).toFixed(2)}t)` : "-";
+    const worst = week.worst_day ? `${week.worst_day.date} (${Number(week.worst_day.tons || 0).toFixed(2)}t)` : "-";
+    list.appendChild(item(`<b>Best day:</b> ${best}`));
+    list.appendChild(item(`<b>Worst day:</b> ${worst}`));
+    list.appendChild(item(`<b>Today target:</b> ${Number(today.target_tonnage || 0).toFixed(2)}t | <b>Shortfall:</b> ${Math.max(0, Number(today.target_tonnage || 0) - Number(today.total_tons_produced || 0)).toFixed(2)}t`));
+  }
+}
+
 async function saveOperationEntry() {
   const payload = {
     op_date: (qs("opDate")?.value || "").trim() || undefined,
@@ -4770,6 +5465,11 @@ async function saveOperationEntry() {
     product_type: (qs("opProductType")?.value || "").trim() || undefined,
     product_produced: (qs("opProductProduced")?.value || "").trim() === "" ? undefined : Number(qs("opProductProduced")?.value || 0),
     trucks_loaded: (qs("opTrucksLoaded")?.value || "").trim() === "" ? undefined : Number(qs("opTrucksLoaded")?.value || 0),
+    loads_count: (qs("opLoadsCount")?.value || "").trim() === "" ? undefined : Number(qs("opLoadsCount")?.value || 0),
+    crusher_feed_tonnes: (qs("opCrusherFeedTonnes")?.value || "").trim() === "" ? undefined : Number(qs("opCrusherFeedTonnes")?.value || 0),
+    crusher_output_tonnes: (qs("opCrusherOutputTonnes")?.value || "").trim() === "" ? undefined : Number(qs("opCrusherOutputTonnes")?.value || 0),
+    crusher_hours: (qs("opCrusherHours")?.value || "").trim() === "" ? undefined : Number(qs("opCrusherHours")?.value || 0),
+    crusher_downtime_hours: (qs("opCrusherDowntime")?.value || "").trim() === "" ? undefined : Number(qs("opCrusherDowntime")?.value || 0),
     weighbridge_amount: (qs("opWeighbridgeAmount")?.value || "").trim() === "" ? undefined : Number(qs("opWeighbridgeAmount")?.value || 0),
     trucks_delivered: (qs("opTrucksDelivered")?.value || "").trim() === "" ? undefined : Number(qs("opTrucksDelivered")?.value || 0),
     product_delivered: (qs("opProductDelivered")?.value || "").trim() === "" ? undefined : Number(qs("opProductDelivered")?.value || 0),
@@ -4922,8 +5622,9 @@ async function loadOperations() {
   let tonnes = 0;
   let produced = 0;
   let loaded = 0;
-  let delivered = 0;
-  let weighbridge = 0;
+  let loadCycles = 0;
+  let crusherFeed = 0;
+  let crusherOutput = 0;
   const clientTotalsDelivered = new Map();
   const clientTotalsTrucks = new Map();
   const clientTotalsTonnes = new Map();
@@ -4931,8 +5632,9 @@ async function loadOperations() {
     tonnes += Number(r.tonnes_moved || 0);
     produced += Number(r.product_produced || 0);
     loaded += Number(r.trucks_loaded || 0);
-    delivered += Number(r.trucks_delivered || 0);
-    weighbridge += Number(r.weighbridge_amount || 0);
+    loadCycles += Number(r.loads_count || 0);
+    crusherFeed += Number(r.crusher_feed_tonnes || 0);
+    crusherOutput += Number(r.crusher_output_tonnes || 0);
     const client = String(r.client_delivered_to || "").trim() || "Unspecified";
     const deliveredQty = Number(r.product_delivered || 0);
     const trucksQty = Number(r.trucks_delivered || 0);
@@ -4943,9 +5645,10 @@ async function loadOperations() {
     list.appendChild(
       item(
         `<b>${r.op_date || "-"}</b> <span class="pill blue">${r.product_type || "product"}</span>` +
-          `<br><small>Tonnes moved: ${Number(r.tonnes_moved || 0).toFixed(2)} | Produced: ${Number(r.product_produced || 0).toFixed(2)} | Delivered: ${Number(r.product_delivered || 0).toFixed(2)}</small>` +
-          `<br><small>Trucks loaded: ${Number(r.trucks_loaded || 0)} | Trucks delivered: ${Number(r.trucks_delivered || 0)} | Weighbridge: ${Number(r.weighbridge_amount || 0).toFixed(2)}</small>` +
-          `<br><small>Client: ${r.client_delivered_to || "-"}${r.notes ? ` | Notes: ${r.notes}` : ""}</small>`
+          `<br><small>Tonnes moved: ${Number(r.tonnes_moved || 0).toFixed(2)} | Produced: ${Number(r.product_produced || 0).toFixed(2)}</small>` +
+          `<br><small>Trucks loaded: ${Number(r.trucks_loaded || 0)} | Load cycles: ${Number(r.loads_count || 0)}</small>` +
+          `<br><small>Crusher feed: ${Number(r.crusher_feed_tonnes || 0).toFixed(2)}t | Crusher output: ${Number(r.crusher_output_tonnes || 0).toFixed(2)}t | Crusher h: ${Number(r.crusher_hours || 0).toFixed(2)} | Downtime h: ${Number(r.crusher_downtime_hours || 0).toFixed(2)}</small>` +
+          `${r.notes ? `<br><small>Notes: ${r.notes}</small>` : ""}`
       )
     );
   });
@@ -4953,8 +5656,9 @@ async function loadOperations() {
   setText("opKpiTonnes", tonnes.toFixed(2));
   setText("opKpiProduced", produced.toFixed(2));
   setText("opKpiLoaded", String(loaded));
-  setText("opKpiDelivered", String(delivered));
-  setText("opKpiWeighbridge", weighbridge.toFixed(2));
+  setText("opKpiLoads", String(loadCycles));
+  const crusherPerf = crusherFeed > 0 ? (crusherOutput / crusherFeed) * 100 : 0;
+  setText("opKpiCrusherPerf", crusherPerf.toFixed(1));
   const metric = String(qs("opClientMetric")?.value || "delivered").toLowerCase();
   const metricMap =
     metric === "trucks" ? clientTotalsTrucks :
@@ -5388,7 +6092,18 @@ function daySummary() {
 function prevDateStr(dateStr) {
   const d = new Date(dateStr + "T00:00:00");
   d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function todayLocalYmd() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function validateDailyRows() {
@@ -5770,7 +6485,7 @@ function renderDailyTable() {
 }
 
 async function loadDailyInput() {
-  const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
+  const date = qs("date")?.value || todayLocalYmd();
   const y = prevDateStr(date);
   setStatus("Loading daily input...");
   setText("dailyResult", "");
@@ -5919,7 +6634,7 @@ async function loadDailyInput() {
 /* -------- Copy Yesterday + Bulk Scheduled -------- */
 
 async function copyYesterdayToToday() {
-  const today = qs("date")?.value || new Date().toISOString().slice(0, 10);
+  const today = qs("date")?.value || todayLocalYmd();
   const y = prevDateStr(today);
 
   setStatus(`Copying from ${y}...`);
@@ -5992,7 +6707,7 @@ function applyBulkScheduled() {
 }
 
 async function saveDailyInput() {
-  const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
+  const date = qs("date")?.value || todayLocalYmd();
 
   validateDailyRows();
   renderDailyPreview();
@@ -6071,7 +6786,7 @@ renderDailyTable(); // re-render so errorRow highlighting appears
 }
 
 async function runShiftSelfCheck() {
-  const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
+  const date = qs("date")?.value || todayLocalYmd();
   const out = qs("shiftSelfCheckResult");
   if (out) out.textContent = "Running checks...";
   const checks = [];
@@ -6118,7 +6833,7 @@ async function runShiftSelfCheck() {
 }
 
 function exportShiftSelfCheckTxt() {
-  const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
+  const date = qs("date")?.value || todayLocalYmd();
   const content = String(qs("shiftSelfCheckResult")?.textContent || "").trim();
   if (!content) {
     alert("Run Shift Self-Check first, then export.");
@@ -6435,6 +7150,7 @@ async function unarchiveSelectedAsset() {
 ========================= */
 
 async function init() {
+  await disableLegacyServiceWorkers();
   await tryInitialSession();
   initTabs();
   initSessionControls();
@@ -6444,7 +7160,7 @@ async function init() {
   applyGlobalPageTranslation();
 
   const dateEl = qs("date");
-  if (dateEl) dateEl.value = new Date().toISOString().slice(0, 10);
+  if (dateEl) dateEl.value = todayLocalYmd();
 
   qs("refresh")?.addEventListener("click", () =>
     loadDashboard().catch((e) => setStatus("Dashboard error: " + e.message))
@@ -6455,6 +7171,37 @@ async function init() {
   qs("loadReliability")?.addEventListener("click", () =>
     loadDashboard().catch((e) => setStatus("Dashboard error: " + e.message))
   );
+  qs("ironmindRefreshBtn")?.addEventListener("click", () =>
+    refreshIronmindInsight().catch((e) => setStatus("IRONMIND refresh error: " + e.message))
+  );
+  qs("saveThresholds")?.addEventListener("click", () => saveThresholdsFromUI());
+  qs("ironmindSummary")?.addEventListener("click", (e) => {
+    const el = e.target instanceof HTMLElement ? e.target : null;
+    if (!el) return;
+    const drillKey = el.dataset.ironmindDrill;
+    const assetCode = el.dataset.ironmindAsset;
+    if (drillKey) ironmindDrillDown(drillKey);
+    if (assetCode) ironmindGoToAsset(assetCode).catch(() => {});
+  });
+  qs("ironmindHistoryList")?.addEventListener("click", (e) => {
+    const el = e.target instanceof HTMLElement ? e.target.closest("button[data-ironmind-history-id]") : null;
+    if (!el) return;
+    const rowEl = el.closest(".item");
+    if (!rowEl?.dataset?.ironmindRow) return;
+    try {
+      const row = JSON.parse(rowEl.dataset.ironmindRow);
+      renderIronmindReport(row);
+      setStatus(`Opened IRONMIND report for ${row?.report_date || "-"}.`);
+    } catch (_) {
+      setStatus("Unable to open selected IRONMIND report.");
+    }
+  });
+  qs("ironmindShowMissingDays")?.addEventListener("change", () => {
+    loadIronmindHistory({ silent: true }).catch(() => {});
+  });
+  qs("ironmindReloadHistory")?.addEventListener("click", () => {
+    loadIronmindHistory().catch((e) => setStatus("IRONMIND history error: " + e.message));
+  });
   qs("saveDocHeaderBtn")?.addEventListener("click", () =>
     saveDocHeader().catch((e) => setStatus("Header save error: " + e.message))
   );
@@ -6466,6 +7213,24 @@ async function init() {
   );
   qs("generateDocDraftFromRequestBtn")?.addEventListener("click", () =>
     generateDocDraftFromRequest().catch((e) => setStatus("Draft request generate error: " + e.message))
+  );
+  qs("aiSmartRunBtn")?.addEventListener("click", () =>
+    runAiSmart().catch((e) => setStatus("Smart AI error: " + e.message))
+  );
+  qs("askJakesBtn")?.addEventListener("click", () =>
+    askJakes().catch((e) => setStatus("Ask Jakes error: " + e.message))
+  );
+  qs("askJakesPresetHydraulics")?.addEventListener("click", () =>
+    applyAskJakesPreset("hydraulics")
+  );
+  qs("askJakesPresetStarting")?.addEventListener("click", () =>
+    applyAskJakesPreset("starting")
+  );
+  qs("askJakesPresetOverheat")?.addEventListener("click", () =>
+    applyAskJakesPreset("overheat")
+  );
+  qs("askJakesUseAsNotesBtn")?.addEventListener("click", () =>
+    useAskJakesAnswerAsNotes()
   );
   qs("speakDocDraftBtn")?.addEventListener("click", () =>
     speakDocDraft()
@@ -6625,6 +7390,39 @@ async function init() {
   );
   qs("saveOperationEntry")?.addEventListener("click", () =>
     saveOperationEntry().catch((e) => setStatus("Operations save error: " + e.message))
+  );
+  qs("saveSiteDailyEntry")?.addEventListener("click", () =>
+    saveSiteDailyEntry().catch((e) => setStatus("Site daily save error: " + e.message))
+  );
+  qs("loadSiteDailyEntries")?.addEventListener("click", () =>
+    loadSiteDailyEntries().catch((e) => setStatus("Site daily load error: " + e.message))
+  );
+  qs("saveSiteEquipmentUsage")?.addEventListener("click", () =>
+    saveSiteEquipmentUsage().catch((e) => setStatus("Site equipment link error: " + e.message))
+  );
+  qs("loadSiteEquipmentUsage")?.addEventListener("click", () =>
+    loadSiteEquipmentUsage().catch((e) => setStatus("Site equipment load error: " + e.message))
+  );
+  qs("saveSiteTarget")?.addEventListener("click", () =>
+    saveSiteTarget().catch((e) => setStatus("Site target save error: " + e.message))
+  );
+  qs("loadSiteTargets")?.addEventListener("click", () =>
+    loadSiteTargets().catch((e) => setStatus("Site target load error: " + e.message))
+  );
+  qs("saveSiteDelay")?.addEventListener("click", () =>
+    saveSiteDelay().catch((e) => setStatus("Site delay save error: " + e.message))
+  );
+  qs("loadSiteDelays")?.addEventListener("click", () =>
+    loadSiteDelays().catch((e) => setStatus("Site delay load error: " + e.message))
+  );
+  qs("saveSiteZone")?.addEventListener("click", () =>
+    saveSiteZone().catch((e) => setStatus("Site zone save error: " + e.message))
+  );
+  qs("loadSiteZones")?.addEventListener("click", () =>
+    loadSiteZones().catch((e) => setStatus("Site zone load error: " + e.message))
+  );
+  qs("loadSiteDashboard")?.addEventListener("click", () =>
+    loadSiteDashboard().catch((e) => setStatus("Site dashboard load error: " + e.message))
   );
   qs("saveOperationsClosingDraft")?.addEventListener("click", () =>
     saveOperationsClosing(false).catch((e) => setStatus("Operations closing error: " + e.message))
@@ -6978,6 +7776,14 @@ async function init() {
   if (fuelSnapEnd && !fuelSnapEnd.value) fuelSnapEnd.value = fuelEnd?.value || date.value;
   const opDate = qs("opDate");
   if (opDate && !opDate.value) opDate.value = new Date().toISOString().slice(0, 10);
+  const opSiteDate = qs("opSiteDate");
+  if (opSiteDate && !opSiteDate.value) opSiteDate.value = new Date().toISOString().slice(0, 10);
+  const opSiteDashDate = qs("opSiteDashDate");
+  if (opSiteDashDate && !opSiteDashDate.value) opSiteDashDate.value = opSiteDate?.value || new Date().toISOString().slice(0, 10);
+  const opDelayDate = qs("opDelayDate");
+  if (opDelayDate && !opDelayDate.value) opDelayDate.value = new Date().toISOString().slice(0, 10);
+  const opTargetDate = qs("opTargetDate");
+  if (opTargetDate && !opTargetDate.value) opTargetDate.value = new Date().toISOString().slice(0, 10);
   const opFrom = qs("opFrom");
   const opTo = qs("opTo");
   if (opFrom && !opFrom.value) opFrom.value = new Date(Date.now() - 1000 * 60 * 60 * 24 * 30).toISOString().slice(0, 10);
@@ -7013,6 +7819,11 @@ async function init() {
   setProcurementKpiFilter("all");
   loadRequisitions().catch(() => {});
   loadOperations().catch(() => {});
+  loadSiteZones().catch(() => {});
+  loadSiteDailyEntries().catch(() => {});
+  loadSiteTargets().catch(() => {});
+  loadSiteDelays().catch(() => {});
+  loadSiteDashboard().catch(() => {});
   loadDispatchTrips().catch(() => {});
   loadQualityCenter().catch(() => {});
   loadFuelBenchmark().catch(() => {});
@@ -7026,6 +7837,7 @@ async function init() {
     loadApprovalRequests().catch(() => {});
   }
   loadCodePickers().catch(() => {});
+  populateThresholdInputs();
   loadDashboard().catch((e) => setStatus("Dashboard error: " + e.message));
 
   const legalList = qs("legalList");
@@ -7369,8 +8181,8 @@ async function generateDocDraft() {
   await loadDocDrafts();
 }
 
-async function generateDocDraftFromRequest() {
-  const requestText = String(qs("docAskRequest")?.value || "").trim();
+async function generateDocDraftFromRequest(requestArg) {
+  const requestText = String(requestArg || qs("aiSmartPrompt")?.value || "").trim();
   if (!requestText) return alert("Enter what document you want first.");
   let headerId = Number(qs("docHeaderId")?.value || 0);
   if (!headerId) {
@@ -7411,6 +8223,136 @@ async function generateDocDraftFromRequest() {
   if (idEl) idEl.value = String(res.id || "");
   setStatus(`Draft generated from request (#${res.id})${res.ai_used ? " with AI" : " (template fallback)"}.`);
   await loadDocDrafts();
+}
+
+function inferDocTypeFromPrompt(prompt) {
+  const s = String(prompt || "").toLowerCase();
+  if (s.includes("checklist")) return "Checklist";
+  if (s.includes("method statement")) return "Method Statement";
+  if (s.includes("site instruction")) return "Site Instruction";
+  if (s.includes("risk")) return "Risk Note";
+  if (s.includes("sop") || s.includes("procedure")) return "SOP";
+  return "";
+}
+
+function parseMachineProblemFromPrompt(prompt) {
+  const src = String(prompt || "").trim();
+  if (!src) return { machine: "", problem: "" };
+  const m = src.match(/^(.+?)\s+(?:has|have|with|showing|shows|no)\s+(.+)$/i);
+  if (m) {
+    const machine = String(m[1] || "").replace(/\s+$/, "").trim();
+    const problem = src.slice(machine.length).replace(/^\s*(has|have|with|showing|shows)?\s*/i, "").trim();
+    return { machine, problem };
+  }
+  return { machine: "", problem: src };
+}
+
+async function runAiSmart() {
+  const out = qs("askJakesOutput");
+  const smartPrompt = String(qs("aiSmartPrompt")?.value || "").trim();
+
+  if (!smartPrompt) {
+    alert("Enter a question or document request first.");
+    return;
+  }
+
+  if (out) {
+    out.textContent = "⏳ Thinking...";
+    out.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  const faultKeywords = /(fault|error|not working|no\s+hydraulic|no\s+hydraulics|no\s+start|won't start|wont start|leak|overheat|pressure|engine|starter|battery|transmission|brake)/i;
+  const docKeywords = /(sop|checklist|method statement|site instruction|risk note|document|procedure|policy|template)/i;
+
+  try {
+    if (faultKeywords.test(smartPrompt) && !docKeywords.test(smartPrompt)) {
+      const parsed = parseMachineProblemFromPrompt(smartPrompt);
+      await askJakes({ machine: parsed.machine, problem: parsed.problem, context: "" });
+      return;
+    }
+
+    const inferred = inferDocTypeFromPrompt(smartPrompt);
+    const titleEl = qs("docTitle");
+    if (titleEl && !String(titleEl.value || "").trim()) titleEl.value = smartPrompt.slice(0, 80);
+    if (inferred) {
+      const typeEl = qs("docType");
+      if (typeEl) typeEl.value = inferred;
+    }
+    await generateDocDraftFromRequest(smartPrompt);
+    if (out) {
+      out.textContent = "Document draft generated — see the Draft Output box below.";
+    }
+  } catch (err) {
+    if (out) out.textContent = "❌ Error: " + (err.message || String(err));
+    setStatus("Smart AI error: " + err.message);
+  }
+}
+
+function applyAskJakesPreset(type) {
+  const machineEl = qs("askJakesMachine");
+  const problemEl = qs("askJakesProblem");
+  const contextEl = qs("askJakesContext");
+  if (!machineEl || !problemEl || !contextEl) return;
+
+  if (type === "hydraulics") {
+    machineEl.value = machineEl.value || "CAT 950 Loader";
+    problemEl.value = "No hydraulics";
+    contextEl.value = "Engine starts, steering weak, no bucket lift.";
+    return;
+  }
+  if (type === "starting") {
+    machineEl.value = machineEl.value || "CAT 950 Loader";
+    problemEl.value = "Will not start";
+    contextEl.value = "Battery indicator low, starter clicking.";
+    return;
+  }
+  if (type === "overheat") {
+    machineEl.value = machineEl.value || "CAT 950 Loader";
+    problemEl.value = "Engine overheating";
+    contextEl.value = "Temperature rises under load, fan noise normal.";
+  }
+}
+
+function useAskJakesAnswerAsNotes() {
+  const answer = String(qs("askJakesOutput")?.textContent || "").trim();
+  if (!answer) {
+    alert("Ask Jakes first to get an answer.");
+    return;
+  }
+  const notesEl = qs("docInputs");
+  if (!notesEl) return;
+  const existing = String(notesEl.value || "").trim();
+  notesEl.value = existing ? `${existing}\n\nAsk Jakes notes:\n${answer}` : `Ask Jakes notes:\n${answer}`;
+  setStatus("Ask Jakes answer copied to draft notes.");
+}
+
+async function askJakes(override = {}) {
+  const machine = String(override.machine || "").trim();
+  const problem = String(override.problem || "").trim();
+  const context = String(override.context || "").trim();
+  const out = qs("askJakesOutput");
+
+  if (!problem) {
+    if (out) out.textContent = "❌ Please describe the machine problem.";
+    return;
+  }
+
+  try {
+    const res = await fetchJson(`${API}/api/docs/ai/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ machine, problem, context }),
+    });
+
+    if (out) {
+      out.textContent = String(res.answer || "No answer returned.");
+      out.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    setStatus("Ask Jakes answered.");
+  } catch (err) {
+    if (out) out.textContent = "❌ Error: " + (err.message || String(err));
+    setStatus("Ask Jakes error: " + err.message);
+  }
 }
 
 function speakDocDraft() {
