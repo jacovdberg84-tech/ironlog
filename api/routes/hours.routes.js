@@ -29,10 +29,23 @@ export default async function hoursRoutes(app) {
       FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
     )
   `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS asset_daily_preferences (
+      asset_id INTEGER PRIMARY KEY,
+      is_used INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    )
+  `).run();
 
   const getAssetInputUnit = db.prepare(`
     SELECT input_unit
     FROM asset_input_units
+    WHERE asset_id = ?
+  `);
+  const getAssetDailyPreference = db.prepare(`
+    SELECT is_used
+    FROM asset_daily_preferences
     WHERE asset_id = ?
   `);
 
@@ -43,19 +56,26 @@ export default async function hoursRoutes(app) {
       input_unit = excluded.input_unit,
       updated_at = datetime('now')
   `);
+  const upsertAssetDailyPreference = db.prepare(`
+    INSERT INTO asset_daily_preferences (asset_id, is_used, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(asset_id) DO UPDATE SET
+      is_used = excluded.is_used,
+      updated_at = datetime('now')
+  `);
 
   function getCarryForwardRow(assetId, workDate) {
     // Prefer exact yesterday; if missing, fall back to latest prior day.
     const y = prevDate(workDate);
     const yRow = db.prepare(`
-      SELECT closing_hours, scheduled_hours, work_date AS source_date, COALESCE(NULLIF(TRIM(input_unit), ''), 'hours') AS input_unit
+      SELECT closing_hours, scheduled_hours, is_used, work_date AS source_date, COALESCE(NULLIF(TRIM(input_unit), ''), 'hours') AS input_unit
       FROM daily_hours
       WHERE asset_id = ? AND work_date = ?
     `).get(assetId, y);
     if (yRow && (yRow.closing_hours != null || yRow.scheduled_hours != null)) return yRow;
 
     const prevRow = db.prepare(`
-      SELECT closing_hours, scheduled_hours, work_date AS source_date, COALESCE(NULLIF(TRIM(input_unit), ''), 'hours') AS input_unit
+      SELECT closing_hours, scheduled_hours, is_used, work_date AS source_date, COALESCE(NULLIF(TRIM(input_unit), ''), 'hours') AS input_unit
       FROM daily_hours
       WHERE asset_id = ?
         AND work_date < ?
@@ -135,6 +155,12 @@ export default async function hoursRoutes(app) {
       suggested_scheduled_hours: yRow?.scheduled_hours ?? null,
       suggested_opening_from_date: yRow?.source_date ?? null,
       suggested_input_unit: (getAssetInputUnit.get(asset.id)?.input_unit || yRow?.input_unit || "hours"),
+      suggested_is_used: (() => {
+        const pref = getAssetDailyPreference.get(asset.id);
+        if (pref && pref.is_used != null) return Boolean(pref.is_used);
+        if (yRow && yRow.is_used != null) return Boolean(yRow.is_used);
+        return null;
+      })(),
       input_unit_locked: false
     };
   });
@@ -301,6 +327,8 @@ export default async function hoursRoutes(app) {
 
     // Persist selected input unit per asset for next-day suggestion (editable anytime).
     upsertAssetInputUnit.run(asset.id, input_unit);
+    // Persist selected production flag per asset for next-day default.
+    upsertAssetDailyPreference.run(asset.id, is_used);
 
     return reply.send({
       ok: true,

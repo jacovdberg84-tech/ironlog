@@ -6626,7 +6626,9 @@ async function loadDailyInput() {
       asset_name: a.asset_name,
       is_master_standby: masterStandby,
 
-      is_used: ex ? !!ex.is_used : !masterStandby,
+      is_used: ex
+        ? !!ex.is_used
+        : (yByCode.has(a.asset_code) ? !!yByCode.get(a.asset_code)?.is_used : !masterStandby),
       input_unit: ex?.input_unit
         ? String(ex.input_unit).toLowerCase()
         : (String(a.category || "").toLowerCase().includes("truck") || String(a.category || "").toLowerCase().includes("vehicle") ? "km" : "hours"),
@@ -6675,6 +6677,7 @@ async function loadDailyInput() {
           row.suggested_input_unit = suggestedUnit;
           row.input_unit = suggestedUnit;
         }
+        if (!ex && typeof d?.suggested_is_used === "boolean") row.is_used = Boolean(d.suggested_is_used);
         if (typeof d?.input_unit_locked === "boolean") row.input_unit_locked = d.input_unit_locked;
         if ((row.opening_hours == null || forceOpenFromYesterday) && d.suggested_opening_hours != null) {
           row.opening_hours = Number(d.suggested_opening_hours);
@@ -6685,6 +6688,7 @@ async function loadDailyInput() {
     }
 
     if (row.scheduled_hours == null) row.scheduled_hours = 0;
+    if (row.is_master_standby) row.is_used = false;
     row.hours_run = calcRun(row.opening_hours, row.closing_hours);
 
     // Apply carry-forward lock from open breakdown
