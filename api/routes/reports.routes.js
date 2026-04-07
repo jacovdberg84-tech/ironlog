@@ -1945,7 +1945,14 @@ export default async function reportsRoutes(app) {
         COALESCE(baseline_fuel_l_per_hour, 5.0) AS oem_lph,
         COALESCE(baseline_fuel_km_per_l, 2.0) AS oem_kmpl,
         COALESCE(NULLIF(TRIM(utilization_mode), ''), CASE
-          WHEN LOWER(COALESCE(category, '')) LIKE '%truck%' OR LOWER(COALESCE(category, '')) LIKE '%vehicle%'
+          WHEN LOWER(COALESCE(category, '')) LIKE '%truck%'
+            OR LOWER(COALESCE(category, '')) LIKE '%vehicle%'
+            OR LOWER(COALESCE(category, '')) LIKE '%ldv%'
+            OR LOWER(COALESCE(category, '')) LIKE '%pickup%'
+            OR LOWER(COALESCE(category, '')) LIKE '%bakkie%'
+            OR LOWER(COALESCE(asset_code, '')) LIKE 'ldv%'
+            OR UPPER(COALESCE(asset_code, '')) GLOB 'V[0-9][0-9]AM'
+            OR LOWER(COALESCE(asset_name, '')) LIKE '%ldv%'
             THEN 'km'
           ELSE 'hours'
         END) AS metric_mode,
