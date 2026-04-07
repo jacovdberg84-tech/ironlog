@@ -220,7 +220,13 @@ export default async function dashboardRoutes(app) {
 
     assetRows.forEach((r) => {
       const assetId = Number(r.asset_id || 0);
-      const scheduled = Math.max(0, Number(r.scheduled_hours || 0));
+      const rowScheduled = Number(r.scheduled_hours);
+      const scheduled = Math.max(
+        0,
+        Number.isFinite(rowScheduled) && rowScheduled > 0
+          ? rowScheduled
+          : Number(scheduledFallback || 0)
+      );
       const runRaw = Math.max(0, Number(r.run_hours || 0));
       const rowUnit = String(r.input_unit || "").toLowerCase();
       const mode = rowUnit === "km" ? "km" : String(r.utilization_mode || "hours").toLowerCase();
