@@ -152,6 +152,12 @@ export default async function dashboardRoutes(app) {
       AND a.active = 1
       AND a.is_standby = 0
   `);
+  const getActiveFleetAssets = db.prepare(`
+    SELECT id AS asset_id, asset_code, asset_name, category, utilization_mode, km_per_hour_factor
+    FROM assets
+    WHERE active = 1
+      AND is_standby = 0
+  `);
 
   // Per-asset downtime for the day from downtime logs (standby excluded)
   const getDayAssetDowntime = db.prepare(`
@@ -261,11 +267,14 @@ export default async function dashboardRoutes(app) {
       }
     });
 
+    const activeFleetIds = getActiveFleetAssets.all().map((r) => Number(r.asset_id || 0));
+    const missingFleetIds = activeFleetIds.filter((id) => id > 0 && !assetIdsInHours.has(id));
     const downtimeOnlyIds = downtimeRows
       .map((r) => Number(r.asset_id || 0))
       .filter((id) => id > 0 && !assetIdsInHours.has(id));
-    if (downtimeOnlyIds.length) {
-      const uniq = Array.from(new Set(downtimeOnlyIds)).slice(0, 300);
+    const includeIds = Array.from(new Set([...downtimeOnlyIds, ...missingFleetIds]));
+    if (includeIds.length) {
+      const uniq = includeIds.slice(0, 500);
       const placeholders = uniq.map(() => "?").join(",");
       const extraAssets = db.prepare(`
         SELECT id AS asset_id, asset_code, asset_name, category, utilization_mode, km_per_hour_factor

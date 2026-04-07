@@ -247,6 +247,12 @@ function reliabilityMetricsForRange(start, end, opts = {}) {
 }
 
 function kpiDaily(date, scheduled) {
+  const activeRow = db.prepare(`
+    SELECT COUNT(*) AS active_assets
+    FROM assets a
+    WHERE a.active = 1
+      AND a.is_standby = 0
+  `).get();
   const usedRow = db.prepare(`
     SELECT COUNT(DISTINCT dh.asset_id) AS used_assets
     FROM daily_hours dh
@@ -257,8 +263,9 @@ function kpiDaily(date, scheduled) {
       AND a.is_standby = 0
   `).get(date);
 
+  const active_assets = Number(activeRow?.active_assets || 0);
   const used_assets = Number(usedRow.used_assets || 0);
-  const available_hours = used_assets * scheduled;
+  const available_hours = active_assets * scheduled;
 
   const runRow = db.prepare(`
     SELECT IFNULL(SUM(dh.hours_run), 0) AS run_hours
@@ -290,13 +297,7 @@ function kpiDaily(date, scheduled) {
         WHERE l.log_date = ?
           AND a.active = 1
           AND a.is_standby = 0
-          AND b.asset_id IN (
-            SELECT DISTINCT dh.asset_id
-            FROM daily_hours dh
-            WHERE dh.work_date = ?
-              AND dh.is_used = 1
-          )
-      `).get(date, date);
+      `).get(date);
       downtime_hours = Number(dtRow?.downtime_hours || 0);
     }
   }
@@ -309,13 +310,7 @@ function kpiDaily(date, scheduled) {
       WHERE b.breakdown_date = ?
         AND a.active = 1
         AND a.is_standby = 0
-        AND b.asset_id IN (
-          SELECT DISTINCT dh.asset_id
-          FROM daily_hours dh
-          WHERE dh.work_date = ?
-            AND dh.is_used = 1
-        )
-    `).get(date, date);
+    `).get(date);
     downtime_hours = Number(dtRow?.downtime_hours || 0);
   }
 
