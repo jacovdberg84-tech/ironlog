@@ -358,14 +358,30 @@ export default async function dashboardRoutes(app) {
     let mtd_scheduled = 0;
     let mtd_run = 0;
     let mtd_downtime = 0;
+    let mtd_day_count = 0;
     const mtdAssetIds = new Set();
     eachDateInclusiveYMD(mtdStart, date, (dayStr) => {
+      mtd_day_count += 1;
       const dr = computeFleetKpiForDay(dayStr, scheduledFallback, { includePerAsset: false });
       mtd_scheduled += dr.scheduled_hours;
       mtd_run += dr.run_hours;
       mtd_downtime += dr.downtime_hours;
       dr.contributingAssetIds.forEach((id) => mtdAssetIds.add(id));
     });
+
+    // Safety fallback: if MTD scheduled remained zero, derive from active fleet.
+    if (mtd_scheduled <= 0 && scheduledFallback > 0 && mtd_day_count > 0) {
+      const activeFleetCountRow = db.prepare(`
+        SELECT COUNT(*) AS c
+        FROM assets
+        WHERE active = 1
+          AND is_standby = 0
+      `).get();
+      const activeFleetCount = Number(activeFleetCountRow?.c || 0);
+      if (activeFleetCount > 0) {
+        mtd_scheduled = activeFleetCount * scheduledFallback * mtd_day_count;
+      }
+    }
 
     const available_hours = Math.max(0, mtd_scheduled - mtd_downtime);
     const availability =
