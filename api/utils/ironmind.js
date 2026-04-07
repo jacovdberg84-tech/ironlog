@@ -540,17 +540,32 @@ export async function runIronmindAutoScheduler(log = console) {
   const runMinute = Math.max(0, Math.min(59, Number(process.env.IRONMIND_RUN_MINUTE ?? 0)));
   const dayOffset = Math.max(0, Number(process.env.IRONMIND_TARGET_OFFSET_DAYS ?? 1));
   const reportType = String(process.env.IRONMIND_REPORT_TYPE || "daily_admin").trim() || "daily_admin";
+  const autoModeRaw = String(process.env.IRONMIND_AUTO_MODE || "daily").trim().toLowerCase();
+  const autoMode = autoModeRaw === "interval" ? "interval" : "daily";
+  const intervalMinutes = Math.max(5, Math.min(1440, Number(process.env.IRONMIND_RUN_INTERVAL_MINUTES ?? 180)));
+  const forceRefresh = ["1", "true", "yes", "on"].includes(
+    String(process.env.IRONMIND_AUTO_FORCE_REFRESH || "0").trim().toLowerCase()
+  );
 
   let lastMinuteKey = "";
+  let lastIntervalRunAtMs = 0;
 
   const maybeRun = async (reason = "tick") => {
     const now = new Date();
+    const nowMs = Date.now();
     const minuteKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()} ${now.getHours()}:${now.getMinutes()}`;
     const shouldRunByClock = now.getHours() === runHour && now.getMinutes() === runMinute;
+    const shouldRunByInterval =
+      autoMode === "interval" &&
+      (reason === "startup" || (nowMs - lastIntervalRunAtMs) >= (intervalMinutes * 60 * 1000));
 
-    if (!shouldRunByClock && reason !== "startup") return;
-    if (shouldRunByClock && lastMinuteKey === minuteKey) return;
-    if (shouldRunByClock) lastMinuteKey = minuteKey;
+    if (autoMode === "daily") {
+      if (!shouldRunByClock && reason !== "startup") return;
+      if (shouldRunByClock && lastMinuteKey === minuteKey) return;
+      if (shouldRunByClock) lastMinuteKey = minuteKey;
+    } else if (!shouldRunByInterval) {
+      return;
+    }
 
     const targetDate = ymdOffsetFromNow(dayOffset);
 
@@ -558,8 +573,9 @@ export async function runIronmindAutoScheduler(log = console) {
       const result = await generateIronmindReport({
         reportDate: targetDate,
         reportType,
-        force: false,
+        force: forceRefresh,
       });
+      if (autoMode === "interval") lastIntervalRunAtMs = nowMs;
       log.info?.(`[ironmind] ${reason} report ready for ${result.report_date} (id=${result.id}, created=${result.created})`);
     } catch (err) {
       log.error?.(`[ironmind] auto run failed: ${err?.message || err}`);
@@ -571,6 +587,14 @@ export async function runIronmindAutoScheduler(log = console) {
     maybeRun("tick");
   }, 30 * 1000);
 
-  log.info?.(`[ironmind] auto scheduler enabled at ${String(runHour).padStart(2, "0")}:${String(runMinute).padStart(2, "0")}, target offset ${dayOffset} day(s)`);
+  if (autoMode === "interval") {
+    log.info?.(
+      `[ironmind] auto scheduler enabled in interval mode (${intervalMinutes} min, force_refresh=${forceRefresh ? "on" : "off"}), target offset ${dayOffset} day(s)`
+    );
+  } else {
+    log.info?.(
+      `[ironmind] auto scheduler enabled at ${String(runHour).padStart(2, "0")}:${String(runMinute).padStart(2, "0")}, target offset ${dayOffset} day(s)`
+    );
+  }
   return timer;
 }
