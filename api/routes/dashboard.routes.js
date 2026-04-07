@@ -335,7 +335,10 @@ export default async function dashboardRoutes(app) {
   // GET /api/dashboard?date=YYYY-MM-DD&scheduled=10
   app.get("/", async (req, reply) => {
     const date = String(req.query?.date || todayYYYYMMDD()).trim();
-    const scheduledFallback = Number(req.query?.scheduled ?? 10);
+    const scheduledRaw = Number(req.query?.scheduled ?? 10);
+    const scheduledFallback = Number.isFinite(scheduledRaw) && scheduledRaw > 0
+      ? scheduledRaw
+      : 10;
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return reply.code(400).send({ error: "date must be YYYY-MM-DD" });
