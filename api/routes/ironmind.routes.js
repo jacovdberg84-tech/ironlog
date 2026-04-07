@@ -23,7 +23,7 @@ export default async function ironmindRoutes(app) {
   function parseAssetCode(question) {
     const q = String(question || "").toUpperCase();
     const m = q.match(/\b[A-Z0-9]{2,}[A-Z][0-9A-Z-]*\b/g) || [];
-    const deny = new Set(["PLEASE", "DOWNTIME", "SELECTED", "TIME", "FROM", "TO", "AND", "THE", "FOR"]);
+    const deny = new Set(["PLEASE", "DOWNTIME", "SELECTED", "TIME", "FROM", "TO", "AND", "THE", "FOR", "FUEL", "USAGE", "RECURRING", "FAILURES", "PM", "OVERDUE", "RISK"]);
     return (m.find((x) => !deny.has(x)) || "").trim();
   }
 
@@ -86,6 +86,7 @@ export default async function ironmindRoutes(app) {
       const start = isDate(body.start) ? String(body.start) : parsed.start;
       const end = isDate(body.end) ? String(body.end) : parsed.end;
       const assetCode = String(body.asset_code || parseAssetCode(question)).trim().toUpperCase();
+      const qLower = question.toLowerCase();
       if (!assetCode) {
         return reply.send({
           ok: true,
@@ -125,6 +126,120 @@ export default async function ironmindRoutes(app) {
         ORDER BY b.id DESC
         LIMIT 1
       `).get(assetCode);
+
+      const asksFuel = qLower.includes("fuel") || qLower.includes("l/hr") || qLower.includes("km/l");
+      const asksRecurring = qLower.includes("recurring") || qLower.includes("repeat") || qLower.includes("failures");
+      const asksPm = qLower.includes("pm") || qLower.includes("overdue") || qLower.includes("maintenance");
+
+      if (asksFuel) {
+        const hasBaseline = db.prepare(`PRAGMA table_info(assets)`).all().some((c) => String(c.name) === "baseline_fuel_l_per_hour");
+        const fuelRow = db.prepare(`
+          SELECT
+            a.asset_code,
+            COALESCE(SUM(fl.liters), 0) AS liters,
+            COALESCE(SUM(fl.hours_run), 0) AS run_hours,
+            COALESCE(a.baseline_fuel_l_per_hour, 0) AS baseline_lph
+          FROM assets a
+          LEFT JOIN fuel_logs fl ON fl.asset_id = a.id AND fl.log_date BETWEEN ? AND ?
+          WHERE UPPER(a.asset_code) = UPPER(?)
+          GROUP BY a.id
+        `).get(start, end, assetCode);
+        if (!fuelRow) {
+          return reply.send({ ok: true, short_answer: `No fuel records found for ${assetCode} in ${start} to ${end}.` });
+        }
+        const liters = Number(fuelRow.liters || 0);
+        const runHours = Number(fuelRow.run_hours || 0);
+        const actualLph = runHours > 0 ? liters / runHours : 0;
+        const baseline = Number(fuelRow.baseline_lph || 0);
+        const overPct = baseline > 0 ? ((actualLph / baseline) - 1) * 100 : null;
+        const short = baseline > 0
+          ? `${assetCode}: fuel ${actualLph.toFixed(2)} L/h vs baseline ${baseline.toFixed(2)} L/h (${overPct >= 0 ? "+" : ""}${overPct.toFixed(1)}%) from ${start} to ${end}.`
+          : `${assetCode}: fuel ${actualLph.toFixed(2)} L/h from ${start} to ${end}. Baseline not configured.`;
+        return reply.send({
+          ok: true,
+          short_answer: short,
+          details: {
+            asset_code: assetCode,
+            start,
+            end,
+            liters,
+            run_hours: runHours,
+            actual_lph: Number(actualLph.toFixed(3)),
+            baseline_lph: baseline,
+            over_pct: overPct == null ? null : Number(overPct.toFixed(2)),
+            baseline_configured: hasBaseline && baseline > 0,
+          },
+        });
+      }
+
+      if (asksRecurring) {
+        const recurring = db.prepare(`
+          SELECT
+            COUNT(DISTINCT l.breakdown_id) AS incidents,
+            COALESCE(SUM(l.hours_down), 0) AS downtime_hours,
+            COALESCE(MIN(l.log_date), '') AS first_log_date,
+            COALESCE(MAX(l.log_date), '') AS last_log_date
+          FROM breakdown_downtime_logs l
+          JOIN breakdowns b ON b.id = l.breakdown_id
+          JOIN assets a ON a.id = b.asset_id
+          WHERE UPPER(a.asset_code) = UPPER(?)
+            AND l.log_date BETWEEN ? AND ?
+        `).get(assetCode, start, end);
+        const incidents = Number(recurring?.incidents || 0);
+        const dt = Number(recurring?.downtime_hours || 0);
+        const short = `${assetCode}: ${incidents} recurring failure incident(s), ${dt.toFixed(1)}h downtime between ${start} and ${end}.`;
+        return reply.send({
+          ok: true,
+          short_answer: short,
+          details: {
+            asset_code: assetCode,
+            start,
+            end,
+            incidents,
+            downtime_hours: dt,
+            first_log_date: recurring?.first_log_date || null,
+            last_log_date: recurring?.last_log_date || null,
+          },
+        });
+      }
+
+      if (asksPm) {
+        const pm = db.prepare(`
+          SELECT
+            mp.service_name,
+            (COALESCE((
+              SELECT SUM(dh.hours_run)
+              FROM daily_hours dh
+              JOIN assets a2 ON a2.id = dh.asset_id
+              WHERE dh.asset_id = mp.asset_id
+                AND dh.is_used = 1
+                AND dh.hours_run > 0
+                AND dh.work_date <= ?
+            ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
+          FROM maintenance_plans mp
+          JOIN assets a ON a.id = mp.asset_id
+          WHERE UPPER(a.asset_code) = UPPER(?)
+            AND mp.active = 1
+          ORDER BY overdue_hours DESC
+          LIMIT 1
+        `).get(end, assetCode);
+        const overdue = Number(pm?.overdue_hours || 0);
+        const riskBand = overdue >= 200 ? "high" : overdue >= 50 ? "medium" : overdue > 0 ? "low" : "none";
+        const short = overdue > 0
+          ? `${assetCode}: PM overdue by ${overdue.toFixed(1)}h (${riskBand} risk) as of ${end}${pm?.service_name ? ` on ${pm.service_name}` : ""}.`
+          : `${assetCode}: no active PM overdue as of ${end}.`;
+        return reply.send({
+          ok: true,
+          short_answer: short,
+          details: {
+            asset_code: assetCode,
+            as_of: end,
+            service_name: pm?.service_name || null,
+            overdue_hours: overdue,
+            risk_band: riskBand,
+          },
+        });
+      }
 
       const hours = Number(row.downtime_hours || 0);
       const short = `${assetCode}: ${hours.toFixed(1)}h downtime from ${start} to ${end} across ${Number(row.logged_days || 0)} logged day(s).`;
