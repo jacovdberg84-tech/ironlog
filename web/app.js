@@ -6389,12 +6389,8 @@ function renderDailyTable() {
       if (String(r.input_unit || "hours").toLowerCase() === u) op.selected = true;
       unitSel.appendChild(op);
     });
-    unitSel.disabled = Boolean(r.input_unit_locked) || !!(r.is_down && r.down_lock);
+    unitSel.disabled = !!(r.is_down && r.down_lock);
     unitSel.addEventListener("change", () => {
-      if (r.input_unit_locked) {
-        unitSel.value = String(r.input_unit || "hours").toLowerCase();
-        return;
-      }
       r.input_unit = String(unitSel.value || "hours").toLowerCase();
       validateDailyRows();
       renderDailyTable();

@@ -88,8 +88,8 @@ export default async function hoursRoutes(app) {
         dh.opening_hours,
         dh.closing_hours,
         dh.hours_run,
-        COALESCE(ai.input_unit, COALESCE(NULLIF(TRIM(dh.input_unit), ''), 'hours')) AS input_unit,
-        CASE WHEN ai.input_unit IS NOT NULL THEN 1 ELSE 0 END AS input_unit_locked,
+        COALESCE(NULLIF(TRIM(dh.input_unit), ''), 'hours') AS input_unit,
+        0 AS input_unit_locked,
         dh.is_used,
         dh.operator,
         dh.notes,
@@ -99,7 +99,6 @@ export default async function hoursRoutes(app) {
         a.is_standby
       FROM daily_hours dh
       JOIN assets a ON a.id = dh.asset_id
-      LEFT JOIN asset_input_units ai ON ai.asset_id = dh.asset_id
       WHERE dh.work_date = ?
       ORDER BY a.asset_code
     `).all(date);
@@ -136,7 +135,7 @@ export default async function hoursRoutes(app) {
       suggested_scheduled_hours: yRow?.scheduled_hours ?? null,
       suggested_opening_from_date: yRow?.source_date ?? null,
       suggested_input_unit: (getAssetInputUnit.get(asset.id)?.input_unit || yRow?.input_unit || "hours"),
-      input_unit_locked: Boolean(getAssetInputUnit.get(asset.id)?.input_unit)
+      input_unit_locked: false
     };
   });
 
@@ -180,10 +179,7 @@ export default async function hoursRoutes(app) {
     const is_used = (body.is_used === false || Number(asset.is_standby) === 1) ? 0 : 1;
     const input_unit_raw = String(body.input_unit || "hours").trim().toLowerCase();
     const requested_input_unit = input_unit_raw === "km" ? "km" : "hours";
-    const lockedInputUnit = String(getAssetInputUnit.get(asset.id)?.input_unit || "").trim().toLowerCase();
-    const input_unit = lockedInputUnit === "km" || lockedInputUnit === "hours"
-      ? lockedInputUnit
-      : requested_input_unit;
+    const input_unit = requested_input_unit;
 
     // scheduled_hours variable per day
     let scheduled_hours = numOrNull(body.scheduled_hours);
@@ -303,7 +299,7 @@ export default async function hoursRoutes(app) {
       notes
     );
 
-    // Persist selected input unit per asset; later daily rows are locked to this choice.
+    // Persist selected input unit per asset for next-day suggestion (editable anytime).
     upsertAssetInputUnit.run(asset.id, input_unit);
 
     return reply.send({
@@ -315,7 +311,7 @@ export default async function hoursRoutes(app) {
       closing_hours,
       hours_run,
       input_unit,
-      input_unit_locked: true,
+      input_unit_locked: false,
       is_used: Boolean(is_used)
     });
   });
