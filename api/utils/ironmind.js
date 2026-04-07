@@ -33,6 +33,23 @@ export function ensureIronmindTable() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_ironmind_reports_unique_date_type
     ON ironmind_reports(report_date, report_type)
   `).run();
+
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS ironmind_asset_risk_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      report_date TEXT NOT NULL,
+      asset_code TEXT NOT NULL,
+      risk_score REAL NOT NULL DEFAULT 0,
+      confidence REAL NOT NULL DEFAULT 0,
+      reasons_json TEXT NOT NULL DEFAULT '[]',
+      features_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  db.prepare(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ironmind_asset_risk_unique
+    ON ironmind_asset_risk_snapshots(report_date, asset_code)
+  `).run();
 }
 
 function getAiConfig() {
@@ -94,6 +111,138 @@ function safeList(arr, fallback) {
   return Array.isArray(arr) && arr.length ? arr : fallback;
 }
 
+function hasColumn(table, col) {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all();
+  return rows.some((r) => String(r.name) === col);
+}
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function computeAssetRiskSignals(reportDate) {
+  const assets = db.prepare(`
+    SELECT id, asset_code, asset_name
+    FROM assets
+    WHERE active = 1 AND IFNULL(is_standby, 0) = 0
+  `).all();
+  const byAssetId = new Map();
+  assets.forEach((a) => {
+    byAssetId.set(Number(a.id), {
+      asset_id: Number(a.id),
+      asset_code: String(a.asset_code || ""),
+      asset_name: String(a.asset_name || ""),
+      incidents_30d: 0,
+      downtime_30d: 0,
+      overdue_hours: 0,
+      max_open_wo_age_hours: 0,
+      fuel_over_pct: 0,
+    });
+  });
+
+  const failures = db.prepare(`
+    SELECT b.asset_id, COUNT(DISTINCT l.breakdown_id) AS incidents, COALESCE(SUM(l.hours_down), 0) AS downtime
+    FROM breakdown_downtime_logs l
+    JOIN breakdowns b ON b.id = l.breakdown_id
+    JOIN assets a ON a.id = b.asset_id
+    WHERE l.log_date BETWEEN DATE(?, '-29 day') AND DATE(?)
+      AND a.active = 1
+      AND IFNULL(a.is_standby, 0) = 0
+    GROUP BY b.asset_id
+  `).all(reportDate, reportDate);
+  failures.forEach((r) => {
+    const row = byAssetId.get(Number(r.asset_id));
+    if (!row) return;
+    row.incidents_30d = Number(r.incidents || 0);
+    row.downtime_30d = Number(r.downtime || 0);
+  });
+
+  const overdueByAsset = db.prepare(`
+    SELECT asset_id, MAX(overdue_hours) AS overdue_hours
+    FROM (
+      SELECT
+        mp.asset_id AS asset_id,
+        (COALESCE((
+          SELECT SUM(dh.hours_run)
+          FROM daily_hours dh
+          WHERE dh.asset_id = mp.asset_id
+            AND dh.is_used = 1
+            AND dh.hours_run > 0
+            AND dh.work_date <= ?
+        ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
+      FROM maintenance_plans mp
+      JOIN assets a ON a.id = mp.asset_id
+      WHERE mp.active = 1 AND a.active = 1 AND IFNULL(a.is_standby, 0) = 0
+    )
+    WHERE overdue_hours >= 0
+    GROUP BY asset_id
+  `).all(reportDate);
+  overdueByAsset.forEach((r) => {
+    const row = byAssetId.get(Number(r.asset_id));
+    if (!row) return;
+    row.overdue_hours = Number(r.overdue_hours || 0);
+  });
+
+  const woAges = db.prepare(`
+    SELECT w.asset_id, MAX(CAST((julianday('now') - julianday(COALESCE(w.opened_at, datetime('now')))) * 24 AS INTEGER)) AS max_age
+    FROM work_orders w
+    JOIN assets a ON a.id = w.asset_id
+    WHERE w.status IN ('open', 'assigned', 'in_progress', 'completed')
+      AND a.active = 1
+      AND IFNULL(a.is_standby, 0) = 0
+    GROUP BY w.asset_id
+  `).all();
+  woAges.forEach((r) => {
+    const row = byAssetId.get(Number(r.asset_id));
+    if (!row) return;
+    row.max_open_wo_age_hours = Number(r.max_age || 0);
+  });
+
+  if (hasColumn("assets", "baseline_fuel_l_per_hour")) {
+    const fuelRows = db.prepare(`
+      SELECT a.id AS asset_id,
+        CASE WHEN COALESCE(a.baseline_fuel_l_per_hour, 0) > 0
+          THEN ((COALESCE(SUM(fl.liters), 0) / SUM(fl.hours_run)) / a.baseline_fuel_l_per_hour - 1.0) * 100.0
+          ELSE 0
+        END AS over_pct
+      FROM fuel_logs fl
+      JOIN assets a ON a.id = fl.asset_id
+      WHERE fl.log_date BETWEEN DATE(?, '-13 day') AND DATE(?)
+        AND COALESCE(fl.hours_run, 0) > 0
+        AND a.active = 1
+        AND IFNULL(a.is_standby, 0) = 0
+      GROUP BY a.id
+      HAVING COALESCE(a.baseline_fuel_l_per_hour, 0) > 0
+    `).all(reportDate, reportDate);
+    fuelRows.forEach((r) => {
+      const row = byAssetId.get(Number(r.asset_id));
+      if (!row) return;
+      row.fuel_over_pct = Number(r.over_pct || 0);
+    });
+  }
+
+  const scored = Array.from(byAssetId.values()).map((r) => {
+    const failurePts = clamp(r.incidents_30d * 12, 0, 35);
+    const downtimePts = clamp(r.downtime_30d * 1.2, 0, 20);
+    const overduePts = clamp(r.overdue_hours / 20, 0, 20);
+    const woAgePts = clamp(r.max_open_wo_age_hours / 6, 0, 15);
+    const fuelPts = clamp(Math.max(0, r.fuel_over_pct - 10) * 0.8, 0, 20);
+    const riskScore = Number(clamp(failurePts + downtimePts + overduePts + woAgePts + fuelPts, 0, 100).toFixed(2));
+    const signalCount = [r.incidents_30d > 0, r.downtime_30d > 0, r.overdue_hours > 0, r.max_open_wo_age_hours > 0, r.fuel_over_pct > 0]
+      .filter(Boolean).length;
+    const confidence = Number(clamp(35 + signalCount * 12 + Math.min(20, r.incidents_30d * 4), 20, 95).toFixed(0));
+    const reasons = [];
+    if (r.incidents_30d >= 2) reasons.push(`${r.incidents_30d} breakdown incidents in 30d`);
+    if (r.downtime_30d > 8) reasons.push(`${r.downtime_30d.toFixed(1)}h downtime in 30d`);
+    if (r.overdue_hours > 0) reasons.push(`${r.overdue_hours.toFixed(1)}h PM overdue`);
+    if (r.max_open_wo_age_hours > 24) reasons.push(`open WO age ${r.max_open_wo_age_hours}h`);
+    if (r.fuel_over_pct > 20) reasons.push(`fuel rate +${r.fuel_over_pct.toFixed(1)}% vs baseline`);
+    return { ...r, risk_score: riskScore, confidence, reasons };
+  }).sort((a, b) => b.risk_score - a.risk_score);
+
+  return scored;
+}
+
 function toIronmindFormat({ repairsNeeded, operationalRisks, suggestions, dataGaps }) {
   const block = (title, lines) => {
     const normalized = safeList(lines, ["Insufficient data"]).map((s) => `- ${String(s || "").trim() || "Insufficient data"}`);
@@ -139,10 +288,21 @@ function buildFallbackInsight(data) {
   for (const s of data.lowStockCritical.slice(0, 3)) {
     operationalRisks.push(`Critical stock risk: ${s.part_code || "part"} on hand ${Number(s.on_hand || 0)} below min ${Number(s.min_stock || 0)}.`);
   }
+  for (const r of (data.recurringFailures30d || []).slice(0, 3)) {
+    operationalRisks.push(`${r.asset_code || "Unknown asset"} recurring breakdown pattern: ${Number(r.incidents || 0)} incidents in 30d, ${Number(r.downtime_hours || 0).toFixed(1)}h downtime.`);
+  }
+  for (const f of (data.fuelAnomalies14d || []).slice(0, 2)) {
+    operationalRisks.push(`${f.asset_code || "Unknown asset"} high fuel trend: ${f.actual_lph.toFixed(2)} L/h vs baseline ${f.baseline_lph.toFixed(2)} L/h (${f.over_pct.toFixed(1)}% over).`);
+  }
 
   suggestions.push("Close or update aged work orders before next shift handover.");
   suggestions.push("Prioritize overdue preventive maintenance on highest-utilization assets.");
   suggestions.push("Reconcile critical spares below minimum and confirm delivery ETA.");
+  suggestions.push("Review recurring-failure assets for root cause elimination and planned intervention before next failure window.");
+  suggestions.push("Validate abnormal fuel-use assets (idling, route/load, injector/air leaks) and schedule targeted inspections.");
+  for (const a of (data.topRiskAssets || []).slice(0, 3)) {
+    suggestions.push(`${a.asset_code || "Asset"} risk ${Number(a.risk_score || 0).toFixed(0)}/100 (confidence ${Number(a.confidence || 0).toFixed(0)}%): ${safeList(a.reasons, ["insufficient signals"]).join("; ")}.`);
+  }
 
   if (Number(data.dataCoverage.active_assets || 0) > 0 && Number(data.dataCoverage.assets_with_daily_entry || 0) === 0) {
     dataGaps.push("Insufficient data: no daily hours captured for active assets.");
@@ -201,6 +361,7 @@ async function callIronmindAi(structuredData, opts = {}) {
     detailMode
       ? "- Each key should contain 4-8 concise but specific bullets with asset codes, magnitudes, and action intent where possible."
       : "- Each key must be an array of short strings.",
+    "- Predictive statements must be evidence-based from trend signals only; never present certainty.",
   ].join("\n");
   const contextBlock = contextNotes ? `\n\nAdditional operator context:\n${contextNotes}` : "";
   const userPrompt = `Structured plant data for report date ${structuredData.report_date}:\n${JSON.stringify(structuredData, null, 2)}${contextBlock}`;
@@ -394,6 +555,64 @@ function buildStructuredData(reportDate) {
     FROM operations_daily
     WHERE operation_date = ?
   `).get(reportDate);
+  const hasFuelBaseline = hasColumn("assets", "baseline_fuel_l_per_hour");
+  const recurringFailures30d = db.prepare(`
+    SELECT
+      a.asset_code,
+      COUNT(DISTINCT l.breakdown_id) AS incidents,
+      COALESCE(SUM(l.hours_down), 0) AS downtime_hours
+    FROM breakdown_downtime_logs l
+    JOIN breakdowns b ON b.id = l.breakdown_id
+    JOIN assets a ON a.id = b.asset_id
+    WHERE l.log_date BETWEEN DATE(?, '-29 day') AND DATE(?)
+      AND a.active = 1
+      AND IFNULL(a.is_standby, 0) = 0
+    GROUP BY a.id
+    HAVING incidents >= 2
+    ORDER BY incidents DESC, downtime_hours DESC
+    LIMIT 8
+  `).all(reportDate, reportDate).map((r) => ({
+    asset_code: r.asset_code,
+    incidents: Number(r.incidents || 0),
+    downtime_hours: Number(r.downtime_hours || 0),
+  }));
+  const fuelAnomalies14d = hasFuelBaseline
+    ? db.prepare(`
+      SELECT asset_code, baseline_lph, actual_lph, over_pct
+      FROM (
+        SELECT
+          a.asset_code AS asset_code,
+          COALESCE(a.baseline_fuel_l_per_hour, 0) AS baseline_lph,
+          CASE WHEN COALESCE(SUM(COALESCE(fl.hours_run, 0)), 0) > 0
+            THEN COALESCE(SUM(COALESCE(fl.liters, 0)), 0) / SUM(COALESCE(fl.hours_run, 0))
+            ELSE 0
+          END AS actual_lph,
+          CASE WHEN COALESCE(a.baseline_fuel_l_per_hour, 0) > 0
+            THEN ((CASE WHEN COALESCE(SUM(COALESCE(fl.hours_run, 0)), 0) > 0
+              THEN COALESCE(SUM(COALESCE(fl.liters, 0)), 0) / SUM(COALESCE(fl.hours_run, 0))
+              ELSE 0
+            END) / a.baseline_fuel_l_per_hour - 1.0) * 100.0
+            ELSE 0
+          END AS over_pct
+        FROM fuel_logs fl
+        JOIN assets a ON a.id = fl.asset_id
+        WHERE fl.log_date BETWEEN DATE(?, '-13 day') AND DATE(?)
+          AND COALESCE(fl.hours_run, 0) > 0
+          AND a.active = 1
+          AND IFNULL(a.is_standby, 0) = 0
+        GROUP BY a.id
+      )
+      WHERE baseline_lph > 0
+        AND actual_lph > baseline_lph * 1.2
+      ORDER BY over_pct DESC
+      LIMIT 8
+    `).all(reportDate, reportDate).map((r) => ({
+      asset_code: r.asset_code,
+      baseline_lph: Number(r.baseline_lph || 0),
+      actual_lph: Number(r.actual_lph || 0),
+      over_pct: Number(r.over_pct || 0),
+    }))
+    : [];
 
   const scheduled = Number(kpiRow?.scheduled_hours || 0);
   const run = Number(kpiRow?.run_hours || 0);
@@ -401,6 +620,20 @@ function buildStructuredData(reportDate) {
   const available = Math.max(0, scheduled - downtime);
   const availabilityPct = scheduled > 0 ? (available / scheduled) * 100 : 0;
   const utilizationPct = available > 0 ? (run / available) * 100 : 0;
+  const assetRiskSignals = computeAssetRiskSignals(reportDate);
+  const topRiskAssets = assetRiskSignals
+    .filter((r) => Number(r.risk_score || 0) >= 35)
+    .slice(0, 8)
+    .map((r) => ({
+      asset_code: r.asset_code,
+      risk_score: Number(r.risk_score || 0),
+      confidence: Number(r.confidence || 0),
+      reasons: r.reasons || [],
+      incidents_30d: Number(r.incidents_30d || 0),
+      downtime_30d: Number(r.downtime_30d || 0),
+      overdue_hours: Number(r.overdue_hours || 0),
+      fuel_over_pct: Number(r.fuel_over_pct || 0),
+    }));
 
   return {
     report_date: reportDate,
@@ -416,6 +649,9 @@ function buildStructuredData(reportDate) {
     openWorkOrders,
     lowStockCritical,
     downtimeTop,
+    recurringFailures30d,
+    fuelAnomalies14d,
+    topRiskAssets,
     dataCoverage: {
       active_assets: Number(activeAssets?.c || 0),
       assets_with_daily_entry: Number(dailyCoverage?.c || 0),
@@ -458,6 +694,33 @@ export async function generateIronmindReport({
   }
 
   const structuredData = buildStructuredData(targetDate);
+  for (const r of (structuredData.topRiskAssets || [])) {
+    db.prepare(`
+      INSERT INTO ironmind_asset_risk_snapshots
+        (report_date, asset_code, risk_score, confidence, reasons_json, features_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(report_date, asset_code)
+      DO UPDATE SET
+        risk_score = excluded.risk_score,
+        confidence = excluded.confidence,
+        reasons_json = excluded.reasons_json,
+        features_json = excluded.features_json,
+        created_at = excluded.created_at
+    `).run(
+      targetDate,
+      String(r.asset_code || ""),
+      Number(r.risk_score || 0),
+      Number(r.confidence || 0),
+      JSON.stringify(r.reasons || []),
+      JSON.stringify({
+        incidents_30d: Number(r.incidents_30d || 0),
+        downtime_30d: Number(r.downtime_30d || 0),
+        overdue_hours: Number(r.overdue_hours || 0),
+        fuel_over_pct: Number(r.fuel_over_pct || 0),
+      }),
+      nowIso()
+    );
+  }
   const aiJson = await callIronmindAi(structuredData, { contextNotes, detailMode });
 
   const parsed = aiJson && typeof aiJson === "object"
