@@ -40,6 +40,13 @@ export default async function dashboardRoutes(app) {
     const rows = db.prepare(`PRAGMA table_info(${table})`).all();
     return rows.some((r) => String(r.name) === col);
   }
+  function getBreakdownDowntimeColumn() {
+    const rows = db.prepare(`PRAGMA table_info(breakdowns)`).all();
+    const names = new Set(rows.map((r) => String(r.name)));
+    if (names.has("downtime_total_hours")) return "downtime_total_hours";
+    if (names.has("downtime_hours")) return "downtime_hours";
+    return "downtime_hours";
+  }
 
   function ensureColumn(table, colName, colDef) {
     if (!hasColumn(table, colName)) {
