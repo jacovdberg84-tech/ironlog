@@ -1687,6 +1687,7 @@ async function loadDashboard() {
   setSkeleton("downtimeReasonsList", 2);
   setSkeleton("stockList", 2);
   setSkeleton("woList", 2);
+  setSkeleton("riskBoardList", 2);
   setSkeleton("slaList", 2);
   setSkeleton("costTrendList", 2);
   setSkeleton("costList", 2);
@@ -1796,6 +1797,29 @@ async function loadDashboard() {
       );
     });
     if (!data.open_work_orders?.length) woList.appendChild(item("<small>No open work orders.</small>"));
+  }
+
+  const riskBoardList = qs("riskBoardList");
+  if (riskBoardList) {
+    riskBoardList.innerHTML = "";
+    try {
+      const rb = await fetchJson(`${API}/api/ironmind/risk-board?date=${encodeURIComponent(date)}&limit=8`);
+      const rows = Array.isArray(rb?.items) ? rb.items : [];
+      rows.forEach((r) => {
+        const reasons = Array.isArray(r.reasons) ? r.reasons.slice(0, 2).join(" | ") : "";
+        riskBoardList.appendChild(
+          item(
+            `<b>${escapeHtml(r.asset_code || "-")}</b> - Risk ${Number(r.risk_score || 0).toFixed(0)}/100` +
+            ` <span class="pill orange">Conf ${Number(r.confidence || 0).toFixed(0)}%</span>` +
+            (reasons ? `<br><small>${escapeHtml(reasons)}</small>` : "") +
+            `<br><button data-ironmind-risk-asset="${escapeHtml(r.asset_code || "")}">Open Asset History</button>`
+          )
+        );
+      });
+      if (!rows.length) riskBoardList.appendChild(item("<small>No risk-board data yet. Refresh IronMind insight first.</small>"));
+    } catch (e) {
+      riskBoardList.appendChild(item(`<small>Risk board unavailable: ${escapeHtml(e.message || String(e))}</small>`));
+    }
   }
 
   const sla = data.workorder_sla || {};
@@ -7246,6 +7270,13 @@ async function init() {
     } catch (_) {
       setStatus("Unable to open selected IRONMIND report.");
     }
+  });
+  qs("riskBoardList")?.addEventListener("click", (e) => {
+    const el = e.target instanceof HTMLElement ? e.target.closest("button[data-ironmind-risk-asset]") : null;
+    if (!el) return;
+    const code = String(el.getAttribute("data-ironmind-risk-asset") || "").trim();
+    if (!code) return;
+    ironmindGoToAsset(code).catch(() => {});
   });
   qs("ironmindShowMissingDays")?.addEventListener("change", () => {
     loadIronmindHistory({ silent: true }).catch(() => {});

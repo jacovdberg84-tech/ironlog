@@ -18,6 +18,43 @@ export default async function ironmindRoutes(app) {
     const matches = q.match(/\b\d{4}-\d{2}-\d{2}\b/g) || [];
     if (matches.length >= 2) return { start: matches[0], end: matches[1] };
     if (matches.length === 1) return { start: matches[0], end: matches[0] };
+    const ym = q.match(/\b(\d{4})-(\d{2})\b/);
+    if (ym) {
+      const y = Number(ym[1]);
+      const m = Number(ym[2]);
+      if (y >= 2000 && m >= 1 && m <= 12) {
+        const start = `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-01`;
+        const endDate = new Date(Date.UTC(y, m, 0));
+        const end = `${endDate.getUTCFullYear()}-${String(endDate.getUTCMonth() + 1).padStart(2, "0")}-${String(endDate.getUTCDate()).padStart(2, "0")}`;
+        return { start, end };
+      }
+    }
+    const monthMap = {
+      january: 1, jan: 1,
+      february: 2, feb: 2,
+      march: 3, mar: 3,
+      april: 4, apr: 4,
+      may: 5,
+      june: 6, jun: 6,
+      july: 7, jul: 7,
+      august: 8, aug: 8,
+      september: 9, sep: 9, sept: 9,
+      october: 10, oct: 10,
+      november: 11, nov: 11,
+      december: 12, dec: 12,
+    };
+    const lower = q.toLowerCase();
+    const monthKey = Object.keys(monthMap).find((k) => new RegExp(`\\b${k}\\b`, "i").test(lower));
+    if (monthKey) {
+      const fallbackYear = Number(String(fallbackDate).slice(0, 4)) || new Date().getUTCFullYear();
+      const yearMatch = lower.match(/\b(20\d{2})\b/);
+      const year = yearMatch ? Number(yearMatch[1]) : fallbackYear;
+      const m = monthMap[monthKey];
+      const start = `${String(year).padStart(4, "0")}-${String(m).padStart(2, "0")}-01`;
+      const endDate = new Date(Date.UTC(year, m, 0));
+      const end = `${endDate.getUTCFullYear()}-${String(endDate.getUTCMonth() + 1).padStart(2, "0")}-${String(endDate.getUTCDate()).padStart(2, "0")}`;
+      return { start, end };
+    }
     return { start: fallbackDate, end: fallbackDate };
   }
   function parseAssetCode(question) {
@@ -259,6 +296,45 @@ export default async function ironmindRoutes(app) {
           open_breakdown_date: openBreakdown?.breakdown_date || null,
         },
       });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.get("/risk-board", async (req, reply) => {
+    try {
+      const asOf = isDate(req.query?.date) ? String(req.query.date) : todayYmd();
+      const limit = Math.max(1, Math.min(20, Number(req.query?.limit || 8)));
+      const rows = db.prepare(`
+        SELECT r.asset_code, r.risk_score, r.confidence, r.reasons_json, r.features_json, r.report_date
+        FROM ironmind_asset_risk_snapshots r
+        JOIN (
+          SELECT asset_code, MAX(report_date) AS latest_date
+          FROM ironmind_asset_risk_snapshots
+          WHERE report_date <= ?
+          GROUP BY asset_code
+        ) x ON x.asset_code = r.asset_code AND x.latest_date = r.report_date
+        ORDER BY r.risk_score DESC, r.confidence DESC, r.asset_code ASC
+        LIMIT ?
+      `).all(asOf, limit);
+
+      const items = (rows || []).map((r) => {
+        let reasons = [];
+        try { reasons = JSON.parse(String(r.reasons_json || "[]")); } catch {}
+        let features = {};
+        try { features = JSON.parse(String(r.features_json || "{}")); } catch {}
+        return {
+          asset_code: String(r.asset_code || ""),
+          report_date: String(r.report_date || ""),
+          risk_score: Number(r.risk_score || 0),
+          confidence: Number(r.confidence || 0),
+          reasons: Array.isArray(reasons) ? reasons : [],
+          features,
+        };
+      });
+
+      return reply.send({ ok: true, as_of: asOf, items });
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message || String(err) });
