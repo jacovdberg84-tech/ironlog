@@ -6397,6 +6397,22 @@ function renderDailyTable() {
       renderDailyPreview();
     });
     downWrap.appendChild(unitSel);
+    const resetUnitBtn = document.createElement("button");
+    resetUnitBtn.type = "button";
+    resetUnitBtn.className = "miniBtn";
+    resetUnitBtn.style.marginLeft = "6px";
+    resetUnitBtn.textContent = "↺";
+    resetUnitBtn.title = "Reset unit to suggested default";
+    resetUnitBtn.disabled = !!(r.is_down && r.down_lock);
+    resetUnitBtn.addEventListener("click", () => {
+      const suggested = String(r.suggested_input_unit || "hours").toLowerCase() === "km" ? "km" : "hours";
+      r.input_unit = suggested;
+      unitSel.value = suggested;
+      validateDailyRows();
+      renderDailyTable();
+      renderDailyPreview();
+    });
+    downWrap.appendChild(resetUnitBtn);
 
     // Down hrs input (for accurate availability downtime)
     const downHrs = document.createElement("input");
@@ -6616,6 +6632,9 @@ async function loadDailyInput() {
       input_unit: ex?.input_unit
         ? String(ex.input_unit).toLowerCase()
         : (String(a.category || "").toLowerCase().includes("truck") || String(a.category || "").toLowerCase().includes("vehicle") ? "km" : "hours"),
+      suggested_input_unit: ex?.input_unit
+        ? String(ex.input_unit).toLowerCase()
+        : (String(a.category || "").toLowerCase().includes("truck") || String(a.category || "").toLowerCase().includes("vehicle") ? "km" : "hours"),
       input_unit_locked: Boolean(ex?.input_unit_locked),
 
       scheduled_hours: ex ? toNum(ex.scheduled_hours) : null,
@@ -6653,7 +6672,11 @@ async function loadDailyInput() {
         const d = await fetchJson(
           `${API}/api/hours/defaults?asset_code=${encodeURIComponent(row.asset_code)}&work_date=${date}`
         );
-        if (d?.suggested_input_unit) row.input_unit = String(d.suggested_input_unit).toLowerCase() === "km" ? "km" : "hours";
+        if (d?.suggested_input_unit) {
+          const suggestedUnit = String(d.suggested_input_unit).toLowerCase() === "km" ? "km" : "hours";
+          row.suggested_input_unit = suggestedUnit;
+          row.input_unit = suggestedUnit;
+        }
         if (typeof d?.input_unit_locked === "boolean") row.input_unit_locked = d.input_unit_locked;
         if ((row.opening_hours == null || forceOpenFromYesterday) && d.suggested_opening_hours != null) {
           row.opening_hours = Number(d.suggested_opening_hours);
