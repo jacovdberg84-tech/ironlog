@@ -1,4 +1,4 @@
-import { generateIronmindReport, getLatestIronmindReport } from "../utils/ironmind.js";
+import { generateIronmindReport, getIronmindHistory, getLatestIronmindReport } from "../utils/ironmind.js";
 
 function toBool(v) {
   const s = String(v || "").trim().toLowerCase();
@@ -6,6 +6,18 @@ function toBool(v) {
 }
 
 export default async function ironmindRoutes(app) {
+  app.get("/history", async (req, reply) => {
+    try {
+      const reportType = String(req.query?.report_type || "daily_admin").trim() || "daily_admin";
+      const days = Math.max(1, Math.min(60, Number(req.query?.days || 7)));
+      const reports = getIronmindHistory({ reportType, limit: days });
+      return reply.send({ ok: true, reports });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
   app.get("/latest", async (req, reply) => {
     try {
       const reportType = String(req.query?.report_type || "daily_admin").trim() || "daily_admin";

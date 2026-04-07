@@ -504,6 +504,26 @@ export function getLatestIronmindReport(reportType = "daily_admin") {
   };
 }
 
+export function getIronmindHistory({ reportType = "daily_admin", limit = 7 } = {}) {
+  ensureIronmindTable();
+  const cappedLimit = Math.max(1, Math.min(60, Number(limit || 7)));
+  const rows = db.prepare(`
+    SELECT id, report_date, report_type, summary, created_at
+    FROM ironmind_reports
+    WHERE report_type = ?
+    ORDER BY report_date DESC, id DESC
+    LIMIT ?
+  `).all(reportType, cappedLimit);
+
+  return (rows || []).map((row) => ({
+    id: Number(row.id),
+    report_date: row.report_date,
+    report_type: row.report_type,
+    summary: row.summary,
+    created_at: row.created_at,
+  }));
+}
+
 export async function runIronmindAutoScheduler(log = console) {
   ensureIronmindTable();
 
