@@ -742,6 +742,7 @@ export default async function dashboardRoutes(app) {
         used_assets,
         scheduled_hours,
         available_hours,
+        utilization_base_hours: Number(mtd_utilization_base.toFixed(2)),
         run_hours: mtd_run,
         downtime_hours,
         availability: availability == null ? null : Number(availability.toFixed(2)),

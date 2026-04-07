@@ -1717,8 +1717,8 @@ async function loadDashboard() {
   setText(
     "utilMeta",
     mtdRange
-      ? `MTD ${mtdRange} · Run hrs: ${data.kpi.run_hours} | Scheduled/asset (header): ${data.scheduled_hours_per_asset}`
-      : `Run hrs: ${data.kpi.run_hours} | Scheduled/asset: ${data.scheduled_hours_per_asset}`
+      ? `MTD ${mtdRange} · Run hrs: ${data.kpi.run_hours} | Util base hrs: ${Number(data.kpi.utilization_base_hours || 0).toFixed(1)} | Scheduled/asset (header): ${data.scheduled_hours_per_asset}`
+      : `Run hrs: ${data.kpi.run_hours} | Util base hrs: ${Number(data.kpi.utilization_base_hours || 0).toFixed(1)} | Scheduled/asset: ${data.scheduled_hours_per_asset}`
   );
   const debugToggle = qs("kpiDebugToggle");
   const debugList = qs("kpiDebugList");
