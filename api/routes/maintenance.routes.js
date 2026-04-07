@@ -4,6 +4,7 @@ import multipart from "@fastify/multipart";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -50,6 +51,14 @@ function getAssetCurrentHours(assetId) {
   `).get(assetId);
 
   return Number(fromDailyHours?.total_hours || 0);
+}
+
+function classifyDueStatus(remainingHours, nearDueHours = 50) {
+  const remaining = Number(remainingHours || 0);
+  const threshold = Math.max(1, Number(nearDueHours || 50));
+  if (remaining <= 0) return "OVERDUE";
+  if (remaining <= threshold) return "ALMOST DUE";
+  return "OK";
 }
 
 export default async function maintenanceRoutes(app) {
@@ -550,11 +559,12 @@ export default async function maintenanceRoutes(app) {
 
   // =====================================================
   // LIST MAINTENANCE DUE
-  // GET /api/maintenance/due?date=2026-02-27
+  // GET /api/maintenance/due?date=2026-02-27&near_due_hours=50
   // =====================================================
   app.get("/due", async (req, reply) => {
     try {
       const date = String(req.query?.date || "").trim();
+      const nearDueHours = Math.max(1, Number(req.query?.near_due_hours || 50));
       if (date && !isDate(date)) {
         return reply.code(400).send({ error: "date must be YYYY-MM-DD" });
       }
@@ -618,11 +628,7 @@ export default async function maintenanceRoutes(app) {
   const current = getAssetCurrentHours(r.asset_id);
   const next_due = Number(r.last_service_hours || 0) + Number(r.interval_hours || 0);
   const remaining = next_due - current;
-  const soonThreshold = Math.max(10, Number(r.interval_hours || 0) * 0.1);
-
-  let status = "OK";
-  if (remaining <= 0) status = "OVERDUE";
-  else if (remaining <= soonThreshold) status = "DUE SOON";
+  const status = classifyDueStatus(remaining, nearDueHours);
 
   return {
     plan_id: r.plan_id,
@@ -644,6 +650,7 @@ export default async function maintenanceRoutes(app) {
       return reply.send({
         ok: true,
         as_of: date || null,
+        near_due_hours: nearDueHours,
         due
       });
     } catch (err) {
@@ -862,6 +869,134 @@ export default async function maintenanceRoutes(app) {
         ok: false,
         error: err.message
       });
+    }
+  });
+
+  // =====================================================
+  // UPCOMING SERVICES PDF
+  // GET /api/maintenance/due-upcoming.pdf?date=YYYY-MM-DD&near_due_hours=50&download=1
+  // =====================================================
+  app.get("/due-upcoming.pdf", async (req, reply) => {
+    try {
+      const date = String(req.query?.date || "").trim();
+      if (date && !isDate(date)) {
+        return reply.code(400).send({ error: "date must be YYYY-MM-DD" });
+      }
+      const nearDueHours = Math.max(1, Number(req.query?.near_due_hours || 50));
+
+      const rows = date
+        ? db.prepare(`
+            SELECT
+              mp.id AS plan_id,
+              mp.asset_id,
+              mp.service_name,
+              mp.interval_hours,
+              mp.last_service_hours,
+              a.asset_code,
+              a.asset_name
+            FROM maintenance_plans mp
+            JOIN assets a ON a.id = mp.asset_id
+            WHERE mp.active = 1
+              AND a.active = 1
+              AND a.is_standby = 0
+              AND a.archived = 0
+            ORDER BY a.asset_code ASC, mp.service_name ASC
+          `).all()
+        : db.prepare(`
+            SELECT
+              mp.id AS plan_id,
+              mp.asset_id,
+              mp.service_name,
+              mp.interval_hours,
+              mp.last_service_hours,
+              a.asset_code,
+              a.asset_name
+            FROM maintenance_plans mp
+            JOIN assets a ON a.id = mp.asset_id
+            WHERE mp.active = 1
+              AND a.active = 1
+              AND a.is_standby = 0
+              AND a.archived = 0
+            ORDER BY a.asset_code ASC, mp.service_name ASC
+          `).all();
+
+      const dueRows = rows
+        .map((r) => {
+          const current = getAssetCurrentHours(r.asset_id);
+          const nextDue = Number(r.last_service_hours || 0) + Number(r.interval_hours || 0);
+          const remaining = nextDue - current;
+          const status = classifyDueStatus(remaining, nearDueHours);
+          return {
+            asset_code: r.asset_code,
+            asset_name: r.asset_name,
+            service_name: r.service_name,
+            current_hours: Number(current.toFixed(2)),
+            next_due_hours: Number(nextDue.toFixed(2)),
+            remaining_hours: Number(remaining.toFixed(2)),
+            status,
+          };
+        })
+        .filter((r) => r.status === "OVERDUE" || r.status === "ALMOST DUE")
+        .sort((a, b) => Number(a.remaining_hours || 0) - Number(b.remaining_hours || 0));
+
+      const asOfLabel = date || new Date().toISOString().slice(0, 10);
+      const pdf = await buildPdfBuffer(
+        (doc) => {
+          sectionTitle(doc, "Upcoming Services");
+          doc
+            .font("Helvetica")
+            .fontSize(10)
+            .text(`As of: ${asOfLabel} | Threshold: <= ${nearDueHours.toFixed(0)}h flagged as ALMOST DUE`);
+          doc.moveDown(0.4);
+
+          table(
+            doc,
+            [
+              { key: "asset_code", label: "Asset", width: 0.12 },
+              { key: "asset_name", label: "Name", width: 0.2 },
+              { key: "service_name", label: "Service", width: 0.18 },
+              { key: "current_hours", label: "Current", width: 0.12, align: "right" },
+              { key: "next_due_hours", label: "Next Due", width: 0.12, align: "right" },
+              { key: "remaining_hours", label: "Remaining", width: 0.12, align: "right" },
+              { key: "status", label: "Status", width: 0.14 },
+            ],
+            dueRows.length
+              ? dueRows.map((r) => ({
+                  ...r,
+                  current_hours: Number(r.current_hours || 0).toFixed(1),
+                  next_due_hours: Number(r.next_due_hours || 0).toFixed(1),
+                  remaining_hours: Number(r.remaining_hours || 0).toFixed(1),
+                }))
+              : [
+                  {
+                    asset_code: "-",
+                    asset_name: "No upcoming services within threshold",
+                    service_name: "-",
+                    current_hours: "-",
+                    next_due_hours: "-",
+                    remaining_hours: "-",
+                    status: "-",
+                  },
+                ]
+          );
+        },
+        {
+          title: "IRONLOG",
+          subtitle: "Maintenance Upcoming Services",
+          rightText: `As of: ${asOfLabel}`,
+        }
+      );
+
+      const isDownload = String(req.query?.download || "").trim() === "1";
+      reply.header("Content-Type", "application/pdf");
+      reply.header(
+        "Content-Disposition",
+        `${isDownload ? "attachment" : "inline"}; filename="maintenance-upcoming-services-${asOfLabel}.pdf"`
+      );
+      return reply.send(pdf);
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
     }
   });
 

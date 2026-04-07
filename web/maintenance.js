@@ -5,6 +5,7 @@ const ROLES_KEY = "ironlog_session_roles";
 const USER_KEY = "ironlog_session_user";
 const SITE_KEY = "ironlog_session_site";
 const TOKEN_KEY = "ironlog_auth_token";
+const MAINT_DUE_THRESHOLD_KEY = "ironlog_maintenance_due_threshold_hours";
 
 function getSessionRole() {
   return String(localStorage.getItem(ROLE_KEY) || "admin").trim().toLowerCase() || "admin";
@@ -89,9 +90,9 @@ function dueCard(d) {
   if (d.is_overdue) {
     statusClass = "status-overdue";
     statusText = "OVERDUE";
-  } else if (String(d.status || "").toUpperCase() === "DUE SOON") {
+  } else if (String(d.status || "").toUpperCase() === "ALMOST DUE") {
     statusClass = "status-soon";
-    statusText = "DUE SOON";
+    statusText = "ALMOST DUE";
   }
 
   return `
@@ -116,7 +117,7 @@ function histRow(r) {
   const last = r.last_serviced_date || "-";
   const est = r.estimated_service_date || "-";
   const hrsToNext = Number(r.remaining_hours || 0);
-  const warn = hrsToNext <= 0 ? "status-overdue" : hrsToNext <= 10 ? "status-soon" : "status-ok";
+  const warn = hrsToNext <= 0 ? "status-overdue" : hrsToNext <= 50 ? "status-soon" : "status-ok";
   return `
     <tr class="${hrsToNext <= 0 ? "downRow" : ""}">
       <td><b>${eq}</b></td>
@@ -328,9 +329,12 @@ async function loadPlans() {
 async function loadDue() {
   const container = document.getElementById("dueList");
   container.innerHTML = `<div class="skeleton-block"></div><div class="skeleton-block"></div>`;
+  const nearDueHours = getDueThresholdHours();
 
   try {
-    const res = await fetch(`${API}/maintenance/due`);
+    const q = new URLSearchParams();
+    q.set("near_due_hours", String(nearDueHours));
+    const res = await fetch(`${API}/maintenance/due?${q.toString()}`);
     const data = await res.json();
     console.log("Due response:", data);
 
@@ -341,22 +345,17 @@ async function loadDue() {
 
     const due = Array.isArray(data.due) ? data.due : [];
     due.sort((a, b) => {
-  const getRank = (d) => {
-    if (d.is_overdue) return 1;
+      const getRank = (d) => {
+        const remaining = Number(d.remaining_hours || 0);
+        if (remaining <= 0) return 1;
+        if (remaining <= nearDueHours) return 2;
+        return 3;
+      };
 
-    const interval = Number(d.interval_hours || 0);
-    const remaining = Number(d.remaining_hours || 0);
-    const soonThreshold = Math.max(10, interval * 0.1);
-
-    if (remaining <= soonThreshold) return 2;
-    return 3;
-  };
-
-  const rankDiff = getRank(a) - getRank(b);
-  if (rankDiff !== 0) return rankDiff;
-
-  return Number(a.remaining_hours || 0) - Number(b.remaining_hours || 0);
-});
+      const rankDiff = getRank(a) - getRank(b);
+      if (rankDiff !== 0) return rankDiff;
+      return Number(a.remaining_hours || 0) - Number(b.remaining_hours || 0);
+    });
     container.innerHTML = due.length
       ? due.map(dueCard).join("")
       : "<div>No due services found.</div>";
@@ -364,6 +363,32 @@ async function loadDue() {
     console.error("Due error:", err);
     container.innerHTML = `<div style="color:#ff8080;">Error loading due services: ${err.message}</div>`;
   }
+}
+
+function openUpcomingServicesPdf(download = false) {
+  const nearDueHours = getDueThresholdHours();
+  const q = new URLSearchParams();
+  q.set("near_due_hours", String(nearDueHours));
+  if (download) q.set("download", "1");
+  window.open(`${API}/maintenance/due-upcoming.pdf?${q.toString()}`, "_blank");
+}
+
+function getDueThresholdHours() {
+  const input = document.getElementById("dueNearThresholdHours");
+  const fromInput = Number(input?.value || 50);
+  const fallbackSaved = Number(localStorage.getItem(MAINT_DUE_THRESHOLD_KEY) || 50);
+  const v = Number.isFinite(fromInput) && fromInput > 0
+    ? fromInput
+    : (Number.isFinite(fallbackSaved) && fallbackSaved > 0 ? fallbackSaved : 50);
+  return Math.max(1, Math.round(v));
+}
+
+function syncDueThresholdInput() {
+  const input = document.getElementById("dueNearThresholdHours");
+  if (!input) return;
+  const saved = Number(localStorage.getItem(MAINT_DUE_THRESHOLD_KEY) || 50);
+  const value = Number.isFinite(saved) && saved > 0 ? Math.round(saved) : 50;
+  input.value = String(value);
 }
 
 async function generateWO() {
@@ -957,9 +982,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const savePlanBtn = document.getElementById("savePlanBtn");
   const useLiveEl = document.getElementById("planUseLiveForLastService");
 
+  syncDueThresholdInput();
   if (generateBtn) {
     generateBtn.addEventListener("click", generateWO);
   }
+  document.getElementById("applyDueThresholdBtn")?.addEventListener("click", async () => {
+    const v = getDueThresholdHours();
+    localStorage.setItem(MAINT_DUE_THRESHOLD_KEY, String(v));
+    await loadDue();
+  });
+  document.getElementById("openUpcomingServicesPdfBtn")?.addEventListener("click", () => openUpcomingServicesPdf(false));
+  document.getElementById("downloadUpcomingServicesPdfBtn")?.addEventListener("click", () => openUpcomingServicesPdf(true));
 
   if (savePlanBtn) {
     savePlanBtn.addEventListener("click", savePlan);

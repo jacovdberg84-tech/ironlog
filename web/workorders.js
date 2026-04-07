@@ -1,6 +1,8 @@
 const API = "/api";
 let closingWorkOrderId = null;
 let closingWorkOrderSource = "";
+let currentDetailWorkOrderId = null;
+let stockCatalogCache = [];
 const ROLE_KEY = "ironlog_session_role";
 const USER_KEY = "ironlog_session_user";
 
@@ -162,6 +164,90 @@ function renderParts(parts) {
   `;
 }
 
+function isLubeItem(item) {
+  const txt = `${String(item?.part_code || "").toLowerCase()} ${String(item?.part_name || "").toLowerCase()}`;
+  return /\blube\b|\boil\b|\bgrease\b|\bhydraulic\b/.test(txt);
+}
+
+function formatStockOptions(items) {
+  const list = Array.isArray(items) ? items : [];
+  const sorted = [...list].sort((a, b) => {
+    const aL = isLubeItem(a) ? 1 : 0;
+    const bL = isLubeItem(b) ? 1 : 0;
+    if (aL !== bL) return aL - bL;
+    return String(a.part_code || "").localeCompare(String(b.part_code || ""));
+  });
+  return sorted
+    .map((r) => {
+      const code = String(r.part_code || "").trim();
+      const name = String(r.part_name || "").trim();
+      const onHand = Number(r.on_hand || 0);
+      const bucket = isLubeItem(r) ? "Lube" : "Part";
+      return `<option value="${code.replace(/"/g, "&quot;")}" data-onhand="${onHand}">[${bucket}] ${code} - ${name} (on hand: ${onHand})</option>`;
+    })
+    .join("");
+}
+
+async function ensureStockCatalogLoaded() {
+  if (Array.isArray(stockCatalogCache) && stockCatalogCache.length) return stockCatalogCache;
+  const res = await fetch(`${API}/stock/onhand`, { headers: authHeaders() });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to load stock catalog");
+  const rows = Array.isArray(data) ? data : [];
+  stockCatalogCache = rows.filter((r) => Number(r.on_hand || 0) > 0);
+  return stockCatalogCache;
+}
+
+function canIssueParts(role) {
+  return ["admin", "supervisor", "stores"].includes(String(role || "").toLowerCase());
+}
+
+function renderIssuePanel(wo) {
+  const role = getSessionRole();
+  const canIssue = canIssueParts(role);
+  if (!wo || !canIssue) {
+    return `<div class="muted">Issue from stores is available for Admin, Supervisor and Stores roles.</div>`;
+  }
+  return `
+    <div class="card" style="margin-top:10px;">
+      <h4 style="margin:0 0 8px 0;">Issue Parts / Lube From Stores</h4>
+      <div class="row" style="gap:10px; align-items:flex-end; flex-wrap:wrap;">
+        <label style="min-width:240px; flex:1;">
+          Search Store Item
+          <input id="woIssueSearch" type="text" placeholder="Type part code or name..." />
+        </label>
+        <label style="min-width:360px; flex:1;">
+          Store Item
+          <select id="woIssuePartCode">
+            <option value="">Select part or lube...</option>
+          </select>
+        </label>
+        <label style="min-width:140px;">
+          Quantity
+          <input id="woIssueQty" type="number" min="1" step="1" value="1" />
+        </label>
+        <button id="woIssueSubmitBtn" data-wo-issue-id="${Number(wo.id)}">Issue to WO</button>
+      </div>
+      <div id="woIssueHint" class="muted" style="margin-top:8px;">Pick an item from current stores stock.</div>
+      <div id="woIssueMsg" style="margin-top:8px;"></div>
+    </div>
+  `;
+}
+
+function refreshIssueOptions(searchTerm = "") {
+  const select = document.getElementById("woIssuePartCode");
+  if (!select) return;
+  const q = String(searchTerm || "").trim().toLowerCase();
+  const rows = Array.isArray(stockCatalogCache) ? stockCatalogCache : [];
+  const filtered = !q
+    ? rows
+    : rows.filter((r) => {
+        const hay = `${String(r.part_code || "").toLowerCase()} ${String(r.part_name || "").toLowerCase()}`;
+        return hay.includes(q);
+      });
+  select.innerHTML = `<option value="">Select part or lube...</option>${formatStockOptions(filtered)}`;
+}
+
 function renderBreakdown(breakdown) {
   if (!breakdown) return `<div class="muted">No linked breakdown.</div>`;
 
@@ -179,6 +265,8 @@ function renderDetail(payload) {
   const wo = payload?.work_order;
   const breakdown = payload?.breakdown;
   const parts = payload?.parts_issued;
+  const lubeIssued = (Array.isArray(parts) ? parts : []).filter((p) => isLubeItem(p));
+  const nonLubeIssued = (Array.isArray(parts) ? parts : []).filter((p) => !isLubeItem(p));
 
   if (!wo) {
     return `<div class="message-error">Work order detail not available.</div>`;
@@ -207,8 +295,15 @@ function renderDetail(payload) {
 
     <div style="margin-top:12px;">
       <h4 style="margin:0 0 8px 0;">Issued Parts</h4>
-      ${renderParts(parts)}
+      ${renderParts(nonLubeIssued)}
     </div>
+
+    <div style="margin-top:12px;">
+      <h4 style="margin:0 0 8px 0;">Issued Lube</h4>
+      ${renderParts(lubeIssued)}
+    </div>
+
+    ${renderIssuePanel(wo)}
   `;
 }
 
@@ -430,6 +525,7 @@ async function loadWorkOrderDetail(id) {
   if (!woId || !detailEl) return;
 
   detailEl.innerHTML = `<div class="skeleton-block"></div>`;
+  currentDetailWorkOrderId = woId;
 
   try {
     const res = await fetch(`${API}/workorders/${woId}`, { headers: authHeaders() });
@@ -438,9 +534,68 @@ async function loadWorkOrderDetail(id) {
       throw new Error(data.error || "Failed to load work order detail");
     }
     detailEl.innerHTML = renderDetail(data);
+    if (canIssueParts(getSessionRole())) {
+      const select = document.getElementById("woIssuePartCode");
+      const searchInput = document.getElementById("woIssueSearch");
+      if (select) {
+        const rows = await ensureStockCatalogLoaded();
+        refreshIssueOptions("");
+        if (searchInput) {
+          searchInput.value = "";
+        }
+      }
+    }
   } catch (err) {
     console.error("Load work order detail error:", err);
     detailEl.innerHTML = `<div class="message-error">${err.message}</div>`;
+  }
+}
+
+async function issueToWorkOrder() {
+  const woId = Number(currentDetailWorkOrderId || 0);
+  if (!woId) return;
+  const msg = document.getElementById("woIssueMsg");
+  const partSelect = document.getElementById("woIssuePartCode");
+  const qtyInput = document.getElementById("woIssueQty");
+  const hint = document.getElementById("woIssueHint");
+  const btn = document.getElementById("woIssueSubmitBtn");
+  const part_code = String(partSelect?.value || "").trim();
+  const quantity = Number(qtyInput?.value || 0);
+  if (!part_code || !Number.isFinite(quantity) || quantity <= 0) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = "Select a store item and quantity > 0.";
+    }
+    return;
+  }
+  if (btn) btn.disabled = true;
+  if (msg) {
+    msg.className = "";
+    msg.textContent = "Issuing...";
+  }
+  try {
+    const res = await fetch(`${API}/workorders/${woId}/issue`, {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ part_code, quantity }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Issue failed");
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = `Issued ${quantity} x ${part_code} to WO #${woId}.`;
+    }
+    stockCatalogCache = [];
+    await loadWorkOrderDetail(woId);
+    await fetchWorkOrders();
+    if (hint) hint.textContent = "Issued successfully. Stock refreshed.";
+  } catch (err) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = err.message || String(err);
+    }
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -513,6 +668,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const closeCancelBtn = document.getElementById("woCloseCancelBtn");
   const closeModal = document.getElementById("woCloseModal");
   const kpiStrip = document.getElementById("woKpiStrip");
+  const detailEl = document.getElementById("woDetail");
   const role = getSessionRole();
 
   const roleBadge = document.getElementById("woRoleBadge");
@@ -588,6 +744,24 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
       if (id) openCloseModalForRow(id, rowSource);
+    });
+  }
+  if (detailEl) {
+    detailEl.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const issueId = target.getAttribute("data-wo-issue-id");
+      if (issueId) {
+        currentDetailWorkOrderId = Number(issueId);
+        issueToWorkOrder();
+      }
+    });
+    detailEl.addEventListener("input", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.id === "woIssueSearch") {
+        refreshIssueOptions(target.value || "");
+      }
     });
   }
 
