@@ -233,6 +233,7 @@ export default async function dashboardRoutes(app) {
     let scheduled_hours = 0;
     let run_hours = 0;
     let downtime_hours = 0;
+    let utilization_base_hours = 0;
     const per_asset_kpi = includePerAsset ? [] : null;
     const contributingAssetIds = new Set();
 
@@ -260,6 +261,7 @@ export default async function dashboardRoutes(app) {
       scheduled_hours += scheduled;
       run_hours += runEff;
       downtime_hours += cappedDown;
+      utilization_base_hours += scheduled;
       const s = Number(scheduled.toFixed(2));
       const runN = Number(runEff.toFixed(2));
       const downN = Number(cappedDown.toFixed(2));
@@ -345,6 +347,7 @@ export default async function dashboardRoutes(app) {
       scheduled_hours,
       run_hours,
       downtime_hours,
+      utilization_base_hours,
       contributingAssetIds,
       per_asset_kpi: includePerAsset ? per_asset_kpi : [],
     };
@@ -376,6 +379,7 @@ export default async function dashboardRoutes(app) {
     let mtd_scheduled = 0;
     let mtd_run = 0;
     let mtd_downtime = 0;
+    let mtd_utilization_base = 0;
     let mtd_day_count = 0;
     const mtdAssetIds = new Set();
     eachDateInclusiveYMD(mtdStart, date, (dayStr) => {
@@ -384,6 +388,7 @@ export default async function dashboardRoutes(app) {
       mtd_scheduled += dr.scheduled_hours;
       mtd_run += dr.run_hours;
       mtd_downtime += dr.downtime_hours;
+      mtd_utilization_base += Number(dr.utilization_base_hours || 0);
       dr.contributingAssetIds.forEach((id) => mtdAssetIds.add(id));
     });
 
@@ -405,7 +410,7 @@ export default async function dashboardRoutes(app) {
     const availability =
       mtd_scheduled > 0 ? (available_hours / mtd_scheduled) * 100 : null;
     const utilization =
-      available_hours > 0 ? (mtd_run / available_hours) * 100 : null;
+      mtd_utilization_base > 0 ? (mtd_run / mtd_utilization_base) * 100 : null;
     const used_assets = mtdAssetIds.size;
 
     const scheduled_hours = mtd_scheduled;
