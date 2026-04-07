@@ -1400,14 +1400,6 @@ function setSpeedo(needleEl, valEl, pct, opts) {
     barFill.classList.remove("kpi-good", "kpi-warn", "kpi-bad");
   };
 
-  // --- Ensure item() exists (used by dashboard lists) ---
-function item(html) {
-  const d = document.createElement("div");
-  d.className = "item";
-  d.innerHTML = html;
-  return d;
-}
-
   // N/A state
   if (pct == null || Number.isNaN(pct)) {
     clearKpiClasses(needleEl);

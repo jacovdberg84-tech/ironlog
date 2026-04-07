@@ -308,21 +308,24 @@ function buildStructuredData(reportDate) {
   `).get(reportDate);
 
   const overdueMaintenance = db.prepare(`
-    SELECT
-      a.asset_code,
-      mp.service_name,
-      (COALESCE((
-        SELECT SUM(dh.hours_run)
-        FROM daily_hours dh
-        WHERE dh.asset_id = mp.asset_id
-          AND dh.is_used = 1
-          AND dh.hours_run > 0
-          AND dh.work_date <= ?
-      ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
-    FROM maintenance_plans mp
-    JOIN assets a ON a.id = mp.asset_id
-    WHERE mp.active = 1 AND a.active = 1 AND IFNULL(a.is_standby, 0) = 0
-    HAVING overdue_hours >= 0
+    SELECT asset_code, service_name, overdue_hours
+    FROM (
+      SELECT
+        a.asset_code,
+        mp.service_name,
+        (COALESCE((
+          SELECT SUM(dh.hours_run)
+          FROM daily_hours dh
+          WHERE dh.asset_id = mp.asset_id
+            AND dh.is_used = 1
+            AND dh.hours_run > 0
+            AND dh.work_date <= ?
+        ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
+      FROM maintenance_plans mp
+      JOIN assets a ON a.id = mp.asset_id
+      WHERE mp.active = 1 AND a.active = 1 AND IFNULL(a.is_standby, 0) = 0
+    )
+    WHERE overdue_hours >= 0
     ORDER BY overdue_hours DESC
     LIMIT 8
   `).all(reportDate).map((r) => ({
