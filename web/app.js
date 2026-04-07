@@ -1812,7 +1812,8 @@ async function loadDashboard() {
             `<b>${escapeHtml(r.asset_code || "-")}</b> - Risk ${Number(r.risk_score || 0).toFixed(0)}/100` +
             ` <span class="pill orange">Conf ${Number(r.confidence || 0).toFixed(0)}%</span>` +
             (reasons ? `<br><small>${escapeHtml(reasons)}</small>` : "") +
-            `<br><button data-ironmind-risk-asset="${escapeHtml(r.asset_code || "")}">Open Asset History</button>`
+            `<br><button data-ironmind-risk-asset="${escapeHtml(r.asset_code || "")}">Open Asset History</button> ` +
+            `<button data-ironmind-risk-wo="${escapeHtml(r.asset_code || "")}">Create WO</button>`
           )
         );
       });
@@ -7272,11 +7273,36 @@ async function init() {
     }
   });
   qs("riskBoardList")?.addEventListener("click", (e) => {
-    const el = e.target instanceof HTMLElement ? e.target.closest("button[data-ironmind-risk-asset]") : null;
-    if (!el) return;
-    const code = String(el.getAttribute("data-ironmind-risk-asset") || "").trim();
-    if (!code) return;
-    ironmindGoToAsset(code).catch(() => {});
+    const target = e.target instanceof HTMLElement ? e.target : null;
+    if (!target) return;
+    const openBtn = target.closest("button[data-ironmind-risk-asset]");
+    if (openBtn) {
+      const code = String(openBtn.getAttribute("data-ironmind-risk-asset") || "").trim();
+      if (!code) return;
+      ironmindGoToAsset(code).catch(() => {});
+      return;
+    }
+    const woBtn = target.closest("button[data-ironmind-risk-wo]");
+    if (woBtn) {
+      const code = String(woBtn.getAttribute("data-ironmind-risk-wo") || "").trim();
+      if (!code) return;
+      (async () => {
+        const downDesc = "IRONMIND predicted risk work order";
+        const res = await fetchJson(`${API}/api/breakdowns/ensure-open`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            asset_code: code,
+            breakdown_date: date,
+            description: downDesc,
+            critical: false,
+          }),
+        });
+        const woId = Number(res?.primary_work_order_id || 0);
+        setStatus(woId > 0 ? `WO #${woId} ready for ${code}.` : `Work order ensured for ${code}.`);
+        await loadDashboard().catch(() => {});
+      })().catch((err) => setStatus("Create WO failed: " + (err.message || err)));
+    }
   });
   qs("ironmindShowMissingDays")?.addEventListener("change", () => {
     loadIronmindHistory({ silent: true }).catch(() => {});
