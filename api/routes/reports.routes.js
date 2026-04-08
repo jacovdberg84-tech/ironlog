@@ -1775,6 +1775,7 @@ export default async function reportsRoutes(app) {
       return { km_run, hours_run };
     }
 
+    const isLdvFleetCode = (code) => /^V(0[1-9]|1[0-4])AM$/i.test(String(code || "").trim());
     const rows = fuelByAsset.map((r) => {
       const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
       const daily = getRunFromDaily.get(r.asset_id, start, end) || {};
@@ -1819,6 +1820,8 @@ export default async function reportsRoutes(app) {
     }).filter((r) => r.fuel_liters > 0 || r.hours_run > 0 || r.km_run > 0)
       // Temporary business rule: exclude LDV/km-mode assets from benchmark report.
       .filter((r) => r.metric_mode !== "km")
+      // Hard exclusion for LDV fleet codes requested by business.
+      .filter((r) => !isLdvFleetCode(r.asset_code))
       .filter((r) => (assetFilter ? String(r.asset_code || "").trim().toLowerCase() === assetFilter : true))
       .filter((r) => (modeFilter === "km" ? r.metric_mode === "km" : modeFilter === "hours" ? r.metric_mode === "hours" : true))
       .sort((a, b) => {
