@@ -495,14 +495,14 @@ export default async function uploadRoutes(app) {
       const runFromReads = (
         mergedOpen != null && mergedClose != null && mergedClose >= mergedOpen
       ) ? (mergedClose - mergedOpen) : null;
-      const mergedRun = [currentRun, nextRun, runFromReads]
-        .filter((v) => v != null && Number.isFinite(v))
-        .reduce((mx, v) => Math.max(mx, v), 0);
+      const runCandidates = [currentRun, nextRun, runFromReads]
+        .filter((v) => v != null && Number.isFinite(v));
+      const mergedRun = runCandidates.length ? Math.max(...runCandidates) : null;
 
       return {
         opening_hours: mergedOpen,
         closing_hours: mergedClose,
-        hours_run: Number.isFinite(mergedRun) ? mergedRun : null,
+        hours_run: mergedRun != null && Number.isFinite(mergedRun) ? mergedRun : null,
       };
     }
 
@@ -555,15 +555,15 @@ export default async function uploadRoutes(app) {
         if (liters <= 0) continue;
         const dayKey = `${asset.id}|${date}`;
         const exists = Boolean(hasExistingForDay.get(asset.id, date));
-        const dailyHoursRun = runFromOpenClose != null ? runFromOpenClose : hours_run;
+        const effectiveHoursRun = runFromOpenClose != null ? runFromOpenClose : hours_run;
         if (exists && conflictMode === "skip") {
           // Backfill meter/hour fields on existing fuel day rows.
-          updateExistingFuelDayMeters.run(meter_unit, meter_run_value, dailyHoursRun, asset.id, date);
+          updateExistingFuelDayMeters.run(meter_unit, meter_run_value, effectiveHoursRun, asset.id, date);
           // Even when skipping fuel duplicates, still hydrate daily hours from FAMS meter readings.
-          if (opening_hours != null || closing_hours != null || dailyHoursRun != null) {
+          if (opening_hours != null || closing_hours != null || effectiveHoursRun != null) {
             const operatorName = famsDriver || famsOperator || null;
             const notesText = famsDesc || source || null;
-            const merged = mergeDailyMeters(getDailyHoursByDay.get(asset.id, date), opening_hours, closing_hours, dailyHoursRun);
+            const merged = mergeDailyMeters(getDailyHoursByDay.get(asset.id, date), opening_hours, closing_hours, effectiveHoursRun);
             upsertDailyHoursFromFuel.run(
               asset.id,
               date,
@@ -583,11 +583,11 @@ export default async function uploadRoutes(app) {
           deletedDayKeys.add(dayKey);
           overwritten_days += 1;
         }
-        insert.run(asset.id, date, liters, source, hours_run, meter_unit, meter_run_value);
-        if (opening_hours != null || closing_hours != null || dailyHoursRun != null) {
+        insert.run(asset.id, date, liters, source, effectiveHoursRun, meter_unit, meter_run_value);
+        if (opening_hours != null || closing_hours != null || effectiveHoursRun != null) {
           const operatorName = famsDriver || famsOperator || null;
           const notesText = famsDesc || source || null;
-          const merged = mergeDailyMeters(getDailyHoursByDay.get(asset.id, date), opening_hours, closing_hours, dailyHoursRun);
+          const merged = mergeDailyMeters(getDailyHoursByDay.get(asset.id, date), opening_hours, closing_hours, effectiveHoursRun);
           upsertDailyHoursFromFuel.run(
             asset.id,
             date,
