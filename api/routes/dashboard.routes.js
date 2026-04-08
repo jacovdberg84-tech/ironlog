@@ -1838,8 +1838,13 @@ export default async function dashboardRoutes(app) {
         COALESCE(CASE WHEN fl.hours_run > 0 THEN fl.hours_run ELSE 0 END, 0) AS meter_hours,
         COALESCE(fl.meter_run_value, 0) AS meter_run_value,
         COALESCE(LOWER(fl.meter_unit), '') AS meter_unit,
+        dh.opening_hours AS day_opening_hours,
+        dh.closing_hours AS day_closing_hours,
         fl.source
       FROM fuel_logs fl
+      LEFT JOIN daily_hours dh
+        ON dh.asset_id = fl.asset_id
+       AND dh.work_date = fl.log_date
       WHERE fl.asset_id = ?
         AND fl.log_date BETWEEN ? AND ?
       ORDER BY fl.log_date ASC, fl.id ASC
@@ -1885,11 +1890,24 @@ export default async function dashboardRoutes(app) {
     if (!(prevMeter > 0)) prevMeter = null;
 
     const rows = fuelRows.map((d) => {
-      const openMeter = prevMeter;
       const meter = toModeMeter(d);
+      const dayOpen = Number(d.day_opening_hours);
+      const dayClose = Number(d.day_closing_hours);
+      const hasDayMeters = Number.isFinite(dayOpen) && Number.isFinite(dayClose) && dayOpen > 0 && dayClose > 0;
+
+      let openMeter = prevMeter;
+      let closeMeter = meter > 0 ? meter : null;
       let runBetween = null;
       let invalidDelta = false;
-      if (openMeter != null && meter > 0) {
+
+      // Prefer explicit day opening/closing readings for hour-based assets.
+      if (mode === "hours" && hasDayMeters) {
+        openMeter = dayOpen;
+        closeMeter = dayClose;
+        const delta = dayClose - dayOpen;
+        if (Number.isFinite(delta) && delta > 0) runBetween = delta;
+        else if (Number.isFinite(delta) && delta <= 0) invalidDelta = true;
+      } else if (openMeter != null && meter > 0) {
         const delta = meter - openMeter;
         if (Number.isFinite(delta) && delta > 0) runBetween = delta;
         else if (Number.isFinite(delta) && delta <= 0) invalidDelta = true;
@@ -1898,7 +1916,7 @@ export default async function dashboardRoutes(app) {
       const lph = (!invalidDelta && mode === "hours" && runBetween != null && runBetween > 0) ? (fuel / runBetween) : null;
       const kmpl = (!invalidDelta && mode === "km" && fuel > 0 && runBetween != null && runBetween > 0) ? (runBetween / fuel) : null;
       const isExcessive = mode === "km" ? (kmpl != null && kmpl < lowThresholdKmpl) : (lph != null && lph > threshold);
-      if (meter > 0) prevMeter = meter;
+      if (closeMeter != null && closeMeter > 0) prevMeter = closeMeter;
       return {
         id: Number(d.id),
         log_date: d.log_date,
@@ -1908,9 +1926,9 @@ export default async function dashboardRoutes(app) {
         run_unit: mode === "km" ? "km" : "hours",
         hours_run: mode === "hours" ? (runBetween == null ? 0 : Number(runBetween.toFixed(2))) : 0,
         km_run: mode === "km" ? (runBetween == null ? 0 : Number(runBetween.toFixed(2))) : 0,
-        meter_value: meter > 0 ? Number(meter.toFixed(2)) : null,
+        meter_value: closeMeter != null && closeMeter > 0 ? Number(closeMeter.toFixed(2)) : null,
         open_meter_value: openMeter != null && openMeter > 0 ? Number(openMeter.toFixed(2)) : null,
-        close_meter_value: meter > 0 ? Number(meter.toFixed(2)) : null,
+        close_meter_value: closeMeter != null && closeMeter > 0 ? Number(closeMeter.toFixed(2)) : null,
         meter_unit_display: mode === "km" ? "km" : "hours",
         invalid_delta: invalidDelta,
         actual_lph: lph == null ? null : Number(lph.toFixed(3)),
