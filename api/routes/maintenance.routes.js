@@ -22,24 +22,26 @@ function getAssetCurrentHours(assetId) {
   // Prefer latest hourmeter closing reading from Daily Input when it exists.
   // This guards against old/test values in asset_hours (e.g. accidental CSV import).
   const latestMeter = db.prepare(`
-    SELECT MAX(closing_hours) AS max_closing
+    SELECT closing_hours AS latest_closing
     FROM daily_hours
     WHERE asset_id = ?
       AND closing_hours IS NOT NULL
+    ORDER BY work_date DESC, id DESC
+    LIMIT 1
   `).get(assetId);
-  const maxClosing = latestMeter?.max_closing == null ? null : Number(latestMeter.max_closing);
+  const latestClosing = latestMeter?.latest_closing == null ? null : Number(latestMeter.latest_closing);
 
   // If asset_hours is present but wildly out of range vs max closing, trust max closing.
   // Heuristic: >5000 hour difference is almost certainly wrong for a live hourmeter.
-  if (assetHours != null && maxClosing != null) {
-    if (Math.abs(assetHours - maxClosing) > 5000) {
-      return maxClosing;
+  if (assetHours != null && latestClosing != null) {
+    if (Math.abs(assetHours - latestClosing) > 5000) {
+      return latestClosing;
     }
     // otherwise take the higher of the two (prevents lagging asset_hours)
-    return Math.max(assetHours, maxClosing);
+    return Math.max(assetHours, latestClosing);
   }
 
-  if (maxClosing != null) return maxClosing;
+  if (latestClosing != null) return latestClosing;
   if (assetHours != null) return assetHours;
 
   const fromDailyHours = db.prepare(`

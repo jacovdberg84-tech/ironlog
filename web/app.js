@@ -649,11 +649,15 @@ function applyRoleVisibility() {
 
   const activePanel = document.querySelector(".panel.show");
   const activeKey = String(activePanel?.id || "").replace(/^tab-/, "");
+  const urlTab = String(new URLSearchParams(window.location.search).get("tab") || "").trim();
+  const preferredTab = urlTab && allowed.has(urlTab) ? urlTab : "";
   if (!activeKey || !allowed.has(activeKey)) {
-    const firstAllowed = allowedList[0];
-    if (firstAllowed) {
-      switchTab(firstAllowed);
+    const target = preferredTab || allowedList[0];
+    if (target) {
+      switchTab(target);
     }
+  } else if (preferredTab && activeKey !== preferredTab) {
+    switchTab(preferredTab);
   } else if (tabSelect) {
     tabSelect.value = activeKey;
   }
