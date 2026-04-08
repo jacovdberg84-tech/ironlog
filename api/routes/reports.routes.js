@@ -4547,7 +4547,7 @@ export default async function reportsRoutes(app) {
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
       WHERE w.closed_at IS NULL
-        AND TRIM(LOWER(COALESCE(w.status, ''))) NOT IN ('completed', 'approved', 'closed')
+        AND REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
       ORDER BY w.id DESC
       LIMIT 30
     `).all();
