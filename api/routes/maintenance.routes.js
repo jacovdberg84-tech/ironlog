@@ -124,6 +124,22 @@ export default async function maintenanceRoutes(app) {
   `).run();
 
   db.prepare(`
+    CREATE TABLE IF NOT EXISTS maintenance_service_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      asset_id INTEGER NOT NULL,
+      plan_id INTEGER,
+      service_name TEXT NOT NULL,
+      service_date TEXT NOT NULL,
+      service_hours REAL,
+      notes TEXT,
+      created_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE RESTRICT,
+      FOREIGN KEY (plan_id) REFERENCES maintenance_plans(id) ON DELETE SET NULL
+    )
+  `).run();
+
+  db.prepare(`
     CREATE TABLE IF NOT EXISTS manager_damage_report_photos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       damage_report_id INTEGER NOT NULL,
@@ -717,6 +733,16 @@ export default async function maintenanceRoutes(app) {
         ORDER BY COALESCE(w.closed_at, w.completed_at) DESC
         LIMIT 1
       `);
+      const getLastBackfillServiced = db.prepare(`
+        SELECT
+          DATE(h.service_date) AS last_serviced_date,
+          h.service_date AS last_serviced_at
+        FROM maintenance_service_history h
+        WHERE h.asset_id = ?
+          AND UPPER(TRIM(h.service_name)) = UPPER(TRIM(?))
+        ORDER BY h.service_date DESC, h.id DESC
+        LIMIT 1
+      `);
 
       const getAvgDaily = db.prepare(`
         SELECT
@@ -741,7 +767,11 @@ export default async function maintenanceRoutes(app) {
         const next_due = Number(p.last_service_hours || 0) + Number(p.interval_hours || 0);
         const remaining = next_due - current;
 
-        const last = getLastServiced.get(Number(p.plan_id || 0));
+        const lastWo = getLastServiced.get(Number(p.plan_id || 0));
+        const lastBackfill = getLastBackfillServiced.get(Number(p.asset_id || 0), String(p.service_name || ""));
+        const lastWoAt = String(lastWo?.last_serviced_at || "");
+        const lastBackfillAt = String(lastBackfill?.last_serviced_at || "");
+        const last = lastBackfillAt && (!lastWoAt || lastBackfillAt > lastWoAt) ? lastBackfill : lastWo;
         const avgRow = getAvgDaily.get(Number(p.asset_id || 0), startDate, endDate);
         const totalRun = Number(avgRow?.total_run || 0);
         const dayCount = Number(avgRow?.day_count || 0);
@@ -766,6 +796,99 @@ export default async function maintenanceRoutes(app) {
       });
 
       return reply.send({ ok: true, as_of: endDate, range: { start: startDate, end: endDate }, rows });
+    } catch (e) {
+      req.log.error(e);
+      return reply.code(500).send({ ok: false, error: e.message || String(e) });
+    }
+  });
+
+  // =====================================================
+  // BACKFILL (ANCIENT) SERVICE HISTORY
+  // POST /api/maintenance/history/backfill
+  // Body: { asset_id, service_name, service_date, service_hours?, notes?, update_plan_last_hours?, plan_id? }
+  // =====================================================
+  app.post("/history/backfill", async (req, reply) => {
+    try {
+      const body = req.body || {};
+      const assetId = Number(body.asset_id || 0);
+      const serviceName = String(body.service_name || "").trim();
+      const serviceDate = String(body.service_date || "").trim();
+      const serviceHoursIn = body.service_hours;
+      const notes = String(body.notes || "").trim() || null;
+      const updatePlanLastHours = Number(body.update_plan_last_hours || 0) === 1;
+      const planIdIn = Number(body.plan_id || 0);
+
+      if (!assetId) return reply.code(400).send({ ok: false, error: "asset_id is required" });
+      if (!serviceName) return reply.code(400).send({ ok: false, error: "service_name is required" });
+      if (!isDate(serviceDate)) return reply.code(400).send({ ok: false, error: "service_date must be YYYY-MM-DD" });
+
+      const serviceHours = serviceHoursIn == null || String(serviceHoursIn).trim() === ""
+        ? null
+        : Number(serviceHoursIn);
+      if (serviceHours != null && (!Number.isFinite(serviceHours) || serviceHours < 0)) {
+        return reply.code(400).send({ ok: false, error: "service_hours must be a valid number >= 0" });
+      }
+
+      const asset = db.prepare(`
+        SELECT id, asset_code, asset_name
+        FROM assets
+        WHERE id = ?
+        LIMIT 1
+      `).get(assetId);
+      if (!asset) return reply.code(404).send({ ok: false, error: "asset not found" });
+
+      let planId = planIdIn > 0 ? planIdIn : null;
+      if (!planId) {
+        const matchedPlan = db.prepare(`
+          SELECT id
+          FROM maintenance_plans
+          WHERE asset_id = ?
+            AND UPPER(TRIM(service_name)) = UPPER(TRIM(?))
+          ORDER BY active DESC, id DESC
+          LIMIT 1
+        `).get(assetId, serviceName);
+        if (matchedPlan?.id) planId = Number(matchedPlan.id);
+      }
+
+      const insert = db.prepare(`
+        INSERT INTO maintenance_service_history (
+          asset_id, plan_id, service_name, service_date, service_hours, notes, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      const updatePlan = db.prepare(`
+        UPDATE maintenance_plans
+        SET last_service_hours = ?
+        WHERE id = ?
+      `);
+
+      const tx = db.transaction(() => {
+        const r = insert.run(
+          assetId,
+          planId,
+          serviceName,
+          serviceDate,
+          serviceHours,
+          notes,
+          String(req.headers?.["x-user-name"] || "system")
+        );
+        if (updatePlanLastHours && planId && serviceHours != null) {
+          updatePlan.run(Number(serviceHours), Number(planId));
+        }
+        return Number(r.lastInsertRowid || 0);
+      });
+
+      const id = tx();
+      return reply.send({
+        ok: true,
+        id,
+        asset_id: assetId,
+        asset_code: asset.asset_code,
+        service_name: serviceName,
+        service_date: serviceDate,
+        service_hours: serviceHours,
+        plan_id: planId || null,
+        plan_last_hours_updated: Boolean(updatePlanLastHours && planId && serviceHours != null),
+      });
     } catch (e) {
       req.log.error(e);
       return reply.code(500).send({ ok: false, error: e.message || String(e) });

@@ -156,9 +156,11 @@ async function loadHistory() {
 
 async function loadAssetsForPlan() {
   const select = document.getElementById("planAsset");
+  const backfillSelect = document.getElementById("backfillAsset");
   if (!select) return;
 
   select.innerHTML = `<option value="">Loading assets...</option>`;
+  if (backfillSelect) backfillSelect.innerHTML = `<option value="">Loading assets...</option>`;
 
   try {
     const res = await fetch(`${API}/assets`);
@@ -204,9 +206,79 @@ async function loadAssetsForPlan() {
         </option>
       `).join("")}
     `;
+    if (backfillSelect) {
+      backfillSelect.innerHTML = `
+        <option value="">Select asset</option>
+        ${validAssets.map(a => `
+          <option value="${a.id}">
+            ${a.asset_code || "NO-CODE"} - ${a.asset_name || "Unnamed Asset"}
+          </option>
+        `).join("")}
+      `;
+    }
   } catch (err) {
     console.error("Assets load error:", err);
     select.innerHTML = `<option value="">Failed to load assets</option>`;
+    if (backfillSelect) backfillSelect.innerHTML = `<option value="">Failed to load assets</option>`;
+  }
+}
+
+async function saveBackfillHistory() {
+  const assetEl = document.getElementById("backfillAsset");
+  const serviceEl = document.getElementById("backfillServiceName");
+  const dateEl = document.getElementById("backfillServiceDate");
+  const hoursEl = document.getElementById("backfillServiceHours");
+  const notesEl = document.getElementById("backfillNotes");
+  const updPlanEl = document.getElementById("backfillUpdatePlanHours");
+  const msgEl = document.getElementById("backfillMsg");
+  if (!assetEl || !serviceEl || !dateEl || !hoursEl || !notesEl || !updPlanEl || !msgEl) return;
+
+  const asset_id = Number(assetEl.value || 0);
+  const service_name = String(serviceEl.value || "").trim();
+  const service_date = String(dateEl.value || "").trim();
+  const service_hours_raw = String(hoursEl.value || "").trim();
+  const notes = String(notesEl.value || "").trim();
+  const update_plan_last_hours = updPlanEl.checked ? 1 : 0;
+
+  if (!asset_id || !service_name || !service_date) {
+    msgEl.className = "message-error";
+    msgEl.textContent = "Asset, service name, and service date are required.";
+    return;
+  }
+
+  const payload = {
+    asset_id,
+    service_name,
+    service_date,
+    service_hours: service_hours_raw === "" ? null : Number(service_hours_raw),
+    notes,
+    update_plan_last_hours,
+  };
+
+  msgEl.className = "muted";
+  msgEl.textContent = "Saving historical service...";
+  try {
+    const res = await fetch(`${API}/maintenance/history/backfill`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save historical service");
+
+    msgEl.className = "message-success";
+    msgEl.textContent = data.plan_last_hours_updated
+      ? "Historical service saved and plan last-service hours updated."
+      : "Historical service saved.";
+    serviceEl.value = "";
+    hoursEl.value = "";
+    notesEl.value = "";
+    await loadHistory();
+    await loadPlans();
+    await loadDue();
+  } catch (err) {
+    msgEl.className = "message-error";
+    msgEl.textContent = err.message || String(err);
   }
 }
 
@@ -1019,6 +1091,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const generateBtn = document.getElementById("generateBtn");
   const savePlanBtn = document.getElementById("savePlanBtn");
+  const saveBackfillBtn = document.getElementById("saveBackfillBtn");
   const useLiveEl = document.getElementById("planUseLiveForLastService");
 
   syncDueThresholdInput();
@@ -1035,6 +1108,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (savePlanBtn) {
     savePlanBtn.addEventListener("click", savePlan);
+  }
+  if (saveBackfillBtn) {
+    saveBackfillBtn.addEventListener("click", saveBackfillHistory);
   }
 
   const assetEl = document.getElementById("planAsset");
