@@ -462,7 +462,7 @@ export default async function dashboardRoutes(app) {
     const openWOCount = db.prepare(`
       SELECT COUNT(*) AS c
       FROM work_orders
-      WHERE status != 'closed'
+      WHERE REPLACE(TRIM(LOWER(COALESCE(status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
     `).get();
 
     // Major downtime list (use downtime logs aggregated per breakdown for this day)
@@ -506,7 +506,7 @@ export default async function dashboardRoutes(app) {
       SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
-      WHERE w.status != 'closed'
+      WHERE REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
       ORDER BY w.id DESC
       LIMIT 8
     `).all();

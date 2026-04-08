@@ -706,7 +706,7 @@ function gmWeeklyRepairForecast(endDate, horizonDays) {
     JOIN assets a ON a.id = w.asset_id
     LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
     WHERE w.source = 'breakdown'
-      AND w.status NOT IN ('closed', 'approved', 'completed')
+      AND REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
     ORDER BY w.opened_at ASC
   `).all().map((r) => ({
     asset_code: r.asset_code,
@@ -1301,7 +1301,7 @@ export default async function reportsRoutes(app) {
       FROM work_orders w
       WHERE w.asset_id = ?
         AND w.closed_at IS NULL
-        AND TRIM(LOWER(COALESCE(w.status, ''))) IN ('open', 'in_progress')
+        AND REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
         ${woF.sql}
       ORDER BY w.id DESC
       LIMIT 300
