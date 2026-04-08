@@ -118,12 +118,18 @@ function histRow(r) {
   const est = r.estimated_service_date || "-";
   const hrsToNext = Number(r.remaining_hours || 0);
   const warn = hrsToNext <= 0 ? "status-overdue" : hrsToNext <= 50 ? "status-soon" : "status-ok";
+  const sourceMap = {
+    daily_closing: "Daily closing",
+    asset_hours: "Asset hours",
+    daily_sum: "Daily sum",
+  };
+  const src = sourceMap[String(r.current_hours_source || "").trim()] || "Unknown";
   return `
     <tr class="${hrsToNext <= 0 ? "downRow" : ""}">
       <td><b>${eq}</b></td>
       <td>${r.service_name || "-"}</td>
       <td>${last}</td>
-      <td style="text-align:right;">${fmt1(r.current_hours)}</td>
+      <td style="text-align:right;">${fmt1(r.current_hours)}<br><small class="muted">(${src})</small></td>
       <td style="text-align:right;"><span class="${warn}">${fmt1(r.remaining_hours)}</span></td>
       <td style="text-align:right;">${fmt1(r.avg_daily_hours)}</td>
       <td>${est}</td>
@@ -207,6 +213,7 @@ async function loadAssetsForPlan() {
 async function loadLiveHoursForSelectedAsset() {
   const assetEl = document.getElementById("planAsset");
   const currentHoursEl = document.getElementById("planCurrentHours");
+  const currentHoursSrcEl = document.getElementById("planCurrentHoursSource");
 
   if (!assetEl || !currentHoursEl) return;
 
@@ -214,6 +221,7 @@ async function loadLiveHoursForSelectedAsset() {
 
   if (!assetId) {
     currentHoursEl.value = "0";
+    if (currentHoursSrcEl) currentHoursSrcEl.textContent = "Source: -";
     syncLastServiceHoursFromLive();
     return;
   }
@@ -231,12 +239,20 @@ async function loadLiveHoursForSelectedAsset() {
 
     currentHoursEl.value = Number(data.current_hours || 0).toFixed(1);
     currentHoursEl.placeholder = "";
+    const sourceMap = {
+      daily_closing: "Daily closing",
+      asset_hours: "Asset hours",
+      daily_sum: "Daily sum",
+    };
+    const src = sourceMap[String(data.current_hours_source || "").trim()] || "Unknown";
+    if (currentHoursSrcEl) currentHoursSrcEl.textContent = `Source: ${src}`;
     syncLastServiceHoursFromLive();
   } catch (err) {
     console.error("Live hours load error:", err);
     // Don’t overwrite user input with 0 when live hours fails
     currentHoursEl.value = "";
     currentHoursEl.placeholder = "";
+    if (currentHoursSrcEl) currentHoursSrcEl.textContent = "Source: -";
   }
 }
 

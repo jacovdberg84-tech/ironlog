@@ -2261,6 +2261,38 @@ async function generateIronmindRsgPlan(createWo = false) {
   }
 }
 
+async function previewIronmindRsgPdf() {
+  const out = qs("ironmindRsgResult");
+  const assetCode = String(qs("ironmindRsgAssetCode")?.value || "").trim().toUpperCase();
+  const serviceHours = Number(qs("ironmindRsgHours")?.value || 2000);
+  if (!assetCode) {
+    if (out) out.textContent = "Asset code is required.";
+    return;
+  }
+  const hours = Number.isFinite(serviceHours) && serviceHours > 0 ? serviceHours : 2000;
+  setStatus("Generating RSG PDF preview...");
+  try {
+    const url = `${API}/api/ironmind/rsg/preview.pdf?asset_code=${encodeURIComponent(assetCode)}&service_hours=${encodeURIComponent(hours)}`;
+    const res = await fetch(url, { headers: { ...authHeaders() } });
+    if (!res.ok) {
+      let message = `Preview failed (${res.status})`;
+      try {
+        const err = await res.json();
+        message = String(err?.error || message);
+      } catch {}
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    window.open(blobUrl, "_blank", "noopener");
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+    setStatus("RSG PDF preview opened.");
+  } catch (e) {
+    if (out) out.textContent = String(e.message || e);
+    setStatus("RSG PDF preview failed.");
+  }
+}
+
 function parseIronmindSections(text) {
   const defs = [
     { key: "repairs", name: "Repairs Needed" },
@@ -7522,6 +7554,9 @@ async function init() {
   });
   qs("ironmindRsgPlanBtn")?.addEventListener("click", () => {
     generateIronmindRsgPlan(false).catch((e) => setStatus("RSG plan error: " + (e.message || e)));
+  });
+  qs("ironmindRsgPreviewPdfBtn")?.addEventListener("click", () => {
+    previewIronmindRsgPdf().catch((e) => setStatus("RSG preview error: " + (e.message || e)));
   });
   qs("ironmindRsgCreateWoBtn")?.addEventListener("click", () => {
     generateIronmindRsgPlan(true).catch((e) => setStatus("RSG create WO error: " + (e.message || e)));

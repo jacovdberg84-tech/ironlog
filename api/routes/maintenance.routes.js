@@ -10,7 +10,7 @@ function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
 }
 
-function getAssetCurrentHours(assetId) {
+function getAssetCurrentHoursInfo(assetId) {
   const fromAssetHours = db.prepare(`
     SELECT total_hours
     FROM asset_hours
@@ -35,14 +35,15 @@ function getAssetCurrentHours(assetId) {
   // Heuristic: >5000 hour difference is almost certainly wrong for a live hourmeter.
   if (assetHours != null && latestClosing != null) {
     if (Math.abs(assetHours - latestClosing) > 5000) {
-      return latestClosing;
+      return { hours: latestClosing, source: "daily_closing" };
     }
     // otherwise take the higher of the two (prevents lagging asset_hours)
-    return Math.max(assetHours, latestClosing);
+    if (latestClosing >= assetHours) return { hours: latestClosing, source: "daily_closing" };
+    return { hours: assetHours, source: "asset_hours" };
   }
 
-  if (latestClosing != null) return latestClosing;
-  if (assetHours != null) return assetHours;
+  if (latestClosing != null) return { hours: latestClosing, source: "daily_closing" };
+  if (assetHours != null) return { hours: assetHours, source: "asset_hours" };
 
   const fromDailyHours = db.prepare(`
     SELECT COALESCE(SUM(hours_run), 0) AS total_hours
@@ -52,7 +53,11 @@ function getAssetCurrentHours(assetId) {
       AND hours_run > 0
   `).get(assetId);
 
-  return Number(fromDailyHours?.total_hours || 0);
+  return { hours: Number(fromDailyHours?.total_hours || 0), source: "daily_sum" };
+}
+
+function getAssetCurrentHours(assetId) {
+  return Number(getAssetCurrentHoursInfo(assetId).hours || 0);
 }
 
 function classifyDueStatus(remainingHours, nearDueHours = 50) {
@@ -541,14 +546,16 @@ export default async function maintenanceRoutes(app) {
         });
       }
 
-      const current_hours = getAssetCurrentHours(assetId);
+      const currentInfo = getAssetCurrentHoursInfo(assetId);
+      const current_hours = Number(currentInfo.hours || 0);
 
       return reply.send({
         ok: true,
         asset_id: asset.id,
         asset_code: asset.asset_code,
         asset_name: asset.asset_name,
-        current_hours: Number(current_hours.toFixed(1))
+        current_hours: Number(current_hours.toFixed(1)),
+        current_hours_source: currentInfo.source
       });
     } catch (err) {
       req.log.error(err);
@@ -729,7 +736,8 @@ export default async function maintenanceRoutes(app) {
       };
 
       const rows = plans.map((p) => {
-        const current = getAssetCurrentHours(Number(p.asset_id || 0));
+        const currentInfo = getAssetCurrentHoursInfo(Number(p.asset_id || 0));
+        const current = Number(currentInfo.hours || 0);
         const next_due = Number(p.last_service_hours || 0) + Number(p.interval_hours || 0);
         const remaining = next_due - current;
 
@@ -750,6 +758,7 @@ export default async function maintenanceRoutes(app) {
           service_name: p.service_name,
           last_serviced_date: last?.last_serviced_date || null,
           current_hours: Number(current.toFixed(2)),
+          current_hours_source: currentInfo.source,
           remaining_hours: Number(remaining.toFixed(2)),
           avg_daily_hours: Number(avgDaily.toFixed(2)),
           estimated_service_date: estDate,

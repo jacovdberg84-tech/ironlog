@@ -1,5 +1,6 @@
 import { generateIronmindReport, getIronmindHistory, getLatestIronmindReport } from "../utils/ironmind.js";
 import { db } from "../db/client.js";
+import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
 
 function toBool(v) {
   const s = String(v || "").trim().toLowerCase();
@@ -484,6 +485,106 @@ export default async function ironmindRoutes(app) {
         source: `rsg_${serviceHours}h_service`,
         plan,
       });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // GET /api/ironmind/rsg/preview.pdf?asset_code=A300AM&service_hours=2000&download=1
+  app.get("/rsg/preview.pdf", async (req, reply) => {
+    try {
+      const assetCodeIn = String(req.query?.asset_code || "").trim().toUpperCase();
+      const serviceHours = Math.max(250, Number(req.query?.service_hours || 2000));
+      const download = String(req.query?.download || "").trim() === "1";
+      if (!assetCodeIn) return reply.code(400).send({ ok: false, error: "asset_code is required" });
+
+      const asset = db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE UPPER(asset_code)=UPPER(?) LIMIT 1`).get(assetCodeIn);
+      if (!asset) return reply.code(404).send({ ok: false, error: `asset not found: ${assetCodeIn}` });
+
+      const plan = await buildRsgPlan({
+        assetCode: String(asset.asset_code || assetCodeIn),
+        equipmentName: String(asset.asset_name || ""),
+        serviceHours,
+      });
+
+      const pdf = await buildPdfBuffer((doc) => {
+        sectionTitle(doc, "Service Guide");
+        table(
+          doc,
+          [
+            { key: "k", label: "Field", width: 0.32 },
+            { key: "v", label: "Value", width: 0.68 },
+          ],
+          [
+            { k: "Asset", v: String(asset.asset_code || "-") },
+            { k: "Equipment", v: String(asset.asset_name || "-") },
+            { k: "Service Interval", v: `${serviceHours} hours` },
+            { k: "Guide Title", v: String(plan.service_title || "-") },
+          ]
+        );
+
+        sectionTitle(doc, "Service Tasks");
+        table(
+          doc,
+          [
+            { key: "idx", label: "#", width: 0.08, align: "right" },
+            { key: "task", label: "Task", width: 0.92 },
+          ],
+          (plan.tasks || []).map((t, i) => ({ idx: String(i + 1), task: String(t || "") }))
+        );
+
+        sectionTitle(doc, "Oil / Lubricants");
+        table(
+          doc,
+          [
+            { key: "name", label: "Oil/Lube", width: 0.56 },
+            { key: "qty", label: "Qty", width: 0.20, align: "right" },
+            { key: "unit", label: "Unit", width: 0.24, align: "center" },
+          ],
+          (plan.oils || []).map((o) => ({
+            name: String(o?.name || ""),
+            qty: Number(o?.qty || 0).toFixed(2),
+            unit: String(o?.unit || "L"),
+          }))
+        );
+
+        sectionTitle(doc, "Checks");
+        table(
+          doc,
+          [
+            { key: "idx", label: "#", width: 0.08, align: "right" },
+            { key: "txt", label: "Checks / Verification", width: 0.92 },
+          ],
+          (plan.checks || []).map((t, i) => ({ idx: String(i + 1), txt: String(t || "") }))
+        );
+
+        sectionTitle(doc, "Post-Service Checks");
+        table(
+          doc,
+          [
+            { key: "idx", label: "#", width: 0.08, align: "right" },
+            { key: "txt", label: "Post-Service", width: 0.92 },
+          ],
+          (plan.post_service_checks || []).map((t, i) => ({ idx: String(i + 1), txt: String(t || "") }))
+        );
+      }, {
+        title: "IRONLOG",
+        subtitle: "Recommended Service Guide (RSG)",
+        rightText: `${asset.asset_code} • ${serviceHours}h`,
+        layout: "landscape",
+      });
+
+      reply
+        .header("Content-Type", "application/pdf")
+        .header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
+        .header("Pragma", "no-cache")
+        .header("Expires", "0")
+        .header(
+          "Content-Disposition",
+          `${download ? "attachment" : "inline"}; filename="RSG_${asset.asset_code}_${serviceHours}h.pdf"`
+        )
+        .send(pdf);
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message || String(err) });
