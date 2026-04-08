@@ -130,6 +130,7 @@ export function buildPdfBuffer(buildFn, opts = {}) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: "A4",
+      layout: opts.layout === "landscape" ? "landscape" : "portrait",
       margins: DEFAULT_MARGINS,
       bufferPages: true,
     });

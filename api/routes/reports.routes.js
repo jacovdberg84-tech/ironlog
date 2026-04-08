@@ -1867,16 +1867,17 @@ export default async function reportsRoutes(app) {
         sectionTitle(doc, "Fuel Benchmark Summary");
         kvGrid(doc, [
           { k: "Period", v: `${start} to ${end}` },
-          { k: "Tolerance", v: `${fmtNum(tolerance * 100, 1)}% (${`hours: above OEM | km: below OEM`})` },
+          { k: "Tolerance", v: `${fmtNum(tolerance * 100, 1)}%` },
           { k: "Mode filter", v: modeFilter ? modeFilter : "all" },
           { k: "Assets", v: fmtNum(summary.assets, 0) },
           { k: "Excessive", v: fmtNum(summary.excessive, 0) },
           { k: "Fuel Total (L)", v: fmtNum(summary.fuel_liters, 2) },
           { k: "Hours Run", v: fmtNum(summary.hours_run, 2) },
-          { k: "Distance (km)", v: fmtNum(summary.km_run, 2) },
           { k: "Avg L/hr", v: summary.avg_lph == null ? "-" : fmtNum(summary.avg_lph, 3) },
-          { k: "Avg km/L", v: summary.avg_km_per_l == null ? "-" : fmtNum(summary.avg_km_per_l, 3) },
         ], 2);
+        doc.font("Helvetica-Bold").fontSize(9).fillColor("#b91c1c").text("Flag legend: EXCESSIVE = above OEM by tolerance", { align: "left" });
+        doc.moveDown(0.4);
+        doc.font("Helvetica").fontSize(9).fillColor("#111111");
 
         sectionTitle(doc, "Fuel Benchmark by Machine");
         table(
@@ -1926,6 +1927,7 @@ export default async function reportsRoutes(app) {
         subtitle: "Fuel Benchmark Report",
         rightText: `${start} to ${end}`,
         showPageNumbers: true,
+        layout: "landscape",
       }
     );
 
