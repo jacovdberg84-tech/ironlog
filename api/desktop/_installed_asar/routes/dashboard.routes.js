@@ -328,7 +328,9 @@ export default async function dashboardRoutes(app) {
     const openWOCount = db.prepare(`
       SELECT COUNT(*) AS c
       FROM work_orders
-      WHERE status != 'closed'
+      WHERE REPLACE(TRIM(LOWER(COALESCE(status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
+        AND (completed_at IS NULL OR TRIM(COALESCE(completed_at, '')) = '')
+        AND (closed_at IS NULL OR TRIM(COALESCE(closed_at, '')) = '')
     `).get();
 
     // Major downtime list (use downtime logs aggregated per breakdown for this day)
@@ -372,7 +374,9 @@ export default async function dashboardRoutes(app) {
       SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
-      WHERE w.status != 'closed'
+      WHERE REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
+        AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')
+        AND (w.closed_at IS NULL OR TRIM(COALESCE(w.closed_at, '')) = '')
       ORDER BY w.id DESC
       LIMIT 8
     `).all();
@@ -387,7 +391,9 @@ export default async function dashboardRoutes(app) {
         CAST((julianday('now') - julianday(COALESCE(w.opened_at, datetime('now')))) * 24 AS INTEGER) AS age_hours
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
-      WHERE w.status IN ('open', 'assigned', 'in_progress', 'completed')
+      WHERE REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
+        AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')
+        AND (w.closed_at IS NULL OR TRIM(COALESCE(w.closed_at, '')) = '')
       ORDER BY age_hours DESC, w.id DESC
       LIMIT 200
     `).all().map((r) => ({
@@ -402,13 +408,12 @@ export default async function dashboardRoutes(app) {
     const sla_summary = {
       open_gt_24h: openWOSla.filter((r) => r.age_hours > 24).length,
       in_progress_gt_48h: openWOSla.filter((r) => String(r.status) === "in_progress" && r.age_hours > 48).length,
-      completed_gt_12h: openWOSla.filter((r) => String(r.status) === "completed" && r.age_hours > 12).length,
+      completed_gt_12h: 0,
     };
     const sla_breaches = openWOSla
       .filter((r) => {
         const s = String(r.status || "").toLowerCase();
         if (s === "in_progress") return r.age_hours > 48;
-        if (s === "completed") return r.age_hours > 12;
         return r.age_hours > 24;
       })
       .map((r) => ({

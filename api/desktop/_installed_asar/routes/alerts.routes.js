@@ -47,7 +47,9 @@ export default async function alertsRoutes(app) {
       SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
-      WHERE w.status != 'closed'
+      WHERE REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
+        AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')
+        AND (w.closed_at IS NULL OR TRIM(COALESCE(w.closed_at, '')) = '')
       ORDER BY w.id DESC
       LIMIT 100
     `).all();
