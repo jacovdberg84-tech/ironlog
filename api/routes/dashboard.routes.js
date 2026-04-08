@@ -1885,10 +1885,11 @@ export default async function dashboardRoutes(app) {
     if (!(prevMeter > 0)) prevMeter = null;
 
     const rows = fuelRows.map((d) => {
+      const openMeter = prevMeter;
       const meter = toModeMeter(d);
       let runBetween = null;
-      if (prevMeter != null && meter > 0) {
-        const delta = meter - prevMeter;
+      if (openMeter != null && meter > 0) {
+        const delta = meter - openMeter;
         if (Number.isFinite(delta) && delta > 0) runBetween = delta;
       }
       const fuel = Number(d.fuel_liters || 0);
@@ -1906,6 +1907,9 @@ export default async function dashboardRoutes(app) {
         hours_run: mode === "hours" ? (runBetween == null ? 0 : Number(runBetween.toFixed(2))) : 0,
         km_run: mode === "km" ? (runBetween == null ? 0 : Number(runBetween.toFixed(2))) : 0,
         meter_value: meter > 0 ? Number(meter.toFixed(2)) : null,
+        open_meter_value: openMeter != null && openMeter > 0 ? Number(openMeter.toFixed(2)) : null,
+        close_meter_value: meter > 0 ? Number(meter.toFixed(2)) : null,
+        meter_unit_display: mode === "km" ? "km" : "hours",
         actual_lph: lph == null ? null : Number(lph.toFixed(3)),
         oem_lph: Number(oem.toFixed(3)),
         excessive_threshold_lph: Number(threshold.toFixed(3)),

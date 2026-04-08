@@ -2895,10 +2895,15 @@ async function loadFuelMachineDailyInline(assetCode, mountEl) {
     const flagged = isInlineFlagged(r);
     const statusClass = flagged ? "fh-status-excessive" : "fh-status-ok";
     const statusText = flagged ? (mode === "km" ? "UNDER BENCHMARK" : "EXCESSIVE") : "OK";
+    const meterUnit = mode === "km" ? "km" : "hrs";
+    const openMeter = r.open_meter_value == null ? "-" : `${Number(r.open_meter_value).toFixed(2)} ${meterUnit}`;
+    const closeMeter = r.close_meter_value == null ? "-" : `${Number(r.close_meter_value).toFixed(2)} ${meterUnit}`;
     return (
       `<tr>` +
       `<td class="fh-col-date">${r.log_date}</td>` +
       `<td class="fh-col-num">${Number(r.fuel_liters || 0).toFixed(2)}</td>` +
+      `<td class="fh-col-num">${openMeter}</td>` +
+      `<td class="fh-col-num">${closeMeter}</td>` +
       `<td class="fh-col-num">${Number((mode === "km" ? r.km_run : r.hours_run) || 0).toFixed(2)}</td>` +
       `<td class="fh-col-num">${mode === "km" ? (r.actual_km_per_l == null ? "-" : Number(r.actual_km_per_l).toFixed(3)) : (r.actual_lph == null ? "-" : Number(r.actual_lph).toFixed(3))}</td>` +
       `<td class="fh-col-status"><span class="fh-status ${statusClass}">${statusText}</span></td>` +
@@ -2909,7 +2914,7 @@ async function loadFuelMachineDailyInline(assetCode, mountEl) {
   mountEl.innerHTML =
     `${top}<br>` +
     (tableRows
-      ? `<div class="fuel-history-table-wrap"><table class="fuel-history-table"><colgroup><col style="width:18%"><col style="width:16%"><col style="width:16%"><col style="width:14%"><col style="width:16%"><col style="width:20%"></colgroup><thead><tr><th class="fh-col-date">Date</th><th class="fh-col-num">Fuel (L)</th><th class="fh-col-num">${mode === "km" ? "Distance Between Fills (km)" : "Hours Between Fills"}</th><th class="fh-col-num">${mode === "km" ? "km/L" : "L/hr"}</th><th class="fh-col-status">Status</th><th class="fh-col-action">Action</th></tr></thead><tbody>${tableRows}</tbody></table></div>`
+      ? `<div class="fuel-history-table-wrap"><table class="fuel-history-table"><colgroup><col style="width:14%"><col style="width:12%"><col style="width:14%"><col style="width:14%"><col style="width:14%"><col style="width:10%"><col style="width:10%"><col style="width:12%"></colgroup><thead><tr><th class="fh-col-date">Date</th><th class="fh-col-num">Fuel (L)</th><th class="fh-col-num">Open ${mode === "km" ? "km" : "hrs"}</th><th class="fh-col-num">Close ${mode === "km" ? "km" : "hrs"}</th><th class="fh-col-num">${mode === "km" ? "Distance Between Fills (km)" : "Hours Between Fills"}</th><th class="fh-col-num">${mode === "km" ? "km/L" : "L/hr"}</th><th class="fh-col-status">Status</th><th class="fh-col-action">Action</th></tr></thead><tbody>${tableRows}</tbody></table></div>`
       : "<small>No filled days found for this machine in selected range.</small>");
 }
 
