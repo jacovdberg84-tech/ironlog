@@ -4556,9 +4556,9 @@ export default async function reportsRoutes(app) {
     const breakdownOpenFilter = breakdownOpenChecks.length
       ? `AND (
           w.source <> 'breakdown'
-          OR (${breakdownOpenChecks.join(" AND ")})
+          OR (b.id IS NOT NULL AND (${breakdownOpenChecks.join(" AND ")}))
         )`
-      : "";
+      : "AND (w.source <> 'breakdown' OR b.id IS NOT NULL)";
     const noClosedShadowWOFilter = `AND NOT EXISTS (
       SELECT 1
       FROM work_orders wx
@@ -4581,6 +4581,16 @@ export default async function reportsRoutes(app) {
         )
         AND REPLACE(TRIM(LOWER(COALESCE(wn.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress', 'completed', 'approved', 'closed')
     )`;
+    const closeApprovalFilter = hasTable("approval_requests")
+      ? `AND NOT EXISTS (
+          SELECT 1
+          FROM approval_requests ar
+          WHERE ar.entity_type = 'work_order'
+            AND CAST(ar.entity_id AS INTEGER) = w.id
+            AND TRIM(LOWER(COALESCE(ar.action, ''))) = 'close_approved'
+            AND TRIM(LOWER(COALESCE(ar.status, ''))) = 'approved'
+        )`
+      : "";
     const openWOs = db.prepare(`
       SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
       FROM work_orders w
@@ -4592,6 +4602,7 @@ export default async function reportsRoutes(app) {
         ${breakdownOpenFilter}
         ${noClosedShadowWOFilter}
         ${latestActivePerAssetSourceFilter}
+        ${closeApprovalFilter}
       ORDER BY w.id DESC
       LIMIT 30
     `).all();
