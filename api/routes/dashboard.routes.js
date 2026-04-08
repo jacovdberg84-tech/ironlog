@@ -1299,6 +1299,89 @@ export default async function dashboardRoutes(app) {
     });
   });
 
+  // POST /api/dashboard/fuel/repair-meter-chain
+  // Body: { asset_code?: string }
+  // Repairs day opening meter to previous day's closing meter when mismatch detected.
+  app.post("/fuel/repair-meter-chain", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    const asset_code = String(req.body?.asset_code || "").trim();
+
+    let assetFilterSql = "";
+    const params = [];
+    if (asset_code) {
+      const asset = db.prepare(`SELECT id, asset_code FROM assets WHERE asset_code = ?`).get(asset_code);
+      if (!asset) return reply.code(404).send({ error: `asset not found: ${asset_code}` });
+      assetFilterSql = "AND d2.asset_id = ?";
+      params.push(asset.id);
+    }
+
+    const candidates = db.prepare(`
+      SELECT
+        d2.id,
+        d2.asset_id,
+        d2.work_date,
+        d2.opening_hours AS old_opening_hours,
+        d2.closing_hours AS closing_hours,
+        d2.hours_run AS old_hours_run,
+        (
+          SELECT d1.closing_hours
+          FROM daily_hours d1
+          WHERE d1.asset_id = d2.asset_id
+            AND d1.work_date < d2.work_date
+            AND d1.closing_hours IS NOT NULL
+          ORDER BY d1.work_date DESC, d1.id DESC
+          LIMIT 1
+        ) AS expected_opening_hours
+      FROM daily_hours d2
+      WHERE 1 = 1
+        ${assetFilterSql}
+    `).all(...params).filter((r) => {
+      if (r.expected_opening_hours == null) return false;
+      if (r.old_opening_hours == null) return true;
+      return Math.abs(Number(r.old_opening_hours) - Number(r.expected_opening_hours)) > 0.0001;
+    });
+
+    const updateRow = db.prepare(`
+      UPDATE daily_hours
+      SET
+        opening_hours = ?,
+        hours_run = CASE
+          WHEN closing_hours IS NOT NULL AND closing_hours >= ? THEN (closing_hours - ?)
+          ELSE hours_run
+        END
+      WHERE id = ?
+    `);
+
+    const tx = db.transaction(() => {
+      for (const r of candidates) {
+        const nextOpen = Number(r.expected_opening_hours);
+        updateRow.run(nextOpen, nextOpen, nextOpen, r.id);
+      }
+    });
+    tx();
+
+    writeAudit(db, req, {
+      module: "fuel",
+      action: "repair_meter_chain",
+      entity_type: "asset",
+      entity_id: asset_code || "all",
+      payload: { repaired_rows: candidates.length },
+    });
+
+    return reply.send({
+      ok: true,
+      asset_code: asset_code || null,
+      repaired_rows: candidates.length,
+      sample: candidates.slice(0, 20).map((r) => ({
+        id: Number(r.id),
+        asset_id: Number(r.asset_id),
+        work_date: r.work_date,
+        old_opening_hours: r.old_opening_hours == null ? null : Number(r.old_opening_hours),
+        expected_opening_hours: Number(r.expected_opening_hours),
+      })),
+    });
+  });
+
   // GET /api/dashboard/fuel/baseline?asset_code=A300AM
   app.get("/fuel/baseline", async (req, reply) => {
     const asset_code = String(req.query?.asset_code || "").trim();

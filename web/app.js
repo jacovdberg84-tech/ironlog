@@ -3667,6 +3667,27 @@ async function importFamsFuelFile() {
   }
 }
 
+async function repairFuelMeterChain() {
+  const resultEl = qs("fuelFamsResult");
+  const assetCode = (qs("fuelRepairAssetCode")?.value || "").trim();
+  if (resultEl) resultEl.textContent = "";
+  setStatus("Repairing meter chain...");
+  try {
+    const body = assetCode ? { asset_code: assetCode } : {};
+    const res = await fetchJson(`${API}/api/dashboard/fuel/repair-meter-chain`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (resultEl) resultEl.textContent = JSON.stringify(res, null, 2);
+    setStatus(`Meter chain repair complete. Rows repaired: ${Number(res?.repaired_rows || 0)}`);
+    await loadDashboard().catch(() => {});
+  } catch (e) {
+    if (resultEl) resultEl.textContent = String(e.message || e);
+    setStatus("Meter chain repair failed.");
+  }
+}
+
 function downloadStoresCsvTemplate() {
   const today = new Date().toISOString().slice(0, 10);
   const lines = [
@@ -7821,6 +7842,9 @@ async function init() {
   );
   qs("fuelFamsUploadBtn")?.addEventListener("click", () =>
     importFamsFuelFile().catch((e) => setStatus("FAMS import error: " + e.message))
+  );
+  qs("fuelRepairMeterChainBtn")?.addEventListener("click", () =>
+    repairFuelMeterChain().catch((e) => setStatus("Meter chain repair error: " + e.message))
   );
   qs("downloadFuelTemplate")?.addEventListener("click", downloadFuelCsvTemplate);
   qs("downloadStoreTemplate")?.addEventListener("click", downloadStoresCsvTemplate);
