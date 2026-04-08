@@ -1258,6 +1258,8 @@ export default async function reportsRoutes(app) {
     };
 
     const bdF = dateFilter("b.breakdown_date");
+    const breakdownParams = [date, date];
+    if (hasBreakdownEndAt) breakdownParams.push(date);
     const breakdowns = db.prepare(`
       SELECT
         b.breakdown_date AS date,
@@ -1630,6 +1632,7 @@ export default async function reportsRoutes(app) {
         subtitle: "Lube Usage Report",
         rightText: `${start} to ${end}`,
         showPageNumbers: true,
+        layout: "landscape",
       }
     );
 
@@ -2136,6 +2139,7 @@ export default async function reportsRoutes(app) {
         subtitle: "Fuel Machine History",
         rightText: `${start} to ${end}`,
         showPageNumbers: true,
+        layout: "landscape",
       }
     );
 
@@ -4480,6 +4484,13 @@ export default async function reportsRoutes(app) {
     `).all(date);
 
     const breakdownDowntimeCol = getBreakdownDowntimeColumn();
+    const hasBreakdownStatus = hasColumn("breakdowns", "status");
+    const hasBreakdownEndAt = hasColumn("breakdowns", "end_at");
+    const hasBreakdownStartAt = hasColumn("breakdowns", "start_at");
+    const breakdownDateExpr = hasBreakdownStartAt ? "DATE(COALESCE(b.breakdown_date, b.start_at))" : "DATE(b.breakdown_date)";
+    const breakdownStatusExpr = hasBreakdownStatus ? "TRIM(LOWER(COALESCE(b.status, '')))" : "''";
+    const breakdownEndAtExpr = hasBreakdownEndAt ? "DATE(b.end_at)" : "NULL";
+    const breakdownStartAtSelect = hasBreakdownStartAt ? "b.start_at" : "NULL AS start_at";
     const breakdowns = db.prepare(`
       SELECT
         b.id,
@@ -4489,8 +4500,8 @@ export default async function reportsRoutes(app) {
         COALESCE(b.${breakdownDowntimeCol}, 0) AS downtime_hours,
         b.critical,
         b.breakdown_date,
-        b.start_at,
-        b.end_at,
+        ${breakdownStartAtSelect},
+        ${hasBreakdownEndAt ? "b.end_at" : "NULL AS end_at"},
         COALESCE((
           SELECT COUNT(DISTINCT l.log_date)
           FROM breakdown_downtime_logs l
@@ -4499,14 +4510,13 @@ export default async function reportsRoutes(app) {
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
       LEFT JOIN daily_hours dh ON dh.asset_id = b.asset_id AND dh.work_date = ?
-      WHERE DATE(COALESCE(b.breakdown_date, b.start_at)) <= ?
+      WHERE ${breakdownDateExpr} <= ?
         AND (
-          b.end_at IS NULL
-          OR DATE(b.end_at) >= ?
-          OR TRIM(LOWER(COALESCE(b.status, ''))) IN ('open', 'in_progress')
+          ${hasBreakdownEndAt ? "b.end_at IS NULL OR DATE(b.end_at) >= ?" : "1 = 1"}
+          OR ${breakdownStatusExpr} IN ('open', 'in_progress')
         )
       ORDER BY downtime_hours DESC
-    `).all(date, date, date).map(r => ({
+    `).all(...breakdownParams).map(r => ({
       ...r,
       critical: Boolean(r.critical),
       days_down: daysDownForBreakdown(r, date),
@@ -4956,6 +4966,7 @@ export default async function reportsRoutes(app) {
         subtitle: "Weekly Operations Report",
         rightText: `Period: ${start} to ${end}`,
         showPageNumbers: true,
+        layout: "landscape",
       }
     );
 
