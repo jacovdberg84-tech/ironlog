@@ -428,6 +428,13 @@ export default async function uploadRoutes(app) {
       WHERE asset_id = ?
         AND log_date = ?
     `);
+    const getDailyHoursByDay = db.prepare(`
+      SELECT opening_hours, closing_hours, hours_run
+      FROM daily_hours
+      WHERE asset_id = ?
+        AND work_date = ?
+      LIMIT 1
+    `);
 
     function pick(r, keys) {
       for (const k of keys) {
@@ -461,6 +468,33 @@ export default async function uploadRoutes(app) {
       const normalized = s.replace(/\s/g, "").replace(/,/g, "");
       const n = Number.parseFloat(normalized);
       return Number.isFinite(n) ? n : fallback;
+    }
+
+    function mergeDailyMeters(currentDay, nextOpen, nextClose, nextRun) {
+      const currentOpen = currentDay?.opening_hours != null ? Number(currentDay.opening_hours) : null;
+      const currentClose = currentDay?.closing_hours != null ? Number(currentDay.closing_hours) : null;
+      const currentRun = currentDay?.hours_run != null ? Number(currentDay.hours_run) : null;
+
+      const mergedOpen = (
+        currentOpen != null && nextOpen != null ? Math.min(currentOpen, nextOpen)
+          : (currentOpen != null ? currentOpen : nextOpen)
+      );
+      const mergedClose = (
+        currentClose != null && nextClose != null ? Math.max(currentClose, nextClose)
+          : (currentClose != null ? currentClose : nextClose)
+      );
+      const runFromReads = (
+        mergedOpen != null && mergedClose != null && mergedClose >= mergedOpen
+      ) ? (mergedClose - mergedOpen) : null;
+      const mergedRun = [currentRun, nextRun, runFromReads]
+        .filter((v) => v != null && Number.isFinite(v))
+        .reduce((mx, v) => Math.max(mx, v), 0);
+
+      return {
+        opening_hours: mergedOpen,
+        closing_hours: mergedClose,
+        hours_run: Number.isFinite(mergedRun) ? mergedRun : null,
+      };
     }
 
     const tx = db.transaction(() => {
@@ -518,7 +552,16 @@ export default async function uploadRoutes(app) {
           if (opening_hours != null || closing_hours != null || dailyHoursRun != null) {
             const operatorName = famsDriver || famsOperator || null;
             const notesText = famsDesc || source || null;
-            upsertDailyHoursFromFuel.run(asset.id, date, opening_hours, closing_hours, dailyHoursRun, operatorName, notesText);
+            const merged = mergeDailyMeters(getDailyHoursByDay.get(asset.id, date), opening_hours, closing_hours, dailyHoursRun);
+            upsertDailyHoursFromFuel.run(
+              asset.id,
+              date,
+              merged.opening_hours,
+              merged.closing_hours,
+              merged.hours_run,
+              operatorName,
+              notesText
+            );
             updated_daily_hours += 1;
           }
           skipped_existing += 1;
@@ -533,7 +576,16 @@ export default async function uploadRoutes(app) {
         if (opening_hours != null || closing_hours != null || dailyHoursRun != null) {
           const operatorName = famsDriver || famsOperator || null;
           const notesText = famsDesc || source || null;
-          upsertDailyHoursFromFuel.run(asset.id, date, opening_hours, closing_hours, dailyHoursRun, operatorName, notesText);
+          const merged = mergeDailyMeters(getDailyHoursByDay.get(asset.id, date), opening_hours, closing_hours, dailyHoursRun);
+          upsertDailyHoursFromFuel.run(
+            asset.id,
+            date,
+            merged.opening_hours,
+            merged.closing_hours,
+            merged.hours_run,
+            operatorName,
+            notesText
+          );
           updated_daily_hours += 1;
         }
         inserted += 1;
