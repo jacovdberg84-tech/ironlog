@@ -461,10 +461,15 @@ export default async function dashboardRoutes(app) {
 
     const openWOCount = db.prepare(`
       SELECT COUNT(*) AS c
-      FROM work_orders
+      FROM work_orders w
+      LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
       WHERE REPLACE(TRIM(LOWER(COALESCE(status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
         AND (completed_at IS NULL OR TRIM(COALESCE(completed_at, '')) = '')
         AND (closed_at IS NULL OR TRIM(COALESCE(closed_at, '')) = '')
+        AND (
+          w.source <> 'breakdown'
+          OR TRIM(LOWER(COALESCE(b.status, ''))) IN ('open', 'in_progress')
+        )
     `).get();
 
     // Major downtime list (use downtime logs aggregated per breakdown for this day)
@@ -508,9 +513,14 @@ export default async function dashboardRoutes(app) {
       SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
+      LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
       WHERE REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
         AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')
         AND (w.closed_at IS NULL OR TRIM(COALESCE(w.closed_at, '')) = '')
+        AND (
+          w.source <> 'breakdown'
+          OR TRIM(LOWER(COALESCE(b.status, ''))) IN ('open', 'in_progress')
+        )
       ORDER BY w.id DESC
       LIMIT 8
     `).all();
@@ -525,9 +535,14 @@ export default async function dashboardRoutes(app) {
         CAST((julianday('now') - julianday(COALESCE(w.opened_at, datetime('now')))) * 24 AS INTEGER) AS age_hours
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
+      LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
       WHERE REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
         AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')
         AND (w.closed_at IS NULL OR TRIM(COALESCE(w.closed_at, '')) = '')
+        AND (
+          w.source <> 'breakdown'
+          OR TRIM(LOWER(COALESCE(b.status, ''))) IN ('open', 'in_progress')
+        )
       ORDER BY age_hours DESC, w.id DESC
       LIMIT 200
     `).all().map((r) => ({

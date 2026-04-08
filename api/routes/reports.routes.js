@@ -4546,9 +4546,14 @@ export default async function reportsRoutes(app) {
       SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
+      LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
       WHERE w.closed_at IS NULL
         AND REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
         AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')
+        AND (
+          w.source <> 'breakdown'
+          OR TRIM(LOWER(COALESCE(b.status, ''))) IN ('open', 'in_progress')
+        )
       ORDER BY w.id DESC
       LIMIT 30
     `).all();
