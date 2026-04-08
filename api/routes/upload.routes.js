@@ -407,12 +407,14 @@ export default async function uploadRoutes(app) {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
     const upsertDailyHoursFromFuel = db.prepare(`
-      INSERT INTO daily_hours (asset_id, work_date, opening_hours, closing_hours, hours_run, is_used)
-      VALUES (?, ?, ?, ?, ?, 1)
+      INSERT INTO daily_hours (asset_id, work_date, opening_hours, closing_hours, hours_run, is_used, operator, notes)
+      VALUES (?, ?, ?, ?, ?, 1, ?, ?)
       ON CONFLICT(asset_id, work_date) DO UPDATE SET
         opening_hours = COALESCE(excluded.opening_hours, daily_hours.opening_hours),
         closing_hours = COALESCE(excluded.closing_hours, daily_hours.closing_hours),
-        hours_run = COALESCE(excluded.hours_run, daily_hours.hours_run)
+        hours_run = COALESCE(excluded.hours_run, daily_hours.hours_run),
+        operator = COALESCE(excluded.operator, daily_hours.operator),
+        notes = COALESCE(excluded.notes, daily_hours.notes)
     `);
     const hasExistingForDay = db.prepare(`
       SELECT 1
@@ -445,9 +447,20 @@ export default async function uploadRoutes(app) {
     function normalizeMeterUnit(raw) {
       const s = String(raw || "").trim().toLowerCase();
       if (!s) return null;
+      if (s.includes("km")) return "km";
+      if (s.includes("hour") || s.includes("hr")) return "hours";
       if (s === "km" || s === "kilometer" || s === "kilometers") return "km";
       if (s === "hr" || s === "hrs" || s === "hour" || s === "hours" || s === "h") return "hours";
       return null;
+    }
+
+    function parseNumberLoose(raw, fallback = null) {
+      if (raw == null) return fallback;
+      const s = String(raw).trim();
+      if (!s) return fallback;
+      const normalized = s.replace(/\s/g, "").replace(/,/g, "");
+      const n = Number.parseFloat(normalized);
+      return Number.isFinite(n) ? n : fallback;
     }
 
     const tx = db.transaction(() => {
@@ -467,23 +480,24 @@ export default async function uploadRoutes(app) {
         const sourceRaw = pick(r, ["source", "Source"]);
         const famsStore = String(pick(r, ["Store", "store"]) || "").trim();
         const famsOperator = String(pick(r, ["Operator", "operator"]) || "").trim();
-        const famsDriver = String(pick(r, ["Driver", "driver"]) || "").trim();
+        const famsDriver = String(pick(r, ["Driver", "driver", "Drv", "drv"]) || "").trim();
+        const famsDesc = String(pick(r, ["Desc", "desc", "Description", "description"]) || "").trim();
         const source = sourceRaw != null && String(sourceRaw).trim() !== ""
           ? String(sourceRaw).trim()
           : [famsStore, famsOperator, famsDriver].filter(Boolean).join(" | ") || null;
         const meter_unit = normalizeMeterUnit(pick(r, ["meter_unit", "MeterUnit", "Measurement", "measurement"]));
         const meterRunRaw = pick(r, ["meter_run_value", "MeterRunValue", "KMHour", "kmhour", "hours_run"]);
         const meterRunNum = meterRunRaw != null && String(meterRunRaw).trim() !== ""
-          ? asFloat(meterRunRaw, 0)
+          ? parseNumberLoose(meterRunRaw, 0)
           : null;
         const meter_run_value = meterRunNum != null && meterRunNum >= 0 ? meterRunNum : null;
         const openingRaw = pick(r, ["OpnRead", "opnread", "opening_hours", "OpeningHours"]);
         const closingRaw = pick(r, ["ClsRead", "clsread", "closing_hours", "ClosingHours"]);
         const opening_hours = openingRaw != null && String(openingRaw).trim() !== ""
-          ? asFloat(openingRaw, 0)
+          ? parseNumberLoose(openingRaw, null)
           : null;
         const closing_hours = closingRaw != null && String(closingRaw).trim() !== ""
-          ? asFloat(closingRaw, 0)
+          ? parseNumberLoose(closingRaw, null)
           : null;
         const runFromOpenClose = (
           opening_hours != null &&
@@ -491,7 +505,7 @@ export default async function uploadRoutes(app) {
           closing_hours >= opening_hours
         ) ? (closing_hours - opening_hours) : null;
         const hoursRunRaw = pick(r, ["hours_run", "HoursRun"]) != null && String(pick(r, ["hours_run", "HoursRun"])).trim() !== ""
-          ? asFloat(pick(r, ["hours_run", "HoursRun"]), 0)
+          ? parseNumberLoose(pick(r, ["hours_run", "HoursRun"]), 0)
           : null;
         const hours_run = hoursRunRaw != null && hoursRunRaw >= 0 ? hoursRunRaw : (meter_unit === "hours" ? meter_run_value : null);
 
@@ -510,7 +524,9 @@ export default async function uploadRoutes(app) {
         insert.run(asset.id, date, liters, source, hours_run, meter_unit, meter_run_value);
         const dailyHoursRun = runFromOpenClose != null ? runFromOpenClose : hours_run;
         if (opening_hours != null || closing_hours != null || dailyHoursRun != null) {
-          upsertDailyHoursFromFuel.run(asset.id, date, opening_hours, closing_hours, dailyHoursRun);
+          const operatorName = famsDriver || famsOperator || null;
+          const notesText = famsDesc || source || null;
+          upsertDailyHoursFromFuel.run(asset.id, date, opening_hours, closing_hours, dailyHoursRun, operatorName, notesText);
           updated_daily_hours += 1;
         }
         inserted += 1;
