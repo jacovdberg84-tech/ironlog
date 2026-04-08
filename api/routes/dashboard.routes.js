@@ -1457,7 +1457,8 @@ export default async function dashboardRoutes(app) {
         COALESCE(NULLIF(a.km_per_hour_factor, 0), 10.0) AS km_per_hour_factor,
         COALESCE(a.baseline_fuel_l_per_hour, 5.0) AS oem_lph,
         COALESCE(a.baseline_fuel_km_per_l, 2.0) AS oem_kmpl,
-        COALESCE(SUM(fl.liters), 0) AS fuel_liters
+        COALESCE(SUM(fl.liters), 0) AS fuel_liters,
+        COUNT(fl.id) AS fill_count
       FROM assets a
       LEFT JOIN fuel_logs fl
         ON fl.asset_id = a.id
@@ -1574,13 +1575,15 @@ export default async function dashboardRoutes(app) {
       const fuel = Number(r.fuel_liters || 0);
       const oem = Number(r.oem_lph || 5);
       const oemK = Number(r.oem_kmpl || 2);
+      const fillCount = Number(r.fill_count || 0);
       const lph = hours > 0 ? fuel / hours : null;
       const kmpl = fuel > 0 && km > 0 ? km / fuel : null;
       const excessiveThreshold = oem * (1 + tolerance);
       const lowThresholdKmpl = oemK * Math.max(0, 1 - tolerance);
-      const is_excessive = mode === "km"
+      const hasEnoughSamples = fillCount >= 2;
+      const is_excessive = hasEnoughSamples && (mode === "km"
         ? (kmpl != null && kmpl < lowThresholdKmpl)
-        : (lph != null && lph > excessiveThreshold);
+        : (lph != null && lph > excessiveThreshold));
       return {
         asset_id: Number(r.asset_id),
         asset_code: r.asset_code,
@@ -1597,6 +1600,8 @@ export default async function dashboardRoutes(app) {
         oem_km_per_l: Number(oemK.toFixed(3)),
         low_threshold_km_per_l: Number(lowThresholdKmpl.toFixed(3)),
         variance_km_per_l: kmpl == null ? null : Number((kmpl - oemK).toFixed(3)),
+        fill_count: fillCount,
+        has_enough_samples: hasEnoughSamples,
         is_excessive,
       };
     }).filter((r) => r.fuel_liters > 0 || r.hours_run > 0 || r.km_run > 0)
