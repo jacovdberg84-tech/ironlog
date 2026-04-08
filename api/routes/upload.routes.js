@@ -406,6 +406,14 @@ export default async function uploadRoutes(app) {
       INSERT INTO fuel_logs (asset_id, log_date, liters, source, hours_run, meter_unit, meter_run_value)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
+    const upsertDailyHoursFromFuel = db.prepare(`
+      INSERT INTO daily_hours (asset_id, work_date, opening_hours, closing_hours, hours_run, is_used)
+      VALUES (?, ?, ?, ?, ?, 1)
+      ON CONFLICT(asset_id, work_date) DO UPDATE SET
+        opening_hours = COALESCE(excluded.opening_hours, daily_hours.opening_hours),
+        closing_hours = COALESCE(excluded.closing_hours, daily_hours.closing_hours),
+        hours_run = COALESCE(excluded.hours_run, daily_hours.hours_run)
+    `);
     const hasExistingForDay = db.prepare(`
       SELECT 1
       FROM fuel_logs
@@ -446,6 +454,7 @@ export default async function uploadRoutes(app) {
       let inserted = 0;
       let skipped_existing = 0;
       let overwritten_days = 0;
+      let updated_daily_hours = 0;
       const deletedDayKeys = new Set();
 
       for (const r of rows) {
@@ -468,6 +477,19 @@ export default async function uploadRoutes(app) {
           ? asFloat(meterRunRaw, 0)
           : null;
         const meter_run_value = meterRunNum != null && meterRunNum >= 0 ? meterRunNum : null;
+        const openingRaw = pick(r, ["OpnRead", "opnread", "opening_hours", "OpeningHours"]);
+        const closingRaw = pick(r, ["ClsRead", "clsread", "closing_hours", "ClosingHours"]);
+        const opening_hours = openingRaw != null && String(openingRaw).trim() !== ""
+          ? asFloat(openingRaw, 0)
+          : null;
+        const closing_hours = closingRaw != null && String(closingRaw).trim() !== ""
+          ? asFloat(closingRaw, 0)
+          : null;
+        const runFromOpenClose = (
+          opening_hours != null &&
+          closing_hours != null &&
+          closing_hours >= opening_hours
+        ) ? (closing_hours - opening_hours) : null;
         const hoursRunRaw = pick(r, ["hours_run", "HoursRun"]) != null && String(pick(r, ["hours_run", "HoursRun"])).trim() !== ""
           ? asFloat(pick(r, ["hours_run", "HoursRun"]), 0)
           : null;
@@ -486,10 +508,15 @@ export default async function uploadRoutes(app) {
           overwritten_days += 1;
         }
         insert.run(asset.id, date, liters, source, hours_run, meter_unit, meter_run_value);
+        const dailyHoursRun = runFromOpenClose != null ? runFromOpenClose : hours_run;
+        if (opening_hours != null || closing_hours != null || dailyHoursRun != null) {
+          upsertDailyHoursFromFuel.run(asset.id, date, opening_hours, closing_hours, dailyHoursRun);
+          updated_daily_hours += 1;
+        }
         inserted += 1;
       }
 
-      return { inserted, skipped_existing, overwritten_days };
+      return { inserted, skipped_existing, overwritten_days, updated_daily_hours };
     });
 
     const summary = tx();
@@ -501,6 +528,7 @@ export default async function uploadRoutes(app) {
       inserted: Number(summary.inserted || 0),
       skipped_existing: Number(summary.skipped_existing || 0),
       overwritten_days: Number(summary.overwritten_days || 0),
+      updated_daily_hours: Number(summary.updated_daily_hours || 0),
     });
   });
 
