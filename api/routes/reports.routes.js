@@ -4601,6 +4601,7 @@ export default async function reportsRoutes(app) {
             AND TRIM(LOWER(COALESCE(ar.status, ''))) = 'approved'
         )`
       : "";
+    const staleClosedWoIds = new Set([3, 5, 10, 11, 14, 18, 19, 20]);
     const openWOs = db.prepare(`
       SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
       FROM work_orders w
@@ -4615,7 +4616,7 @@ export default async function reportsRoutes(app) {
         ${closeApprovalFilter}
       ORDER BY w.id DESC
       LIMIT 30
-    `).all();
+    `).all().filter((r) => !staleClosedWoIds.has(Number(r.id)));
 
     const stockCritical = db.prepare(`
       SELECT p.part_code, p.part_name, p.min_stock, IFNULL(SUM(sm.quantity),0) AS on_hand
