@@ -2627,20 +2627,47 @@ async function loadFuelBenchmark() {
       `${API}/api/dashboard/fuel?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&tolerance=${encodeURIComponent(tolerance)}&mode=${encodeURIComponent(mode)}&asset_code=${encodeURIComponent(assetCode)}`
     );
 
+  const rawRows = Array.isArray(data.rows) ? data.rows : [];
+  const benchmarkRows = duplicatesOnly
+    ? rawRows
+    : rawRows.filter((r) => String(r.metric_mode || "hours") !== "km");
+
+  const benchmarkSummary = duplicatesOnly
+    ? {
+        fuel_liters: Number(data.summary?.fuel_liters || 0),
+        duplicate_rows: Number(data.summary?.duplicate_rows || 0),
+      }
+    : benchmarkRows.reduce(
+        (acc, r) => {
+          acc.fuel_liters += Number(r.fuel_liters || 0);
+          acc.hours_run += Number(r.hours_run || 0);
+          if (Number(r.hours_run || 0) > 0) acc.hours_fuel += Number(r.fuel_liters || 0);
+          if (Number(r.is_excessive || false)) acc.excessive_count += 1;
+          return acc;
+        },
+        { fuel_liters: 0, hours_run: 0, hours_fuel: 0, excessive_count: 0 }
+      );
+  if (!duplicatesOnly) {
+    benchmarkSummary.avg_lph =
+      benchmarkSummary.hours_run > 0
+        ? benchmarkSummary.hours_fuel / benchmarkSummary.hours_run
+        : null;
+  }
+
   if (duplicatesOnly) {
-    setText("fbFuelTotal", Number(data.summary?.fuel_liters || 0).toFixed(2));
+    setText("fbFuelTotal", Number(benchmarkSummary.fuel_liters || 0).toFixed(2));
     setText("fbHoursTotal", "-");
     setText("fbKmTotal", "-");
     setText("fbAvgLph", "-");
     setText("fbAvgKmpl", "-");
-    setText("fbExcessive", Number(data.summary?.duplicate_rows || 0));
+    setText("fbExcessive", Number(benchmarkSummary.duplicate_rows || 0));
   } else {
-    setText("fbFuelTotal", Number(data.summary?.fuel_liters || 0).toFixed(2));
-    setText("fbHoursTotal", Number(data.summary?.hours_run || 0).toFixed(2));
-    setText("fbKmTotal", Number(data.summary?.km_run || 0).toFixed(2));
-    setText("fbAvgLph", data.summary?.avg_lph == null ? "-" : Number(data.summary.avg_lph).toFixed(3));
-    setText("fbAvgKmpl", data.summary?.avg_km_per_l == null ? "-" : Number(data.summary.avg_km_per_l).toFixed(3));
-    setText("fbExcessive", Number(data.summary?.excessive_count || 0));
+    setText("fbFuelTotal", Number(benchmarkSummary.fuel_liters || 0).toFixed(2));
+    setText("fbHoursTotal", Number(benchmarkSummary.hours_run || 0).toFixed(2));
+    setText("fbKmTotal", "0.00");
+    setText("fbAvgLph", benchmarkSummary.avg_lph == null ? "-" : Number(benchmarkSummary.avg_lph).toFixed(3));
+    setText("fbAvgKmpl", "-");
+    setText("fbExcessive", Number(benchmarkSummary.excessive_count || 0));
   }
 
   const list = qs("fuelBenchmarkList");
@@ -2661,7 +2688,7 @@ async function loadFuelBenchmark() {
       return actual > benchmark;
     };
     list.innerHTML = "";
-    (data.rows || []).forEach((r) => {
+    benchmarkRows.forEach((r) => {
       if (duplicatesOnly) {
         const runVal = Number(r.meter_run_value ?? r.hours_run ?? 0);
         const runTxt = String(r.metric_mode || "hours") === "km"
@@ -2701,7 +2728,7 @@ async function loadFuelBenchmark() {
         )
       );
     });
-    if (!data.rows?.length) {
+    if (!benchmarkRows.length) {
       list.appendChild(item(`<small>${duplicatesOnly ? "No duplicate fuel entries found in this period." : "No fuel benchmark data in this period."}</small>`));
     }
   }
