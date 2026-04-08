@@ -4491,6 +4491,8 @@ export default async function reportsRoutes(app) {
     const breakdownStatusExpr = hasBreakdownStatus ? "TRIM(LOWER(COALESCE(b.status, '')))" : "''";
     const breakdownEndAtExpr = hasBreakdownEndAt ? "DATE(b.end_at)" : "NULL";
     const breakdownStartAtSelect = hasBreakdownStartAt ? "b.start_at" : "NULL AS start_at";
+    const breakdownParams = [date, date];
+    if (hasBreakdownEndAt) breakdownParams.push(date);
     const breakdowns = db.prepare(`
       SELECT
         b.id,
@@ -4692,6 +4694,7 @@ export default async function reportsRoutes(app) {
         subtitle: `Daily Operations Report (${reportRevision})`,
         rightText: `Date: ${date}`,
         showPageNumbers: true,
+        layout: "landscape",
       }
     );
 
