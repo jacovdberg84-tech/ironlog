@@ -1499,6 +1499,7 @@ export default async function docsRoutes(app) {
       title: "IRONLOG",
       subtitle: "AI Document - Final Issue",
       rightText: `Draft #${row.id}`,
+      layout: "landscape",
     });
 
     const safeTitle = safeFileName(row.title, `draft-${id}`);
@@ -1600,6 +1601,7 @@ export default async function docsRoutes(app) {
       title: "IRONLOG",
       subtitle: "Approved Documents Register",
       rightText: "Compliance Export",
+      layout: "landscape",
     });
 
     const download = String(req.query?.download || "0") === "1";

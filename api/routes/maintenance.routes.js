@@ -984,6 +984,7 @@ export default async function maintenanceRoutes(app) {
           title: "IRONLOG",
           subtitle: "Maintenance Upcoming Services",
           rightText: `As of: ${asOfLabel}`,
+          layout: "landscape",
         }
       );
 
