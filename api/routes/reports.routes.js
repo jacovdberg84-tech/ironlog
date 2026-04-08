@@ -247,12 +247,6 @@ function reliabilityMetricsForRange(start, end, opts = {}) {
 }
 
 function kpiDaily(date, scheduled) {
-  const activeRow = db.prepare(`
-    SELECT COUNT(*) AS active_assets
-    FROM assets a
-    WHERE a.active = 1
-      AND a.is_standby = 0
-  `).get();
   const usedRow = db.prepare(`
     SELECT COUNT(DISTINCT dh.asset_id) AS used_assets
     FROM daily_hours dh
@@ -263,9 +257,7 @@ function kpiDaily(date, scheduled) {
       AND a.is_standby = 0
   `).get(date);
 
-  const active_assets = Number(activeRow?.active_assets || 0);
   const used_assets = Number(usedRow.used_assets || 0);
-  const available_hours = active_assets * scheduled;
 
   const runRow = db.prepare(`
     SELECT IFNULL(SUM(dh.hours_run), 0) AS run_hours
@@ -293,16 +285,18 @@ function kpiDaily(date, scheduled) {
       AND a.is_standby = 0
   `).get(Number(scheduled || 0), date);
   const utilization_base_hours = Number(utilBaseRow?.utilization_base_hours || 0);
+  const available_hours = utilization_base_hours;
 
   const dtLogsRow = db.prepare(`
     SELECT IFNULL(SUM(l.hours_down), 0) AS downtime_hours
     FROM breakdown_downtime_logs l
     JOIN breakdowns b ON b.id = l.breakdown_id
     JOIN assets a ON a.id = b.asset_id
+    JOIN daily_hours dh ON dh.asset_id = b.asset_id AND dh.work_date = ? AND dh.is_used = 1
     WHERE l.log_date = ?
       AND a.active = 1
       AND a.is_standby = 0
-  `).get(date);
+  `).get(date, date);
   let downtime_hours = Number(dtLogsRow?.downtime_hours || 0);
   const openNoLogRow = db.prepare(`
     SELECT IFNULL(SUM(
@@ -313,7 +307,7 @@ function kpiDaily(date, scheduled) {
     ), 0) AS assumed_down_hours
     FROM breakdowns b
     JOIN assets a ON a.id = b.asset_id
-    LEFT JOIN daily_hours dh ON dh.asset_id = b.asset_id AND dh.work_date = ?
+    JOIN daily_hours dh ON dh.asset_id = b.asset_id AND dh.work_date = ? AND dh.is_used = 1
     WHERE b.status = 'OPEN'
       AND b.breakdown_date <= ?
       AND a.active = 1
@@ -1274,7 +1268,7 @@ export default async function reportsRoutes(app) {
     };
 
     const bdF = dateFilter("b.breakdown_date");
-    const breakdownParams = [date, date];
+    const breakdownParams = [date, date, date];
     if (hasBreakdownEndAt) breakdownParams.push(date);
     const breakdowns = db.prepare(`
       SELECT
@@ -4464,7 +4458,7 @@ export default async function reportsRoutes(app) {
       ? "AND COALESCE(a.active, 1) = 1"
       : "";
 
-    // Full active fleet (non-standby): every asset gets a row; hours from daily_hours when present.
+    // Production-selected assets only for the selected day.
     const hours = db.prepare(`
       SELECT
         a.asset_code,
@@ -4474,10 +4468,12 @@ export default async function reportsRoutes(app) {
         dh.is_used,
         dh.opening_hours,
         dh.closing_hours,
-        CASE WHEN dh.id IS NULL THEN 0 ELSE 1 END AS has_daily_entry
-      FROM assets a
-      LEFT JOIN daily_hours dh ON dh.asset_id = a.id AND dh.work_date = ?
-      WHERE COALESCE(a.is_standby, 0) = 0
+        1 AS has_daily_entry
+      FROM daily_hours dh
+      JOIN assets a ON a.id = dh.asset_id
+      WHERE dh.work_date = ?
+        AND dh.is_used = 1
+        AND COALESCE(a.is_standby, 0) = 0
         ${activeClause}
         ${archivedClause}
       ORDER BY a.asset_code
@@ -4515,6 +4511,12 @@ export default async function reportsRoutes(app) {
         a.asset_code,
         b.description,
         dh.notes AS daily_breakdown_comment,
+        COALESCE((
+          SELECT SUM(fl.liters)
+          FROM fuel_logs fl
+          WHERE fl.asset_id = b.asset_id
+            AND fl.log_date = ?
+        ), 0) AS fuel_liters,
         COALESCE(b.${breakdownDowntimeCol}, 0) AS downtime_hours,
         b.critical,
         b.breakdown_date,
@@ -4524,6 +4526,7 @@ export default async function reportsRoutes(app) {
           SELECT COUNT(DISTINCT l.log_date)
           FROM breakdown_downtime_logs l
           WHERE l.breakdown_id = b.id
+            AND l.log_date <= ?
         ), 0) AS logged_days
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
@@ -4652,18 +4655,20 @@ export default async function reportsRoutes(app) {
           [
             { key: "asset", label: "Asset", width: 0.14 },
             { key: "days", label: "Days down", width: 0.12, align: "right" },
+            { key: "fuel", label: "Fuel used (L)", width: 0.12, align: "right" },
             { key: "hrs", label: "Downtime (hrs)", width: 0.12, align: "right" },
             { key: "crit", label: "Critical", width: 0.10, align: "center" },
-            { key: "desc", label: "Description", width: 0.30 },
-            { key: "comment", label: "Breakdown comment", width: 0.22 },
+            { key: "desc", label: "Description", width: 0.22 },
+            { key: "comment", label: "Breakdown comment", width: 0.18 },
           ],
           breakdownsPdf.map(r => ({
             asset: r.asset_code,
             days: fmtNum(r.days_down || 0, 0),
+            fuel: fmtNum(r.fuel_liters || 0, 1),
             hrs: fmtNum(r.downtime_hours, 1),
             crit: r.critical ? "YES" : "NO",
-            desc: compactCell(r.description ?? "", 140),
-            comment: compactCell(r.daily_breakdown_comment ?? "", 100),
+            desc: compactCell(r.description ?? "", 180),
+            comment: compactCell(r.daily_breakdown_comment ?? "", 260),
           }))
         );
 
