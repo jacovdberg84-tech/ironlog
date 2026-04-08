@@ -327,10 +327,10 @@ export default async function dashboardRoutes(app) {
 
     const openWOCount = db.prepare(`
       SELECT COUNT(*) AS c
-      FROM work_orders
-      WHERE REPLACE(TRIM(LOWER(COALESCE(status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
-        AND (completed_at IS NULL OR TRIM(COALESCE(completed_at, '')) = '')
-        AND (closed_at IS NULL OR TRIM(COALESCE(closed_at, '')) = '')
+      FROM work_orders w
+      WHERE REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
+        AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')
+        AND (w.closed_at IS NULL OR TRIM(COALESCE(w.closed_at, '')) = '')
     `).get();
 
     // Major downtime list (use downtime logs aggregated per breakdown for this day)
