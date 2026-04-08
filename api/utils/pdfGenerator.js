@@ -4,6 +4,14 @@ import fs from "node:fs";
 import path from "node:path";
 
 const DEFAULT_MARGINS = { top: 56, bottom: 52, left: 70, right: 70 };
+const BRAND = {
+  primary: "#0b3a7e",
+  primarySoft: "#dbeafe",
+  text: "#0f172a",
+  muted: "#334155",
+  line: "#93c5fd",
+  zebra: "#f8fafc",
+};
 
 function contentWidth(doc) {
   return doc.page.width - doc.page.margins.left - doc.page.margins.right;
@@ -54,20 +62,20 @@ export function drawHeaderFooter(doc, opts = {}) {
   const barH = 32;
   doc
     .rect(left, top - 38, right - left, barH)
-    .fillOpacity(0.06)
-    .fill("#000000");
+    .fillOpacity(1)
+    .fill(BRAND.primarySoft);
 
   doc.fillOpacity(1);
 
   // Title left
   doc
-    .fillColor("#111111")
+    .fillColor(BRAND.primary)
     .font("Helvetica-Bold")
     .fontSize(14)
     .text(displayTitle, left + 10, top - 32, { width: (right - left) * 0.55 });
 
   doc
-    .fillColor("#333333")
+    .fillColor(BRAND.muted)
     .font("Helvetica")
     .fontSize(10)
     .text(subtitle, left + 10, top - 16, { width: (right - left) * 0.55 });
@@ -76,6 +84,7 @@ export function drawHeaderFooter(doc, opts = {}) {
   if (rightText) {
     doc
       .fillColor("#333333")
+      .fillColor(BRAND.muted)
       .font("Helvetica")
       .fontSize(10)
       .text(rightText, left, top - 24, { width: right - left - 10, align: "right" });
@@ -86,8 +95,8 @@ export function drawHeaderFooter(doc, opts = {}) {
     .moveTo(left, top - 6)
     .lineTo(right, top - 6)
     .lineWidth(1)
-    .strokeOpacity(0.25)
-    .stroke("#000000");
+    .strokeOpacity(1)
+    .stroke(BRAND.line);
 
   doc.restore();
 
@@ -104,7 +113,7 @@ export function drawHeaderFooter(doc, opts = {}) {
     .strokeOpacity(0.15)
     .stroke("#000000");
 
-  doc.fillOpacity(1).fillColor("#666666").font("Helvetica").fontSize(8);
+  doc.fillOpacity(1).fillColor(BRAND.muted).font("Helvetica").fontSize(8);
 
   doc.text(`Generated: ${nowStamp()}`, left, footerY, {
     width: (right - left) * 0.6,
@@ -130,7 +139,7 @@ export function buildPdfBuffer(buildFn, opts = {}) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: "A4",
-      layout: opts.layout === "landscape" ? "landscape" : "portrait",
+      layout: opts.layout === "portrait" ? "portrait" : "landscape",
       margins: DEFAULT_MARGINS,
       bufferPages: true,
     });
@@ -194,7 +203,7 @@ export function sectionTitle(doc, text) {
   ensurePageSpace(doc, 40);
 
   doc.moveDown(0.4);
-  doc.font("Helvetica-Bold").fontSize(12).fillColor("#111111");
+  doc.font("Helvetica-Bold").fontSize(12).fillColor(BRAND.primary);
   doc.text(text, doc.page.margins.left, doc.y, { width: contentWidth(doc) });
 
   doc.moveDown(0.2);
@@ -203,11 +212,11 @@ export function sectionTitle(doc, text) {
     .moveTo(doc.page.margins.left, y)
     .lineTo(doc.page.width - doc.page.margins.right, y)
     .lineWidth(1)
-    .strokeOpacity(0.2)
-    .stroke("#000000");
+    .strokeOpacity(1)
+    .stroke(BRAND.line);
 
   doc.moveDown(0.6);
-  doc.font("Helvetica").fillColor("#111111");
+  doc.font("Helvetica").fillColor(BRAND.text);
 }
 
 /**
@@ -217,7 +226,7 @@ export function kvLine(doc, k, v) {
   const left = doc.page.margins.left;
   const w = contentWidth(doc);
 
-  doc.font("Helvetica").fontSize(10).fillColor("#111111");
+  doc.font("Helvetica").fontSize(10).fillColor(BRAND.text);
   doc.text(`${k}: `, left, doc.y, { continued: true, width: w });
   doc.font("Helvetica").text(String(v ?? ""), { width: w });
 }
@@ -234,7 +243,7 @@ export function kvGrid(doc, items, cols = 2) {
   const colW = w / cols;
   const rowH = 14;
 
-  doc.font("Helvetica").fontSize(10).fillColor("#111111");
+  doc.font("Helvetica").fontSize(10).fillColor(BRAND.text);
 
   let x = left;
   let y = doc.y;
@@ -295,11 +304,11 @@ export function table(doc, columns, rows, opts = {}) {
     doc.save();
     doc
       .rect(left, y, w, headerH)
-      .fillOpacity(0.07)
-      .fill("#000000");
+      .fillOpacity(1)
+      .fill(BRAND.primary);
     doc.restore();
 
-    doc.font("Helvetica-Bold").fontSize(headerFontSize).fillColor("#111111");
+    doc.font("Helvetica-Bold").fontSize(headerFontSize).fillColor("#ffffff");
 
     let x = left;
     for (const c of colAbs) {
@@ -312,11 +321,11 @@ export function table(doc, columns, rows, opts = {}) {
       .moveTo(left, y + headerH)
       .lineTo(right, y + headerH)
       .lineWidth(1)
-      .strokeOpacity(0.18)
-      .stroke("#000000");
+      .strokeOpacity(1)
+      .stroke(BRAND.line);
 
     doc.y = y + headerH + 2;
-    doc.font("Helvetica").fontSize(fontSize).fillColor("#111111");
+    doc.font("Helvetica").fontSize(fontSize).fillColor(BRAND.text);
   };
 
   drawHeader();
@@ -351,8 +360,8 @@ export function table(doc, columns, rows, opts = {}) {
       doc.save();
       doc
         .rect(left, y, w, rowDrawH)
-        .fillOpacity(0.03)
-        .fill("#000000");
+        .fillOpacity(1)
+        .fill(BRAND.zebra);
       doc.restore();
     }
 
@@ -368,8 +377,8 @@ export function table(doc, columns, rows, opts = {}) {
       .moveTo(left, y + rowDrawH)
       .lineTo(right, y + rowDrawH)
       .lineWidth(1)
-      .strokeOpacity(0.08)
-      .stroke("#000000");
+      .strokeOpacity(1)
+      .stroke("#e2e8f0");
 
     doc.y = y + rowDrawH;
   }
@@ -385,7 +394,7 @@ export function smallTable(doc, headers, rows) {
   const left = doc.page.margins.left;
   const w = contentWidth(doc);
 
-  doc.font("Helvetica").fontSize(9).fillColor("#111111");
+  doc.font("Helvetica").fontSize(9).fillColor(BRAND.text);
 
   doc.text(headers.join(" | "), left, doc.y, { width: w });
 
