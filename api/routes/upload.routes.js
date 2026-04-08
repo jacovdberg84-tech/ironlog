@@ -485,7 +485,7 @@ export default async function uploadRoutes(app) {
         const source = sourceRaw != null && String(sourceRaw).trim() !== ""
           ? String(sourceRaw).trim()
           : [famsStore, famsOperator, famsDriver].filter(Boolean).join(" | ") || null;
-        const meter_unit = normalizeMeterUnit(pick(r, ["meter_unit", "MeterUnit", "Measurement", "measurement"]));
+        const meter_unit = normalizeMeterUnit(pick(r, ["meter_unit", "MeterUnit", "Measurement", "measurement", "Type", "type"]));
         const meterRunRaw = pick(r, ["meter_run_value", "MeterRunValue", "KMHour", "kmhour", "hours_run"]);
         const meterRunNum = meterRunRaw != null && String(meterRunRaw).trim() !== ""
           ? parseNumberLoose(meterRunRaw, 0)
@@ -512,7 +512,15 @@ export default async function uploadRoutes(app) {
         if (liters <= 0) continue;
         const dayKey = `${asset.id}|${date}`;
         const exists = Boolean(hasExistingForDay.get(asset.id, date));
+        const dailyHoursRun = runFromOpenClose != null ? runFromOpenClose : hours_run;
         if (exists && conflictMode === "skip") {
+          // Even when skipping fuel duplicates, still hydrate daily hours from FAMS meter readings.
+          if (opening_hours != null || closing_hours != null || dailyHoursRun != null) {
+            const operatorName = famsDriver || famsOperator || null;
+            const notesText = famsDesc || source || null;
+            upsertDailyHoursFromFuel.run(asset.id, date, opening_hours, closing_hours, dailyHoursRun, operatorName, notesText);
+            updated_daily_hours += 1;
+          }
           skipped_existing += 1;
           continue;
         }
@@ -522,7 +530,6 @@ export default async function uploadRoutes(app) {
           overwritten_days += 1;
         }
         insert.run(asset.id, date, liters, source, hours_run, meter_unit, meter_run_value);
-        const dailyHoursRun = runFromOpenClose != null ? runFromOpenClose : hours_run;
         if (opening_hours != null || closing_hours != null || dailyHoursRun != null) {
           const operatorName = famsDriver || famsOperator || null;
           const notesText = famsDesc || source || null;
