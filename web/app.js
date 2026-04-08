@@ -2278,8 +2278,15 @@ async function previewIronmindRsgPdf() {
     if (!res.ok) {
       let message = `Preview failed (${res.status})`;
       try {
-        const err = await res.json();
-        message = String(err?.error || message);
+        const raw = await res.text();
+        if (raw) {
+          try {
+            const err = JSON.parse(raw);
+            message = String(err?.error || message);
+          } catch {
+            message = raw.slice(0, 300);
+          }
+        }
       } catch {}
       throw new Error(message);
     }
@@ -2288,7 +2295,8 @@ async function previewIronmindRsgPdf() {
     if (previewWin && !previewWin.closed) {
       previewWin.location.href = blobUrl;
     } else {
-      window.open(blobUrl, "_blank", "noopener");
+      // Popup blocked fallback: open in current tab so preview still works.
+      window.location.href = blobUrl;
     }
     setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
     setStatus("RSG PDF preview opened.");
