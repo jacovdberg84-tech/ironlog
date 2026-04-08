@@ -4508,7 +4508,7 @@ export default async function reportsRoutes(app) {
     const breakdownDateExpr = hasBreakdownStartAt ? "DATE(COALESCE(b.breakdown_date, b.start_at))" : "DATE(b.breakdown_date)";
     const breakdownStatusExpr = hasBreakdownStatus ? "TRIM(LOWER(COALESCE(b.status, '')))" : "''";
     const breakdownStartAtSelect = hasBreakdownStartAt ? "b.start_at" : "NULL AS start_at";
-    const breakdownParams = [date, date, date, date];
+    const breakdownParams = [date, date, date];
     if (hasBreakdownEndAt) breakdownParams.push(date);
     const breakdowns = db.prepare(`
       SELECT
@@ -4516,12 +4516,6 @@ export default async function reportsRoutes(app) {
         a.asset_code,
         b.description,
         dh.notes AS daily_breakdown_comment,
-        COALESCE((
-          SELECT SUM(fl.liters)
-          FROM fuel_logs fl
-          WHERE fl.asset_id = b.asset_id
-            AND fl.log_date = ?
-        ), 0) AS fuel_liters,
         COALESCE(b.${breakdownDowntimeCol}, 0) AS downtime_hours,
         b.critical,
         b.breakdown_date,
@@ -4553,7 +4547,7 @@ export default async function reportsRoutes(app) {
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
       WHERE w.closed_at IS NULL
-        AND TRIM(LOWER(COALESCE(w.status, ''))) IN ('open', 'in_progress')
+        AND TRIM(LOWER(COALESCE(w.status, ''))) NOT IN ('completed', 'approved', 'closed')
       ORDER BY w.id DESC
       LIMIT 30
     `).all();
@@ -4660,16 +4654,14 @@ export default async function reportsRoutes(app) {
           [
             { key: "asset", label: "Asset", width: 0.14 },
             { key: "days", label: "Days down", width: 0.12, align: "right" },
-            { key: "fuel", label: "Fuel used (L)", width: 0.12, align: "right" },
             { key: "hrs", label: "Downtime (hrs)", width: 0.12, align: "right" },
             { key: "crit", label: "Critical", width: 0.10, align: "center" },
-            { key: "desc", label: "Description", width: 0.22 },
-            { key: "comment", label: "Breakdown comment", width: 0.18 },
+            { key: "desc", label: "Description", width: 0.30 },
+            { key: "comment", label: "Breakdown comment", width: 0.22 },
           ],
           breakdownsPdf.map(r => ({
             asset: r.asset_code,
             days: fmtNum(r.days_down || 0, 0),
-            fuel: fmtNum(r.fuel_liters || 0, 1),
             hrs: fmtNum(r.downtime_hours, 1),
             crit: r.critical ? "YES" : "NO",
             desc: compactCell(r.description ?? "", 180),
