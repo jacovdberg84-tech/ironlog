@@ -4542,6 +4542,16 @@ export default async function reportsRoutes(app) {
       days_down: daysDownForBreakdown(r, date),
     }));
 
+    const hasWOCompletedAt = hasColumn("work_orders", "completed_at");
+    const woCompletedFilter = hasWOCompletedAt
+      ? "AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')"
+      : "";
+    const breakdownOpenFilter = hasBreakdownStatus
+      ? `AND (
+          w.source <> 'breakdown'
+          OR TRIM(LOWER(COALESCE(b.status, ''))) IN ('open', 'in_progress')
+        )`
+      : "";
     const openWOs = db.prepare(`
       SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
       FROM work_orders w
@@ -4549,11 +4559,8 @@ export default async function reportsRoutes(app) {
       LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
       WHERE w.closed_at IS NULL
         AND REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
-        AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')
-        AND (
-          w.source <> 'breakdown'
-          OR TRIM(LOWER(COALESCE(b.status, ''))) IN ('open', 'in_progress')
-        )
+        ${woCompletedFilter}
+        ${breakdownOpenFilter}
       ORDER BY w.id DESC
       LIMIT 30
     `).all();
