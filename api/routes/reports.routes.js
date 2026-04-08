@@ -4567,6 +4567,20 @@ export default async function reportsRoutes(app) {
         AND COALESCE(wx.reference_id, -1) = COALESCE(w.reference_id, -1)
         AND REPLACE(TRIM(LOWER(COALESCE(wx.status, ''))), ' ', '_') IN ('completed', 'approved', 'closed')
     )`;
+    const latestActivePerAssetSourceFilter = `AND NOT EXISTS (
+      SELECT 1
+      FROM work_orders wn
+      WHERE wn.asset_id = w.asset_id
+        AND COALESCE(wn.source, '') = COALESCE(w.source, '')
+        AND (
+          COALESCE(wn.opened_at, '') > COALESCE(w.opened_at, '')
+          OR (
+            COALESCE(wn.opened_at, '') = COALESCE(w.opened_at, '')
+            AND wn.id > w.id
+          )
+        )
+        AND REPLACE(TRIM(LOWER(COALESCE(wn.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress', 'completed', 'approved', 'closed')
+    )`;
     const openWOs = db.prepare(`
       SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
       FROM work_orders w
@@ -4577,6 +4591,7 @@ export default async function reportsRoutes(app) {
         ${woCompletedFilter}
         ${breakdownOpenFilter}
         ${noClosedShadowWOFilter}
+        ${latestActivePerAssetSourceFilter}
       ORDER BY w.id DESC
       LIMIT 30
     `).all();
