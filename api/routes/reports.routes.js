@@ -4485,6 +4485,7 @@ export default async function reportsRoutes(app) {
         b.id,
         a.asset_code,
         b.description,
+        dh.notes AS daily_breakdown_comment,
         COALESCE(b.${breakdownDowntimeCol}, 0) AS downtime_hours,
         b.critical,
         b.breakdown_date,
@@ -4497,9 +4498,15 @@ export default async function reportsRoutes(app) {
         ), 0) AS logged_days
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
-      WHERE b.breakdown_date = ?
+      LEFT JOIN daily_hours dh ON dh.asset_id = b.asset_id AND dh.work_date = ?
+      WHERE DATE(COALESCE(b.breakdown_date, b.start_at)) <= ?
+        AND (
+          b.end_at IS NULL
+          OR DATE(b.end_at) >= ?
+          OR TRIM(LOWER(COALESCE(b.status, ''))) IN ('open', 'in_progress')
+        )
       ORDER BY downtime_hours DESC
-    `).all(date).map(r => ({
+    `).all(date, date, date).map(r => ({
       ...r,
       critical: Boolean(r.critical),
       days_down: daysDownForBreakdown(r, date),
@@ -4619,7 +4626,8 @@ export default async function reportsRoutes(app) {
             { key: "days", label: "Days down", width: 0.12, align: "right" },
             { key: "hrs", label: "Downtime (hrs)", width: 0.12, align: "right" },
             { key: "crit", label: "Critical", width: 0.10, align: "center" },
-            { key: "desc", label: "Description", width: 0.52 },
+            { key: "desc", label: "Description", width: 0.30 },
+            { key: "comment", label: "Breakdown comment", width: 0.22 },
           ],
           breakdownsPdf.map(r => ({
             asset: r.asset_code,
@@ -4627,6 +4635,7 @@ export default async function reportsRoutes(app) {
             hrs: fmtNum(r.downtime_hours, 1),
             crit: r.critical ? "YES" : "NO",
             desc: compactCell(r.description ?? "", 140),
+            comment: compactCell(r.daily_breakdown_comment ?? "", 100),
           }))
         );
 

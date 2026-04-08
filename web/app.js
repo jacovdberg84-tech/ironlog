@@ -6497,6 +6497,19 @@ function renderDailyTable() {
     });
     downWrap.appendChild(downHrs);
 
+    const downComment = document.createElement("input");
+    downComment.className = "cellInput";
+    downComment.type = "text";
+    downComment.style.marginLeft = "8px";
+    downComment.style.width = "220px";
+    downComment.placeholder = "Breakdown comment...";
+    downComment.disabled = !r.is_down;
+    downComment.value = String(r.breakdown_comment || "");
+    downComment.addEventListener("input", () => {
+      r.breakdown_comment = String(downComment.value || "").trim();
+    });
+    downWrap.appendChild(downComment);
+
     chkDown.addEventListener("change", () => {
       r.is_down = chkDown.checked;
 
@@ -6507,10 +6520,12 @@ function renderDailyTable() {
       } else {
         r.down_reason = "";
         r.down_hours = null;
+        r.breakdown_comment = "";
       }
 
       reason.disabled = !r.is_down;
       downHrs.disabled = !r.is_down;
+      downComment.disabled = !r.is_down;
 
       validateDailyRows();
       renderDailyTable();
@@ -6599,9 +6614,21 @@ function renderDailyTable() {
     tr.appendChild(tdR);
 
     const tdSt = document.createElement("td");
+    const startYmd = String(r.breakdown_start_date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || "";
+    const calcDaysDown = (() => {
+      if (!startYmd) return null;
+      const endYmd = String(qs("date")?.value || todayLocalYmd());
+      const s = Date.parse(`${startYmd}T00:00:00`);
+      const e = Date.parse(`${endYmd}T00:00:00`);
+      if (!Number.isFinite(s) || !Number.isFinite(e) || e < s) return null;
+      return Math.floor((e - s) / 86400000) + 1;
+    })();
     if (r.is_down) {
       const lockNote = r.is_down && r.down_lock ? `<br><small class="muted">Locked until WO is repaired (status: ${r.lock_wo_status || "-"})</small>` : "";
-      tdSt.innerHTML = `<span class="badge err">DOWN — ${r.down_reason || "No reason"}</span>${lockNote}`;
+      const downMeta = startYmd
+        ? `<br><small class="muted">Started: ${startYmd}${calcDaysDown != null ? ` | Days down: ${calcDaysDown}` : ""}</small>`
+        : "";
+      tdSt.innerHTML = `<span class="badge err">DOWN — ${r.down_reason || "No reason"}</span>${downMeta}${lockNote}`;
     }
     else if (r.error) tdSt.innerHTML = `<span class="badge err">${r.error}</span>`;
     else if (r.warning) tdSt.innerHTML = `<span class="badge warn">${r.warning}</span>`;
@@ -6705,6 +6732,8 @@ async function loadDailyInput() {
       down_reason: "",
       down_hours: null,
       down_lock: false,
+      breakdown_start_date: "",
+      breakdown_comment: ex?.notes ? String(ex.notes) : "",
 
       error: null,
       warning: null,
@@ -6755,7 +6784,8 @@ async function loadDailyInput() {
       row.is_down = true;
       row.down_lock = true;
       row.down_reason = parseDownReasonFromDesc(bd.description);
-        row.lock_wo_status = bd.primary_work_order_status || "";
+      row.lock_wo_status = bd.primary_work_order_status || "";
+      row.breakdown_start_date = String(bd.start_at || bd.breakdown_date || "").trim();
       const downForDate = Number(bd.hours_down_for_date);
       row.down_hours = Number.isFinite(downForDate) && downForDate >= 0
         ? downForDate
@@ -6898,6 +6928,7 @@ renderDailyTable(); // re-render so errorRow highlighting appears
       opening_hours: r.opening_hours,
       closing_hours: r.closing_hours,
       hours_run: r.hours_run,
+      notes: r.is_down ? (String(r.breakdown_comment || "").trim() || null) : null,
     };
 
     try {
