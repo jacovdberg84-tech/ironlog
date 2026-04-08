@@ -2307,6 +2307,50 @@ async function previewIronmindRsgPdf() {
   }
 }
 
+async function downloadIronmindRsgPdf() {
+  const out = qs("ironmindRsgResult");
+  const assetCode = String(qs("ironmindRsgAssetCode")?.value || "").trim().toUpperCase();
+  const serviceHours = Number(qs("ironmindRsgHours")?.value || 2000);
+  if (!assetCode) {
+    if (out) out.textContent = "Asset code is required.";
+    return;
+  }
+  const hours = Number.isFinite(serviceHours) && serviceHours > 0 ? serviceHours : 2000;
+  setStatus("Preparing RSG PDF download...");
+  try {
+    const url = `${API}/api/ironmind/rsg/preview.pdf?asset_code=${encodeURIComponent(assetCode)}&service_hours=${encodeURIComponent(hours)}&download=1`;
+    const res = await fetch(url, { headers: { ...authHeaders() } });
+    if (!res.ok) {
+      let message = `Download failed (${res.status})`;
+      try {
+        const raw = await res.text();
+        if (raw) {
+          try {
+            const err = JSON.parse(raw);
+            message = String(err?.error || message);
+          } catch {
+            message = raw.slice(0, 300);
+          }
+        }
+      } catch {}
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = `RSG_${assetCode}_${hours}h.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+    setStatus("RSG PDF downloaded.");
+  } catch (e) {
+    if (out) out.textContent = String(e.message || e);
+    setStatus("RSG PDF download failed.");
+  }
+}
+
 function parseIronmindSections(text) {
   const defs = [
     { key: "repairs", name: "Repairs Needed" },
@@ -7571,6 +7615,9 @@ async function init() {
   });
   qs("ironmindRsgPreviewPdfBtn")?.addEventListener("click", () => {
     previewIronmindRsgPdf().catch((e) => setStatus("RSG preview error: " + (e.message || e)));
+  });
+  qs("ironmindRsgDownloadPdfBtn")?.addEventListener("click", () => {
+    downloadIronmindRsgPdf().catch((e) => setStatus("RSG download error: " + (e.message || e)));
   });
   qs("ironmindRsgCreateWoBtn")?.addEventListener("click", () => {
     generateIronmindRsgPlan(true).catch((e) => setStatus("RSG create WO error: " + (e.message || e)));
