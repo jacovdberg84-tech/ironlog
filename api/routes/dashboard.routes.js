@@ -1464,6 +1464,7 @@ export default async function dashboardRoutes(app) {
         ON fl.asset_id = a.id
        AND fl.log_date BETWEEN ? AND ?
       WHERE a.active = 1
+        AND UPPER(COALESCE(a.asset_code, '')) NOT GLOB 'V[0-9][0-9]AM'
       GROUP BY a.id
       ORDER BY a.asset_code ASC
     `).all(start, end);
