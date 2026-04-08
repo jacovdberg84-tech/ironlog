@@ -4546,12 +4546,27 @@ export default async function reportsRoutes(app) {
     const woCompletedFilter = hasWOCompletedAt
       ? "AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')"
       : "";
-    const breakdownOpenFilter = hasBreakdownStatus
+    const breakdownOpenChecks = [];
+    if (hasBreakdownStatus) {
+      breakdownOpenChecks.push("TRIM(LOWER(COALESCE(b.status, ''))) IN ('open', 'in_progress')");
+    }
+    if (hasBreakdownEndAt) {
+      breakdownOpenChecks.push("(b.end_at IS NULL OR TRIM(COALESCE(b.end_at, '')) = '')");
+    }
+    const breakdownOpenFilter = breakdownOpenChecks.length
       ? `AND (
           w.source <> 'breakdown'
-          OR TRIM(LOWER(COALESCE(b.status, ''))) IN ('open', 'in_progress')
+          OR (${breakdownOpenChecks.join(" AND ")})
         )`
       : "";
+    const noClosedShadowWOFilter = `AND NOT EXISTS (
+      SELECT 1
+      FROM work_orders wx
+      WHERE wx.source = 'breakdown'
+        AND wx.asset_id = w.asset_id
+        AND COALESCE(wx.reference_id, -1) = COALESCE(w.reference_id, -1)
+        AND REPLACE(TRIM(LOWER(COALESCE(wx.status, ''))), ' ', '_') IN ('completed', 'approved', 'closed')
+    )`;
     const openWOs = db.prepare(`
       SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
       FROM work_orders w
@@ -4561,6 +4576,7 @@ export default async function reportsRoutes(app) {
         AND REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
         ${woCompletedFilter}
         ${breakdownOpenFilter}
+        ${noClosedShadowWOFilter}
       ORDER BY w.id DESC
       LIMIT 30
     `).all();
@@ -4722,7 +4738,7 @@ export default async function reportsRoutes(app) {
       },
       {
         title: "IRONLOG",
-        subtitle: `Daily Operations Report (${reportRevision})`,
+        subtitle: "Daily Operations Report",
         rightText: `Date: ${date}`,
         showPageNumbers: true,
         layout: "landscape",
