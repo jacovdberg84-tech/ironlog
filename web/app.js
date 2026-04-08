@@ -1791,12 +1791,20 @@ async function loadDashboard() {
   const woList = qs("woList");
   if (woList) {
     woList.innerHTML = "";
-    (data.open_work_orders || []).forEach((r) => {
+    const isStrictOpenWO = (r) => {
+      const norm = String(r?.status || "").trim().toLowerCase().replace(/\s+/g, "_");
+      const completedAt = String(r?.completed_at || "").trim();
+      const closedAt = String(r?.closed_at || "").trim();
+      return ["open", "assigned", "in_progress"].includes(norm) && !completedAt && !closedAt;
+    };
+    const openRows = (data.open_work_orders || []).filter(isStrictOpenWO);
+    setText("aOpenWO", openRows.length);
+    openRows.forEach((r) => {
       woList.appendChild(
         item(`<b>WO #${r.id}</b> – ${r.asset_code}<br><small>${r.source} | ${r.status} | ${r.opened_at}</small>`)
       );
     });
-    if (!data.open_work_orders?.length) woList.appendChild(item("<small>No open work orders.</small>"));
+    if (!openRows.length) woList.appendChild(item("<small>No open work orders.</small>"));
   }
 
   const riskBoardList = qs("riskBoardList");
