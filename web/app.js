@@ -2271,6 +2271,7 @@ async function previewIronmindRsgPdf() {
   }
   const hours = Number.isFinite(serviceHours) && serviceHours > 0 ? serviceHours : 2000;
   setStatus("Generating RSG PDF preview...");
+  const previewWin = window.open("", "_blank", "noopener");
   try {
     const url = `${API}/api/ironmind/rsg/preview.pdf?asset_code=${encodeURIComponent(assetCode)}&service_hours=${encodeURIComponent(hours)}`;
     const res = await fetch(url, { headers: { ...authHeaders() } });
@@ -2284,10 +2285,15 @@ async function previewIronmindRsgPdf() {
     }
     const blob = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
-    window.open(blobUrl, "_blank", "noopener");
+    if (previewWin && !previewWin.closed) {
+      previewWin.location.href = blobUrl;
+    } else {
+      window.open(blobUrl, "_blank", "noopener");
+    }
     setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
     setStatus("RSG PDF preview opened.");
   } catch (e) {
+    if (previewWin && !previewWin.closed) previewWin.close();
     if (out) out.textContent = String(e.message || e);
     setStatus("RSG PDF preview failed.");
   }
