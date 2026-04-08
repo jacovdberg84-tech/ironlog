@@ -63,6 +63,115 @@ export default async function ironmindRoutes(app) {
     const deny = new Set(["PLEASE", "DOWNTIME", "SELECTED", "TIME", "FROM", "TO", "AND", "THE", "FOR", "FUEL", "USAGE", "RECURRING", "FAILURES", "PM", "OVERDUE", "RISK"]);
     return (m.find((x) => !deny.has(x)) || "").trim();
   }
+  function hasColumn(table, col) {
+    const rows = db.prepare(`PRAGMA table_info(${table})`).all();
+    return rows.some((r) => String(r.name) === col);
+  }
+  function getAiConfig() {
+    const openaiKey = process.env.OPENAI_API_KEY;
+    const openaiModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
+    if (openaiKey) return { provider: "openai", apiKey: openaiKey, model: openaiModel };
+    return { provider: null };
+  }
+  async function tryGenerateRsgPlanWithAi({ equipmentLabel, serviceHours }) {
+    const cfg = getAiConfig();
+    if (!cfg.provider) return null;
+    const system = [
+      "You are a heavy-equipment maintenance planner.",
+      "Return strict JSON only.",
+      "Schema: {service_title:string,tasks:[string],oils:[{name:string,qty:number,unit:string}],checks:[string],post_service_checks:[string],safety:[string]}",
+      "Use practical values. If exact OEM value is unknown, provide conservative estimate and mention 'verify with OEM manual' in checks.",
+    ].join(" ");
+    const user = `Generate a ${serviceHours} hour Recommended Service Guide for ${equipmentLabel}. Include key tasks, oil/lube quantities, checks before release, and safety steps.`;
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${cfg.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        temperature: 0.2,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const content = String(data?.choices?.[0]?.message?.content || "").trim();
+    const start = content.indexOf("{");
+    const end = content.lastIndexOf("}");
+    if (start < 0 || end < start) return null;
+    try {
+      const parsed = JSON.parse(content.slice(start, end + 1));
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+  function buildFallbackRsgPlan({ equipmentLabel, serviceHours }) {
+    return {
+      service_title: `${equipmentLabel} - ${serviceHours}hr service`,
+      tasks: [
+        "Drain and replace engine oil and filters",
+        "Replace hydraulic return/pilot filters and inspect suction strainers",
+        "Replace fuel filters and water separator element",
+        "Inspect air intake system and replace air filters if restricted",
+        "Inspect undercarriage, pins/bushings, and grease all lubrication points",
+        "Inspect cooling pack; clean cores and verify fan operation",
+      ],
+      oils: [
+        { name: "Engine oil", qty: 32, unit: "L" },
+        { name: "Final drive oil (each side)", qty: 8, unit: "L" },
+        { name: "Swing drive oil", qty: 6, unit: "L" },
+        { name: "Grease", qty: 3, unit: "kg" },
+      ],
+      checks: [
+        "Verify exact capacities against OEM manual before fill",
+        "Inspect for leaks at all changed filters and drain points",
+        "Record hourmeter and service completion in maintenance history",
+      ],
+      post_service_checks: [
+        "Warm-up run for 15-20 minutes and re-check fluid levels",
+        "Check fault codes and confirm no active alarms",
+        "Function-test boom/arm/bucket/swing/travel and verify operating pressures",
+      ],
+      safety: [
+        "LOTO and isolate machine before service",
+        "Use spill kits and approved waste-oil disposal process",
+        "Use calibrated torque specs for critical fasteners",
+      ],
+    };
+  }
+  function normalizeRsgPlan(raw, equipmentLabel, serviceHours) {
+    const fallback = buildFallbackRsgPlan({ equipmentLabel, serviceHours });
+    const plan = raw && typeof raw === "object" ? raw : {};
+    const asList = (v, fb) => Array.isArray(v) ? v.map((x) => String(x || "").trim()).filter(Boolean) : fb;
+    const oils = Array.isArray(plan.oils)
+      ? plan.oils
+          .map((o) => ({
+            name: String(o?.name || "").trim(),
+            qty: Number(o?.qty),
+            unit: String(o?.unit || "").trim() || "L",
+          }))
+          .filter((o) => o.name && Number.isFinite(o.qty) && o.qty > 0)
+      : fallback.oils;
+    return {
+      service_title: String(plan.service_title || fallback.service_title),
+      tasks: asList(plan.tasks, fallback.tasks),
+      oils,
+      checks: asList(plan.checks, fallback.checks),
+      post_service_checks: asList(plan.post_service_checks, fallback.post_service_checks),
+      safety: asList(plan.safety, fallback.safety),
+    };
+  }
+  async function buildRsgPlan({ assetCode, equipmentName, serviceHours }) {
+    const label = [assetCode, equipmentName].filter(Boolean).join(" - ") || "Equipment";
+    const aiPlan = await tryGenerateRsgPlanWithAi({ equipmentLabel: label, serviceHours });
+    return normalizeRsgPlan(aiPlan, label, serviceHours);
+  }
 
   app.get("/history", async (req, reply) => {
     try {
@@ -295,6 +404,85 @@ export default async function ironmindRoutes(app) {
           has_open_breakdown: Boolean(openBreakdown),
           open_breakdown_date: openBreakdown?.breakdown_date || null,
         },
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // POST /api/ironmind/rsg/plan
+  // Body: { asset_code?, equipment_name?, service_hours? }
+  app.post("/rsg/plan", async (req, reply) => {
+    try {
+      const body = req.body || {};
+      const serviceHours = Math.max(250, Number(body.service_hours || 2000));
+      let assetCode = String(body.asset_code || "").trim().toUpperCase();
+      let equipmentName = String(body.equipment_name || "").trim();
+      if (assetCode) {
+        const a = db.prepare(`SELECT asset_code, asset_name FROM assets WHERE UPPER(asset_code)=UPPER(?) LIMIT 1`).get(assetCode);
+        if (a) {
+          assetCode = String(a.asset_code || assetCode).toUpperCase();
+          if (!equipmentName) equipmentName = String(a.asset_name || "");
+        }
+      }
+      const plan = await buildRsgPlan({ assetCode, equipmentName, serviceHours });
+      return reply.send({ ok: true, asset_code: assetCode || null, equipment_name: equipmentName || null, service_hours: serviceHours, plan });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // POST /api/ironmind/rsg/create-wo
+  // Body: { asset_code, service_hours?, equipment_name? }
+  app.post("/rsg/create-wo", async (req, reply) => {
+    try {
+      const body = req.body || {};
+      const assetCode = String(body.asset_code || "").trim().toUpperCase();
+      const serviceHours = Math.max(250, Number(body.service_hours || 2000));
+      const equipmentNameIn = String(body.equipment_name || "").trim();
+      if (!assetCode) return reply.code(400).send({ ok: false, error: "asset_code is required" });
+      const asset = db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE UPPER(asset_code)=UPPER(?) LIMIT 1`).get(assetCode);
+      if (!asset) return reply.code(404).send({ ok: false, error: `asset not found: ${assetCode}` });
+      const equipmentName = equipmentNameIn || String(asset.asset_name || "");
+      const plan = await buildRsgPlan({ assetCode: asset.asset_code, equipmentName, serviceHours });
+
+      const wo = db.prepare(`
+        INSERT INTO work_orders (asset_id, source, reference_id, status)
+        VALUES (?, ?, NULL, 'open')
+      `).run(asset.id, `rsg_${serviceHours}h_service`);
+      const woId = Number(wo.lastInsertRowid || 0);
+
+      if (woId > 0 && hasColumn("work_orders", "completion_notes")) {
+        const notes = [
+          `RSG Service Guide: ${plan.service_title}`,
+          "",
+          "Tasks:",
+          ...plan.tasks.map((t) => `- ${t}`),
+          "",
+          "Oil / Lubricants:",
+          ...plan.oils.map((o) => `- ${o.name}: ${o.qty} ${o.unit}`),
+          "",
+          "Checks:",
+          ...plan.checks.map((c) => `- ${c}`),
+          "",
+          "Post-service checks:",
+          ...plan.post_service_checks.map((c) => `- ${c}`),
+          "",
+          "Safety:",
+          ...plan.safety.map((s) => `- ${s}`),
+        ].join("\n");
+        db.prepare(`UPDATE work_orders SET completion_notes = ? WHERE id = ?`).run(notes, woId);
+      }
+
+      return reply.send({
+        ok: true,
+        work_order_id: woId,
+        asset_code: String(asset.asset_code || assetCode),
+        service_hours: serviceHours,
+        source: `rsg_${serviceHours}h_service`,
+        plan,
       });
     } catch (err) {
       req.log.error(err);

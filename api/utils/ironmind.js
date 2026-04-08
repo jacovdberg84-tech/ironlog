@@ -115,6 +115,12 @@ function hasColumn(table, col) {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all();
   return rows.some((r) => String(r.name) === col);
 }
+function hasTable(name) {
+  const row = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?")
+    .get(String(name || ""));
+  return Boolean(row);
+}
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -550,11 +556,16 @@ function buildStructuredData(reportDate) {
     incidents: Number(r.incidents || 0),
   }));
 
-  const siteOpsCount = db.prepare(`
-    SELECT COUNT(*) AS c
-    FROM operations_daily
-    WHERE operation_date = ?
-  `).get(reportDate);
+  const siteOpsDateCol = hasColumn("operations_daily", "operation_date")
+    ? "operation_date"
+    : (hasColumn("operations_daily", "op_date") ? "op_date" : null);
+  const siteOpsCount = (hasTable("operations_daily") && siteOpsDateCol)
+    ? db.prepare(`
+      SELECT COUNT(*) AS c
+      FROM operations_daily
+      WHERE ${siteOpsDateCol} = ?
+    `).get(reportDate)
+    : { c: 0 };
   const hasFuelBaseline = hasColumn("assets", "baseline_fuel_l_per_hour");
   const recurringFailures30d = db.prepare(`
     SELECT
