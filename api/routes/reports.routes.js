@@ -1606,6 +1606,9 @@ export default async function reportsRoutes(app) {
     `).get(start, end);
 
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
     const pdf = await buildPdfBuffer(
       (doc) => {
         tryDrawLogo(doc, logoPath);
@@ -1660,6 +1663,9 @@ export default async function reportsRoutes(app) {
   // =========================
   // GET /api/reports/fuel-benchmark.pdf?start=YYYY-MM-DD&end=YYYY-MM-DD&tolerance=0.15&download=1
   app.get("/fuel-benchmark.pdf", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
     const start = String(req.query?.start || "").trim();
     const end = String(req.query?.end || "").trim();
     const toleranceInput = Number(req.query?.tolerance ?? 0.15);
@@ -4501,9 +4507,8 @@ export default async function reportsRoutes(app) {
     const hasBreakdownStartAt = hasColumn("breakdowns", "start_at");
     const breakdownDateExpr = hasBreakdownStartAt ? "DATE(COALESCE(b.breakdown_date, b.start_at))" : "DATE(b.breakdown_date)";
     const breakdownStatusExpr = hasBreakdownStatus ? "TRIM(LOWER(COALESCE(b.status, '')))" : "''";
-    const breakdownEndAtExpr = hasBreakdownEndAt ? "DATE(b.end_at)" : "NULL";
     const breakdownStartAtSelect = hasBreakdownStartAt ? "b.start_at" : "NULL AS start_at";
-    const breakdownParams = [date, date];
+    const breakdownParams = [date, date, date, date];
     if (hasBreakdownEndAt) breakdownParams.push(date);
     const breakdowns = db.prepare(`
       SELECT
@@ -4729,6 +4734,9 @@ export default async function reportsRoutes(app) {
   // WEEKLY PDF
   // =========================
   app.get("/weekly.pdf", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
     const start = String(req.query?.start || "").trim();
     const end = String(req.query?.end || "").trim();
     const scheduled = Number(req.query?.scheduled ?? 10);
