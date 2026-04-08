@@ -3635,6 +3635,7 @@ async function doUpload() {
 
 async function importFamsFuelFile() {
   const fileEl = qs("fuelFamsFile");
+  const modeEl = qs("fuelFamsConflictMode");
   const resultEl = qs("fuelFamsResult");
   if (!fileEl || !resultEl) return;
 
@@ -3643,11 +3644,13 @@ async function importFamsFuelFile() {
 
   const fd = new FormData();
   fd.append("file", file);
+  const conflictMode = String(modeEl?.value || "skip").trim().toLowerCase();
+  const mode = ["skip", "overwrite"].includes(conflictMode) ? conflictMode : "skip";
 
   setStatus("Importing FAMS fuel file...");
   resultEl.textContent = "";
   try {
-    const res = await fetchJson(`${API}/api/upload/fuel`, { method: "POST", body: fd });
+    const res = await fetchJson(`${API}/api/upload/fuel?on_conflict=${encodeURIComponent(mode)}`, { method: "POST", body: fd });
     resultEl.textContent = JSON.stringify(res, null, 2);
     setStatus("FAMS fuel import complete.");
     await loadDashboard().catch(() => {});

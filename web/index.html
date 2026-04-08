@@ -767,10 +767,14 @@
           <summary><b>Import FAMS fuel file</b> (direct)</summary>
           <p class="muted" style="margin:6px 0 0 0;">
             Upload the FAMS export directly (columns like
-            <code>Registration, Date, Measurement, KMHour, Volume</code>).
+            <code>Reg/Registration, Date, Volume, Measurement, KMHour</code>).
           </p>
           <div class="row">
             <input id="fuelFamsFile" type="file" accept=".csv,.txt" />
+            <select id="fuelFamsConflictMode" class="w-180">
+              <option value="skip">Skip existing days</option>
+              <option value="overwrite">Overwrite existing days</option>
+            </select>
             <button id="fuelFamsUploadBtn" type="button">Import FAMS Fuel File</button>
           </div>
           <pre class="output" id="fuelFamsResult"></pre>

@@ -311,6 +311,9 @@ export default async function uploadRoutes(app) {
     const file = await req.file();
     if (!file) return reply.code(400).send({ error: "Upload a CSV file field named 'file'." });
 
+    const conflictModeRaw = String(req.query?.on_conflict || "skip").trim().toLowerCase();
+    const conflictMode = ["skip", "overwrite"].includes(conflictModeRaw) ? conflictModeRaw : "skip";
+
     const buf = await file.toBuffer();
     let rows = parseCsvToObjects(buf);
 
@@ -392,7 +395,7 @@ export default async function uploadRoutes(app) {
     const headerSet = new Set(headerKeys.map(normalizeHeader));
     const hasHeaders = (...aliases) => aliases.some((a) => headerSet.has(normalizeHeader(a)));
     const hasIronlogShape = hasHeaders("asset_code") && hasHeaders("log_date") && hasHeaders("liters");
-    const hasFamsShape = hasHeaders("registration") && hasHeaders("date") && hasHeaders("volume");
+    const hasFamsShape = hasHeaders("registration", "reg") && hasHeaders("date") && hasHeaders("volume");
     if (!hasIronlogShape && !hasFamsShape) {
       throw new Error(
         `Missing required fuel columns. Found: ${headerKeys.join(", ") || "(none)"}`
@@ -402,6 +405,18 @@ export default async function uploadRoutes(app) {
     const insert = db.prepare(`
       INSERT INTO fuel_logs (asset_id, log_date, liters, source, hours_run, meter_unit, meter_run_value)
       VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const hasExistingForDay = db.prepare(`
+      SELECT 1
+      FROM fuel_logs
+      WHERE asset_id = ?
+        AND log_date = ?
+      LIMIT 1
+    `);
+    const deleteExistingForDay = db.prepare(`
+      DELETE FROM fuel_logs
+      WHERE asset_id = ?
+        AND log_date = ?
     `);
 
     function pick(r, keys) {
@@ -428,8 +443,13 @@ export default async function uploadRoutes(app) {
     }
 
     const tx = db.transaction(() => {
+      let inserted = 0;
+      let skipped_existing = 0;
+      let overwritten_days = 0;
+      const deletedDayKeys = new Set();
+
       for (const r of rows) {
-        const assetCode = String(pick(r, ["asset_code", "AssetCode", "ASSET_CODE", "Registration", "registration"]) || "").trim();
+        const assetCode = String(pick(r, ["asset_code", "AssetCode", "ASSET_CODE", "Registration", "registration", "Reg", "reg"]) || "").trim();
         const asset = getAssetIdByCode.get(assetCode);
         if (!asset) continue;
 
@@ -454,13 +474,34 @@ export default async function uploadRoutes(app) {
         const hours_run = hoursRunRaw != null && hoursRunRaw >= 0 ? hoursRunRaw : (meter_unit === "hours" ? meter_run_value : null);
 
         if (liters <= 0) continue;
+        const dayKey = `${asset.id}|${date}`;
+        const exists = Boolean(hasExistingForDay.get(asset.id, date));
+        if (exists && conflictMode === "skip") {
+          skipped_existing += 1;
+          continue;
+        }
+        if (exists && conflictMode === "overwrite" && !deletedDayKeys.has(dayKey)) {
+          deleteExistingForDay.run(asset.id, date);
+          deletedDayKeys.add(dayKey);
+          overwritten_days += 1;
+        }
         insert.run(asset.id, date, liters, source, hours_run, meter_unit, meter_run_value);
+        inserted += 1;
       }
+
+      return { inserted, skipped_existing, overwritten_days };
     });
 
-    tx();
+    const summary = tx();
 
-    return reply.send({ ok: true, imported: rows.length });
+    return reply.send({
+      ok: true,
+      mode: conflictMode,
+      parsed_rows: rows.length,
+      inserted: Number(summary.inserted || 0),
+      skipped_existing: Number(summary.skipped_existing || 0),
+      overwritten_days: Number(summary.overwritten_days || 0),
+    });
   });
 
   // -------------------------
