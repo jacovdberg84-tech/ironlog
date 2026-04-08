@@ -4735,24 +4735,9 @@ export default async function reportsRoutes(app) {
           }))
         );
 
-        sectionTitle(doc, "Open Work Orders");
-        table(
-          doc,
-          [
-            { key: "wo", label: "WO#", width: 0.12, align: "right" },
-            { key: "asset", label: "Asset", width: 0.14 },
-            { key: "source", label: "Source", width: 0.20 },
-            { key: "status", label: "Status", width: 0.14 },
-            { key: "opened", label: "Opened", width: 0.40 },
-          ],
-          openWOsPdf.map(r => ({
-            wo: String(r.id),
-            asset: r.asset_code,
-            source: compactCell(r.source ?? "", 24),
-            status: compactCell(r.status ?? "", 24),
-            opened: r.opened_at ?? "",
-          }))
-        );
+        // Open Work Orders section intentionally omitted in Daily PDF.
+        // Current data contains stale legacy WO lifecycle rows that can show closed
+        // work orders as open in some environments.
 
         sectionTitle(doc, "Critical Stock (Top 20)");
         table(
