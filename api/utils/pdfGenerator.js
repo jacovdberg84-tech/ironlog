@@ -275,10 +275,13 @@ export function table(doc, columns, rows, opts = {}) {
   const right = doc.page.width - doc.page.margins.right;
   const w = right - left;
 
-  const fontSize = opts.fontSize ?? 9;
-  const headerFontSize = opts.headerFontSize ?? 9;
-  const rowPadY = opts.rowPadY ?? 4;
-  const headerPadY = opts.headerPadY ?? 5;
+  const compactAuto = opts.compact != null
+    ? Boolean(opts.compact)
+    : (columns.length >= 8 || w < 700);
+  const fontSize = opts.fontSize ?? (compactAuto ? 8 : 9);
+  const headerFontSize = opts.headerFontSize ?? (compactAuto ? 8 : 9);
+  const rowPadY = opts.rowPadY ?? (compactAuto ? 3 : 4);
+  const headerPadY = opts.headerPadY ?? (compactAuto ? 4 : 5);
 
   // compute absolute column widths
   const colAbs = columns.map((c) => ({
@@ -335,7 +338,7 @@ export function table(doc, columns, rows, opts = {}) {
     for (const c of colAbs) {
       const val = row?.[c.key];
       const txt = String(val ?? "");
-      const h = doc.heightOfString(txt, { width: c.absW - 8, align: c.align });
+      const h = doc.heightOfString(txt, { width: c.absW - 8, align: c.align, lineBreak: true });
       if (h > maxTextH) maxTextH = h;
     }
     return Math.max(rowH, Math.ceil(maxTextH + rowPadY * 2));
@@ -368,7 +371,12 @@ export function table(doc, columns, rows, opts = {}) {
     let x = left;
     for (const c of colAbs) {
       const val = rows[i]?.[c.key];
-      doc.text(String(val ?? ""), x + 4, y + rowPadY, { width: c.absW - 8, align: c.align });
+      doc.text(String(val ?? ""), x + 4, y + rowPadY, {
+        width: c.absW - 8,
+        align: c.align,
+        lineBreak: true,
+        ellipsis: false,
+      });
       x += c.absW;
     }
 
