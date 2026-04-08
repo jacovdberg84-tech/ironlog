@@ -74,7 +74,77 @@ export default async function ironmindRoutes(app) {
     if (openaiKey) return { provider: "openai", apiKey: openaiKey, model: openaiModel };
     return { provider: null };
   }
-  async function tryGenerateRsgPlanWithAi({ equipmentLabel, serviceHours }) {
+  function getAssetOilProfile(assetId, limit = 6) {
+    const id = Number(assetId || 0);
+    if (!id) return [];
+    const hasOilLogs = db.prepare(`
+      SELECT 1 AS ok
+      FROM sqlite_master
+      WHERE type='table' AND name='oil_logs'
+      LIMIT 1
+    `).get();
+    if (!hasOilLogs) return [];
+
+    const hasMappings = db.prepare(`
+      SELECT 1 AS ok
+      FROM sqlite_master
+      WHERE type='table' AND name='lube_type_mappings'
+      LIMIT 1
+    `).get();
+    const hasParts = db.prepare(`
+      SELECT 1 AS ok
+      FROM sqlite_master
+      WHERE type='table' AND name='parts'
+      LIMIT 1
+    `).get();
+
+    const rows = db.prepare(`
+      SELECT
+        COALESCE(NULLIF(TRIM(o.oil_type), ''), 'UNSPECIFIED') AS oil_key,
+        COUNT(*) AS fills,
+        COALESCE(SUM(o.quantity), 0) AS qty_total,
+        MAX(o.log_date) AS last_used
+      FROM oil_logs o
+      WHERE o.asset_id = ?
+      GROUP BY COALESCE(NULLIF(TRIM(o.oil_type), ''), 'UNSPECIFIED')
+      ORDER BY fills DESC, qty_total DESC, last_used DESC
+      LIMIT ?
+    `).all(id, Number(limit));
+
+    if (!rows.length) return [];
+
+    let mappingByOil = new Map();
+    if (hasMappings && hasParts) {
+      const mapped = db.prepare(`
+        SELECT
+          LOWER(TRIM(m.oil_key)) AS oil_key_lc,
+          TRIM(m.part_code) AS part_code,
+          TRIM(p.part_name) AS part_name
+        FROM lube_type_mappings m
+        LEFT JOIN parts p ON UPPER(TRIM(p.part_code)) = UPPER(TRIM(m.part_code))
+      `).all();
+      mappingByOil = new Map(
+        mapped
+          .filter((r) => String(r.oil_key_lc || "").trim() !== "")
+          .map((r) => [String(r.oil_key_lc).trim(), { part_code: r.part_code || "", part_name: r.part_name || "" }])
+      );
+    }
+
+    return rows.map((r) => {
+      const oilKey = String(r.oil_key || "").trim();
+      const mapped = mappingByOil.get(oilKey.toLowerCase()) || null;
+      const label = mapped?.part_name
+        ? `${oilKey} (${mapped.part_name}${mapped.part_code ? ` - ${mapped.part_code}` : ""})`
+        : oilKey;
+      return {
+        name: label,
+        qty: Number(Number(r.qty_total || 0).toFixed(2)),
+        unit: "L",
+      };
+    }).filter((o) => o.name && Number.isFinite(o.qty) && o.qty > 0);
+  }
+
+  async function tryGenerateRsgPlanWithAi({ equipmentLabel, serviceHours, preferredOils = [] }) {
     const cfg = getAiConfig();
     if (!cfg.provider) return null;
     const system = [
@@ -83,7 +153,10 @@ export default async function ironmindRoutes(app) {
       "Schema: {service_title:string,tasks:[string],oils:[{name:string,qty:number,unit:string}],checks:[string],post_service_checks:[string],safety:[string]}",
       "Use practical values. If exact OEM value is unknown, provide conservative estimate and mention 'verify with OEM manual' in checks.",
     ].join(" ");
-    const user = `Generate a ${serviceHours} hour Recommended Service Guide for ${equipmentLabel}. Include key tasks, oil/lube quantities, checks before release, and safety steps.`;
+    const oilHint = preferredOils.length
+      ? `Use these site oils and quantities as the default unless clearly unsafe: ${preferredOils.map((o) => `${o.name} ${o.qty}${o.unit || "L"}`).join("; ")}.`
+      : "If exact oil grades are uncertain, keep conservative values and tell user to verify with OEM manual.";
+    const user = `Generate a ${serviceHours} hour Recommended Service Guide for ${equipmentLabel}. Include key tasks, oil/lube quantities, checks before release, and safety steps. ${oilHint}`;
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -168,10 +241,21 @@ export default async function ironmindRoutes(app) {
       safety: asList(plan.safety, fallback.safety),
     };
   }
-  async function buildRsgPlan({ assetCode, equipmentName, serviceHours }) {
+  async function buildRsgPlan({ assetId, assetCode, equipmentName, serviceHours }) {
     const label = [assetCode, equipmentName].filter(Boolean).join(" - ") || "Equipment";
-    const aiPlan = await tryGenerateRsgPlanWithAi({ equipmentLabel: label, serviceHours });
-    return normalizeRsgPlan(aiPlan, label, serviceHours);
+    const preferredOils = getAssetOilProfile(assetId, 6);
+    const aiPlan = await tryGenerateRsgPlanWithAi({ equipmentLabel: label, serviceHours, preferredOils });
+    const plan = normalizeRsgPlan(aiPlan, label, serviceHours);
+
+    // Prefer real site-recorded oils/quantities when available for this asset.
+    if (preferredOils.length) {
+      plan.oils = preferredOils;
+      plan.checks = [
+        ...plan.checks,
+        "Oil types and quantities are sourced from site oil history for this asset; verify against OEM service manual before execution.",
+      ];
+    }
+    return plan;
   }
 
   app.get("/history", async (req, reply) => {
@@ -427,7 +511,15 @@ export default async function ironmindRoutes(app) {
           if (!equipmentName) equipmentName = String(a.asset_name || "");
         }
       }
-      const plan = await buildRsgPlan({ assetCode, equipmentName, serviceHours });
+      const assetRow = assetCode
+        ? db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE UPPER(asset_code)=UPPER(?) LIMIT 1`).get(assetCode)
+        : null;
+      const plan = await buildRsgPlan({
+        assetId: Number(assetRow?.id || 0),
+        assetCode,
+        equipmentName: equipmentName || String(assetRow?.asset_name || ""),
+        serviceHours,
+      });
       return reply.send({ ok: true, asset_code: assetCode || null, equipment_name: equipmentName || null, service_hours: serviceHours, plan });
     } catch (err) {
       req.log.error(err);
@@ -447,7 +539,7 @@ export default async function ironmindRoutes(app) {
       const asset = db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE UPPER(asset_code)=UPPER(?) LIMIT 1`).get(assetCode);
       if (!asset) return reply.code(404).send({ ok: false, error: `asset not found: ${assetCode}` });
       const equipmentName = equipmentNameIn || String(asset.asset_name || "");
-      const plan = await buildRsgPlan({ assetCode: asset.asset_code, equipmentName, serviceHours });
+      const plan = await buildRsgPlan({ assetId: asset.id, assetCode: asset.asset_code, equipmentName, serviceHours });
 
       const wo = db.prepare(`
         INSERT INTO work_orders (asset_id, source, reference_id, status)
@@ -503,6 +595,7 @@ export default async function ironmindRoutes(app) {
       if (!asset) return reply.code(404).send({ ok: false, error: `asset not found: ${assetCodeIn}` });
 
       const plan = await buildRsgPlan({
+        assetId: asset.id,
         assetCode: String(asset.asset_code || assetCodeIn),
         equipmentName: String(asset.asset_name || ""),
         serviceHours,
