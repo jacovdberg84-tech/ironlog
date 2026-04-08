@@ -428,6 +428,15 @@ export default async function uploadRoutes(app) {
       WHERE asset_id = ?
         AND log_date = ?
     `);
+    const updateExistingFuelDayMeters = db.prepare(`
+      UPDATE fuel_logs
+      SET
+        meter_unit = COALESCE(?, meter_unit),
+        meter_run_value = COALESCE(?, meter_run_value),
+        hours_run = COALESCE(?, hours_run)
+      WHERE asset_id = ?
+        AND log_date = ?
+    `);
     const getDailyHoursByDay = db.prepare(`
       SELECT opening_hours, closing_hours, hours_run
       FROM daily_hours
@@ -548,6 +557,8 @@ export default async function uploadRoutes(app) {
         const exists = Boolean(hasExistingForDay.get(asset.id, date));
         const dailyHoursRun = runFromOpenClose != null ? runFromOpenClose : hours_run;
         if (exists && conflictMode === "skip") {
+          // Backfill meter/hour fields on existing fuel day rows.
+          updateExistingFuelDayMeters.run(meter_unit, meter_run_value, dailyHoursRun, asset.id, date);
           // Even when skipping fuel duplicates, still hydrate daily hours from FAMS meter readings.
           if (opening_hours != null || closing_hours != null || dailyHoursRun != null) {
             const operatorName = famsDriver || famsOperator || null;
