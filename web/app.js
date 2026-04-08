@@ -575,10 +575,10 @@ async function fetchJson(url, opts) {
 
 function getRoleAllowedTabs(role) {
   const r = String(role || "").toLowerCase();
-  if (r === "operator") return ["dash", "daily", "fuel", "lube", "legal", "operations", "docs", "vehicle"];
-  if (r === "artisan") return ["dash", "maintenance", "Breakdowns", "reports", "fuel", "lube", "legal", "operations", "dispatch", "docs", "vehicle"];
-  if (r === "stores") return ["dash", "maintenance", "stock", "uploads", "reports", "legal", "procurement", "operations", "dispatch", "quality", "docs", "vehicle"];
-  if (r === "supervisor") return ["dash", "daily", "assets", "maintenance", "fuel", "lube", "stock", "legal", "uploads", "reports", "Breakdowns", "approvals", "procurement", "operations", "dispatch", "quality", "audit", "docs", "vehicle"];
+  if (r === "operator") return ["dash", "daily", "fuel", "lube", "legal", "operations", "ironmind", "docs", "vehicle"];
+  if (r === "artisan") return ["dash", "maintenance", "Breakdowns", "reports", "fuel", "lube", "legal", "operations", "dispatch", "ironmind", "docs", "vehicle"];
+  if (r === "stores") return ["dash", "maintenance", "stock", "uploads", "reports", "legal", "procurement", "operations", "dispatch", "quality", "ironmind", "docs", "vehicle"];
+  if (r === "supervisor") return ["dash", "daily", "assets", "maintenance", "fuel", "lube", "stock", "legal", "uploads", "reports", "Breakdowns", "approvals", "procurement", "operations", "dispatch", "quality", "audit", "ironmind", "docs", "vehicle"];
   return [
     "dash",
     "daily",
@@ -597,6 +597,7 @@ function getRoleAllowedTabs(role) {
     "dispatch",
     "quality",
     "audit",
+    "ironmind",
     "docs",
     "vehicle",
     "admin",
@@ -3640,6 +3641,10 @@ function initTabs() {
   const tabSelect = qs("tabSelect");
   if (!tabSelect) return;
   tabSelect.addEventListener("change", () => switchTab(tabSelect.value));
+  const urlTab = String(new URLSearchParams(window.location.search).get("tab") || "").trim();
+  if (urlTab && tabSelect.querySelector(`option[value="${urlTab}"]`)) {
+    tabSelect.value = urlTab;
+  }
   if (!document.querySelector(".panel.show")) {
     switchTab(tabSelect.value || "dash");
   }
