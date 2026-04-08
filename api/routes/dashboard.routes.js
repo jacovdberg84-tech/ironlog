@@ -475,8 +475,8 @@ export default async function dashboardRoutes(app) {
       SELECT COUNT(*) AS c
       FROM work_orders w
       LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
-      WHERE REPLACE(TRIM(LOWER(COALESCE(status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
-        AND (closed_at IS NULL OR TRIM(COALESCE(closed_at, '')) = '')
+      WHERE REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
+        AND (w.closed_at IS NULL OR TRIM(COALESCE(w.closed_at, '')) = '')
         ${woCompletedFilter}
         ${breakdownOpenFilter}
     `).get();
