@@ -4581,7 +4581,17 @@ export default async function reportsRoutes(app) {
         )
         AND REPLACE(TRIM(LOWER(COALESCE(wn.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress', 'completed', 'approved', 'closed')
     )`;
-    const closeApprovalFilter = hasTable("approval_requests")
+    const hasApprovalRequestsTable = (() => {
+      try {
+        const row = db
+          .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?")
+          .get("approval_requests");
+        return Boolean(row);
+      } catch {
+        return false;
+      }
+    })();
+    const closeApprovalFilter = hasApprovalRequestsTable
       ? `AND NOT EXISTS (
           SELECT 1
           FROM approval_requests ar
