@@ -1562,15 +1562,15 @@ export default async function dashboardRoutes(app) {
 
     const rows = fuelByAsset.map((r) => {
       const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
-      const kmPerHour = Math.max(0.1, Number(r.km_per_hour_factor || 10));
       const daily = getRunFromDaily.get(r.asset_id, start, end) || {};
       const fuelRun = getRunFromFuel(r.asset_id, start, end) || {};
       const dailyKm = Number(daily.km_run || 0);
       const dailyHours = Number(daily.hours_run || 0);
       const fuelKm = Number(fuelRun.km_run || 0);
       const fuelHours = Number(fuelRun.hours_run || 0);
-      const km = dailyKm > 0 ? dailyKm : (fuelKm > 0 ? fuelKm : (dailyHours > 0 ? dailyHours * kmPerHour : fuelHours * kmPerHour));
-      const hours = dailyHours > 0 ? dailyHours : (fuelHours > 0 ? fuelHours : (dailyKm > 0 ? dailyKm / kmPerHour : fuelKm / kmPerHour));
+      // Use only same-unit run evidence to avoid false "excessive" from inferred conversions.
+      const km = dailyKm > 0 ? dailyKm : (fuelKm > 0 ? fuelKm : 0);
+      const hours = dailyHours > 0 ? dailyHours : (fuelHours > 0 ? fuelHours : 0);
       const fuel = Number(r.fuel_liters || 0);
       const oem = Number(r.oem_lph || 5);
       const oemK = Number(r.oem_kmpl || 2);
@@ -1618,10 +1618,10 @@ export default async function dashboardRoutes(app) {
         acc.km_run += Number(r.km_run || 0);
         if (r.metric_mode === "km") {
           acc.km_assets += 1;
-          acc.km_fuel += Number(r.fuel_liters || 0);
+          if (Number(r.km_run || 0) > 0) acc.km_fuel += Number(r.fuel_liters || 0);
         } else {
           acc.hours_assets += 1;
-          acc.hours_fuel += Number(r.fuel_liters || 0);
+          if (Number(r.hours_run || 0) > 0) acc.hours_fuel += Number(r.fuel_liters || 0);
         }
         if (r.is_excessive) acc.excessive_count += 1;
         return acc;
