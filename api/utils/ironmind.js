@@ -126,7 +126,13 @@ function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
+function maxTrustedDailyRunHours() {
+  const v = Number(process.env.IRONMIND_MAX_DAILY_RUN_HOURS || 24);
+  return Number.isFinite(v) && v > 0 ? v : 24;
+}
+
 function computeAssetRiskSignals(reportDate) {
+  const maxRunHours = maxTrustedDailyRunHours();
   const assets = db.prepare(`
     SELECT id, asset_code, asset_name
     FROM assets
@@ -174,6 +180,7 @@ function computeAssetRiskSignals(reportDate) {
           WHERE dh.asset_id = mp.asset_id
             AND dh.is_used = 1
             AND dh.hours_run > 0
+            AND dh.hours_run <= ?
             AND dh.work_date <= ?
         ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
       FROM maintenance_plans mp
@@ -182,7 +189,7 @@ function computeAssetRiskSignals(reportDate) {
     )
     WHERE overdue_hours >= 0
     GROUP BY asset_id
-  `).all(reportDate);
+  `).all(maxRunHours, reportDate);
   overdueByAsset.forEach((r) => {
     const row = byAssetId.get(Number(r.asset_id));
     if (!row) return;
@@ -451,6 +458,7 @@ async function callIronmindAi(structuredData, opts = {}) {
 }
 
 function buildStructuredData(reportDate) {
+  const maxRunHours = maxTrustedDailyRunHours();
   const activeAssets = db.prepare(`
     SELECT COUNT(*) AS c
     FROM assets
@@ -490,6 +498,7 @@ function buildStructuredData(reportDate) {
           WHERE dh.asset_id = mp.asset_id
             AND dh.is_used = 1
             AND dh.hours_run > 0
+            AND dh.hours_run <= ?
             AND dh.work_date <= ?
         ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
       FROM maintenance_plans mp
@@ -499,7 +508,7 @@ function buildStructuredData(reportDate) {
     WHERE overdue_hours >= 0
     ORDER BY overdue_hours DESC
     LIMIT 8
-  `).all(reportDate).map((r) => ({
+  `).all(maxRunHours, reportDate).map((r) => ({
     asset_code: r.asset_code,
     service_name: r.service_name,
     overdue_hours: Number(r.overdue_hours || 0),
