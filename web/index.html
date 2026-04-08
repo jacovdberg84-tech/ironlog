@@ -64,6 +64,7 @@
           <option value="dash">📊 Dashboard</option>
           <option value="daily">📝 Daily Input</option>
           <option value="assets">🛠️ Assets</option>
+          <option value="ironmind">🧠 IronMind</option>
           <option value="fuel">⛽ Fuel</option>
           <option value="lube">🧴 Lube</option>
           <option value="stock">📦 Stores</option>
@@ -139,50 +140,6 @@
         </div>
       </div>
 
-      <!-- Insights Section -->
-      <div class="card" style="margin:24px 0;">
-        <div class="metric-header">IRONMIND Daily Insight</div>
-        <div class="row">
-          <button id="ironmindRefreshBtn">Refresh Insight</button>
-          <small class="muted" id="ironmindMeta">No report loaded yet.</small>
-        </div>
-        <div class="row stack-6">
-          <textarea
-            id="ironmindContext"
-            class="ironmind-context"
-            rows="4"
-            placeholder="Optional extra context for IRONMIND (weather, incidents, priorities, planned constraints)..."
-          ></textarea>
-          <label class="chk">
-            <input id="ironmindDetailMode" type="checkbox" />
-            More detailed insight
-          </label>
-        </div>
-        <div class="row stack-6">
-          <input id="ironmindAskInput" class="minw-260" placeholder="Ask IronMind (e.g. downtime for G01AM from 2026-02-14 to 2026-04-07)" />
-          <button id="ironmindAskBtn">Ask</button>
-        </div>
-        <div class="output ironmind-body" id="ironmindAskResult">
-          <small class="muted">Ask a question for short operational answers.</small>
-        </div>
-        <div class="output ironmind-body" id="ironmindSummary">
-          <small class="muted">Loading IRONMIND insight...</small>
-        </div>
-        <details class="ironmind-history-pane">
-          <summary>IRONMIND history (last 7 days)</summary>
-          <div class="row stack-6 ironmind-history-controls">
-            <label class="chk">
-              <input id="ironmindShowMissingDays" type="checkbox" />
-              Include missing days
-            </label>
-            <button id="ironmindReloadHistory">Reload history</button>
-          </div>
-          <div class="list" id="ironmindHistoryList">
-            <small class="muted">No history loaded yet.</small>
-          </div>
-        </details>
-      </div>
-
       <!-- Collapsible Details Section -->
       <details class="dashboard-details" open>
         <summary>More Details</summary>
@@ -208,11 +165,6 @@
             <h3>Open Work Orders</h3>
             <div class="list" id="woList"></div>
             <p class="muted">Most recent open work orders.</p>
-          </div>
-          <div class="card">
-            <h3>Top Predicted Failures (7d)</h3>
-            <div class="list" id="riskBoardList"></div>
-            <p class="muted">Highest current equipment risk by score and confidence.</p>
           </div>
           <div class="card">
             <h3>WO SLA Escalations</h3>
@@ -332,6 +284,75 @@
           </div>
           <pre class="output" id="costSetupResult"></pre>
           <p class="muted">Configure defaults, asset rates, and part unit costs used by Cost Engine.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- IRONMIND -->
+    <section class="panel" id="tab-ironmind">
+      <div class="card stack-12">
+        <h3>IronMind (Maintenance Intelligence)</h3>
+        <p class="muted">Daily insights, predicted failures, and RSG work-order generation.</p>
+      </div>
+
+      <div class="card" style="margin:12px 0;">
+        <div class="metric-header">IRONMIND Daily Insight</div>
+        <div class="row">
+          <button id="ironmindRefreshBtn">Refresh Insight</button>
+          <small class="muted" id="ironmindMeta">No report loaded yet.</small>
+        </div>
+        <div class="row stack-6">
+          <textarea
+            id="ironmindContext"
+            class="ironmind-context"
+            rows="4"
+            placeholder="Optional extra context for IRONMIND (weather, incidents, priorities, planned constraints)..."
+          ></textarea>
+          <label class="chk">
+            <input id="ironmindDetailMode" type="checkbox" />
+            More detailed insight
+          </label>
+        </div>
+        <div class="row stack-6">
+          <input id="ironmindAskInput" class="minw-260" placeholder="Ask IronMind (e.g. downtime for G01AM from 2026-02-14 to 2026-04-07)" />
+          <button id="ironmindAskBtn">Ask</button>
+        </div>
+        <div class="output ironmind-body" id="ironmindAskResult">
+          <small class="muted">Ask a question for short operational answers.</small>
+        </div>
+        <div class="output ironmind-body" id="ironmindSummary">
+          <small class="muted">Loading IRONMIND insight...</small>
+        </div>
+        <details class="ironmind-history-pane">
+          <summary>IRONMIND history (last 7 days)</summary>
+          <div class="row stack-6 ironmind-history-controls">
+            <label class="chk">
+              <input id="ironmindShowMissingDays" type="checkbox" />
+              Include missing days
+            </label>
+            <button id="ironmindReloadHistory">Reload history</button>
+          </div>
+          <div class="list" id="ironmindHistoryList">
+            <small class="muted">No history loaded yet.</small>
+          </div>
+        </details>
+      </div>
+
+      <div class="grid stack-12">
+        <div class="card">
+          <h3>Top Predicted Failures (7d)</h3>
+          <div class="list" id="riskBoardList"></div>
+          <p class="muted">Highest current equipment risk by score and confidence.</p>
+        </div>
+        <div class="card">
+          <h3>RSG Service Guide -> Work Order</h3>
+          <div class="row">
+            <input id="ironmindRsgAssetCode" list="assetCodeOptions" class="w-140" placeholder="Asset code" />
+            <input id="ironmindRsgHours" class="w-110" type="number" min="250" step="50" value="2000" />
+            <button id="ironmindRsgPlanBtn">Generate Plan</button>
+            <button id="ironmindRsgCreateWoBtn">Create WO</button>
+          </div>
+          <pre class="output" id="ironmindRsgResult"></pre>
         </div>
       </div>
     </section>

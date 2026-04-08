@@ -2222,6 +2222,40 @@ async function askIronmindQuestion() {
   }
 }
 
+async function generateIronmindRsgPlan(createWo = false) {
+  const out = qs("ironmindRsgResult");
+  const assetCode = String(qs("ironmindRsgAssetCode")?.value || "").trim().toUpperCase();
+  const serviceHours = Number(qs("ironmindRsgHours")?.value || 2000);
+  if (!assetCode) {
+    if (out) out.textContent = "Asset code is required.";
+    return;
+  }
+  const body = {
+    asset_code: assetCode,
+    service_hours: Number.isFinite(serviceHours) && serviceHours > 0 ? serviceHours : 2000,
+  };
+  if (out) out.textContent = "";
+  setStatus(createWo ? "Creating RSG work order..." : "Generating RSG plan...");
+  try {
+    const endpoint = createWo ? "/api/ironmind/rsg/create-wo" : "/api/ironmind/rsg/plan";
+    const res = await fetchJson(`${API}${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (out) out.textContent = JSON.stringify(res, null, 2);
+    if (createWo && Number(res?.work_order_id || 0) > 0) {
+      setStatus(`RSG WO created (#${Number(res.work_order_id)}).`);
+      await loadDashboard().catch(() => {});
+    } else {
+      setStatus("RSG plan generated.");
+    }
+  } catch (e) {
+    if (out) out.textContent = String(e.message || e);
+    setStatus(`RSG ${createWo ? "WO creation" : "plan"} failed.`);
+  }
+}
+
 function parseIronmindSections(text) {
   const defs = [
     { key: "repairs", name: "Repairs Needed" },
@@ -7476,6 +7510,12 @@ async function init() {
   });
   qs("ironmindReloadHistory")?.addEventListener("click", () => {
     loadIronmindHistory().catch((e) => setStatus("IRONMIND history error: " + e.message));
+  });
+  qs("ironmindRsgPlanBtn")?.addEventListener("click", () => {
+    generateIronmindRsgPlan(false).catch((e) => setStatus("RSG plan error: " + (e.message || e)));
+  });
+  qs("ironmindRsgCreateWoBtn")?.addEventListener("click", () => {
+    generateIronmindRsgPlan(true).catch((e) => setStatus("RSG create WO error: " + (e.message || e)));
   });
   qs("saveDocHeaderBtn")?.addEventListener("click", () =>
     saveDocHeader().catch((e) => setStatus("Header save error: " + e.message))
