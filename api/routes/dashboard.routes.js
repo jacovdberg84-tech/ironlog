@@ -463,6 +463,8 @@ export default async function dashboardRoutes(app) {
       SELECT COUNT(*) AS c
       FROM work_orders
       WHERE REPLACE(TRIM(LOWER(COALESCE(status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
+        AND (completed_at IS NULL OR TRIM(COALESCE(completed_at, '')) = '')
+        AND (closed_at IS NULL OR TRIM(COALESCE(closed_at, '')) = '')
     `).get();
 
     // Major downtime list (use downtime logs aggregated per breakdown for this day)
@@ -507,6 +509,8 @@ export default async function dashboardRoutes(app) {
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
       WHERE REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
+        AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')
+        AND (w.closed_at IS NULL OR TRIM(COALESCE(w.closed_at, '')) = '')
       ORDER BY w.id DESC
       LIMIT 8
     `).all();
@@ -522,6 +526,8 @@ export default async function dashboardRoutes(app) {
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
       WHERE REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
+        AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')
+        AND (w.closed_at IS NULL OR TRIM(COALESCE(w.closed_at, '')) = '')
       ORDER BY age_hours DESC, w.id DESC
       LIMIT 200
     `).all().map((r) => ({
