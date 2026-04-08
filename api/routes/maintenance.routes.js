@@ -895,6 +895,85 @@ export default async function maintenanceRoutes(app) {
     }
   });
 
+  // GET /api/maintenance/history/backfill?asset_id=&limit=20
+  app.get("/history/backfill", async (req, reply) => {
+    try {
+      const assetId = Number(req.query?.asset_id || 0);
+      const limit = Math.max(1, Math.min(200, Number(req.query?.limit || 20)));
+      const where = assetId > 0 ? "WHERE h.asset_id = ?" : "";
+      const rows = db.prepare(`
+        SELECT
+          h.id,
+          h.asset_id,
+          h.plan_id,
+          h.service_name,
+          h.service_date,
+          h.service_hours,
+          h.notes,
+          h.created_by,
+          h.created_at,
+          a.asset_code,
+          a.asset_name
+        FROM maintenance_service_history h
+        JOIN assets a ON a.id = h.asset_id
+        ${where}
+        ORDER BY h.service_date DESC, h.id DESC
+        LIMIT ?
+      `).all(...(assetId > 0 ? [assetId, limit] : [limit]));
+      return reply.send({ ok: true, rows });
+    } catch (e) {
+      req.log.error(e);
+      return reply.code(500).send({ ok: false, error: e.message || String(e) });
+    }
+  });
+
+  // PUT /api/maintenance/history/backfill/:id
+  app.put("/history/backfill/:id", async (req, reply) => {
+    try {
+      const id = Number(req.params?.id || 0);
+      if (!id) return reply.code(400).send({ ok: false, error: "invalid id" });
+      const body = req.body || {};
+      const serviceName = String(body.service_name || "").trim();
+      const serviceDate = String(body.service_date || "").trim();
+      const notes = String(body.notes || "").trim() || null;
+      const serviceHoursIn = body.service_hours;
+      const serviceHours = serviceHoursIn == null || String(serviceHoursIn).trim() === ""
+        ? null
+        : Number(serviceHoursIn);
+      if (!serviceName) return reply.code(400).send({ ok: false, error: "service_name is required" });
+      if (!isDate(serviceDate)) return reply.code(400).send({ ok: false, error: "service_date must be YYYY-MM-DD" });
+      if (serviceHours != null && (!Number.isFinite(serviceHours) || serviceHours < 0)) {
+        return reply.code(400).send({ ok: false, error: "service_hours must be a valid number >= 0" });
+      }
+      const cur = db.prepare(`SELECT id FROM maintenance_service_history WHERE id = ?`).get(id);
+      if (!cur) return reply.code(404).send({ ok: false, error: "backfill entry not found" });
+      db.prepare(`
+        UPDATE maintenance_service_history
+        SET service_name = ?, service_date = ?, service_hours = ?, notes = ?
+        WHERE id = ?
+      `).run(serviceName, serviceDate, serviceHours, notes, id);
+      return reply.send({ ok: true, id });
+    } catch (e) {
+      req.log.error(e);
+      return reply.code(500).send({ ok: false, error: e.message || String(e) });
+    }
+  });
+
+  // DELETE /api/maintenance/history/backfill/:id
+  app.delete("/history/backfill/:id", async (req, reply) => {
+    try {
+      const id = Number(req.params?.id || 0);
+      if (!id) return reply.code(400).send({ ok: false, error: "invalid id" });
+      const cur = db.prepare(`SELECT id FROM maintenance_service_history WHERE id = ?`).get(id);
+      if (!cur) return reply.code(404).send({ ok: false, error: "backfill entry not found" });
+      db.prepare(`DELETE FROM maintenance_service_history WHERE id = ?`).run(id);
+      return reply.send({ ok: true, id });
+    } catch (e) {
+      req.log.error(e);
+      return reply.code(500).send({ ok: false, error: e.message || String(e) });
+    }
+  });
+
   // =====================================================
   // AUTO-GENERATE SERVICE WORK ORDERS
   // POST /api/maintenance/generate?date=2026-02-27

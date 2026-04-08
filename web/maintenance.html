@@ -145,6 +145,21 @@
         <button id="saveBackfillBtn">Save Historical Service</button>
       </div>
       <div id="backfillMsg" class="muted">Use this for old/manual records that happened before IRONLOG.</div>
+      <div style="overflow:auto; margin-top:10px;">
+        <table class="gridTable" style="min-width:980px;">
+          <thead>
+            <tr>
+              <th>Asset</th>
+              <th>Service</th>
+              <th>Date</th>
+              <th style="text-align:right;">Hours</th>
+              <th>Notes</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="backfillBody"></tbody>
+        </table>
+      </div>
     </div>
 
     <div class="card stack-24">

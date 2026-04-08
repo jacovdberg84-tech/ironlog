@@ -137,6 +137,32 @@ function histRow(r) {
   `;
 }
 
+function escBackfill(s) {
+  return String(s == null ? "" : s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function backfillRow(r) {
+  const hours = r.service_hours == null ? "-" : Number(r.service_hours).toFixed(1);
+  return `
+    <tr data-backfill-id="${Number(r.id || 0)}">
+      <td>${escBackfill(r.asset_code || "-")} - ${escBackfill(r.asset_name || "-")}</td>
+      <td>${escBackfill(r.service_name || "-")}</td>
+      <td>${escBackfill(r.service_date || "-")}</td>
+      <td style="text-align:right;">${hours}</td>
+      <td>${escBackfill(r.notes || "")}</td>
+      <td>
+        <button data-backfill-action="edit">Edit</button>
+        <button data-backfill-action="delete">Delete</button>
+      </td>
+    </tr>
+  `;
+}
+
 async function loadHistory() {
   const body = document.getElementById("histBody");
   const meta = document.getElementById("histMeta");
@@ -151,6 +177,23 @@ async function loadHistory() {
     body.innerHTML = rows.length ? rows.map(histRow).join("") : `<tr><td colspan="7" class="muted">No history rows.</td></tr>`;
   } catch (e) {
     body.innerHTML = `<tr><td colspan="7" class="message-error">History load error: ${e.message || e}</td></tr>`;
+  }
+}
+
+async function loadBackfillHistory() {
+  const body = document.getElementById("backfillBody");
+  if (!body) return;
+  body.innerHTML = `<tr><td colspan="6" class="muted">Loading...</td></tr>`;
+  try {
+    const res = await fetch(`${API}/maintenance/history/backfill?limit=20`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load backfill history");
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    body.innerHTML = rows.length
+      ? rows.map(backfillRow).join("")
+      : `<tr><td colspan="6" class="muted">No historical entries yet.</td></tr>`;
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="6" class="message-error">${escBackfill(e.message || e)}</td></tr>`;
   }
 }
 
@@ -276,10 +319,50 @@ async function saveBackfillHistory() {
     await loadHistory();
     await loadPlans();
     await loadDue();
+    await loadBackfillHistory();
   } catch (err) {
     msgEl.className = "message-error";
     msgEl.textContent = err.message || String(err);
   }
+}
+
+async function editBackfillHistory(id) {
+  const iid = Number(id || 0);
+  if (!iid) return;
+  const service_name = prompt("Service name:");
+  if (service_name == null) return;
+  const service_date = prompt("Service date (YYYY-MM-DD):");
+  if (service_date == null) return;
+  const service_hours = prompt("Service hours (blank for none):", "");
+  if (service_hours == null) return;
+  const notes = prompt("Notes (optional):", "");
+  if (notes == null) return;
+  const payload = {
+    service_name: String(service_name || "").trim(),
+    service_date: String(service_date || "").trim(),
+    service_hours: String(service_hours || "").trim() === "" ? null : Number(service_hours),
+    notes: String(notes || "").trim(),
+  };
+  const res = await fetch(`${API}/maintenance/history/backfill/${iid}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to update historical entry");
+  await loadBackfillHistory();
+  await loadHistory();
+}
+
+async function deleteBackfillHistory(id) {
+  const iid = Number(id || 0);
+  if (!iid) return;
+  if (!confirm("Delete this historical service entry?")) return;
+  const res = await fetch(`${API}/maintenance/history/backfill/${iid}`, { method: "DELETE" });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to delete historical entry");
+  await loadBackfillHistory();
+  await loadHistory();
 }
 
 async function loadLiveHoursForSelectedAsset() {
@@ -1092,6 +1175,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const generateBtn = document.getElementById("generateBtn");
   const savePlanBtn = document.getElementById("savePlanBtn");
   const saveBackfillBtn = document.getElementById("saveBackfillBtn");
+  const backfillBody = document.getElementById("backfillBody");
   const useLiveEl = document.getElementById("planUseLiveForLastService");
 
   syncDueThresholdInput();
@@ -1112,6 +1196,21 @@ document.addEventListener("DOMContentLoaded", () => {
   if (saveBackfillBtn) {
     saveBackfillBtn.addEventListener("click", saveBackfillHistory);
   }
+  if (backfillBody) {
+    backfillBody.addEventListener("click", (e) => {
+      const btn = e.target instanceof HTMLElement ? e.target.closest("button[data-backfill-action]") : null;
+      if (!btn) return;
+      const tr = btn.closest("tr[data-backfill-id]");
+      const id = Number(tr?.getAttribute("data-backfill-id") || 0);
+      const action = String(btn.getAttribute("data-backfill-action") || "");
+      if (!id || !action) return;
+      if (action === "edit") {
+        editBackfillHistory(id).catch((err) => alert(err.message || err));
+      } else if (action === "delete") {
+        deleteBackfillHistory(id).catch((err) => alert(err.message || err));
+      }
+    });
+  }
 
   const assetEl = document.getElementById("planAsset");
   if (assetEl) {
@@ -1129,6 +1228,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadPlans();
   loadDue();
   loadHistory();
+  loadBackfillHistory();
   const miDate = document.getElementById("miDate");
   const drDate = document.getElementById("drDate");
   if (miDate && !miDate.value) miDate.value = new Date().toISOString().slice(0, 10);
