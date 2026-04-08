@@ -2270,38 +2270,16 @@ async function previewIronmindRsgPdf() {
     return;
   }
   const hours = Number.isFinite(serviceHours) && serviceHours > 0 ? serviceHours : 2000;
-  setStatus("Generating RSG PDF preview...");
-  const previewWin = window.open("", "_blank", "noopener");
+  setStatus("Opening RSG PDF preview...");
   try {
     const url = `${API}/api/ironmind/rsg/preview.pdf?asset_code=${encodeURIComponent(assetCode)}&service_hours=${encodeURIComponent(hours)}`;
-    const res = await fetch(url, { headers: { ...authHeaders() } });
-    if (!res.ok) {
-      let message = `Preview failed (${res.status})`;
-      try {
-        const raw = await res.text();
-        if (raw) {
-          try {
-            const err = JSON.parse(raw);
-            message = String(err?.error || message);
-          } catch {
-            message = raw.slice(0, 300);
-          }
-        }
-      } catch {}
-      throw new Error(message);
+    const win = window.open(url, "_blank", "noopener");
+    if (!win) {
+      // Popup blocked fallback
+      window.location.href = url;
     }
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    if (previewWin && !previewWin.closed) {
-      previewWin.location.href = blobUrl;
-    } else {
-      // Popup blocked fallback: open in current tab so preview still works.
-      window.location.href = blobUrl;
-    }
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
     setStatus("RSG PDF preview opened.");
   } catch (e) {
-    if (previewWin && !previewWin.closed) previewWin.close();
     if (out) out.textContent = String(e.message || e);
     setStatus("RSG PDF preview failed.");
   }
@@ -2319,32 +2297,14 @@ async function downloadIronmindRsgPdf() {
   setStatus("Preparing RSG PDF download...");
   try {
     const url = `${API}/api/ironmind/rsg/preview.pdf?asset_code=${encodeURIComponent(assetCode)}&service_hours=${encodeURIComponent(hours)}&download=1`;
-    const res = await fetch(url, { headers: { ...authHeaders() } });
-    if (!res.ok) {
-      let message = `Download failed (${res.status})`;
-      try {
-        const raw = await res.text();
-        if (raw) {
-          try {
-            const err = JSON.parse(raw);
-            message = String(err?.error || message);
-          } catch {
-            message = raw.slice(0, 300);
-          }
-        }
-      } catch {}
-      throw new Error(message);
-    }
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = `RSG_${assetCode}_${hours}h.pdf`;
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener";
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
-    setStatus("RSG PDF downloaded.");
+    setStatus("RSG PDF download started.");
   } catch (e) {
     if (out) out.textContent = String(e.message || e);
     setStatus("RSG PDF download failed.");
