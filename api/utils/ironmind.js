@@ -169,20 +169,12 @@ function computeAssetRiskSignals(reportDate) {
       SELECT
         mp.asset_id AS asset_id,
         (COALESCE((
-          SELECT dh.closing_hours
+          SELECT SUM(dh.hours_run)
           FROM daily_hours dh
           WHERE dh.asset_id = mp.asset_id
-            AND dh.closing_hours IS NOT NULL
+            AND dh.is_used = 1
+            AND dh.hours_run > 0
             AND dh.work_date <= ?
-          ORDER BY dh.work_date DESC, dh.id DESC
-          LIMIT 1
-        ), (
-          SELECT COALESCE(SUM(dh2.hours_run), 0)
-          FROM daily_hours dh2
-          WHERE dh2.asset_id = mp.asset_id
-            AND dh2.is_used = 1
-            AND dh2.hours_run > 0
-            AND dh2.work_date <= ?
         ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
       FROM maintenance_plans mp
       JOIN assets a ON a.id = mp.asset_id
@@ -190,7 +182,7 @@ function computeAssetRiskSignals(reportDate) {
     )
     WHERE overdue_hours >= 0
     GROUP BY asset_id
-  `).all(reportDate, reportDate);
+  `).all(reportDate);
   overdueByAsset.forEach((r) => {
     const row = byAssetId.get(Number(r.asset_id));
     if (!row) return;
@@ -493,20 +485,12 @@ function buildStructuredData(reportDate) {
         a.asset_code,
         mp.service_name,
         (COALESCE((
-          SELECT dh.closing_hours
+          SELECT SUM(dh.hours_run)
           FROM daily_hours dh
           WHERE dh.asset_id = mp.asset_id
-            AND dh.closing_hours IS NOT NULL
+            AND dh.is_used = 1
+            AND dh.hours_run > 0
             AND dh.work_date <= ?
-          ORDER BY dh.work_date DESC, dh.id DESC
-          LIMIT 1
-        ), (
-          SELECT COALESCE(SUM(dh2.hours_run), 0)
-          FROM daily_hours dh2
-          WHERE dh2.asset_id = mp.asset_id
-            AND dh2.is_used = 1
-            AND dh2.hours_run > 0
-            AND dh2.work_date <= ?
         ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
       FROM maintenance_plans mp
       JOIN assets a ON a.id = mp.asset_id
@@ -515,7 +499,7 @@ function buildStructuredData(reportDate) {
     WHERE overdue_hours >= 0
     ORDER BY overdue_hours DESC
     LIMIT 8
-  `).all(reportDate, reportDate).map((r) => ({
+  `).all(reportDate).map((r) => ({
     asset_code: r.asset_code,
     service_name: r.service_name,
     overdue_hours: Number(r.overdue_hours || 0),
