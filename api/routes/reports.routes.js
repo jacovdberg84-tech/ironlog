@@ -278,6 +278,21 @@ function kpiDaily(date, scheduled) {
   `).get(date);
 
   const run_hours = Number(runRow.run_hours || 0);
+  const utilBaseRow = db.prepare(`
+    SELECT IFNULL(SUM(
+      CASE
+        WHEN COALESCE(dh.scheduled_hours, 0) > 0 THEN dh.scheduled_hours
+        ELSE ?
+      END
+    ), 0) AS utilization_base_hours
+    FROM daily_hours dh
+    JOIN assets a ON a.id = dh.asset_id
+    WHERE dh.work_date = ?
+      AND dh.is_used = 1
+      AND a.active = 1
+      AND a.is_standby = 0
+  `).get(Number(scheduled || 0), date);
+  const utilization_base_hours = Number(utilBaseRow?.utilization_base_hours || 0);
 
   const dtLogsRow = db.prepare(`
     SELECT IFNULL(SUM(l.hours_down), 0) AS downtime_hours
@@ -313,11 +328,12 @@ function kpiDaily(date, scheduled) {
   downtime_hours += Number(openNoLogRow?.assumed_down_hours || 0);
 
   const availability = available_hours > 0 ? ((available_hours - downtime_hours) / available_hours) * 100 : null;
-  const utilization = available_hours > 0 ? (run_hours / available_hours) * 100 : null;
+  const utilization = utilization_base_hours > 0 ? (run_hours / utilization_base_hours) * 100 : null;
 
   return {
     used_assets,
     available_hours,
+    utilization_base_hours,
     run_hours,
     downtime_hours,
     availability: availability == null ? null : Number(availability.toFixed(2)),
