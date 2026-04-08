@@ -2877,6 +2877,7 @@ async function loadFuelMachineDailyInline(assetCode, mountEl) {
   mountEl.setAttribute("data-code", String(assetCode));
   const mode = String(data.summary?.metric_mode || "hours");
   const isInlineFlagged = (r) => {
+    if (r?.invalid_delta) return false;
     if (mode === "km") {
       const actual = Number(r?.actual_km_per_l);
       const benchmark = Number(r?.oem_km_per_l);
@@ -2893,8 +2894,9 @@ async function loadFuelMachineDailyInline(assetCode, mountEl) {
   const top = `<div class="fuel-inline-summary"><small><b>Fill days:</b> ${Number(data.summary?.days || 0)} | <b>Fuel:</b> ${Number(data.summary?.fuel_liters || 0).toFixed(2)}L | <b>Fill ${mode === "km" ? "distance" : "hours"}:</b> ${Number(mode === "km" ? (data.summary?.km_run || 0) : (data.summary?.hours_run || 0)).toFixed(2)} | <b>Avg:</b> ${mode === "km" ? (data.summary?.avg_km_per_l == null ? "-" : Number(data.summary.avg_km_per_l).toFixed(3) + " km/L") : (data.summary?.avg_lph == null ? "-" : Number(data.summary.avg_lph).toFixed(3) + " L/hr")} | <b>${mode === "km" ? "Under benchmark days" : "Over benchmark days"}:</b> ${Number(data.summary?.excessive_days || 0)}</small></div>`;
   const tableRows = rows.map((r) => {
     const flagged = isInlineFlagged(r);
-    const statusClass = flagged ? "fh-status-excessive" : "fh-status-ok";
-    const statusText = flagged ? (mode === "km" ? "UNDER BENCHMARK" : "EXCESSIVE") : "OK";
+    const invalid = Boolean(r?.invalid_delta);
+    const statusClass = invalid ? "fh-status-excessive" : (flagged ? "fh-status-excessive" : "fh-status-ok");
+    const statusText = invalid ? "INVALID DELTA" : (flagged ? (mode === "km" ? "UNDER BENCHMARK" : "EXCESSIVE") : "OK");
     const meterUnit = mode === "km" ? "km" : "hrs";
     const openMeter = r.open_meter_value == null ? "-" : `${Number(r.open_meter_value).toFixed(2)} ${meterUnit}`;
     const closeMeter = r.close_meter_value == null ? "-" : `${Number(r.close_meter_value).toFixed(2)} ${meterUnit}`;
@@ -2904,8 +2906,8 @@ async function loadFuelMachineDailyInline(assetCode, mountEl) {
       `<td class="fh-col-num">${Number(r.fuel_liters || 0).toFixed(2)}</td>` +
       `<td class="fh-col-num">${openMeter}</td>` +
       `<td class="fh-col-num">${closeMeter}</td>` +
-      `<td class="fh-col-num">${Number((mode === "km" ? r.km_run : r.hours_run) || 0).toFixed(2)}</td>` +
-      `<td class="fh-col-num">${mode === "km" ? (r.actual_km_per_l == null ? "-" : Number(r.actual_km_per_l).toFixed(3)) : (r.actual_lph == null ? "-" : Number(r.actual_lph).toFixed(3))}</td>` +
+      `<td class="fh-col-num">${invalid ? "-" : Number((mode === "km" ? r.km_run : r.hours_run) || 0).toFixed(2)}</td>` +
+      `<td class="fh-col-num">${invalid ? "-" : (mode === "km" ? (r.actual_km_per_l == null ? "-" : Number(r.actual_km_per_l).toFixed(3)) : (r.actual_lph == null ? "-" : Number(r.actual_lph).toFixed(3)))}</td>` +
       `<td class="fh-col-status"><span class="fh-status ${statusClass}">${statusText}</span></td>` +
       `<td class="fh-col-action"><button data-fuel-delete="${Number(r.id || 0)}">Delete</button></td>` +
       `</tr>`

@@ -1888,13 +1888,15 @@ export default async function dashboardRoutes(app) {
       const openMeter = prevMeter;
       const meter = toModeMeter(d);
       let runBetween = null;
+      let invalidDelta = false;
       if (openMeter != null && meter > 0) {
         const delta = meter - openMeter;
         if (Number.isFinite(delta) && delta > 0) runBetween = delta;
+        else if (Number.isFinite(delta) && delta <= 0) invalidDelta = true;
       }
       const fuel = Number(d.fuel_liters || 0);
-      const lph = mode === "hours" && runBetween != null && runBetween > 0 ? fuel / runBetween : null;
-      const kmpl = mode === "km" && fuel > 0 && runBetween != null && runBetween > 0 ? runBetween / fuel : null;
+      const lph = (!invalidDelta && mode === "hours" && runBetween != null && runBetween > 0) ? (fuel / runBetween) : null;
+      const kmpl = (!invalidDelta && mode === "km" && fuel > 0 && runBetween != null && runBetween > 0) ? (runBetween / fuel) : null;
       const isExcessive = mode === "km" ? (kmpl != null && kmpl < lowThresholdKmpl) : (lph != null && lph > threshold);
       if (meter > 0) prevMeter = meter;
       return {
@@ -1910,6 +1912,7 @@ export default async function dashboardRoutes(app) {
         open_meter_value: openMeter != null && openMeter > 0 ? Number(openMeter.toFixed(2)) : null,
         close_meter_value: meter > 0 ? Number(meter.toFixed(2)) : null,
         meter_unit_display: mode === "km" ? "km" : "hours",
+        invalid_delta: invalidDelta,
         actual_lph: lph == null ? null : Number(lph.toFixed(3)),
         oem_lph: Number(oem.toFixed(3)),
         excessive_threshold_lph: Number(threshold.toFixed(3)),
