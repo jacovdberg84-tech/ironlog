@@ -84,7 +84,7 @@ export default async function breakdownRoutes(app) {
   `);
 
   const getOpenBreakdownByAssetId = db.prepare(`
-    SELECT b.id, b.primary_work_order_id
+    SELECT b.id, b.primary_work_order_id, b.breakdown_date, b.start_at
     FROM breakdowns b
     WHERE b.asset_id = ?
       AND b.status = 'OPEN'
@@ -98,6 +98,7 @@ export default async function breakdownRoutes(app) {
       b.asset_id,
       a.asset_code,
       b.breakdown_date,
+      b.start_at,
       b.description,
       b.primary_work_order_id,
       wo.status AS primary_work_order_status
@@ -115,6 +116,7 @@ export default async function breakdownRoutes(app) {
       b.asset_id,
       a.asset_code,
       b.breakdown_date,
+      b.start_at,
       b.description,
       b.primary_work_order_id,
       wo.status AS primary_work_order_status,
@@ -165,6 +167,14 @@ export default async function breakdownRoutes(app) {
     UPDATE breakdowns
     SET primary_work_order_id = ?
     WHERE id = ?
+  `);
+  const updateBreakdownStart = db.prepare(`
+    UPDATE breakdowns
+    SET
+      breakdown_date = COALESCE(?, breakdown_date),
+      start_at = COALESCE(?, start_at)
+    WHERE id = ?
+      AND status = 'OPEN'
   `);
 
   const insertBreakdownShortClosed = db.prepare(`
@@ -422,6 +432,7 @@ export default async function breakdownRoutes(app) {
     const body = req.body || {};
     const asset_code = String(body.asset_code || "").trim();
     const breakdown_date = String(body.breakdown_date || "").trim(); // YYYY-MM-DD
+    const start_date = String(body.start_date || "").trim(); // optional YYYY-MM-DD manual correction
     const description = String(body.description || "Down - Daily Input").trim();
     const component = body.component ? String(body.component).trim() : null;
     const critical = body.critical ? 1 : 0;
@@ -429,6 +440,10 @@ export default async function breakdownRoutes(app) {
     if (!asset_code || !isDate(breakdown_date)) {
       return reply.code(400).send({ error: "asset_code and breakdown_date(YYYY-MM-DD) required" });
     }
+    if (start_date && !isDate(start_date)) {
+      return reply.code(400).send({ error: "start_date must be YYYY-MM-DD when provided" });
+    }
+    const effectiveStartDate = start_date || breakdown_date;
 
     // GET validation (optional input)
     const getPack = validateGetFields(body, reply);
@@ -439,6 +454,13 @@ export default async function breakdownRoutes(app) {
 
     const existing = getOpenBreakdownByAssetId.get(asset.id);
     if (existing) {
+      if (start_date) {
+        updateBreakdownStart.run(
+          effectiveStartDate,
+          `${effectiveStartDate} 00:00:00`,
+          Number(existing.id)
+        );
+      }
       return reply.send({
         ok: true,
         breakdown_id: existing.id,
@@ -450,7 +472,7 @@ export default async function breakdownRoutes(app) {
     const tx = db.transaction(() => {
       const b = insertBreakdown.run(
         asset.id,
-        breakdown_date,
+        effectiveStartDate,
         description,
         component,
         critical,
@@ -465,6 +487,13 @@ export default async function breakdownRoutes(app) {
       const workOrderId = Number(wo.lastInsertRowid);
 
       linkPrimaryWO.run(workOrderId, breakdownId);
+      if (start_date) {
+        updateBreakdownStart.run(
+          effectiveStartDate,
+          `${effectiveStartDate} 00:00:00`,
+          breakdownId
+        );
+      }
 
       return { breakdownId, workOrderId };
     });

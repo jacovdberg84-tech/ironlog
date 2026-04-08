@@ -6331,6 +6331,7 @@ async function logDownRowToBreakdowns(date, r) {
       body: JSON.stringify({
         asset_code: r.asset_code,
         breakdown_date: date,
+        start_date: String(r.breakdown_start_date || "").trim() || date,
         description: downDesc,
         critical: false,
       }),
@@ -6497,6 +6498,19 @@ function renderDailyTable() {
     });
     downWrap.appendChild(downHrs);
 
+    const downStart = document.createElement("input");
+    downStart.type = "date";
+    downStart.className = "cellInput";
+    downStart.style.marginLeft = "8px";
+    downStart.title = "Breakdown start date (manual correction)";
+    downStart.disabled = !r.is_down;
+    downStart.value = String(r.breakdown_start_date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || "";
+    downStart.addEventListener("change", () => {
+      r.breakdown_start_date = String(downStart.value || "").trim();
+      renderDailyTable();
+    });
+    downWrap.appendChild(downStart);
+
     const downComment = document.createElement("input");
     downComment.className = "cellInput";
     downComment.type = "text";
@@ -6521,10 +6535,12 @@ function renderDailyTable() {
         r.down_reason = "";
         r.down_hours = null;
         r.breakdown_comment = "";
+        r.breakdown_start_date = "";
       }
 
       reason.disabled = !r.is_down;
       downHrs.disabled = !r.is_down;
+      downStart.disabled = !r.is_down;
       downComment.disabled = !r.is_down;
 
       validateDailyRows();
@@ -6794,6 +6810,10 @@ async function loadDailyInput() {
         row.closing_hours = row.opening_hours;
         row.hours_run = 0;
       }
+    }
+
+    if (row.is_down && !String(row.breakdown_start_date || "").trim()) {
+      row.breakdown_start_date = date;
     }
 
     dailyRows.push(row);
