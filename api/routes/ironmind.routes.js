@@ -325,6 +325,16 @@ export default async function ironmindRoutes(app) {
       return reply.code(500).send({ ok: false, error: err.message || String(err) });
     }
   });
+  app.get("/rsg/profiles/template.csv", async (_req, reply) => {
+    const csv = [
+      "profile_key,make,model_match,service_hours,title,tasks,checks,post_service_checks,safety,oils,filters",
+      "\"cat-350-6000\",\"CAT\",\"350,350D,350F\",6000,\"CAT 350 - 6000hr service\",\"Drain oils|Replace filters|Leak checks\",\"Verify OEM capacities|Check contamination\",\"Warm-up and recheck levels|Confirm no alarms\",\"LOTO before service|Use spill kit\",\"Hydraulic oil|210|L|hydraulic oil||Engine oil|40|L|engine oil||SAE50 final drives and swing motors|80|L|sae50\",\"Engine oil filter|1|ea|oil filter||Hydraulic return filter|1|ea|hydraulic filter\"",
+    ].join("\n");
+    reply
+      .header("Content-Type", "text/csv; charset=utf-8")
+      .header("Content-Disposition", "attachment; filename=\"rsg_profiles_template.csv\"")
+      .send(csv);
+  });
   function getPartOnHandById(partId) {
     const id = Number(partId || 0);
     if (!id) return 0;

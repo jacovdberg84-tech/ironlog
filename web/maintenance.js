@@ -1445,6 +1445,51 @@ function parseLines(text) {
     .filter(Boolean);
 }
 
+function parseCsvLine(line) {
+  const out = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    const nxt = line[i + 1];
+    if (ch === '"' && inQuotes && nxt === '"') {
+      cur += '"';
+      i += 1;
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (ch === "," && !inQuotes) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur);
+  return out.map((s) => String(s || "").trim());
+}
+
+function parsePackedItems(s, fallbackUnit) {
+  return String(s || "")
+    .split("||")
+    .map((x) => String(x || "").trim())
+    .filter(Boolean)
+    .map((chunk) => {
+      const [nameRaw, qtyRaw, unitRaw, hintRaw] = chunk.split("|").map((v) => String(v || "").trim());
+      const qty = Number(qtyRaw || 0);
+      return {
+        name: nameRaw,
+        qty: Number.isFinite(qty) ? qty : 0,
+        unit: unitRaw || fallbackUnit,
+        part_hint: hintRaw || nameRaw,
+      };
+    })
+    .filter((x) => x.name && x.qty > 0);
+}
+
 function parseRsgItems(text, defaultUnit) {
   return parseLines(text).map((line) => {
     const [nameRaw, qtyRaw, unitRaw, hintRaw] = line.split("|").map((s) => String(s || "").trim());
@@ -1577,6 +1622,81 @@ async function saveRsgProfile() {
     if (msg) {
       msg.className = "message-success";
       msg.textContent = `Profile saved: ${profile_key}`;
+    }
+    await loadRsgProfiles();
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = e.message || String(e);
+    }
+  }
+}
+
+function downloadRsgCsvTemplate() {
+  window.open(`${API}/ironmind/rsg/profiles/template.csv`, "_blank");
+}
+
+async function importRsgProfilesCsv() {
+  const msg = document.getElementById("rsgProfileMsg");
+  const file = document.getElementById("rsgCsvFile")?.files?.[0];
+  if (!file) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = "Choose a CSV file first.";
+    }
+    return;
+  }
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = "Parsing CSV and importing...";
+  }
+  const txt = await file.text();
+  const lines = String(txt || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length < 2) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = "CSV has no data rows.";
+    }
+    return;
+  }
+  const header = parseCsvLine(lines[0]).map((h) => h.toLowerCase());
+  const idx = (name) => header.indexOf(String(name).toLowerCase());
+  const get = (arr, name) => {
+    const i = idx(name);
+    return i >= 0 ? String(arr[i] || "").trim() : "";
+  };
+  const profiles = [];
+  for (let i = 1; i < lines.length; i += 1) {
+    const cols = parseCsvLine(lines[i]);
+    const profile_key = get(cols, "profile_key");
+    const service_hours = Number(get(cols, "service_hours") || 0);
+    const title = get(cols, "title");
+    if (!profile_key || !service_hours || !title) continue;
+    profiles.push({
+      profile_key,
+      make: get(cols, "make"),
+      model_match: get(cols, "model_match"),
+      service_hours,
+      title,
+      tasks: parseLines(get(cols, "tasks").split("|").join("\n")),
+      checks: parseLines(get(cols, "checks").split("|").join("\n")),
+      post_service_checks: parseLines(get(cols, "post_service_checks").split("|").join("\n")),
+      safety: parseLines(get(cols, "safety").split("|").join("\n")),
+      oils: parsePackedItems(get(cols, "oils"), "L"),
+      filters: parsePackedItems(get(cols, "filters"), "ea"),
+    });
+  }
+  try {
+    const res = await fetch(`${API}/ironmind/rsg/profiles/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profiles }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Import failed");
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = `CSV import complete: ${Number(data.upserted || 0)} profile(s) upserted.`;
     }
     await loadRsgProfiles();
   } catch (e) {
@@ -1767,6 +1887,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("loadWeeklyForumBtn")?.addEventListener("click", loadWeeklyForumSummary);
   document.getElementById("saveRsgProfileBtn")?.addEventListener("click", saveRsgProfile);
   document.getElementById("loadRsgProfilesBtn")?.addEventListener("click", loadRsgProfiles);
+  document.getElementById("downloadRsgCsvTemplateBtn")?.addEventListener("click", downloadRsgCsvTemplate);
+  document.getElementById("importRsgCsvBtn")?.addEventListener("click", importRsgProfilesCsv);
   document.getElementById("saveWfActionBtn")?.addEventListener("click", saveWeeklyForumAction);
   document.getElementById("loadWfActionsBtn")?.addEventListener("click", loadWeeklyForumActions);
   document.getElementById("openWeeklyForumPdfBtn")?.addEventListener("click", () => openWeeklyForumPdf(false));
