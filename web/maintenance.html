@@ -213,6 +213,80 @@
       </div>
       <small class="muted" id="inspectproStatusMeta">Shows latest InspectPro ingest events.</small>
     </div>
+
+    <div class="card stack-24">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0;">IronMind RSG Manual Profiles</h3>
+      </div>
+      <div class="form-grid">
+        <label>
+          Make
+          <input id="rsgMake" type="text" placeholder="CAT" />
+        </label>
+        <label>
+          Model Match (comma separated)
+          <input id="rsgModelMatch" type="text" placeholder="350,350D,350F" />
+        </label>
+        <label>
+          Service Hours
+          <input id="rsgServiceHours" type="number" min="1" step="1" value="2000" />
+        </label>
+        <label>
+          Profile Key
+          <input id="rsgProfileKey" type="text" placeholder="cat-350-6000" />
+        </label>
+      </div>
+      <label>
+        Title
+        <input id="rsgTitle" type="text" placeholder="CAT 350 - 6000hr service" />
+      </label>
+      <label>
+        Tasks (one per line)
+        <textarea id="rsgTasks" rows="4" style="width:100%;"></textarea>
+      </label>
+      <label>
+        Checks (one per line)
+        <textarea id="rsgChecks" rows="3" style="width:100%;"></textarea>
+      </label>
+      <label>
+        Post-Service Checks (one per line)
+        <textarea id="rsgPostChecks" rows="3" style="width:100%;"></textarea>
+      </label>
+      <label>
+        Safety (one per line)
+        <textarea id="rsgSafety" rows="3" style="width:100%;"></textarea>
+      </label>
+      <label>
+        Oils (one per line: Name|Qty|Unit|Part Hint)
+        <textarea id="rsgOils" rows="4" style="width:100%;" placeholder="Hydraulic oil|210|L|hydraulic oil"></textarea>
+      </label>
+      <label>
+        Filters (one per line: Name|Qty|Unit|Part Hint)
+        <textarea id="rsgFilters" rows="4" style="width:100%;" placeholder="Engine oil filter|1|ea|oil filter"></textarea>
+      </label>
+      <div class="row stack-10">
+        <button id="saveRsgProfileBtn">Save RSG Profile</button>
+        <button id="loadRsgProfilesBtn">Refresh Profiles</button>
+      </div>
+      <div id="rsgProfileMsg" class="muted">Manual profile input drives IronMind RSG from trusted site data.</div>
+      <div style="overflow:auto; margin-top:10px;">
+        <table class="gridTable" style="min-width:980px;">
+          <thead>
+            <tr>
+              <th>Profile Key</th>
+              <th>Make</th>
+              <th>Model Match</th>
+              <th>Hours</th>
+              <th>Title</th>
+              <th>Oils</th>
+              <th>Filters</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="rsgProfilesBody"></tbody>
+        </table>
+      </div>
+    </div>
     </div>
 
     <div id="managerInspectionsCard" class="card stack-24">
@@ -454,6 +528,6 @@
     </div>
   </div>
 
-  <script src="./maintenance.js?v=4"></script>
+  <script src="./maintenance.js?v=5"></script>
 </body>
 </html>

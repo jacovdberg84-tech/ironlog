@@ -1438,6 +1438,155 @@ async function updateWeeklyForumActionStatus(id, status) {
   });
 }
 
+function parseLines(text) {
+  return String(text || "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function parseRsgItems(text, defaultUnit) {
+  return parseLines(text).map((line) => {
+    const [nameRaw, qtyRaw, unitRaw, hintRaw] = line.split("|").map((s) => String(s || "").trim());
+    const qty = Number(qtyRaw || 0);
+    return {
+      name: nameRaw,
+      qty: Number.isFinite(qty) ? qty : 0,
+      unit: unitRaw || defaultUnit,
+      part_hint: hintRaw || nameRaw,
+    };
+  }).filter((x) => x.name && x.qty > 0);
+}
+
+function itemLines(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map((x) => `${String(x?.name || "").trim()}|${Number(x?.qty || 0)}|${String(x?.unit || "").trim()}|${String(x?.part_hint || x?.name || "").trim()}`)
+    .join("\n");
+}
+
+function slug(s) {
+  return String(s || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function rsgProfileRow(r) {
+  return `
+    <tr>
+      <td>${esc(r.key || "-")}</td>
+      <td>${esc(r.make || "-")}</td>
+      <td>${esc((r.modelContains || []).join(", ") || "-")}</td>
+      <td style="text-align:right;">${Number(r.service_hours || 0)}</td>
+      <td>${esc(r.title || "-")}</td>
+      <td style="text-align:right;">${Array.isArray(r.oils) ? r.oils.length : 0}</td>
+      <td style="text-align:right;">${Array.isArray(r.filters) ? r.filters.length : 0}</td>
+      <td><button data-rsg-edit="${esc(r.key || "")}">Edit</button></td>
+    </tr>
+  `;
+}
+
+let rsgProfilesCache = [];
+async function loadRsgProfiles() {
+  const body = document.getElementById("rsgProfilesBody");
+  if (!body) return;
+  body.innerHTML = `<tr><td colspan="8" class="muted">Loading...</td></tr>`;
+  try {
+    const res = await fetch(`${API}/ironmind/rsg/profiles`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load RSG profiles");
+    rsgProfilesCache = Array.isArray(data.rows) ? data.rows : [];
+    body.innerHTML = rsgProfilesCache.length
+      ? rsgProfilesCache.map(rsgProfileRow).join("")
+      : `<tr><td colspan="8" class="muted">No saved profiles yet.</td></tr>`;
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="8" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+  }
+}
+
+function fillRsgProfileForm(profileKey) {
+  const p = rsgProfilesCache.find((x) => String(x.key || "") === String(profileKey || ""));
+  if (!p) return;
+  const set = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.value = v == null ? "" : String(v);
+  };
+  set("rsgProfileKey", p.key || "");
+  set("rsgMake", p.make || "");
+  set("rsgModelMatch", Array.isArray(p.modelContains) ? p.modelContains.join(",") : "");
+  set("rsgServiceHours", Number(p.service_hours || 0) || 0);
+  set("rsgTitle", p.title || "");
+  set("rsgTasks", parseLines((p.tasks || []).join("\n")).join("\n"));
+  set("rsgChecks", parseLines((p.checks || []).join("\n")).join("\n"));
+  set("rsgPostChecks", parseLines((p.post_service_checks || []).join("\n")).join("\n"));
+  set("rsgSafety", parseLines((p.safety || []).join("\n")).join("\n"));
+  set("rsgOils", itemLines(p.oils || []));
+  set("rsgFilters", itemLines(p.filters || []));
+}
+
+async function saveRsgProfile() {
+  const msg = document.getElementById("rsgProfileMsg");
+  const make = String(document.getElementById("rsgMake")?.value || "").trim();
+  const model_match = String(document.getElementById("rsgModelMatch")?.value || "").trim();
+  const service_hours = Math.max(1, Number(document.getElementById("rsgServiceHours")?.value || 0));
+  const title = String(document.getElementById("rsgTitle")?.value || "").trim();
+  let profile_key = String(document.getElementById("rsgProfileKey")?.value || "").trim().toLowerCase();
+  const tasks = parseLines(document.getElementById("rsgTasks")?.value || "");
+  const checks = parseLines(document.getElementById("rsgChecks")?.value || "");
+  const post_service_checks = parseLines(document.getElementById("rsgPostChecks")?.value || "");
+  const safety = parseLines(document.getElementById("rsgSafety")?.value || "");
+  const oils = parseRsgItems(document.getElementById("rsgOils")?.value || "", "L");
+  const filters = parseRsgItems(document.getElementById("rsgFilters")?.value || "", "ea");
+  if (!profile_key) {
+    profile_key = `${slug(make)}-${slug(model_match || "model")}-${Number(service_hours || 0)}`;
+    const keyEl = document.getElementById("rsgProfileKey");
+    if (keyEl) keyEl.value = profile_key;
+  }
+  if (!profile_key || !title || !service_hours) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = "Profile key, service hours, and title are required.";
+    }
+    return;
+  }
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = "Saving profile...";
+  }
+  try {
+    const res = await fetch(`${API}/ironmind/rsg/profiles`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        profile_key,
+        make,
+        model_match,
+        service_hours,
+        title,
+        tasks,
+        checks,
+        post_service_checks,
+        safety,
+        oils,
+        filters,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save profile");
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = `Profile saved: ${profile_key}`;
+    }
+    await loadRsgProfiles();
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = e.message || String(e);
+    }
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   console.log("Maintenance UI loaded");
 
@@ -1601,6 +1750,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadDamageReports().catch(() => {});
   loadWeeklyForumSummary().catch(() => {});
   loadWeeklyForumActions().catch(() => {});
+  loadRsgProfiles().catch(() => {});
   document.getElementById("syncStatsBtn")?.addEventListener("click", syncLoadStats);
   document.getElementById("syncStateBtn")?.addEventListener("click", syncLoadState);
   document.getElementById("syncOutboxBtn")?.addEventListener("click", syncLoadOutbox);
@@ -1615,6 +1765,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("showWeeklyForumBtn")?.addEventListener("click", () => setTopView("wf"));
   document.getElementById("showSyncAdminBtn")?.addEventListener("click", () => setTopView("sync"));
   document.getElementById("loadWeeklyForumBtn")?.addEventListener("click", loadWeeklyForumSummary);
+  document.getElementById("saveRsgProfileBtn")?.addEventListener("click", saveRsgProfile);
+  document.getElementById("loadRsgProfilesBtn")?.addEventListener("click", loadRsgProfiles);
   document.getElementById("saveWfActionBtn")?.addEventListener("click", saveWeeklyForumAction);
   document.getElementById("loadWfActionsBtn")?.addEventListener("click", loadWeeklyForumActions);
   document.getElementById("openWeeklyForumPdfBtn")?.addEventListener("click", () => openWeeklyForumPdf(false));
@@ -1627,6 +1779,11 @@ document.addEventListener("DOMContentLoaded", () => {
     updateWeeklyForumActionStatus(id, status)
       .then(() => loadWeeklyForumActions())
       .catch((e) => alert(`Failed to update status: ${e.message || e}`));
+  });
+  document.getElementById("rsgProfilesBody")?.addEventListener("click", (evt) => {
+    const btn = evt.target?.closest?.("button[data-rsg-edit]");
+    if (!btn) return;
+    fillRsgProfileForm(btn.getAttribute("data-rsg-edit") || "");
   });
   setTopView("main");
 });
