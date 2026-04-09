@@ -1280,7 +1280,7 @@ export default async function dashboardRoutes(app) {
         variance_lph: lph == null ? null : Number((lph - oem).toFixed(3)),
         is_excessive,
       };
-    }).filter((r) => r.fuel_liters > 0 || r.hours_run > 0)
+    }).filter((r) => r.fuel_liters > 0)
       .sort((a, b) => {
         const ex = Number(Boolean(b.is_excessive)) - Number(Boolean(a.is_excessive));
         if (ex !== 0) return ex;

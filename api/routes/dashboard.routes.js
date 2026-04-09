@@ -1928,7 +1928,7 @@ export default async function dashboardRoutes(app) {
         has_enough_samples: hasEnoughSamples,
         is_excessive,
       };
-    }).filter((r) => r.fuel_liters > 0 || r.hours_run > 0 || r.km_run > 0)
+    }).filter((r) => r.fuel_liters > 0)
       // Temporary business rule: exclude LDV/km-mode assets from benchmark list/flags.
       .filter((r) => r.metric_mode !== "km")
       .filter((r) => (assetFilter ? String(r.asset_code || "").trim().toLowerCase() === assetFilter : true))

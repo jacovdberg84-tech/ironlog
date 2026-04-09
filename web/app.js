@@ -3841,15 +3841,7 @@ async function clearFuelFromDate() {
   if (resultEl) resultEl.textContent = "";
   setStatus("Checking clear impact...");
   try {
-    const preview = await fetchJson(`${API}/api/dashboard/fuel/clear-from-date/preview`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({
-        from_date: fromDate,
-        ...(assetCode ? { asset_code: assetCode } : {}),
-        clear_daily_hours: clearDailyHours,
-      }),
-    });
+    const preview = await previewFuelClearImpact(fromDate, assetCode, clearDailyHours);
     const ok = confirm(
       `About to clear fuel from ${fromDate}` +
       `${assetCode ? ` for ${assetCode}` : " for all assets"}.\n` +
@@ -3880,6 +3872,33 @@ async function clearFuelFromDate() {
     if (resultEl) resultEl.textContent = String(e.message || e);
     setStatus("Fuel clear failed. Check API version and permissions.");
   }
+}
+
+async function previewFuelClearImpact(fromDate, assetCode, clearDailyHours) {
+  const result = await fetchJson(`${API}/api/dashboard/fuel/clear-from-date/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({
+      from_date: fromDate,
+      ...(assetCode ? { asset_code: assetCode } : {}),
+      clear_daily_hours: clearDailyHours,
+    }),
+  });
+  const previewEl = qs("fuelClearPreviewResult");
+  if (previewEl) previewEl.textContent = JSON.stringify(result, null, 2);
+  return result;
+}
+
+async function runFuelClearPreview() {
+  const fromDate = (qs("fuelClearFromDate")?.value || "").trim();
+  const assetCode = (qs("fuelClearAssetCode")?.value || "").trim();
+  const clearDailyHours = Boolean(qs("fuelClearDailyHours")?.checked);
+  if (!fromDate) return alert("Select a from date first.");
+  setStatus("Loading clear preview...");
+  const preview = await previewFuelClearImpact(fromDate, assetCode, clearDailyHours);
+  setStatus(
+    `Preview ready. Logs: ${Number(preview?.deleted_logs || 0)}, Days: ${Number(preview?.affected_days || 0)}`
+  );
 }
 
 async function editFuelMachineHours(logId, openValue, closeValue) {
@@ -8102,6 +8121,9 @@ async function init() {
   );
   qs("fuelClearFromDateBtn")?.addEventListener("click", () =>
     clearFuelFromDate().catch((e) => setStatus("Fuel clear error: " + e.message))
+  );
+  qs("fuelClearPreviewBtn")?.addEventListener("click", () =>
+    runFuelClearPreview().catch((e) => setStatus("Fuel clear preview error: " + e.message))
   );
   qs("downloadFuelTemplate")?.addEventListener("click", downloadFuelCsvTemplate);
   qs("downloadStoreTemplate")?.addEventListener("click", downloadStoresCsvTemplate);
