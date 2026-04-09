@@ -1178,13 +1178,10 @@ export default async function reportsRoutes(app) {
         fl.log_date,
         COALESCE(fl.liters, 0) AS fuel_liters,
         COALESCE(CASE WHEN fl.hours_run > 0 THEN fl.hours_run ELSE 0 END, 0) AS meter_hours,
-        dh.opening_hours AS day_opening_hours,
-        dh.closing_hours AS day_closing_hours,
+        fl.open_meter_value,
+        fl.close_meter_value,
         fl.source
       FROM fuel_logs fl
-      LEFT JOIN daily_hours dh
-        ON dh.asset_id = fl.asset_id
-       AND dh.work_date = fl.log_date
       WHERE fl.asset_id = ?
         AND fl.log_date BETWEEN ? AND ?
       ORDER BY fl.log_date ASC, fl.id ASC
@@ -1208,15 +1205,15 @@ export default async function reportsRoutes(app) {
 
     const rows = fuelRows.map((d) => {
       const meter = Number(d.meter_hours || 0);
-      const dayOpen = Number(d.day_opening_hours);
-      const dayClose = Number(d.day_closing_hours);
-      const hasDayMeters = Number.isFinite(dayOpen) && Number.isFinite(dayClose) && dayOpen > 0 && dayClose > 0;
+      const rowOpen = d.open_meter_value == null ? null : Number(d.open_meter_value);
+      const rowClose = d.close_meter_value == null ? null : Number(d.close_meter_value);
+      const hasRowMeters = rowOpen != null && rowClose != null && rowOpen > 0 && rowClose > 0;
       let closeMeter = meter > 0 ? meter : null;
       let hoursBetween = null;
       let invalidDelta = false;
-      if (hasDayMeters) {
-        closeMeter = dayClose;
-        const delta = dayClose - dayOpen;
+      if (hasRowMeters) {
+        closeMeter = rowClose;
+        const delta = rowClose - rowOpen;
         if (Number.isFinite(delta) && delta > 0) hoursBetween = delta;
         else if (Number.isFinite(delta) && delta <= 0) invalidDelta = true;
       } else if (prevMeter != null && meter > 0) {

@@ -105,6 +105,8 @@ export default async function dashboardRoutes(app) {
   ensureColumn("fuel_logs", "hours_run", "hours_run REAL");
   ensureColumn("fuel_logs", "meter_run_value", "meter_run_value REAL");
   ensureColumn("fuel_logs", "meter_unit", "meter_unit TEXT");
+  ensureColumn("fuel_logs", "open_meter_value", "open_meter_value REAL");
+  ensureColumn("fuel_logs", "close_meter_value", "close_meter_value REAL");
   ensureColumn("work_orders", "labor_hours", "labor_hours REAL DEFAULT 0");
   ensureColumn("work_orders", "labor_rate_per_hour", "labor_rate_per_hour REAL");
 
@@ -1558,20 +1560,32 @@ export default async function dashboardRoutes(app) {
     `).get(fuelLogId);
     if (!fuelLog) return reply.code(404).send({ error: "fuel log not found" });
 
-    const hoursRun = Number((closingMeter - openingMeter).toFixed(3));
+    const runDelta = Number((closingMeter - openingMeter).toFixed(3));
+    const current = db.prepare(`
+      SELECT COALESCE(LOWER(meter_unit), '') AS meter_unit
+      FROM fuel_logs
+      WHERE id = ?
+      LIMIT 1
+    `).get(fuelLogId);
+    const unit = String(current?.meter_unit || "").toLowerCase();
     db.prepare(`
-      INSERT INTO daily_hours (asset_id, work_date, opening_hours, closing_hours, hours_run, is_used)
-      VALUES (?, ?, ?, ?, ?, 1)
-      ON CONFLICT(asset_id, work_date) DO UPDATE SET
-        opening_hours = excluded.opening_hours,
-        closing_hours = excluded.closing_hours,
-        hours_run = excluded.hours_run
+      UPDATE fuel_logs
+      SET
+        open_meter_value = ?,
+        close_meter_value = ?,
+        meter_run_value = ?,
+        hours_run = CASE
+          WHEN ? = 'km' THEN hours_run
+          ELSE ?
+        END
+      WHERE id = ?
     `).run(
-      Number(fuelLog.asset_id),
-      String(fuelLog.log_date),
       Number(openingMeter.toFixed(3)),
       Number(closingMeter.toFixed(3)),
-      hoursRun
+      Number(closingMeter.toFixed(3)),
+      unit,
+      runDelta,
+      fuelLogId
     );
 
     writeAudit(db, req, {
@@ -1584,7 +1598,7 @@ export default async function dashboardRoutes(app) {
         log_date: fuelLog.log_date,
         opening_meter: Number(openingMeter.toFixed(3)),
         closing_meter: Number(closingMeter.toFixed(3)),
-        hours_run: hoursRun,
+        hours_run: runDelta,
       },
     });
 
@@ -1595,7 +1609,7 @@ export default async function dashboardRoutes(app) {
       log_date: fuelLog.log_date,
       opening_meter: Number(openingMeter.toFixed(3)),
       closing_meter: Number(closingMeter.toFixed(3)),
-      hours_run: hoursRun,
+      hours_run: runDelta,
     });
   });
 
@@ -1792,29 +1806,15 @@ export default async function dashboardRoutes(app) {
       ORDER BY a.asset_code ASC
     `).all(start, end);
 
-    const getRunFromDaily = db.prepare(`
-      SELECT
-        COALESCE(SUM(CASE
-          WHEN LOWER(COALESCE(NULLIF(input_unit, ''), 'hours')) = 'km' THEN COALESCE(hours_run, 0)
-          ELSE 0
-        END), 0) AS km_run,
-        COALESCE(SUM(CASE
-          WHEN LOWER(COALESCE(NULLIF(input_unit, ''), 'hours')) <> 'km' THEN COALESCE(hours_run, 0)
-          ELSE 0
-        END), 0) AS hours_run
-      FROM daily_hours
-      WHERE asset_id = ?
-        AND work_date BETWEEN ? AND ?
-        AND is_used = 1
-        AND hours_run > 0
-    `);
     const getFuelLogsInRange = db.prepare(`
       SELECT
         id,
         log_date,
         COALESCE(LOWER(meter_unit), '') AS meter_unit,
         COALESCE(meter_run_value, 0) AS meter_run_value,
-        COALESCE(hours_run, 0) AS hours_run
+        COALESCE(hours_run, 0) AS hours_run,
+        open_meter_value,
+        close_meter_value
       FROM fuel_logs
       WHERE asset_id = ?
         AND log_date BETWEEN ? AND ?
@@ -1826,7 +1826,9 @@ export default async function dashboardRoutes(app) {
         log_date,
         COALESCE(LOWER(meter_unit), '') AS meter_unit,
         COALESCE(meter_run_value, 0) AS meter_run_value,
-        COALESCE(hours_run, 0) AS hours_run
+        COALESCE(hours_run, 0) AS hours_run,
+        open_meter_value,
+        close_meter_value
       FROM fuel_logs
       WHERE asset_id = ?
         AND log_date < ?
@@ -1859,6 +1861,15 @@ export default async function dashboardRoutes(app) {
         const unit = String(row.meter_unit || "").toLowerCase();
         const meter = Number(row.meter_run_value || 0);
         const legacyHours = Number(row.hours_run || 0);
+        const openMeter = row.open_meter_value == null ? null : Number(row.open_meter_value);
+        const closeMeter = row.close_meter_value == null ? null : Number(row.close_meter_value);
+
+        if (openMeter != null && closeMeter != null && closeMeter > openMeter) {
+          const delta = closeMeter - openMeter;
+          if (unit === "km") km_run += delta;
+          else hours_run += delta;
+          continue;
+        }
 
         if (unit === "km" && meter > 0) {
           if (prevKmMeter != null) {
@@ -1887,15 +1898,11 @@ export default async function dashboardRoutes(app) {
 
     const rows = fuelByAsset.map((r) => {
       const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
-      const daily = getRunFromDaily.get(r.asset_id, start, end) || {};
       const fuelRun = getRunFromFuel(r.asset_id, start, end) || {};
-      const dailyKm = Number(daily.km_run || 0);
-      const dailyHours = Number(daily.hours_run || 0);
       const fuelKm = Number(fuelRun.km_run || 0);
       const fuelHours = Number(fuelRun.hours_run || 0);
-      // Use only same-unit run evidence to avoid false "excessive" from inferred conversions.
-      const km = dailyKm > 0 ? dailyKm : (fuelKm > 0 ? fuelKm : 0);
-      const hours = dailyHours > 0 ? dailyHours : (fuelHours > 0 ? fuelHours : 0);
+      const km = fuelKm > 0 ? fuelKm : 0;
+      const hours = fuelHours > 0 ? fuelHours : 0;
       const fuel = Number(r.fuel_liters || 0);
       const oem = Number(r.oem_lph || 5);
       const oemK = Number(r.oem_kmpl || 2);
@@ -2138,13 +2145,10 @@ export default async function dashboardRoutes(app) {
         COALESCE(CASE WHEN fl.hours_run > 0 THEN fl.hours_run ELSE 0 END, 0) AS meter_hours,
         COALESCE(fl.meter_run_value, 0) AS meter_run_value,
         COALESCE(LOWER(fl.meter_unit), '') AS meter_unit,
-        dh.opening_hours AS day_opening_hours,
-        dh.closing_hours AS day_closing_hours,
+        fl.open_meter_value,
+        fl.close_meter_value,
         fl.source
       FROM fuel_logs fl
-      LEFT JOIN daily_hours dh
-        ON dh.asset_id = fl.asset_id
-       AND dh.work_date = fl.log_date
       WHERE fl.asset_id = ?
         AND fl.log_date BETWEEN ? AND ?
       ORDER BY fl.log_date ASC, fl.id ASC
@@ -2191,20 +2195,20 @@ export default async function dashboardRoutes(app) {
 
     const rows = fuelRows.map((d) => {
       const meter = toModeMeter(d);
-      const dayOpen = Number(d.day_opening_hours);
-      const dayClose = Number(d.day_closing_hours);
-      const hasDayMeters = Number.isFinite(dayOpen) && Number.isFinite(dayClose) && dayOpen > 0 && dayClose > 0;
+      const rowOpen = d.open_meter_value == null ? null : Number(d.open_meter_value);
+      const rowClose = d.close_meter_value == null ? null : Number(d.close_meter_value);
+      const hasRowMeters = rowOpen != null && rowClose != null && rowOpen > 0 && rowClose > 0;
 
       let openMeter = prevMeter;
       let closeMeter = meter > 0 ? meter : null;
       let runBetween = null;
       let invalidDelta = false;
 
-      // Prefer explicit day opening/closing readings for hour-based assets.
-      if (mode === "hours" && hasDayMeters) {
-        openMeter = dayOpen;
-        closeMeter = dayClose;
-        const delta = dayClose - dayOpen;
+      // Prefer explicit per-fill opening/closing readings from fuel logs.
+      if (hasRowMeters) {
+        openMeter = rowOpen;
+        closeMeter = rowClose;
+        const delta = rowClose - rowOpen;
         if (Number.isFinite(delta) && delta > 0) runBetween = delta;
         else if (Number.isFinite(delta) && delta <= 0) invalidDelta = true;
       } else if (openMeter != null && meter > 0) {
