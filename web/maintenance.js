@@ -1335,6 +1335,109 @@ async function openWeeklyForumPdf(download = false) {
   }
 }
 
+function wfStatusLabel(s) {
+  const v = String(s || "open").toLowerCase();
+  if (v === "in_progress") return "In Progress";
+  if (v === "blocked") return "Blocked";
+  if (v === "done") return "Done";
+  return "Open";
+}
+
+async function loadWeeklyForumActions() {
+  const body = document.getElementById("wfActionBody");
+  const start = String(document.getElementById("wfStart")?.value || "").trim();
+  const end = String(document.getElementById("wfEnd")?.value || "").trim();
+  if (!body) return;
+  body.innerHTML = `<tr><td colspan="8" class="muted">Loading...</td></tr>`;
+  const q = new URLSearchParams();
+  if (start) q.set("start", start);
+  if (end) q.set("end", end);
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-forum/actions?${q.toString()}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load actions");
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    body.innerHTML = rows.length
+      ? rows.map((r) => `
+        <tr>
+          <td>${Number(r.id || 0)}</td>
+          <td>${esc(r.action_date || "-")}</td>
+          <td>${esc(r.department || "-")}</td>
+          <td>${esc(r.action_item || "-")}</td>
+          <td>${esc(r.owner_name || "-")}</td>
+          <td>${esc(r.due_date || "-")}</td>
+          <td>
+            <select data-wf-action-status="${Number(r.id || 0)}">
+              <option value="open" ${String(r.status) === "open" ? "selected" : ""}>Open</option>
+              <option value="in_progress" ${String(r.status) === "in_progress" ? "selected" : ""}>In Progress</option>
+              <option value="blocked" ${String(r.status) === "blocked" ? "selected" : ""}>Blocked</option>
+              <option value="done" ${String(r.status) === "done" ? "selected" : ""}>Done</option>
+            </select>
+          </td>
+          <td>${esc(r.notes || "")}</td>
+        </tr>
+      `).join("")
+      : `<tr><td colspan="8" class="muted">No actions logged for selected range.</td></tr>`;
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="8" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+  }
+}
+
+async function saveWeeklyForumAction() {
+  const msg = document.getElementById("wfActionMsg");
+  const action_date = String(document.getElementById("wfActionDate")?.value || "").trim();
+  const department = String(document.getElementById("wfActionDept")?.value || "").trim();
+  const owner_name = String(document.getElementById("wfActionOwner")?.value || "").trim();
+  const due_date = String(document.getElementById("wfActionDue")?.value || "").trim();
+  const status = String(document.getElementById("wfActionStatus")?.value || "open").trim().toLowerCase();
+  const action_item = String(document.getElementById("wfActionItem")?.value || "").trim();
+  const notes = String(document.getElementById("wfActionNotes")?.value || "").trim();
+  if (!msg) return;
+
+  if (!action_date || !department || !owner_name || !action_item) {
+    msg.className = "message-error";
+    msg.textContent = "Action date, department, owner, and action item are required.";
+    return;
+  }
+  msg.className = "muted";
+  msg.textContent = "Saving action...";
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-forum/actions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action_date,
+        department,
+        action_item,
+        owner_name,
+        due_date: due_date || null,
+        status,
+        notes: notes || null,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save action");
+    msg.className = "message-success";
+    msg.textContent = "Action saved.";
+    document.getElementById("wfActionItem").value = "";
+    document.getElementById("wfActionNotes").value = "";
+    await loadWeeklyForumActions();
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = e.message || String(e);
+  }
+}
+
+async function updateWeeklyForumActionStatus(id, status) {
+  const n = Number(id || 0);
+  if (!n) return;
+  await fetch(`${API}/maintenance/weekly-forum/actions/${n}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   console.log("Maintenance UI loaded");
 
@@ -1441,6 +1544,8 @@ document.addEventListener("DOMContentLoaded", () => {
     d.setDate(d.getDate() + mondayOffset + 4);
     wfEnd.value = d.toISOString().slice(0, 10);
   }
+  const wfActionDate = document.getElementById("wfActionDate");
+  if (wfActionDate && !wfActionDate.value) wfActionDate.value = new Date().toISOString().slice(0, 10);
   document.getElementById("saveMiBtn")?.addEventListener("click", saveManagerInspection);
   document.getElementById("saveDrBtn")?.addEventListener("click", saveDamageReport);
   document.getElementById("loadMiBtn")?.addEventListener("click", loadManagerInspections);
@@ -1495,6 +1600,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadManagerInspections().catch(() => {});
   loadDamageReports().catch(() => {});
   loadWeeklyForumSummary().catch(() => {});
+  loadWeeklyForumActions().catch(() => {});
   document.getElementById("syncStatsBtn")?.addEventListener("click", syncLoadStats);
   document.getElementById("syncStateBtn")?.addEventListener("click", syncLoadState);
   document.getElementById("syncOutboxBtn")?.addEventListener("click", syncLoadOutbox);
@@ -1509,7 +1615,18 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("showWeeklyForumBtn")?.addEventListener("click", () => setTopView("wf"));
   document.getElementById("showSyncAdminBtn")?.addEventListener("click", () => setTopView("sync"));
   document.getElementById("loadWeeklyForumBtn")?.addEventListener("click", loadWeeklyForumSummary);
+  document.getElementById("saveWfActionBtn")?.addEventListener("click", saveWeeklyForumAction);
+  document.getElementById("loadWfActionsBtn")?.addEventListener("click", loadWeeklyForumActions);
   document.getElementById("openWeeklyForumPdfBtn")?.addEventListener("click", () => openWeeklyForumPdf(false));
   document.getElementById("downloadWeeklyForumPdfBtn")?.addEventListener("click", () => openWeeklyForumPdf(true));
+  document.getElementById("wfActionBody")?.addEventListener("change", (evt) => {
+    const sel = evt.target?.closest?.("select[data-wf-action-status]");
+    if (!sel) return;
+    const id = Number(sel.getAttribute("data-wf-action-status") || 0);
+    const status = String(sel.value || "open");
+    updateWeeklyForumActionStatus(id, status)
+      .then(() => loadWeeklyForumActions())
+      .catch((e) => alert(`Failed to update status: ${e.message || e}`));
+  });
   setTopView("main");
 });

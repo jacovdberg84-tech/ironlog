@@ -1545,6 +1545,148 @@ export default async function maintenanceRoutes(app) {
   });
 
   // =====================================================
+  // WEEKLY FORUM ACTION TRACKER
+  // =====================================================
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS weekly_forum_actions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      action_date TEXT NOT NULL,
+      department TEXT NOT NULL,
+      action_item TEXT NOT NULL,
+      owner_name TEXT NOT NULL,
+      due_date TEXT,
+      status TEXT NOT NULL DEFAULT 'open',
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+
+  app.get("/weekly-forum/actions", async (req, reply) => {
+    try {
+      const start = String(req.query?.start || "").trim();
+      const end = String(req.query?.end || "").trim();
+      const status = String(req.query?.status || "").trim().toLowerCase();
+      if (start && !isDate(start)) return reply.code(400).send({ ok: false, error: "start must be YYYY-MM-DD" });
+      if (end && !isDate(end)) return reply.code(400).send({ ok: false, error: "end must be YYYY-MM-DD" });
+
+      const where = [];
+      const params = [];
+      if (start) {
+        where.push("action_date >= ?");
+        params.push(start);
+      }
+      if (end) {
+        where.push("action_date <= ?");
+        params.push(end);
+      }
+      if (status) {
+        where.push("LOWER(COALESCE(status,'open')) = ?");
+        params.push(status);
+      }
+
+      const rows = db.prepare(`
+        SELECT
+          id, action_date, department, action_item, owner_name, due_date,
+          status, notes, created_at, updated_at
+        FROM weekly_forum_actions
+        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+        ORDER BY
+          CASE LOWER(COALESCE(status, 'open'))
+            WHEN 'open' THEN 0
+            WHEN 'in_progress' THEN 1
+            WHEN 'blocked' THEN 2
+            ELSE 3
+          END ASC,
+          COALESCE(due_date, action_date) ASC,
+          id DESC
+      `).all(...params);
+      return reply.send({ ok: true, rows });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.post("/weekly-forum/actions", async (req, reply) => {
+    try {
+      const action_date = String(req.body?.action_date || "").trim() || new Date().toISOString().slice(0, 10);
+      const department = String(req.body?.department || "").trim();
+      const action_item = String(req.body?.action_item || "").trim();
+      const owner_name = String(req.body?.owner_name || "").trim();
+      const due_date = String(req.body?.due_date || "").trim() || null;
+      const status = String(req.body?.status || "open").trim().toLowerCase() || "open";
+      const notes = String(req.body?.notes || "").trim() || null;
+
+      if (!isDate(action_date)) return reply.code(400).send({ ok: false, error: "action_date must be YYYY-MM-DD" });
+      if (!department) return reply.code(400).send({ ok: false, error: "department is required" });
+      if (!action_item) return reply.code(400).send({ ok: false, error: "action_item is required" });
+      if (!owner_name) return reply.code(400).send({ ok: false, error: "owner_name is required" });
+      if (due_date && !isDate(due_date)) return reply.code(400).send({ ok: false, error: "due_date must be YYYY-MM-DD" });
+
+      const allowedStatuses = ["open", "in_progress", "blocked", "done"];
+      if (!allowedStatuses.includes(status)) {
+        return reply.code(400).send({ ok: false, error: "status must be open|in_progress|blocked|done" });
+      }
+
+      const ins = db.prepare(`
+        INSERT INTO weekly_forum_actions (
+          action_date, department, action_item, owner_name, due_date, status, notes, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `).run(action_date, department, action_item, owner_name, due_date, status, notes);
+      return reply.send({ ok: true, id: Number(ins.lastInsertRowid) });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.put("/weekly-forum/actions/:id", async (req, reply) => {
+    try {
+      const id = Number(req.params?.id || 0);
+      if (!id) return reply.code(400).send({ ok: false, error: "invalid id" });
+      const existing = db.prepare(`SELECT id FROM weekly_forum_actions WHERE id = ?`).get(id);
+      if (!existing) return reply.code(404).send({ ok: false, error: "action not found" });
+
+      const department = req.body?.department != null ? String(req.body.department).trim() : undefined;
+      const action_item = req.body?.action_item != null ? String(req.body.action_item).trim() : undefined;
+      const owner_name = req.body?.owner_name != null ? String(req.body.owner_name).trim() : undefined;
+      const due_date = req.body?.due_date != null ? (String(req.body.due_date).trim() || null) : undefined;
+      const status = req.body?.status != null ? String(req.body.status).trim().toLowerCase() : undefined;
+      const notes = req.body?.notes != null ? (String(req.body.notes).trim() || null) : undefined;
+
+      if (due_date !== undefined && due_date && !isDate(due_date)) {
+        return reply.code(400).send({ ok: false, error: "due_date must be YYYY-MM-DD" });
+      }
+      if (status !== undefined) {
+        const allowedStatuses = ["open", "in_progress", "blocked", "done"];
+        if (!allowedStatuses.includes(status)) {
+          return reply.code(400).send({ ok: false, error: "status must be open|in_progress|blocked|done" });
+        }
+      }
+
+      db.prepare(`
+        UPDATE weekly_forum_actions
+        SET
+          department = COALESCE(?, department),
+          action_item = COALESCE(?, action_item),
+          owner_name = COALESCE(?, owner_name),
+          due_date = COALESCE(?, due_date),
+          status = COALESCE(?, status),
+          notes = COALESCE(?, notes),
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).run(department ?? null, action_item ?? null, owner_name ?? null, due_date ?? null, status ?? null, notes ?? null, id);
+
+      return reply.send({ ok: true, id });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // =====================================================
   // MANAGER INSPECTIONS
   // =====================================================
   app.get("/inspections", async (req, reply) => {

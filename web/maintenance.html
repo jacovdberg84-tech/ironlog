@@ -362,6 +362,71 @@
         </table>
       </div>
       <small class="muted">Forecast uses historical closed service work orders and linked stores/oil usage as planning guidance.</small>
+
+      <hr class="hr-soft" />
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0;">Action Tracker</h3>
+      </div>
+      <div class="row stack-10">
+        <label>
+          Action Date
+          <input id="wfActionDate" type="date" />
+        </label>
+        <label>
+          Department
+          <select id="wfActionDept">
+            <option value="">Select</option>
+            <option value="Operations">Operations</option>
+            <option value="Maintenance">Maintenance</option>
+            <option value="Finance">Finance</option>
+            <option value="QA/QC">QA/QC</option>
+            <option value="HR">HR</option>
+            <option value="Procurement">Procurement</option>
+            <option value="Safety">Safety</option>
+          </select>
+        </label>
+        <label>
+          Owner
+          <input id="wfActionOwner" type="text" placeholder="Responsible person" />
+        </label>
+        <label>
+          Due Date
+          <input id="wfActionDue" type="date" />
+        </label>
+        <label>
+          Status
+          <select id="wfActionStatus">
+            <option value="open">Open</option>
+            <option value="in_progress">In Progress</option>
+            <option value="blocked">Blocked</option>
+            <option value="done">Done</option>
+          </select>
+        </label>
+      </div>
+      <textarea id="wfActionItem" rows="2" placeholder="Action item..." style="width:100%;"></textarea>
+      <textarea id="wfActionNotes" rows="2" placeholder="Notes (optional)..." style="width:100%;"></textarea>
+      <div class="row stack-10">
+        <button id="saveWfActionBtn">Save Action</button>
+        <button id="loadWfActionsBtn">Refresh Actions</button>
+      </div>
+      <div id="wfActionMsg" class="muted"></div>
+      <div style="overflow:auto; margin-top:10px;">
+        <table class="gridTable" style="min-width:1100px;">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Date</th>
+              <th>Department</th>
+              <th>Action</th>
+              <th>Owner</th>
+              <th>Due</th>
+              <th>Status</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody id="wfActionBody"></tbody>
+        </table>
+      </div>
     </div>
 
     <div id="syncAdminCard" class="card stack-24">
@@ -389,6 +454,6 @@
     </div>
   </div>
 
-  <script src="./maintenance.js?v=3"></script>
+  <script src="./maintenance.js?v=4"></script>
 </body>
 </html>
