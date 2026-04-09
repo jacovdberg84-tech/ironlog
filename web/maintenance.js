@@ -689,14 +689,17 @@ function syncHeaders() {
 function setTopView(view) {
   const main = document.getElementById("mainMaintenanceCards");
   const mi = document.getElementById("managerInspectionsCard");
+  const wf = document.getElementById("weeklyForumCard");
   const sync = document.getElementById("syncAdminCard");
   const btnMain = document.getElementById("showMainMaintBtn");
   const btnMi = document.getElementById("showManagerInspectionsBtn");
+  const btnWf = document.getElementById("showWeeklyForumBtn");
   const btnSync = document.getElementById("showSyncAdminBtn");
-  if (!main || !mi || !sync) return;
+  if (!main || !mi || !wf || !sync) return;
 
   main.style.display = view === "main" ? "" : "none";
   mi.style.display = view === "mi" ? "" : "none";
+  wf.style.display = view === "wf" ? "" : "none";
   sync.style.display = view === "sync" ? "" : "none";
 
   const styleBtn = (btn, active) => {
@@ -707,6 +710,7 @@ function setTopView(view) {
   };
   styleBtn(btnMain, view === "main");
   styleBtn(btnMi, view === "mi");
+  styleBtn(btnWf, view === "wf");
   styleBtn(btnSync, view === "sync");
 }
 
@@ -1225,6 +1229,78 @@ async function loadManagerInspections() {
   }
 }
 
+function fmtMoney(v) {
+  const n = Number(v || 0);
+  return Number.isFinite(n) ? n.toFixed(2) : "0.00";
+}
+
+async function loadWeeklyForumSummary() {
+  const msg = document.getElementById("wfMsg");
+  const kpiBody = document.getElementById("wfKpiBody");
+  const upcomingBody = document.getElementById("wfUpcomingBody");
+  const startEl = document.getElementById("wfStart");
+  const endEl = document.getElementById("wfEnd");
+  const nearEl = document.getElementById("wfNearDueHours");
+  if (!msg || !kpiBody || !upcomingBody || !startEl || !endEl || !nearEl) return;
+
+  const start = String(startEl.value || "").trim();
+  const end = String(endEl.value || "").trim();
+  const near_due_hours = Math.max(1, Number(nearEl.value || 50));
+  const q = new URLSearchParams();
+  if (start) q.set("start", start);
+  if (end) q.set("end", end);
+  q.set("near_due_hours", String(near_due_hours));
+
+  msg.className = "muted";
+  msg.textContent = "Loading weekly forum data...";
+  kpiBody.innerHTML = `<tr><td colspan="2" class="muted">Loading...</td></tr>`;
+  upcomingBody.innerHTML = `<tr><td colspan="9" class="muted">Loading...</td></tr>`;
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-forum/summary?${q.toString()}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load weekly forum summary");
+
+    const kpis = data.kpis || {};
+    const costs = data.costs || {};
+    const range = data.range || {};
+    kpiBody.innerHTML = [
+      ["Range", `${range.start || "-"} to ${range.end || "-"}`],
+      ["Open Work Orders", Number(kpis.open_work_orders || 0)],
+      ["Upcoming Services Flagged", Number(kpis.upcoming_services_flagged || 0)],
+      ["Stores Oil Cost", fmtMoney(costs.stores_oil_cost)],
+      ["Stores Parts Cost", fmtMoney(costs.stores_parts_cost)],
+      ["Maintenance Labor Cost", fmtMoney(costs.maintenance_labor_cost)],
+      ["Weekly Total Cost", fmtMoney(costs.weekly_total_cost)],
+      ["Upcoming Service Forecast Cost", fmtMoney(costs.upcoming_service_forecast_cost)],
+    ].map(([k, v]) => `<tr><td>${esc(k)}</td><td style="text-align:right;">${esc(String(v))}</td></tr>`).join("");
+
+    const rows = Array.isArray(data.upcoming_services) ? data.upcoming_services : [];
+    upcomingBody.innerHTML = rows.length
+      ? rows.map((r) => `
+        <tr>
+          <td>${esc(r.asset_code || "-")} - ${esc(r.asset_name || "-")}</td>
+          <td>${esc(r.service_name || "-")}</td>
+          <td style="text-align:right;">${fmt1(r.current_hours)}</td>
+          <td style="text-align:right;">${fmt1(r.next_due_hours)}</td>
+          <td style="text-align:right;">${fmt1(r.remaining_hours)}</td>
+          <td>${esc(r.status || "-")}</td>
+          <td style="text-align:right;">${fmt1(r?.forecast?.avg_oil_qty)}</td>
+          <td style="text-align:right;">${fmt1(r?.forecast?.avg_parts_qty)}</td>
+          <td style="text-align:right;">${fmtMoney(r?.forecast?.est_service_kit_cost)}</td>
+        </tr>
+      `).join("")
+      : `<tr><td colspan="9" class="muted">No upcoming services within threshold.</td></tr>`;
+
+    msg.className = "message-success";
+    msg.textContent = "Weekly forum summary loaded.";
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = `Load error: ${e.message || e}`;
+    kpiBody.innerHTML = `<tr><td colspan="2" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+    upcomingBody.innerHTML = `<tr><td colspan="9" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   console.log("Maintenance UI loaded");
 
@@ -1315,6 +1391,22 @@ document.addEventListener("DOMContentLoaded", () => {
     drStart.value = d.toISOString().slice(0, 10);
   }
   if (drEnd && !drEnd.value) drEnd.value = new Date().toISOString().slice(0, 10);
+  const wfStart = document.getElementById("wfStart");
+  const wfEnd = document.getElementById("wfEnd");
+  if (wfStart && !wfStart.value) {
+    const d = new Date();
+    const day = d.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + mondayOffset);
+    wfStart.value = d.toISOString().slice(0, 10);
+  }
+  if (wfEnd && !wfEnd.value) {
+    const d = new Date();
+    const day = d.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + mondayOffset + 4);
+    wfEnd.value = d.toISOString().slice(0, 10);
+  }
   document.getElementById("saveMiBtn")?.addEventListener("click", saveManagerInspection);
   document.getElementById("saveDrBtn")?.addEventListener("click", saveDamageReport);
   document.getElementById("loadMiBtn")?.addEventListener("click", loadManagerInspections);
@@ -1368,6 +1460,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadAssetsForInspection().catch(() => {});
   loadManagerInspections().catch(() => {});
   loadDamageReports().catch(() => {});
+  loadWeeklyForumSummary().catch(() => {});
   document.getElementById("syncStatsBtn")?.addEventListener("click", syncLoadStats);
   document.getElementById("syncStateBtn")?.addEventListener("click", syncLoadState);
   document.getElementById("syncOutboxBtn")?.addEventListener("click", syncLoadOutbox);
@@ -1379,6 +1472,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("syncCheckpointBtn")?.addEventListener("click", syncCheckpointLastPull);
   document.getElementById("showMainMaintBtn")?.addEventListener("click", () => setTopView("main"));
   document.getElementById("showManagerInspectionsBtn")?.addEventListener("click", () => setTopView("mi"));
+  document.getElementById("showWeeklyForumBtn")?.addEventListener("click", () => setTopView("wf"));
   document.getElementById("showSyncAdminBtn")?.addEventListener("click", () => setTopView("sync"));
+  document.getElementById("loadWeeklyForumBtn")?.addEventListener("click", loadWeeklyForumSummary);
   setTopView("main");
 });

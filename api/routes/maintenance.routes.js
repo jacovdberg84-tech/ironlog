@@ -1223,6 +1223,226 @@ export default async function maintenanceRoutes(app) {
   });
 
   // =====================================================
+  // WEEKLY FORUM SUMMARY (cross-functional alignment)
+  // GET /api/maintenance/weekly-forum/summary?start=YYYY-MM-DD&end=YYYY-MM-DD&near_due_hours=50
+  // =====================================================
+  app.get("/weekly-forum/summary", async (req, reply) => {
+    try {
+      const nearDueHours = Math.max(1, Number(req.query?.near_due_hours || 50));
+      const startIn = String(req.query?.start || "").trim();
+      const endIn = String(req.query?.end || "").trim();
+
+      const now = new Date();
+      const day = now.getDay(); // 0=Sun ... 6=Sat
+      const mondayOffset = day === 0 ? -6 : 1 - day;
+      const monday = new Date(now);
+      monday.setHours(0, 0, 0, 0);
+      monday.setDate(monday.getDate() + mondayOffset);
+      const friday = new Date(monday);
+      friday.setDate(friday.getDate() + 4);
+      const ymd = (d) => d.toISOString().slice(0, 10);
+      const start = startIn && isDate(startIn) ? startIn : ymd(monday);
+      const end = endIn && isDate(endIn) ? endIn : ymd(friday);
+      if (!isDate(start) || !isDate(end)) {
+        return reply.code(400).send({ ok: false, error: "start and end must be YYYY-MM-DD" });
+      }
+      if (start > end) {
+        return reply.code(400).send({ ok: false, error: "start must be <= end" });
+      }
+
+      const hasTable = (name) =>
+        Boolean(
+          db.prepare(`
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table' AND name = ?
+            LIMIT 1
+          `).get(name)
+        );
+      const hasColumn = (table, col) => {
+        if (!hasTable(table)) return false;
+        const rows = db.prepare(`PRAGMA table_info(${table})`).all();
+        return rows.some((r) => String(r.name || "") === col);
+      };
+
+      const plans = hasTable("maintenance_plans")
+        ? db.prepare(`
+            SELECT
+              mp.id AS plan_id,
+              mp.asset_id,
+              mp.service_name,
+              mp.interval_hours,
+              mp.last_service_hours,
+              a.asset_code,
+              a.asset_name
+            FROM maintenance_plans mp
+            JOIN assets a ON a.id = mp.asset_id
+            WHERE mp.active = 1
+              AND a.active = 1
+              AND a.archived = 0
+              AND a.is_standby = 0
+            ORDER BY a.asset_code ASC, mp.service_name ASC
+          `).all()
+        : [];
+
+      const openWOs =
+        hasTable("work_orders")
+          ? Number(
+              db.prepare(`
+                SELECT COUNT(*) AS c
+                FROM work_orders
+                WHERE LOWER(COALESCE(status, 'open')) NOT IN ('closed', 'completed', 'approved')
+              `).get()?.c || 0
+            )
+          : 0;
+
+      const closedStatuses = "'closed','completed','approved'";
+      const hasWOCompletedAt = hasColumn("work_orders", "completed_at");
+      const woCloseExpr = hasWOCompletedAt ? "COALESCE(w.completed_at, w.closed_at)" : "w.closed_at";
+
+      const partsCost = hasTable("stock_movements") && hasTable("work_orders")
+        ? Number(
+            db.prepare(`
+              SELECT COALESCE(SUM(ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0)), 0) AS v
+              FROM stock_movements sm
+              JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
+              WHERE ${woCloseExpr} IS NOT NULL
+                AND DATE(${woCloseExpr}) BETWEEN ? AND ?
+                AND (
+                  LOWER(COALESCE(sm.movement_type, '')) = 'out'
+                  OR COALESCE(sm.quantity, 0) < 0
+                )
+            `).get(start, end)?.v || 0
+          )
+        : 0;
+
+      const oilCost = hasTable("oil_logs")
+        ? Number(
+            db.prepare(`
+              SELECT COALESCE(SUM(COALESCE(quantity, 0) * COALESCE(unit_cost, 0)), 0) AS v
+              FROM oil_logs
+              WHERE log_date BETWEEN ? AND ?
+            `).get(start, end)?.v || 0
+          )
+        : 0;
+
+      const laborCost = hasTable("work_orders")
+        ? Number(
+            db.prepare(`
+              SELECT COALESCE(SUM(COALESCE(labor_hours, 0) * COALESCE(labor_rate_per_hour, 0)), 0) AS v
+              FROM work_orders w
+              WHERE ${woCloseExpr} IS NOT NULL
+                AND DATE(${woCloseExpr}) BETWEEN ? AND ?
+            `).get(start, end)?.v || 0
+          )
+        : 0;
+
+      const getAssetCurrentHoursSafe = (assetId) => {
+        try {
+          return getAssetCurrentHours(assetId);
+        } catch {
+          return 0;
+        }
+      };
+
+      const forecastRows = plans
+        .map((p) => {
+          const current = Number(getAssetCurrentHoursSafe(p.asset_id) || 0);
+          const nextDue = Number(p.last_service_hours || 0) + Number(p.interval_hours || 0);
+          const remaining = nextDue - current;
+          const status = classifyDueStatus(remaining, nearDueHours);
+
+          const hist = hasTable("work_orders") && hasTable("stock_movements")
+            ? db.prepare(`
+                SELECT
+                  COUNT(DISTINCT w.id) AS service_events,
+                  COALESCE(SUM(ABS(COALESCE(sm.quantity, 0))), 0) AS parts_qty_total,
+                  COALESCE(SUM(ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0)), 0) AS parts_cost_total
+                FROM work_orders w
+                LEFT JOIN stock_movements sm ON sm.reference = ('work_order:' || w.id)
+                WHERE LOWER(COALESCE(w.source, '')) = 'service'
+                  AND COALESCE(w.reference_id, 0) = ?
+                  AND LOWER(COALESCE(w.status, '')) IN (${closedStatuses})
+              `).get(Number(p.plan_id || 0))
+            : null;
+
+          const serviceEvents = Number(hist?.service_events || 0);
+          const avgPartsQty = serviceEvents > 0 ? Number(hist.parts_qty_total || 0) / serviceEvents : 0;
+          const avgPartsCost = serviceEvents > 0 ? Number(hist.parts_cost_total || 0) / serviceEvents : 0;
+
+          const oilAvg = hasTable("oil_logs") && hasTable("work_orders")
+            ? db.prepare(`
+                SELECT
+                  COALESCE(SUM(ol.quantity), 0) AS oil_qty_total,
+                  COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, 0)), 0) AS oil_cost_total
+                FROM oil_logs ol
+                WHERE ol.asset_id = ?
+                  AND ol.log_date IN (
+                    SELECT DATE(${woCloseExpr})
+                    FROM work_orders w
+                    WHERE LOWER(COALESCE(w.source, '')) = 'service'
+                      AND COALESCE(w.reference_id, 0) = ?
+                      AND ${woCloseExpr} IS NOT NULL
+                      AND LOWER(COALESCE(w.status, '')) IN (${closedStatuses})
+                  )
+              `).get(Number(p.asset_id || 0), Number(p.plan_id || 0))
+            : null;
+          const avgOilQty = serviceEvents > 0 ? Number(oilAvg?.oil_qty_total || 0) / serviceEvents : 0;
+          const avgOilCost = serviceEvents > 0 ? Number(oilAvg?.oil_cost_total || 0) / serviceEvents : 0;
+
+          const serviceKitCost = avgPartsCost + avgOilCost;
+          return {
+            plan_id: Number(p.plan_id || 0),
+            asset_id: Number(p.asset_id || 0),
+            asset_code: p.asset_code,
+            asset_name: p.asset_name,
+            service_name: p.service_name,
+            current_hours: Number(current.toFixed(2)),
+            next_due_hours: Number(nextDue.toFixed(2)),
+            remaining_hours: Number(remaining.toFixed(2)),
+            status,
+            forecast: {
+              service_events: serviceEvents,
+              avg_oil_qty: Number(avgOilQty.toFixed(2)),
+              avg_oil_cost: Number(avgOilCost.toFixed(2)),
+              avg_parts_qty: Number(avgPartsQty.toFixed(2)),
+              avg_parts_cost: Number(avgPartsCost.toFixed(2)),
+              est_service_kit_cost: Number(serviceKitCost.toFixed(2)),
+            },
+          };
+        })
+        .filter((r) => r.status === "OVERDUE" || r.status === "ALMOST DUE")
+        .sort((a, b) => Number(a.remaining_hours || 0) - Number(b.remaining_hours || 0))
+        .slice(0, 40);
+
+      const totalForecastCost = forecastRows.reduce(
+        (s, r) => s + Number(r.forecast?.est_service_kit_cost || 0),
+        0
+      );
+
+      return reply.send({
+        ok: true,
+        range: { start, end },
+        kpis: {
+          open_work_orders: openWOs,
+          upcoming_services_flagged: forecastRows.length,
+        },
+        costs: {
+          stores_oil_cost: Number(oilCost.toFixed(2)),
+          stores_parts_cost: Number(partsCost.toFixed(2)),
+          maintenance_labor_cost: Number(laborCost.toFixed(2)),
+          weekly_total_cost: Number((oilCost + partsCost + laborCost).toFixed(2)),
+          upcoming_service_forecast_cost: Number(totalForecastCost.toFixed(2)),
+        },
+        upcoming_services: forecastRows,
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // =====================================================
   // MANAGER INSPECTIONS
   // =====================================================
   app.get("/inspections", async (req, reply) => {

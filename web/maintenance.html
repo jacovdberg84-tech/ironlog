@@ -16,6 +16,7 @@
     <div class="page-header-actions">
       <button id="showMainMaintBtn">Main Maintenance</button>
       <button id="showManagerInspectionsBtn">Manager Inspections</button>
+      <button id="showWeeklyForumBtn">Weekly Forum</button>
       <button id="showSyncAdminBtn">Sync Admin</button>
       <button onclick="location.href='workorders.html'">Work Orders</button>
       <button onclick="location.href='index.html?tab=ironmind'">IronMind</button>
@@ -305,6 +306,60 @@
         <button id="downloadDrBulkPdfPhotosBtn">Download Damage PDF (Photos)</button>
       </div>
       <div id="drList" class="list"></div>
+    </div>
+
+    <div id="weeklyForumCard" class="card stack-24" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0;">Weekly Forum Dashboard</h3>
+      </div>
+      <div class="row stack-10">
+        <label>
+          Start Date
+          <input id="wfStart" type="date" />
+        </label>
+        <label>
+          End Date
+          <input id="wfEnd" type="date" />
+        </label>
+        <label>
+          Near-Due Hours
+          <input id="wfNearDueHours" type="number" min="1" step="1" value="50" />
+        </label>
+        <button id="loadWeeklyForumBtn">Load Weekly Forum</button>
+      </div>
+      <div id="wfMsg" class="muted">Select dates and load summary.</div>
+
+      <div style="overflow:auto; margin-top:10px;">
+        <table class="gridTable" style="min-width:780px;">
+          <thead>
+            <tr>
+              <th>Metric</th>
+              <th style="text-align:right;">Value</th>
+            </tr>
+          </thead>
+          <tbody id="wfKpiBody"></tbody>
+        </table>
+      </div>
+
+      <div style="overflow:auto; margin-top:14px;">
+        <table class="gridTable" style="min-width:980px;">
+          <thead>
+            <tr>
+              <th>Machine</th>
+              <th>Service</th>
+              <th style="text-align:right;">Current Hrs</th>
+              <th style="text-align:right;">Next Due</th>
+              <th style="text-align:right;">Remaining</th>
+              <th>Status</th>
+              <th style="text-align:right;">Avg Oil Qty</th>
+              <th style="text-align:right;">Avg Parts Qty</th>
+              <th style="text-align:right;">Est Kit Cost</th>
+            </tr>
+          </thead>
+          <tbody id="wfUpcomingBody"></tbody>
+        </table>
+      </div>
+      <small class="muted">Forecast uses historical closed service work orders and linked stores/oil usage as planning guidance.</small>
     </div>
 
     <div id="syncAdminCard" class="card stack-24">
