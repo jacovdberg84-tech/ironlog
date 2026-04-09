@@ -1245,6 +1245,48 @@ function weeklyForumQueryString() {
   return q.toString();
 }
 
+let wfUpcomingCache = [];
+let wfInputsCache = [];
+let wfPartsCache = [];
+function wfPlanLabel(r) {
+  return `${String(r.asset_code || "-")} - ${String(r.asset_name || "-")} | ${String(r.service_name || "-")} (Plan ${Number(r.plan_id || 0)})`;
+}
+function refreshWeeklyForumPlanOptions() {
+  const sel = document.getElementById("wfInputPlan");
+  if (!sel) return;
+  sel.innerHTML = wfUpcomingCache.length
+    ? `<option value="">Select upcoming service</option>${wfUpcomingCache.map((r) => `<option value="${Number(r.plan_id || 0)}">${esc(wfPlanLabel(r))}</option>`).join("")}`
+    : `<option value="">No upcoming services loaded</option>`;
+}
+function refreshWeeklyForumInputsTable() {
+  const body = document.getElementById("wfInputsBody");
+  if (!body) return;
+  body.innerHTML = wfInputsCache.length
+    ? wfInputsCache.map((r) => {
+        const plan = wfUpcomingCache.find((p) => Number(p.plan_id || 0) === Number(r.plan_id || 0));
+        return `
+          <tr>
+            <td>${esc(plan ? wfPlanLabel(plan) : `Plan ${Number(r.plan_id || 0)}`)}</td>
+            <td>${esc(r.oil_part_code || "-")}</td>
+            <td style="text-align:right;">${fmt1(r.oil_qty)}</td>
+            <td>${esc(r.parts_part_code || "-")}</td>
+            <td style="text-align:right;">${fmt1(r.parts_qty)}</td>
+            <td>${esc(r.notes || "")}</td>
+          </tr>
+        `;
+      }).join("")
+    : `<tr><td colspan="6" class="muted">No manual inputs saved.</td></tr>`;
+}
+function refreshWeeklyForumPartsDatalist() {
+  const dl = document.getElementById("wfPartsList");
+  if (!dl) return;
+  dl.innerHTML = wfPartsCache.map((p) => {
+    const code = String(p.part_code || "").trim();
+    const desc = `${code} - ${String(p.part_name || "")} | on hand ${Number(p.on_hand || 0).toFixed(2)} | unit ${Number(p.latest_unit_cost || 0).toFixed(2)}`;
+    return `<option value="${esc(code)}">${esc(desc)}</option>`;
+  }).join("");
+}
+
 async function loadWeeklyForumSummary() {
   const msg = document.getElementById("wfMsg");
   const kpiBody = document.getElementById("wfKpiBody");
@@ -1280,6 +1322,8 @@ async function loadWeeklyForumSummary() {
     ].map(([k, v]) => `<tr><td>${esc(k)}</td><td style="text-align:right;">${esc(String(v))}</td></tr>`).join("");
 
     const rows = Array.isArray(data.upcoming_services) ? data.upcoming_services : [];
+    wfUpcomingCache = rows;
+    refreshWeeklyForumPlanOptions();
     upcomingBody.innerHTML = rows.length
       ? rows.map((r) => `
         <tr>
@@ -1436,6 +1480,67 @@ async function updateWeeklyForumActionStatus(id, status) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status }),
   });
+}
+
+async function loadWeeklyForumParts() {
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-forum/parts`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load parts list");
+    wfPartsCache = Array.isArray(data.rows) ? data.rows : [];
+    refreshWeeklyForumPartsDatalist();
+  } catch {
+    wfPartsCache = [];
+    refreshWeeklyForumPartsDatalist();
+  }
+}
+
+async function loadWeeklyForumInputs() {
+  const body = document.getElementById("wfInputsBody");
+  if (body) body.innerHTML = `<tr><td colspan="6" class="muted">Loading...</td></tr>`;
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-forum/forecast-inputs`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load manual inputs");
+    wfInputsCache = Array.isArray(data.rows) ? data.rows : [];
+    refreshWeeklyForumInputsTable();
+  } catch (e) {
+    if (body) body.innerHTML = `<tr><td colspan="6" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+  }
+}
+
+async function saveWeeklyForumInput() {
+  const msg = document.getElementById("wfInputMsg");
+  const plan_id = Number(document.getElementById("wfInputPlan")?.value || 0);
+  const oil_part_code = String(document.getElementById("wfInputOilCode")?.value || "").trim();
+  const oil_qty = Math.max(0, Number(document.getElementById("wfInputOilQty")?.value || 0));
+  const parts_part_code = String(document.getElementById("wfInputPartsCode")?.value || "").trim();
+  const parts_qty = Math.max(0, Number(document.getElementById("wfInputPartsQty")?.value || 0));
+  const notes = String(document.getElementById("wfInputNotes")?.value || "").trim();
+  if (!msg) return;
+  if (!plan_id) {
+    msg.className = "message-error";
+    msg.textContent = "Select an upcoming service plan first.";
+    return;
+  }
+  msg.className = "muted";
+  msg.textContent = "Saving manual input...";
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-forum/forecast-inputs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan_id, oil_part_code: oil_part_code || null, oil_qty, parts_part_code: parts_part_code || null, parts_qty, notes: notes || null }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save input");
+    msg.className = "message-success";
+    msg.textContent = "Manual input saved. Forecast cost now uses stores pricing.";
+    await loadWeeklyForumInputs();
+    await loadWeeklyForumSummary();
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = e.message || String(e);
+  }
 }
 
 function parseLines(text) {
@@ -1870,6 +1975,8 @@ document.addEventListener("DOMContentLoaded", () => {
   loadDamageReports().catch(() => {});
   loadWeeklyForumSummary().catch(() => {});
   loadWeeklyForumActions().catch(() => {});
+  loadWeeklyForumParts().catch(() => {});
+  loadWeeklyForumInputs().catch(() => {});
   loadRsgProfiles().catch(() => {});
   document.getElementById("syncStatsBtn")?.addEventListener("click", syncLoadStats);
   document.getElementById("syncStateBtn")?.addEventListener("click", syncLoadState);
@@ -1891,6 +1998,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("importRsgCsvBtn")?.addEventListener("click", importRsgProfilesCsv);
   document.getElementById("saveWfActionBtn")?.addEventListener("click", saveWeeklyForumAction);
   document.getElementById("loadWfActionsBtn")?.addEventListener("click", loadWeeklyForumActions);
+  document.getElementById("saveWfInputBtn")?.addEventListener("click", saveWeeklyForumInput);
+  document.getElementById("loadWfInputsBtn")?.addEventListener("click", loadWeeklyForumInputs);
   document.getElementById("openWeeklyForumPdfBtn")?.addEventListener("click", () => openWeeklyForumPdf(false));
   document.getElementById("downloadWeeklyForumPdfBtn")?.addEventListener("click", () => openWeeklyForumPdf(true));
   document.getElementById("wfActionBody")?.addEventListener("change", (evt) => {

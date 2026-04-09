@@ -1343,6 +1343,44 @@ export default async function maintenanceRoutes(app) {
           return 0;
         }
       };
+      const forecastInputs = hasTable("weekly_forum_service_inputs")
+        ? db.prepare(`
+            SELECT plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, notes
+            FROM weekly_forum_service_inputs
+          `).all()
+        : [];
+      const inputByPlan = new Map((forecastInputs || []).map((r) => [Number(r.plan_id || 0), r]));
+      const getPartPricing = (partCodeIn) => {
+        const partCode = String(partCodeIn || "").trim();
+        if (!partCode || !hasTable("parts") || !hasTable("stock_movements")) {
+          return { unit_cost: 0, on_hand: 0, part_name: null };
+        }
+        const part = db.prepare(`
+          SELECT id, part_name
+          FROM parts
+          WHERE UPPER(TRIM(part_code)) = UPPER(TRIM(?))
+          LIMIT 1
+        `).get(partCode);
+        if (!part?.id) return { unit_cost: 0, on_hand: 0, part_name: null };
+        const costRow = db.prepare(`
+          SELECT COALESCE(unit_cost_usd, cost_input, 0) AS unit_cost
+          FROM stock_movements
+          WHERE part_id = ?
+            AND COALESCE(unit_cost_usd, cost_input, 0) > 0
+          ORDER BY id DESC
+          LIMIT 1
+        `).get(part.id);
+        const onHandRow = db.prepare(`
+          SELECT COALESCE(SUM(quantity), 0) AS on_hand
+          FROM stock_movements
+          WHERE part_id = ?
+        `).get(part.id);
+        return {
+          unit_cost: Number(costRow?.unit_cost || 0),
+          on_hand: Number(onHandRow?.on_hand || 0),
+          part_name: String(part.part_name || ""),
+        };
+      };
 
       const forecastRows = plans
         .map((p) => {
@@ -1390,6 +1428,16 @@ export default async function maintenanceRoutes(app) {
           const avgOilCost = serviceEvents > 0 ? Number(oilAvg?.oil_cost_total || 0) / serviceEvents : 0;
 
           const serviceKitCost = avgPartsCost + avgOilCost;
+          const manual = inputByPlan.get(Number(p.plan_id || 0)) || null;
+          const oilPartCode = String(manual?.oil_part_code || "").trim();
+          const partsPartCode = String(manual?.parts_part_code || "").trim();
+          const oilQtyManual = Number(manual?.oil_qty || 0);
+          const partsQtyManual = Number(manual?.parts_qty || 0);
+          const oilPricing = oilPartCode ? getPartPricing(oilPartCode) : { unit_cost: 0, on_hand: 0, part_name: null };
+          const partsPricing = partsPartCode ? getPartPricing(partsPartCode) : { unit_cost: 0, on_hand: 0, part_name: null };
+          const manualOilCost = oilQtyManual > 0 ? oilQtyManual * Number(oilPricing.unit_cost || 0) : 0;
+          const manualPartsCost = partsQtyManual > 0 ? partsQtyManual * Number(partsPricing.unit_cost || 0) : 0;
+          const hasManualOverride = oilQtyManual > 0 || partsQtyManual > 0;
           return {
             plan_id: Number(p.plan_id || 0),
             asset_id: Number(p.asset_id || 0),
@@ -1406,7 +1454,23 @@ export default async function maintenanceRoutes(app) {
               avg_oil_cost: Number(avgOilCost.toFixed(2)),
               avg_parts_qty: Number(avgPartsQty.toFixed(2)),
               avg_parts_cost: Number(avgPartsCost.toFixed(2)),
-              est_service_kit_cost: Number(serviceKitCost.toFixed(2)),
+              est_service_kit_cost: Number((hasManualOverride ? (manualOilCost + manualPartsCost) : serviceKitCost).toFixed(2)),
+              cost_source: hasManualOverride ? "manual_store_pricing" : "historical_average",
+              manual: {
+                oil_part_code: oilPartCode || null,
+                oil_part_name: oilPricing.part_name || null,
+                oil_qty: Number(oilQtyManual.toFixed(2)),
+                oil_unit_cost: Number(Number(oilPricing.unit_cost || 0).toFixed(4)),
+                oil_on_hand: Number(Number(oilPricing.on_hand || 0).toFixed(2)),
+                oil_cost_total: Number(manualOilCost.toFixed(2)),
+                parts_part_code: partsPartCode || null,
+                parts_part_name: partsPricing.part_name || null,
+                parts_qty: Number(partsQtyManual.toFixed(2)),
+                parts_unit_cost: Number(Number(partsPricing.unit_cost || 0).toFixed(4)),
+                parts_on_hand: Number(Number(partsPricing.on_hand || 0).toFixed(2)),
+                parts_cost_total: Number(manualPartsCost.toFixed(2)),
+                notes: String(manual?.notes || ""),
+              },
             },
           };
         })
@@ -1561,6 +1625,19 @@ export default async function maintenanceRoutes(app) {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS weekly_forum_service_inputs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      plan_id INTEGER NOT NULL UNIQUE,
+      oil_part_code TEXT,
+      oil_qty REAL NOT NULL DEFAULT 0,
+      parts_part_code TEXT,
+      parts_qty REAL NOT NULL DEFAULT 0,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
 
   app.get("/weekly-forum/actions", async (req, reply) => {
     try {
@@ -1602,6 +1679,83 @@ export default async function maintenanceRoutes(app) {
           id DESC
       `).all(...params);
       return reply.send({ ok: true, rows });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+  app.get("/weekly-forum/parts", async (req, reply) => {
+    try {
+      const hasPartsTable = Boolean(
+        db.prepare(`
+          SELECT 1
+          FROM sqlite_master
+          WHERE type = 'table' AND name = 'parts'
+          LIMIT 1
+        `).get()
+      );
+      const rows = hasPartsTable
+        ? db.prepare(`
+            SELECT
+              p.part_code,
+              p.part_name,
+              COALESCE(SUM(sm.quantity), 0) AS on_hand,
+              COALESCE((
+                SELECT COALESCE(sm2.unit_cost_usd, sm2.cost_input, 0)
+                FROM stock_movements sm2
+                WHERE sm2.part_id = p.id
+                  AND COALESCE(sm2.unit_cost_usd, sm2.cost_input, 0) > 0
+                ORDER BY sm2.id DESC
+                LIMIT 1
+              ), 0) AS latest_unit_cost
+            FROM parts p
+            LEFT JOIN stock_movements sm ON sm.part_id = p.id
+            GROUP BY p.id
+            ORDER BY p.part_code ASC
+            LIMIT 1500
+          `).all()
+        : [];
+      return reply.send({ ok: true, rows });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+  app.get("/weekly-forum/forecast-inputs", async (req, reply) => {
+    try {
+      const rows = db.prepare(`
+        SELECT id, plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, notes, updated_at
+        FROM weekly_forum_service_inputs
+        ORDER BY plan_id ASC
+      `).all();
+      return reply.send({ ok: true, rows });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+  app.post("/weekly-forum/forecast-inputs", async (req, reply) => {
+    try {
+      const plan_id = Number(req.body?.plan_id || 0);
+      const oil_part_code = String(req.body?.oil_part_code || "").trim() || null;
+      const oil_qty = Math.max(0, Number(req.body?.oil_qty || 0));
+      const parts_part_code = String(req.body?.parts_part_code || "").trim() || null;
+      const parts_qty = Math.max(0, Number(req.body?.parts_qty || 0));
+      const notes = String(req.body?.notes || "").trim() || null;
+      if (!plan_id) return reply.code(400).send({ ok: false, error: "plan_id is required" });
+      db.prepare(`
+        INSERT INTO weekly_forum_service_inputs (
+          plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, notes, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(plan_id) DO UPDATE SET
+          oil_part_code = excluded.oil_part_code,
+          oil_qty = excluded.oil_qty,
+          parts_part_code = excluded.parts_part_code,
+          parts_qty = excluded.parts_qty,
+          notes = excluded.notes,
+          updated_at = datetime('now')
+      `).run(plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, notes);
+      return reply.send({ ok: true, plan_id });
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message || String(err) });

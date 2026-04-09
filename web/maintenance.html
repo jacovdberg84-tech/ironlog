@@ -439,6 +439,57 @@
         </table>
       </div>
       <small class="muted">Forecast uses historical closed service work orders and linked stores/oil usage as planning guidance.</small>
+      <hr class="hr-soft" />
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0;">Manual Upcoming Service Inputs (Store-Priced)</h3>
+      </div>
+      <div class="row stack-10">
+        <label>
+          Upcoming Service
+          <select id="wfInputPlan"></select>
+        </label>
+        <label>
+          Oil Part Code
+          <input id="wfInputOilCode" list="wfPartsList" placeholder="e.g. OIL-HYD-46" />
+        </label>
+        <label>
+          Oil Qty
+          <input id="wfInputOilQty" type="number" min="0" step="0.1" value="0" />
+        </label>
+        <label>
+          Parts Part Code
+          <input id="wfInputPartsCode" list="wfPartsList" placeholder="e.g. FLT-ENG-350" />
+        </label>
+        <label>
+          Parts Qty
+          <input id="wfInputPartsQty" type="number" min="0" step="0.1" value="0" />
+        </label>
+      </div>
+      <label>
+        Notes
+        <input id="wfInputNotes" type="text" placeholder="Optional comments..." />
+      </label>
+      <div class="row stack-10">
+        <button id="saveWfInputBtn">Save Manual Input</button>
+        <button id="loadWfInputsBtn">Refresh Inputs</button>
+      </div>
+      <div id="wfInputMsg" class="muted"></div>
+      <datalist id="wfPartsList"></datalist>
+      <div style="overflow:auto; margin-top:10px;">
+        <table class="gridTable" style="min-width:1040px;">
+          <thead>
+            <tr>
+              <th>Plan</th>
+              <th>Oil Part</th>
+              <th style="text-align:right;">Oil Qty</th>
+              <th>Parts Part</th>
+              <th style="text-align:right;">Parts Qty</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody id="wfInputsBody"></tbody>
+        </table>
+      </div>
 
       <hr class="hr-soft" />
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
@@ -531,6 +582,6 @@
     </div>
   </div>
 
-  <script src="./maintenance.js?v=5"></script>
+  <script src="./maintenance.js?v=6"></script>
 </body>
 </html>
