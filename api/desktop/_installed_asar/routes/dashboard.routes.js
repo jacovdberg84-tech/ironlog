@@ -1569,7 +1569,7 @@ export default async function dashboardRoutes(app) {
   // POST /api/dashboard/fuel/machine-hours
   // Body: { fuel_log_id: number, opening_meter: number, closing_meter: number }
   app.post("/fuel/machine-hours", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    if (!requireRoles(req, reply, ["admin", "supervisor", "operator", "artisan"])) return;
     const fuelLogId = Number(req.body?.fuel_log_id || 0);
     const openingMeter = Number(req.body?.opening_meter);
     const closingMeter = Number(req.body?.closing_meter);

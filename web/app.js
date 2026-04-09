@@ -3048,7 +3048,7 @@ async function loadFuelMachineDailyInline(assetCode, mountEl) {
       `<td class="fh-col-num">${invalid ? "-" : Number((mode === "km" ? r.km_run : r.hours_run) || 0).toFixed(2)}</td>` +
       `<td class="fh-col-num">${invalid ? "-" : (mode === "km" ? (r.actual_km_per_l == null ? "-" : Number(r.actual_km_per_l).toFixed(3)) : (r.actual_lph == null ? "-" : Number(r.actual_lph).toFixed(3)))}</td>` +
       `<td class="fh-col-status"><span class="fh-status ${statusClass}">${statusText}</span></td>` +
-      `<td class="fh-col-action"><button data-fuel-edit="${Number(r.id || 0)}" data-open="${r.open_meter_value == null ? "" : Number(r.open_meter_value)}" data-close="${r.close_meter_value == null ? "" : Number(r.close_meter_value)}">Edit Hrs</button> <button data-fuel-delete="${Number(r.id || 0)}">Delete</button></td>` +
+      `<td class="fh-col-action"><button data-fuel-edit="${Number(r.id || 0)}" data-open="${r.open_meter_value == null ? "" : Number(r.open_meter_value)}" data-close="${r.close_meter_value == null ? "" : Number(r.close_meter_value)}">Edit Open/Close</button> <button data-fuel-delete="${Number(r.id || 0)}">Delete</button></td>` +
       `</tr>`
     );
   }).join("");
