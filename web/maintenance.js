@@ -1264,18 +1264,34 @@ function refreshWeeklyForumInputsTable() {
   body.innerHTML = wfInputsCache.length
     ? wfInputsCache.map((r) => {
         const plan = wfUpcomingCache.find((p) => Number(p.plan_id || 0) === Number(r.plan_id || 0));
+        let items = [];
+        try {
+          const parsed = JSON.parse(String(r.items_json || "[]"));
+          if (Array.isArray(parsed)) items = parsed;
+        } catch {}
+        if (!items.length) {
+          const oilCode = String(r.oil_part_code || "").trim();
+          const oilQty = Number(r.oil_qty || 0);
+          const partCode = String(r.parts_part_code || "").trim();
+          const partQty = Number(r.parts_qty || 0);
+          if (oilCode && oilQty > 0) items.push({ type: "oil", part_code: oilCode, qty: oilQty });
+          if (partCode && partQty > 0) items.push({ type: "part", part_code: partCode, qty: partQty });
+        }
+        const oils = items.filter((x) => String(x.type || "part").toLowerCase() === "oil");
+        const parts = items.filter((x) => String(x.type || "part").toLowerCase() !== "oil");
+        const render = (rows) => rows.length
+          ? rows.map((x) => `${String(x.part_code || "")} (${fmt1(x.qty)})`).join(", ")
+          : "-";
         return `
           <tr>
             <td>${esc(plan ? wfPlanLabel(plan) : `Plan ${Number(r.plan_id || 0)}`)}</td>
-            <td>${esc(r.oil_part_code || "-")}</td>
-            <td style="text-align:right;">${fmt1(r.oil_qty)}</td>
-            <td>${esc(r.parts_part_code || "-")}</td>
-            <td style="text-align:right;">${fmt1(r.parts_qty)}</td>
+            <td>${esc(render(oils))}</td>
+            <td>${esc(render(parts))}</td>
             <td>${esc(r.notes || "")}</td>
           </tr>
         `;
       }).join("")
-    : `<tr><td colspan="6" class="muted">No manual inputs saved.</td></tr>`;
+    : `<tr><td colspan="4" class="muted">No manual inputs saved.</td></tr>`;
 }
 function refreshWeeklyForumPartsDatalist() {
   const dl = document.getElementById("wfPartsList");
@@ -1497,7 +1513,7 @@ async function loadWeeklyForumParts() {
 
 async function loadWeeklyForumInputs() {
   const body = document.getElementById("wfInputsBody");
-  if (body) body.innerHTML = `<tr><td colspan="6" class="muted">Loading...</td></tr>`;
+  if (body) body.innerHTML = `<tr><td colspan="4" class="muted">Loading...</td></tr>`;
   try {
     const res = await fetch(`${API}/maintenance/weekly-forum/forecast-inputs`);
     const data = await res.json();
@@ -1505,22 +1521,41 @@ async function loadWeeklyForumInputs() {
     wfInputsCache = Array.isArray(data.rows) ? data.rows : [];
     refreshWeeklyForumInputsTable();
   } catch (e) {
-    if (body) body.innerHTML = `<tr><td colspan="6" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+    if (body) body.innerHTML = `<tr><td colspan="4" class="message-error">${esc(e.message || String(e))}</td></tr>`;
   }
+}
+
+function parseWfItems(text, type) {
+  return String(text || "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [codeRaw, qtyRaw] = line.split(",").map((x) => String(x || "").trim());
+      const qty = Number(qtyRaw || 0);
+      return { type, part_code: codeRaw, qty: Number.isFinite(qty) ? qty : 0 };
+    })
+    .filter((x) => x.part_code && x.qty > 0);
 }
 
 async function saveWeeklyForumInput() {
   const msg = document.getElementById("wfInputMsg");
   const plan_id = Number(document.getElementById("wfInputPlan")?.value || 0);
-  const oil_part_code = String(document.getElementById("wfInputOilCode")?.value || "").trim();
-  const oil_qty = Math.max(0, Number(document.getElementById("wfInputOilQty")?.value || 0));
-  const parts_part_code = String(document.getElementById("wfInputPartsCode")?.value || "").trim();
-  const parts_qty = Math.max(0, Number(document.getElementById("wfInputPartsQty")?.value || 0));
+  const oilsText = String(document.getElementById("wfInputOils")?.value || "").trim();
+  const partsText = String(document.getElementById("wfInputParts")?.value || "").trim();
   const notes = String(document.getElementById("wfInputNotes")?.value || "").trim();
+  const oils = parseWfItems(oilsText, "oil");
+  const parts = parseWfItems(partsText, "part");
+  const items = [...oils, ...parts];
   if (!msg) return;
   if (!plan_id) {
     msg.className = "message-error";
     msg.textContent = "Select an upcoming service plan first.";
+    return;
+  }
+  if (!items.length) {
+    msg.className = "message-error";
+    msg.textContent = "Enter at least one oil or part line: part_code,qty";
     return;
   }
   msg.className = "muted";
@@ -1529,7 +1564,7 @@ async function saveWeeklyForumInput() {
     const res = await fetch(`${API}/maintenance/weekly-forum/forecast-inputs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan_id, oil_part_code: oil_part_code || null, oil_qty, parts_part_code: parts_part_code || null, parts_qty, notes: notes || null }),
+      body: JSON.stringify({ plan_id, items, notes: notes || null }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to save input");

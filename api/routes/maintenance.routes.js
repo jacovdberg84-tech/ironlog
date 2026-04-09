@@ -1345,7 +1345,7 @@ export default async function maintenanceRoutes(app) {
       };
       const forecastInputs = hasTable("weekly_forum_service_inputs")
         ? db.prepare(`
-            SELECT plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, notes
+            SELECT plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, items_json, notes
             FROM weekly_forum_service_inputs
           `).all()
         : [];
@@ -1429,15 +1429,35 @@ export default async function maintenanceRoutes(app) {
 
           const serviceKitCost = avgPartsCost + avgOilCost;
           const manual = inputByPlan.get(Number(p.plan_id || 0)) || null;
-          const oilPartCode = String(manual?.oil_part_code || "").trim();
-          const partsPartCode = String(manual?.parts_part_code || "").trim();
-          const oilQtyManual = Number(manual?.oil_qty || 0);
-          const partsQtyManual = Number(manual?.parts_qty || 0);
-          const oilPricing = oilPartCode ? getPartPricing(oilPartCode) : { unit_cost: 0, on_hand: 0, part_name: null };
-          const partsPricing = partsPartCode ? getPartPricing(partsPartCode) : { unit_cost: 0, on_hand: 0, part_name: null };
-          const manualOilCost = oilQtyManual > 0 ? oilQtyManual * Number(oilPricing.unit_cost || 0) : 0;
-          const manualPartsCost = partsQtyManual > 0 ? partsQtyManual * Number(partsPricing.unit_cost || 0) : 0;
-          const hasManualOverride = oilQtyManual > 0 || partsQtyManual > 0;
+          let manualItems = [];
+          try {
+            const parsed = JSON.parse(String(manual?.items_json || "[]"));
+            if (Array.isArray(parsed)) manualItems = parsed;
+          } catch {}
+          if (!manualItems.length) {
+            manualItems = [
+              { type: "oil", part_code: String(manual?.oil_part_code || "").trim(), qty: Number(manual?.oil_qty || 0) },
+              { type: "part", part_code: String(manual?.parts_part_code || "").trim(), qty: Number(manual?.parts_qty || 0) },
+            ].filter((x) => x.part_code && Number(x.qty || 0) > 0);
+          }
+          const pricedItems = manualItems.map((it) => {
+            const type = String(it?.type || "part").toLowerCase() === "oil" ? "oil" : "part";
+            const part_code = String(it?.part_code || "").trim();
+            const qty = Math.max(0, Number(it?.qty || 0));
+            const pricing = part_code ? getPartPricing(part_code) : { unit_cost: 0, on_hand: 0, part_name: null };
+            return {
+              type,
+              part_code,
+              part_name: pricing.part_name || null,
+              qty: Number(qty.toFixed(2)),
+              unit_cost: Number(Number(pricing.unit_cost || 0).toFixed(4)),
+              on_hand: Number(Number(pricing.on_hand || 0).toFixed(2)),
+              line_cost: Number((qty * Number(pricing.unit_cost || 0)).toFixed(2)),
+            };
+          }).filter((x) => x.part_code && x.qty > 0);
+          const manualOilCost = pricedItems.filter((x) => x.type === "oil").reduce((s, x) => s + Number(x.line_cost || 0), 0);
+          const manualPartsCost = pricedItems.filter((x) => x.type !== "oil").reduce((s, x) => s + Number(x.line_cost || 0), 0);
+          const hasManualOverride = pricedItems.length > 0;
           return {
             plan_id: Number(p.plan_id || 0),
             asset_id: Number(p.asset_id || 0),
@@ -1457,18 +1477,9 @@ export default async function maintenanceRoutes(app) {
               est_service_kit_cost: Number((hasManualOverride ? (manualOilCost + manualPartsCost) : serviceKitCost).toFixed(2)),
               cost_source: hasManualOverride ? "manual_store_pricing" : "historical_average",
               manual: {
-                oil_part_code: oilPartCode || null,
-                oil_part_name: oilPricing.part_name || null,
-                oil_qty: Number(oilQtyManual.toFixed(2)),
-                oil_unit_cost: Number(Number(oilPricing.unit_cost || 0).toFixed(4)),
-                oil_on_hand: Number(Number(oilPricing.on_hand || 0).toFixed(2)),
                 oil_cost_total: Number(manualOilCost.toFixed(2)),
-                parts_part_code: partsPartCode || null,
-                parts_part_name: partsPricing.part_name || null,
-                parts_qty: Number(partsQtyManual.toFixed(2)),
-                parts_unit_cost: Number(Number(partsPricing.unit_cost || 0).toFixed(4)),
-                parts_on_hand: Number(Number(partsPricing.on_hand || 0).toFixed(2)),
                 parts_cost_total: Number(manualPartsCost.toFixed(2)),
+                items: pricedItems,
                 notes: String(manual?.notes || ""),
               },
             },
@@ -1633,11 +1644,19 @@ export default async function maintenanceRoutes(app) {
       oil_qty REAL NOT NULL DEFAULT 0,
       parts_part_code TEXT,
       parts_qty REAL NOT NULL DEFAULT 0,
+      items_json TEXT NOT NULL DEFAULT '[]',
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `).run();
+  try {
+    const wfInputCols = db.prepare(`PRAGMA table_info(weekly_forum_service_inputs)`).all();
+    const wfInputHasItems = wfInputCols.some((c) => String(c?.name || "") === "items_json");
+    if (!wfInputHasItems) {
+      db.prepare(`ALTER TABLE weekly_forum_service_inputs ADD COLUMN items_json TEXT NOT NULL DEFAULT '[]'`).run();
+    }
+  } catch {}
 
   app.get("/weekly-forum/actions", async (req, reply) => {
     try {
@@ -1724,7 +1743,7 @@ export default async function maintenanceRoutes(app) {
   app.get("/weekly-forum/forecast-inputs", async (req, reply) => {
     try {
       const rows = db.prepare(`
-        SELECT id, plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, notes, updated_at
+        SELECT id, plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, items_json, notes, updated_at
         FROM weekly_forum_service_inputs
         ORDER BY plan_id ASC
       `).all();
@@ -1737,24 +1756,34 @@ export default async function maintenanceRoutes(app) {
   app.post("/weekly-forum/forecast-inputs", async (req, reply) => {
     try {
       const plan_id = Number(req.body?.plan_id || 0);
+      const items = Array.isArray(req.body?.items) ? req.body.items : [];
       const oil_part_code = String(req.body?.oil_part_code || "").trim() || null;
       const oil_qty = Math.max(0, Number(req.body?.oil_qty || 0));
       const parts_part_code = String(req.body?.parts_part_code || "").trim() || null;
       const parts_qty = Math.max(0, Number(req.body?.parts_qty || 0));
       const notes = String(req.body?.notes || "").trim() || null;
+      const normalizedItems = items
+        .map((it) => ({
+          type: String(it?.type || "part").toLowerCase() === "oil" ? "oil" : "part",
+          part_code: String(it?.part_code || "").trim(),
+          qty: Math.max(0, Number(it?.qty || 0)),
+        }))
+        .filter((it) => it.part_code && it.qty > 0);
+      const items_json = JSON.stringify(normalizedItems);
       if (!plan_id) return reply.code(400).send({ ok: false, error: "plan_id is required" });
       db.prepare(`
         INSERT INTO weekly_forum_service_inputs (
-          plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, notes, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+          plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, items_json, notes, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(plan_id) DO UPDATE SET
           oil_part_code = excluded.oil_part_code,
           oil_qty = excluded.oil_qty,
           parts_part_code = excluded.parts_part_code,
           parts_qty = excluded.parts_qty,
+          items_json = excluded.items_json,
           notes = excluded.notes,
           updated_at = datetime('now')
-      `).run(plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, notes);
+      `).run(plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, items_json, notes);
       return reply.send({ ok: true, plan_id });
     } catch (err) {
       req.log.error(err);
