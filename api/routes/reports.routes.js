@@ -62,6 +62,24 @@ function daysDownForBreakdown(bd, reportDate) {
   return spanDays || 1;
 }
 
+function daysDownForBreakdownInRange(bd, startDateInclusive, endDateInclusive) {
+  const startDate = parseIsoDate(bd.start_at) || parseIsoDate(bd.breakdown_date);
+  if (!startDate) return 0;
+  const rangeStart = parseIsoDate(startDateInclusive);
+  const rangeEnd = parseIsoDate(endDateInclusive);
+  if (!rangeStart || !rangeEnd) return 0;
+
+  const rawEnd = parseIsoDate(bd.end_at) || rangeEnd;
+  const spanStart = startDate > rangeStart ? startDate : rangeStart;
+  const spanEnd = rawEnd < rangeEnd ? rawEnd : rangeEnd;
+  if (spanEnd < spanStart) return 0;
+
+  const spanDays = inclusiveDaysBetween(spanStart, spanEnd);
+  const loggedInRange = Number(bd.logged_days_in_range || 0);
+  // Keep consistent with Daily: never undercount when logs are sparse.
+  return Math.max(spanDays, loggedInRange);
+}
+
 function isMonth(m) {
   return /^\d{4}-\d{2}$/.test(String(m || "").trim());
 }
@@ -4874,14 +4892,35 @@ export default async function reportsRoutes(app) {
     const defaults = costDefaults();
 
     const breakdownDowntimeCol = getBreakdownDowntimeColumn();
+    const hasBreakdownStartAt = hasColumn("breakdowns", "start_at");
+    const hasBreakdownEndAt = hasColumn("breakdowns", "end_at");
+    const breakdownStartAtSelect = hasBreakdownStartAt ? "b.start_at" : "NULL AS start_at";
+    const breakdownEndAtSelect = hasBreakdownEndAt ? "b.end_at" : "NULL AS end_at";
     const majorDowntime = db.prepare(`
-      SELECT a.asset_code, b.breakdown_date, COALESCE(b.${breakdownDowntimeCol}, 0) AS downtime_hours, b.critical, b.description
+      SELECT
+        a.asset_code,
+        b.breakdown_date,
+        ${breakdownStartAtSelect},
+        ${breakdownEndAtSelect},
+        COALESCE(b.${breakdownDowntimeCol}, 0) AS downtime_hours,
+        b.critical,
+        b.description,
+        COALESCE((
+          SELECT COUNT(DISTINCT l.log_date)
+          FROM breakdown_downtime_logs l
+          WHERE l.breakdown_id = b.id
+            AND l.log_date BETWEEN ? AND ?
+        ), 0) AS logged_days_in_range
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
       WHERE b.breakdown_date BETWEEN ? AND ?
       ORDER BY downtime_hours DESC
       LIMIT 25
-    `).all(start, end).map(r => ({ ...r, critical: Boolean(r.critical) }));
+    `).all(start, end, start, end).map((r) => ({
+      ...r,
+      critical: Boolean(r.critical),
+      days_down: daysDownForBreakdownInRange(r, start, end),
+    }));
 
     const overdue = db.prepare(`
       SELECT
@@ -5048,13 +5087,15 @@ export default async function reportsRoutes(app) {
           [
             { key: "date", label: "Date", width: 0.16 },
             { key: "asset", label: "Asset", width: 0.14 },
+            { key: "days", label: "Days", width: 0.10, align: "right" },
             { key: "hrs", label: "Hrs", width: 0.10, align: "right" },
             { key: "crit", label: "Crit", width: 0.10, align: "center" },
-            { key: "desc", label: "Description", width: 0.50 },
+            { key: "desc", label: "Description", width: 0.40 },
           ],
           majorDowntimePdf.map(r => ({
             date: r.breakdown_date,
             asset: r.asset_code,
+            days: fmtNum(r.days_down || 0, 0),
             hrs: fmtNum(r.downtime_hours, 1),
             crit: r.critical ? "YES" : "NO",
             desc: compactCell(r.description ?? "", 120),
