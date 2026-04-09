@@ -23,6 +23,7 @@ import qualityRoutes from "./routes/quality.routes.js";
 import syncRoutes from "./routes/sync.routes.js";
 import docsRoutes from "./routes/docs.routes.js";
 import ironmindRoutes from "./routes/ironmind.routes.js";
+import inspectproRoutes from "./routes/inspectpro.routes.js";
 import { ironlogAuthHook } from "./auth/hook.js";
 
 export function buildServer() {
@@ -65,5 +66,6 @@ app.register(qualityRoutes, { prefix: "/api/quality" });
 app.register(syncRoutes, { prefix: "/api/sync" });
 app.register(docsRoutes, { prefix: "/api/docs" });
 app.register(ironmindRoutes, { prefix: "/api/ironmind" });
+app.register(inspectproRoutes, { prefix: "/api/integrations/inspectpro" });
   return app;
 }

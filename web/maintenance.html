@@ -186,6 +186,32 @@
       </div>
       <div id="dueList" class="card-grid"></div>
     </div>
+
+    <div class="card stack-24">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0;">InspectPro Live Status</h3>
+        <div class="row" style="gap:8px;">
+          <button id="inspectproRefreshStatusBtn">Refresh</button>
+        </div>
+      </div>
+      <div style="overflow:auto;">
+        <table class="gridTable" style="min-width:980px;">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>When</th>
+              <th>Type</th>
+              <th>Asset</th>
+              <th>Status</th>
+              <th>Target ID</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody id="inspectproStatusBody"></tbody>
+        </table>
+      </div>
+      <small class="muted" id="inspectproStatusMeta">Shows latest InspectPro ingest events.</small>
+    </div>
     </div>
 
     <div id="managerInspectionsCard" class="card stack-24">

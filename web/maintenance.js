@@ -163,6 +163,23 @@ function backfillRow(r) {
   `;
 }
 
+function inspectproRow(r) {
+  const status = String(r.status || "").toLowerCase();
+  const cls = status === "ok" ? "status-ok" : status === "error" ? "status-overdue" : "status-soon";
+  const when = String(r.updated_at || r.created_at || "-");
+  return `
+    <tr>
+      <td>${Number(r.id || 0)}</td>
+      <td>${escBackfill(when)}</td>
+      <td>${escBackfill(r.event_type || "-")}</td>
+      <td>${escBackfill(r.asset_code || "-")}</td>
+      <td><span class="${cls}">${escBackfill(status || "-")}</span></td>
+      <td>${r.target_id == null ? "-" : Number(r.target_id)}</td>
+      <td>${escBackfill(r.error_message || "")}</td>
+    </tr>
+  `;
+}
+
 async function loadHistory() {
   const body = document.getElementById("histBody");
   const meta = document.getElementById("histMeta");
@@ -194,6 +211,26 @@ async function loadBackfillHistory() {
       : `<tr><td colspan="6" class="muted">No historical entries yet.</td></tr>`;
   } catch (e) {
     body.innerHTML = `<tr><td colspan="6" class="message-error">${escBackfill(e.message || e)}</td></tr>`;
+  }
+}
+
+async function loadInspectproStatus() {
+  const body = document.getElementById("inspectproStatusBody");
+  const meta = document.getElementById("inspectproStatusMeta");
+  if (!body) return;
+  body.innerHTML = `<tr><td colspan="7" class="muted">Loading...</td></tr>`;
+  try {
+    const res = await fetch(`${API}/integrations/inspectpro/status?limit=20`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load InspectPro status");
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    body.innerHTML = rows.length
+      ? rows.map(inspectproRow).join("")
+      : `<tr><td colspan="7" class="muted">No InspectPro events yet.</td></tr>`;
+    if (meta) meta.textContent = `Latest update: ${new Date().toLocaleString()}`;
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="7" class="message-error">${escBackfill(e.message || e)}</td></tr>`;
+    if (meta) meta.textContent = "Status load failed.";
   }
 }
 
@@ -1175,6 +1212,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const generateBtn = document.getElementById("generateBtn");
   const savePlanBtn = document.getElementById("savePlanBtn");
   const saveBackfillBtn = document.getElementById("saveBackfillBtn");
+  const inspectproRefreshStatusBtn = document.getElementById("inspectproRefreshStatusBtn");
   const backfillBody = document.getElementById("backfillBody");
   const useLiveEl = document.getElementById("planUseLiveForLastService");
 
@@ -1195,6 +1233,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (saveBackfillBtn) {
     saveBackfillBtn.addEventListener("click", saveBackfillHistory);
+  }
+  if (inspectproRefreshStatusBtn) {
+    inspectproRefreshStatusBtn.addEventListener("click", () => {
+      loadInspectproStatus().catch(() => {});
+    });
   }
   if (backfillBody) {
     backfillBody.addEventListener("click", (e) => {
@@ -1229,6 +1272,10 @@ document.addEventListener("DOMContentLoaded", () => {
   loadDue();
   loadHistory();
   loadBackfillHistory();
+  loadInspectproStatus();
+  setInterval(() => {
+    loadInspectproStatus().catch(() => {});
+  }, 20000);
   const miDate = document.getElementById("miDate");
   const drDate = document.getElementById("drDate");
   if (miDate && !miDate.value) miDate.value = new Date().toISOString().slice(0, 10);

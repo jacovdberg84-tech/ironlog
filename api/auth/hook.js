@@ -58,6 +58,7 @@ export async function ironlogAuthHook(req, reply) {
 
   if (url === "/api/auth/login" && req.method === "POST") return;
   if (url === "/api/auth/tabs" && req.method === "GET") return;
+  if (url === "/api/integrations/inspectpro/events" && req.method === "POST") return;
 
   const auth = String(req.headers.authorization || "");
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
