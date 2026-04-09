@@ -99,6 +99,38 @@ export default async function ironmindRoutes(app) {
     const rows = db.prepare(`PRAGMA table_info(${table})`).all();
     return rows.some((r) => String(r.name) === col);
   }
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS rsg_service_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile_key TEXT NOT NULL UNIQUE,
+      make TEXT,
+      model_match TEXT,
+      service_hours INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      tasks_json TEXT NOT NULL DEFAULT '[]',
+      checks_json TEXT NOT NULL DEFAULT '[]',
+      post_service_checks_json TEXT NOT NULL DEFAULT '[]',
+      safety_json TEXT NOT NULL DEFAULT '[]',
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS rsg_service_profile_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile_id INTEGER NOT NULL,
+      item_type TEXT NOT NULL, -- oil | filter
+      item_name TEXT NOT NULL,
+      qty REAL NOT NULL,
+      unit TEXT NOT NULL DEFAULT 'L',
+      part_hint TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY(profile_id) REFERENCES rsg_service_profiles(id) ON DELETE CASCADE
+    )
+  `).run();
   function getAiConfig() {
     const openaiKey = process.env.OPENAI_API_KEY;
     const openaiModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -108,11 +140,82 @@ export default async function ironmindRoutes(app) {
   function normalizeText(v) {
     return String(v || "").trim().toUpperCase();
   }
+  function parseJsonArray(v) {
+    try {
+      const parsed = JSON.parse(String(v || "[]"));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  function parseModelMatchTokens(v) {
+    return String(v || "")
+      .split(",")
+      .map((x) => normalizeText(x))
+      .filter(Boolean);
+  }
+  function getDbRsgProfiles() {
+    const profiles = db.prepare(`
+      SELECT
+        id, profile_key, make, model_match, service_hours, title,
+        tasks_json, checks_json, post_service_checks_json, safety_json, active
+      FROM rsg_service_profiles
+      WHERE active = 1
+      ORDER BY service_hours ASC, id ASC
+    `).all();
+    if (!profiles.length) return [];
+    const items = db.prepare(`
+      SELECT
+        profile_id, item_type, item_name, qty, unit, part_hint, sort_order
+      FROM rsg_service_profile_items
+      ORDER BY profile_id ASC, sort_order ASC, id ASC
+    `).all();
+    const byProfile = new Map();
+    for (const it of items) {
+      const pid = Number(it.profile_id || 0);
+      if (!byProfile.has(pid)) byProfile.set(pid, []);
+      byProfile.get(pid).push(it);
+    }
+    return profiles.map((p) => {
+      const pItems = byProfile.get(Number(p.id || 0)) || [];
+      return {
+        key: String(p.profile_key || "").trim(),
+        make: String(p.make || "").trim(),
+        modelContains: parseModelMatchTokens(p.model_match),
+        service_hours: Number(p.service_hours || 0),
+        title: String(p.title || "").trim(),
+        tasks: parseJsonArray(p.tasks_json).map((x) => String(x || "")).filter(Boolean),
+        checks: parseJsonArray(p.checks_json).map((x) => String(x || "")).filter(Boolean),
+        post_service_checks: parseJsonArray(p.post_service_checks_json).map((x) => String(x || "")).filter(Boolean),
+        safety: parseJsonArray(p.safety_json).map((x) => String(x || "")).filter(Boolean),
+        oils: pItems
+          .filter((x) => String(x.item_type || "") === "oil")
+          .map((x) => ({
+            name: String(x.item_name || ""),
+            qty: Number(x.qty || 0),
+            unit: String(x.unit || "L"),
+            part_hint: String(x.part_hint || x.item_name || ""),
+          }))
+          .filter((x) => x.name && Number.isFinite(x.qty) && x.qty > 0),
+        filters: pItems
+          .filter((x) => String(x.item_type || "") === "filter")
+          .map((x) => ({
+            name: String(x.item_name || ""),
+            qty: Number(x.qty || 0),
+            unit: String(x.unit || "ea"),
+            part_hint: String(x.part_hint || x.item_name || ""),
+          }))
+          .filter((x) => x.name && Number.isFinite(x.qty) && x.qty > 0),
+      };
+    }).filter((p) => p.key && p.service_hours > 0 && p.title);
+  }
   function pickRsgServiceProfile({ assetCode, equipmentName, serviceHours }) {
+    const dbProfiles = getDbRsgProfiles();
+    const sourceProfiles = dbProfiles.length ? dbProfiles : RSG_SERVICE_PROFILES;
     const code = normalizeText(assetCode);
     const eq = normalizeText(equipmentName);
     const hours = Number(serviceHours || 0);
-    return RSG_SERVICE_PROFILES.find((p) => {
+    return sourceProfiles.find((p) => {
       if (Number(p.service_hours || 0) !== hours) return false;
       const makeOk = normalizeText(p.make) ? (code.includes(normalizeText(p.make)) || eq.includes(normalizeText(p.make))) : true;
       if (!makeOk) return false;
@@ -121,6 +224,107 @@ export default async function ironmindRoutes(app) {
       return modelTokens.some((t) => code.includes(t) || eq.includes(t));
     }) || null;
   }
+
+  // RSG profile maintenance (document-driven master data)
+  app.get("/rsg/profiles", async (_req, reply) => {
+    const rows = getDbRsgProfiles();
+    return reply.send({ ok: true, rows });
+  });
+  function upsertRsgProfile(b = {}) {
+    const profile_key = String(b.profile_key || "").trim().toLowerCase();
+    const make = String(b.make || "").trim();
+    const model_match = String(b.model_match || "").trim();
+    const service_hours = Math.max(1, Number(b.service_hours || 0));
+    const title = String(b.title || "").trim();
+    const tasks = Array.isArray(b.tasks) ? b.tasks.map((x) => String(x || "").trim()).filter(Boolean) : [];
+    const checks = Array.isArray(b.checks) ? b.checks.map((x) => String(x || "").trim()).filter(Boolean) : [];
+    const post_service_checks = Array.isArray(b.post_service_checks) ? b.post_service_checks.map((x) => String(x || "").trim()).filter(Boolean) : [];
+    const safety = Array.isArray(b.safety) ? b.safety.map((x) => String(x || "").trim()).filter(Boolean) : [];
+    const oils = Array.isArray(b.oils) ? b.oils : [];
+    const filters = Array.isArray(b.filters) ? b.filters : [];
+    if (!profile_key || !service_hours || !title) {
+      const e = new Error("profile_key, service_hours, and title are required");
+      e.statusCode = 400;
+      throw e;
+    }
+    const tx = db.transaction(() => {
+      const ins = db.prepare(`
+        INSERT INTO rsg_service_profiles (
+          profile_key, make, model_match, service_hours, title,
+          tasks_json, checks_json, post_service_checks_json, safety_json, active, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))
+        ON CONFLICT(profile_key) DO UPDATE SET
+          make = excluded.make,
+          model_match = excluded.model_match,
+          service_hours = excluded.service_hours,
+          title = excluded.title,
+          tasks_json = excluded.tasks_json,
+          checks_json = excluded.checks_json,
+          post_service_checks_json = excluded.post_service_checks_json,
+          safety_json = excluded.safety_json,
+          active = 1,
+          updated_at = datetime('now')
+      `).run(
+        profile_key,
+        make || null,
+        model_match || null,
+        service_hours,
+        title,
+        JSON.stringify(tasks),
+        JSON.stringify(checks),
+        JSON.stringify(post_service_checks),
+        JSON.stringify(safety)
+      );
+      const pid =
+        Number(ins.lastInsertRowid || 0) ||
+        Number(db.prepare(`SELECT id FROM rsg_service_profiles WHERE profile_key = ?`).get(profile_key)?.id || 0);
+      db.prepare(`DELETE FROM rsg_service_profile_items WHERE profile_id = ?`).run(pid);
+      const insertItem = db.prepare(`
+        INSERT INTO rsg_service_profile_items (
+          profile_id, item_type, item_name, qty, unit, part_hint, sort_order, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `);
+      let sort = 1;
+      for (const o of oils) {
+        const name = String(o?.name || "").trim();
+        const qty = Number(o?.qty || 0);
+        if (!name || !(qty > 0)) continue;
+        insertItem.run(pid, "oil", name, qty, String(o?.unit || "L"), String(o?.part_hint || name), sort++);
+      }
+      for (const f of filters) {
+        const name = String(f?.name || "").trim();
+        const qty = Number(f?.qty || 0);
+        if (!name || !(qty > 0)) continue;
+        insertItem.run(pid, "filter", name, qty, String(f?.unit || "ea"), String(f?.part_hint || name), sort++);
+      }
+      return { id: pid, profile_key };
+    });
+    return tx();
+  }
+  app.post("/rsg/profiles", async (req, reply) => {
+    try {
+      const result = upsertRsgProfile(req.body || {});
+      return reply.send({ ok: true, id: result.id, profile_key: result.profile_key });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(Number(err?.statusCode || 500)).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+  app.post("/rsg/profiles/import", async (req, reply) => {
+    try {
+      const rows = Array.isArray(req.body?.profiles) ? req.body.profiles : [];
+      if (!rows.length) return reply.code(400).send({ ok: false, error: "profiles[] is required" });
+      let upserted = 0;
+      for (const p of rows) {
+        upsertRsgProfile(p || {});
+        upserted += 1;
+      }
+      return reply.send({ ok: true, requested: rows.length, upserted });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
   function getPartOnHandById(partId) {
     const id = Number(partId || 0);
     if (!id) return 0;
