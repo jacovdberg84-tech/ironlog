@@ -2047,6 +2047,7 @@ async function loadDashboard() {
 
   await loadStockMonitor().catch(() => {});
   await loadIronmindInsight({ silent: true }).catch(() => {});
+  await loadIronmindSettings().catch(() => {});
   await loadIronmindHistory({ silent: true }).catch(() => {});
 
   setStatus("Dashboard ready.");
@@ -2082,6 +2083,52 @@ async function loadIronmindInsight(options = {}) {
     if (metaEl) metaEl.textContent = "Insight unavailable right now.";
     if (!silent) setStatus("IRONMIND load error: " + err.message);
     throw err;
+  }
+}
+
+async function loadIronmindSettings() {
+  const meta = qs("ironmindSettingsMeta");
+  try {
+    const res = await fetchJson(`${API}/api/ironmind/settings`);
+    const s = res?.settings || {};
+    const setVal = (id, v) => {
+      const el = qs(id);
+      if (el && Number.isFinite(Number(v))) el.value = Number(v);
+    };
+    setVal("ironmindMaxRunGlobal", s.max_daily_run_hours);
+    setVal("ironmindMaxRunLdv", s.max_daily_run_hours_ldv);
+    setVal("ironmindMaxRunTruck", s.max_daily_run_hours_truck);
+    setVal("ironmindMaxRunHeavy", s.max_daily_run_hours_heavy);
+    if (meta) meta.textContent = "Thresholds loaded.";
+  } catch {
+    if (meta) meta.textContent = "Threshold load failed.";
+  }
+}
+
+async function saveIronmindSettings() {
+  const meta = qs("ironmindSettingsMeta");
+  const readNum = (id, d) => {
+    const n = Number(qs(id)?.value);
+    return Number.isFinite(n) && n > 0 ? n : d;
+  };
+  const payload = {
+    max_daily_run_hours: readNum("ironmindMaxRunGlobal", 24),
+    max_daily_run_hours_ldv: readNum("ironmindMaxRunLdv", 16),
+    max_daily_run_hours_truck: readNum("ironmindMaxRunTruck", 18),
+    max_daily_run_hours_heavy: readNum("ironmindMaxRunHeavy", 24),
+  };
+  setStatus("Saving IronMind thresholds...");
+  try {
+    await fetchJson(`${API}/api/ironmind/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (meta) meta.textContent = "Saved. Click Refresh Insight to apply now.";
+    setStatus("IronMind thresholds saved.");
+  } catch (err) {
+    if (meta) meta.textContent = `Save failed: ${err.message || err}`;
+    setStatus("IronMind threshold save failed.");
   }
 }
 
@@ -7503,6 +7550,9 @@ async function init() {
   );
   qs("ironmindRefreshBtn")?.addEventListener("click", () =>
     refreshIronmindInsight().catch((e) => setStatus("IRONMIND refresh error: " + e.message))
+  );
+  qs("ironmindSaveSettingsBtn")?.addEventListener("click", () =>
+    saveIronmindSettings().catch((e) => setStatus("IronMind settings error: " + (e.message || e)))
   );
   qs("ironmindAskBtn")?.addEventListener("click", () =>
     askIronmindQuestion().catch((e) => setStatus("IRONMIND ask error: " + e.message))

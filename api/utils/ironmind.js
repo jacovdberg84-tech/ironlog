@@ -50,6 +50,14 @@ export function ensureIronmindTable() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_ironmind_asset_risk_unique
     ON ironmind_asset_risk_snapshots(report_date, asset_code)
   `).run();
+
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS ironmind_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
 }
 
 function getAiConfig() {
@@ -127,28 +135,83 @@ function clamp(n, min, max) {
 }
 
 function maxTrustedDailyRunHours() {
-  const v = Number(process.env.IRONMIND_MAX_DAILY_RUN_HOURS || 24);
+  const v = Number(getIronmindSettingValue("max_daily_run_hours", process.env.IRONMIND_MAX_DAILY_RUN_HOURS || 24));
   return Number.isFinite(v) && v > 0 ? v : 24;
+}
+
+function getIronmindSettingValue(key, fallback) {
+  try {
+    if (!hasTable("ironmind_settings")) return fallback;
+    const row = db.prepare(`SELECT value FROM ironmind_settings WHERE key = ? LIMIT 1`).get(String(key || ""));
+    if (!row || row.value == null) return fallback;
+    return row.value;
+  } catch {
+    return fallback;
+  }
 }
 
 function getCategoryTrustedDailyRunHours(category) {
   const base = maxTrustedDailyRunHours();
   const key = String(category || "").trim().toLowerCase();
   if (!key) return base;
-  const read = (envKey, fallback) => {
-    const n = Number(process.env[envKey] || fallback);
-    return Number.isFinite(n) && n > 0 ? n : fallback;
-  };
   if (key.includes("ldv") || key.includes("pickup") || key.includes("light vehicle")) {
-    return read("IRONMIND_MAX_DAILY_RUN_HOURS_LDV", Math.min(base, 16));
+    const configured = getIronmindSettingValue("max_daily_run_hours_ldv", process.env.IRONMIND_MAX_DAILY_RUN_HOURS_LDV || Math.min(base, 16));
+    return Number.isFinite(Number(configured)) && Number(configured) > 0 ? Number(configured) : Math.min(base, 16);
   }
   if (key.includes("truck") || key.includes("tipper")) {
-    return read("IRONMIND_MAX_DAILY_RUN_HOURS_TRUCK", Math.min(base, 18));
+    const configured = getIronmindSettingValue("max_daily_run_hours_truck", process.env.IRONMIND_MAX_DAILY_RUN_HOURS_TRUCK || Math.min(base, 18));
+    return Number.isFinite(Number(configured)) && Number(configured) > 0 ? Number(configured) : Math.min(base, 18);
   }
   if (key.includes("excavator") || key.includes("loader") || key.includes("dozer")) {
-    return read("IRONMIND_MAX_DAILY_RUN_HOURS_HEAVY", base);
+    const configured = getIronmindSettingValue("max_daily_run_hours_heavy", process.env.IRONMIND_MAX_DAILY_RUN_HOURS_HEAVY || base);
+    return Number.isFinite(Number(configured)) && Number(configured) > 0 ? Number(configured) : base;
   }
   return base;
+}
+
+export function getIronmindSettings() {
+  ensureIronmindTable();
+  const num = (v, d) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : d;
+  };
+  const baseDefault = num(process.env.IRONMIND_MAX_DAILY_RUN_HOURS || 24, 24);
+  const defaults = {
+    max_daily_run_hours: baseDefault,
+    max_daily_run_hours_ldv: num(process.env.IRONMIND_MAX_DAILY_RUN_HOURS_LDV || Math.min(baseDefault, 16), Math.min(baseDefault, 16)),
+    max_daily_run_hours_truck: num(process.env.IRONMIND_MAX_DAILY_RUN_HOURS_TRUCK || Math.min(baseDefault, 18), Math.min(baseDefault, 18)),
+    max_daily_run_hours_heavy: num(process.env.IRONMIND_MAX_DAILY_RUN_HOURS_HEAVY || baseDefault, baseDefault),
+  };
+  const rows = db.prepare(`SELECT key, value FROM ironmind_settings`).all();
+  const out = { ...defaults };
+  for (const r of rows) {
+    const k = String(r.key || "").trim();
+    if (!Object.prototype.hasOwnProperty.call(out, k)) continue;
+    out[k] = num(r.value, out[k]);
+  }
+  return out;
+}
+
+export function setIronmindSettings(patch = {}) {
+  ensureIronmindTable();
+  const allowed = ["max_daily_run_hours", "max_daily_run_hours_ldv", "max_daily_run_hours_truck", "max_daily_run_hours_heavy"];
+  const upsert = db.prepare(`
+    INSERT INTO ironmind_settings (key, value, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET
+      value = excluded.value,
+      updated_at = excluded.updated_at
+  `);
+  const tx = db.transaction(() => {
+    for (const k of allowed) {
+      if (!Object.prototype.hasOwnProperty.call(patch, k)) continue;
+      const n = Number(patch[k]);
+      if (!Number.isFinite(n) || n <= 0) continue;
+      upsert.run(k, String(n));
+    }
+  });
+  tx();
+  return getIronmindSettings();
 }
 
 function computeAssetRiskSignals(reportDate) {

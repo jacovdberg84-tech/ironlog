@@ -1,4 +1,4 @@
-import { generateIronmindReport, getIronmindHistory, getLatestIronmindReport } from "../utils/ironmind.js";
+import { generateIronmindReport, getIronmindHistory, getLatestIronmindReport, getIronmindSettings, setIronmindSettings } from "../utils/ironmind.js";
 import { db } from "../db/client.js";
 import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
 
@@ -278,6 +278,26 @@ export default async function ironmindRoutes(app) {
         return reply.send({ ok: true, report: null });
       }
       return reply.send({ ok: true, report: row });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  app.get("/settings", async (req, reply) => {
+    try {
+      return reply.send({ ok: true, settings: getIronmindSettings() });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  app.put("/settings", async (req, reply) => {
+    try {
+      const body = req.body || {};
+      const settings = setIronmindSettings(body);
+      return reply.send({ ok: true, settings });
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message });
