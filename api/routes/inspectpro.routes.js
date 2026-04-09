@@ -72,22 +72,19 @@ export default async function inspectproRoutes(app) {
     return db.prepare(`SELECT id, asset_code FROM assets WHERE UPPER(asset_code)=UPPER(?) LIMIT 1`).get(assetCode);
   };
 
-  app.post("/events", async (req, reply) => {
-    if (!requireInspectproKey(req, reply)) return;
-    const body = req.body || {};
+  const ingestEvent = (body) => {
     const eventType = String(body.event_type || "").trim().toLowerCase();
     const eventUuid = String(body.uuid || body.event_uuid || "").trim();
     const source = String(body.source || "inspectpro-manager").trim() || "inspectpro-manager";
-    if (!eventUuid) return reply.code(400).send({ ok: false, error: "uuid is required" });
+    if (!eventUuid) throw new Error("uuid is required");
     if (!["inspection", "damage_report"].includes(eventType)) {
-      return reply.code(400).send({ ok: false, error: "event_type must be inspection or damage_report" });
+      throw new Error("event_type must be inspection or damage_report");
     }
 
     let status = "ok";
     let targetId = null;
     let assetCode = null;
     let errorMessage = null;
-
     try {
       const tx = db.transaction(() => {
         const asset = resolveAsset(body);
@@ -179,7 +176,34 @@ export default async function inspectproRoutes(app) {
       errorMessage,
       JSON.stringify(body || {})
     );
+    return { status, errorMessage, eventUuid, eventType, targetId, assetCode };
+  };
 
+  app.post("/events", async (req, reply) => {
+    if (!requireInspectproKey(req, reply)) return;
+    const body = req.body || {};
+    const { status, errorMessage, eventUuid, eventType, targetId, assetCode } = ingestEvent(body);
+    if (status !== "ok") {
+      return reply.code(400).send({ ok: false, status, error: errorMessage, uuid: eventUuid, event_type: eventType });
+    }
+    return reply.send({ ok: true, status, uuid: eventUuid, event_type: eventType, target_id: targetId, asset_code: assetCode });
+  });
+
+  // Compatibility aliases for integrators expecting direct paths.
+  app.post("/inspection", async (req, reply) => {
+    if (!requireInspectproKey(req, reply)) return;
+    const body = { ...(req.body || {}), event_type: "inspection" };
+    const { status, errorMessage, eventUuid, eventType, targetId, assetCode } = ingestEvent(body);
+    if (status !== "ok") {
+      return reply.code(400).send({ ok: false, status, error: errorMessage, uuid: eventUuid, event_type: eventType });
+    }
+    return reply.send({ ok: true, status, uuid: eventUuid, event_type: eventType, target_id: targetId, asset_code: assetCode });
+  });
+
+  app.post("/damage-report", async (req, reply) => {
+    if (!requireInspectproKey(req, reply)) return;
+    const body = { ...(req.body || {}), event_type: "damage_report" };
+    const { status, errorMessage, eventUuid, eventType, targetId, assetCode } = ingestEvent(body);
     if (status !== "ok") {
       return reply.code(400).send({ ok: false, status, error: errorMessage, uuid: eventUuid, event_type: eventType });
     }
@@ -196,6 +220,66 @@ export default async function inspectproRoutes(app) {
         LIMIT ?
       `).all(limit);
       return reply.send({ ok: true, rows });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // Pull endpoints for InspectPro "domain sync" flows.
+  app.get("/pull/assets", async (req, reply) => {
+    if (!requireInspectproKey(req, reply)) return;
+    try {
+      const rows = db.prepare(`
+        SELECT id, asset_code, asset_name, category, active, archived
+        FROM assets
+        WHERE active = 1 AND IFNULL(archived, 0) = 0
+        ORDER BY asset_code ASC
+      `).all();
+      return reply.send({
+        ok: true,
+        assets: rows.map((r) => ({
+          asset_id: Number(r.id),
+          asset_code: String(r.asset_code || ""),
+          asset_name: String(r.asset_name || ""),
+          category: String(r.category || ""),
+          active: Number(r.active || 0) === 1,
+        })),
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.get("/pull/recent", async (req, reply) => {
+    if (!requireInspectproKey(req, reply)) return;
+    try {
+      const days = Math.max(1, Math.min(90, Number(req.query?.days || 14)));
+      const inspections = db.prepare(`
+        SELECT mi.id, mi.uuid, mi.inspection_date, mi.inspector_name, mi.notes, mi.updated_at, a.asset_code
+        FROM manager_inspections mi
+        JOIN assets a ON a.id = mi.asset_id
+        WHERE mi.inspection_date >= date('now', ?)
+        ORDER BY mi.inspection_date DESC, mi.id DESC
+        LIMIT 500
+      `).all(`-${days} day`);
+      const drInspectorCol = pickExistingColumn("manager_damage_reports", ["inspector_name", "inspector", "manager_name"], "inspector_name");
+      const damages = db.prepare(`
+        SELECT dr.id, dr.uuid, dr.report_date, dr.${drInspectorCol} AS inspector_name,
+               dr.hour_meter, dr.damage_location, dr.severity, dr.damage_description,
+               dr.immediate_action, dr.out_of_service, dr.updated_at, a.asset_code
+        FROM manager_damage_reports dr
+        JOIN assets a ON a.id = dr.asset_id
+        WHERE dr.report_date >= date('now', ?)
+        ORDER BY dr.report_date DESC, dr.id DESC
+        LIMIT 500
+      `).all(`-${days} day`);
+      return reply.send({
+        ok: true,
+        inspections,
+        damage_reports: damages,
+      });
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message || String(err) });
