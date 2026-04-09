@@ -1222,7 +1222,7 @@ export default async function reportsRoutes(app) {
       .header("Content-Type", "application/pdf")
       .header(
         "Content-Disposition",
-        `${download ? "attachment" : "inline"}; filename="IRONLOG_WO_${wo.id}.pdf"`
+        `${download ? "attachment" : "inline"}; filename="AML_Work_Order_${wo.id}_${todayYmd()}.pdf"`
       )
       .send(pdf);
   });
@@ -1560,7 +1560,7 @@ export default async function reportsRoutes(app) {
       .header("Content-Type", "application/pdf")
       .header(
         "Content-Disposition",
-        `${download ? "attachment" : "inline"}; filename="IRONLOG_AssetHistory_${asset.asset_code}.pdf"`
+        `${download ? "attachment" : "inline"}; filename="AML_Asset_History_${asset.asset_code}_${end}.pdf"`
       )
       .send(pdf);
   });
@@ -1653,7 +1653,7 @@ export default async function reportsRoutes(app) {
       .header("Content-Type", "application/pdf")
       .header(
         "Content-Disposition",
-        `${download ? "attachment" : "inline"}; filename="IRONLOG_Lube_${start}_to_${end}.pdf"`
+        `${download ? "attachment" : "inline"}; filename="AML_Lube_${end}.pdf"`
       )
       .send(pdf);
   });
@@ -1954,7 +1954,7 @@ export default async function reportsRoutes(app) {
       .header("Content-Type", "application/pdf")
       .header(
         "Content-Disposition",
-        `${download ? "attachment" : "inline"}; filename="IRONLOG_Fuel_Benchmark_${start}_to_${end}.pdf"`
+        `${download ? "attachment" : "inline"}; filename="AML_Fuel_Benchmark_${end}.pdf"`
       )
       .send(pdf);
   });
@@ -2163,7 +2163,7 @@ export default async function reportsRoutes(app) {
       .header("Content-Type", "application/pdf")
       .header(
         "Content-Disposition",
-        `${download ? "attachment" : "inline"}; filename="IRONLOG_Fuel_History_${asset.asset_code}_${start}_to_${end}.pdf"`
+        `${download ? "attachment" : "inline"}; filename="AML_Fuel_History_${asset.asset_code}_${end}.pdf"`
       )
       .send(pdf);
   });
@@ -3166,7 +3166,7 @@ export default async function reportsRoutes(app) {
       .header("Content-Type", "application/pdf")
       .header(
         "Content-Disposition",
-        `${download ? "attachment" : "inline"}; filename="IRONLOG_Stock_Monitor${part_code ? `_${part_code}` : ""}.pdf"`
+        `${download ? "attachment" : "inline"}; filename="AML_Stock_Monitor${part_code ? `_${part_code}` : ""}_${todayYmd()}.pdf"`
       )
       .send(pdf);
   });
@@ -3307,7 +3307,7 @@ export default async function reportsRoutes(app) {
       .header("Content-Type", "application/pdf")
       .header(
         "Content-Disposition",
-        `${download ? "attachment" : "inline"}; filename="IRONLOG_Legal_Compliance_${days}d.pdf"`
+        `${download ? "attachment" : "inline"}; filename="AML_Legal_Compliance_${todayYmd()}.pdf"`
       )
       .send(pdf);
   });
@@ -4250,7 +4250,7 @@ export default async function reportsRoutes(app) {
 
     reply
       .header("Content-Type", "application/pdf")
-      .header("Content-Disposition", `${download ? "attachment" : "inline"}; filename="IRONLOG_Maintenance_Cost_By_Equipment_${label}.pdf"`)
+      .header("Content-Disposition", `${download ? "attachment" : "inline"}; filename="AML_Maintenance_Cost_By_Equipment_${label}.pdf"`)
       .send(pdf);
   });
 
@@ -4823,7 +4823,7 @@ export default async function reportsRoutes(app) {
 
     reply
       .header("Content-Type", "application/pdf")
-      .header("Content-Disposition", `inline; filename="IRONLOG_Daily_${date}.pdf"`)
+      .header("Content-Disposition", `inline; filename="AML_Daily_${date}.pdf"`)
       .send(pdf);
   });
 
@@ -5101,7 +5101,7 @@ export default async function reportsRoutes(app) {
 
     reply
       .header("Content-Type", "application/pdf")
-      .header("Content-Disposition", `inline; filename="IRONLOG_Weekly_${start}_to_${end}.pdf"`)
+      .header("Content-Disposition", `inline; filename="AML_Weekly_${end}.pdf"`)
       .send(pdf);
   });
 
@@ -5257,7 +5257,7 @@ export default async function reportsRoutes(app) {
       .header("Content-Type", "application/pdf")
       .header(
         "Content-Disposition",
-        `${download ? "attachment" : "inline"}; filename="IRONLOG_Operations_${start}_to_${end}.pdf"`
+        `${download ? "attachment" : "inline"}; filename="AML_Operations_${end}.pdf"`
       )
       .send(pdf);
   });

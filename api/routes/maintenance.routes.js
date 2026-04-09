@@ -1213,7 +1213,7 @@ export default async function maintenanceRoutes(app) {
       reply.header("Content-Type", "application/pdf");
       reply.header(
         "Content-Disposition",
-        `${isDownload ? "attachment" : "inline"}; filename="maintenance-upcoming-services-${asOfLabel}.pdf"`
+        `${isDownload ? "attachment" : "inline"}; filename="AML_Upcoming_Services_${asOfLabel}.pdf"`
       );
       return reply.send(pdf);
     } catch (err) {
