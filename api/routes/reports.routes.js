@@ -42,22 +42,24 @@ function parseIsoDate(d) {
 
 function daysDownForBreakdown(bd, reportDate) {
   const logged = Number(bd.logged_days || 0);
-  if (logged > 0) return logged;
-
   const startDate = parseIsoDate(bd.start_at) || parseIsoDate(bd.breakdown_date);
-  if (!startDate) return 1;
-
-  const endDate = parseIsoDate(bd.end_at);
-  if (endDate) {
-    return inclusiveDaysBetween(startDate, endDate);
-  }
+  if (!startDate) return logged > 0 ? logged : 1;
 
   const asOf = parseIsoDate(reportDate);
-  if (asOf) {
-    return inclusiveDaysBetween(startDate, asOf);
+  const endDate = parseIsoDate(bd.end_at);
+  let spanEnd = endDate || asOf || startDate;
+  if (asOf && endDate && endDate > asOf) {
+    // Daily report is "as of selected date", so never count beyond it.
+    spanEnd = asOf;
   }
 
-  return 1;
+  const spanDays = spanEnd >= startDate ? inclusiveDaysBetween(startDate, spanEnd) : 0;
+  if (logged > 0) {
+    // If daily logs are sparse/missing on some days, do not under-report days down.
+    return Math.max(logged, spanDays);
+  }
+
+  return spanDays || 1;
 }
 
 function isMonth(m) {
