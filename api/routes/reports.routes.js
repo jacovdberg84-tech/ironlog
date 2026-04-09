@@ -4634,7 +4634,15 @@ export default async function reportsRoutes(app) {
       : "";
     const staleClosedWoIds = new Set([3, 5, 10, 11, 14, 18, 19, 20]);
     const openWOs = db.prepare(`
-      SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
+      SELECT
+        w.id,
+        a.asset_code,
+        w.source,
+        w.status,
+        CASE
+          WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(b.start_at), ''), NULLIF(TRIM(b.breakdown_date), ''), w.opened_at)
+          ELSE w.opened_at
+        END AS opened_at
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
       LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'

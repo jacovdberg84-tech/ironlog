@@ -2844,9 +2844,18 @@ export default async function reportsRoutes(app) {
     `).all(date).map(r => ({ ...r, critical: Boolean(r.critical) }));
 
     const openWOs = db.prepare(`
-      SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
+      SELECT
+        w.id,
+        a.asset_code,
+        w.source,
+        w.status,
+        CASE
+          WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(b.start_at), ''), NULLIF(TRIM(b.breakdown_date), ''), w.opened_at)
+          ELSE w.opened_at
+        END AS opened_at
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
+      LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
       WHERE w.closed_at IS NULL
         AND REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
         AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')

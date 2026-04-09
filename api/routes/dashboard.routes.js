@@ -519,7 +519,15 @@ export default async function dashboardRoutes(app) {
     `).all().map(r => ({ ...r, on_hand: Number(r.on_hand) }));
 
     const openWOs = db.prepare(`
-      SELECT w.id, a.asset_code, w.source, w.status, w.opened_at
+      SELECT
+        w.id,
+        a.asset_code,
+        w.source,
+        w.status,
+        CASE
+          WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(b.start_at), ''), NULLIF(TRIM(b.breakdown_date), ''), w.opened_at)
+          ELSE w.opened_at
+        END AS opened_at
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
       LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
@@ -537,8 +545,21 @@ export default async function dashboardRoutes(app) {
         a.asset_code,
         w.source,
         w.status,
-        w.opened_at,
-        CAST((julianday('now') - julianday(COALESCE(w.opened_at, datetime('now')))) * 24 AS INTEGER) AS age_hours
+        CASE
+          WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(b.start_at), ''), NULLIF(TRIM(b.breakdown_date), ''), w.opened_at)
+          ELSE w.opened_at
+        END AS opened_at,
+        CAST((
+          julianday('now') - julianday(
+            COALESCE(
+              CASE
+                WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(b.start_at), ''), NULLIF(TRIM(b.breakdown_date), ''), w.opened_at)
+                ELSE w.opened_at
+              END,
+              datetime('now')
+            )
+          )
+        ) * 24 AS INTEGER) AS age_hours
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
       LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
