@@ -1230,9 +1230,6 @@ export default async function maintenanceRoutes(app) {
       const assetId = Number(req.query?.asset_id || 0);
       const start = String(req.query?.start || "").trim();
       const end = String(req.query?.end || "").trim();
-      const responsiblePerson = String(req.query?.responsible_person || "").trim();
-      const pendingInvestigationRaw = String(req.query?.pending_investigation || "").trim();
-      const hseReportAvailableRaw = String(req.query?.hse_report_available || "").trim();
       const params = [];
       const where = [];
       if (assetId > 0) {
@@ -1655,6 +1652,9 @@ export default async function maintenanceRoutes(app) {
       const assetId = Number(req.query?.asset_id || 0);
       const start = String(req.query?.start || "").trim();
       const end = String(req.query?.end || "").trim();
+      const responsiblePerson = String(req.query?.responsible_person || "").trim();
+      const pendingInvestigationRaw = String(req.query?.pending_investigation || "").trim();
+      const hseReportAvailableRaw = String(req.query?.hse_report_available || "").trim();
       const params = [];
       const where = [];
       if (assetId > 0) {
