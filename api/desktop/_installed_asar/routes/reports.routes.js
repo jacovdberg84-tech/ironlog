@@ -298,16 +298,22 @@ export default async function reportsRoutes(app) {
     `).all();
     const woColSet = new Set(woCols.map((c) => String(c.name || "")));
     const optionalWoCol = (name) => (woColSet.has(name) ? `w.${name}` : `NULL AS ${name}`);
+    const requiredWoCols = ["id", "asset_id"];
+    for (const col of requiredWoCols) {
+      if (!woColSet.has(col)) {
+        return reply.code(500).send({ error: `work_orders schema missing required column: ${col}` });
+      }
+    }
 
     const wo = db.prepare(`
       SELECT
         w.id,
         w.asset_id,
-        w.source,
-        w.reference_id,
-        w.status,
-        w.opened_at,
-        w.closed_at,
+        ${optionalWoCol("source")},
+        ${optionalWoCol("reference_id")},
+        ${optionalWoCol("status")},
+        ${optionalWoCol("opened_at")},
+        ${optionalWoCol("closed_at")},
         ${optionalWoCol("completed_at")},
         ${optionalWoCol("completion_notes")},
         ${optionalWoCol("artisan_name")},
@@ -380,6 +386,22 @@ export default async function reportsRoutes(app) {
       const stockMovementCols = db.prepare(`
         PRAGMA table_info(stock_movements)
       `).all();
+      const partCols = db.prepare(`
+        PRAGMA table_info(parts)
+      `).all();
+      const stockColSet = new Set(stockMovementCols.map((c) => String(c.name || "")));
+      const partColSet = new Set(partCols.map((c) => String(c.name || "")));
+      const canQueryIssuedParts =
+        stockColSet.has("id") &&
+        stockColSet.has("part_id") &&
+        stockColSet.has("quantity") &&
+        stockColSet.has("reference") &&
+        partColSet.has("id") &&
+        partColSet.has("part_code") &&
+        partColSet.has("part_name");
+      if (!canQueryIssuedParts) {
+        issuedParts = [];
+      } else {
       const hasCreatedAt = stockMovementCols.some((c) => String(c.name) === "created_at");
       const hasMovementDate = stockMovementCols.some((c) => String(c.name) === "movement_date");
       const movementDateExpr = hasCreatedAt
@@ -400,6 +422,7 @@ export default async function reportsRoutes(app) {
         WHERE sm.reference = ?
         ORDER BY sm.id ASC
       `).all(`work_order:${id}`);
+      }
     }
 
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
