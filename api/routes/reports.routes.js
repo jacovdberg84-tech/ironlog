@@ -1857,7 +1857,7 @@ export default async function reportsRoutes(app) {
         fill_count: fillCount,
         flag: is_excessive ? "EXCESSIVE" : "OK",
       };
-    }).filter((r) => r.fuel_liters > 0 || r.hours_run > 0 || r.km_run > 0)
+    }).filter((r) => r.fuel_liters > 0)
       // Temporary business rule: exclude LDV/km-mode assets from benchmark report.
       .filter((r) => r.metric_mode !== "km")
       // Hard exclusion for LDV fleet codes requested by business.
@@ -1981,6 +1981,9 @@ export default async function reportsRoutes(app) {
 
   // GET /api/reports/fuel-machine-history.pdf?asset_code=A300AM&start=YYYY-MM-DD&end=YYYY-MM-DD&tolerance=0.15&download=1
   app.get("/fuel-machine-history.pdf", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
     const assetCode = String(req.query?.asset_code || "").trim();
     const start = String(req.query?.start || "").trim();
     const end = String(req.query?.end || "").trim();
@@ -2027,8 +2030,13 @@ export default async function reportsRoutes(app) {
         COALESCE(CASE WHEN fl.hours_run > 0 THEN fl.hours_run ELSE 0 END, 0) AS meter_hours,
         COALESCE(fl.meter_run_value, 0) AS meter_run_value,
         COALESCE(LOWER(fl.meter_unit), '') AS meter_unit,
+        dh.opening_hours AS day_opening_hours,
+        dh.closing_hours AS day_closing_hours,
         fl.source
       FROM fuel_logs fl
+      LEFT JOIN daily_hours dh
+        ON dh.asset_id = fl.asset_id
+       AND dh.work_date = fl.log_date
       WHERE fl.asset_id = ?
         AND fl.log_date BETWEEN ? AND ?
       ORDER BY fl.log_date ASC, fl.id ASC
@@ -2067,18 +2075,31 @@ export default async function reportsRoutes(app) {
 
     const rows = fuelRows.map((d) => {
       const meter = toModeMeter(d);
+      const dayOpen = Number(d.day_opening_hours);
+      const dayClose = Number(d.day_closing_hours);
+      const hasDayMeters = Number.isFinite(dayOpen) && Number.isFinite(dayClose) && dayOpen > 0 && dayClose > 0;
+      let openMeter = prevMeter;
+      let closeMeter = meter > 0 ? meter : null;
       let runBetween = null;
-      if (prevMeter != null && meter > 0) {
+      let invalidDelta = false;
+      if (mode === "hours" && hasDayMeters) {
+        openMeter = dayOpen;
+        closeMeter = dayClose;
+        const delta = dayClose - dayOpen;
+        if (Number.isFinite(delta) && delta > 0) runBetween = delta;
+        else if (Number.isFinite(delta) && delta <= 0) invalidDelta = true;
+      } else if (prevMeter != null && meter > 0) {
         const delta = meter - prevMeter;
         if (Number.isFinite(delta) && delta > 0) runBetween = delta;
+        else if (Number.isFinite(delta) && delta <= 0) invalidDelta = true;
       }
       const fuel = Number(d.fuel_liters || 0);
-      const lph = mode === "hours" && runBetween != null && runBetween > 0 ? fuel / runBetween : null;
-      const kmpl = mode === "km" && fuel > 0 && runBetween != null && runBetween > 0 ? runBetween / fuel : null;
+      const lph = (!invalidDelta && mode === "hours" && runBetween != null && runBetween > 0) ? fuel / runBetween : null;
+      const kmpl = (!invalidDelta && mode === "km" && fuel > 0 && runBetween != null && runBetween > 0) ? runBetween / fuel : null;
       const flag = mode === "km"
-        ? (kmpl != null && kmpl < lowThresholdKmpl ? "EXCESSIVE" : "OK")
-        : (lph != null && lph > threshold ? "EXCESSIVE" : "OK");
-      if (meter > 0) prevMeter = meter;
+        ? (invalidDelta ? "INVALID DELTA" : (kmpl != null && kmpl < lowThresholdKmpl ? "EXCESSIVE" : "OK"))
+        : (invalidDelta ? "INVALID DELTA" : (lph != null && lph > threshold ? "EXCESSIVE" : "OK"));
+      if (closeMeter != null && closeMeter > 0) prevMeter = closeMeter;
       return {
         log_date: d.log_date,
         metric_mode: mode,

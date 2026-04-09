@@ -992,6 +992,9 @@ export default async function reportsRoutes(app) {
   // =========================
   // GET /api/reports/fuel-benchmark.pdf?start=YYYY-MM-DD&end=YYYY-MM-DD&tolerance=0.15&download=1
   app.get("/fuel-benchmark.pdf", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
     const start = String(req.query?.start || "").trim();
     const end = String(req.query?.end || "").trim();
     const toleranceInput = Number(req.query?.tolerance ?? 0.15);
@@ -1053,7 +1056,7 @@ export default async function reportsRoutes(app) {
         variance_lph: lph == null ? null : Number((lph - oem).toFixed(3)),
         flag: is_excessive ? "EXCESSIVE" : "OK",
       };
-    }).filter((r) => r.fuel_liters > 0 || r.hours_run > 0)
+    }).filter((r) => r.fuel_liters > 0)
       .sort((a, b) => {
         const ex = (b.flag === "EXCESSIVE" ? 1 : 0) - (a.flag === "EXCESSIVE" ? 1 : 0);
         if (ex !== 0) return ex;
@@ -1147,6 +1150,9 @@ export default async function reportsRoutes(app) {
 
   // GET /api/reports/fuel-machine-history.pdf?asset_code=A300AM&start=YYYY-MM-DD&end=YYYY-MM-DD&tolerance=0.15&download=1
   app.get("/fuel-machine-history.pdf", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
     const assetCode = String(req.query?.asset_code || "").trim();
     const start = String(req.query?.start || "").trim();
     const end = String(req.query?.end || "").trim();
@@ -1172,8 +1178,13 @@ export default async function reportsRoutes(app) {
         fl.log_date,
         COALESCE(fl.liters, 0) AS fuel_liters,
         COALESCE(CASE WHEN fl.hours_run > 0 THEN fl.hours_run ELSE 0 END, 0) AS meter_hours,
+        dh.opening_hours AS day_opening_hours,
+        dh.closing_hours AS day_closing_hours,
         fl.source
       FROM fuel_logs fl
+      LEFT JOIN daily_hours dh
+        ON dh.asset_id = fl.asset_id
+       AND dh.work_date = fl.log_date
       WHERE fl.asset_id = ?
         AND fl.log_date BETWEEN ? AND ?
       ORDER BY fl.log_date ASC, fl.id ASC
@@ -1197,15 +1208,26 @@ export default async function reportsRoutes(app) {
 
     const rows = fuelRows.map((d) => {
       const meter = Number(d.meter_hours || 0);
+      const dayOpen = Number(d.day_opening_hours);
+      const dayClose = Number(d.day_closing_hours);
+      const hasDayMeters = Number.isFinite(dayOpen) && Number.isFinite(dayClose) && dayOpen > 0 && dayClose > 0;
+      let closeMeter = meter > 0 ? meter : null;
       let hoursBetween = null;
-      if (prevMeter != null && meter > 0) {
+      let invalidDelta = false;
+      if (hasDayMeters) {
+        closeMeter = dayClose;
+        const delta = dayClose - dayOpen;
+        if (Number.isFinite(delta) && delta > 0) hoursBetween = delta;
+        else if (Number.isFinite(delta) && delta <= 0) invalidDelta = true;
+      } else if (prevMeter != null && meter > 0) {
         const delta = meter - prevMeter;
         if (Number.isFinite(delta) && delta > 0) hoursBetween = delta;
+        else if (Number.isFinite(delta) && delta <= 0) invalidDelta = true;
       }
       const fuel = Number(d.fuel_liters || 0);
-      const lph = hoursBetween != null && hoursBetween > 0 ? fuel / hoursBetween : null;
-      const flag = lph != null && lph > threshold ? "EXCESSIVE" : "OK";
-      if (meter > 0) prevMeter = meter;
+      const lph = !invalidDelta && hoursBetween != null && hoursBetween > 0 ? fuel / hoursBetween : null;
+      const flag = invalidDelta ? "INVALID DELTA" : (lph != null && lph > threshold ? "EXCESSIVE" : "OK");
+      if (closeMeter != null && closeMeter > 0) prevMeter = closeMeter;
       return {
         log_date: d.log_date,
         fuel_liters: Number(fuel.toFixed(2)),
