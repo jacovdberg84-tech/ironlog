@@ -3048,7 +3048,7 @@ async function loadFuelMachineDailyInline(assetCode, mountEl) {
       `<td class="fh-col-num">${invalid ? "-" : Number((mode === "km" ? r.km_run : r.hours_run) || 0).toFixed(2)}</td>` +
       `<td class="fh-col-num">${invalid ? "-" : (mode === "km" ? (r.actual_km_per_l == null ? "-" : Number(r.actual_km_per_l).toFixed(3)) : (r.actual_lph == null ? "-" : Number(r.actual_lph).toFixed(3)))}</td>` +
       `<td class="fh-col-status"><span class="fh-status ${statusClass}">${statusText}</span></td>` +
-      `<td class="fh-col-action"><button data-fuel-delete="${Number(r.id || 0)}">Delete</button></td>` +
+      `<td class="fh-col-action"><button data-fuel-edit="${Number(r.id || 0)}" data-open="${r.open_meter_value == null ? "" : Number(r.open_meter_value)}" data-close="${r.close_meter_value == null ? "" : Number(r.close_meter_value)}">Edit Hrs</button> <button data-fuel-delete="${Number(r.id || 0)}">Delete</button></td>` +
       `</tr>`
     );
   }).join("");
@@ -3829,6 +3829,69 @@ async function repairFuelMeterChain() {
     if (resultEl) resultEl.textContent = String(e.message || e);
     setStatus("Meter chain repair failed.");
   }
+}
+
+async function clearFuelFromDate() {
+  const resultEl = qs("fuelFamsResult");
+  const fromDate = (qs("fuelClearFromDate")?.value || "").trim();
+  const assetCode = (qs("fuelClearAssetCode")?.value || "").trim();
+  const clearDailyHours = Boolean(qs("fuelClearDailyHours")?.checked);
+  if (!fromDate) return alert("Select a from date first.");
+
+  const scopeTxt = assetCode ? `for ${assetCode}` : "for all assets";
+  const ok = confirm(
+    `This will delete fuel logs from ${fromDate} ${scopeTxt}.\n` +
+    (clearDailyHours ? "Daily opening/closing/run meters on affected days will also be cleared.\n" : "") +
+    "You can then re-upload the CSV files.\n\nContinue?"
+  );
+  if (!ok) return;
+
+  if (resultEl) resultEl.textContent = "";
+  setStatus("Clearing fuel data...");
+  try {
+    const res = await fetchJson(`${API}/api/dashboard/fuel/clear-from-date`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        from_date: fromDate,
+        ...(assetCode ? { asset_code: assetCode } : {}),
+        clear_daily_hours: clearDailyHours,
+      }),
+    });
+    if (resultEl) resultEl.textContent = JSON.stringify(res, null, 2);
+    setStatus(`Fuel clear complete. Deleted logs: ${Number(res?.deleted_logs || 0)}`);
+    await Promise.all([loadDashboard().catch(() => {}), loadFuelBenchmark().catch(() => {})]);
+  } catch (e) {
+    if (resultEl) resultEl.textContent = String(e.message || e);
+    setStatus("Fuel clear failed.");
+  }
+}
+
+async function editFuelMachineHours(logId, openValue, closeValue) {
+  const id = Number(logId || 0);
+  if (!Number.isInteger(id) || id <= 0) return;
+  const openDefault = Number.isFinite(Number(openValue)) ? String(Number(openValue)) : "";
+  const closeDefault = Number.isFinite(Number(closeValue)) ? String(Number(closeValue)) : "";
+  const openRaw = prompt("Enter opening meter value", openDefault);
+  if (openRaw == null) return;
+  const closeRaw = prompt("Enter closing meter value", closeDefault);
+  if (closeRaw == null) return;
+
+  const opening = Number(String(openRaw).trim());
+  const closing = Number(String(closeRaw).trim());
+  if (!Number.isFinite(opening) || opening < 0) return alert("Opening meter must be >= 0.");
+  if (!Number.isFinite(closing) || closing < 0) return alert("Closing meter must be >= 0.");
+  if (closing < opening) return alert("Closing meter must be greater than or equal to opening meter.");
+
+  await fetchJson(`${API}/api/dashboard/fuel/machine-hours`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({
+      fuel_log_id: id,
+      opening_meter: opening,
+      closing_meter: closing,
+    }),
+  });
 }
 
 function downloadStoresCsvTemplate() {
@@ -7908,6 +7971,24 @@ async function init() {
       return;
     }
 
+    const editBtn = evt.target?.closest?.("button[data-fuel-edit]");
+    if (editBtn) {
+      const logId = Number(editBtn.getAttribute("data-fuel-edit") || 0);
+      const openVal = editBtn.getAttribute("data-open");
+      const closeVal = editBtn.getAttribute("data-close");
+      const rowEl = editBtn.closest(".item");
+      const mountEl = rowEl?.querySelector?.(".fuel-inline-history");
+      const code = String(mountEl?.getAttribute?.("data-code") || "");
+      editFuelMachineHours(logId, openVal, closeVal)
+        .then(() => Promise.all([
+          loadFuelBenchmark().catch(() => {}),
+          code && mountEl ? loadFuelMachineDailyInline(code, mountEl).catch(() => {}) : Promise.resolve(),
+        ]))
+        .then(() => setStatus("Machine hours updated."))
+        .catch((e) => setStatus("Machine hours update failed: " + (e.message || e)));
+      return;
+    }
+
     const delBtn = evt.target?.closest?.("button[data-fuel-delete]");
     if (delBtn) {
       const logId = Number(delBtn.getAttribute("data-fuel-delete") || 0);
@@ -8003,6 +8084,9 @@ async function init() {
   );
   qs("fuelRepairMeterChainBtn")?.addEventListener("click", () =>
     repairFuelMeterChain().catch((e) => setStatus("Meter chain repair error: " + e.message))
+  );
+  qs("fuelClearFromDateBtn")?.addEventListener("click", () =>
+    clearFuelFromDate().catch((e) => setStatus("Fuel clear error: " + e.message))
   );
   qs("downloadFuelTemplate")?.addEventListener("click", downloadFuelCsvTemplate);
   qs("downloadStoreTemplate")?.addEventListener("click", downloadStoresCsvTemplate);

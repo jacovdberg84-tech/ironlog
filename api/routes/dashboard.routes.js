@@ -1403,6 +1403,162 @@ export default async function dashboardRoutes(app) {
     });
   });
 
+  // POST /api/dashboard/fuel/clear-from-date
+  // Body: { from_date: 'YYYY-MM-DD', asset_code?: string, clear_daily_hours?: boolean }
+  app.post("/fuel/clear-from-date", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    const fromDate = String(req.body?.from_date || "").trim();
+    const assetCode = String(req.body?.asset_code || "").trim();
+    const clearDailyHours = Boolean(req.body?.clear_daily_hours);
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) {
+      return reply.code(400).send({ error: "from_date must be YYYY-MM-DD" });
+    }
+
+    let assetId = null;
+    if (assetCode) {
+      const asset = db.prepare(`SELECT id, asset_code FROM assets WHERE asset_code = ?`).get(assetCode);
+      if (!asset) return reply.code(404).send({ error: `asset not found: ${assetCode}` });
+      assetId = Number(asset.id);
+    }
+
+    const whereSql = assetId != null ? "WHERE log_date >= ? AND asset_id = ?" : "WHERE log_date >= ?";
+    const whereParams = assetId != null ? [fromDate, assetId] : [fromDate];
+
+    const tx = db.transaction(() => {
+      const dayRows = db.prepare(`
+        SELECT DISTINCT asset_id, log_date
+        FROM fuel_logs
+        ${whereSql}
+      `).all(...whereParams);
+
+      const logsToDelete = Number(
+        db.prepare(`SELECT COUNT(*) AS n FROM fuel_logs ${whereSql}`).get(...whereParams)?.n || 0
+      );
+
+      const deleted = db.prepare(`DELETE FROM fuel_logs ${whereSql}`).run(...whereParams);
+
+      let clearedDailyHoursRows = 0;
+      if (clearDailyHours && dayRows.length > 0) {
+        const clearDaily = db.prepare(`
+          UPDATE daily_hours
+          SET opening_hours = NULL,
+              closing_hours = NULL,
+              hours_run = NULL
+          WHERE asset_id = ?
+            AND work_date = ?
+        `);
+        for (const d of dayRows) {
+          const res = clearDaily.run(Number(d.asset_id), String(d.log_date));
+          clearedDailyHoursRows += Number(res.changes || 0);
+        }
+      }
+
+      return {
+        deleted_logs: Number(deleted.changes || logsToDelete || 0),
+        affected_days: dayRows.length,
+        cleared_daily_hours_rows: clearedDailyHoursRows,
+      };
+    });
+
+    const summary = tx();
+
+    writeAudit(db, req, {
+      module: "fuel",
+      action: "clear_from_date",
+      entity_type: "asset",
+      entity_id: assetCode || "all",
+      payload: {
+        from_date: fromDate,
+        clear_daily_hours: clearDailyHours,
+        deleted_logs: summary.deleted_logs,
+        affected_days: summary.affected_days,
+        cleared_daily_hours_rows: summary.cleared_daily_hours_rows,
+      },
+    });
+
+    return reply.send({
+      ok: true,
+      from_date: fromDate,
+      asset_code: assetCode || null,
+      clear_daily_hours: clearDailyHours,
+      deleted_logs: Number(summary.deleted_logs || 0),
+      affected_days: Number(summary.affected_days || 0),
+      cleared_daily_hours_rows: Number(summary.cleared_daily_hours_rows || 0),
+    });
+  });
+
+  // POST /api/dashboard/fuel/machine-hours
+  // Body: { fuel_log_id: number, opening_meter: number, closing_meter: number }
+  app.post("/fuel/machine-hours", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    const fuelLogId = Number(req.body?.fuel_log_id || 0);
+    const openingMeter = Number(req.body?.opening_meter);
+    const closingMeter = Number(req.body?.closing_meter);
+
+    if (!Number.isInteger(fuelLogId) || fuelLogId <= 0) {
+      return reply.code(400).send({ error: "fuel_log_id must be a valid integer" });
+    }
+    if (!Number.isFinite(openingMeter) || openingMeter < 0) {
+      return reply.code(400).send({ error: "opening_meter must be >= 0" });
+    }
+    if (!Number.isFinite(closingMeter) || closingMeter < 0) {
+      return reply.code(400).send({ error: "closing_meter must be >= 0" });
+    }
+    if (closingMeter < openingMeter) {
+      return reply.code(400).send({ error: "closing_meter must be >= opening_meter" });
+    }
+
+    const fuelLog = db.prepare(`
+      SELECT fl.id, fl.asset_id, fl.log_date, a.asset_code
+      FROM fuel_logs fl
+      JOIN assets a ON a.id = fl.asset_id
+      WHERE fl.id = ?
+      LIMIT 1
+    `).get(fuelLogId);
+    if (!fuelLog) return reply.code(404).send({ error: "fuel log not found" });
+
+    const hoursRun = Number((closingMeter - openingMeter).toFixed(3));
+    db.prepare(`
+      INSERT INTO daily_hours (asset_id, work_date, opening_hours, closing_hours, hours_run, is_used)
+      VALUES (?, ?, ?, ?, ?, 1)
+      ON CONFLICT(asset_id, work_date) DO UPDATE SET
+        opening_hours = excluded.opening_hours,
+        closing_hours = excluded.closing_hours,
+        hours_run = excluded.hours_run
+    `).run(
+      Number(fuelLog.asset_id),
+      String(fuelLog.log_date),
+      Number(openingMeter.toFixed(3)),
+      Number(closingMeter.toFixed(3)),
+      hoursRun
+    );
+
+    writeAudit(db, req, {
+      module: "fuel",
+      action: "edit_machine_hours",
+      entity_type: "fuel_log",
+      entity_id: String(fuelLogId),
+      payload: {
+        asset_code: fuelLog.asset_code,
+        log_date: fuelLog.log_date,
+        opening_meter: Number(openingMeter.toFixed(3)),
+        closing_meter: Number(closingMeter.toFixed(3)),
+        hours_run: hoursRun,
+      },
+    });
+
+    return reply.send({
+      ok: true,
+      fuel_log_id: Number(fuelLogId),
+      asset_code: fuelLog.asset_code,
+      log_date: fuelLog.log_date,
+      opening_meter: Number(openingMeter.toFixed(3)),
+      closing_meter: Number(closingMeter.toFixed(3)),
+      hours_run: hoursRun,
+    });
+  });
+
   // GET /api/dashboard/fuel/baseline?asset_code=A300AM
   app.get("/fuel/baseline", async (req, reply) => {
     const asset_code = String(req.query?.asset_code || "").trim();

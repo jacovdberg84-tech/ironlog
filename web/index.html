@@ -823,6 +823,15 @@
             <input id="fuelRepairAssetCode" list="assetCodeOptions" class="w-140" placeholder="Asset code (optional)" />
             <button id="fuelRepairMeterChainBtn" type="button">Repair Meter Chain</button>
           </div>
+          <div class="row">
+            <input id="fuelClearFromDate" type="date" />
+            <input id="fuelClearAssetCode" list="assetCodeOptions" class="w-140" placeholder="Asset code (optional)" />
+            <label class="chk">
+              <input id="fuelClearDailyHours" type="checkbox" checked />
+              Also clear daily meters
+            </label>
+            <button id="fuelClearFromDateBtn" type="button">Clear Fuel From Date</button>
+          </div>
           <pre class="output" id="fuelFamsResult"></pre>
         </details>
         <pre class="output" id="fuelInputResult"></pre>
