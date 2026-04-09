@@ -2066,7 +2066,8 @@ async function loadIronmindInsight(options = {}) {
           ["IRONMIND DAILY INSIGHT", "", "Repairs Needed", "- Insufficient data",
            "", "Operational Risks", "- Insufficient data",
            "", "Suggestions", "- Insufficient data",
-           "", "Data Gaps", "- Insufficient data"].join("\n")
+           "", "Data Gaps", "- Insufficient data",
+           "", "Data Anomalies", "- Insufficient data"].join("\n")
         );
         renderIronmindSections(summaryEl, emptySections);
       }
@@ -2189,6 +2190,7 @@ async function refreshIronmindInsight() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         force: true,
+        report_date: todayLocalYmd(),
         report_type: "daily_admin",
         context_notes: contextNotes || undefined,
         detail_mode: detailMode,
@@ -2317,6 +2319,7 @@ function parseIronmindSections(text) {
     { key: "risks", name: "Operational Risks" },
     { key: "suggestions", name: "Suggestions" },
     { key: "data_gaps", name: "Data Gaps" },
+    { key: "anomalies", name: "Data Anomalies" },
   ];
   const src = String(text || "");
   return defs.map((sec, i) => {

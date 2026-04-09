@@ -275,6 +275,35 @@ function toIronmindFormat({ repairsNeeded, operationalRisks, suggestions, dataGa
   ].join("\n");
 }
 
+function appendDataAnomaliesSection(baseSummary, lines) {
+  const block = (title, items) => {
+    const normalized = (items && items.length
+      ? items
+      : ["No suspicious daily_input rows in the last 90 days."]
+    ).map((s) => `- ${String(s || "").trim()}`);
+    return `${title}\n${normalized.join("\n")}`;
+  };
+  return `${String(baseSummary || "").trim()}\n\n${block("Data Anomalies", lines)}`;
+}
+
+function buildDailyInputAnomalyLines(rows, maxTrustedHours) {
+  const maxH = Number(maxTrustedHours || 24);
+  if (!Array.isArray(rows) || !rows.length) {
+    return [
+      `No rows flagged in the last 90 days (hours_run > ${maxH}h or closing_hours < opening_hours). PM overdue math ignores those run rows.`,
+    ];
+  }
+  return rows.map((r) => {
+    const code = String(r.asset_code || "?").trim();
+    const d = String(r.work_date || "?").trim();
+    const reason = String(r.reason || "flagged").trim();
+    const hr = r.hours_run != null ? `${Number(r.hours_run).toFixed(1)}h run` : "run n/a";
+    const op = r.opening_hours != null ? Number(r.opening_hours).toFixed(1) : "-";
+    const cl = r.closing_hours != null ? Number(r.closing_hours).toFixed(1) : "-";
+    return `${code} on ${d}: ${reason} (${hr}, open ${op} / close ${cl}) — correct Daily Input or repair meter chain.`;
+  });
+}
+
 function buildFallbackInsight(data) {
   const repairsNeeded = [];
   const operationalRisks = [];
@@ -371,6 +400,7 @@ async function callIronmindAi(structuredData, opts = {}) {
     "- No motivational language.",
     "- No chit-chat.",
     "- Respond as JSON only with keys: repairs_needed, operational_risks, suggestions, data_gaps.",
+    "- Structured JSON may include daily_input_anomalies: treat those as data quality issues, not equipment failure.",
     detailMode
       ? "- Each key should contain 4-8 concise but specific bullets with asset codes, magnitudes, and action intent where possible."
       : "- Each key must be an array of short strings.",
@@ -655,6 +685,44 @@ function buildStructuredData(reportDate) {
       fuel_over_pct: Number(r.fuel_over_pct || 0),
     }));
 
+  const dailyInputAnomalies = db.prepare(`
+    SELECT
+      a.asset_code AS asset_code,
+      dh.work_date AS work_date,
+      dh.hours_run AS hours_run,
+      dh.opening_hours AS opening_hours,
+      dh.closing_hours AS closing_hours,
+      CASE
+        WHEN dh.hours_run IS NOT NULL AND dh.hours_run > ? THEN 'hours_run exceeds trusted max'
+        WHEN dh.opening_hours IS NOT NULL AND dh.closing_hours IS NOT NULL
+          AND dh.closing_hours < dh.opening_hours THEN 'invalid meter (close < open)'
+        ELSE 'flagged'
+      END AS reason
+    FROM daily_hours dh
+    JOIN assets a ON a.id = dh.asset_id
+    WHERE dh.is_used = 1
+      AND dh.work_date BETWEEN date(?, '-89 day') AND ?
+      AND a.active = 1
+      AND IFNULL(a.is_standby, 0) = 0
+      AND (
+        (dh.hours_run IS NOT NULL AND dh.hours_run > ?)
+        OR (
+          dh.opening_hours IS NOT NULL
+          AND dh.closing_hours IS NOT NULL
+          AND dh.closing_hours < dh.opening_hours
+        )
+      )
+    ORDER BY dh.work_date DESC, dh.hours_run DESC
+    LIMIT 25
+  `).all(maxRunHours, reportDate, reportDate, maxRunHours).map((r) => ({
+    asset_code: r.asset_code,
+    work_date: r.work_date,
+    hours_run: r.hours_run == null ? null : Number(r.hours_run),
+    opening_hours: r.opening_hours == null ? null : Number(r.opening_hours),
+    closing_hours: r.closing_hours == null ? null : Number(r.closing_hours),
+    reason: r.reason,
+  }));
+
   return {
     report_date: reportDate,
     kpi: {
@@ -672,6 +740,8 @@ function buildStructuredData(reportDate) {
     recurringFailures30d,
     fuelAnomalies14d,
     topRiskAssets,
+    daily_input_anomalies: dailyInputAnomalies,
+    trusted_daily_run_hours_max: maxRunHours,
     dataCoverage: {
       active_assets: Number(activeAssets?.c || 0),
       assets_with_daily_entry: Number(dailyCoverage?.c || 0),
@@ -690,7 +760,7 @@ export async function generateIronmindReport({
 }) {
   ensureIronmindTable();
 
-  const targetDate = String(reportDate || ymdOffsetFromNow(1)).trim();
+  const targetDate = String(reportDate || ymdOffsetFromNow(0)).trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
     throw new Error("reportDate must be YYYY-MM-DD");
   }
@@ -752,7 +822,11 @@ export async function generateIronmindReport({
       }
     : buildFallbackInsight(structuredData);
 
-  const summary = toIronmindFormat(parsed);
+  const anomalyLines = buildDailyInputAnomalyLines(
+    structuredData.daily_input_anomalies,
+    structuredData.trusted_daily_run_hours_max
+  );
+  const summary = appendDataAnomaliesSection(toIronmindFormat(parsed), anomalyLines);
 
   db.prepare(`
     INSERT INTO ironmind_reports (report_date, report_type, summary, created_at)
