@@ -3037,18 +3037,18 @@ async function loadFuelMachineDailyInline(assetCode, mountEl) {
     const statusClass = invalid ? "fh-status-excessive" : (flagged ? "fh-status-excessive" : "fh-status-ok");
     const statusText = invalid ? "INVALID DELTA" : (flagged ? (mode === "km" ? "UNDER BENCHMARK" : "EXCESSIVE") : "OK");
     const meterUnit = mode === "km" ? "km" : "hrs";
-    const openMeter = r.open_meter_value == null ? "-" : `${Number(r.open_meter_value).toFixed(2)} ${meterUnit}`;
-    const closeMeter = r.close_meter_value == null ? "-" : `${Number(r.close_meter_value).toFixed(2)} ${meterUnit}`;
+    const openMeterValue = r.open_meter_value == null ? "" : Number(r.open_meter_value).toFixed(2);
+    const closeMeterValue = r.close_meter_value == null ? "" : Number(r.close_meter_value).toFixed(2);
     return (
       `<tr>` +
       `<td class="fh-col-date">${r.log_date}</td>` +
       `<td class="fh-col-num">${Number(r.fuel_liters || 0).toFixed(2)}</td>` +
-      `<td class="fh-col-num">${openMeter}</td>` +
-      `<td class="fh-col-num">${closeMeter}</td>` +
+      `<td class="fh-col-num"><input data-fuel-open-input="1" class="w-110" type="number" step="0.01" min="0" value="${openMeterValue}"> ${meterUnit}</td>` +
+      `<td class="fh-col-num"><input data-fuel-close-input="1" class="w-110" type="number" step="0.01" min="0" value="${closeMeterValue}"> ${meterUnit}</td>` +
       `<td class="fh-col-num">${invalid ? "-" : Number((mode === "km" ? r.km_run : r.hours_run) || 0).toFixed(2)}</td>` +
       `<td class="fh-col-num">${invalid ? "-" : (mode === "km" ? (r.actual_km_per_l == null ? "-" : Number(r.actual_km_per_l).toFixed(3)) : (r.actual_lph == null ? "-" : Number(r.actual_lph).toFixed(3)))}</td>` +
       `<td class="fh-col-status"><span class="fh-status ${statusClass}">${statusText}</span></td>` +
-      `<td class="fh-col-action"><button data-fuel-edit="${Number(r.id || 0)}" data-open="${r.open_meter_value == null ? "" : Number(r.open_meter_value)}" data-close="${r.close_meter_value == null ? "" : Number(r.close_meter_value)}">Edit Open/Close</button> <button data-fuel-delete="${Number(r.id || 0)}">Delete</button></td>` +
+      `<td class="fh-col-action"><button data-fuel-save="${Number(r.id || 0)}">Save</button> <button data-fuel-delete="${Number(r.id || 0)}">Delete</button></td>` +
       `</tr>`
     );
   }).join("");
@@ -3916,6 +3916,31 @@ async function editFuelMachineHours(logId, openValue, closeValue) {
   if (!Number.isFinite(opening) || opening < 0) return alert("Opening meter must be >= 0.");
   if (!Number.isFinite(closing) || closing < 0) return alert("Closing meter must be >= 0.");
   if (closing < opening) return alert("Closing meter must be greater than or equal to opening meter.");
+
+  await fetchJson(`${API}/api/dashboard/fuel/machine-hours`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({
+      fuel_log_id: id,
+      opening_meter: opening,
+      closing_meter: closing,
+    }),
+  });
+}
+
+async function saveFuelMachineHoursInline(saveBtn) {
+  const id = Number(saveBtn?.getAttribute("data-fuel-save") || 0);
+  if (!Number.isInteger(id) || id <= 0) return;
+  const row = saveBtn.closest("tr");
+  if (!row) return;
+  const openEl = row.querySelector('input[data-fuel-open-input="1"]');
+  const closeEl = row.querySelector('input[data-fuel-close-input="1"]');
+  const opening = Number(String(openEl?.value || "").trim());
+  const closing = Number(String(closeEl?.value || "").trim());
+
+  if (!Number.isFinite(opening) || opening < 0) return alert("Opening hours must be >= 0.");
+  if (!Number.isFinite(closing) || closing < 0) return alert("Closing hours must be >= 0.");
+  if (closing < opening) return alert("Closing hours must be greater than or equal to opening hours.");
 
   await fetchJson(`${API}/api/dashboard/fuel/machine-hours`, {
     method: "POST",
@@ -8005,15 +8030,12 @@ async function init() {
       return;
     }
 
-    const editBtn = evt.target?.closest?.("button[data-fuel-edit]");
-    if (editBtn) {
-      const logId = Number(editBtn.getAttribute("data-fuel-edit") || 0);
-      const openVal = editBtn.getAttribute("data-open");
-      const closeVal = editBtn.getAttribute("data-close");
-      const rowEl = editBtn.closest(".item");
+    const saveBtn = evt.target?.closest?.("button[data-fuel-save]");
+    if (saveBtn) {
+      const rowEl = saveBtn.closest(".item");
       const mountEl = rowEl?.querySelector?.(".fuel-inline-history");
       const code = String(mountEl?.getAttribute?.("data-code") || "");
-      editFuelMachineHours(logId, openVal, closeVal)
+      saveFuelMachineHoursInline(saveBtn)
         .then(() => Promise.all([
           loadFuelBenchmark().catch(() => {}),
           code && mountEl ? loadFuelMachineDailyInline(code, mountEl).catch(() => {}) : Promise.resolve(),
