@@ -978,6 +978,7 @@ export default async function reportsRoutes(app) {
     if (!Number.isFinite(id) || id <= 0) {
       return reply.code(400).send({ error: "valid work order id required" });
     }
+    try {
 
     const woCols = db.prepare(`
       PRAGMA table_info(work_orders)
@@ -1321,6 +1322,38 @@ export default async function reportsRoutes(app) {
         `${download ? "attachment" : "inline"}; filename="AML_Work_Order_${wo.id}_${todayYmd()}.pdf"`
       )
       .send(pdf);
+    } catch (err) {
+      req.log.error({ err, id }, "workorder pdf generation failed");
+      try {
+        const fallbackPdf = await buildPdfBuffer(
+          (doc) => {
+            sectionTitle(doc, "Work Order");
+            kvGrid(doc, [
+              { k: "WO #", v: id },
+              { k: "Status", v: "PDF fallback generated" },
+              { k: "Error", v: "Detailed PDF template failed. Please contact support." },
+            ], 1);
+          },
+          {
+            title: "IRONLOG",
+            subtitle: "Work Order Job Card (Fallback)",
+            rightText: `WO #${id}`,
+            showPageNumbers: true,
+            disableHeaderFooter: nohf,
+          }
+        );
+        return reply
+          .header("Content-Type", "application/pdf")
+          .header(
+            "Content-Disposition",
+            `${download ? "attachment" : "inline"}; filename="AML_Work_Order_${id}_${todayYmd()}_fallback.pdf"`
+          )
+          .send(fallbackPdf);
+      } catch (fallbackErr) {
+        req.log.error({ fallbackErr, id }, "workorder fallback pdf generation failed");
+        return reply.code(500).send({ ok: false, error: "workorder_pdf_generation_failed", id });
+      }
+    }
   });
 
   // =========================
