@@ -122,20 +122,26 @@ export default async function inspectproRoutes(app) {
           const damageLocation = String(body.damage_location || "").trim() || null;
           const damageDescription = String(body.damage_description || "").trim() || null;
           const immediateAction = String(body.immediate_action || "").trim() || null;
+          const damageTime = String(body.damage_time || "").trim() || null;
+          const responsiblePerson = String(body.responsible_person || "").trim() || null;
           const inspector = String(body.inspector_name || "").trim() || null;
           const hourMeterRaw = body.hour_meter;
           const hourMeter = hourMeterRaw == null || String(hourMeterRaw).trim() === "" ? null : Number(hourMeterRaw);
           const outOfService = Number(body.out_of_service || 0) ? 1 : 0;
+          const pendingInvestigation = Number(body.pending_investigation || 0) ? 1 : 0;
+          const hseReportAvailable = Number(body.hse_report_available || 0) ? 1 : 0;
           const siteCode = String(body.site_code || "main").trim().toLowerCase() || "main";
           if (!severity || !damageLocation || !damageDescription || !immediateAction) {
             throw new Error("severity, damage_location, damage_description, immediate_action are required");
           }
           if (hourMeter != null && !Number.isFinite(hourMeter)) throw new Error("hour_meter must be numeric");
+          if (damageTime && !/^\d{2}:\d{2}$/.test(damageTime)) throw new Error("damage_time must be HH:MM");
           const r = db.prepare(`
             INSERT INTO manager_damage_reports (
               asset_id, uuid, site_code, report_date, ${drInspectorCol}, hour_meter,
-              damage_location, severity, damage_description, immediate_action, out_of_service, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+              damage_location, severity, damage_description, immediate_action, out_of_service,
+              damage_time, responsible_person, pending_investigation, hse_report_available, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(uuid) DO UPDATE SET
               asset_id = excluded.asset_id,
               site_code = excluded.site_code,
@@ -147,10 +153,15 @@ export default async function inspectproRoutes(app) {
               damage_description = excluded.damage_description,
               immediate_action = excluded.immediate_action,
               out_of_service = excluded.out_of_service,
+              damage_time = excluded.damage_time,
+              responsible_person = excluded.responsible_person,
+              pending_investigation = excluded.pending_investigation,
+              hse_report_available = excluded.hse_report_available,
               updated_at = excluded.updated_at
           `).run(
             asset.id, eventUuid, siteCode, reportDate, inspector, hourMeter,
-            damageLocation, severity, damageDescription, immediateAction, outOfService
+            damageLocation, severity, damageDescription, immediateAction, outOfService,
+            damageTime, responsiblePerson, pendingInvestigation, hseReportAvailable
           );
           if (Number(r.lastInsertRowid || 0) > 0) {
             targetId = Number(r.lastInsertRowid);

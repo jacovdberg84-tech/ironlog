@@ -981,13 +981,17 @@ async function uploadInspectionPhoto(inspectionId) {
 async function saveDamageReport() {
   const asset_id = Number(document.getElementById("drAsset")?.value || 0);
   const report_date = String(document.getElementById("drDate")?.value || "").trim();
+  const damage_time = String(document.getElementById("drTime")?.value || "").trim();
   const inspector_name = String(document.getElementById("drInspector")?.value || "").trim();
   const hour_meter_raw = String(document.getElementById("drHours")?.value || "").trim();
   const damage_location = String(document.getElementById("drLocation")?.value || "").trim();
+  const responsible_person = String(document.getElementById("drResponsiblePerson")?.value || "").trim();
   const severity = String(document.getElementById("drSeverity")?.value || "").trim();
   const damage_description = String(document.getElementById("drDescription")?.value || "").trim();
   const immediate_action = String(document.getElementById("drAction")?.value || "").trim();
   const out_of_service = document.getElementById("drOutOfService")?.checked ? 1 : 0;
+  const pending_investigation = document.getElementById("drPendingInvestigation")?.checked ? 1 : 0;
+  const hse_report_available = document.getElementById("drHseReportAvailable")?.checked ? 1 : 0;
   const msg = document.getElementById("drMsg");
 
   if (!asset_id) return alert("Select an asset for damage report.");
@@ -1010,13 +1014,17 @@ async function saveDamageReport() {
       body: JSON.stringify({
         asset_id,
         report_date,
+        damage_time,
         inspector_name,
         hour_meter,
         damage_location,
+        responsible_person,
         severity,
         damage_description,
         immediate_action,
         out_of_service,
+        pending_investigation,
+        hse_report_available,
       }),
     });
     const data = await res.json();
@@ -1025,9 +1033,13 @@ async function saveDamageReport() {
     document.getElementById("drDescription").value = "";
     document.getElementById("drAction").value = "";
     document.getElementById("drLocation").value = "";
+    document.getElementById("drResponsiblePerson").value = "";
     document.getElementById("drHours").value = "";
+    document.getElementById("drTime").value = "";
     document.getElementById("drSeverity").value = "";
     document.getElementById("drOutOfService").checked = false;
+    document.getElementById("drPendingInvestigation").checked = false;
+    document.getElementById("drHseReportAvailable").checked = false;
     await loadDamageReports();
   } catch (e) {
     if (msg) msg.textContent = `Save error: ${e.message || e}`;
@@ -1069,8 +1081,9 @@ function damageCard(r) {
   return `
     <div class="card">
       <div><b>${esc(r.asset_code)}</b> - ${esc(r.asset_name || "")}</div>
-      <div><small>Date: ${esc(r.report_date || "-")} | Inspector: ${esc(r.inspector_name || "-")} | Hours: ${esc(r.hour_meter == null ? "-" : String(Number(r.hour_meter).toFixed(1)))}</small></div>
-      <div><small>Location: <b>${esc(r.damage_location || "-")}</b> | Severity: <span class="${sevClass}">${esc((r.severity || "-").toUpperCase())}</span> | Out of service: <b>${Number(r.out_of_service || 0) ? "YES" : "NO"}</b></small></div>
+      <div><small>Date: ${esc(r.report_date || "-")} ${esc(r.damage_time || "")} | Inspector: ${esc(r.inspector_name || "-")} | Hours: ${esc(r.hour_meter == null ? "-" : String(Number(r.hour_meter).toFixed(1)))}</small></div>
+      <div><small>Location: <b>${esc(r.damage_location || "-")}</b> | Responsible: <b>${esc(r.responsible_person || "-")}</b></small></div>
+      <div><small>Severity: <span class="${sevClass}">${esc((r.severity || "-").toUpperCase())}</span> | Out of service: <b>${Number(r.out_of_service || 0) ? "YES" : "NO"}</b> | Pending investigation: <b>${Number(r.pending_investigation || 0) ? "YES" : "NO"}</b> | HSE report: <b>${Number(r.hse_report_available || 0) ? "YES" : "NO"}</b></small></div>
       <div style="margin-top:6px;"><small><b>Damage:</b> ${esc(r.damage_description || "")}</small></div>
       <div style="margin-top:4px;"><small><b>Immediate action:</b> ${esc(r.immediate_action || "")}</small></div>
       <div style="margin-top:8px;">${photoHtml}</div>

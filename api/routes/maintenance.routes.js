@@ -117,6 +117,10 @@ export default async function maintenanceRoutes(app) {
       damage_description TEXT,
       immediate_action TEXT,
       out_of_service INTEGER NOT NULL DEFAULT 0,
+      damage_time TEXT,
+      responsible_person TEXT,
+      pending_investigation INTEGER NOT NULL DEFAULT 0,
+      hse_report_available INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE RESTRICT
@@ -186,6 +190,10 @@ export default async function maintenanceRoutes(app) {
   ensureColumn("manager_damage_reports", "damage_description TEXT", "damage_description");
   ensureColumn("manager_damage_reports", "immediate_action TEXT", "immediate_action");
   ensureColumn("manager_damage_reports", "out_of_service INTEGER NOT NULL DEFAULT 0", "out_of_service");
+  ensureColumn("manager_damage_reports", "damage_time TEXT", "damage_time");
+  ensureColumn("manager_damage_reports", "responsible_person TEXT", "responsible_person");
+  ensureColumn("manager_damage_reports", "pending_investigation INTEGER NOT NULL DEFAULT 0", "pending_investigation");
+  ensureColumn("manager_damage_reports", "hse_report_available INTEGER NOT NULL DEFAULT 0", "hse_report_available");
   ensureColumn("manager_damage_report_photos", "uuid TEXT", "uuid");
   ensureColumn("manager_damage_report_photos", "site_code TEXT DEFAULT 'main'", "site_code");
   ensureColumn("manager_damage_report_photos", "updated_at TEXT", "updated_at");
@@ -1671,6 +1679,10 @@ export default async function maintenanceRoutes(app) {
           dr.damage_description,
           dr.immediate_action,
           dr.out_of_service,
+          dr.damage_time,
+          dr.responsible_person,
+          dr.pending_investigation,
+          dr.hse_report_available,
           dr.created_at,
           a.asset_code,
           a.asset_name
@@ -1732,6 +1744,10 @@ export default async function maintenanceRoutes(app) {
       const damage_description = String(req.body?.damage_description || "").trim() || null;
       const immediate_action = String(req.body?.immediate_action || "").trim() || null;
       const out_of_service = Number(req.body?.out_of_service || 0) ? 1 : 0;
+      const damage_time = String(req.body?.damage_time || "").trim() || null;
+      const responsible_person = String(req.body?.responsible_person || "").trim() || null;
+      const pending_investigation = Number(req.body?.pending_investigation || 0) ? 1 : 0;
+      const hse_report_available = Number(req.body?.hse_report_available || 0) ? 1 : 0;
       const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
 
       if (!asset_id) return reply.code(400).send({ ok: false, error: "asset_id is required" });
@@ -1743,6 +1759,9 @@ export default async function maintenanceRoutes(app) {
       if (!severity) return reply.code(400).send({ ok: false, error: "severity is required" });
       if (!damage_description) return reply.code(400).send({ ok: false, error: "damage_description is required" });
       if (!immediate_action) return reply.code(400).send({ ok: false, error: "immediate_action is required" });
+      if (damage_time && !/^\d{2}:\d{2}$/.test(damage_time)) {
+        return reply.code(400).send({ ok: false, error: "damage_time must be HH:MM" });
+      }
 
       const asset = db.prepare(`SELECT id FROM assets WHERE id = ?`).get(asset_id);
       if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
@@ -1750,9 +1769,10 @@ export default async function maintenanceRoutes(app) {
       const ins = db.prepare(`
         INSERT INTO manager_damage_reports (
           asset_id, uuid, site_code, report_date, ${drInspectorCol}, hour_meter,
-          damage_location, severity, damage_description, immediate_action, out_of_service, updated_at
+          damage_location, severity, damage_description, immediate_action, out_of_service,
+          damage_time, responsible_person, pending_investigation, hse_report_available, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `).run(
         asset_id,
         crypto.randomUUID(),
@@ -1764,7 +1784,11 @@ export default async function maintenanceRoutes(app) {
         severity,
         damage_description,
         immediate_action,
-        out_of_service
+        out_of_service,
+        damage_time,
+        responsible_person,
+        pending_investigation,
+        hse_report_available
       );
 
       return reply.send({ ok: true, id: Number(ins.lastInsertRowid) });

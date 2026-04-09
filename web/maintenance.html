@@ -249,11 +249,13 @@
       <div class="row stack-10">
         <select id="drAsset" class="w-200"></select>
         <input id="drDate" type="date" />
+        <input id="drTime" type="time" class="w-200" />
         <input id="drInspector" class="w-200" placeholder="Inspector name" />
         <input id="drHours" type="number" step="0.1" min="0" class="w-200" placeholder="Machine hours" />
       </div>
       <div class="row stack-10">
         <input id="drLocation" class="w-200" placeholder="Damage location" />
+        <input id="drResponsiblePerson" class="w-200" placeholder="Responsible person" />
         <select id="drSeverity" class="w-200">
           <option value="">Severity</option>
           <option value="low">Low</option>
@@ -264,6 +266,14 @@
         <label style="display:flex; align-items:center; gap:6px;">
           <input id="drOutOfService" type="checkbox" />
           Out of service
+        </label>
+        <label style="display:flex; align-items:center; gap:6px;">
+          <input id="drPendingInvestigation" type="checkbox" />
+          Pending investigation
+        </label>
+        <label style="display:flex; align-items:center; gap:6px;">
+          <input id="drHseReportAvailable" type="checkbox" />
+          HSE report available
         </label>
       </div>
       <textarea id="drDescription" rows="3" placeholder="Damage description..." style="width:100%;"></textarea>
