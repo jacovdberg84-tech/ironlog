@@ -669,16 +669,10 @@ export default async function reportsRoutes(app) {
           .send(fallbackPdf);
       } catch (fallbackErr) {
         req.log.error({ fallbackErr, id }, "workorder fallback pdf generation failed");
-        const primaryMsg = (() => {
-          try { return String(err?.message || err || "unknown_error"); } catch { return "unknown_error"; }
-        })();
-        const fallbackMsg = (() => {
-          try { return String(fallbackErr?.message || fallbackErr || "unknown_error"); } catch { return "unknown_error"; }
-        })();
         return reply
           .code(500)
           .type("text/plain; charset=utf-8")
-          .send(`workorder_pdf_generation_failed:${id}:primary=${primaryMsg}:fallback=${fallbackMsg}`);
+          .send(`workorder_pdf_generation_failed:${id}`);
       }
     }
   });
