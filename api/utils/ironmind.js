@@ -131,10 +131,29 @@ function maxTrustedDailyRunHours() {
   return Number.isFinite(v) && v > 0 ? v : 24;
 }
 
+function getCategoryTrustedDailyRunHours(category) {
+  const base = maxTrustedDailyRunHours();
+  const key = String(category || "").trim().toLowerCase();
+  if (!key) return base;
+  const read = (envKey, fallback) => {
+    const n = Number(process.env[envKey] || fallback);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  };
+  if (key.includes("ldv") || key.includes("pickup") || key.includes("light vehicle")) {
+    return read("IRONMIND_MAX_DAILY_RUN_HOURS_LDV", Math.min(base, 16));
+  }
+  if (key.includes("truck") || key.includes("tipper")) {
+    return read("IRONMIND_MAX_DAILY_RUN_HOURS_TRUCK", Math.min(base, 18));
+  }
+  if (key.includes("excavator") || key.includes("loader") || key.includes("dozer")) {
+    return read("IRONMIND_MAX_DAILY_RUN_HOURS_HEAVY", base);
+  }
+  return base;
+}
+
 function computeAssetRiskSignals(reportDate) {
-  const maxRunHours = maxTrustedDailyRunHours();
   const assets = db.prepare(`
-    SELECT id, asset_code, asset_name
+    SELECT id, asset_code, asset_name, category
     FROM assets
     WHERE active = 1 AND IFNULL(is_standby, 0) = 0
   `).all();
@@ -144,6 +163,7 @@ function computeAssetRiskSignals(reportDate) {
       asset_id: Number(a.id),
       asset_code: String(a.asset_code || ""),
       asset_name: String(a.asset_name || ""),
+      category: String(a.category || ""),
       incidents_30d: 0,
       downtime_30d: 0,
       overdue_hours: 0,
@@ -169,32 +189,38 @@ function computeAssetRiskSignals(reportDate) {
     row.downtime_30d = Number(r.downtime || 0);
   });
 
-  const overdueByAsset = db.prepare(`
-    SELECT asset_id, MAX(overdue_hours) AS overdue_hours
-    FROM (
-      SELECT
-        mp.asset_id AS asset_id,
-        (COALESCE((
-          SELECT SUM(dh.hours_run)
-          FROM daily_hours dh
-          WHERE dh.asset_id = mp.asset_id
-            AND dh.is_used = 1
-            AND dh.hours_run > 0
-            AND dh.hours_run <= ?
-            AND dh.work_date <= ?
-        ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
-      FROM maintenance_plans mp
-      JOIN assets a ON a.id = mp.asset_id
-      WHERE mp.active = 1 AND a.active = 1 AND IFNULL(a.is_standby, 0) = 0
-    )
-    WHERE overdue_hours >= 0
-    GROUP BY asset_id
-  `).all(maxRunHours, reportDate);
-  overdueByAsset.forEach((r) => {
-    const row = byAssetId.get(Number(r.asset_id));
-    if (!row) return;
-    row.overdue_hours = Number(r.overdue_hours || 0);
-  });
+  const sumTrustedRun = db.prepare(`
+    SELECT COALESCE(SUM(dh.hours_run), 0) AS run_total
+    FROM daily_hours dh
+    WHERE dh.asset_id = ?
+      AND dh.is_used = 1
+      AND dh.hours_run > 0
+      AND dh.hours_run <= ?
+      AND dh.work_date <= ?
+  `);
+  const activePlans = db.prepare(`
+    SELECT
+      mp.asset_id,
+      mp.interval_hours,
+      mp.last_service_hours,
+      a.category
+    FROM maintenance_plans mp
+    JOIN assets a ON a.id = mp.asset_id
+    WHERE mp.active = 1
+      AND a.active = 1
+      AND IFNULL(a.is_standby, 0) = 0
+  `).all();
+  for (const p of activePlans) {
+    const aid = Number(p.asset_id || 0);
+    if (!aid) continue;
+    const cap = getCategoryTrustedDailyRunHours(p.category);
+    const runTotal = Number(sumTrustedRun.get(aid, cap, reportDate)?.run_total || 0);
+    const overdue = runTotal - (Number(p.last_service_hours || 0) + Number(p.interval_hours || 0));
+    if (overdue < 0) continue;
+    const row = byAssetId.get(aid);
+    if (!row) continue;
+    row.overdue_hours = Math.max(Number(row.overdue_hours || 0), Number(overdue || 0));
+  }
 
   const woAges = db.prepare(`
     SELECT w.asset_id, MAX(CAST((julianday('now') - julianday(COALESCE(w.opened_at, datetime('now')))) * 24 AS INTEGER)) AS max_age
@@ -401,6 +427,7 @@ async function callIronmindAi(structuredData, opts = {}) {
     "- No chit-chat.",
     "- Respond as JSON only with keys: repairs_needed, operational_risks, suggestions, data_gaps.",
     "- Structured JSON may include daily_input_anomalies: treat those as data quality issues, not equipment failure.",
+    "- Prefer workshop-actionable bullets in this format: 'ASSET: issue | Owner: role | Parts: item/code or none | ETA: value'.",
     detailMode
       ? "- Each key should contain 4-8 concise but specific bullets with asset codes, magnitudes, and action intent where possible."
       : "- Each key must be an array of short strings.",
@@ -516,33 +543,43 @@ function buildStructuredData(reportDate) {
     WHERE l.log_date = ?
   `).get(reportDate);
 
-  const overdueMaintenance = db.prepare(`
-    SELECT asset_code, service_name, overdue_hours
-    FROM (
-      SELECT
-        a.asset_code,
-        mp.service_name,
-        (COALESCE((
-          SELECT SUM(dh.hours_run)
-          FROM daily_hours dh
-          WHERE dh.asset_id = mp.asset_id
-            AND dh.is_used = 1
-            AND dh.hours_run > 0
-            AND dh.hours_run <= ?
-            AND dh.work_date <= ?
-        ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
-      FROM maintenance_plans mp
-      JOIN assets a ON a.id = mp.asset_id
-      WHERE mp.active = 1 AND a.active = 1 AND IFNULL(a.is_standby, 0) = 0
-    )
-    WHERE overdue_hours >= 0
-    ORDER BY overdue_hours DESC
-    LIMIT 8
-  `).all(maxRunHours, reportDate).map((r) => ({
-    asset_code: r.asset_code,
-    service_name: r.service_name,
-    overdue_hours: Number(r.overdue_hours || 0),
-  }));
+  const planRows = db.prepare(`
+    SELECT
+      mp.asset_id,
+      mp.service_name,
+      mp.interval_hours,
+      mp.last_service_hours,
+      a.asset_code,
+      a.category
+    FROM maintenance_plans mp
+    JOIN assets a ON a.id = mp.asset_id
+    WHERE mp.active = 1
+      AND a.active = 1
+      AND IFNULL(a.is_standby, 0) = 0
+  `).all();
+  const sumTrustedRun = db.prepare(`
+    SELECT COALESCE(SUM(dh.hours_run), 0) AS run_total
+    FROM daily_hours dh
+    WHERE dh.asset_id = ?
+      AND dh.is_used = 1
+      AND dh.hours_run > 0
+      AND dh.hours_run <= ?
+      AND dh.work_date <= ?
+  `);
+  const overdueMaintenance = planRows
+    .map((p) => {
+      const cap = getCategoryTrustedDailyRunHours(p.category);
+      const runTotal = Number(sumTrustedRun.get(Number(p.asset_id || 0), cap, reportDate)?.run_total || 0);
+      const overdue = runTotal - (Number(p.last_service_hours || 0) + Number(p.interval_hours || 0));
+      return {
+        asset_code: p.asset_code,
+        service_name: p.service_name,
+        overdue_hours: Number(overdue || 0),
+      };
+    })
+    .filter((r) => Number(r.overdue_hours || 0) >= 0)
+    .sort((a, b) => Number(b.overdue_hours || 0) - Number(a.overdue_hours || 0))
+    .slice(0, 8);
 
   const openWorkOrders = db.prepare(`
     SELECT
@@ -685,36 +722,40 @@ function buildStructuredData(reportDate) {
       fuel_over_pct: Number(r.fuel_over_pct || 0),
     }));
 
-  const dailyInputAnomalies = db.prepare(`
+  const recentRows = db.prepare(`
     SELECT
       a.asset_code AS asset_code,
+      a.category AS category,
       dh.work_date AS work_date,
       dh.hours_run AS hours_run,
       dh.opening_hours AS opening_hours,
-      dh.closing_hours AS closing_hours,
-      CASE
-        WHEN dh.hours_run IS NOT NULL AND dh.hours_run > ? THEN 'hours_run exceeds trusted max'
-        WHEN dh.opening_hours IS NOT NULL AND dh.closing_hours IS NOT NULL
-          AND dh.closing_hours < dh.opening_hours THEN 'invalid meter (close < open)'
-        ELSE 'flagged'
-      END AS reason
+      dh.closing_hours AS closing_hours
     FROM daily_hours dh
     JOIN assets a ON a.id = dh.asset_id
     WHERE dh.is_used = 1
       AND dh.work_date BETWEEN date(?, '-89 day') AND ?
       AND a.active = 1
       AND IFNULL(a.is_standby, 0) = 0
-      AND (
-        (dh.hours_run IS NOT NULL AND dh.hours_run > ?)
-        OR (
-          dh.opening_hours IS NOT NULL
-          AND dh.closing_hours IS NOT NULL
-          AND dh.closing_hours < dh.opening_hours
-        )
-      )
     ORDER BY dh.work_date DESC, dh.hours_run DESC
-    LIMIT 25
-  `).all(maxRunHours, reportDate, reportDate, maxRunHours).map((r) => ({
+    LIMIT 500
+  `).all(reportDate, reportDate);
+  const dailyInputAnomalies = recentRows.map((r) => {
+    const cap = getCategoryTrustedDailyRunHours(r.category);
+    let reason = "";
+    if (r.hours_run != null && Number(r.hours_run) > cap) reason = `hours_run exceeds trusted max (${cap}h for category)`;
+    else if (r.opening_hours != null && r.closing_hours != null && Number(r.closing_hours) < Number(r.opening_hours)) {
+      reason = "invalid meter (close < open)";
+    }
+    if (!reason) return null;
+    return {
+      asset_code: r.asset_code,
+      work_date: r.work_date,
+      hours_run: r.hours_run == null ? null : Number(r.hours_run),
+      opening_hours: r.opening_hours == null ? null : Number(r.opening_hours),
+      closing_hours: r.closing_hours == null ? null : Number(r.closing_hours),
+      reason,
+    };
+  }).filter(Boolean).slice(0, 25).map((r) => ({
     asset_code: r.asset_code,
     work_date: r.work_date,
     hours_run: r.hours_run == null ? null : Number(r.hours_run),
