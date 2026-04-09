@@ -1849,16 +1849,6 @@ export default async function reportsRoutes(app) {
       ORDER BY a.asset_code ASC
     `).all(start, end);
 
-    const getRunFromDaily = db.prepare(`
-      SELECT
-        COALESCE(SUM(CASE WHEN LOWER(COALESCE(NULLIF(input_unit, ''), 'hours')) = 'km' THEN COALESCE(hours_run, 0) ELSE 0 END), 0) AS km_run,
-        COALESCE(SUM(CASE WHEN LOWER(COALESCE(NULLIF(input_unit, ''), 'hours')) <> 'km' THEN COALESCE(hours_run, 0) ELSE 0 END), 0) AS hours_run
-      FROM daily_hours
-      WHERE asset_id = ?
-        AND work_date BETWEEN ? AND ?
-        AND is_used = 1
-        AND hours_run > 0
-    `);
     const getFuelLogsInRange = db.prepare(`
       SELECT
         id,
@@ -1934,15 +1924,11 @@ export default async function reportsRoutes(app) {
     const isLdvFleetCode = (code) => /^V(0[1-9]|1[0-4])AM$/i.test(String(code || "").trim());
     const rows = fuelByAsset.map((r) => {
       const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
-      const daily = getRunFromDaily.get(r.asset_id, start, end) || {};
       const fuelRun = getRunFromFuel(r.asset_id, start, end) || {};
-      const dailyKm = Number(daily.km_run || 0);
-      const dailyHours = Number(daily.hours_run || 0);
       const fuelKm = Number(fuelRun.km_run || 0);
       const fuelHours = Number(fuelRun.hours_run || 0);
-      // Use only same-unit run evidence to avoid false "excessive" from inferred conversions.
-      const km = dailyKm > 0 ? dailyKm : (fuelKm > 0 ? fuelKm : 0);
-      const hours = dailyHours > 0 ? dailyHours : (fuelHours > 0 ? fuelHours : 0);
+      const km = fuelKm > 0 ? fuelKm : 0;
+      const hours = fuelHours > 0 ? fuelHours : 0;
       const fuel = Number(r.fuel_liters || 0);
       const oem = Number(r.oem_lph || 5);
       const oemK = Number(r.oem_kmpl || 2);

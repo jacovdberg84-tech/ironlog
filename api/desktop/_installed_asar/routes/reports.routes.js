@@ -1136,14 +1136,6 @@ export default async function reportsRoutes(app) {
       ORDER BY a.asset_code ASC
     `).all(start, end);
 
-    const getHoursDaily = db.prepare(`
-      SELECT COALESCE(SUM(hours_run), 0) AS hours_run
-      FROM daily_hours
-      WHERE asset_id = ?
-        AND work_date BETWEEN ? AND ?
-        AND is_used = 1
-        AND hours_run > 0
-    `);
     const getHoursFuel = db.prepare(`
       SELECT COALESCE(SUM(hours_run), 0) AS hours_run
       FROM fuel_logs
@@ -1153,9 +1145,8 @@ export default async function reportsRoutes(app) {
     `);
 
     const rows = fuelByAsset.map((r) => {
-      const dailyHours = Number(getHoursDaily.get(r.asset_id, start, end)?.hours_run || 0);
       const fuelHours = Number(getHoursFuel.get(r.asset_id, start, end)?.hours_run || 0);
-      const hours = dailyHours > 0 ? dailyHours : fuelHours;
+      const hours = fuelHours > 0 ? fuelHours : 0;
       const fuel = Number(r.fuel_liters || 0);
       const oem = Number(r.oem_lph || 5);
       const lph = hours > 0 ? fuel / hours : null;
