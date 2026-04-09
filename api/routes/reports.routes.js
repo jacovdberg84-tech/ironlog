@@ -988,6 +988,12 @@ export default async function reportsRoutes(app) {
         w.status,
         w.opened_at,
         w.closed_at,
+        w.completed_at,
+        w.completion_notes,
+        w.artisan_name,
+        w.artisan_signed_at,
+        w.supervisor_name,
+        w.supervisor_signed_at,
         a.asset_code,
         a.asset_name,
         a.category
@@ -1016,24 +1022,48 @@ export default async function reportsRoutes(app) {
       `).get(wo.reference_id);
     }
 
-    const stockMovementCols = db.prepare(`
-      PRAGMA table_info(stock_movements)
-    `).all();
-    const hasCreatedAt = stockMovementCols.some((c) => String(c.name) === "created_at");
-    const movementDateExpr = hasCreatedAt ? "sm.created_at" : "sm.movement_date";
+    let issuedParts = [];
+    const stockMovementsExists = Boolean(
+      db.prepare(`
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'stock_movements'
+        LIMIT 1
+      `).get()
+    );
+    const partsExists = Boolean(
+      db.prepare(`
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'parts'
+        LIMIT 1
+      `).get()
+    );
+    if (stockMovementsExists && partsExists) {
+      const stockMovementCols = db.prepare(`
+        PRAGMA table_info(stock_movements)
+      `).all();
+      const hasCreatedAt = stockMovementCols.some((c) => String(c.name) === "created_at");
+      const hasMovementDate = stockMovementCols.some((c) => String(c.name) === "movement_date");
+      const movementDateExpr = hasCreatedAt
+        ? "sm.created_at"
+        : hasMovementDate
+          ? "sm.movement_date"
+          : "datetime('now')";
 
-    const issuedParts = db.prepare(`
-      SELECT
-        sm.id,
-        ${movementDateExpr} AS movement_date,
-        sm.quantity,
-        p.part_code,
-        p.part_name
-      FROM stock_movements sm
-      JOIN parts p ON p.id = sm.part_id
-      WHERE sm.reference = ?
-      ORDER BY sm.id ASC
-    `).all(`work_order:${id}`);
+      issuedParts = db.prepare(`
+        SELECT
+          sm.id,
+          ${movementDateExpr} AS movement_date,
+          sm.quantity,
+          p.part_code,
+          p.part_name
+        FROM stock_movements sm
+        JOIN parts p ON p.id = sm.part_id
+        WHERE sm.reference = ?
+        ORDER BY sm.id ASC
+      `).all(`work_order:${id}`);
+    }
 
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
 
