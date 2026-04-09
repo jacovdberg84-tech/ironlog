@@ -7,6 +7,37 @@ function toBool(v) {
   return s === "1" || s === "true" || s === "yes" || s === "y";
 }
 
+const RSG_SERVICE_PROFILES = [
+  {
+    key: "cat-350-6000",
+    make: "CAT",
+    modelContains: ["350"],
+    service_hours: 6000,
+    title: "CAT 350 - 6000hr service",
+    tasks: [
+      "Drain and replace engine oil, final drives, and swing motor oils",
+      "Inspect hydraulic tank condition and top-up/replace per OEM procedure",
+      "Replace engine oil, fuel, hydraulic return, pilot, and air filters",
+      "Inspect contamination indicators and perform leak checks under load",
+      "Record all meter readings and sign off service completion",
+    ],
+    oils: [
+      { name: "Hydraulic oil", qty: 210, unit: "L", part_hint: "hydraulic oil" },
+      { name: "Engine oil", qty: 40, unit: "L", part_hint: "engine oil" },
+      { name: "SAE50 final drives and swing motors", qty: 80, unit: "L", part_hint: "sae50" },
+    ],
+    filters: [
+      { name: "Engine oil filter", qty: 1, unit: "ea", part_hint: "oil filter" },
+      { name: "Fuel filter primary", qty: 1, unit: "ea", part_hint: "fuel filter" },
+      { name: "Fuel filter secondary", qty: 1, unit: "ea", part_hint: "fuel filter" },
+      { name: "Hydraulic return filter", qty: 1, unit: "ea", part_hint: "hydraulic filter" },
+      { name: "Pilot filter", qty: 1, unit: "ea", part_hint: "pilot filter" },
+      { name: "Air filter outer", qty: 1, unit: "ea", part_hint: "air filter" },
+      { name: "Air filter inner", qty: 1, unit: "ea", part_hint: "air filter" },
+    ],
+  },
+];
+
 export default async function ironmindRoutes(app) {
   function isDate(v) {
     return /^\d{4}-\d{2}-\d{2}$/.test(String(v || "").trim());
@@ -73,6 +104,94 @@ export default async function ironmindRoutes(app) {
     const openaiModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
     if (openaiKey) return { provider: "openai", apiKey: openaiKey, model: openaiModel };
     return { provider: null };
+  }
+  function normalizeText(v) {
+    return String(v || "").trim().toUpperCase();
+  }
+  function pickRsgServiceProfile({ assetCode, equipmentName, serviceHours }) {
+    const code = normalizeText(assetCode);
+    const eq = normalizeText(equipmentName);
+    const hours = Number(serviceHours || 0);
+    return RSG_SERVICE_PROFILES.find((p) => {
+      if (Number(p.service_hours || 0) !== hours) return false;
+      const makeOk = normalizeText(p.make) ? (code.includes(normalizeText(p.make)) || eq.includes(normalizeText(p.make))) : true;
+      if (!makeOk) return false;
+      const modelTokens = Array.isArray(p.modelContains) ? p.modelContains.map(normalizeText).filter(Boolean) : [];
+      if (!modelTokens.length) return true;
+      return modelTokens.some((t) => code.includes(t) || eq.includes(t));
+    }) || null;
+  }
+  function getPartOnHandById(partId) {
+    const id = Number(partId || 0);
+    if (!id) return 0;
+    const row = db.prepare(`
+      SELECT COALESCE(SUM(quantity), 0) AS on_hand
+      FROM stock_movements
+      WHERE part_id = ?
+    `).get(id);
+    return Number(row?.on_hand || 0);
+  }
+  function findPartForHint(hint) {
+    const h = String(hint || "").trim();
+    if (!h) return null;
+    const row = db.prepare(`
+      SELECT id, part_code, part_name
+      FROM parts
+      WHERE LOWER(COALESCE(part_name, '')) LIKE LOWER(?)
+         OR LOWER(COALESCE(part_code, '')) LIKE LOWER(?)
+      ORDER BY
+        CASE
+          WHEN LOWER(COALESCE(part_name, '')) = LOWER(?) THEN 0
+          WHEN LOWER(COALESCE(part_code, '')) = LOWER(?) THEN 1
+          ELSE 2
+        END,
+        id ASC
+      LIMIT 1
+    `).get(`%${h}%`, `%${h}%`, h, h);
+    return row || null;
+  }
+  function buildRsgReadiness({ oils = [], filters = [] }) {
+    const rows = [];
+    for (const o of oils) {
+      const required = Number(o?.qty || 0);
+      if (!(required > 0)) continue;
+      const part = findPartForHint(o?.part_hint || o?.name || "");
+      const onHand = part ? getPartOnHandById(part.id) : 0;
+      rows.push({
+        category: "oil",
+        name: String(o?.name || ""),
+        unit: String(o?.unit || "L"),
+        required_qty: Number(required.toFixed(2)),
+        on_hand_qty: Number(onHand.toFixed(2)),
+        sufficient: onHand >= required,
+        shortage_qty: Number(Math.max(0, required - onHand).toFixed(2)),
+        part_code: part?.part_code || null,
+        part_name: part?.part_name || null,
+      });
+    }
+    for (const f of filters) {
+      const required = Number(f?.qty || 0);
+      if (!(required > 0)) continue;
+      const part = findPartForHint(f?.part_hint || f?.name || "");
+      const onHand = part ? getPartOnHandById(part.id) : 0;
+      rows.push({
+        category: "filter",
+        name: String(f?.name || ""),
+        unit: String(f?.unit || "ea"),
+        required_qty: Number(required.toFixed(2)),
+        on_hand_qty: Number(onHand.toFixed(2)),
+        sufficient: onHand >= required,
+        shortage_qty: Number(Math.max(0, required - onHand).toFixed(2)),
+        part_code: part?.part_code || null,
+        part_name: part?.part_name || null,
+      });
+    }
+    const insufficient = rows.filter((r) => !r.sufficient);
+    return {
+      items: rows,
+      all_sufficient: insufficient.length === 0,
+      insufficient_count: insufficient.length,
+    };
   }
   function getAssetOilProfile(assetId, limit = 6) {
     const id = Number(assetId || 0);
@@ -217,6 +336,7 @@ export default async function ironmindRoutes(app) {
         "Use spill kits and approved waste-oil disposal process",
         "Use calibrated torque specs for critical fasteners",
       ],
+      filters: [],
     };
   }
   function normalizeRsgPlan(raw, equipmentLabel, serviceHours) {
@@ -232,6 +352,15 @@ export default async function ironmindRoutes(app) {
           }))
           .filter((o) => o.name && Number.isFinite(o.qty) && o.qty > 0)
       : fallback.oils;
+    const filters = Array.isArray(plan.filters)
+      ? plan.filters
+          .map((f) => ({
+            name: String(f?.name || "").trim(),
+            qty: Number(f?.qty),
+            unit: String(f?.unit || "").trim() || "ea",
+          }))
+          .filter((f) => f.name && Number.isFinite(f.qty) && f.qty > 0)
+      : fallback.filters;
     return {
       service_title: String(plan.service_title || fallback.service_title),
       tasks: asList(plan.tasks, fallback.tasks),
@@ -239,23 +368,51 @@ export default async function ironmindRoutes(app) {
       checks: asList(plan.checks, fallback.checks),
       post_service_checks: asList(plan.post_service_checks, fallback.post_service_checks),
       safety: asList(plan.safety, fallback.safety),
+      filters,
     };
   }
   async function buildRsgPlan({ assetId, assetCode, equipmentName, serviceHours }) {
     const label = [assetCode, equipmentName].filter(Boolean).join(" - ") || "Equipment";
     const preferredOils = getAssetOilProfile(assetId, 6);
+    const profile = pickRsgServiceProfile({ assetCode, equipmentName, serviceHours });
     const aiPlan = await tryGenerateRsgPlanWithAi({ equipmentLabel: label, serviceHours, preferredOils });
     const plan = normalizeRsgPlan(aiPlan, label, serviceHours);
 
+    if (profile) {
+      plan.service_title = profile.title || plan.service_title;
+      if (Array.isArray(profile.tasks) && profile.tasks.length) plan.tasks = profile.tasks.map((t) => String(t));
+      if (Array.isArray(profile.oils) && profile.oils.length) {
+        plan.oils = profile.oils.map((o) => ({
+          name: String(o.name || ""),
+          qty: Number(o.qty || 0),
+          unit: String(o.unit || "L"),
+          part_hint: String(o.part_hint || o.name || ""),
+        })).filter((o) => o.name && Number.isFinite(o.qty) && o.qty > 0);
+      }
+      if (Array.isArray(profile.filters) && profile.filters.length) {
+        plan.filters = profile.filters.map((f) => ({
+          name: String(f.name || ""),
+          qty: Number(f.qty || 0),
+          unit: String(f.unit || "ea"),
+          part_hint: String(f.part_hint || f.name || ""),
+        })).filter((f) => f.name && Number.isFinite(f.qty) && f.qty > 0);
+      }
+      plan.checks = [
+        ...plan.checks,
+        "Profile-based service pack applied (site configured). Verify all capacities with OEM manual before execution.",
+      ];
+    }
+
     // Prefer real site-recorded oils/quantities when available for this asset.
-    if (preferredOils.length) {
+    if (!profile && preferredOils.length) {
       plan.oils = preferredOils;
       plan.checks = [
         ...plan.checks,
         "Oil types and quantities are sourced from site oil history for this asset; verify against OEM service manual before execution.",
       ];
     }
-    return plan;
+    const readiness = buildRsgReadiness({ oils: plan.oils || [], filters: plan.filters || [] });
+    return { plan, readiness, profile_key: profile?.key || null };
   }
 
   app.get("/history", async (req, reply) => {
@@ -534,13 +691,21 @@ export default async function ironmindRoutes(app) {
       const assetRow = assetCode
         ? db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE UPPER(asset_code)=UPPER(?) LIMIT 1`).get(assetCode)
         : null;
-      const plan = await buildRsgPlan({
+      const rsg = await buildRsgPlan({
         assetId: Number(assetRow?.id || 0),
         assetCode,
         equipmentName: equipmentName || String(assetRow?.asset_name || ""),
         serviceHours,
       });
-      return reply.send({ ok: true, asset_code: assetCode || null, equipment_name: equipmentName || null, service_hours: serviceHours, plan });
+      return reply.send({
+        ok: true,
+        asset_code: assetCode || null,
+        equipment_name: equipmentName || null,
+        service_hours: serviceHours,
+        plan: rsg.plan,
+        readiness: rsg.readiness,
+        profile_key: rsg.profile_key,
+      });
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message || String(err) });
@@ -559,7 +724,8 @@ export default async function ironmindRoutes(app) {
       const asset = db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE UPPER(asset_code)=UPPER(?) LIMIT 1`).get(assetCode);
       if (!asset) return reply.code(404).send({ ok: false, error: `asset not found: ${assetCode}` });
       const equipmentName = equipmentNameIn || String(asset.asset_name || "");
-      const plan = await buildRsgPlan({ assetId: asset.id, assetCode: asset.asset_code, equipmentName, serviceHours });
+      const rsg = await buildRsgPlan({ assetId: asset.id, assetCode: asset.asset_code, equipmentName, serviceHours });
+      const plan = rsg.plan;
 
       const wo = db.prepare(`
         INSERT INTO work_orders (asset_id, source, reference_id, status)
@@ -596,6 +762,8 @@ export default async function ironmindRoutes(app) {
         service_hours: serviceHours,
         source: `rsg_${serviceHours}h_service`,
         plan,
+        readiness: rsg.readiness,
+        profile_key: rsg.profile_key,
       });
     } catch (err) {
       req.log.error(err);
@@ -614,12 +782,13 @@ export default async function ironmindRoutes(app) {
       const asset = db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE UPPER(asset_code)=UPPER(?) LIMIT 1`).get(assetCodeIn);
       if (!asset) return reply.code(404).send({ ok: false, error: `asset not found: ${assetCodeIn}` });
 
-      const plan = await buildRsgPlan({
+      const rsg = await buildRsgPlan({
         assetId: asset.id,
         assetCode: String(asset.asset_code || assetCodeIn),
         equipmentName: String(asset.asset_name || ""),
         serviceHours,
       });
+      const plan = rsg.plan;
 
       const pdf = await buildPdfBuffer((doc) => {
         sectionTitle(doc, "Service Guide");
@@ -660,6 +829,48 @@ export default async function ironmindRoutes(app) {
             qty: Number(o?.qty || 0).toFixed(2),
             unit: String(o?.unit || "L"),
           }))
+        );
+
+        sectionTitle(doc, "Filters / Service Kit");
+        table(
+          doc,
+          [
+            { key: "name", label: "Filter / Kit Item", width: 0.62 },
+            { key: "qty", label: "Qty", width: 0.2, align: "right" },
+            { key: "unit", label: "Unit", width: 0.18, align: "center" },
+          ],
+          (plan.filters || []).length
+            ? (plan.filters || []).map((f) => ({
+                name: String(f?.name || ""),
+                qty: Number(f?.qty || 0).toFixed(2),
+                unit: String(f?.unit || "ea"),
+              }))
+            : [{ name: "No explicit filter kit defined in profile", qty: "-", unit: "-" }]
+        );
+
+        sectionTitle(doc, "Stores Readiness Check");
+        table(
+          doc,
+          [
+            { key: "category", label: "Type", width: 0.12 },
+            { key: "name", label: "Requirement", width: 0.34 },
+            { key: "required", label: "Required", width: 0.12, align: "right" },
+            { key: "on_hand", label: "On Hand", width: 0.12, align: "right" },
+            { key: "shortage", label: "Shortage", width: 0.12, align: "right" },
+            { key: "part", label: "Stores Link", width: 0.1 },
+            { key: "status", label: "Status", width: 0.08, align: "center" },
+          ],
+          (rsg.readiness?.items || []).length
+            ? rsg.readiness.items.map((it) => ({
+                category: String(it.category || "").toUpperCase(),
+                name: String(it.name || ""),
+                required: `${Number(it.required_qty || 0).toFixed(2)} ${String(it.unit || "")}`.trim(),
+                on_hand: `${Number(it.on_hand_qty || 0).toFixed(2)} ${String(it.unit || "")}`.trim(),
+                shortage: `${Number(it.shortage_qty || 0).toFixed(2)} ${String(it.unit || "")}`.trim(),
+                part: it.part_code ? `${String(it.part_code)}${it.part_name ? ` (${String(it.part_name)})` : ""}` : "Not linked",
+                status: it.sufficient ? "OK" : "SHORT",
+              }))
+            : [{ category: "-", name: "No readiness items", required: "-", on_hand: "-", shortage: "-", part: "-", status: "-" }]
         );
 
         sectionTitle(doc, "Checks");
