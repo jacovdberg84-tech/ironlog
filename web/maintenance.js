@@ -1248,6 +1248,7 @@ function weeklyForumQueryString() {
 let wfUpcomingCache = [];
 let wfInputsCache = [];
 let wfPartsCache = [];
+let wfDraftItems = [];
 function wfPlanLabel(r) {
   return `${String(r.asset_code || "-")} - ${String(r.asset_name || "-")} | ${String(r.service_name || "-")} (Plan ${Number(r.plan_id || 0)})`;
 }
@@ -1302,6 +1303,105 @@ function refreshWeeklyForumPartsDatalist() {
     return `<option value="${esc(code)}">${esc(desc)}</option>`;
   }).join("");
 }
+function getWfPartByCode(codeIn) {
+  const code = String(codeIn || "").trim().toUpperCase();
+  if (!code) return null;
+  return wfPartsCache.find((p) => String(p.part_code || "").trim().toUpperCase() === code) || null;
+}
+function refreshWfDraftEditor() {
+  const body = document.getElementById("wfItemsEditorBody");
+  const oilTotalEl = document.getElementById("wfOilTotal");
+  const partsTotalEl = document.getElementById("wfPartsTotal");
+  const serviceTotalEl = document.getElementById("wfServiceTotal");
+  if (!body) return;
+  body.innerHTML = wfDraftItems.length
+    ? wfDraftItems.map((it, idx) => `
+      <tr>
+        <td>${esc(it.type === "oil" ? "Oil" : "Part")}</td>
+        <td>${esc(it.part_code)}</td>
+        <td>${esc(it.part_name || "-")}</td>
+        <td style="text-align:right;">${fmt1(it.qty)}</td>
+        <td style="text-align:right;">${fmtMoney(it.unit_cost)}</td>
+        <td style="text-align:right;">${fmtMoney(it.line_cost)}</td>
+        <td style="text-align:right;">${fmt1(it.on_hand)}</td>
+        <td style="text-align:right;"><button type="button" data-wf-item-del="${idx}">Remove</button></td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="8" class="muted">No items added yet.</td></tr>`;
+  const oilTotal = wfDraftItems.filter((x) => x.type === "oil").reduce((s, x) => s + Number(x.line_cost || 0), 0);
+  const partsTotal = wfDraftItems.filter((x) => x.type !== "oil").reduce((s, x) => s + Number(x.line_cost || 0), 0);
+  const serviceTotal = oilTotal + partsTotal;
+  if (oilTotalEl) oilTotalEl.textContent = fmtMoney(oilTotal);
+  if (partsTotalEl) partsTotalEl.textContent = fmtMoney(partsTotal);
+  if (serviceTotalEl) serviceTotalEl.textContent = fmtMoney(serviceTotal);
+}
+function hydrateWfDraftFromSaved(planId) {
+  const row = wfInputsCache.find((r) => Number(r.plan_id || 0) === Number(planId || 0));
+  if (!row) {
+    wfDraftItems = [];
+    refreshWfDraftEditor();
+    return;
+  }
+  let items = [];
+  try {
+    const parsed = JSON.parse(String(row.items_json || "[]"));
+    if (Array.isArray(parsed)) items = parsed;
+  } catch {}
+  wfDraftItems = items.map((it) => {
+    const part = getWfPartByCode(it.part_code);
+    const qty = Math.max(0, Number(it.qty || 0));
+    const unit = Number(part?.latest_unit_cost || 0);
+    return {
+      type: String(it.type || "part").toLowerCase() === "oil" ? "oil" : "part",
+      part_code: String(it.part_code || "").trim(),
+      part_name: String(part?.part_name || ""),
+      qty,
+      unit_cost: unit,
+      on_hand: Number(part?.on_hand || 0),
+      line_cost: qty * unit,
+    };
+  }).filter((x) => x.part_code && x.qty > 0);
+  refreshWfDraftEditor();
+}
+function addWfDraftItem() {
+  const msg = document.getElementById("wfInputMsg");
+  const type = String(document.getElementById("wfItemType")?.value || "part").toLowerCase() === "oil" ? "oil" : "part";
+  const part_code = String(document.getElementById("wfItemCode")?.value || "").trim();
+  const qty = Math.max(0, Number(document.getElementById("wfItemQty")?.value || 0));
+  if (!part_code || qty <= 0) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = "Select a part code and enter a quantity greater than 0.";
+    }
+    return;
+  }
+  const part = getWfPartByCode(part_code);
+  if (!part) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = "Part code not found in Stores list. Please use a valid part code.";
+    }
+    return;
+  }
+  wfDraftItems.push({
+    type,
+    part_code: String(part.part_code || "").trim(),
+    part_name: String(part.part_name || ""),
+    qty,
+    unit_cost: Number(part.latest_unit_cost || 0),
+    on_hand: Number(part.on_hand || 0),
+    line_cost: qty * Number(part.latest_unit_cost || 0),
+  });
+  const codeEl = document.getElementById("wfItemCode");
+  const qtyEl = document.getElementById("wfItemQty");
+  if (codeEl) codeEl.value = "";
+  if (qtyEl) qtyEl.value = "0";
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = "Item added.";
+  }
+  refreshWfDraftEditor();
+}
 
 async function loadWeeklyForumSummary() {
   const msg = document.getElementById("wfMsg");
@@ -1338,8 +1438,14 @@ async function loadWeeklyForumSummary() {
     ].map(([k, v]) => `<tr><td>${esc(k)}</td><td style="text-align:right;">${esc(String(v))}</td></tr>`).join("");
 
     const rows = Array.isArray(data.upcoming_services) ? data.upcoming_services : [];
+    const planSel = document.getElementById("wfInputPlan");
+    const prevPlan = Number(planSel?.value || 0);
     wfUpcomingCache = rows;
     refreshWeeklyForumPlanOptions();
+    if (planSel && prevPlan && wfUpcomingCache.some((x) => Number(x.plan_id || 0) === prevPlan)) {
+      planSel.value = String(prevPlan);
+    }
+    hydrateWfDraftFromSaved(Number(planSel?.value || 0));
     upcomingBody.innerHTML = rows.length
       ? rows.map((r) => `
         <tr>
@@ -1505,6 +1611,7 @@ async function loadWeeklyForumParts() {
     if (!res.ok) throw new Error(data.error || "Failed to load parts list");
     wfPartsCache = Array.isArray(data.rows) ? data.rows : [];
     refreshWeeklyForumPartsDatalist();
+    hydrateWfDraftFromSaved(Number(document.getElementById("wfInputPlan")?.value || 0));
   } catch {
     wfPartsCache = [];
     refreshWeeklyForumPartsDatalist();
@@ -1520,33 +1627,22 @@ async function loadWeeklyForumInputs() {
     if (!res.ok) throw new Error(data.error || "Failed to load manual inputs");
     wfInputsCache = Array.isArray(data.rows) ? data.rows : [];
     refreshWeeklyForumInputsTable();
+    const planNow = Number(document.getElementById("wfInputPlan")?.value || 0);
+    if (planNow) hydrateWfDraftFromSaved(planNow);
   } catch (e) {
     if (body) body.innerHTML = `<tr><td colspan="4" class="message-error">${esc(e.message || String(e))}</td></tr>`;
   }
 }
 
-function parseWfItems(text, type) {
-  return String(text || "")
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [codeRaw, qtyRaw] = line.split(",").map((x) => String(x || "").trim());
-      const qty = Number(qtyRaw || 0);
-      return { type, part_code: codeRaw, qty: Number.isFinite(qty) ? qty : 0 };
-    })
-    .filter((x) => x.part_code && x.qty > 0);
-}
-
 async function saveWeeklyForumInput() {
   const msg = document.getElementById("wfInputMsg");
   const plan_id = Number(document.getElementById("wfInputPlan")?.value || 0);
-  const oilsText = String(document.getElementById("wfInputOils")?.value || "").trim();
-  const partsText = String(document.getElementById("wfInputParts")?.value || "").trim();
   const notes = String(document.getElementById("wfInputNotes")?.value || "").trim();
-  const oils = parseWfItems(oilsText, "oil");
-  const parts = parseWfItems(partsText, "part");
-  const items = [...oils, ...parts];
+  const items = wfDraftItems.map((x) => ({
+    type: x.type === "oil" ? "oil" : "part",
+    part_code: String(x.part_code || "").trim(),
+    qty: Math.max(0, Number(x.qty || 0)),
+  })).filter((x) => x.part_code && x.qty > 0);
   if (!msg) return;
   if (!plan_id) {
     msg.className = "message-error";
@@ -2035,6 +2131,19 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("loadWfActionsBtn")?.addEventListener("click", loadWeeklyForumActions);
   document.getElementById("saveWfInputBtn")?.addEventListener("click", saveWeeklyForumInput);
   document.getElementById("loadWfInputsBtn")?.addEventListener("click", loadWeeklyForumInputs);
+  document.getElementById("wfAddItemBtn")?.addEventListener("click", addWfDraftItem);
+  document.getElementById("wfInputPlan")?.addEventListener("change", (evt) => {
+    const planId = Number(evt.target?.value || 0);
+    hydrateWfDraftFromSaved(planId);
+  });
+  document.getElementById("wfItemsEditorBody")?.addEventListener("click", (evt) => {
+    const btn = evt.target?.closest?.("button[data-wf-item-del]");
+    if (!btn) return;
+    const idx = Number(btn.getAttribute("data-wf-item-del") || -1);
+    if (idx < 0 || idx >= wfDraftItems.length) return;
+    wfDraftItems.splice(idx, 1);
+    refreshWfDraftEditor();
+  });
   document.getElementById("openWeeklyForumPdfBtn")?.addEventListener("click", () => openWeeklyForumPdf(false));
   document.getElementById("downloadWeeklyForumPdfBtn")?.addEventListener("click", () => openWeeklyForumPdf(true));
   document.getElementById("wfActionBody")?.addEventListener("change", (evt) => {
