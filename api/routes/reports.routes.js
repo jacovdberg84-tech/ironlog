@@ -979,6 +979,12 @@ export default async function reportsRoutes(app) {
       return reply.code(400).send({ error: "valid work order id required" });
     }
 
+    const woCols = db.prepare(`
+      PRAGMA table_info(work_orders)
+    `).all();
+    const woColSet = new Set(woCols.map((c) => String(c.name || "")));
+    const optionalWoCol = (name) => (woColSet.has(name) ? `w.${name}` : `NULL AS ${name}`);
+
     const wo = db.prepare(`
       SELECT
         w.id,
@@ -988,12 +994,12 @@ export default async function reportsRoutes(app) {
         w.status,
         w.opened_at,
         w.closed_at,
-        w.completed_at,
-        w.completion_notes,
-        w.artisan_name,
-        w.artisan_signed_at,
-        w.supervisor_name,
-        w.supervisor_signed_at,
+        ${optionalWoCol("completed_at")},
+        ${optionalWoCol("completion_notes")},
+        ${optionalWoCol("artisan_name")},
+        ${optionalWoCol("artisan_signed_at")},
+        ${optionalWoCol("supervisor_name")},
+        ${optionalWoCol("supervisor_signed_at")},
         a.asset_code,
         a.asset_name,
         a.category
@@ -1004,8 +1010,25 @@ export default async function reportsRoutes(app) {
 
     if (!wo) return reply.code(404).send({ error: "work order not found" });
 
+    const breakdownTableExists = Boolean(
+      db.prepare(`
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'breakdowns'
+        LIMIT 1
+      `).get()
+    );
+    const maintenancePlansTableExists = Boolean(
+      db.prepare(`
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'maintenance_plans'
+        LIMIT 1
+      `).get()
+    );
+
     let breakdown = null;
-    if (String(wo.source || "").toLowerCase() === "breakdown" && wo.reference_id) {
+    if (breakdownTableExists && String(wo.source || "").toLowerCase() === "breakdown" && wo.reference_id) {
       breakdown = db.prepare(`
         SELECT id, breakdown_date, description, component, critical, downtime_total_hours
         FROM breakdowns
@@ -1014,7 +1037,7 @@ export default async function reportsRoutes(app) {
     }
 
     let servicePlan = null;
-    if (String(wo.source || "").toLowerCase() === "service" && wo.reference_id) {
+    if (maintenancePlansTableExists && String(wo.source || "").toLowerCase() === "service" && wo.reference_id) {
       servicePlan = db.prepare(`
         SELECT id, service_name, interval_hours, last_service_hours, active
         FROM maintenance_plans
