@@ -1234,6 +1234,17 @@ function fmtMoney(v) {
   return Number.isFinite(n) ? n.toFixed(2) : "0.00";
 }
 
+function weeklyForumQueryString() {
+  const start = String(document.getElementById("wfStart")?.value || "").trim();
+  const end = String(document.getElementById("wfEnd")?.value || "").trim();
+  const near = Math.max(1, Number(document.getElementById("wfNearDueHours")?.value || 50));
+  const q = new URLSearchParams();
+  if (start) q.set("start", start);
+  if (end) q.set("end", end);
+  q.set("near_due_hours", String(near));
+  return q.toString();
+}
+
 async function loadWeeklyForumSummary() {
   const msg = document.getElementById("wfMsg");
   const kpiBody = document.getElementById("wfKpiBody");
@@ -1243,20 +1254,14 @@ async function loadWeeklyForumSummary() {
   const nearEl = document.getElementById("wfNearDueHours");
   if (!msg || !kpiBody || !upcomingBody || !startEl || !endEl || !nearEl) return;
 
-  const start = String(startEl.value || "").trim();
-  const end = String(endEl.value || "").trim();
-  const near_due_hours = Math.max(1, Number(nearEl.value || 50));
-  const q = new URLSearchParams();
-  if (start) q.set("start", start);
-  if (end) q.set("end", end);
-  q.set("near_due_hours", String(near_due_hours));
+  const q = weeklyForumQueryString();
 
   msg.className = "muted";
   msg.textContent = "Loading weekly forum data...";
   kpiBody.innerHTML = `<tr><td colspan="2" class="muted">Loading...</td></tr>`;
   upcomingBody.innerHTML = `<tr><td colspan="9" class="muted">Loading...</td></tr>`;
   try {
-    const res = await fetch(`${API}/maintenance/weekly-forum/summary?${q.toString()}`);
+    const res = await fetch(`${API}/maintenance/weekly-forum/summary?${q}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to load weekly forum summary");
 
@@ -1298,6 +1303,35 @@ async function loadWeeklyForumSummary() {
     msg.textContent = `Load error: ${e.message || e}`;
     kpiBody.innerHTML = `<tr><td colspan="2" class="message-error">${esc(e.message || String(e))}</td></tr>`;
     upcomingBody.innerHTML = `<tr><td colspan="9" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+  }
+}
+
+async function openWeeklyForumPdf(download = false) {
+  const q = weeklyForumQueryString();
+  const url = `${API}/maintenance/weekly-forum.pdf?${q}${download ? "&download=1" : ""}`;
+  try {
+    const res = await fetch(url, { headers: authHeaders() });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(txt || `PDF request failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    if (download) {
+      const a = document.createElement("a");
+      const dateTag = new Date().toISOString().slice(0, 10);
+      a.href = blobUrl;
+      a.download = `weekly-forum-${dateTag}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
+      return;
+    }
+    window.open(blobUrl, "_blank");
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+  } catch (e) {
+    alert(`Weekly Forum PDF error: ${e.message || e}`);
   }
 }
 
@@ -1475,5 +1509,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("showWeeklyForumBtn")?.addEventListener("click", () => setTopView("wf"));
   document.getElementById("showSyncAdminBtn")?.addEventListener("click", () => setTopView("sync"));
   document.getElementById("loadWeeklyForumBtn")?.addEventListener("click", loadWeeklyForumSummary);
+  document.getElementById("openWeeklyForumPdfBtn")?.addEventListener("click", () => openWeeklyForumPdf(false));
+  document.getElementById("downloadWeeklyForumPdfBtn")?.addEventListener("click", () => openWeeklyForumPdf(true));
   setTopView("main");
 });

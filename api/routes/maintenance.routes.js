@@ -1222,15 +1222,10 @@ export default async function maintenanceRoutes(app) {
     }
   });
 
-  // =====================================================
-  // WEEKLY FORUM SUMMARY (cross-functional alignment)
-  // GET /api/maintenance/weekly-forum/summary?start=YYYY-MM-DD&end=YYYY-MM-DD&near_due_hours=50
-  // =====================================================
-  app.get("/weekly-forum/summary", async (req, reply) => {
-    try {
-      const nearDueHours = Math.max(1, Number(req.query?.near_due_hours || 50));
-      const startIn = String(req.query?.start || "").trim();
-      const endIn = String(req.query?.end || "").trim();
+  async function buildWeeklyForumSummary(query = {}) {
+      const nearDueHours = Math.max(1, Number(query?.near_due_hours || 50));
+      const startIn = String(query?.start || "").trim();
+      const endIn = String(query?.end || "").trim();
 
       const now = new Date();
       const day = now.getDay(); // 0=Sun ... 6=Sat
@@ -1244,10 +1239,14 @@ export default async function maintenanceRoutes(app) {
       const start = startIn && isDate(startIn) ? startIn : ymd(monday);
       const end = endIn && isDate(endIn) ? endIn : ymd(friday);
       if (!isDate(start) || !isDate(end)) {
-        return reply.code(400).send({ ok: false, error: "start and end must be YYYY-MM-DD" });
+        const e = new Error("start and end must be YYYY-MM-DD");
+        e.statusCode = 400;
+        throw e;
       }
       if (start > end) {
-        return reply.code(400).send({ ok: false, error: "start must be <= end" });
+        const e = new Error("start must be <= end");
+        e.statusCode = 400;
+        throw e;
       }
 
       const hasTable = (name) =>
@@ -1420,7 +1419,7 @@ export default async function maintenanceRoutes(app) {
         0
       );
 
-      return reply.send({
+      return {
         ok: true,
         range: { start, end },
         kpis: {
@@ -1435,10 +1434,113 @@ export default async function maintenanceRoutes(app) {
           upcoming_service_forecast_cost: Number(totalForecastCost.toFixed(2)),
         },
         upcoming_services: forecastRows,
-      });
+      };
+  }
+
+  // =====================================================
+  // WEEKLY FORUM SUMMARY (cross-functional alignment)
+  // GET /api/maintenance/weekly-forum/summary?start=YYYY-MM-DD&end=YYYY-MM-DD&near_due_hours=50
+  // =====================================================
+  app.get("/weekly-forum/summary", async (req, reply) => {
+    try {
+      const data = await buildWeeklyForumSummary(req.query || {});
+      return reply.send(data);
     } catch (err) {
       req.log.error(err);
-      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+      return reply.code(Number(err?.statusCode || 500)).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // =====================================================
+  // WEEKLY FORUM PDF
+  // GET /api/maintenance/weekly-forum.pdf?start=YYYY-MM-DD&end=YYYY-MM-DD&near_due_hours=50&download=1
+  // =====================================================
+  app.get("/weekly-forum.pdf", async (req, reply) => {
+    try {
+      const data = await buildWeeklyForumSummary(req.query || {});
+      const start = String(data?.range?.start || "");
+      const end = String(data?.range?.end || "");
+      const isDownload = String(req.query?.download || "").trim() === "1";
+
+      const pdf = await buildPdfBuffer(
+        (doc) => {
+          sectionTitle(doc, "Weekly Forum Summary");
+          table(
+            doc,
+            [
+              { key: "metric", label: "Metric", width: 0.62 },
+              { key: "value", label: "Value", width: 0.38, align: "right" },
+            ],
+            [
+              { metric: "Range", value: `${start} to ${end}` },
+              { metric: "Open Work Orders", value: Number(data?.kpis?.open_work_orders || 0) },
+              { metric: "Upcoming Services Flagged", value: Number(data?.kpis?.upcoming_services_flagged || 0) },
+              { metric: "Stores Oil Cost", value: Number(data?.costs?.stores_oil_cost || 0).toFixed(2) },
+              { metric: "Stores Parts Cost", value: Number(data?.costs?.stores_parts_cost || 0).toFixed(2) },
+              { metric: "Maintenance Labor Cost", value: Number(data?.costs?.maintenance_labor_cost || 0).toFixed(2) },
+              { metric: "Weekly Total Cost", value: Number(data?.costs?.weekly_total_cost || 0).toFixed(2) },
+              { metric: "Upcoming Service Forecast Cost", value: Number(data?.costs?.upcoming_service_forecast_cost || 0).toFixed(2) },
+            ]
+          );
+
+          sectionTitle(doc, "Upcoming Services Forecast");
+          const rows = Array.isArray(data?.upcoming_services) ? data.upcoming_services : [];
+          table(
+            doc,
+            [
+              { key: "machine", label: "Machine", width: 0.2 },
+              { key: "service", label: "Service", width: 0.17 },
+              { key: "current", label: "Current", width: 0.09, align: "right" },
+              { key: "next", label: "Next Due", width: 0.09, align: "right" },
+              { key: "remain", label: "Remaining", width: 0.09, align: "right" },
+              { key: "status", label: "Status", width: 0.1 },
+              { key: "oil", label: "Avg Oil Qty", width: 0.09, align: "right" },
+              { key: "parts", label: "Avg Parts Qty", width: 0.09, align: "right" },
+              { key: "kit", label: "Est Kit Cost", width: 0.08, align: "right" },
+            ],
+            rows.length
+              ? rows.map((r) => ({
+                  machine: `${String(r.asset_code || "-")} - ${String(r.asset_name || "-")}`,
+                  service: String(r.service_name || "-"),
+                  current: Number(r.current_hours || 0).toFixed(1),
+                  next: Number(r.next_due_hours || 0).toFixed(1),
+                  remain: Number(r.remaining_hours || 0).toFixed(1),
+                  status: String(r.status || "-"),
+                  oil: Number(r?.forecast?.avg_oil_qty || 0).toFixed(1),
+                  parts: Number(r?.forecast?.avg_parts_qty || 0).toFixed(1),
+                  kit: Number(r?.forecast?.est_service_kit_cost || 0).toFixed(2),
+                }))
+              : [{
+                  machine: "-",
+                  service: "No upcoming services within threshold",
+                  current: "-",
+                  next: "-",
+                  remain: "-",
+                  status: "-",
+                  oil: "-",
+                  parts: "-",
+                  kit: "-",
+                }]
+          );
+        },
+        {
+          title: "IRONLOG",
+          subtitle: "Weekly Forum",
+          rightText: `${start} to ${end}`,
+          showPageNumbers: true,
+          layout: "landscape",
+        }
+      );
+
+      reply.header("Content-Type", "application/pdf");
+      reply.header(
+        "Content-Disposition",
+        `${isDownload ? "attachment" : "inline"}; filename="AML_Weekly_Forum_${end}.pdf"`
+      );
+      return reply.send(pdf);
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(Number(err?.statusCode || 500)).send({ ok: false, error: err.message || String(err) });
     }
   });
 
