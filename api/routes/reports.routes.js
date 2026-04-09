@@ -3378,18 +3378,44 @@ export default async function reportsRoutes(app) {
     `).all(date);
 
     const breakdownDowntimeCol = getBreakdownDowntimeColumn();
+    const hasBreakdownEndAt = hasColumn("breakdowns", "end_at");
+    const hasBreakdownStartAt = hasColumn("breakdowns", "start_at");
+    const breakdownDateExpr = hasBreakdownStartAt ? "DATE(COALESCE(b.breakdown_date, b.start_at))" : "DATE(b.breakdown_date)";
+    const breakdownStatusExpr = hasColumn("breakdowns", "status")
+      ? "TRIM(LOWER(COALESCE(b.status, '')))"
+      : "''";
+    const breakdownStartAtSelect = hasBreakdownStartAt ? "b.start_at" : "NULL AS start_at";
+    const breakdownParams = [date, date, date];
+    if (hasBreakdownEndAt) breakdownParams.push(date);
     const breakdowns = db.prepare(`
       SELECT
         a.asset_code,
         a.asset_name,
+        b.breakdown_date,
+        ${breakdownStartAtSelect},
+        ${hasBreakdownEndAt ? "b.end_at" : "NULL AS end_at"},
         b.description,
         COALESCE(b.${breakdownDowntimeCol}, 0) AS downtime_hours,
-        b.critical
+        b.critical,
+        COALESCE((
+          SELECT COUNT(DISTINCT l.log_date)
+          FROM breakdown_downtime_logs l
+          WHERE l.breakdown_id = b.id
+            AND l.log_date <= ?
+        ), 0) AS logged_days
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
-      WHERE b.breakdown_date = ?
+      WHERE ${breakdownDateExpr} <= ?
+        AND (
+          ${hasBreakdownEndAt ? "b.end_at IS NULL OR DATE(b.end_at) >= ?" : "1 = 1"}
+          OR ${breakdownStatusExpr} IN ('open', 'in_progress')
+        )
       ORDER BY downtime_hours DESC
-    `).all(date).map(r => ({ ...r, critical: Boolean(r.critical) }));
+    `).all(...breakdownParams).map((r) => ({
+      ...r,
+      critical: Boolean(r.critical),
+      days_down: daysDownForBreakdown(r, date),
+    }));
 
     const upcoming = db.prepare(`
       SELECT
@@ -3478,6 +3504,7 @@ export default async function reportsRoutes(app) {
       [
         { header: "Asset code", key: "asset_code", width: 14 },
         { header: "Asset name", key: "asset_name", width: 26 },
+        { header: "Days down", key: "days_down", width: 12 },
         { header: "Downtime (hours)", key: "downtime_hours", width: 14 },
         { header: "Critical", key: "critical", width: 10 },
         { header: "Description", key: "description", width: 40 },
