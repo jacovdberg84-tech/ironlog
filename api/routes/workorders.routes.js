@@ -104,13 +104,17 @@ export default async function workOrderRoutes(app) {
         w.source,
         w.reference_id,
         w.status,
-        w.opened_at,
+        CASE
+          WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(b.start_at), ''), NULLIF(TRIM(b.breakdown_date), ''), w.opened_at)
+          ELSE w.opened_at
+        END AS opened_at,
         w.closed_at,
         a.asset_code,
         a.asset_name,
         a.category
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
+      LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
     `;
 
     const rows = status
@@ -207,11 +211,15 @@ export default async function workOrderRoutes(app) {
     let breakdown = null;
     if (wo.source === "breakdown" && wo.reference_id) {
       breakdown = db.prepare(`
-        SELECT id, breakdown_date, description, downtime_total_hours, critical, created_at
+        SELECT id, breakdown_date, start_at, description, downtime_total_hours, critical, created_at
         FROM breakdowns
         WHERE id = ?
       `).get(wo.reference_id);
       if (breakdown) breakdown.critical = Boolean(breakdown.critical);
+      // Show effective opened date from breakdown date/start instead of WO creation date.
+      if (breakdown) {
+        wo.opened_at = String(breakdown.start_at || breakdown.breakdown_date || wo.opened_at || "").trim() || wo.opened_at;
+      }
     }
 
     // Parts issued to this WO (from stock_movements reference=work_order:<id>)
