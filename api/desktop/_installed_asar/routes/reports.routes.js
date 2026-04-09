@@ -290,7 +290,7 @@ export default async function reportsRoutes(app) {
     const minimal = String(req.query?.minimal || "").trim() === "1";
     const nohf = String(req.query?.nohf || "").trim() === "1";
     if (!Number.isFinite(id) || id <= 0) {
-      return reply.code(400).send({ error: "valid work order id required" });
+      return reply.code(400).type("text/plain; charset=utf-8").send("valid work order id required");
     }
     try {
 
@@ -302,7 +302,7 @@ export default async function reportsRoutes(app) {
     const requiredWoCols = ["id", "asset_id"];
     for (const col of requiredWoCols) {
       if (!woColSet.has(col)) {
-        return reply.code(500).send({ error: `work_orders schema missing required column: ${col}` });
+        return reply.code(500).type("text/plain; charset=utf-8").send(`work_orders schema missing required column: ${col}`);
       }
     }
 
@@ -329,7 +329,7 @@ export default async function reportsRoutes(app) {
       WHERE w.id = ?
     `).get(id);
 
-    if (!wo) return reply.code(404).send({ error: "work order not found" });
+    if (!wo) return reply.code(404).type("text/plain; charset=utf-8").send("work order not found");
 
     const breakdownTableExists = Boolean(
       db.prepare(`
@@ -665,7 +665,7 @@ export default async function reportsRoutes(app) {
           .send(fallbackPdf);
       } catch (fallbackErr) {
         req.log.error({ fallbackErr, id }, "workorder fallback pdf generation failed");
-        return reply.code(500).send({ ok: false, error: "workorder_pdf_generation_failed", id });
+        return reply.code(500).type("text/plain; charset=utf-8").send(`workorder_pdf_generation_failed:${id}`);
       }
     }
   });
