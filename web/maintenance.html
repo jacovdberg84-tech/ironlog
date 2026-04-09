@@ -287,6 +287,17 @@
         <select id="drFilterAsset" class="w-200"></select>
         <input id="drStart" type="date" />
         <input id="drEnd" type="date" />
+        <input id="drFilterResponsiblePerson" class="w-200" placeholder="Responsible person" />
+        <select id="drFilterPendingInvestigation" class="w-200">
+          <option value="">Pending investigation: All</option>
+          <option value="1">Pending only</option>
+          <option value="0">Not pending</option>
+        </select>
+        <select id="drFilterHseReportAvailable" class="w-200">
+          <option value="">HSE report: All</option>
+          <option value="1">HSE report available</option>
+          <option value="0">No HSE report</option>
+        </select>
         <button id="loadDrBtn">Load Damage Reports</button>
         <button id="openDrBulkPdfBtn">Open Damage PDF</button>
         <button id="downloadDrBulkPdfBtn">Download Damage PDF</button>

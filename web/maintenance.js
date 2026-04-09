@@ -1105,10 +1105,16 @@ async function loadDamageReports() {
   const asset_id = String(document.getElementById("drFilterAsset")?.value || "").trim();
   const start = String(document.getElementById("drStart")?.value || "").trim();
   const end = String(document.getElementById("drEnd")?.value || "").trim();
+  const responsible_person = String(document.getElementById("drFilterResponsiblePerson")?.value || "").trim();
+  const pending_investigation = String(document.getElementById("drFilterPendingInvestigation")?.value || "").trim();
+  const hse_report_available = String(document.getElementById("drFilterHseReportAvailable")?.value || "").trim();
   const q = new URLSearchParams();
   if (asset_id) q.set("asset_id", asset_id);
   if (start) q.set("start", start);
   if (end) q.set("end", end);
+  if (responsible_person) q.set("responsible_person", responsible_person);
+  if (pending_investigation === "0" || pending_investigation === "1") q.set("pending_investigation", pending_investigation);
+  if (hse_report_available === "0" || hse_report_available === "1") q.set("hse_report_available", hse_report_available);
   try {
     const res = await fetch(`${API}/maintenance/damage-reports${q.toString() ? `?${q.toString()}` : ""}`);
     const data = await res.json();

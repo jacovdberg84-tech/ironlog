@@ -1230,6 +1230,9 @@ export default async function maintenanceRoutes(app) {
       const assetId = Number(req.query?.asset_id || 0);
       const start = String(req.query?.start || "").trim();
       const end = String(req.query?.end || "").trim();
+      const responsiblePerson = String(req.query?.responsible_person || "").trim();
+      const pendingInvestigationRaw = String(req.query?.pending_investigation || "").trim();
+      const hseReportAvailableRaw = String(req.query?.hse_report_available || "").trim();
       const params = [];
       const where = [];
       if (assetId > 0) {
@@ -1665,6 +1668,18 @@ export default async function maintenanceRoutes(app) {
       if (isDate(end)) {
         where.push("dr.report_date <= ?");
         params.push(end);
+      }
+      if (responsiblePerson) {
+        where.push("UPPER(COALESCE(dr.responsible_person, '')) LIKE UPPER(?)");
+        params.push(`%${responsiblePerson}%`);
+      }
+      if (pendingInvestigationRaw === "0" || pendingInvestigationRaw === "1") {
+        where.push("COALESCE(dr.pending_investigation, 0) = ?");
+        params.push(Number(pendingInvestigationRaw));
+      }
+      if (hseReportAvailableRaw === "0" || hseReportAvailableRaw === "1") {
+        where.push("COALESCE(dr.hse_report_available, 0) = ?");
+        params.push(Number(hseReportAvailableRaw));
       }
 
       const rows = db.prepare(`
