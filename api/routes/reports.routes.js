@@ -4614,11 +4614,16 @@ export default async function reportsRoutes(app) {
             AND REPLACE(TRIM(LOWER(COALESCE(wbx.status, ''))), ' ', '_') IN ('completed', 'approved', 'closed')
         )
       ORDER BY downtime_hours DESC
-    `).all(...breakdownParams).map(r => ({
-      ...r,
-      critical: Boolean(r.critical),
-      days_down: daysDownForBreakdown(r, date),
-    }));
+    `).all(...breakdownParams).map((r) => {
+      const daysDown = daysDownForBreakdown(r, date);
+      return {
+        ...r,
+        critical: Boolean(r.critical),
+        days_down: daysDown,
+        // Align displayed downtime with selected daily scheduled hours.
+        downtime_hours: Number(daysDown) * Number(scheduled || 0),
+      };
+    });
 
     const hasWOCompletedAt = hasColumn("work_orders", "completed_at");
     const woCompletedFilter = hasWOCompletedAt
