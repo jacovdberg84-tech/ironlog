@@ -1403,6 +1403,46 @@ export default async function dashboardRoutes(app) {
     });
   });
 
+  // POST /api/dashboard/fuel/clear-from-date/preview
+  // Body: { from_date: 'YYYY-MM-DD', asset_code?: string, clear_daily_hours?: boolean }
+  app.post("/fuel/clear-from-date/preview", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    const fromDate = String(req.body?.from_date || "").trim();
+    const assetCode = String(req.body?.asset_code || "").trim();
+    const clearDailyHours = Boolean(req.body?.clear_daily_hours);
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) {
+      return reply.code(400).send({ error: "from_date must be YYYY-MM-DD" });
+    }
+
+    let assetId = null;
+    if (assetCode) {
+      const asset = db.prepare(`SELECT id FROM assets WHERE asset_code = ?`).get(assetCode);
+      if (!asset) return reply.code(404).send({ error: `asset not found: ${assetCode}` });
+      assetId = Number(asset.id);
+    }
+
+    const whereSql = assetId != null ? "WHERE log_date >= ? AND asset_id = ?" : "WHERE log_date >= ?";
+    const whereParams = assetId != null ? [fromDate, assetId] : [fromDate];
+    const dayRows = db.prepare(`
+      SELECT DISTINCT asset_id, log_date
+      FROM fuel_logs
+      ${whereSql}
+    `).all(...whereParams);
+    const logsToDelete = Number(
+      db.prepare(`SELECT COUNT(*) AS n FROM fuel_logs ${whereSql}`).get(...whereParams)?.n || 0
+    );
+
+    return reply.send({
+      ok: true,
+      from_date: fromDate,
+      asset_code: assetCode || null,
+      clear_daily_hours: clearDailyHours,
+      deleted_logs: logsToDelete,
+      affected_days: dayRows.length,
+    });
+  });
+
   // POST /api/dashboard/fuel/clear-from-date
   // Body: { from_date: 'YYYY-MM-DD', asset_code?: string, clear_daily_hours?: boolean }
   app.post("/fuel/clear-from-date", async (req, reply) => {

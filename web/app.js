@@ -3838,17 +3838,32 @@ async function clearFuelFromDate() {
   const clearDailyHours = Boolean(qs("fuelClearDailyHours")?.checked);
   if (!fromDate) return alert("Select a from date first.");
 
-  const scopeTxt = assetCode ? `for ${assetCode}` : "for all assets";
-  const ok = confirm(
-    `This will delete fuel logs from ${fromDate} ${scopeTxt}.\n` +
-    (clearDailyHours ? "Daily opening/closing/run meters on affected days will also be cleared.\n" : "") +
-    "You can then re-upload the CSV files.\n\nContinue?"
-  );
-  if (!ok) return;
-
   if (resultEl) resultEl.textContent = "";
-  setStatus("Clearing fuel data...");
+  setStatus("Checking clear impact...");
   try {
+    const preview = await fetchJson(`${API}/api/dashboard/fuel/clear-from-date/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        from_date: fromDate,
+        ...(assetCode ? { asset_code: assetCode } : {}),
+        clear_daily_hours: clearDailyHours,
+      }),
+    });
+    const ok = confirm(
+      `About to clear fuel from ${fromDate}` +
+      `${assetCode ? ` for ${assetCode}` : " for all assets"}.\n` +
+      `Fuel logs to delete: ${Number(preview?.deleted_logs || 0)}\n` +
+      `Affected days: ${Number(preview?.affected_days || 0)}\n` +
+      (clearDailyHours ? "Daily opening/closing/run meters on affected days will also be cleared.\n" : "") +
+      "\nContinue?"
+    );
+    if (!ok) {
+      setStatus("Fuel clear cancelled.");
+      return;
+    }
+
+    setStatus("Clearing fuel data...");
     const res = await fetchJson(`${API}/api/dashboard/fuel/clear-from-date`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -3863,7 +3878,7 @@ async function clearFuelFromDate() {
     await Promise.all([loadDashboard().catch(() => {}), loadFuelBenchmark().catch(() => {})]);
   } catch (e) {
     if (resultEl) resultEl.textContent = String(e.message || e);
-    setStatus("Fuel clear failed.");
+    setStatus("Fuel clear failed. Check API version and permissions.");
   }
 }
 
