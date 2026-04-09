@@ -4601,12 +4601,38 @@ export default async function reportsRoutes(app) {
     const latestActivePerAssetSourceFilter = `AND NOT EXISTS (
       SELECT 1
       FROM work_orders wn
+      LEFT JOIN breakdowns bn ON bn.id = wn.reference_id AND wn.source = 'breakdown'
+      LEFT JOIN breakdowns bw ON bw.id = w.reference_id AND w.source = 'breakdown'
       WHERE wn.asset_id = w.asset_id
         AND COALESCE(wn.source, '') = COALESCE(w.source, '')
         AND (
-          COALESCE(wn.opened_at, '') > COALESCE(w.opened_at, '')
+          COALESCE(
+            CASE
+              WHEN wn.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(bn.start_at), ''), NULLIF(TRIM(bn.breakdown_date), ''), wn.opened_at)
+              ELSE wn.opened_at
+            END,
+            ''
+          ) > COALESCE(
+            CASE
+              WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(bw.start_at), ''), NULLIF(TRIM(bw.breakdown_date), ''), w.opened_at)
+              ELSE w.opened_at
+            END,
+            ''
+          )
           OR (
-            COALESCE(wn.opened_at, '') = COALESCE(w.opened_at, '')
+            COALESCE(
+              CASE
+                WHEN wn.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(bn.start_at), ''), NULLIF(TRIM(bn.breakdown_date), ''), wn.opened_at)
+                ELSE wn.opened_at
+              END,
+              ''
+            ) = COALESCE(
+              CASE
+                WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(bw.start_at), ''), NULLIF(TRIM(bw.breakdown_date), ''), w.opened_at)
+                ELSE w.opened_at
+              END,
+              ''
+            )
             AND wn.id > w.id
           )
         )
