@@ -619,6 +619,18 @@ function mpMonthLabel() {
   return new Date().toISOString().slice(0, 7);
 }
 
+function getMpSelectedRange(reportType) {
+  const type = String(reportType || "").toLowerCase() === "monthly" ? "monthly" : "weekly";
+  if (type === "monthly") {
+    const month = String(document.getElementById("mpMonth")?.value || "").trim() || mpMonthLabel();
+    return { month };
+  }
+  const start = String(document.getElementById("mpWeekStart")?.value || "").trim();
+  const end = String(document.getElementById("mpWeekEnd")?.value || "").trim();
+  if (start && end) return { start, end };
+  return mpWeekRangeLabel();
+}
+
 async function mpGenerate(reportType) {
   const msg = document.getElementById("mpStatusMsg");
   const type = String(reportType || "").toLowerCase() === "monthly" ? "monthly" : "weekly";
@@ -627,11 +639,11 @@ async function mpGenerate(reportType) {
     msg.textContent = `Generating ${type} presentation...`;
   }
   const body = { period_type: type };
-  if (type === "monthly") body.month = mpMonthLabel();
+  const sel = getMpSelectedRange(type);
+  if (type === "monthly") body.month = sel.month;
   else {
-    const w = mpWeekRangeLabel();
-    body.start = w.start;
-    body.end = w.end;
+    body.start = sel.start;
+    body.end = sel.end;
   }
   try {
     const res = await fetch(`${API}/reports/maintenance-master/generate`, {
@@ -658,6 +670,12 @@ function openMaintenancePackLatest(reportType, download = false) {
   const type = String(reportType || "").toLowerCase() === "monthly" ? "monthly" : "weekly";
   const q = new URLSearchParams();
   q.set("period_type", type);
+  const sel = getMpSelectedRange(type);
+  if (type === "monthly") q.set("month", sel.month);
+  else {
+    q.set("start", sel.start);
+    q.set("end", sel.end);
+  }
   if (download) q.set("download", "1");
   window.open(`${API}/reports/maintenance-master/latest.pptx?${q.toString()}`, "_blank");
 }
@@ -2376,6 +2394,18 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   const wfActionDate = document.getElementById("wfActionDate");
   if (wfActionDate && !wfActionDate.value) wfActionDate.value = new Date().toISOString().slice(0, 10);
+  const mpWeekStart = document.getElementById("mpWeekStart");
+  const mpWeekEnd = document.getElementById("mpWeekEnd");
+  const mpMonth = document.getElementById("mpMonth");
+  if (mpWeekStart && !mpWeekStart.value) {
+    const w = mpWeekRangeLabel();
+    mpWeekStart.value = w.start;
+  }
+  if (mpWeekEnd && !mpWeekEnd.value) {
+    const w = mpWeekRangeLabel();
+    mpWeekEnd.value = w.end;
+  }
+  if (mpMonth && !mpMonth.value) mpMonth.value = mpMonthLabel();
   document.getElementById("saveMiBtn")?.addEventListener("click", saveManagerInspection);
   document.getElementById("saveDrBtn")?.addEventListener("click", saveDamageReport);
   document.getElementById("loadMiBtn")?.addEventListener("click", loadManagerInspections);

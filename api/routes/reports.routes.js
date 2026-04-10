@@ -4721,7 +4721,12 @@ export default async function reportsRoutes(app) {
         FROM daily
         GROUP BY asset_id
       )
-      SELECT d.asset_code, COUNT(*) AS anomaly_days
+      SELECT
+        d.asset_code,
+        COUNT(*) AS anomaly_days,
+        COALESCE(MAX(s.avg_lph), 0) AS avg_lph_benchmark,
+        COALESCE(MAX(s.avg_lph * 1.35), 0) AS anomaly_threshold_lph,
+        COALESCE(MAX(d.liters / d.hours_run), 0) AS peak_anomaly_lph
       FROM daily d
       JOIN stats s ON s.asset_id = d.asset_id
       WHERE d.hours_run > 0
@@ -4780,8 +4785,8 @@ export default async function reportsRoutes(app) {
     s4.addText("3) Breakdowns and Maintenance (Cost per Machine)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 20, bold: true });
     s4.addTable(
       [
-        [{ text: "Asset", options: { bold: true } }, { text: "Type", options: { bold: true } }, { text: "WO True Down (h)", options: { bold: true } }, { text: "Parts", options: { bold: true } }, { text: "Labor", options: { bold: true } }, { text: "Down Cost", options: { bold: true } }, { text: "Total", options: { bold: true } }],
-        ...rows.slice(0, 12).map((r) => [`${r.asset_code} ${compactCell(r.asset_name, 18)}`, r.category || "", Number(woDownMap.get(String(r.asset_code || "")) || 0).toFixed(1), r.parts_cost.toFixed(2), r.labor_cost.toFixed(2), r.downtime_cost.toFixed(2), r.maintenance_total_cost.toFixed(2)]),
+        [{ text: "Asset", options: { bold: true } }, { text: "Type", options: { bold: true } }, { text: "WO True Down (h)", options: { bold: true } }, { text: "Parts", options: { bold: true } }, { text: "Labor", options: { bold: true } }, { text: "Total", options: { bold: true } }],
+        ...rows.slice(0, 12).map((r) => [`${r.asset_code} ${compactCell(r.asset_name, 18)}`, r.category || "", Number(woDownMap.get(String(r.asset_code || "")) || 0).toFixed(1), r.parts_cost.toFixed(2), r.labor_cost.toFixed(2), r.maintenance_total_cost.toFixed(2)]),
       ],
       { x: 0.4, y: 1.1, w: 12.5, h: 5.8, fontSize: 10.5, border: { pt: 1, color: "C8C8C8" } }
     );
@@ -4822,7 +4827,17 @@ export default async function reportsRoutes(app) {
     const s10 = pptx.addSlide();
     s10.addText("9) Challenges and Risks", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
     s10.addText(`Weather / Rain days: ${rainCount}\nBreakdowns in period: ${breakdownCount}\nUnplanned maintenance (breakdown WOs opened): ${unplannedMaintCount}\nTrue WO downtime (breakdown): ${totalTrueDowntimeWo.toFixed(1)} h`, { x: 0.8, y: 1.5, w: 8.0, h: 2.8, fontSize: 16 });
-    s10.addText(`Rain dates: ${rainDates.length ? rainDates.join(", ") : "None recorded in selected period"}\nSource: Reports rain-days widget / site_rain_days`, { x: 0.8, y: 4.5, w: 11.5, h: 1.2, fontSize: 12, color: "666666" });
+    s10.addText("Fuel anomaly benchmark (LPH): daily LPH > asset avg LPH x 1.35", { x: 0.8, y: 4.2, w: 11.5, h: 0.35, fontSize: 11, bold: true });
+    s10.addTable(
+      [
+        [{ text: "Asset", options: { bold: true } }, { text: "Anomaly Days", options: { bold: true } }, { text: "Avg LPH", options: { bold: true } }, { text: "Threshold LPH", options: { bold: true } }, { text: "Peak Anomaly LPH", options: { bold: true } }],
+        ...(fuelAnomalyRows.length
+          ? fuelAnomalyRows.slice(0, 8).map((r) => [String(r.asset_code || ""), String(Number(r.anomaly_days || 0)), Number(r.avg_lph_benchmark || 0).toFixed(2), Number(r.anomaly_threshold_lph || 0).toFixed(2), Number(r.peak_anomaly_lph || 0).toFixed(2)])
+          : [["-", "0", "-", "-", "-"]]),
+      ],
+      { x: 0.8, y: 4.6, w: 11.4, h: 1.6, fontSize: 10.5, border: { pt: 1, color: "C8C8C8" } }
+    );
+    s10.addText(`Rain dates: ${rainDates.length ? rainDates.join(", ") : "None recorded in selected period"}\nSource: Reports rain-days widget / site_rain_days`, { x: 0.8, y: 6.35, w: 11.5, h: 0.5, fontSize: 10, color: "666666" });
     const buffer = await pptx.write({ outputType: "nodebuffer" });
     return Buffer.from(buffer);
   }
@@ -4905,6 +4920,11 @@ export default async function reportsRoutes(app) {
     const site_code = String(req.query?.site_code || getSiteCode(req)).trim().toLowerCase() || "default";
     const report_type = String(req.query?.period_type || "weekly").trim().toLowerCase();
     const download = String(req.query?.download || "").trim() === "1";
+    const month = String(req.query?.month || "").trim();
+    const start = String(req.query?.start || "").trim();
+    const end = String(req.query?.end || "").trim();
+    const hasExplicitPeriod = (report_type === "monthly" && isMonth(month))
+      || (report_type === "weekly" && isYmd(start) && isYmd(end));
     let row = db.prepare(`
       SELECT report_type, label, file_path
       FROM maintenance_presentation_runs
@@ -4914,9 +4934,9 @@ export default async function reportsRoutes(app) {
       LIMIT 1
     `).get(site_code, report_type);
 
-    if (!row?.file_path || !fs.existsSync(row.file_path)) {
+    if (hasExplicitPeriod || !row?.file_path || !fs.existsSync(row.file_path)) {
       try {
-        const generated = await generateMaintenanceMaster(report_type, site_code, {});
+        const generated = await generateMaintenanceMaster(report_type, site_code, { month, start, end });
         row = {
           report_type,
           label: generated.label,
