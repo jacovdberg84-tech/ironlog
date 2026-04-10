@@ -1713,11 +1713,17 @@ export default async function reportsRoutes(app) {
       return reply.code(400).send({ error: "start and end (YYYY-MM-DD) required" });
     }
 
+    const defaultLubeCost = Number(
+      db.prepare(`SELECT value FROM cost_settings WHERE key = 'lube_cost_per_qty_default' LIMIT 1`).get()?.value
+    );
+    const lubeUnitFallback = Number.isFinite(defaultLubeCost) && defaultLubeCost > 0 ? defaultLubeCost : 4.0;
+
     const rows = db.prepare(`
       SELECT
         a.asset_code,
         a.asset_name,
         COALESCE(SUM(ol.quantity), 0) AS qty_total,
+        COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS total_lube_cost,
         COUNT(*) AS entries
       FROM oil_logs ol
       JOIN assets a ON a.id = ol.asset_id
@@ -1725,21 +1731,47 @@ export default async function reportsRoutes(app) {
       GROUP BY a.id
       ORDER BY qty_total DESC, a.asset_code ASC
       LIMIT 400
-    `).all(start, end).map((r) => ({
+    `).all(lubeUnitFallback, start, end).map((r) => ({
       asset_code: r.asset_code,
       asset_name: r.asset_name,
       qty_total: Number(r.qty_total || 0),
+      total_lube_cost: Number(r.total_lube_cost || 0),
       entries: Number(r.entries || 0),
+    }));
+
+    const detailRows = db.prepare(`
+      SELECT
+        a.asset_code,
+        a.asset_name,
+        COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED') AS part_number,
+        COALESCE(p.part_name, '') AS lube_description,
+        COALESCE(SUM(ol.quantity), 0) AS qty_total,
+        COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS total_lube_cost
+      FROM oil_logs ol
+      JOIN assets a ON a.id = ol.asset_id
+      LEFT JOIN parts p ON UPPER(TRIM(p.part_code)) = UPPER(TRIM(COALESCE(ol.oil_type, '')))
+      WHERE ol.log_date BETWEEN ? AND ?
+      GROUP BY a.id, part_number, p.part_name
+      ORDER BY a.asset_code ASC, qty_total DESC, part_number ASC
+      LIMIT 1200
+    `).all(lubeUnitFallback, start, end).map((r) => ({
+      asset_code: String(r.asset_code || ""),
+      asset_name: String(r.asset_name || ""),
+      part_number: String(r.part_number || "UNSPECIFIED"),
+      lube_description: String(r.lube_description || ""),
+      qty_total: Number(r.qty_total || 0),
+      total_lube_cost: Number(r.total_lube_cost || 0),
     }));
 
     const summary = db.prepare(`
       SELECT
         COALESCE(SUM(quantity), 0) AS qty_total,
+        COALESCE(SUM(quantity * COALESCE(unit_cost, ?)), 0) AS total_lube_cost,
         COUNT(*) AS entries,
         COUNT(DISTINCT asset_id) AS assets
       FROM oil_logs
       WHERE log_date BETWEEN ? AND ?
-    `).get(start, end);
+    `).get(lubeUnitFallback, start, end);
 
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -1753,6 +1785,7 @@ export default async function reportsRoutes(app) {
         kvGrid(doc, [
           { k: "Period", v: `${start} to ${end}` },
           { k: "Total Qty", v: fmtNum(summary?.qty_total || 0, 1) },
+          { k: "Total Cost", v: fmtNum(summary?.total_lube_cost || 0, 2) },
           { k: "Total Entries", v: fmtNum(summary?.entries || 0, 0) },
           { k: "Assets Logged", v: fmtNum(summary?.assets || 0, 0) },
         ], 2);
@@ -1762,9 +1795,10 @@ export default async function reportsRoutes(app) {
           doc,
           [
             { key: "asset_code", label: "Asset Code", width: 0.18 },
-            { key: "asset_name", label: "Asset Name", width: 0.46 },
-            { key: "entries", label: "Entries", width: 0.14, align: "right" },
-            { key: "qty_total", label: "Qty Total", width: 0.22, align: "right" },
+            { key: "asset_name", label: "Asset Name", width: 0.36 },
+            { key: "entries", label: "Entries", width: 0.12, align: "right" },
+            { key: "qty_total", label: "Qty Total", width: 0.16, align: "right" },
+            { key: "total_lube_cost", label: "Total Cost", width: 0.18, align: "right" },
           ],
           rows.length
             ? rows.map((r) => ({
@@ -1772,8 +1806,39 @@ export default async function reportsRoutes(app) {
                 asset_name: r.asset_name || "",
                 entries: fmtNum(r.entries, 0),
                 qty_total: fmtNum(r.qty_total, 1),
+                total_lube_cost: fmtNum(r.total_lube_cost, 2),
               }))
-            : [{ asset_code: "-", asset_name: "No lube usage in period", entries: "-", qty_total: "-" }]
+            : [{ asset_code: "-", asset_name: "No lube usage in period", entries: "-", qty_total: "-", total_lube_cost: "-" }]
+        );
+
+        sectionTitle(doc, "Lube Usage Detail (Part Number / Description)");
+        table(
+          doc,
+          [
+            { key: "asset_code", label: "Asset Code", width: 0.12 },
+            { key: "asset_name", label: "Asset Name", width: 0.24 },
+            { key: "part_number", label: "Lube Part Number", width: 0.16 },
+            { key: "lube_description", label: "Lube Description", width: 0.24 },
+            { key: "qty_total", label: "Qty", width: 0.10, align: "right" },
+            { key: "total_lube_cost", label: "Cost", width: 0.14, align: "right" },
+          ],
+          detailRows.length
+            ? detailRows.map((r) => ({
+                asset_code: r.asset_code,
+                asset_name: r.asset_name || "",
+                part_number: r.part_number || "UNSPECIFIED",
+                lube_description: r.lube_description || "-",
+                qty_total: fmtNum(r.qty_total, 1),
+                total_lube_cost: fmtNum(r.total_lube_cost, 2),
+              }))
+            : [{
+                asset_code: "-",
+                asset_name: "-",
+                part_number: "-",
+                lube_description: "No lube detail rows in period",
+                qty_total: "-",
+                total_lube_cost: "-",
+              }]
         );
       },
       {
