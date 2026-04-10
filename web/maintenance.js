@@ -822,11 +822,13 @@ function setTopView(view) {
   const mi = document.getElementById("managerInspectionsCard");
   const wf = document.getElementById("weeklyForumCard");
   const kpi = document.getElementById("assetKpiCard");
+  const hist = document.getElementById("histogramCard");
   const sync = document.getElementById("syncAdminCard");
   const btnMain = document.getElementById("showMainMaintBtn");
   const btnMi = document.getElementById("showManagerInspectionsBtn");
   const btnWf = document.getElementById("showWeeklyForumBtn");
   const btnKpi = document.getElementById("showAssetKpiBtn");
+  const btnHist = document.getElementById("showHistogramBtn");
   const btnSync = document.getElementById("showSyncAdminBtn");
   if (!main || !mi || !wf || !sync) return;
 
@@ -834,6 +836,7 @@ function setTopView(view) {
   mi.style.display = view === "mi" ? "" : "none";
   wf.style.display = view === "wf" ? "" : "none";
   if (kpi) kpi.style.display = view === "kpi" ? "" : "none";
+  if (hist) hist.style.display = view === "hist" ? "" : "none";
   sync.style.display = view === "sync" ? "" : "none";
 
   const styleBtn = (btn, active) => {
@@ -846,7 +849,106 @@ function setTopView(view) {
   styleBtn(btnMi, view === "mi");
   styleBtn(btnWf, view === "wf");
   styleBtn(btnKpi, view === "kpi");
+  styleBtn(btnHist, view === "hist");
   styleBtn(btnSync, view === "sync");
+}
+
+async function loadHistogramEvents() {
+  const body = document.getElementById("histBody");
+  const msg = document.getElementById("histMsg");
+  if (!body) return;
+  body.innerHTML = `<tr><td colspan="8" class="muted">Loading...</td></tr>`;
+  try {
+    const q = new URLSearchParams();
+    const start = String(document.getElementById("histFilterStart")?.value || "").trim();
+    const end = String(document.getElementById("histFilterEnd")?.value || "").trim();
+    const location = String(document.getElementById("histFilterLocation")?.value || "").trim();
+    const part = String(document.getElementById("histFilterPart")?.value || "").trim();
+    const approval = String(document.getElementById("histFilterApproval")?.value || "").trim();
+    if (start) q.set("start", start);
+    if (end) q.set("end", end);
+    if (location) q.set("location", location);
+    if (part) q.set("part", part);
+    if (approval) q.set("approval", approval);
+    const res = await fetch(`${API}/maintenance/histogram/events?${q.toString()}`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load histogram events");
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="8" class="muted">No events found for selected filters.</td></tr>`;
+      if (msg) {
+        msg.className = "muted";
+        msg.textContent = "No events found.";
+      }
+      return;
+    }
+    body.innerHTML = rows.map((r) => `
+      <tr>
+        <td>${esc(r.event_date || "-")}</td>
+        <td>${esc(r.location || "-")}</td>
+        <td>${esc(r.part_code || "-")}</td>
+        <td>${esc(r.part_name || "-")}</td>
+        <td>${esc(r.approval_status || "-")}</td>
+        <td>${esc(r.approved_by || "-")}</td>
+        <td>${esc(r.notes || "-")}</td>
+        <td>${esc(r.created_by || "-")}</td>
+      </tr>
+    `).join("");
+    if (msg) {
+      msg.className = "muted";
+      msg.textContent = `Loaded ${rows.length} event(s).`;
+    }
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="8" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = `Load error: ${e.message || e}`;
+    }
+  }
+}
+
+async function saveHistogramEvent() {
+  const msg = document.getElementById("histMsg");
+  const event_date = String(document.getElementById("histEventDate")?.value || "").trim();
+  const location = String(document.getElementById("histLocation")?.value || "").trim();
+  const part_code = String(document.getElementById("histPartCode")?.value || "").trim();
+  const part_name = String(document.getElementById("histPartName")?.value || "").trim();
+  const approval_status = String(document.getElementById("histApprovalStatus")?.value || "").trim();
+  const approved_by = String(document.getElementById("histApprovedBy")?.value || "").trim();
+  const notes = String(document.getElementById("histNotes")?.value || "").trim();
+  if (!event_date) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = "Event date is required.";
+    }
+    return;
+  }
+  try {
+    const res = await fetch(`${API}/maintenance/histogram/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ event_date, location, part_code, part_name, approval_status, approved_by, notes }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save event");
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = "Histogram event saved.";
+    }
+    const clearIds = ["histLocation", "histPartCode", "histPartName", "histApprovedBy", "histNotes"];
+    clearIds.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.value = "";
+    });
+    const approvalEl = document.getElementById("histApprovalStatus");
+    if (approvalEl) approvalEl.value = "";
+    await loadHistogramEvents();
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = `Save error: ${e.message || e}`;
+    }
+  }
 }
 
 function getSyncForm() {
@@ -2412,6 +2514,16 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   const wfActionDate = document.getElementById("wfActionDate");
   if (wfActionDate && !wfActionDate.value) wfActionDate.value = new Date().toISOString().slice(0, 10);
+  const histEventDate = document.getElementById("histEventDate");
+  if (histEventDate && !histEventDate.value) histEventDate.value = new Date().toISOString().slice(0, 10);
+  const histFilterStart = document.getElementById("histFilterStart");
+  const histFilterEnd = document.getElementById("histFilterEnd");
+  if (histFilterStart && !histFilterStart.value) {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    histFilterStart.value = d.toISOString().slice(0, 10);
+  }
+  if (histFilterEnd && !histFilterEnd.value) histFilterEnd.value = new Date().toISOString().slice(0, 10);
   const mpWeekStart = document.getElementById("mpWeekStart");
   const mpWeekEnd = document.getElementById("mpWeekEnd");
   const mpMonth = document.getElementById("mpMonth");
@@ -2496,7 +2608,10 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("showManagerInspectionsBtn")?.addEventListener("click", () => setTopView("mi"));
   document.getElementById("showWeeklyForumBtn")?.addEventListener("click", () => setTopView("wf"));
   document.getElementById("showAssetKpiBtn")?.addEventListener("click", () => setTopView("kpi"));
+  document.getElementById("showHistogramBtn")?.addEventListener("click", () => setTopView("hist"));
   document.getElementById("showSyncAdminBtn")?.addEventListener("click", () => setTopView("sync"));
+  document.getElementById("saveHistogramBtn")?.addEventListener("click", () => saveHistogramEvent());
+  document.getElementById("loadHistogramBtn")?.addEventListener("click", () => loadHistogramEvents());
   document.getElementById("loadAssetKpiBtn")?.addEventListener("click", () => loadAssetKpiWeekly());
   document.getElementById("mpRefreshStatusBtn")?.addEventListener("click", () => loadMaintenancePackStatus());
   document.getElementById("mpStatusBody")?.addEventListener("click", (evt) => {
@@ -2557,4 +2672,5 @@ document.addEventListener("DOMContentLoaded", () => {
     fillRsgProfileForm(btn.getAttribute("data-rsg-edit") || "");
   });
   setTopView("main");
+  loadHistogramEvents().catch(() => {});
 });

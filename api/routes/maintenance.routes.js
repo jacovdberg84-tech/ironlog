@@ -171,6 +171,23 @@ export default async function maintenanceRoutes(app) {
   `).run();
 
   db.prepare(`
+    CREATE TABLE IF NOT EXISTS maintenance_histogram_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      site_code TEXT DEFAULT 'main',
+      event_date TEXT NOT NULL,
+      location TEXT,
+      part_code TEXT,
+      part_name TEXT,
+      approval_status TEXT,
+      approved_by TEXT,
+      notes TEXT,
+      created_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+
+  db.prepare(`
     CREATE TABLE IF NOT EXISTS manager_damage_report_photos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       damage_report_id INTEGER NOT NULL,
@@ -228,6 +245,17 @@ export default async function maintenanceRoutes(app) {
   ensureColumn("manager_damage_report_photos", "image_data TEXT", "image_data");
   ensureColumn("manager_damage_report_photos", "caption TEXT", "caption");
   ensureColumn("manager_damage_report_photos", "created_at TEXT", "created_at");
+  ensureColumn("maintenance_histogram_events", "site_code TEXT DEFAULT 'main'", "site_code");
+  ensureColumn("maintenance_histogram_events", "event_date TEXT", "event_date");
+  ensureColumn("maintenance_histogram_events", "location TEXT", "location");
+  ensureColumn("maintenance_histogram_events", "part_code TEXT", "part_code");
+  ensureColumn("maintenance_histogram_events", "part_name TEXT", "part_name");
+  ensureColumn("maintenance_histogram_events", "approval_status TEXT", "approval_status");
+  ensureColumn("maintenance_histogram_events", "approved_by TEXT", "approved_by");
+  ensureColumn("maintenance_histogram_events", "notes TEXT", "notes");
+  ensureColumn("maintenance_histogram_events", "created_by TEXT", "created_by");
+  ensureColumn("maintenance_histogram_events", "created_at TEXT", "created_at");
+  ensureColumn("maintenance_histogram_events", "updated_at TEXT", "updated_at");
   try {
     const pt = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='parts' LIMIT 1`).get();
     if (pt) ensureColumn("parts", "consumable_kind TEXT", "consumable_kind");
@@ -1975,6 +2003,83 @@ export default async function maintenanceRoutes(app) {
       `).run(department ?? null, action_item ?? null, owner_name ?? null, due_date ?? null, status ?? null, notes ?? null, id);
 
       return reply.send({ ok: true, id });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.get("/histogram/events", async (req, reply) => {
+    try {
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const start = String(req.query?.start || "").trim();
+      const end = String(req.query?.end || "").trim();
+      const location = String(req.query?.location || "").trim();
+      const approval = String(req.query?.approval || "").trim();
+      const part = String(req.query?.part || "").trim();
+      const limitRaw = Number(req.query?.limit || 300);
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(2000, Math.trunc(limitRaw))) : 300;
+
+      const where = ["COALESCE(site_code, 'main') = ?"];
+      const params = [site_code];
+      if (isDate(start)) {
+        where.push("event_date >= ?");
+        params.push(start);
+      }
+      if (isDate(end)) {
+        where.push("event_date <= ?");
+        params.push(end);
+      }
+      if (location) {
+        where.push("LOWER(COALESCE(location, '')) LIKE ?");
+        params.push(`%${location.toLowerCase()}%`);
+      }
+      if (approval) {
+        where.push("LOWER(COALESCE(approval_status, '')) LIKE ?");
+        params.push(`%${approval.toLowerCase()}%`);
+      }
+      if (part) {
+        where.push("(LOWER(COALESCE(part_code, '')) LIKE ? OR LOWER(COALESCE(part_name, '')) LIKE ?)");
+        params.push(`%${part.toLowerCase()}%`, `%${part.toLowerCase()}%`);
+      }
+
+      const sql = `
+        SELECT id, event_date, location, part_code, part_name, approval_status, approved_by, notes, created_by, created_at, updated_at
+        FROM maintenance_histogram_events
+        WHERE ${where.join(" AND ")}
+        ORDER BY event_date DESC, id DESC
+        LIMIT ${limit}
+      `;
+      const rows = db.prepare(sql).all(...params);
+      return reply.send({ ok: true, rows });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.post("/histogram/events", async (req, reply) => {
+    try {
+      const body = req.body || {};
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const created_by = String(req.headers?.["x-user-name"] || "system").trim() || "system";
+      const event_date = String(body.event_date || "").trim();
+      if (!isDate(event_date)) {
+        return reply.code(400).send({ ok: false, error: "event_date must be YYYY-MM-DD" });
+      }
+      const location = String(body.location || "").trim();
+      const part_code = String(body.part_code || "").trim();
+      const part_name = String(body.part_name || "").trim();
+      const approval_status = String(body.approval_status || "").trim();
+      const approved_by = String(body.approved_by || "").trim();
+      const notes = String(body.notes || "").trim();
+      const now = new Date().toISOString();
+      const info = db.prepare(`
+        INSERT INTO maintenance_histogram_events (
+          site_code, event_date, location, part_code, part_name, approval_status, approved_by, notes, created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(site_code, event_date, location, part_code, part_name, approval_status, approved_by, notes, created_by, now, now);
+      return reply.send({ ok: true, id: Number(info.lastInsertRowid || 0) });
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message || String(err) });

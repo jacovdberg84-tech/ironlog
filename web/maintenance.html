@@ -18,6 +18,7 @@
       <button id="showManagerInspectionsBtn">Manager Inspections</button>
       <button id="showWeeklyForumBtn">Weekly Forum</button>
       <button id="showAssetKpiBtn">Asset KPI</button>
+      <button id="showHistogramBtn">Histogram</button>
       <button id="showSyncAdminBtn">Sync Admin</button>
       <button onclick="location.href='workorders.html'">Work Orders</button>
       <button onclick="location.href='index.html?tab=Breakdowns'">Breakdown Ops</button>
@@ -695,6 +696,83 @@
       </div>
     </div>
 
+    <div id="histogramCard" class="card stack-24" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0;">Histogram Event Tracker</h3>
+      </div>
+      <div class="form-grid">
+        <label>
+          Event Date
+          <input id="histEventDate" type="date" />
+        </label>
+        <label>
+          Location
+          <input id="histLocation" type="text" placeholder="Workshop / Pit / Plant" />
+        </label>
+        <label>
+          Part Code
+          <input id="histPartCode" type="text" placeholder="e.g. FLT-123" />
+        </label>
+        <label>
+          Part Name
+          <input id="histPartName" type="text" placeholder="e.g. Fuel Filter" />
+        </label>
+        <label>
+          Approval Status
+          <select id="histApprovalStatus">
+            <option value="">Select</option>
+            <option value="Pending">Pending</option>
+            <option value="Approved">Approved</option>
+            <option value="Rejected">Rejected</option>
+          </select>
+        </label>
+        <label>
+          Approved By
+          <input id="histApprovedBy" type="text" placeholder="Manager / Supervisor" />
+        </label>
+      </div>
+      <label>
+        Notes
+        <textarea id="histNotes" rows="3" style="width:100%;" placeholder="Event details, reference number, etc."></textarea>
+      </label>
+      <div class="row stack-10">
+        <button id="saveHistogramBtn" type="button">Save Event</button>
+      </div>
+      <div id="histMsg" class="muted">Track event timeline by date, location, parts, and approvals.</div>
+
+      <hr class="hr-soft" />
+      <div class="row stack-10">
+        <input id="histFilterStart" type="date" />
+        <input id="histFilterEnd" type="date" />
+        <input id="histFilterLocation" type="text" placeholder="Filter location" />
+        <input id="histFilterPart" type="text" placeholder="Filter part code/name" />
+        <select id="histFilterApproval">
+          <option value="">All approvals</option>
+          <option value="Pending">Pending</option>
+          <option value="Approved">Approved</option>
+          <option value="Rejected">Rejected</option>
+        </select>
+        <button id="loadHistogramBtn" type="button">Load Events</button>
+      </div>
+      <div style="overflow:auto; margin-top:8px;">
+        <table class="gridTable" style="min-width:1120px;">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Location</th>
+              <th>Part Code</th>
+              <th>Part Name</th>
+              <th>Approval</th>
+              <th>Approved By</th>
+              <th>Notes</th>
+              <th>Captured By</th>
+            </tr>
+          </thead>
+          <tbody id="histBody"></tbody>
+        </table>
+      </div>
+    </div>
+
     <div id="syncAdminCard" class="card stack-24">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <h3 style="margin:0;">Sync Admin (Hybrid)</h3>
@@ -720,6 +798,6 @@
     </div>
   </div>
 
-  <script src="./maintenance.js?v=11"></script>
+  <script src="./maintenance.js?v=12"></script>
 </body>
 </html>
