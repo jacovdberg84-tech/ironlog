@@ -7829,7 +7829,7 @@ async function init() {
     askIronmindQuestion().catch((e) => setStatus("IRONMIND ask error: " + e.message))
   );
   qs("ironmindAskInput")?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       askIronmindQuestion().catch((err) => setStatus("IRONMIND ask error: " + err.message));
     }

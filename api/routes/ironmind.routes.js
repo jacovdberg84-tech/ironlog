@@ -718,15 +718,67 @@ export default async function ironmindRoutes(app) {
           .filter(Boolean)
           .find((s) => !s.startsWith("#") && !s.startsWith("- "))
           || "";
+        const totalDowntime = Number(db.prepare(`
+          SELECT COALESCE(SUM(l.hours_down), 0) AS h
+          FROM breakdown_downtime_logs l
+          WHERE l.log_date BETWEEN ? AND ?
+        `).get(start, end)?.h || 0);
+        const openBreakdowns = Number(db.prepare(`
+          SELECT COUNT(*) AS c
+          FROM breakdowns
+          WHERE status = 'OPEN'
+        `).get()?.c || 0);
+        const overduePm = Number(db.prepare(`
+          SELECT COUNT(*) AS c
+          FROM (
+            SELECT
+              mp.id,
+              (COALESCE((
+                SELECT SUM(dh.hours_run)
+                FROM daily_hours dh
+                WHERE dh.asset_id = mp.asset_id
+                  AND dh.is_used = 1
+                  AND dh.hours_run > 0
+                  AND dh.work_date <= ?
+              ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
+            FROM maintenance_plans mp
+            WHERE mp.active = 1
+          ) x
+          WHERE x.overdue_hours > 0
+        `).get(end)?.c || 0);
+        const topDownRows = db.prepare(`
+          SELECT
+            a.asset_code,
+            COALESCE(SUM(l.hours_down), 0) AS downtime_hours
+          FROM breakdown_downtime_logs l
+          JOIN breakdowns b ON b.id = l.breakdown_id
+          JOIN assets a ON a.id = b.asset_id
+          WHERE l.log_date BETWEEN ? AND ?
+          GROUP BY a.asset_code
+          ORDER BY downtime_hours DESC, a.asset_code ASC
+          LIMIT 3
+        `).all(start, end);
+        const topDownText = topDownRows.length
+          ? topDownRows.map((r) => `${String(r.asset_code || "-")}: ${Number(r.downtime_hours || 0).toFixed(1)}h`).join("; ")
+          : "No downtime records in selected range.";
+
+        const broad = [
+          `Fleet snapshot (${start} to ${end}):`,
+          `- Total downtime: ${totalDowntime.toFixed(1)}h`,
+          `- Open breakdowns: ${openBreakdowns}`,
+          `- PM overdue assets: ${overduePm}`,
+          `- Top downtime assets: ${topDownText}`,
+        ].join("\n");
+
         if (firstLine) {
           return reply.send({
             ok: true,
-            short_answer: `IronMind: ${firstLine}\n\nTip: include an asset code for deep analysis (e.g. G01AM from 2026-02-14 to 2026-04-07).`,
+            short_answer: `IronMind: ${firstLine}\n\n${broad}\n\nTip: include an asset code for deep analysis (e.g. G01AM from 2026-02-14 to 2026-04-07).`,
           });
         }
         return reply.send({
           ok: true,
-          short_answer: "Please include an asset code, for example: G01AM from 2026-02-14 to 2026-04-07.",
+          short_answer: `${broad}\n\nTip: include an asset code for deep analysis (e.g. G01AM from 2026-02-14 to 2026-04-07).`,
         });
       }
       const row = db.prepare(`

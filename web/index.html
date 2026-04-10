@@ -312,7 +312,12 @@
           </label>
         </div>
         <div class="row stack-6">
-          <input id="ironmindAskInput" class="minw-260" placeholder="Ask IronMind (e.g. downtime for G01AM from 2026-02-14 to 2026-04-07)" />
+          <textarea
+            id="ironmindAskInput"
+            class="ironmind-context"
+            rows="3"
+            placeholder="Ask IronMind anything about maintenance, risk, downtime, PM overdue, fuel trends, and operations context... (Ctrl+Enter to send)"
+          ></textarea>
           <button id="ironmindAskBtn">Ask</button>
         </div>
         <div class="output ironmind-body" id="ironmindAskResult">
