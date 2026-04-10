@@ -1485,15 +1485,168 @@ async function loadWeeklyForumSummary() {
   }
 }
 
-async function loadAssetKpiWeekly() {
-  const msg = document.getElementById("akpMsg");
+let akpLastResponse = null;
+
+function akpCategoryNorm(cat) {
+  const t = String(cat ?? "").trim();
+  return t || "Uncategorized";
+}
+
+function akpPct(num, den) {
+  return den > 0 && Number.isFinite(num) ? Number(((num / den) * 100).toFixed(1)) : null;
+}
+
+function akpRollupCategoriesFromAssets(assetRows) {
+  const catMap = new Map();
+  for (const a of assetRows) {
+    const catKey = akpCategoryNorm(a.category);
+    if (!catMap.has(catKey)) {
+      catMap.set(catKey, {
+        category: catKey,
+        scheduled_hours: 0,
+        run_hours: 0,
+        downtime_hours: 0,
+        available_hours: 0,
+        asset_ids: new Set(),
+      });
+    }
+    const c = catMap.get(catKey);
+    c.scheduled_hours += Number(a.scheduled_hours || 0);
+    c.run_hours += Number(a.run_hours || 0);
+    c.downtime_hours += Number(a.downtime_hours || 0);
+    c.available_hours += Number(a.available_hours || 0);
+    c.asset_ids.add(a.asset_id);
+  }
+  const rows = Array.from(catMap.values()).map((c) => {
+    const sched = c.scheduled_hours;
+    const avail = c.available_hours;
+    const run = c.run_hours;
+    return {
+      category: c.category,
+      asset_count: c.asset_ids.size,
+      scheduled_hours: Number(sched.toFixed(2)),
+      run_hours: Number(run.toFixed(2)),
+      downtime_hours: Number(c.downtime_hours.toFixed(2)),
+      available_hours: Number(avail.toFixed(2)),
+      availability_pct: akpPct(avail, sched),
+      utilization_pct: akpPct(run, avail),
+    };
+  });
+  rows.sort((x, y) => {
+    if (x.utilization_pct == null && y.utilization_pct == null) {
+      return String(x.category || "").localeCompare(String(y.category || ""));
+    }
+    if (x.utilization_pct == null) return 1;
+    if (y.utilization_pct == null) return -1;
+    return y.utilization_pct - x.utilization_pct;
+  });
+  return rows;
+}
+
+function akpFleetFromAssets(assetRows) {
+  const fleet_sched = assetRows.reduce((s, r) => s + Number(r.scheduled_hours || 0), 0);
+  const fleet_avail = assetRows.reduce((s, r) => s + Number(r.available_hours || 0), 0);
+  const fleet_run = assetRows.reduce((s, r) => s + Number(r.run_hours || 0), 0);
+  const fleet_down = assetRows.reduce((s, r) => s + Number(r.downtime_hours || 0), 0);
+  return {
+    scheduled_hours: Number(fleet_sched.toFixed(2)),
+    available_hours: Number(fleet_avail.toFixed(2)),
+    run_hours: Number(fleet_run.toFixed(2)),
+    downtime_hours: Number(fleet_down.toFixed(2)),
+    availability_pct: akpPct(fleet_avail, fleet_sched),
+    utilization_pct: akpPct(fleet_run, fleet_avail),
+  };
+}
+
+function refreshAkpCategoryFilterOptions(data, previousValue) {
+  const sel = document.getElementById("akpCategoryFilter");
+  if (!sel) return;
+  const cats = Array.isArray(data?.by_category) ? data.by_category : [];
+  const keys = cats.map((c) => String(c.category ?? "Uncategorized"));
+  const prev = previousValue != null ? String(previousValue) : String(sel.value || "");
+  sel.innerHTML = `<option value="">All types</option>${keys
+    .map((k) => `<option value="${escAttr(k)}">${esc(k)}</option>`)
+    .join("")}`;
+  if (prev && keys.includes(prev)) sel.value = prev;
+  else sel.value = "";
+}
+
+function escAttr(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function renderAssetKpiTables(data) {
   const fleetEl = document.getElementById("akpFleetSummary");
   const catBody = document.getElementById("akpCategoryBody");
   const assetBody = document.getElementById("akpAssetBody");
+  const filterSel = document.getElementById("akpCategoryFilter");
+  if (!catBody || !assetBody || !data) return;
+
+  const filterRaw = String(filterSel?.value || "").trim();
+  const allAssets = Array.isArray(data.by_asset) ? data.by_asset : [];
+  const filteredAssets = filterRaw
+    ? allAssets.filter((a) => akpCategoryNorm(a.category) === filterRaw)
+    : allAssets;
+
+  const cats = filterRaw
+    ? akpRollupCategoriesFromAssets(filteredAssets)
+    : Array.isArray(data.by_category) ? data.by_category : [];
+
+  const fleet = filterRaw ? akpFleetFromAssets(filteredAssets) : data.fleet || {};
+  const days = Number(data.days_in_range || 0);
+  if (fleetEl) {
+    const label = filterRaw ? `<strong>Filtered (${esc(filterRaw)}):</strong>` : "<strong>All assets in range:</strong>";
+    fleetEl.innerHTML = `${label} scheduled ${fmt1(fleet.scheduled_hours)} h, available ${fmt1(fleet.available_hours)} h, run ${fmt1(fleet.run_hours)} h, downtime ${fmt1(fleet.downtime_hours)} h — availability ${fmtPct(fleet.availability_pct)}, utilization ${fmtPct(fleet.utilization_pct)} <span class="muted">(${days} calendar days)</span>`;
+  }
+
+  catBody.innerHTML = cats.length
+    ? cats.map((r) => `
+        <tr>
+          <td>${esc(r.category || "—")}</td>
+          <td style="text-align:right;">${Number(r.asset_count || 0)}</td>
+          <td style="text-align:right;">${fmt1(r.scheduled_hours)}</td>
+          <td style="text-align:right;">${fmt1(r.available_hours)}</td>
+          <td style="text-align:right;">${fmt1(r.run_hours)}</td>
+          <td style="text-align:right;">${fmt1(r.downtime_hours)}</td>
+          <td style="text-align:right;">${fmtPct(r.availability_pct)}</td>
+          <td style="text-align:right;">${fmtPct(r.utilization_pct)}</td>
+        </tr>
+      `).join("")
+    : `<tr><td colspan="8" class="muted">${filterRaw ? "No assets in this type for the range." : "No production daily hours in range (check Daily Input / dates)."}</td></tr>`;
+
+  assetBody.innerHTML = filteredAssets.length
+    ? filteredAssets.map((r) => `
+        <tr>
+          <td>${esc(r.asset_code || "—")} — ${esc(r.asset_name || "")}</td>
+          <td>${esc(r.category || "—")}</td>
+          <td>${esc(r.utilization_mode || "—")}</td>
+          <td style="text-align:right;">${Number(r.days_with_data || 0)} / ${Number(r.days_in_range || 0)}</td>
+          <td style="text-align:right;">${fmt1(r.scheduled_hours)}</td>
+          <td style="text-align:right;">${fmt1(r.available_hours)}</td>
+          <td style="text-align:right;">${fmt1(r.run_hours)}</td>
+          <td style="text-align:right;">${fmt1(r.downtime_hours)}</td>
+          <td style="text-align:right;">${fmtPct(r.availability_pct)}</td>
+          <td style="text-align:right;">${fmtPct(r.utilization_pct)}</td>
+        </tr>
+      `).join("")
+    : `<tr><td colspan="10" class="muted">${filterRaw ? "No rows for this type." : "No rows."}</td></tr>`;
+}
+
+async function loadAssetKpiWeekly() {
+  const msg = document.getElementById("akpMsg");
+  const catBody = document.getElementById("akpCategoryBody");
+  const assetBody = document.getElementById("akpAssetBody");
+  const fleetEl = document.getElementById("akpFleetSummary");
   const start = String(document.getElementById("akpStart")?.value || "").trim();
   const end = String(document.getElementById("akpEnd")?.value || "").trim();
   const schedEl = document.getElementById("akpScheduled");
   const sched = Math.max(0.5, Number(schedEl?.value || 10));
+  const filterSel = document.getElementById("akpCategoryFilter");
+  const prevFilter = String(filterSel?.value || "");
   if (!msg || !catBody || !assetBody) return;
   if (!start || !end) {
     msg.className = "message-error";
@@ -1513,45 +1666,16 @@ async function loadAssetKpiWeekly() {
     const res = await fetch(`${API}/dashboard/asset-kpi/weekly?${q.toString()}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to load asset KPI");
-    const fleet = data.fleet || {};
-    if (fleetEl) {
-      fleetEl.innerHTML = `<strong>All assets in range:</strong> scheduled ${fmt1(fleet.scheduled_hours)} h, available ${fmt1(fleet.available_hours)} h, run ${fmt1(fleet.run_hours)} h, downtime ${fmt1(fleet.downtime_hours)} h — availability ${fmtPct(fleet.availability_pct)}, utilization ${fmtPct(fleet.utilization_pct)} <span class="muted">(${Number(data.days_in_range || 0)} calendar days)</span>`;
-    }
-    const cats = Array.isArray(data.by_category) ? data.by_category : [];
-    catBody.innerHTML = cats.length
-      ? cats.map((r) => `
-        <tr>
-          <td>${esc(r.category || "—")}</td>
-          <td style="text-align:right;">${Number(r.asset_count || 0)}</td>
-          <td style="text-align:right;">${fmt1(r.scheduled_hours)}</td>
-          <td style="text-align:right;">${fmt1(r.available_hours)}</td>
-          <td style="text-align:right;">${fmt1(r.run_hours)}</td>
-          <td style="text-align:right;">${fmt1(r.downtime_hours)}</td>
-          <td style="text-align:right;">${fmtPct(r.availability_pct)}</td>
-          <td style="text-align:right;">${fmtPct(r.utilization_pct)}</td>
-        </tr>
-      `).join("")
-      : `<tr><td colspan="8" class="muted">No production daily hours in range (check Daily Input / dates).</td></tr>`;
-    const assets = Array.isArray(data.by_asset) ? data.by_asset : [];
-    assetBody.innerHTML = assets.length
-      ? assets.map((r) => `
-        <tr>
-          <td>${esc(r.asset_code || "—")} — ${esc(r.asset_name || "")}</td>
-          <td>${esc(r.category || "—")}</td>
-          <td>${esc(r.utilization_mode || "—")}</td>
-          <td style="text-align:right;">${Number(r.days_with_data || 0)} / ${Number(r.days_in_range || 0)}</td>
-          <td style="text-align:right;">${fmt1(r.scheduled_hours)}</td>
-          <td style="text-align:right;">${fmt1(r.available_hours)}</td>
-          <td style="text-align:right;">${fmt1(r.run_hours)}</td>
-          <td style="text-align:right;">${fmt1(r.downtime_hours)}</td>
-          <td style="text-align:right;">${fmtPct(r.availability_pct)}</td>
-          <td style="text-align:right;">${fmtPct(r.utilization_pct)}</td>
-        </tr>
-      `).join("")
-      : `<tr><td colspan="10" class="muted">No rows.</td></tr>`;
+    akpLastResponse = data;
+    refreshAkpCategoryFilterOptions(data, prevFilter);
+    renderAssetKpiTables(data);
     msg.className = "message-success";
-    msg.textContent = `Loaded ${start} → ${end}. Higher utilization = more run hours per available hour.`;
+    const fil = String(document.getElementById("akpCategoryFilter")?.value || "").trim();
+    msg.textContent = fil
+      ? `Loaded ${start} → ${end}, showing type “${fil}”.`
+      : `Loaded ${start} → ${end}. Higher utilization = more run hours per available hour.`;
   } catch (e) {
+    akpLastResponse = null;
     msg.className = "message-error";
     msg.textContent = `Error: ${e.message || e}`;
     catBody.innerHTML = `<tr><td colspan="8" class="message-error">${esc(e.message || String(e))}</td></tr>`;
@@ -2229,6 +2353,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("showAssetKpiBtn")?.addEventListener("click", () => setTopView("kpi"));
   document.getElementById("showSyncAdminBtn")?.addEventListener("click", () => setTopView("sync"));
   document.getElementById("loadAssetKpiBtn")?.addEventListener("click", () => loadAssetKpiWeekly());
+  document.getElementById("akpCategoryFilter")?.addEventListener("change", () => {
+    if (akpLastResponse) renderAssetKpiTables(akpLastResponse);
+  });
   document.getElementById("loadWeeklyForumBtn")?.addEventListener("click", loadWeeklyForumSummary);
   document.getElementById("saveRsgProfileBtn")?.addEventListener("click", saveRsgProfile);
   document.getElementById("loadRsgProfilesBtn")?.addEventListener("click", loadRsgProfiles);

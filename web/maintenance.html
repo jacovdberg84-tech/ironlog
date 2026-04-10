@@ -605,6 +605,12 @@
           Scheduled hrs fallback
           <input id="akpScheduled" type="number" min="0.5" max="24" step="0.5" value="10" title="Used when a day has no scheduled hours on the row" />
         </label>
+        <label>
+          Asset type (category)
+          <select id="akpCategoryFilter" class="w-200" title="Filter tables by asset category">
+            <option value="">All types</option>
+          </select>
+        </label>
         <button id="loadAssetKpiBtn" type="button">Load</button>
       </div>
       <div id="akpMsg" class="muted">Pick a week (or any range) and load.</div>
@@ -674,6 +680,6 @@
     </div>
   </div>
 
-  <script src="./maintenance.js?v=9"></script>
+  <script src="./maintenance.js?v=10"></script>
 </body>
 </html>
