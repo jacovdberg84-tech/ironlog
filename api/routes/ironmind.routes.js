@@ -576,6 +576,9 @@ export default async function ironmindRoutes(app) {
       "Do not ask for asset code unless absolutely needed.",
       "Use available fleet context and provide actionable next steps.",
       "If uncertain, say what data is missing and still provide best guidance.",
+      "Never mention model training cutoff dates, being an AI model, or inability to learn.",
+      "Never answer with generic assistant disclaimers.",
+      "Stay specific to the provided operational context.",
     ].join(" ");
     const hist = Array.isArray(history)
       ? history.slice(-6).flatMap((h) => {
@@ -618,7 +621,17 @@ export default async function ironmindRoutes(app) {
       if (!res.ok) return null;
       const data = await res.json();
       const text = String(data?.choices?.[0]?.message?.content || "").trim();
-      return text || null;
+      const lower = text.toLowerCase();
+      const looksGeneric = [
+        "up until october 2023",
+        "as an ai language model",
+        "i cannot learn",
+        "i currently cannot learn",
+        "training data",
+        "knowledge cutoff",
+      ].some((s) => lower.includes(s));
+      if (!text || looksGeneric) return null;
+      return text;
     } catch {
       return null;
     }
