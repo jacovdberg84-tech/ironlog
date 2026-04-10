@@ -710,6 +710,20 @@ export default async function ironmindRoutes(app) {
       const assetCode = String(body.asset_code || parseAssetCode(question)).trim().toUpperCase();
       const qLower = question.toLowerCase();
       if (!assetCode) {
+        const latest = getLatestIronmindReport("daily_admin");
+        const summary = String(latest?.summary || "").trim();
+        const firstLine = summary
+          .split(/\r?\n/)
+          .map((s) => String(s || "").trim())
+          .filter(Boolean)
+          .find((s) => !s.startsWith("#") && !s.startsWith("- "))
+          || "";
+        if (firstLine) {
+          return reply.send({
+            ok: true,
+            short_answer: `IronMind: ${firstLine}\n\nTip: include an asset code for deep analysis (e.g. G01AM from 2026-02-14 to 2026-04-07).`,
+          });
+        }
         return reply.send({
           ok: true,
           short_answer: "Please include an asset code, for example: G01AM from 2026-02-14 to 2026-04-07.",

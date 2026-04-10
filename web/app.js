@@ -2296,8 +2296,9 @@ async function askIronmindQuestion() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question, date }),
     });
-    const short = String(res?.short_answer || "No answer returned.");
-    if (out) out.innerHTML = `<div>${escapeHtml(short)}</div>`;
+    const short = String(res?.short_answer || res?.answer || res?.message || "No answer returned.");
+    const safe = escapeHtml(short).replace(/\n/g, "<br>");
+    if (out) out.innerHTML = `<div>${safe}</div>`;
     setStatus("IRONMIND question answered.");
   } catch (e) {
     if (out) out.innerHTML = `<small class="muted">Question failed: ${escapeHtml(e.message || String(e))}</small>`;
