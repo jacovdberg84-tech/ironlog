@@ -737,6 +737,8 @@
       </label>
       <div class="row stack-10">
         <button id="saveHistogramBtn" type="button">Save Event</button>
+        <button id="openHistogramPdfBtn" type="button">Open PDF</button>
+        <button id="downloadHistogramPdfBtn" type="button">Download PDF</button>
       </div>
       <div id="histMsg" class="muted">Track event timeline by date, location, parts, and approvals.</div>
 
@@ -766,9 +768,10 @@
               <th>Approved By</th>
               <th>Notes</th>
               <th>Captured By</th>
+              <th>Actions</th>
             </tr>
           </thead>
-          <tbody id="histBody"></tbody>
+          <tbody id="histEventBody"></tbody>
         </table>
       </div>
     </div>

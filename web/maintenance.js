@@ -854,10 +854,10 @@ function setTopView(view) {
 }
 
 async function loadHistogramEvents() {
-  const body = document.getElementById("histBody");
+  const body = document.getElementById("histEventBody");
   const msg = document.getElementById("histMsg");
   if (!body) return;
-  body.innerHTML = `<tr><td colspan="8" class="muted">Loading...</td></tr>`;
+  body.innerHTML = `<tr><td colspan="9" class="muted">Loading...</td></tr>`;
   try {
     const q = new URLSearchParams();
     const start = String(document.getElementById("histFilterStart")?.value || "").trim();
@@ -875,7 +875,7 @@ async function loadHistogramEvents() {
     if (!res.ok) throw new Error(data.error || "Failed to load histogram events");
     const rows = Array.isArray(data.rows) ? data.rows : [];
     if (!rows.length) {
-      body.innerHTML = `<tr><td colspan="8" class="muted">No events found for selected filters.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="9" class="muted">No events found for selected filters.</td></tr>`;
       if (msg) {
         msg.className = "muted";
         msg.textContent = "No events found.";
@@ -892,6 +892,10 @@ async function loadHistogramEvents() {
         <td>${esc(r.approved_by || "-")}</td>
         <td>${esc(r.notes || "-")}</td>
         <td>${esc(r.created_by || "-")}</td>
+        <td style="white-space:nowrap;">
+          <button type="button" data-hist-edit="${Number(r.id || 0)}">Edit</button>
+          <button type="button" data-hist-del="${Number(r.id || 0)}">Delete</button>
+        </td>
       </tr>
     `).join("");
     if (msg) {
@@ -899,7 +903,7 @@ async function loadHistogramEvents() {
       msg.textContent = `Loaded ${rows.length} event(s).`;
     }
   } catch (e) {
-    body.innerHTML = `<tr><td colspan="8" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="9" class="message-error">${esc(e.message || String(e))}</td></tr>`;
     if (msg) {
       msg.className = "message-error";
       msg.textContent = `Load error: ${e.message || e}`;
@@ -947,6 +951,92 @@ async function saveHistogramEvent() {
     if (msg) {
       msg.className = "message-error";
       msg.textContent = `Save error: ${e.message || e}`;
+    }
+  }
+}
+
+function openHistogramPdf(download = false) {
+  const q = new URLSearchParams();
+  const start = String(document.getElementById("histFilterStart")?.value || "").trim();
+  const end = String(document.getElementById("histFilterEnd")?.value || "").trim();
+  const location = String(document.getElementById("histFilterLocation")?.value || "").trim();
+  const part = String(document.getElementById("histFilterPart")?.value || "").trim();
+  const approval = String(document.getElementById("histFilterApproval")?.value || "").trim();
+  if (start) q.set("start", start);
+  if (end) q.set("end", end);
+  if (location) q.set("location", location);
+  if (part) q.set("part", part);
+  if (approval) q.set("approval", approval);
+  if (download) q.set("download", "1");
+  window.open(`${API}/maintenance/histogram/events.pdf?${q.toString()}`, "_blank");
+}
+
+async function editHistogramEvent(id) {
+  const n = Number(id || 0);
+  if (!n) return;
+  const rows = Array.from(document.querySelectorAll("#histEventBody tr"));
+  const row = rows.find((tr) => Number(tr.querySelector("button[data-hist-edit]")?.getAttribute("data-hist-edit") || 0) === n);
+  const tds = row ? row.querySelectorAll("td") : [];
+  const currentDate = String(tds[0]?.textContent || "").trim();
+  const currentLocation = String(tds[1]?.textContent || "").trim();
+  const currentPartCode = String(tds[2]?.textContent || "").trim();
+  const currentPartName = String(tds[3]?.textContent || "").trim();
+  const currentApproval = String(tds[4]?.textContent || "").trim();
+  const currentApprovedBy = String(tds[5]?.textContent || "").trim();
+  const currentNotes = String(tds[6]?.textContent || "").trim();
+
+  const event_date = String(window.prompt("Event date (YYYY-MM-DD):", currentDate) || "").trim();
+  if (!event_date) return;
+  const location = String(window.prompt("Location:", currentLocation) || "").trim();
+  const part_code = String(window.prompt("Part code:", currentPartCode) || "").trim();
+  const part_name = String(window.prompt("Part name:", currentPartName) || "").trim();
+  const approval_status = String(window.prompt("Approval status (Pending/Approved/Rejected):", currentApproval) || "").trim();
+  const approved_by = String(window.prompt("Approved by:", currentApprovedBy) || "").trim();
+  const notes = String(window.prompt("Notes:", currentNotes) || "").trim();
+
+  const msg = document.getElementById("histMsg");
+  try {
+    const res = await fetch(`${API}/maintenance/histogram/events/${n}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ event_date, location, part_code, part_name, approval_status, approved_by, notes }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to update event");
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = "Histogram event updated.";
+    }
+    await loadHistogramEvents();
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = `Update error: ${e.message || e}`;
+    }
+  }
+}
+
+async function deleteHistogramEvent(id) {
+  const n = Number(id || 0);
+  if (!n) return;
+  if (!window.confirm("Delete this histogram event?")) return;
+  const msg = document.getElementById("histMsg");
+  try {
+    const res = await fetch(`${API}/maintenance/histogram/events/${n}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to delete event");
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = "Histogram event deleted.";
+    }
+    await loadHistogramEvents();
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = `Delete error: ${e.message || e}`;
     }
   }
 }
@@ -2612,6 +2702,19 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("showSyncAdminBtn")?.addEventListener("click", () => setTopView("sync"));
   document.getElementById("saveHistogramBtn")?.addEventListener("click", () => saveHistogramEvent());
   document.getElementById("loadHistogramBtn")?.addEventListener("click", () => loadHistogramEvents());
+  document.getElementById("openHistogramPdfBtn")?.addEventListener("click", () => openHistogramPdf(false));
+  document.getElementById("downloadHistogramPdfBtn")?.addEventListener("click", () => openHistogramPdf(true));
+  document.getElementById("histEventBody")?.addEventListener("click", (evt) => {
+    const editBtn = evt.target?.closest?.("button[data-hist-edit]");
+    if (editBtn) {
+      editHistogramEvent(Number(editBtn.getAttribute("data-hist-edit") || 0));
+      return;
+    }
+    const delBtn = evt.target?.closest?.("button[data-hist-del]");
+    if (delBtn) {
+      deleteHistogramEvent(Number(delBtn.getAttribute("data-hist-del") || 0));
+    }
+  });
   document.getElementById("loadAssetKpiBtn")?.addEventListener("click", () => loadAssetKpiWeekly());
   document.getElementById("mpRefreshStatusBtn")?.addEventListener("click", () => loadMaintenancePackStatus());
   document.getElementById("mpStatusBody")?.addEventListener("click", (evt) => {

@@ -2086,6 +2086,153 @@ export default async function maintenanceRoutes(app) {
     }
   });
 
+  app.put("/histogram/events/:id", async (req, reply) => {
+    try {
+      const id = Number(req.params?.id || 0);
+      if (!id) return reply.code(400).send({ ok: false, error: "Invalid id" });
+      const body = req.body || {};
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const existing = db.prepare(`SELECT id FROM maintenance_histogram_events WHERE id = ? AND COALESCE(site_code, 'main') = ?`).get(id, site_code);
+      if (!existing) return reply.code(404).send({ ok: false, error: "Event not found" });
+
+      const event_date = String(body.event_date || "").trim();
+      if (event_date && !isDate(event_date)) {
+        return reply.code(400).send({ ok: false, error: "event_date must be YYYY-MM-DD" });
+      }
+      const location = String(body.location || "").trim();
+      const part_code = String(body.part_code || "").trim();
+      const part_name = String(body.part_name || "").trim();
+      const approval_status = String(body.approval_status || "").trim();
+      const approved_by = String(body.approved_by || "").trim();
+      const notes = String(body.notes || "").trim();
+      const now = new Date().toISOString();
+
+      db.prepare(`
+        UPDATE maintenance_histogram_events
+        SET
+          event_date = COALESCE(NULLIF(?, ''), event_date),
+          location = ?,
+          part_code = ?,
+          part_name = ?,
+          approval_status = ?,
+          approved_by = ?,
+          notes = ?,
+          updated_at = ?
+        WHERE id = ?
+          AND COALESCE(site_code, 'main') = ?
+      `).run(event_date, location, part_code, part_name, approval_status, approved_by, notes, now, id, site_code);
+      return reply.send({ ok: true, id });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.delete("/histogram/events/:id", async (req, reply) => {
+    try {
+      const id = Number(req.params?.id || 0);
+      if (!id) return reply.code(400).send({ ok: false, error: "Invalid id" });
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const info = db.prepare(`
+        DELETE FROM maintenance_histogram_events
+        WHERE id = ?
+          AND COALESCE(site_code, 'main') = ?
+      `).run(id, site_code);
+      if (!Number(info.changes || 0)) return reply.code(404).send({ ok: false, error: "Event not found" });
+      return reply.send({ ok: true, id });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.get("/histogram/events.pdf", async (req, reply) => {
+    try {
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const start = String(req.query?.start || "").trim();
+      const end = String(req.query?.end || "").trim();
+      const location = String(req.query?.location || "").trim();
+      const approval = String(req.query?.approval || "").trim();
+      const part = String(req.query?.part || "").trim();
+      const download = String(req.query?.download || "").trim() === "1";
+
+      const where = ["COALESCE(site_code, 'main') = ?"];
+      const params = [site_code];
+      if (isDate(start)) {
+        where.push("event_date >= ?");
+        params.push(start);
+      }
+      if (isDate(end)) {
+        where.push("event_date <= ?");
+        params.push(end);
+      }
+      if (location) {
+        where.push("LOWER(COALESCE(location, '')) LIKE ?");
+        params.push(`%${location.toLowerCase()}%`);
+      }
+      if (approval) {
+        where.push("LOWER(COALESCE(approval_status, '')) LIKE ?");
+        params.push(`%${approval.toLowerCase()}%`);
+      }
+      if (part) {
+        where.push("(LOWER(COALESCE(part_code, '')) LIKE ? OR LOWER(COALESCE(part_name, '')) LIKE ?)");
+        params.push(`%${part.toLowerCase()}%`, `%${part.toLowerCase()}%`);
+      }
+
+      const rows = db.prepare(`
+        SELECT event_date, location, part_code, part_name, approval_status, approved_by, notes, created_by
+        FROM maintenance_histogram_events
+        WHERE ${where.join(" AND ")}
+        ORDER BY event_date DESC, id DESC
+        LIMIT 2000
+      `).all(...params);
+
+      const periodLabel = `${isDate(start) ? start : "-"} to ${isDate(end) ? end : "-"}`;
+      const pdf = await buildPdfBuffer((doc) => {
+        sectionTitle(doc, "Maintenance Histogram Events");
+        doc
+          .font("Helvetica")
+          .fontSize(10)
+          .text(`Site: ${site_code} | Period: ${periodLabel} | Total events: ${rows.length}`);
+        doc.moveDown(0.4);
+        table(
+          doc,
+          [
+            { key: "event_date", label: "Date", width: 0.1 },
+            { key: "location", label: "Location", width: 0.16 },
+            { key: "part_code", label: "Part Code", width: 0.12 },
+            { key: "part_name", label: "Part Name", width: 0.14 },
+            { key: "approval_status", label: "Approval", width: 0.1 },
+            { key: "approved_by", label: "Approved By", width: 0.12 },
+            { key: "notes", label: "Notes", width: 0.16 },
+            { key: "created_by", label: "Captured By", width: 0.1 },
+          ],
+          rows.length
+            ? rows.map((r) => ({
+                event_date: String(r.event_date || "-"),
+                location: String(r.location || "-"),
+                part_code: String(r.part_code || "-"),
+                part_name: String(r.part_name || "-"),
+                approval_status: String(r.approval_status || "-"),
+                approved_by: String(r.approved_by || "-"),
+                notes: String(r.notes || "-"),
+                created_by: String(r.created_by || "-"),
+              }))
+            : [{ event_date: "-", location: "No events found", part_code: "-", part_name: "-", approval_status: "-", approved_by: "-", notes: "-", created_by: "-" }]
+        );
+      });
+
+      const dateTag = new Date().toISOString().slice(0, 10);
+      reply
+        .header("Content-Type", "application/pdf")
+        .header("Content-Disposition", `${download ? "attachment" : "inline"}; filename="maintenance-histogram-${dateTag}.pdf"`)
+        .send(pdf);
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
   // =====================================================
   // MANAGER INSPECTIONS
   // =====================================================
