@@ -6,6 +6,23 @@ const USER_KEY = "ironlog_session_user";
 const SITE_KEY = "ironlog_session_site";
 const TOKEN_KEY = "ironlog_auth_token";
 const MAINT_DUE_THRESHOLD_KEY = "ironlog_maintenance_due_threshold_hours";
+const MAINT_LOCK_KEY = "ironlog_maintenance_access_ok";
+const MAINT_LOCK_USER = "BJ van den Berg";
+const MAINT_LOCK_PASSWORD = "0mhliac789";
+
+function ensureMaintenanceAccess() {
+  if (sessionStorage.getItem(MAINT_LOCK_KEY) === "1") return true;
+  const user = String(window.prompt("Maintenance username:") || "").trim();
+  const pass = String(window.prompt("Maintenance password:") || "");
+  const ok = user === MAINT_LOCK_USER && pass === MAINT_LOCK_PASSWORD;
+  if (ok) {
+    sessionStorage.setItem(MAINT_LOCK_KEY, "1");
+    return true;
+  }
+  alert("Access denied.");
+  location.href = "index.html";
+  return false;
+}
 
 function getSessionRole() {
   return String(localStorage.getItem(ROLE_KEY) || "admin").trim().toLowerCase() || "admin";
@@ -2269,6 +2286,7 @@ async function importRsgProfilesCsv() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  if (!ensureMaintenanceAccess()) return;
   console.log("Maintenance UI loaded");
 
   const generateBtn = document.getElementById("generateBtn");

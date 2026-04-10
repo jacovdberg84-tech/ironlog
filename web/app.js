@@ -12,11 +12,31 @@ const TOKEN_KEY = "ironlog_auth_token";
 const TABS_OVERRIDE_KEY = "ironlog_allowed_tabs";
 const SLA_OPEN_SAME_TAB_KEY = "ironlog_sla_open_same_tab";
 const LOC_DEFAULT_PREFIX = "ironlog_default_location_";
+const MAINT_LOCK_KEY = "ironlog_maintenance_access_ok";
+const MAINT_LOCK_USER = "BJ van den Berg";
+const MAINT_LOCK_PASSWORD = "0mhliac789";
 const DEFAULT_ROLE = "admin";
 const DEFAULT_USER = "admin";
 const DEFAULT_SITE = "main";
 const LANG_KEY = "ironlog_lang";
 const DEFAULT_LANG = "en";
+function maintenanceAccessGate() {
+  const alreadyOk = sessionStorage.getItem(MAINT_LOCK_KEY) === "1";
+  if (alreadyOk) {
+    location.href = "maintenance.html";
+    return;
+  }
+  const user = String(window.prompt("Maintenance username:") || "").trim();
+  const pass = String(window.prompt("Maintenance password:") || "");
+  if (user === MAINT_LOCK_USER && pass === MAINT_LOCK_PASSWORD) {
+    sessionStorage.setItem(MAINT_LOCK_KEY, "1");
+    location.href = "maintenance.html";
+    return;
+  }
+  alert("Invalid maintenance credentials.");
+}
+window.maintenanceAccessGate = maintenanceAccessGate;
+
 const I18N = {
   en: {
     statusReady: "Ready.",
