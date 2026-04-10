@@ -2520,9 +2520,9 @@ function renderLubeUsageTable(payload) {
         <tbody>
           ${flat.map((r) => `
             <tr>
-              <td style="padding:10px 8px;">${esc(r.asset_code || "-")}</td>
-              <td style="padding:10px 8px;">${esc(r.asset_name || r.asset_code || "-")}</td>
-              <td style="padding:10px 8px;">${esc(r.oil_type || "UNSPECIFIED")}</td>
+              <td style="padding:10px 8px;">${escapeHtml(r.asset_code || "-")}</td>
+              <td style="padding:10px 8px;">${escapeHtml(r.asset_name || r.asset_code || "-")}</td>
+              <td style="padding:10px 8px;">${escapeHtml(r.oil_type || "UNSPECIFIED")}</td>
               <td style="padding:10px 8px; text-align:right;">${Number(r.qty || 0).toFixed(1)}</td>
               <td style="padding:10px 8px; text-align:right;">${fmtMoney(r.cost || 0)}</td>
             </tr>
