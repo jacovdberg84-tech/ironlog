@@ -604,6 +604,102 @@ async function openUpcomingServicesPdf(download = false) {
   }
 }
 
+function mpWeekRangeLabel() {
+  const d = new Date();
+  const day = d.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + mondayOffset);
+  const start = d.toISOString().slice(0, 10);
+  d.setDate(d.getDate() + 6);
+  const end = d.toISOString().slice(0, 10);
+  return { start, end };
+}
+
+function mpMonthLabel() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+async function mpGenerate(reportType) {
+  const msg = document.getElementById("mpStatusMsg");
+  const type = String(reportType || "").toLowerCase() === "monthly" ? "monthly" : "weekly";
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = `Generating ${type} presentation...`;
+  }
+  const body = { period_type: type };
+  if (type === "monthly") body.month = mpMonthLabel();
+  else {
+    const w = mpWeekRangeLabel();
+    body.start = w.start;
+    body.end = w.end;
+  }
+  try {
+    const res = await fetch(`${API}/reports/maintenance-master/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Generation failed");
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = `${type} presentation generated (${data.label}).`;
+    }
+    await loadMaintenancePackStatus();
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = `Generate error: ${e.message || e}`;
+    }
+  }
+}
+
+function openMaintenancePackLatest(reportType, download = false) {
+  const type = String(reportType || "").toLowerCase() === "monthly" ? "monthly" : "weekly";
+  const q = new URLSearchParams();
+  q.set("period_type", type);
+  if (download) q.set("download", "1");
+  window.open(`${API}/reports/maintenance-master/latest.pptx?${q.toString()}`, "_blank");
+}
+
+async function loadMaintenancePackStatus() {
+  const body = document.getElementById("mpStatusBody");
+  const msg = document.getElementById("mpStatusMsg");
+  if (!body) return;
+  body.innerHTML = `<tr><td colspan="5" class="muted">Loading...</td></tr>`;
+  try {
+    const res = await fetch(`${API}/reports/maintenance-master/status`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Status load failed");
+    const weekly = data?.latest?.weekly || null;
+    const monthly = data?.latest?.monthly || null;
+    const rowHtml = (label, key, r) => `
+      <tr>
+        <td>${esc(label)}</td>
+        <td>${esc(r?.period_start && r?.period_end ? `${r.period_start} to ${r.period_end}` : "-")}</td>
+        <td>${esc(r?.generated_at || "-")}</td>
+        <td>${esc(r?.status || "not generated")}</td>
+        <td style="display:flex; gap:8px;">
+          <button type="button" data-mp-gen="${key}">Generate</button>
+          <button type="button" data-mp-open="${key}">Open Latest</button>
+          <button type="button" data-mp-download="${key}">Download Latest</button>
+        </td>
+      </tr>
+    `;
+    body.innerHTML = rowHtml("Weekly", "weekly", weekly) + rowHtml("Monthly", "monthly", monthly);
+    if (msg) {
+      msg.className = "muted";
+      msg.textContent = "Status loaded.";
+    }
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="5" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = `Status error: ${e.message || e}`;
+    }
+  }
+}
+
 function getDueThresholdHours() {
   const input = document.getElementById("dueNearThresholdHours");
   const fromInput = Number(input?.value || 50);
@@ -2337,6 +2433,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadWeeklyForumActions().catch(() => {});
   loadWeeklyForumParts().catch(() => {});
   loadWeeklyForumInputs().catch(() => {});
+  loadMaintenancePackStatus().catch(() => {});
   loadRsgProfiles().catch(() => {});
   document.getElementById("syncStatsBtn")?.addEventListener("click", syncLoadStats);
   document.getElementById("syncStateBtn")?.addEventListener("click", syncLoadState);
@@ -2353,6 +2450,23 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("showAssetKpiBtn")?.addEventListener("click", () => setTopView("kpi"));
   document.getElementById("showSyncAdminBtn")?.addEventListener("click", () => setTopView("sync"));
   document.getElementById("loadAssetKpiBtn")?.addEventListener("click", () => loadAssetKpiWeekly());
+  document.getElementById("mpRefreshStatusBtn")?.addEventListener("click", () => loadMaintenancePackStatus());
+  document.getElementById("mpStatusBody")?.addEventListener("click", (evt) => {
+    const gen = evt.target?.closest?.("button[data-mp-gen]");
+    if (gen) {
+      mpGenerate(String(gen.getAttribute("data-mp-gen") || "weekly"));
+      return;
+    }
+    const open = evt.target?.closest?.("button[data-mp-open]");
+    if (open) {
+      openMaintenancePackLatest(String(open.getAttribute("data-mp-open") || "weekly"), false);
+      return;
+    }
+    const dl = evt.target?.closest?.("button[data-mp-download]");
+    if (dl) {
+      openMaintenancePackLatest(String(dl.getAttribute("data-mp-download") || "weekly"), true);
+    }
+  });
   document.getElementById("akpCategoryFilter")?.addEventListener("change", () => {
     if (akpLastResponse) renderAssetKpiTables(akpLastResponse);
   });

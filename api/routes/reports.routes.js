@@ -13,6 +13,8 @@ import {
   ensurePageSpace,
 } from "../utils/pdfGenerator.js";
 
+let maintenanceMasterSchedulerStarted = false;
+
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
 }
@@ -4489,16 +4491,37 @@ export default async function reportsRoutes(app) {
       .send(pdf);
   });
 
-  app.get("/maintenance-exec.pptx", async (req, reply) => {
-    const resolved = resolveMaintenancePeriod(req);
-    if (!resolved) {
-      return reply.code(400).send({ error: "Provide month=YYYY-MM or start/end=YYYY-MM-DD" });
-    }
-    const { period, label } = resolved;
-    const site_code = getSiteCode(req);
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS maintenance_presentation_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      report_type TEXT NOT NULL,         -- weekly | monthly
+      label TEXT NOT NULL,               -- YYYY-MM-DD_to_YYYY-MM-DD or YYYY-MM
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      site_code TEXT NOT NULL DEFAULT 'default',
+      file_path TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'ok', -- ok | failed
+      message TEXT,
+      generated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(report_type, label, site_code)
+    )
+  `).run();
+
+  function weeklyRangeForDate(dateIn = todayYmd()) {
+    const d = new Date(`${dateIn}T12:00:00`);
+    const day = d.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    const monday = new Date(d);
+    monday.setDate(monday.getDate() + mondayOffset);
+    const sunday = new Date(monday);
+    sunday.setDate(sunday.getDate() + 6);
+    const fmt = (x) => x.toISOString().slice(0, 10);
+    return { start: fmt(monday), end: fmt(sunday) };
+  }
+
+  async function buildMaintenanceExecutiveDeck({ period, label, site_code }) {
     const defaults = costDefaults();
     const { rows, totals } = buildMaintenanceCostByEquipment(period);
-
     const rainRows = db.prepare(`
       SELECT rain_date
       FROM site_rain_days
@@ -4509,7 +4532,6 @@ export default async function reportsRoutes(app) {
     const rainDates = rainRows.map((r) => String(r.rain_date || "").trim()).filter(Boolean);
     const rainCount = rainDates.length;
     const rainPlaceholders = rainDates.length ? rainDates.map(() => "?").join(",") : "";
-
     const runRow = db.prepare(`
       SELECT COALESCE(SUM(hours_run), 0) AS run_hours
       FROM daily_hours
@@ -4536,19 +4558,16 @@ export default async function reportsRoutes(app) {
     const adjustedScheduled = Math.max(0, scheduledHours - rainSchedHours);
     const utilRaw = scheduledHours > 0 ? (runHours / scheduledHours) * 100 : null;
     const utilAdj = adjustedScheduled > 0 ? (runHours / adjustedScheduled) * 100 : null;
-
     const availByTypeBase = db.prepare(`
       SELECT
         LOWER(IFNULL(a.category, 'uncategorized')) AS equipment_type,
-        COALESCE(SUM(dh.scheduled_hours), 0) AS scheduled_hours,
-        COALESCE(SUM(CASE WHEN dh.is_used = 1 THEN dh.hours_run ELSE 0 END), 0) AS run_hours
+        COALESCE(SUM(dh.scheduled_hours), 0) AS scheduled_hours
       FROM daily_hours dh
       JOIN assets a ON a.id = dh.asset_id
       WHERE dh.work_date BETWEEN ? AND ?
       GROUP BY LOWER(IFNULL(a.category, 'uncategorized'))
       ORDER BY equipment_type ASC
     `).all(period.start, period.end);
-
     const availByTypeDowntime = db.prepare(`
       SELECT
         LOWER(IFNULL(a.category, 'uncategorized')) AS equipment_type,
@@ -4560,7 +4579,6 @@ export default async function reportsRoutes(app) {
       GROUP BY LOWER(IFNULL(a.category, 'uncategorized'))
     `).all(period.start, period.end);
     const downtimeByType = new Map(availByTypeDowntime.map((r) => [String(r.equipment_type || ""), Number(r.downtime_hours || 0)]));
-
     const rainSchedByType = new Map();
     if (rainDates.length) {
       const rowsRainType = db.prepare(`
@@ -4574,7 +4592,6 @@ export default async function reportsRoutes(app) {
       `).all(...rainDates);
       for (const r of rowsRainType) rainSchedByType.set(String(r.equipment_type || ""), Number(r.rain_scheduled_hours || 0));
     }
-
     const availabilityByType = availByTypeBase.map((r) => {
       const key = String(r.equipment_type || "");
       const scheduled = Number(r.scheduled_hours || 0);
@@ -4584,14 +4601,11 @@ export default async function reportsRoutes(app) {
       const availability_pct = adjusted > 0 ? Math.max(0, ((adjusted - downtime) / adjusted) * 100) : null;
       return {
         equipment_type: key.toUpperCase(),
-        scheduled_hours: Number(scheduled.toFixed(1)),
-        rain_adjustment_hours: Number(rainH.toFixed(1)),
         adjusted_hours: Number(adjusted.toFixed(1)),
         downtime_hours: Number(downtime.toFixed(1)),
         availability_pct: availability_pct == null ? null : Number(availability_pct.toFixed(2)),
       };
     });
-
     const oilTotal = db.prepare(`
       SELECT COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS oil_cost
       FROM oil_logs ol
@@ -4607,98 +4621,325 @@ export default async function reportsRoutes(app) {
       GROUP BY LOWER(IFNULL(a.category, 'uncategorized'))
       ORDER BY oil_cost DESC
     `).all(defaults.lube_cost_per_qty_default, period.start, period.end);
-
+    const periodStartTs = `${period.start} 00:00:00`;
+    const periodEndTs = `${period.end} 23:59:59`;
+    const woDowntimeByAsset = db.prepare(`
+      SELECT
+        a.asset_code,
+        a.asset_name,
+        COALESCE(SUM(
+          MAX(
+            0,
+            (
+              julianday(MIN(COALESCE(w.completed_at, w.closed_at, ?), ?))
+              - julianday(MAX(COALESCE(w.opened_at, ?), ?))
+            ) * 24.0
+          )
+        ), 0) AS true_downtime_hours
+      FROM work_orders w
+      JOIN assets a ON a.id = w.asset_id
+      WHERE LOWER(COALESCE(w.source, '')) = 'breakdown'
+        AND COALESCE(w.opened_at, ?) <= ?
+        AND COALESCE(w.completed_at, w.closed_at, ?) >= ?
+      GROUP BY a.id
+      ORDER BY true_downtime_hours DESC, a.asset_code ASC
+    `).all(periodEndTs, periodEndTs, periodStartTs, periodStartTs, periodStartTs, periodEndTs, periodEndTs, periodStartTs);
+    const woDownMap = new Map(woDowntimeByAsset.map((r) => [String(r.asset_code || ""), Number(r.true_downtime_hours || 0)]));
+    const totalTrueDowntimeWo = woDowntimeByAsset.reduce((s, r) => s + Number(r.true_downtime_hours || 0), 0);
+    const hseSummary = db.prepare(`
+      SELECT
+        COUNT(*) AS reports,
+        COALESCE(SUM(CASE WHEN COALESCE(hse_report_available, 0) = 1 THEN 1 ELSE 0 END), 0) AS hse_reports,
+        COALESCE(SUM(CASE WHEN COALESCE(pending_investigation, 0) = 1 THEN 1 ELSE 0 END), 0) AS pending_investigation,
+        COALESCE(SUM(CASE WHEN COALESCE(out_of_service, 0) = 1 THEN 1 ELSE 0 END), 0) AS out_of_service
+      FROM manager_damage_reports
+      WHERE report_date BETWEEN ? AND ?
+    `).get(period.start, period.end);
+    const inspectionsSummary = db.prepare(`
+      SELECT
+        COUNT(*) AS inspections_done,
+        COUNT(DISTINCT asset_id) AS assets_covered
+      FROM manager_inspections
+      WHERE inspection_date BETWEEN ? AND ?
+    `).get(period.start, period.end);
+    const lubeByMachine = db.prepare(`
+      SELECT
+        a.asset_code,
+        a.asset_name,
+        COALESCE(SUM(ol.quantity), 0) AS qty_total,
+        COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS lube_cost
+      FROM oil_logs ol
+      JOIN assets a ON a.id = ol.asset_id
+      WHERE ol.log_date BETWEEN ? AND ?
+      GROUP BY a.id
+      ORDER BY lube_cost DESC, a.asset_code ASC
+      LIMIT 16
+    `).all(defaults.lube_cost_per_qty_default, period.start, period.end);
+    const criticalLowParts = db.prepare(`
+      SELECT
+        p.part_code,
+        p.part_name,
+        p.min_stock,
+        COALESCE(SUM(sm.quantity), 0) AS on_hand
+      FROM parts p
+      LEFT JOIN stock_movements sm ON sm.part_id = p.id
+      WHERE COALESCE(p.critical, 0) = 1
+      GROUP BY p.id
+      HAVING on_hand < COALESCE(p.min_stock, 0)
+      ORDER BY on_hand ASC, p.part_code ASC
+      LIMIT 20
+    `).all();
+    const fuelAnomalyRows = db.prepare(`
+      WITH daily AS (
+        SELECT
+          fl.asset_id,
+          a.asset_code,
+          fl.log_date,
+          COALESCE(SUM(fl.liters), 0) AS liters,
+          COALESCE(MAX(dh.hours_run), 0) AS hours_run
+        FROM fuel_logs fl
+        JOIN assets a ON a.id = fl.asset_id
+        LEFT JOIN daily_hours dh ON dh.asset_id = fl.asset_id AND dh.work_date = fl.log_date
+        WHERE fl.log_date BETWEEN ? AND ?
+        GROUP BY fl.asset_id, a.asset_code, fl.log_date
+      ),
+      stats AS (
+        SELECT asset_id, AVG(CASE WHEN hours_run > 0 THEN liters / hours_run ELSE NULL END) AS avg_lph
+        FROM daily
+        GROUP BY asset_id
+      )
+      SELECT d.asset_code, COUNT(*) AS anomaly_days
+      FROM daily d
+      JOIN stats s ON s.asset_id = d.asset_id
+      WHERE d.hours_run > 0
+        AND s.avg_lph IS NOT NULL
+        AND (d.liters / d.hours_run) > (s.avg_lph * 1.35)
+      GROUP BY d.asset_code
+      ORDER BY anomaly_days DESC, d.asset_code ASC
+      LIMIT 20
+    `).all(period.start, period.end);
+    const breakdownCount = Number(db.prepare(`SELECT COUNT(*) AS c FROM breakdowns WHERE breakdown_date BETWEEN ? AND ?`).get(period.start, period.end)?.c || 0);
+    const unplannedMaintCount = Number(db.prepare(`
+      SELECT COUNT(*) AS c
+      FROM work_orders
+      WHERE LOWER(COALESCE(source, '')) = 'breakdown'
+        AND COALESCE(opened_at, '') BETWEEN ? AND ?
+    `).get(periodStartTs, periodEndTs)?.c || 0);
     const pptx = new PptxGenJS();
     pptx.layout = "LAYOUT_WIDE";
     pptx.author = "IRONLOG";
     pptx.subject = "Maintenance executive report";
     pptx.title = `Maintenance Executive - ${label}`;
-
     const s1 = pptx.addSlide();
     s1.addText("IRONLOG Maintenance Executive Report", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 24, bold: true });
     s1.addText(`Period: ${period.start} to ${period.end} | Site: ${site_code}`, { x: 0.4, y: 0.9, w: 12.4, h: 0.4, fontSize: 12 });
     s1.addText(
       [
-        { text: `Rain days recorded: ${rainCount}\n`, options: { bold: true } },
+        { text: `Total TRUE downtime (breakdown WOs): ${totalTrueDowntimeWo.toFixed(1)} h\n`, options: { bold: true } },
+        { text: `Rain days recorded: ${rainCount}\n` },
         { text: `Scheduled hours: ${scheduledHours.toFixed(1)}\n` },
         { text: `Rain-adjusted scheduled hours: ${adjustedScheduled.toFixed(1)}\n` },
         { text: `Run hours: ${runHours.toFixed(1)}\n` },
         { text: `Utilisation (raw): ${utilRaw == null ? "N/A" : `${utilRaw.toFixed(2)}%`}\n` },
         { text: `Utilisation (rain-adjusted): ${utilAdj == null ? "N/A" : `${utilAdj.toFixed(2)}%`}` },
       ],
-      { x: 0.6, y: 1.6, w: 6.4, h: 2.6, fontSize: 15 }
+      { x: 0.6, y: 1.6, w: 6.5, h: 3.2, fontSize: 14 }
     );
     s1.addText(
-      [
-        { text: `Maintenance Cost Totals\n`, options: { bold: true } },
-        { text: `Parts: ${totals.parts_cost.toFixed(2)}\n` },
-        { text: `Labor: ${totals.labor_cost.toFixed(2)}\n` },
-        { text: `Downtime: ${totals.downtime_cost.toFixed(2)}\n` },
-        { text: `Total Services: ${(totals.parts_cost + totals.labor_cost + totals.downtime_cost).toFixed(2)}\n` },
-        { text: `Oil/Lube Cost: ${Number(oilTotal?.oil_cost || 0).toFixed(2)}` },
-      ],
-      { x: 7.2, y: 1.6, w: 5.6, h: 2.8, fontSize: 15 }
+      "Index\n1) Safety (HSE)\n2) Plant Performance\n3) Breakdowns & Maintenance\n4) Production Support\n5) Lubrication\n6) Parts & Stores\n7) Inspections Done\n8) Security (Fuel Anomalies)\n9) Challenges & Risks",
+      { x: 7.3, y: 1.6, w: 5.4, h: 3.6, fontSize: 13, bold: true }
     );
-
     const s2 = pptx.addSlide();
-    s2.addText("Availability % by Equipment Type (Rain-adjusted)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 20, bold: true });
-    const availTable = [
-      [
-        { text: "Type", options: { bold: true } },
-        { text: "Adjusted Hours", options: { bold: true } },
-        { text: "Downtime Hrs", options: { bold: true } },
-        { text: "Availability %", options: { bold: true } },
-      ],
-      ...availabilityByType.slice(0, 16).map((r) => [
-        r.equipment_type,
-        r.adjusted_hours.toFixed(1),
-        r.downtime_hours.toFixed(1),
-        r.availability_pct == null ? "N/A" : `${r.availability_pct.toFixed(2)}%`,
-      ]),
-    ];
-    s2.addTable(availTable, { x: 0.5, y: 1.1, w: 12.3, h: 5.6, fontSize: 12, border: { pt: 1, color: "C8C8C8" } });
-
+    s2.addText("1) Safety (HSE)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
+    s2.addText(`Damage reports: ${Number(hseSummary?.reports || 0)}\nHSE reports available: ${Number(hseSummary?.hse_reports || 0)}\nPending investigation: ${Number(hseSummary?.pending_investigation || 0)}\nOut of service: ${Number(hseSummary?.out_of_service || 0)}`, { x: 0.6, y: 1.3, w: 6.3, h: 2.5, fontSize: 16 });
     const s3 = pptx.addSlide();
-    s3.addText("Maintenance Costs by Equipment (Top)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 20, bold: true });
-    const costTable = [
+    s3.addText("2) Plant Performance", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
+    s3.addTable(
       [
-        { text: "Asset", options: { bold: true } },
-        { text: "Type", options: { bold: true } },
-        { text: "Parts", options: { bold: true } },
-        { text: "Labor", options: { bold: true } },
-        { text: "Downtime", options: { bold: true } },
-        { text: "Total", options: { bold: true } },
+        [{ text: "Type", options: { bold: true } }, { text: "Adjusted Hours", options: { bold: true } }, { text: "Downtime Hrs", options: { bold: true } }, { text: "Availability %", options: { bold: true } }],
+        ...availabilityByType.slice(0, 16).map((r) => [r.equipment_type, r.adjusted_hours.toFixed(1), r.downtime_hours.toFixed(1), r.availability_pct == null ? "N/A" : `${r.availability_pct.toFixed(2)}%`]),
       ],
-      ...rows.slice(0, 14).map((r) => [
-        `${r.asset_code} ${compactCell(r.asset_name, 20)}`,
-        r.category || "",
-        r.parts_cost.toFixed(2),
-        r.labor_cost.toFixed(2),
-        r.downtime_cost.toFixed(2),
-        r.maintenance_total_cost.toFixed(2),
-      ]),
-    ];
-    s3.addTable(costTable, { x: 0.5, y: 1.1, w: 12.3, h: 5.6, fontSize: 11, border: { pt: 1, color: "C8C8C8" } });
-
+      { x: 0.5, y: 1.1, w: 12.3, h: 5.6, fontSize: 12, border: { pt: 1, color: "C8C8C8" } }
+    );
     const s4 = pptx.addSlide();
-    s4.addText("Oil/Lube Cost by Equipment Type", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 20, bold: true });
-    const oilTable = [
+    s4.addText("3) Breakdowns and Maintenance (Cost per Machine)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 20, bold: true });
+    s4.addTable(
       [
-        { text: "Type", options: { bold: true } },
-        { text: "Oil/Lube Cost", options: { bold: true } },
+        [{ text: "Asset", options: { bold: true } }, { text: "Type", options: { bold: true } }, { text: "WO True Down (h)", options: { bold: true } }, { text: "Parts", options: { bold: true } }, { text: "Labor", options: { bold: true } }, { text: "Down Cost", options: { bold: true } }, { text: "Total", options: { bold: true } }],
+        ...rows.slice(0, 12).map((r) => [`${r.asset_code} ${compactCell(r.asset_name, 18)}`, r.category || "", Number(woDownMap.get(String(r.asset_code || "")) || 0).toFixed(1), r.parts_cost.toFixed(2), r.labor_cost.toFixed(2), r.downtime_cost.toFixed(2), r.maintenance_total_cost.toFixed(2)]),
       ],
-      ...oilByType.slice(0, 18).map((r) => [String(r.equipment_type || "").toUpperCase(), Number(r.oil_cost || 0).toFixed(2)]),
-    ];
-    s4.addTable(oilTable, { x: 0.9, y: 1.2, w: 7.0, h: 5.4, fontSize: 13, border: { pt: 1, color: "C8C8C8" } });
-    s4.addText(`Total Oil/Lube Cost: ${Number(oilTotal?.oil_cost || 0).toFixed(2)}`, { x: 8.2, y: 1.4, w: 4.2, h: 0.6, fontSize: 16, bold: true });
-    s4.addText("Note: Costs are used (not volumes), aligned to maintenance activity period.", { x: 8.2, y: 2.1, w: 4.3, h: 1.5, fontSize: 11, color: "666666" });
-
+      { x: 0.4, y: 1.1, w: 12.5, h: 5.8, fontSize: 10.5, border: { pt: 1, color: "C8C8C8" } }
+    );
+    const s5 = pptx.addSlide();
+    s5.addText("4) Production Support", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
+    s5.addText("Placeholder slide requested. Data wiring will be added from Operations metrics in next phase.", { x: 0.6, y: 1.5, w: 11.8, h: 1.2, fontSize: 16 });
+    const s6 = pptx.addSlide();
+    s6.addText("5) Lubrication (Cost per Machine)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
+    s6.addTable(
+      [
+        [{ text: "Asset Code", options: { bold: true } }, { text: "Asset Name", options: { bold: true } }, { text: "Qty", options: { bold: true } }, { text: "Lube Cost", options: { bold: true } }],
+        ...lubeByMachine.slice(0, 16).map((r) => [String(r.asset_code || ""), compactCell(r.asset_name || "", 26), Number(r.qty_total || 0).toFixed(1), Number(r.lube_cost || 0).toFixed(2)]),
+      ],
+      { x: 0.6, y: 1.1, w: 11.8, h: 5.6, fontSize: 12, border: { pt: 1, color: "C8C8C8" } }
+    );
+    const s7 = pptx.addSlide();
+    s7.addText("6) Parts and Stores (Critical Low Stock)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
+    s7.addTable(
+      [
+        [{ text: "Part Code", options: { bold: true } }, { text: "Part Name", options: { bold: true } }, { text: "Min", options: { bold: true } }, { text: "On Hand", options: { bold: true } }],
+        ...(criticalLowParts.length ? criticalLowParts.slice(0, 18).map((r) => [String(r.part_code || ""), compactCell(r.part_name || "", 28), Number(r.min_stock || 0).toFixed(1), Number(r.on_hand || 0).toFixed(1)]) : [["-", "No critical low stock items", "-", "-"]]),
+      ],
+      { x: 0.7, y: 1.1, w: 11.5, h: 5.8, fontSize: 12, border: { pt: 1, color: "C8C8C8" } }
+    );
+    const s8 = pptx.addSlide();
+    s8.addText("7) Inspections Done", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
+    s8.addText(`Inspections completed: ${Number(inspectionsSummary?.inspections_done || 0)}\nAssets covered: ${Number(inspectionsSummary?.assets_covered || 0)}`, { x: 0.8, y: 1.6, w: 5.8, h: 1.8, fontSize: 18 });
+    const s9 = pptx.addSlide();
+    s9.addText("8) Security (Fuel Anomalies)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
+    s9.addTable(
+      [
+        [{ text: "Asset Code", options: { bold: true } }, { text: "Anomaly Days", options: { bold: true } }],
+        ...(fuelAnomalyRows.length ? fuelAnomalyRows.map((r) => [String(r.asset_code || ""), String(Number(r.anomaly_days || 0))]) : [["-", "No anomalies in selected period"]]),
+      ],
+      { x: 1.2, y: 1.3, w: 6.2, h: 4.8, fontSize: 13, border: { pt: 1, color: "C8C8C8" } }
+    );
+    const s10 = pptx.addSlide();
+    s10.addText("9) Challenges and Risks", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
+    s10.addText(`Weather / Rain days: ${rainCount}\nBreakdowns in period: ${breakdownCount}\nUnplanned maintenance (breakdown WOs opened): ${unplannedMaintCount}\nTrue WO downtime (breakdown): ${totalTrueDowntimeWo.toFixed(1)} h`, { x: 0.8, y: 1.5, w: 8.0, h: 2.8, fontSize: 16 });
+    s10.addText(`Rain dates: ${rainDates.length ? rainDates.join(", ") : "None recorded in selected period"}`, { x: 0.8, y: 4.5, w: 11.5, h: 1.2, fontSize: 12, color: "666666" });
     const buffer = await pptx.write({ outputType: "nodebuffer" });
+    return Buffer.from(buffer);
+  }
+
+  async function generateMaintenanceMaster(reportType, site_code, opts = {}) {
+    const t = String(reportType || "").toLowerCase();
+    let period;
+    let label;
+    if (t === "monthly") {
+      const m = opts.month && isMonth(opts.month) ? opts.month : todayYmd().slice(0, 7);
+      period = monthRange(m);
+      label = m;
+    } else {
+      if (isDate(opts.start) && isDate(opts.end)) {
+        period = { start: opts.start, end: opts.end };
+      } else {
+        period = weeklyRangeForDate(todayYmd());
+      }
+      label = `${period.start}_to_${period.end}`;
+    }
+    const deck = await buildMaintenanceExecutiveDeck({ period, label, site_code });
+    const root = path.join(dataRoot, "reports-cache", "maintenance-master");
+    fs.mkdirSync(root, { recursive: true });
+    const fileName = `maintenance_master_${t}_${site_code}_${label}.pptx`;
+    const absPath = path.join(root, fileName);
+    fs.writeFileSync(absPath, deck);
+    db.prepare(`
+      INSERT INTO maintenance_presentation_runs (report_type, label, period_start, period_end, site_code, file_path, status, message, generated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'ok', NULL, datetime('now'))
+      ON CONFLICT(report_type, label, site_code) DO UPDATE SET
+        period_start = excluded.period_start,
+        period_end = excluded.period_end,
+        file_path = excluded.file_path,
+        status = 'ok',
+        message = NULL,
+        generated_at = datetime('now')
+    `).run(t, label, period.start, period.end, site_code, absPath);
+    return { report_type: t, label, period, site_code, file_path: absPath, generated_at: new Date().toISOString() };
+  }
+
+  app.get("/maintenance-master/status", async (req, reply) => {
+    const site_code = String(req.query?.site_code || getSiteCode(req)).trim().toLowerCase() || "default";
+    const rows = db.prepare(`
+      SELECT report_type, label, period_start, period_end, site_code, file_path, status, message, generated_at
+      FROM maintenance_presentation_runs
+      WHERE site_code = ?
+      ORDER BY generated_at DESC
+      LIMIT 20
+    `).all(site_code);
+    const latestByType = {};
+    for (const r of rows) {
+      const t = String(r.report_type || "");
+      if (!t || latestByType[t]) continue;
+      latestByType[t] = r;
+    }
+    return reply.send({ ok: true, site_code, latest: latestByType, rows });
+  });
+
+  app.post("/maintenance-master/generate", async (req, reply) => {
+    try {
+      const body = req.body || {};
+      const site_code = String(body.site_code || getSiteCode(req)).trim().toLowerCase() || "default";
+      const report_type = String(body.period_type || body.report_type || "weekly").trim().toLowerCase();
+      if (!["weekly", "monthly"].includes(report_type)) {
+        return reply.code(400).send({ ok: false, error: "period_type must be weekly or monthly" });
+      }
+      const out = await generateMaintenanceMaster(report_type, site_code, {
+        month: String(body.month || "").trim(),
+        start: String(body.start || "").trim(),
+        end: String(body.end || "").trim(),
+      });
+      return reply.send({ ok: true, ...out });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.get("/maintenance-master/latest.pptx", async (req, reply) => {
+    const site_code = String(req.query?.site_code || getSiteCode(req)).trim().toLowerCase() || "default";
+    const report_type = String(req.query?.period_type || "weekly").trim().toLowerCase();
+    const download = String(req.query?.download || "").trim() === "1";
+    const row = db.prepare(`
+      SELECT report_type, label, file_path
+      FROM maintenance_presentation_runs
+      WHERE site_code = ?
+        AND report_type = ?
+      ORDER BY generated_at DESC
+      LIMIT 1
+    `).get(site_code, report_type);
+    if (!row?.file_path || !fs.existsSync(row.file_path)) {
+      return reply.code(404).send({ ok: false, error: "No generated presentation found for this type/site yet" });
+    }
+    const buf = fs.readFileSync(row.file_path);
+    reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+      .header("Content-Disposition", `${download ? "attachment" : "inline"}; filename="IRONLOG_Maintenance_Master_${report_type}_${row.label}.pptx"`)
+      .send(buf);
+  });
+
+  app.get("/maintenance-exec.pptx", async (req, reply) => {
+    const resolved = resolveMaintenancePeriod(req);
+    if (!resolved) {
+      return reply.code(400).send({ error: "Provide month=YYYY-MM or start/end=YYYY-MM-DD" });
+    }
+    const { period, label } = resolved;
+    const site_code = getSiteCode(req);
+    const buffer = await buildMaintenanceExecutiveDeck({ period, label, site_code });
     reply
       .header("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation")
       .header("Content-Disposition", `attachment; filename="IRONLOG_Maintenance_Executive_${label}.pptx"`)
-      .send(Buffer.from(buffer));
+      .send(buffer);
   });
+
+  if (!maintenanceMasterSchedulerStarted) {
+    maintenanceMasterSchedulerStarted = true;
+    const tick = async () => {
+      try {
+        const site_code = "default";
+        const w = weeklyRangeForDate(todayYmd());
+        const weeklyLabel = `${w.start}_to_${w.end}`;
+        const monthlyLabel = todayYmd().slice(0, 7);
+        const hasWeekly = db.prepare(`SELECT 1 AS ok FROM maintenance_presentation_runs WHERE report_type='weekly' AND label=? AND site_code=? LIMIT 1`).get(weeklyLabel, site_code);
+        if (!hasWeekly) await generateMaintenanceMaster("weekly", site_code, { start: w.start, end: w.end });
+        const hasMonthly = db.prepare(`SELECT 1 AS ok FROM maintenance_presentation_runs WHERE report_type='monthly' AND label=? AND site_code=? LIMIT 1`).get(monthlyLabel, site_code);
+        if (!hasMonthly) await generateMaintenanceMaster("monthly", site_code, { month: monthlyLabel });
+      } catch (e) {
+        app.log.error(e);
+      }
+    };
+    tick().catch(() => {});
+    setInterval(() => tick().catch(() => {}), 60 * 60 * 1000);
+  }
 
   // =========================
   // DAILY PDF
