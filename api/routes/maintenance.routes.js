@@ -2153,7 +2153,7 @@ export default async function maintenanceRoutes(app) {
 
   app.get("/histogram/events.pdf", async (req, reply) => {
     try {
-      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const site_code = String(req.query?.site_code || req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
       const start = String(req.query?.start || "").trim();
       const end = String(req.query?.end || "").trim();
       const location = String(req.query?.location || "").trim();

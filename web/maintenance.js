@@ -960,6 +960,7 @@ async function saveHistogramEvent() {
 function openHistogramPdf(download = false) {
   const q = new URLSearchParams();
   q.set("include_all", "1");
+  q.set("site_code", getSessionSite());
   if (download) q.set("download", "1");
   window.open(`${API}/maintenance/histogram/events.pdf?${q.toString()}`, "_blank");
 }
