@@ -92,7 +92,20 @@
     <div class="card stack-24">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <h3 style="margin:0;">Service History (Live)</h3>
-        <div class="muted" id="histMeta">As of: -</div>
+        <div class="row stack-10">
+          <label>
+            View
+            <select id="histViewMode">
+              <option value="all">All Services</option>
+              <option value="closest">Closest Due</option>
+            </select>
+          </label>
+          <label id="histClosestLimitWrap" style="display:none;">
+            Top N
+            <input id="histClosestLimit" type="number" min="1" max="200" step="1" value="20" class="w-100" />
+          </label>
+          <div class="muted" id="histMeta">As of: -</div>
+        </div>
       </div>
       <div style="overflow:auto;">
         <table class="gridTable" style="min-width:980px;">

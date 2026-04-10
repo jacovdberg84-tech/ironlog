@@ -200,14 +200,29 @@ function inspectproRow(r) {
 async function loadHistory() {
   const body = document.getElementById("histBody");
   const meta = document.getElementById("histMeta");
+  const modeEl = document.getElementById("histViewMode");
+  const limitEl = document.getElementById("histClosestLimit");
+  const limitWrap = document.getElementById("histClosestLimitWrap");
   if (!body) return;
   body.innerHTML = `<tr><td colspan="7" class="muted">Loading...</td></tr>`;
   try {
     const res = await fetch(`${API}/maintenance/history`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to load history");
-    if (meta) meta.textContent = `As of: ${data.as_of || "-"}`;
-    const rows = Array.isArray(data.rows) ? data.rows : [];
+    const mode = String(modeEl?.value || "all").trim().toLowerCase();
+    if (limitWrap) limitWrap.style.display = mode === "closest" ? "" : "none";
+    const rawRows = Array.isArray(data.rows) ? data.rows : [];
+    let rows = rawRows.slice();
+    if (mode === "closest") {
+      rows.sort((a, b) => Number(a?.remaining_hours || 0) - Number(b?.remaining_hours || 0));
+      const n = Number(limitEl?.value || 20);
+      const topN = Number.isFinite(n) ? Math.max(1, Math.min(200, Math.trunc(n))) : 20;
+      rows = rows.slice(0, topN);
+    }
+    if (meta) {
+      const suffix = mode === "closest" ? ` | Showing closest due (${rows.length}/${rawRows.length})` : "";
+      meta.textContent = `As of: ${data.as_of || "-"}${suffix}`;
+    }
     body.innerHTML = rows.length ? rows.map(histRow).join("") : `<tr><td colspan="7" class="muted">No history rows.</td></tr>`;
   } catch (e) {
     body.innerHTML = `<tr><td colspan="7" class="message-error">History load error: ${e.message || e}</td></tr>`;
@@ -2600,6 +2615,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   const wfActionDate = document.getElementById("wfActionDate");
   if (wfActionDate && !wfActionDate.value) wfActionDate.value = new Date().toISOString().slice(0, 10);
+  const histViewMode = document.getElementById("histViewMode");
+  const histClosestLimitWrap = document.getElementById("histClosestLimitWrap");
+  if (histClosestLimitWrap) histClosestLimitWrap.style.display = String(histViewMode?.value || "all") === "closest" ? "" : "none";
   const histEventDate = document.getElementById("histEventDate");
   if (histEventDate && !histEventDate.value) histEventDate.value = new Date().toISOString().slice(0, 10);
   const histFilterStart = document.getElementById("histFilterStart");
@@ -2696,6 +2714,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("showAssetKpiBtn")?.addEventListener("click", () => setTopView("kpi"));
   document.getElementById("showHistogramBtn")?.addEventListener("click", () => setTopView("hist"));
   document.getElementById("showSyncAdminBtn")?.addEventListener("click", () => setTopView("sync"));
+  document.getElementById("histViewMode")?.addEventListener("change", () => loadHistory());
+  document.getElementById("histClosestLimit")?.addEventListener("change", () => loadHistory());
   document.getElementById("saveHistogramBtn")?.addEventListener("click", () => saveHistogramEvent());
   document.getElementById("loadHistogramBtn")?.addEventListener("click", () => loadHistogramEvents());
   document.getElementById("openHistogramPdfBtn")?.addEventListener("click", () => openHistogramPdf(false));
