@@ -709,15 +709,7 @@ export default async function ironmindRoutes(app) {
       const end = isDate(body.end) ? String(body.end) : parsed.end;
       const assetCode = String(body.asset_code || parseAssetCode(question)).trim().toUpperCase();
       const qLower = question.toLowerCase();
-      if (!assetCode) {
-        const latest = getLatestIronmindReport("daily_admin");
-        const summary = String(latest?.summary || "").trim();
-        const firstLine = summary
-          .split(/\r?\n/)
-          .map((s) => String(s || "").trim())
-          .filter(Boolean)
-          .find((s) => !s.startsWith("#") && !s.startsWith("- "))
-          || "";
+      const buildFleetSnapshotText = () => {
         const totalDowntime = Number(db.prepare(`
           SELECT COALESCE(SUM(l.hours_down), 0) AS h
           FROM breakdown_downtime_logs l
@@ -761,14 +753,24 @@ export default async function ironmindRoutes(app) {
         const topDownText = topDownRows.length
           ? topDownRows.map((r) => `${String(r.asset_code || "-")}: ${Number(r.downtime_hours || 0).toFixed(1)}h`).join("; ")
           : "No downtime records in selected range.";
-
-        const broad = [
+        return [
           `Fleet snapshot (${start} to ${end}):`,
           `- Total downtime: ${totalDowntime.toFixed(1)}h`,
           `- Open breakdowns: ${openBreakdowns}`,
           `- PM overdue assets: ${overduePm}`,
           `- Top downtime assets: ${topDownText}`,
         ].join("\n");
+      };
+      if (!assetCode) {
+        const latest = getLatestIronmindReport("daily_admin");
+        const summary = String(latest?.summary || "").trim();
+        const firstLine = summary
+          .split(/\r?\n/)
+          .map((s) => String(s || "").trim())
+          .filter(Boolean)
+          .find((s) => !s.startsWith("#") && !s.startsWith("- "))
+          || "";
+        const broad = buildFleetSnapshotText();
 
         if (firstLine) {
           return reply.send({
@@ -796,7 +798,11 @@ export default async function ironmindRoutes(app) {
         WHERE UPPER(a.asset_code) = UPPER(?)
       `).get(start, end, assetCode);
       if (!row?.asset_code) {
-        return reply.send({ ok: true, short_answer: `No asset found for code ${assetCode}.` });
+        const broad = buildFleetSnapshotText();
+        return reply.send({
+          ok: true,
+          short_answer: `${broad}\n\nNo exact asset found for "${assetCode}". Ask with an exact asset code only if you want machine-specific analysis.`,
+        });
       }
       const breakdowns = db.prepare(`
         SELECT COUNT(*) AS c
