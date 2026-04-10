@@ -1743,7 +1743,10 @@ export default async function reportsRoutes(app) {
       SELECT
         a.asset_code,
         a.asset_name,
-        COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED') AS part_number,
+        CASE
+          WHEN LOWER(TRIM(COALESCE(ol.oil_type, ''))) IN ('admin','supervisor','manager','stores','artisan','operator') THEN 'UNSPECIFIED'
+          ELSE COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED')
+        END AS part_number,
         COALESCE(p.part_name, '') AS lube_description,
         COALESCE(SUM(ol.quantity), 0) AS qty_total,
         COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS total_lube_cost

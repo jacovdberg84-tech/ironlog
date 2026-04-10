@@ -115,6 +115,14 @@ export default async function stockRoutes(app) {
     return Number.isFinite(v) && v > 0 ? v : fallback;
   }
 
+  function normalizeOilTypeInput(raw, fallback = null) {
+    const v = String(raw ?? "").trim();
+    if (!v) return fallback;
+    const blocked = new Set(["admin", "supervisor", "manager", "stores", "artisan", "operator"]);
+    if (blocked.has(v.toLowerCase())) return fallback;
+    return v;
+  }
+
   /** Local currency amount per one unit of stock → USD per unit (rate = local units per 1 USD). */
   function unitCostToUsd(amount, currency) {
     const c = String(currency || "USD").toUpperCase();
@@ -902,10 +910,7 @@ export default async function stockRoutes(app) {
       body.log_date != null && String(body.log_date).trim() !== ""
         ? String(body.log_date).trim()
         : new Date().toISOString().slice(0, 10);
-    const oil_type =
-      body.oil_type != null && String(body.oil_type).trim() !== ""
-        ? String(body.oil_type).trim()
-        : null;
+    const oil_type = normalizeOilTypeInput(body.oil_type, null);
     const quantity = Number(body.quantity ?? 0);
 
     if (!asset_code) return reply.code(400).send({ error: "asset_code is required" });
@@ -955,10 +960,7 @@ export default async function stockRoutes(app) {
       body.log_date != null && String(body.log_date).trim() !== ""
         ? String(body.log_date).trim()
         : new Date().toISOString().slice(0, 10);
-    const oil_type =
-      body.oil_type != null && String(body.oil_type).trim() !== ""
-        ? String(body.oil_type).trim()
-        : null;
+    const oil_type = normalizeOilTypeInput(body.oil_type, null);
     const notes =
       body.notes != null && String(body.notes).trim() !== ""
         ? String(body.notes).trim()
@@ -1006,7 +1008,7 @@ export default async function stockRoutes(app) {
         const lg = db.prepare(`
           INSERT INTO oil_logs (asset_id, log_date, oil_type, quantity)
           VALUES (?, ?, ?, ?)
-        `).run(asset.id, log_date, oil_type || part.part_code || null, quantity);
+        `).run(asset.id, log_date, normalizeOilTypeInput(oil_type, part.part_code || null), quantity);
         lube_log_id = Number(lg.lastInsertRowid);
       }
 

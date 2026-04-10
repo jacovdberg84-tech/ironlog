@@ -784,7 +784,10 @@ export default async function dashboardRoutes(app) {
     const lubeDailyByType = db.prepare(`
       SELECT
         a.asset_code,
-        COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED') AS oil_type,
+        CASE
+          WHEN LOWER(TRIM(COALESCE(ol.oil_type, ''))) IN ('admin','supervisor','manager','stores','artisan','operator') THEN 'UNSPECIFIED'
+          ELSE COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED')
+        END AS oil_type,
         COALESCE(SUM(ol.quantity), 0) AS qty,
         COALESCE(SUM(
           ol.quantity * COALESCE(
@@ -1091,7 +1094,10 @@ export default async function dashboardRoutes(app) {
     const byTypeRows = db.prepare(`
       SELECT
         a.asset_code,
-        COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED') AS oil_type,
+        CASE
+          WHEN LOWER(TRIM(COALESCE(ol.oil_type, ''))) IN ('admin','supervisor','manager','stores','artisan','operator') THEN 'UNSPECIFIED'
+          ELSE COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED')
+        END AS oil_type,
         COALESCE(SUM(ol.quantity), 0) AS qty_total,
         COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS total_lube_cost
       FROM oil_logs ol
@@ -1156,7 +1162,10 @@ export default async function dashboardRoutes(app) {
 
     const byType = db.prepare(`
       SELECT
-        COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED') AS oil_key,
+        CASE
+          WHEN LOWER(TRIM(COALESCE(ol.oil_type, ''))) IN ('admin','supervisor','manager','stores','artisan','operator') THEN 'UNSPECIFIED'
+          ELSE COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED')
+        END AS oil_key,
         COALESCE(SUM(ol.quantity), 0) AS qty_total,
         COUNT(*) AS entries
       FROM oil_logs ol
@@ -1173,7 +1182,10 @@ export default async function dashboardRoutes(app) {
     const trend = db.prepare(`
       SELECT
         SUBSTR(ol.log_date, 1, 7) AS month,
-        COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED') AS oil_key,
+        CASE
+          WHEN LOWER(TRIM(COALESCE(ol.oil_type, ''))) IN ('admin','supervisor','manager','stores','artisan','operator') THEN 'UNSPECIFIED'
+          ELSE COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED')
+        END AS oil_key,
         COALESCE(SUM(ol.quantity), 0) AS qty
       FROM oil_logs ol
       WHERE ol.log_date BETWEEN ? AND ?
