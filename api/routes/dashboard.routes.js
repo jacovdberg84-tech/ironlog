@@ -25,6 +25,12 @@ function monthStartIso(dateStr) {
   return `${s.slice(0, 7)}-01`;
 }
 
+function isToyotaHiluxAsset(asset) {
+  const code = String(asset?.asset_code || "").toLowerCase();
+  const name = String(asset?.asset_name || "").toLowerCase();
+  return name.includes("toyota") && name.includes("hilux") || code.includes("hilux");
+}
+
 function eachDateInclusiveYMD(startStr, endStr, fn) {
   const start = new Date(`${startStr}T12:00:00`);
   const end = new Date(`${endStr}T12:00:00`);
@@ -140,19 +146,11 @@ export default async function dashboardRoutes(app) {
       a.category,
       COALESCE(NULLIF(TRIM(dh.input_unit), ''), '') AS input_unit,
       CASE
-        WHEN UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM' THEN 'km'
-        ELSE COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
-        WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
-          OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
-          OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
-          OR LOWER(COALESCE(a.category, '')) LIKE '%pickup%'
-          OR LOWER(COALESCE(a.category, '')) LIKE '%bakkie%'
-          OR LOWER(COALESCE(a.asset_code, '')) LIKE 'ldv%'
-          OR UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM'
-          OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
-          THEN 'km'
+        WHEN (
+          (INSTR(LOWER(COALESCE(a.asset_name, '')), 'toyota') > 0 AND INSTR(LOWER(COALESCE(a.asset_name, '')), 'hilux') > 0)
+          OR INSTR(LOWER(COALESCE(a.asset_code, '')), 'hilux') > 0
+        ) THEN 'km'
         ELSE 'hours'
-      END)
       END AS utilization_mode,
       COALESCE(NULLIF(a.km_per_hour_factor, 0), 10.0) AS km_per_hour_factor,
       COALESCE(dh.scheduled_hours, 0) AS scheduled_hours,
@@ -259,8 +257,7 @@ export default async function dashboardRoutes(app) {
           : Number(scheduledFallback || 0)
       );
       const runRaw = Math.max(0, Number(r.run_hours || 0));
-      const rowUnit = String(r.input_unit || "").toLowerCase();
-      const mode = rowUnit === "km" ? "km" : String(r.utilization_mode || "hours").toLowerCase();
+      const mode = isToyotaHiluxAsset(r) ? "km" : "hours";
       const kmPerHour = Math.max(0.1, Number(r.km_per_hour_factor || 10));
       const run = mode === "km" ? (runRaw / kmPerHour) : runRaw;
       const loggedDownRaw = Math.max(0, Number(downtimeByAsset.get(assetId) || 0));
@@ -320,9 +317,7 @@ export default async function dashboardRoutes(app) {
           : (openBreakdownAssets.has(assetId) ? scheduled : 0);
         const cappedDown = Math.min(loggedDown, scheduled);
         const cat = String(a.category || "");
-        const mode = String(a.utilization_mode || "").trim()
-          ? String(a.utilization_mode || "").toLowerCase()
-          : (cat.toLowerCase().includes("truck") || cat.toLowerCase().includes("vehicle") ? "km" : "hours");
+        const mode = isToyotaHiluxAsset(a) ? "km" : "hours";
         const kmPerHour = Math.max(0.1, Number(a.km_per_hour_factor || 10));
         const runRaw = 0;
         const run = mode === "km" ? (runRaw / kmPerHour) : runRaw;
