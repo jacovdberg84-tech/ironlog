@@ -4561,7 +4561,8 @@ export default async function reportsRoutes(app) {
     const availByTypeBase = db.prepare(`
       SELECT
         LOWER(IFNULL(a.category, 'uncategorized')) AS equipment_type,
-        COALESCE(SUM(dh.scheduled_hours), 0) AS scheduled_hours
+        COALESCE(SUM(dh.scheduled_hours), 0) AS scheduled_hours,
+        COALESCE(SUM(CASE WHEN dh.is_used = 1 THEN dh.hours_run ELSE 0 END), 0) AS run_hours
       FROM daily_hours dh
       JOIN assets a ON a.id = dh.asset_id
       WHERE dh.work_date BETWEEN ? AND ?
@@ -4599,11 +4600,15 @@ export default async function reportsRoutes(app) {
       const adjusted = Math.max(0, scheduled - rainH);
       const downtime = Number(downtimeByType.get(key) || 0);
       const availability_pct = adjusted > 0 ? Math.max(0, ((adjusted - downtime) / adjusted) * 100) : null;
+      const run = Number(r.run_hours || 0);
+      const utilization_pct = adjusted > 0 ? Math.max(0, (run / adjusted) * 100) : null;
       return {
         equipment_type: key.toUpperCase(),
         adjusted_hours: Number(adjusted.toFixed(1)),
+        run_hours: Number(run.toFixed(1)),
         downtime_hours: Number(downtime.toFixed(1)),
         availability_pct: availability_pct == null ? null : Number(availability_pct.toFixed(2)),
+        utilization_pct: utilization_pct == null ? null : Number(utilization_pct.toFixed(2)),
       };
     });
     const oilTotal = db.prepare(`
@@ -4725,6 +4730,7 @@ export default async function reportsRoutes(app) {
       WHERE LOWER(COALESCE(source, '')) = 'breakdown'
         AND COALESCE(opened_at, '') BETWEEN ? AND ?
     `).get(periodStartTs, periodEndTs)?.c || 0);
+    const totalFuelAnomalyDays = fuelAnomalyRows.reduce((s, r) => s + Number(r.anomaly_days || 0), 0);
     const pptx = new PptxGenJS();
     pptx.layout = "LAYOUT_WIDE";
     pptx.author = "IRONLOG";
@@ -4741,7 +4747,8 @@ export default async function reportsRoutes(app) {
         { text: `Rain-adjusted scheduled hours: ${adjustedScheduled.toFixed(1)}\n` },
         { text: `Run hours: ${runHours.toFixed(1)}\n` },
         { text: `Utilisation (raw): ${utilRaw == null ? "N/A" : `${utilRaw.toFixed(2)}%`}\n` },
-        { text: `Utilisation (rain-adjusted): ${utilAdj == null ? "N/A" : `${utilAdj.toFixed(2)}%`}` },
+        { text: `Utilisation (rain-adjusted): ${utilAdj == null ? "N/A" : `${utilAdj.toFixed(2)}%`}\n` },
+        { text: `Downtime cost (period): ${totals.downtime_cost.toFixed(2)}` },
       ],
       { x: 0.6, y: 1.6, w: 6.5, h: 3.2, fontSize: 14 }
     );
@@ -4756,8 +4763,8 @@ export default async function reportsRoutes(app) {
     s3.addText("2) Plant Performance", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
     s3.addTable(
       [
-        [{ text: "Type", options: { bold: true } }, { text: "Adjusted Hours", options: { bold: true } }, { text: "Downtime Hrs", options: { bold: true } }, { text: "Availability %", options: { bold: true } }],
-        ...availabilityByType.slice(0, 16).map((r) => [r.equipment_type, r.adjusted_hours.toFixed(1), r.downtime_hours.toFixed(1), r.availability_pct == null ? "N/A" : `${r.availability_pct.toFixed(2)}%`]),
+        [{ text: "Type", options: { bold: true } }, { text: "Adjusted Hours", options: { bold: true } }, { text: "Run Hrs", options: { bold: true } }, { text: "Downtime Hrs", options: { bold: true } }, { text: "Availability %", options: { bold: true } }, { text: "Utilization %", options: { bold: true } }],
+        ...availabilityByType.slice(0, 16).map((r) => [r.equipment_type, r.adjusted_hours.toFixed(1), r.run_hours.toFixed(1), r.downtime_hours.toFixed(1), r.availability_pct == null ? "N/A" : `${r.availability_pct.toFixed(2)}%`, r.utilization_pct == null ? "N/A" : `${r.utilization_pct.toFixed(2)}%`]),
       ],
       { x: 0.5, y: 1.1, w: 12.3, h: 5.6, fontSize: 12, border: { pt: 1, color: "C8C8C8" } }
     );
@@ -4796,6 +4803,7 @@ export default async function reportsRoutes(app) {
     s8.addText(`Inspections completed: ${Number(inspectionsSummary?.inspections_done || 0)}\nAssets covered: ${Number(inspectionsSummary?.assets_covered || 0)}`, { x: 0.8, y: 1.6, w: 5.8, h: 1.8, fontSize: 18 });
     const s9 = pptx.addSlide();
     s9.addText("8) Security (Fuel Anomalies)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
+    s9.addText(`Total fuel anomaly days: ${Number(totalFuelAnomalyDays || 0)}`, { x: 1.2, y: 0.9, w: 6.2, h: 0.4, fontSize: 14, bold: true });
     s9.addTable(
       [
         [{ text: "Asset Code", options: { bold: true } }, { text: "Anomaly Days", options: { bold: true } }],
@@ -4806,7 +4814,7 @@ export default async function reportsRoutes(app) {
     const s10 = pptx.addSlide();
     s10.addText("9) Challenges and Risks", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
     s10.addText(`Weather / Rain days: ${rainCount}\nBreakdowns in period: ${breakdownCount}\nUnplanned maintenance (breakdown WOs opened): ${unplannedMaintCount}\nTrue WO downtime (breakdown): ${totalTrueDowntimeWo.toFixed(1)} h`, { x: 0.8, y: 1.5, w: 8.0, h: 2.8, fontSize: 16 });
-    s10.addText(`Rain dates: ${rainDates.length ? rainDates.join(", ") : "None recorded in selected period"}`, { x: 0.8, y: 4.5, w: 11.5, h: 1.2, fontSize: 12, color: "666666" });
+    s10.addText(`Rain dates: ${rainDates.length ? rainDates.join(", ") : "None recorded in selected period"}\nSource: Reports rain-days widget / site_rain_days`, { x: 0.8, y: 4.5, w: 11.5, h: 1.2, fontSize: 12, color: "666666" });
     const buffer = await pptx.write({ outputType: "nodebuffer" });
     return Buffer.from(buffer);
   }
