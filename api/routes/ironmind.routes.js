@@ -39,6 +39,11 @@ const RSG_SERVICE_PROFILES = [
 ];
 
 export default async function ironmindRoutes(app) {
+  const ironmindRuntime = {
+    last_ask_mode: "unknown",
+    last_ask_error: "",
+    last_ask_at: "",
+  };
   function isDate(v) {
     return /^\d{4}-\d{2}-\d{2}$/.test(String(v || "").trim());
   }
@@ -903,7 +908,15 @@ export default async function ironmindRoutes(app) {
       const history = Array.isArray(body.history) ? body.history : [];
       const qLower = question.toLowerCase();
       const live = await tryAnswerIronmindAskWithAi({ question, start, end, assetCode, history });
-      if (live) return reply.send({ ok: true, short_answer: live });
+      if (live) {
+        ironmindRuntime.last_ask_mode = "live_ai";
+        ironmindRuntime.last_ask_error = "";
+        ironmindRuntime.last_ask_at = new Date().toISOString();
+        return reply.send({ ok: true, short_answer: live });
+      }
+      ironmindRuntime.last_ask_mode = "fallback";
+      ironmindRuntime.last_ask_error = "";
+      ironmindRuntime.last_ask_at = new Date().toISOString();
       const buildFleetSnapshotText = () => {
         const totalDowntime = Number(db.prepare(`
           SELECT COALESCE(SUM(l.hours_down), 0) AS h
@@ -1150,6 +1163,28 @@ export default async function ironmindRoutes(app) {
       });
     } catch (err) {
       req.log.error(err);
+      ironmindRuntime.last_ask_mode = "error";
+      ironmindRuntime.last_ask_error = err?.message || String(err);
+      ironmindRuntime.last_ask_at = new Date().toISOString();
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.get("/health", async (_req, reply) => {
+    try {
+      const cfg = getAiConfig();
+      const provider = String(cfg?.provider || "none");
+      const model = provider === "openai" ? String(cfg?.model || "gpt-4o-mini") : "";
+      return reply.send({
+        ok: true,
+        provider,
+        model,
+        live_enabled: provider === "openai",
+        last_ask_mode: ironmindRuntime.last_ask_mode,
+        last_ask_error: ironmindRuntime.last_ask_error || null,
+        last_ask_at: ironmindRuntime.last_ask_at || null,
+      });
+    } catch (err) {
       return reply.code(500).send({ ok: false, error: err.message || String(err) });
     }
   });

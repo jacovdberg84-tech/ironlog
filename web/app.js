@@ -2076,6 +2076,7 @@ async function loadDashboard() {
 
   await loadStockMonitor().catch(() => {});
   await loadIronmindInsight({ silent: true }).catch(() => {});
+  await loadIronmindHealth().catch(() => {});
   await loadIronmindSettings().catch(() => {});
   await loadIronmindHistory({ silent: true }).catch(() => {});
 
@@ -2112,6 +2113,26 @@ async function loadIronmindInsight(options = {}) {
     if (metaEl) metaEl.textContent = "Insight unavailable right now.";
     if (!silent) setStatus("IRONMIND load error: " + err.message);
     throw err;
+  }
+}
+
+async function loadIronmindHealth() {
+  const healthEl = qs("ironmindHealth");
+  if (!healthEl) return;
+  try {
+    const data = await fetchJson(`${API}/api/ironmind/health`);
+    const live = Boolean(data?.live_enabled);
+    const provider = String(data?.provider || "none");
+    const model = String(data?.model || "");
+    const mode = String(data?.last_ask_mode || "unknown");
+    const err = String(data?.last_ask_error || "").trim();
+    const left = live ? `OpenAI: Connected (${provider}${model ? `/${model}` : ""})` : `OpenAI: Not connected (${provider})`;
+    const right = `Last ask mode: ${mode}${err ? ` | Last error: ${err}` : ""}`;
+    healthEl.textContent = `${left} | ${right}`;
+    healthEl.className = live ? "status-ok" : "status-overdue";
+  } catch (e) {
+    healthEl.textContent = `OpenAI status unavailable: ${e.message || e}`;
+    healthEl.className = "status-overdue";
   }
 }
 
@@ -2309,6 +2330,7 @@ async function askIronmindQuestion() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sid, question, answer: short }),
     }).catch(() => {});
+    loadIronmindHealth().catch(() => {});
     setStatus("IRONMIND question answered.");
   } catch (e) {
     if (out) out.innerHTML = `<small class="muted">Question failed: ${escapeHtml(e.message || String(e))}</small>`;
@@ -7912,6 +7934,9 @@ async function init() {
   qs("ironmindRefreshBtn")?.addEventListener("click", () =>
     refreshIronmindInsight().catch((e) => setStatus("IRONMIND refresh error: " + e.message))
   );
+  setInterval(() => {
+    loadIronmindHealth().catch(() => {});
+  }, 30000);
   qs("ironmindSaveSettingsBtn")?.addEventListener("click", () =>
     saveIronmindSettings().catch((e) => setStatus("IronMind settings error: " + (e.message || e)))
   );
