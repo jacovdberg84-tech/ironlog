@@ -760,7 +760,14 @@ export default async function dashboardRoutes(app) {
       SELECT
         a.asset_code,
         a.asset_name,
-        COALESCE(SUM(ol.quantity), 0) AS qty
+        COALESCE(SUM(ol.quantity), 0) AS qty,
+        COALESCE(SUM(
+          ol.quantity * COALESCE(
+            ol.unit_cost,
+            (SELECT value FROM cost_settings WHERE key = 'lube_cost_per_qty_default' LIMIT 1),
+            4.0
+          )
+        ), 0) AS lube_cost
       FROM oil_logs ol
       JOIN assets a ON a.id = ol.asset_id
       WHERE ol.log_date = ?
@@ -771,10 +778,19 @@ export default async function dashboardRoutes(app) {
       asset_code: r.asset_code,
       asset_name: r.asset_name,
       qty: Number(r.qty || 0),
+      lube_cost: Number(r.lube_cost || 0),
     }));
 
     const lubeTotalRow = db.prepare(`
-      SELECT COALESCE(SUM(quantity), 0) AS qty_total
+      SELECT
+        COALESCE(SUM(quantity), 0) AS qty_total,
+        COALESCE(SUM(
+          quantity * COALESCE(
+            unit_cost,
+            (SELECT value FROM cost_settings WHERE key = 'lube_cost_per_qty_default' LIMIT 1),
+            4.0
+          )
+        ), 0) AS total_lube_cost
       FROM oil_logs
       WHERE log_date = ?
     `).get(date);
@@ -986,6 +1002,7 @@ export default async function dashboardRoutes(app) {
       lube_usage: {
         date,
         qty_total: Number(lubeTotalRow?.qty_total || 0),
+        total_lube_cost: Number(lubeTotalRow?.total_lube_cost || 0),
         rows: lubeDaily,
       },
       cost_engine: {
@@ -1012,11 +1029,17 @@ export default async function dashboardRoutes(app) {
       return reply.code(400).send({ error: "start and end must be YYYY-MM-DD" });
     }
 
+    const defaultLubeCost = Number(
+      db.prepare(`SELECT value FROM cost_settings WHERE key = 'lube_cost_per_qty_default' LIMIT 1`).get()?.value
+    );
+    const lubeUnitFallback = Number.isFinite(defaultLubeCost) && defaultLubeCost > 0 ? defaultLubeCost : 4.0;
+
     const rows = db.prepare(`
       SELECT
         a.asset_code,
         a.asset_name,
         COALESCE(SUM(ol.quantity), 0) AS qty_total,
+        COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS total_lube_cost,
         COUNT(*) AS entries
       FROM oil_logs ol
       JOIN assets a ON a.id = ol.asset_id
@@ -1024,21 +1047,23 @@ export default async function dashboardRoutes(app) {
       GROUP BY a.id
       ORDER BY qty_total DESC, a.asset_code ASC
       LIMIT 200
-    `).all(start, end).map((r) => ({
+    `).all(lubeUnitFallback, start, end).map((r) => ({
       asset_code: r.asset_code,
       asset_name: r.asset_name,
       qty_total: Number(r.qty_total || 0),
+      total_lube_cost: Number(r.total_lube_cost || 0),
       entries: Number(r.entries || 0),
     }));
 
     const summary = db.prepare(`
       SELECT
         COALESCE(SUM(ol.quantity), 0) AS qty_total,
+        COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS total_lube_cost,
         COUNT(*) AS entries,
         COUNT(DISTINCT ol.asset_id) AS assets
       FROM oil_logs ol
       WHERE ol.log_date BETWEEN ? AND ?
-    `).get(start, end);
+    `).get(lubeUnitFallback, start, end);
 
     return {
       ok: true,
@@ -1046,6 +1071,7 @@ export default async function dashboardRoutes(app) {
       end,
       summary: {
         qty_total: Number(summary?.qty_total || 0),
+        total_lube_cost: Number(summary?.total_lube_cost || 0),
         entries: Number(summary?.entries || 0),
         assets: Number(summary?.assets || 0),
       },

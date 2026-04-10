@@ -2034,12 +2034,16 @@ async function loadDashboard() {
   setText("lubeQtyTotal", Number(lube.qty_total || 0).toFixed(1));
   setText("lubeEntries", Array.isArray(lube.rows) ? lube.rows.length : 0);
   setText("lubeAssets", Array.isArray(lube.rows) ? lube.rows.length : 0);
+  setText("cLubeCost", fmtMoney(lube.total_lube_cost != null ? lube.total_lube_cost : data?.cost_engine?.lube_cost));
   const lubeList = qs("lubeList");
   if (lubeList) {
     lubeList.innerHTML = "";
     (lube.rows || []).forEach((r) => {
       lubeList.appendChild(
-        item(`<b>${r.asset_code}</b> – ${Number(r.qty || 0).toFixed(1)} qty<br><small>${r.asset_name || ""}</small>`)
+        item(
+          `<b>${r.asset_code}</b> – ${Number(r.qty || 0).toFixed(1)} qty | ${fmtMoney(r.total_lube_cost ?? r.lube_cost)} cost` +
+          `<br><small>Issued to: ${r.asset_name || r.asset_code || "Unknown equipment"}</small>`
+        )
       );
     });
     if (!lube.rows?.length) lubeList.appendChild(item("<small>No lube logs for this date.</small>"));
@@ -2461,6 +2465,7 @@ async function loadLubeUsage() {
   setText("lubeQtyTotal", Number(data.summary?.qty_total || 0).toFixed(1));
   setText("lubeEntries", Number(data.summary?.entries || 0));
   setText("lubeAssets", Number(data.summary?.assets || 0));
+  setText("cLubeCost", fmtMoney(data.summary?.total_lube_cost || 0));
 
   const lubeList = qs("lubeList");
   if (lubeList) {
@@ -2468,8 +2473,8 @@ async function loadLubeUsage() {
     (data.rows || []).forEach((r) => {
       lubeList.appendChild(
         item(
-          `<b>${r.asset_code}</b> – ${Number(r.qty_total || 0).toFixed(1)} qty` +
-          `<br><small>${r.asset_name || ""} | Entries: ${Number(r.entries || 0)}</small>`
+          `<b>${r.asset_code}</b> – ${Number(r.qty_total || 0).toFixed(1)} qty | ${fmtMoney(r.total_lube_cost || 0)} cost` +
+          `<br><small>Issued to: ${r.asset_name || r.asset_code || "Unknown equipment"} | Entries: ${Number(r.entries || 0)}</small>`
         )
       );
     });
