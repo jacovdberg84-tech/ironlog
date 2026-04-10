@@ -2301,20 +2301,99 @@ async function askIronmindQuestion() {
     const safe = escapeHtml(short).replace(/\n/g, "<br>");
     window.__ironmindAskHistory.push({ question, answer: short });
     window.__ironmindAskHistory = window.__ironmindAskHistory.slice(-12);
-    if (out) {
-      const items = window.__ironmindAskHistory.map((h) => `
-        <div style="margin-bottom:10px;">
-          <div><b>You:</b> ${escapeHtml(String(h.question || ""))}</div>
-          <div><b>IronMind:</b> ${escapeHtml(String(h.answer || "")).replace(/\n/g, "<br>")}</div>
-        </div>
-      `).join("");
-      out.innerHTML = items || `<div>${safe}</div>`;
-    }
+    saveIronmindAskHistoryLocal();
+    renderIronmindAskHistory();
+    const sid = getIronmindSessionId();
+    fetchJson(`${API}/api/ironmind/ask-memory`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sid, question, answer: short }),
+    }).catch(() => {});
     setStatus("IRONMIND question answered.");
   } catch (e) {
     if (out) out.innerHTML = `<small class="muted">Question failed: ${escapeHtml(e.message || String(e))}</small>`;
     setStatus("IRONMIND ask error: " + (e.message || e));
   }
+}
+
+function ironmindMemoryStorageKey() {
+  return `ironmind_chat_${String(getSessionUser() || "user").toLowerCase()}_${String(getSessionSite() || "main").toLowerCase()}`;
+}
+
+function getIronmindSessionId() {
+  const key = `${ironmindMemoryStorageKey()}_session`;
+  let sid = String(localStorage.getItem(key) || "").trim();
+  if (!sid) {
+    sid = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(key, sid);
+  }
+  return sid;
+}
+
+function saveIronmindAskHistoryLocal() {
+  try {
+    localStorage.setItem(ironmindMemoryStorageKey(), JSON.stringify(window.__ironmindAskHistory || []));
+  } catch {}
+}
+
+function loadIronmindAskHistoryLocal() {
+  try {
+    const parsed = JSON.parse(String(localStorage.getItem(ironmindMemoryStorageKey()) || "[]"));
+    if (Array.isArray(parsed)) return parsed;
+  } catch {}
+  return [];
+}
+
+function renderIronmindAskHistory() {
+  const out = qs("ironmindAskResult");
+  if (!out) return;
+  const rows = Array.isArray(window.__ironmindAskHistory) ? window.__ironmindAskHistory : [];
+  if (!rows.length) {
+    out.innerHTML = `<small class="muted">Ask a question for short operational answers.</small>`;
+    return;
+  }
+  out.innerHTML = rows.map((h) => `
+    <div style="margin-bottom:10px;">
+      <div><b>You:</b> ${escapeHtml(String(h.question || ""))}</div>
+      <div><b>IronMind:</b> ${escapeHtml(String(h.answer || "")).replace(/\n/g, "<br>")}</div>
+    </div>
+  `).join("");
+}
+
+async function hydrateIronmindAskMemory() {
+  window.__ironmindAskHistory = loadIronmindAskHistoryLocal().slice(-12);
+  renderIronmindAskHistory();
+  try {
+    const sid = getIronmindSessionId();
+    const data = await fetchJson(`${API}/api/ironmind/ask-memory?session_id=${encodeURIComponent(sid)}&limit=30`);
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    if (rows.length) {
+      window.__ironmindAskHistory = rows.map((r) => ({
+        question: String(r.question || ""),
+        answer: String(r.answer || ""),
+      })).slice(-12);
+      saveIronmindAskHistoryLocal();
+      renderIronmindAskHistory();
+    }
+  } catch {}
+}
+
+async function resetIronmindAskMemory() {
+  const out = qs("ironmindAskResult");
+  const key = ironmindMemoryStorageKey();
+  try {
+    localStorage.removeItem(key);
+  } catch {}
+  window.__ironmindAskHistory = [];
+  renderIronmindAskHistory();
+  try {
+    const sid = getIronmindSessionId();
+    await fetchJson(`${API}/api/ironmind/ask-memory?session_id=${encodeURIComponent(sid)}`, {
+      method: "DELETE",
+    });
+  } catch {}
+  if (out) out.innerHTML = `<small class="muted">Memory cleared.</small>`;
+  setStatus("IronMind chat memory reset.");
 }
 
 async function generateIronmindRsgPlan(createWo = false) {
@@ -7839,12 +7918,16 @@ async function init() {
   qs("ironmindAskBtn")?.addEventListener("click", () =>
     askIronmindQuestion().catch((e) => setStatus("IRONMIND ask error: " + e.message))
   );
+  qs("ironmindResetMemoryBtn")?.addEventListener("click", () =>
+    resetIronmindAskMemory().catch((e) => setStatus("IRONMIND reset memory error: " + e.message))
+  );
   qs("ironmindAskInput")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       askIronmindQuestion().catch((err) => setStatus("IRONMIND ask error: " + err.message));
     }
   });
+  hydrateIronmindAskMemory().catch(() => {});
   qs("saveThresholds")?.addEventListener("click", () => saveThresholdsFromUI());
   qs("ironmindSummary")?.addEventListener("click", (e) => {
     const el = e.target instanceof HTMLElement ? e.target : null;

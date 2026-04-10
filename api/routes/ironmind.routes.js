@@ -99,6 +99,11 @@ export default async function ironmindRoutes(app) {
     const rows = db.prepare(`PRAGMA table_info(${table})`).all();
     return rows.some((r) => String(r.name) === col);
   }
+  function getAskMemoryCtx(req) {
+    const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+    const user_name = String(req.headers?.["x-user-name"] || "unknown").trim().toLowerCase() || "unknown";
+    return { site_code, user_name };
+  }
   db.prepare(`
     CREATE TABLE IF NOT EXISTS rsg_service_profiles (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -115,6 +120,21 @@ export default async function ironmindRoutes(app) {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
+  `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS ironmind_ask_memory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      site_code TEXT NOT NULL DEFAULT 'main',
+      user_name TEXT NOT NULL DEFAULT 'unknown',
+      session_id TEXT NOT NULL,
+      question TEXT NOT NULL,
+      answer TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  db.prepare(`
+    CREATE INDEX IF NOT EXISTS idx_ironmind_ask_memory_lookup
+    ON ironmind_ask_memory(site_code, user_name, session_id, id)
   `).run();
   db.prepare(`
     CREATE TABLE IF NOT EXISTS rsg_service_profile_items (
@@ -780,6 +800,80 @@ export default async function ironmindRoutes(app) {
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  app.get("/ask-memory", async (req, reply) => {
+    try {
+      const { site_code, user_name } = getAskMemoryCtx(req);
+      const session_id = String(req.query?.session_id || "").trim();
+      if (!session_id) return reply.send({ ok: true, rows: [] });
+      const limitRaw = Number(req.query?.limit || 30);
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, Math.trunc(limitRaw))) : 30;
+      const rows = db.prepare(`
+        SELECT question, answer, created_at
+        FROM ironmind_ask_memory
+        WHERE site_code = ?
+          AND user_name = ?
+          AND session_id = ?
+        ORDER BY id DESC
+        LIMIT ?
+      `).all(site_code, user_name, session_id, limit).reverse();
+      return reply.send({ ok: true, rows });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.post("/ask-memory", async (req, reply) => {
+    try {
+      const { site_code, user_name } = getAskMemoryCtx(req);
+      const body = req.body || {};
+      const session_id = String(body.session_id || "").trim();
+      const question = String(body.question || "").trim();
+      const answer = String(body.answer || "").trim();
+      if (!session_id || !question || !answer) {
+        return reply.code(400).send({ ok: false, error: "session_id, question and answer are required" });
+      }
+      db.prepare(`
+        INSERT INTO ironmind_ask_memory (site_code, user_name, session_id, question, answer, created_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+      `).run(site_code, user_name, session_id, question, answer);
+      db.prepare(`
+        DELETE FROM ironmind_ask_memory
+        WHERE id IN (
+          SELECT id
+          FROM ironmind_ask_memory
+          WHERE site_code = ?
+            AND user_name = ?
+            AND session_id = ?
+          ORDER BY id DESC
+          LIMIT -1 OFFSET 60
+        )
+      `).run(site_code, user_name, session_id);
+      return reply.send({ ok: true });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.delete("/ask-memory", async (req, reply) => {
+    try {
+      const { site_code, user_name } = getAskMemoryCtx(req);
+      const session_id = String(req.query?.session_id || "").trim();
+      if (!session_id) return reply.code(400).send({ ok: false, error: "session_id is required" });
+      db.prepare(`
+        DELETE FROM ironmind_ask_memory
+        WHERE site_code = ?
+          AND user_name = ?
+          AND session_id = ?
+      `).run(site_code, user_name, session_id);
+      return reply.send({ ok: true });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
     }
   });
 
