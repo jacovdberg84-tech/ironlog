@@ -959,16 +959,7 @@ async function saveHistogramEvent() {
 
 function openHistogramPdf(download = false) {
   const q = new URLSearchParams();
-  const start = String(document.getElementById("histFilterStart")?.value || "").trim();
-  const end = String(document.getElementById("histFilterEnd")?.value || "").trim();
-  const location = String(document.getElementById("histFilterLocation")?.value || "").trim();
-  const part = String(document.getElementById("histFilterPart")?.value || "").trim();
-  const approval = String(document.getElementById("histFilterApproval")?.value || "").trim();
-  if (start) q.set("start", start);
-  if (end) q.set("end", end);
-  if (location) q.set("location", location);
-  if (part) q.set("part", part);
-  if (approval) q.set("approval", approval);
+  q.set("include_all", "1");
   if (download) q.set("download", "1");
   window.open(`${API}/maintenance/histogram/events.pdf?${q.toString()}`, "_blank");
 }

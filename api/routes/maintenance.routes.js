@@ -2159,27 +2159,28 @@ export default async function maintenanceRoutes(app) {
       const location = String(req.query?.location || "").trim();
       const approval = String(req.query?.approval || "").trim();
       const part = String(req.query?.part || "").trim();
+      const include_all = String(req.query?.include_all || "").trim() === "1";
       const download = String(req.query?.download || "").trim() === "1";
 
       const where = ["COALESCE(site_code, 'main') = ?"];
       const params = [site_code];
-      if (isDate(start)) {
+      if (!include_all && isDate(start)) {
         where.push("event_date >= ?");
         params.push(start);
       }
-      if (isDate(end)) {
+      if (!include_all && isDate(end)) {
         where.push("event_date <= ?");
         params.push(end);
       }
-      if (location) {
+      if (!include_all && location) {
         where.push("LOWER(COALESCE(location, '')) LIKE ?");
         params.push(`%${location.toLowerCase()}%`);
       }
-      if (approval) {
+      if (!include_all && approval) {
         where.push("LOWER(COALESCE(approval_status, '')) LIKE ?");
         params.push(`%${approval.toLowerCase()}%`);
       }
-      if (part) {
+      if (!include_all && part) {
         where.push("(LOWER(COALESCE(part_code, '')) LIKE ? OR LOWER(COALESCE(part_name, '')) LIKE ?)");
         params.push(`%${part.toLowerCase()}%`, `%${part.toLowerCase()}%`);
       }
@@ -2191,7 +2192,7 @@ export default async function maintenanceRoutes(app) {
         ORDER BY event_date DESC, id DESC
       `).all(...params);
 
-      const periodLabel = `${isDate(start) ? start : "-"} to ${isDate(end) ? end : "-"}`;
+      const periodLabel = include_all ? "ALL EVENTS" : `${isDate(start) ? start : "-"} to ${isDate(end) ? end : "-"}`;
       const pdf = await buildPdfBuffer((doc) => {
         sectionTitle(doc, "Maintenance Histogram Events");
         doc
