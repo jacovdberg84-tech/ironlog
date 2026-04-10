@@ -1417,7 +1417,7 @@ async function loadWeeklyForumSummary() {
   msg.className = "muted";
   msg.textContent = "Loading weekly forum data...";
   kpiBody.innerHTML = `<tr><td colspan="2" class="muted">Loading...</td></tr>`;
-  upcomingBody.innerHTML = `<tr><td colspan="9" class="muted">Loading...</td></tr>`;
+  upcomingBody.innerHTML = `<tr><td colspan="11" class="muted">Loading...</td></tr>`;
   try {
     const res = await fetch(`${API}/maintenance/weekly-forum/summary?${q}`);
     const data = await res.json();
@@ -1456,11 +1456,13 @@ async function loadWeeklyForumSummary() {
           <td style="text-align:right;">${fmt1(r.remaining_hours)}</td>
           <td>${esc(r.status || "-")}</td>
           <td style="text-align:right;">${fmt1(r?.forecast?.avg_oil_qty)}</td>
+          <td style="text-align:right;">${fmtMoney(r?.forecast?.avg_oil_cost)}</td>
           <td style="text-align:right;">${fmt1(r?.forecast?.avg_parts_qty)}</td>
+          <td style="text-align:right;">${fmtMoney(r?.forecast?.avg_parts_cost)}</td>
           <td style="text-align:right;">${fmtMoney(r?.forecast?.est_service_kit_cost)}</td>
         </tr>
       `).join("")
-      : `<tr><td colspan="9" class="muted">No upcoming services within threshold.</td></tr>`;
+      : `<tr><td colspan="11" class="muted">No upcoming services within threshold.</td></tr>`;
 
     msg.className = "message-success";
     msg.textContent = "Weekly forum summary loaded.";
@@ -1468,7 +1470,7 @@ async function loadWeeklyForumSummary() {
     msg.className = "message-error";
     msg.textContent = `Load error: ${e.message || e}`;
     kpiBody.innerHTML = `<tr><td colspan="2" class="message-error">${esc(e.message || String(e))}</td></tr>`;
-    upcomingBody.innerHTML = `<tr><td colspan="9" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+    upcomingBody.innerHTML = `<tr><td colspan="11" class="message-error">${esc(e.message || String(e))}</td></tr>`;
   }
 }
 

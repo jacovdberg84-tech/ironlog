@@ -1563,15 +1563,17 @@ export default async function maintenanceRoutes(app) {
           table(
             doc,
             [
-              { key: "machine", label: "Machine", width: 0.2 },
-              { key: "service", label: "Service", width: 0.17 },
-              { key: "current", label: "Current", width: 0.09, align: "right" },
-              { key: "next", label: "Next Due", width: 0.09, align: "right" },
-              { key: "remain", label: "Remaining", width: 0.09, align: "right" },
-              { key: "status", label: "Status", width: 0.1 },
-              { key: "oil", label: "Avg Oil Qty", width: 0.09, align: "right" },
-              { key: "parts", label: "Avg Parts Qty", width: 0.09, align: "right" },
-              { key: "kit", label: "Est Kit Cost", width: 0.08, align: "right" },
+              { key: "machine", label: "Machine", width: 0.18 },
+              { key: "service", label: "Service", width: 0.15 },
+              { key: "current", label: "Current", width: 0.07, align: "right" },
+              { key: "next", label: "Next Due", width: 0.07, align: "right" },
+              { key: "remain", label: "Remaining", width: 0.07, align: "right" },
+              { key: "status", label: "Status", width: 0.09 },
+              { key: "oil", label: "Avg Oil Qty", width: 0.07, align: "right" },
+              { key: "oil_cost", label: "Avg Oil $", width: 0.08, align: "right" },
+              { key: "parts", label: "Avg Parts Qty", width: 0.07, align: "right" },
+              { key: "parts_cost", label: "Avg Parts $", width: 0.08, align: "right" },
+              { key: "kit", label: "Est Kit Cost", width: 0.07, align: "right" },
             ],
             rows.length
               ? rows.map((r) => ({
@@ -1582,7 +1584,9 @@ export default async function maintenanceRoutes(app) {
                   remain: Number(r.remaining_hours || 0).toFixed(1),
                   status: String(r.status || "-"),
                   oil: Number(r?.forecast?.avg_oil_qty || 0).toFixed(1),
+                  oil_cost: Number(r?.forecast?.avg_oil_cost || 0).toFixed(2),
                   parts: Number(r?.forecast?.avg_parts_qty || 0).toFixed(1),
+                  parts_cost: Number(r?.forecast?.avg_parts_cost || 0).toFixed(2),
                   kit: Number(r?.forecast?.est_service_kit_cost || 0).toFixed(2),
                 }))
               : [{
@@ -1593,7 +1597,9 @@ export default async function maintenanceRoutes(app) {
                   remain: "-",
                   status: "-",
                   oil: "-",
+                  oil_cost: "-",
                   parts: "-",
+                  parts_cost: "-",
                   kit: "-",
                 }]
           );
