@@ -17,6 +17,7 @@
       <button id="showMainMaintBtn">Main Maintenance</button>
       <button id="showManagerInspectionsBtn">Manager Inspections</button>
       <button id="showWeeklyForumBtn">Weekly Forum</button>
+      <button id="showAssetKpiBtn">Asset KPI</button>
       <button id="showSyncAdminBtn">Sync Admin</button>
       <button onclick="location.href='workorders.html'">Work Orders</button>
       <button onclick="location.href='index.html?tab=ironmind'">IronMind</button>
@@ -582,6 +583,72 @@
       </div>
     </div>
 
+    <div id="assetKpiCard" class="card stack-24" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0;">KPI per asset — weekly usage</h3>
+      </div>
+      <p class="muted" style="margin:0 0 12px 0;">
+        Uses the same rules as the main dashboard: <strong>availability</strong> = available ÷ scheduled (available = scheduled − downtime),
+        <strong>utilization</strong> = run ÷ available. Tables are sorted by utilization (highest first) so you can see which equipment performed best.
+        Equipment type is the asset <strong>category</strong> field.
+      </p>
+      <div class="row stack-10">
+        <label>
+          Start
+          <input id="akpStart" type="date" />
+        </label>
+        <label>
+          End
+          <input id="akpEnd" type="date" />
+        </label>
+        <label>
+          Scheduled hrs fallback
+          <input id="akpScheduled" type="number" min="0.5" max="24" step="0.5" value="10" title="Used when a day has no scheduled hours on the row" />
+        </label>
+        <button id="loadAssetKpiBtn" type="button">Load</button>
+      </div>
+      <div id="akpMsg" class="muted">Pick a week (or any range) and load.</div>
+      <div id="akpFleetSummary" style="margin-top:12px;" class="muted"></div>
+      <h4 style="margin:16px 0 8px 0;">By equipment type (category)</h4>
+      <div style="overflow:auto;">
+        <table class="gridTable" style="min-width:720px;">
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th style="text-align:right;">Assets</th>
+              <th style="text-align:right;">Scheduled h</th>
+              <th style="text-align:right;">Available h</th>
+              <th style="text-align:right;">Run h</th>
+              <th style="text-align:right;">Downtime h</th>
+              <th style="text-align:right;">Availability %</th>
+              <th style="text-align:right;">Utilization %</th>
+            </tr>
+          </thead>
+          <tbody id="akpCategoryBody"></tbody>
+        </table>
+      </div>
+      <h4 style="margin:16px 0 8px 0;">Per asset</h4>
+      <div style="overflow:auto;">
+        <table class="gridTable" style="min-width:920px;">
+          <thead>
+            <tr>
+              <th>Asset</th>
+              <th>Category</th>
+              <th>Mode</th>
+              <th style="text-align:right;">Days w/ data</th>
+              <th style="text-align:right;">Scheduled h</th>
+              <th style="text-align:right;">Available h</th>
+              <th style="text-align:right;">Run h</th>
+              <th style="text-align:right;">Downtime h</th>
+              <th style="text-align:right;">Availability %</th>
+              <th style="text-align:right;">Utilization %</th>
+            </tr>
+          </thead>
+          <tbody id="akpAssetBody"></tbody>
+        </table>
+      </div>
+    </div>
+
     <div id="syncAdminCard" class="card stack-24">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <h3 style="margin:0;">Sync Admin (Hybrid)</h3>
@@ -607,6 +674,6 @@
     </div>
   </div>
 
-  <script src="./maintenance.js?v=8"></script>
+  <script src="./maintenance.js?v=9"></script>
 </body>
 </html>

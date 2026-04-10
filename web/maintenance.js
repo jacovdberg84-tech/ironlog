@@ -690,16 +690,19 @@ function setTopView(view) {
   const main = document.getElementById("mainMaintenanceCards");
   const mi = document.getElementById("managerInspectionsCard");
   const wf = document.getElementById("weeklyForumCard");
+  const kpi = document.getElementById("assetKpiCard");
   const sync = document.getElementById("syncAdminCard");
   const btnMain = document.getElementById("showMainMaintBtn");
   const btnMi = document.getElementById("showManagerInspectionsBtn");
   const btnWf = document.getElementById("showWeeklyForumBtn");
+  const btnKpi = document.getElementById("showAssetKpiBtn");
   const btnSync = document.getElementById("showSyncAdminBtn");
   if (!main || !mi || !wf || !sync) return;
 
   main.style.display = view === "main" ? "" : "none";
   mi.style.display = view === "mi" ? "" : "none";
   wf.style.display = view === "wf" ? "" : "none";
+  if (kpi) kpi.style.display = view === "kpi" ? "" : "none";
   sync.style.display = view === "sync" ? "" : "none";
 
   const styleBtn = (btn, active) => {
@@ -711,6 +714,7 @@ function setTopView(view) {
   styleBtn(btnMain, view === "main");
   styleBtn(btnMi, view === "mi");
   styleBtn(btnWf, view === "wf");
+  styleBtn(btnKpi, view === "kpi");
   styleBtn(btnSync, view === "sync");
 }
 
@@ -1234,6 +1238,11 @@ function fmtMoney(v) {
   return Number.isFinite(n) ? n.toFixed(2) : "0.00";
 }
 
+function fmtPct(v) {
+  if (v == null || v === "" || !Number.isFinite(Number(v))) return "—";
+  return `${Number(v).toFixed(1)}%`;
+}
+
 function weeklyForumQueryString() {
   const start = String(document.getElementById("wfStart")?.value || "").trim();
   const end = String(document.getElementById("wfEnd")?.value || "").trim();
@@ -1473,6 +1482,80 @@ async function loadWeeklyForumSummary() {
     msg.textContent = `Load error: ${e.message || e}`;
     kpiBody.innerHTML = `<tr><td colspan="2" class="message-error">${esc(e.message || String(e))}</td></tr>`;
     upcomingBody.innerHTML = `<tr><td colspan="11" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+  }
+}
+
+async function loadAssetKpiWeekly() {
+  const msg = document.getElementById("akpMsg");
+  const fleetEl = document.getElementById("akpFleetSummary");
+  const catBody = document.getElementById("akpCategoryBody");
+  const assetBody = document.getElementById("akpAssetBody");
+  const start = String(document.getElementById("akpStart")?.value || "").trim();
+  const end = String(document.getElementById("akpEnd")?.value || "").trim();
+  const schedEl = document.getElementById("akpScheduled");
+  const sched = Math.max(0.5, Number(schedEl?.value || 10));
+  if (!msg || !catBody || !assetBody) return;
+  if (!start || !end) {
+    msg.className = "message-error";
+    msg.textContent = "Choose start and end dates.";
+    return;
+  }
+  msg.className = "muted";
+  msg.textContent = "Loading KPI…";
+  catBody.innerHTML = `<tr><td colspan="8" class="muted">Loading…</td></tr>`;
+  assetBody.innerHTML = `<tr><td colspan="10" class="muted">Loading…</td></tr>`;
+  if (fleetEl) fleetEl.textContent = "";
+  const q = new URLSearchParams();
+  q.set("start", start);
+  q.set("end", end);
+  q.set("scheduled", String(sched));
+  try {
+    const res = await fetch(`${API}/dashboard/asset-kpi/weekly?${q.toString()}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load asset KPI");
+    const fleet = data.fleet || {};
+    if (fleetEl) {
+      fleetEl.innerHTML = `<strong>All assets in range:</strong> scheduled ${fmt1(fleet.scheduled_hours)} h, available ${fmt1(fleet.available_hours)} h, run ${fmt1(fleet.run_hours)} h, downtime ${fmt1(fleet.downtime_hours)} h — availability ${fmtPct(fleet.availability_pct)}, utilization ${fmtPct(fleet.utilization_pct)} <span class="muted">(${Number(data.days_in_range || 0)} calendar days)</span>`;
+    }
+    const cats = Array.isArray(data.by_category) ? data.by_category : [];
+    catBody.innerHTML = cats.length
+      ? cats.map((r) => `
+        <tr>
+          <td>${esc(r.category || "—")}</td>
+          <td style="text-align:right;">${Number(r.asset_count || 0)}</td>
+          <td style="text-align:right;">${fmt1(r.scheduled_hours)}</td>
+          <td style="text-align:right;">${fmt1(r.available_hours)}</td>
+          <td style="text-align:right;">${fmt1(r.run_hours)}</td>
+          <td style="text-align:right;">${fmt1(r.downtime_hours)}</td>
+          <td style="text-align:right;">${fmtPct(r.availability_pct)}</td>
+          <td style="text-align:right;">${fmtPct(r.utilization_pct)}</td>
+        </tr>
+      `).join("")
+      : `<tr><td colspan="8" class="muted">No production daily hours in range (check Daily Input / dates).</td></tr>`;
+    const assets = Array.isArray(data.by_asset) ? data.by_asset : [];
+    assetBody.innerHTML = assets.length
+      ? assets.map((r) => `
+        <tr>
+          <td>${esc(r.asset_code || "—")} — ${esc(r.asset_name || "")}</td>
+          <td>${esc(r.category || "—")}</td>
+          <td>${esc(r.utilization_mode || "—")}</td>
+          <td style="text-align:right;">${Number(r.days_with_data || 0)} / ${Number(r.days_in_range || 0)}</td>
+          <td style="text-align:right;">${fmt1(r.scheduled_hours)}</td>
+          <td style="text-align:right;">${fmt1(r.available_hours)}</td>
+          <td style="text-align:right;">${fmt1(r.run_hours)}</td>
+          <td style="text-align:right;">${fmt1(r.downtime_hours)}</td>
+          <td style="text-align:right;">${fmtPct(r.availability_pct)}</td>
+          <td style="text-align:right;">${fmtPct(r.utilization_pct)}</td>
+        </tr>
+      `).join("")
+      : `<tr><td colspan="10" class="muted">No rows.</td></tr>`;
+    msg.className = "message-success";
+    msg.textContent = `Loaded ${start} → ${end}. Higher utilization = more run hours per available hour.`;
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = `Error: ${e.message || e}`;
+    catBody.innerHTML = `<tr><td colspan="8" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+    assetBody.innerHTML = `<tr><td colspan="10" class="message-error">${esc(e.message || String(e))}</td></tr>`;
   }
 }
 
@@ -2053,6 +2136,24 @@ document.addEventListener("DOMContentLoaded", () => {
     d.setDate(d.getDate() + mondayOffset + 4);
     wfEnd.value = d.toISOString().slice(0, 10);
   }
+  const akpStart = document.getElementById("akpStart");
+  const akpEnd = document.getElementById("akpEnd");
+  if (akpStart && !akpStart.value && wfStart?.value) akpStart.value = wfStart.value;
+  if (akpEnd && !akpEnd.value && wfEnd?.value) akpEnd.value = wfEnd.value;
+  if (akpStart && !akpStart.value) {
+    const d = new Date();
+    const day = d.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + mondayOffset);
+    akpStart.value = d.toISOString().slice(0, 10);
+  }
+  if (akpEnd && !akpEnd.value) {
+    const d = new Date();
+    const day = d.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + mondayOffset + 4);
+    akpEnd.value = d.toISOString().slice(0, 10);
+  }
   const wfActionDate = document.getElementById("wfActionDate");
   if (wfActionDate && !wfActionDate.value) wfActionDate.value = new Date().toISOString().slice(0, 10);
   document.getElementById("saveMiBtn")?.addEventListener("click", saveManagerInspection);
@@ -2125,7 +2226,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("showMainMaintBtn")?.addEventListener("click", () => setTopView("main"));
   document.getElementById("showManagerInspectionsBtn")?.addEventListener("click", () => setTopView("mi"));
   document.getElementById("showWeeklyForumBtn")?.addEventListener("click", () => setTopView("wf"));
+  document.getElementById("showAssetKpiBtn")?.addEventListener("click", () => setTopView("kpi"));
   document.getElementById("showSyncAdminBtn")?.addEventListener("click", () => setTopView("sync"));
+  document.getElementById("loadAssetKpiBtn")?.addEventListener("click", () => loadAssetKpiWeekly());
   document.getElementById("loadWeeklyForumBtn")?.addEventListener("click", loadWeeklyForumSummary);
   document.getElementById("saveRsgProfileBtn")?.addEventListener("click", saveRsgProfile);
   document.getElementById("loadRsgProfilesBtn")?.addEventListener("click", loadRsgProfiles);

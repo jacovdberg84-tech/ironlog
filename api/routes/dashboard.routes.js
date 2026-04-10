@@ -365,6 +365,170 @@ export default async function dashboardRoutes(app) {
     };
   }
 
+  // GET /api/dashboard/asset-kpi/weekly?start=YYYY-MM-DD&end=YYYY-MM-DD&scheduled=10
+  // Rolls up dashboard KPI rules (availability / utilization) across a date range per asset and by equipment category.
+  app.get("/asset-kpi/weekly", async (req, reply) => {
+    const startIn = String(req.query?.start || "").trim();
+    const endIn = String(req.query?.end || "").trim();
+    const scheduledRaw = Number(req.query?.scheduled ?? 10);
+    const scheduledFallback = Number.isFinite(scheduledRaw) && scheduledRaw > 0 ? scheduledRaw : 10;
+
+    const now = new Date();
+    const dow = now.getDay();
+    const mondayOffset = dow === 0 ? -6 : 1 - dow;
+    const monday = new Date(now);
+    monday.setHours(0, 0, 0, 0);
+    monday.setDate(monday.getDate() + mondayOffset);
+    const friday = new Date(monday);
+    friday.setDate(friday.getDate() + 4);
+    const ymd = (d) => d.toISOString().slice(0, 10);
+    const start = /^\d{4}-\d{2}-\d{2}$/.test(startIn) ? startIn : ymd(monday);
+    const end = /^\d{4}-\d{2}-\d{2}$/.test(endIn) ? endIn : ymd(friday);
+    if (start > end) {
+      return reply.code(400).send({ ok: false, error: "start must be <= end" });
+    }
+
+    const assetMap = new Map();
+    let daysInRange = 0;
+    eachDateInclusiveYMD(start, end, (dayStr) => {
+      daysInRange += 1;
+      const k = computeFleetKpiForDay(dayStr, scheduledFallback, { includePerAsset: true });
+      for (const row of k.per_asset_kpi || []) {
+        const id = Number(row.asset_id || 0);
+        if (!id) continue;
+        if (!assetMap.has(id)) {
+          assetMap.set(id, {
+            asset_id: id,
+            asset_code: String(row.asset_code || ""),
+            asset_name: String(row.asset_name || ""),
+            category: String(row.category || ""),
+            utilization_mode: String(row.utilization_mode || "hours"),
+            scheduled_hours: 0,
+            run_hours: 0,
+            downtime_hours: 0,
+            available_hours: 0,
+            days_with_data: 0,
+          });
+        }
+        const a = assetMap.get(id);
+        const s = Number(row.scheduled_hours || 0);
+        const r = Number(row.run_hours || 0);
+        const d = Number(row.downtime_hours || 0);
+        const v = Number(row.available_hours || 0);
+        a.scheduled_hours += s;
+        a.run_hours += r;
+        a.downtime_hours += d;
+        a.available_hours += v;
+        if (s > 0 || r > 0 || d > 0) a.days_with_data += 1;
+      }
+    });
+
+    const pct = (num, den) =>
+      den > 0 && Number.isFinite(num) ? Number(((num / den) * 100).toFixed(1)) : null;
+
+    const by_asset = Array.from(assetMap.values()).map((a) => {
+      const sched = a.scheduled_hours;
+      const avail = a.available_hours;
+      const run = a.run_hours;
+      return {
+        asset_id: a.asset_id,
+        asset_code: a.asset_code,
+        asset_name: a.asset_name,
+        category: a.category,
+        utilization_mode: a.utilization_mode,
+        days_with_data: a.days_with_data,
+        days_in_range: daysInRange,
+        scheduled_hours: Number(sched.toFixed(2)),
+        run_hours: Number(run.toFixed(2)),
+        downtime_hours: Number(a.downtime_hours.toFixed(2)),
+        available_hours: Number(avail.toFixed(2)),
+        availability_pct: pct(avail, sched),
+        utilization_pct: pct(run, avail),
+      };
+    });
+
+    by_asset.sort((x, y) => {
+      if (x.utilization_pct == null && y.utilization_pct == null) {
+        return String(x.asset_code || "").localeCompare(String(y.asset_code || ""));
+      }
+      if (x.utilization_pct == null) return 1;
+      if (y.utilization_pct == null) return -1;
+      return y.utilization_pct - x.utilization_pct;
+    });
+
+    const catMap = new Map();
+    for (const a of by_asset) {
+      const catKey = String(a.category || "").trim() || "Uncategorized";
+      if (!catMap.has(catKey)) {
+        catMap.set(catKey, {
+          category: catKey,
+          scheduled_hours: 0,
+          run_hours: 0,
+          downtime_hours: 0,
+          available_hours: 0,
+          asset_ids: new Set(),
+        });
+      }
+      const c = catMap.get(catKey);
+      c.scheduled_hours += a.scheduled_hours;
+      c.run_hours += a.run_hours;
+      c.downtime_hours += a.downtime_hours;
+      c.available_hours += a.available_hours;
+      c.asset_ids.add(a.asset_id);
+    }
+
+    const by_category = Array.from(catMap.values()).map((c) => {
+      const sched = c.scheduled_hours;
+      const avail = c.available_hours;
+      const run = c.run_hours;
+      return {
+        category: c.category,
+        asset_count: c.asset_ids.size,
+        scheduled_hours: Number(sched.toFixed(2)),
+        run_hours: Number(run.toFixed(2)),
+        downtime_hours: Number(c.downtime_hours.toFixed(2)),
+        available_hours: Number(avail.toFixed(2)),
+        availability_pct: pct(avail, sched),
+        utilization_pct: pct(run, avail),
+      };
+    });
+
+    by_category.sort((x, y) => {
+      if (x.utilization_pct == null && y.utilization_pct == null) {
+        return String(x.category || "").localeCompare(String(y.category || ""));
+      }
+      if (x.utilization_pct == null) return 1;
+      if (y.utilization_pct == null) return -1;
+      return y.utilization_pct - x.utilization_pct;
+    });
+
+    const fleet_sched = by_asset.reduce((s, r) => s + r.scheduled_hours, 0);
+    const fleet_avail = by_asset.reduce((s, r) => s + r.available_hours, 0);
+    const fleet_run = by_asset.reduce((s, r) => s + r.run_hours, 0);
+    const fleet_down = by_asset.reduce((s, r) => s + r.downtime_hours, 0);
+
+    return reply.send({
+      ok: true,
+      range: { start, end },
+      scheduled_fallback: scheduledFallback,
+      days_in_range: daysInRange,
+      definitions: {
+        availability_pct: "(sum of available hours) / (sum of scheduled hours) × 100; available = scheduled − downtime (capped per day).",
+        utilization_pct: "(sum of effective run hours) / (sum of available hours) × 100 (matches main dashboard KPI).",
+      },
+      fleet: {
+        scheduled_hours: Number(fleet_sched.toFixed(2)),
+        available_hours: Number(fleet_avail.toFixed(2)),
+        run_hours: Number(fleet_run.toFixed(2)),
+        downtime_hours: Number(fleet_down.toFixed(2)),
+        availability_pct: pct(fleet_avail, fleet_sched),
+        utilization_pct: pct(fleet_run, fleet_avail),
+      },
+      by_category,
+      by_asset,
+    });
+  });
+
   // GET /api/dashboard?date=YYYY-MM-DD&scheduled=10
   app.get("/", async (req, reply) => {
     const date = String(req.query?.date || todayYYYYMMDD()).trim();
