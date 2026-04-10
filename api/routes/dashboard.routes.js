@@ -781,6 +781,39 @@ export default async function dashboardRoutes(app) {
       lube_cost: Number(r.lube_cost || 0),
     }));
 
+    const lubeDailyByType = db.prepare(`
+      SELECT
+        a.asset_code,
+        COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED') AS oil_type,
+        COALESCE(SUM(ol.quantity), 0) AS qty,
+        COALESCE(SUM(
+          ol.quantity * COALESCE(
+            ol.unit_cost,
+            (SELECT value FROM cost_settings WHERE key = 'lube_cost_per_qty_default' LIMIT 1),
+            4.0
+          )
+        ), 0) AS lube_cost
+      FROM oil_logs ol
+      JOIN assets a ON a.id = ol.asset_id
+      WHERE ol.log_date = ?
+      GROUP BY a.asset_code, oil_type
+      ORDER BY a.asset_code ASC, qty DESC, oil_type ASC
+      LIMIT 400
+    `).all(date);
+    const byTypeMap = new Map();
+    for (const r of lubeDailyByType) {
+      const code = String(r.asset_code || "");
+      if (!byTypeMap.has(code)) byTypeMap.set(code, []);
+      byTypeMap.get(code).push({
+        oil_type: String(r.oil_type || "UNSPECIFIED"),
+        qty: Number(r.qty || 0),
+        lube_cost: Number(r.lube_cost || 0),
+      });
+    }
+    for (const row of lubeDaily) {
+      row.by_oil_type = byTypeMap.get(String(row.asset_code || "")) || [];
+    }
+
     const lubeTotalRow = db.prepare(`
       SELECT
         COALESCE(SUM(quantity), 0) AS qty_total,
@@ -1054,6 +1087,33 @@ export default async function dashboardRoutes(app) {
       total_lube_cost: Number(r.total_lube_cost || 0),
       entries: Number(r.entries || 0),
     }));
+
+    const byTypeRows = db.prepare(`
+      SELECT
+        a.asset_code,
+        COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED') AS oil_type,
+        COALESCE(SUM(ol.quantity), 0) AS qty_total,
+        COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS total_lube_cost
+      FROM oil_logs ol
+      JOIN assets a ON a.id = ol.asset_id
+      WHERE ol.log_date BETWEEN ? AND ?
+      GROUP BY a.asset_code, oil_type
+      ORDER BY a.asset_code ASC, qty_total DESC, oil_type ASC
+      LIMIT 1200
+    `).all(lubeUnitFallback, start, end);
+    const byTypeLookup = new Map();
+    for (const r of byTypeRows) {
+      const code = String(r.asset_code || "");
+      if (!byTypeLookup.has(code)) byTypeLookup.set(code, []);
+      byTypeLookup.get(code).push({
+        oil_type: String(r.oil_type || "UNSPECIFIED"),
+        qty_total: Number(r.qty_total || 0),
+        total_lube_cost: Number(r.total_lube_cost || 0),
+      });
+    }
+    for (const row of rows) {
+      row.by_oil_type = byTypeLookup.get(String(row.asset_code || "")) || [];
+    }
 
     const summary = db.prepare(`
       SELECT

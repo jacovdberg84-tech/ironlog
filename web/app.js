@@ -2039,10 +2039,19 @@ async function loadDashboard() {
   if (lubeList) {
     lubeList.innerHTML = "";
     (lube.rows || []).forEach((r) => {
+      const byOilType = Array.isArray(r.by_oil_type) ? r.by_oil_type : [];
+      const byOilHtml = byOilType.length
+        ? byOilType.map((x) =>
+          `<div>• ${x.oil_type}: ${Number(x.qty || 0).toFixed(1)} qty | ${fmtMoney(x.lube_cost || 0)}</div>`
+        ).join("")
+        : `<div>• No oil type split available</div>`;
       lubeList.appendChild(
         item(
-          `<b>${r.asset_code}</b> – ${Number(r.qty || 0).toFixed(1)} qty | ${fmtMoney(r.total_lube_cost ?? r.lube_cost)} cost` +
-          `<br><small>Issued to: ${r.asset_name || r.asset_code || "Unknown equipment"}</small>`
+          `<div style="padding:8px 0; line-height:1.45;">` +
+          `<div><b>${r.asset_code}</b> — ${r.asset_name || r.asset_code || "Unknown equipment"}</div>` +
+          `<div><small>Total issued: ${Number(r.qty || 0).toFixed(1)} qty | Total cost: ${fmtMoney(r.total_lube_cost ?? r.lube_cost)}</small></div>` +
+          `<div style="margin-top:6px;"><small><b>Oil type breakdown:</b></small>${byOilHtml}</div>` +
+          `</div>`
         )
       );
     });
@@ -2471,10 +2480,19 @@ async function loadLubeUsage() {
   if (lubeList) {
     lubeList.innerHTML = "";
     (data.rows || []).forEach((r) => {
+      const byOilType = Array.isArray(r.by_oil_type) ? r.by_oil_type : [];
+      const byOilHtml = byOilType.length
+        ? byOilType.map((x) =>
+          `<div>• ${x.oil_type}: ${Number(x.qty_total || 0).toFixed(1)} qty | ${fmtMoney(x.total_lube_cost || 0)}</div>`
+        ).join("")
+        : `<div>• No oil type split available</div>`;
       lubeList.appendChild(
         item(
-          `<b>${r.asset_code}</b> – ${Number(r.qty_total || 0).toFixed(1)} qty | ${fmtMoney(r.total_lube_cost || 0)} cost` +
-          `<br><small>Issued to: ${r.asset_name || r.asset_code || "Unknown equipment"} | Entries: ${Number(r.entries || 0)}</small>`
+          `<div style="padding:8px 0; line-height:1.45;">` +
+          `<div><b>${r.asset_code}</b> — ${r.asset_name || r.asset_code || "Unknown equipment"}</div>` +
+          `<div><small>Total issued: ${Number(r.qty_total || 0).toFixed(1)} qty | Total cost: ${fmtMoney(r.total_lube_cost || 0)} | Entries: ${Number(r.entries || 0)}</small></div>` +
+          `<div style="margin-top:6px;"><small><b>Oil type breakdown:</b></small>${byOilHtml}</div>` +
+          `</div>`
         )
       );
     });
