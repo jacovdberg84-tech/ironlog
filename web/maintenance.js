@@ -857,7 +857,7 @@ async function loadHistogramEvents() {
   const body = document.getElementById("histEventBody");
   const msg = document.getElementById("histMsg");
   if (!body) return;
-  body.innerHTML = `<tr><td colspan="9" class="muted">Loading...</td></tr>`;
+  body.innerHTML = `<tr><td colspan="10" class="muted">Loading...</td></tr>`;
   try {
     const q = new URLSearchParams();
     const start = String(document.getElementById("histFilterStart")?.value || "").trim();
@@ -875,7 +875,7 @@ async function loadHistogramEvents() {
     if (!res.ok) throw new Error(data.error || "Failed to load histogram events");
     const rows = Array.isArray(data.rows) ? data.rows : [];
     if (!rows.length) {
-      body.innerHTML = `<tr><td colspan="9" class="muted">No events found for selected filters.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="10" class="muted">No events found for selected filters.</td></tr>`;
       if (msg) {
         msg.className = "muted";
         msg.textContent = "No events found.";
@@ -885,6 +885,7 @@ async function loadHistogramEvents() {
     body.innerHTML = rows.map((r) => `
       <tr>
         <td>${esc(r.event_date || "-")}</td>
+        <td>${esc(r.asset_number || "-")}</td>
         <td>${esc(r.location || "-")}</td>
         <td>${esc(r.part_code || "-")}</td>
         <td>${esc(r.part_name || "-")}</td>
@@ -903,7 +904,7 @@ async function loadHistogramEvents() {
       msg.textContent = `Loaded ${rows.length} event(s).`;
     }
   } catch (e) {
-    body.innerHTML = `<tr><td colspan="9" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="10" class="message-error">${esc(e.message || String(e))}</td></tr>`;
     if (msg) {
       msg.className = "message-error";
       msg.textContent = `Load error: ${e.message || e}`;
@@ -914,6 +915,7 @@ async function loadHistogramEvents() {
 async function saveHistogramEvent() {
   const msg = document.getElementById("histMsg");
   const event_date = String(document.getElementById("histEventDate")?.value || "").trim();
+  const asset_number = String(document.getElementById("histAssetNumber")?.value || "").trim();
   const location = String(document.getElementById("histLocation")?.value || "").trim();
   const part_code = String(document.getElementById("histPartCode")?.value || "").trim();
   const part_name = String(document.getElementById("histPartName")?.value || "").trim();
@@ -931,7 +933,7 @@ async function saveHistogramEvent() {
     const res = await fetch(`${API}/maintenance/histogram/events`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ event_date, location, part_code, part_name, approval_status, approved_by, notes }),
+      body: JSON.stringify({ event_date, asset_number, location, part_code, part_name, approval_status, approved_by, notes }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to save event");
@@ -939,7 +941,7 @@ async function saveHistogramEvent() {
       msg.className = "message-success";
       msg.textContent = "Histogram event saved.";
     }
-    const clearIds = ["histLocation", "histPartCode", "histPartName", "histApprovedBy", "histNotes"];
+    const clearIds = ["histAssetNumber", "histLocation", "histPartCode", "histPartName", "histApprovedBy", "histNotes"];
     clearIds.forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.value = "";
@@ -978,15 +980,17 @@ async function editHistogramEvent(id) {
   const row = rows.find((tr) => Number(tr.querySelector("button[data-hist-edit]")?.getAttribute("data-hist-edit") || 0) === n);
   const tds = row ? row.querySelectorAll("td") : [];
   const currentDate = String(tds[0]?.textContent || "").trim();
-  const currentLocation = String(tds[1]?.textContent || "").trim();
-  const currentPartCode = String(tds[2]?.textContent || "").trim();
-  const currentPartName = String(tds[3]?.textContent || "").trim();
-  const currentApproval = String(tds[4]?.textContent || "").trim();
-  const currentApprovedBy = String(tds[5]?.textContent || "").trim();
-  const currentNotes = String(tds[6]?.textContent || "").trim();
+  const currentAssetNumber = String(tds[1]?.textContent || "").trim();
+  const currentLocation = String(tds[2]?.textContent || "").trim();
+  const currentPartCode = String(tds[3]?.textContent || "").trim();
+  const currentPartName = String(tds[4]?.textContent || "").trim();
+  const currentApproval = String(tds[5]?.textContent || "").trim();
+  const currentApprovedBy = String(tds[6]?.textContent || "").trim();
+  const currentNotes = String(tds[7]?.textContent || "").trim();
 
   const event_date = String(window.prompt("Event date (YYYY-MM-DD):", currentDate) || "").trim();
   if (!event_date) return;
+  const asset_number = String(window.prompt("Asset number:", currentAssetNumber) || "").trim();
   const location = String(window.prompt("Location:", currentLocation) || "").trim();
   const part_code = String(window.prompt("Part code:", currentPartCode) || "").trim();
   const part_name = String(window.prompt("Part name:", currentPartName) || "").trim();
@@ -999,7 +1003,7 @@ async function editHistogramEvent(id) {
     const res = await fetch(`${API}/maintenance/histogram/events/${n}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ event_date, location, part_code, part_name, approval_status, approved_by, notes }),
+      body: JSON.stringify({ event_date, asset_number, location, part_code, part_name, approval_status, approved_by, notes }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to update event");

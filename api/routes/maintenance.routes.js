@@ -175,6 +175,7 @@ export default async function maintenanceRoutes(app) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       site_code TEXT DEFAULT 'main',
       event_date TEXT NOT NULL,
+      asset_number TEXT,
       location TEXT,
       part_code TEXT,
       part_name TEXT,
@@ -247,6 +248,7 @@ export default async function maintenanceRoutes(app) {
   ensureColumn("manager_damage_report_photos", "created_at TEXT", "created_at");
   ensureColumn("maintenance_histogram_events", "site_code TEXT DEFAULT 'main'", "site_code");
   ensureColumn("maintenance_histogram_events", "event_date TEXT", "event_date");
+  ensureColumn("maintenance_histogram_events", "asset_number TEXT", "asset_number");
   ensureColumn("maintenance_histogram_events", "location TEXT", "location");
   ensureColumn("maintenance_histogram_events", "part_code TEXT", "part_code");
   ensureColumn("maintenance_histogram_events", "part_name TEXT", "part_name");
@@ -2044,7 +2046,7 @@ export default async function maintenanceRoutes(app) {
       }
 
       const sql = `
-        SELECT id, event_date, location, part_code, part_name, approval_status, approved_by, notes, created_by, created_at, updated_at
+        SELECT id, event_date, asset_number, location, part_code, part_name, approval_status, approved_by, notes, created_by, created_at, updated_at
         FROM maintenance_histogram_events
         WHERE ${where.join(" AND ")}
         ORDER BY event_date DESC, id DESC
@@ -2068,6 +2070,7 @@ export default async function maintenanceRoutes(app) {
         return reply.code(400).send({ ok: false, error: "event_date must be YYYY-MM-DD" });
       }
       const location = String(body.location || "").trim();
+      const asset_number = String(body.asset_number || "").trim();
       const part_code = String(body.part_code || "").trim();
       const part_name = String(body.part_name || "").trim();
       const approval_status = String(body.approval_status || "").trim();
@@ -2076,9 +2079,9 @@ export default async function maintenanceRoutes(app) {
       const now = new Date().toISOString();
       const info = db.prepare(`
         INSERT INTO maintenance_histogram_events (
-          site_code, event_date, location, part_code, part_name, approval_status, approved_by, notes, created_by, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(site_code, event_date, location, part_code, part_name, approval_status, approved_by, notes, created_by, now, now);
+          site_code, event_date, asset_number, location, part_code, part_name, approval_status, approved_by, notes, created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(site_code, event_date, asset_number, location, part_code, part_name, approval_status, approved_by, notes, created_by, now, now);
       return reply.send({ ok: true, id: Number(info.lastInsertRowid || 0) });
     } catch (err) {
       req.log.error(err);
@@ -2100,6 +2103,7 @@ export default async function maintenanceRoutes(app) {
         return reply.code(400).send({ ok: false, error: "event_date must be YYYY-MM-DD" });
       }
       const location = String(body.location || "").trim();
+      const asset_number = String(body.asset_number || "").trim();
       const part_code = String(body.part_code || "").trim();
       const part_name = String(body.part_name || "").trim();
       const approval_status = String(body.approval_status || "").trim();
@@ -2111,6 +2115,7 @@ export default async function maintenanceRoutes(app) {
         UPDATE maintenance_histogram_events
         SET
           event_date = COALESCE(NULLIF(?, ''), event_date),
+          asset_number = ?,
           location = ?,
           part_code = ?,
           part_name = ?,
@@ -2120,7 +2125,7 @@ export default async function maintenanceRoutes(app) {
           updated_at = ?
         WHERE id = ?
           AND COALESCE(site_code, 'main') = ?
-      `).run(event_date, location, part_code, part_name, approval_status, approved_by, notes, now, id, site_code);
+      `).run(event_date, asset_number, location, part_code, part_name, approval_status, approved_by, notes, now, id, site_code);
       return reply.send({ ok: true, id });
     } catch (err) {
       req.log.error(err);
@@ -2180,11 +2185,10 @@ export default async function maintenanceRoutes(app) {
       }
 
       const rows = db.prepare(`
-        SELECT event_date, location, part_code, part_name, approval_status, approved_by, notes, created_by
+        SELECT event_date, asset_number, location, part_code, part_name, approval_status, approved_by, notes, created_by
         FROM maintenance_histogram_events
         WHERE ${where.join(" AND ")}
         ORDER BY event_date DESC, id DESC
-        LIMIT 2000
       `).all(...params);
 
       const periodLabel = `${isDate(start) ? start : "-"} to ${isDate(end) ? end : "-"}`;
@@ -2199,17 +2203,19 @@ export default async function maintenanceRoutes(app) {
           doc,
           [
             { key: "event_date", label: "Date", width: 0.1 },
-            { key: "location", label: "Location", width: 0.16 },
-            { key: "part_code", label: "Part Code", width: 0.12 },
-            { key: "part_name", label: "Part Name", width: 0.14 },
+            { key: "asset_number", label: "Asset No", width: 0.1 },
+            { key: "location", label: "Location", width: 0.13 },
+            { key: "part_code", label: "Part Code", width: 0.11 },
+            { key: "part_name", label: "Part Name", width: 0.13 },
             { key: "approval_status", label: "Approval", width: 0.1 },
             { key: "approved_by", label: "Approved By", width: 0.12 },
-            { key: "notes", label: "Notes", width: 0.16 },
-            { key: "created_by", label: "Captured By", width: 0.1 },
+            { key: "notes", label: "Notes", width: 0.13 },
+            { key: "created_by", label: "Captured By", width: 0.08 },
           ],
           rows.length
             ? rows.map((r) => ({
                 event_date: String(r.event_date || "-"),
+                asset_number: String(r.asset_number || "-"),
                 location: String(r.location || "-"),
                 part_code: String(r.part_code || "-"),
                 part_name: String(r.part_name || "-"),
@@ -2218,7 +2224,7 @@ export default async function maintenanceRoutes(app) {
                 notes: String(r.notes || "-"),
                 created_by: String(r.created_by || "-"),
               }))
-            : [{ event_date: "-", location: "No events found", part_code: "-", part_name: "-", approval_status: "-", approved_by: "-", notes: "-", created_by: "-" }]
+            : [{ event_date: "-", asset_number: "-", location: "No events found", part_code: "-", part_name: "-", approval_status: "-", approved_by: "-", notes: "-", created_by: "-" }]
         );
       });
 
