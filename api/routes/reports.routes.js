@@ -4905,7 +4905,7 @@ export default async function reportsRoutes(app) {
     const site_code = String(req.query?.site_code || getSiteCode(req)).trim().toLowerCase() || "default";
     const report_type = String(req.query?.period_type || "weekly").trim().toLowerCase();
     const download = String(req.query?.download || "").trim() === "1";
-    const row = db.prepare(`
+    let row = db.prepare(`
       SELECT report_type, label, file_path
       FROM maintenance_presentation_runs
       WHERE site_code = ?
@@ -4913,8 +4913,18 @@ export default async function reportsRoutes(app) {
       ORDER BY generated_at DESC
       LIMIT 1
     `).get(site_code, report_type);
+
     if (!row?.file_path || !fs.existsSync(row.file_path)) {
-      return reply.code(404).send({ ok: false, error: "No generated presentation found for this type/site yet" });
+      try {
+        const generated = await generateMaintenanceMaster(report_type, site_code, {});
+        row = {
+          report_type,
+          label: generated.label,
+          file_path: generated.file_path,
+        };
+      } catch (e) {
+        return reply.code(404).send({ ok: false, error: "No generated presentation found for this type/site yet" });
+      }
     }
     const buf = fs.readFileSync(row.file_path);
     reply
