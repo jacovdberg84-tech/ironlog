@@ -15,6 +15,7 @@ const LOC_DEFAULT_PREFIX = "ironlog_default_location_";
 const MAINT_LOCK_KEY = "ironlog_maintenance_access_ok";
 const MAINT_LOCK_USER = "BJ van den Berg";
 const MAINT_LOCK_PASSWORD = "0mhliac789";
+const MAINT_CHILD_TABS = new Set(["Breakdowns", "ironmind"]);
 const DEFAULT_ROLE = "admin";
 const DEFAULT_USER = "admin";
 const DEFAULT_SITE = "main";
@@ -36,6 +37,14 @@ function maintenanceAccessGate() {
   alert("Invalid maintenance credentials.");
 }
 window.maintenanceAccessGate = maintenanceAccessGate;
+
+function hasMaintenanceAccessGate() {
+  return sessionStorage.getItem(MAINT_LOCK_KEY) === "1";
+}
+
+function isMaintenanceChildTab(tabKey) {
+  return MAINT_CHILD_TABS.has(String(tabKey || "").trim());
+}
 
 const I18N = {
   en: {
@@ -656,7 +665,8 @@ function applyRoleVisibility() {
         opt.hidden = !roles.some((r) => ["admin", "supervisor"].includes(r));
         return;
       }
-      opt.hidden = !allowed.has(opt.value);
+      const blockedByMaintenanceGate = isMaintenanceChildTab(opt.value) && !hasMaintenanceAccessGate();
+      opt.hidden = !allowed.has(opt.value) || blockedByMaintenanceGate;
     });
   }
 
@@ -3833,6 +3843,11 @@ async function archiveLegalDoc(id, active) {
 function switchTab(key) {
   const k = String(key || "").trim();
   if (!k) return;
+  if (isMaintenanceChildTab(k) && !hasMaintenanceAccessGate()) {
+    alert("Open this section from Maintenance.");
+    location.href = "maintenance.html";
+    return;
+  }
   document.querySelectorAll(".panel").forEach((p) => p.classList.remove("show"));
   const panel = qs(`tab-${k}`);
   if (panel) panel.classList.add("show");
