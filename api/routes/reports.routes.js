@@ -4598,14 +4598,22 @@ export default async function reportsRoutes(app) {
       const scheduled = Number(r.scheduled_hours || 0);
       const rainH = Number(rainSchedByType.get(key) || 0);
       const adjusted = Math.max(0, scheduled - rainH);
-      const downtime = Number(downtimeByType.get(key) || 0);
-      const availability_pct = adjusted > 0 ? Math.max(0, ((adjusted - downtime) / adjusted) * 100) : null;
+      const downtimeRaw = Number(downtimeByType.get(key) || 0);
+      const downtime = Math.min(Math.max(0, downtimeRaw), Math.max(0, scheduled));
       const run = Number(r.run_hours || 0);
-      const utilization_pct = adjusted > 0 ? Math.max(0, (run / adjusted) * 100) : null;
+      // Align with live dashboard KPI behavior:
+      // - cap run at scheduled
+      // - availability base = scheduled
+      // - utilization base = scheduled (not reduced available hours)
+      const runEff = Math.min(Math.max(0, run), Math.max(0, scheduled));
+      const available = Math.max(0, scheduled - downtime);
+      const availability_pct = scheduled > 0 ? Math.max(0, (available / scheduled) * 100) : null;
+      const utilization_pct = scheduled > 0 ? Math.max(0, (runEff / scheduled) * 100) : null;
       return {
         equipment_type: key.toUpperCase(),
+        scheduled_hours: Number(scheduled.toFixed(1)),
         adjusted_hours: Number(adjusted.toFixed(1)),
-        run_hours: Number(run.toFixed(1)),
+        run_hours: Number(runEff.toFixed(1)),
         downtime_hours: Number(downtime.toFixed(1)),
         availability_pct: availability_pct == null ? null : Number(availability_pct.toFixed(2)),
         utilization_pct: utilization_pct == null ? null : Number(utilization_pct.toFixed(2)),
@@ -4763,8 +4771,8 @@ export default async function reportsRoutes(app) {
     s3.addText("2) Plant Performance", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
     s3.addTable(
       [
-        [{ text: "Type", options: { bold: true } }, { text: "Adjusted Hours", options: { bold: true } }, { text: "Run Hrs", options: { bold: true } }, { text: "Downtime Hrs", options: { bold: true } }, { text: "Availability %", options: { bold: true } }, { text: "Utilization %", options: { bold: true } }],
-        ...availabilityByType.slice(0, 16).map((r) => [r.equipment_type, r.adjusted_hours.toFixed(1), r.run_hours.toFixed(1), r.downtime_hours.toFixed(1), r.availability_pct == null ? "N/A" : `${r.availability_pct.toFixed(2)}%`, r.utilization_pct == null ? "N/A" : `${r.utilization_pct.toFixed(2)}%`]),
+        [{ text: "Type", options: { bold: true } }, { text: "Scheduled Hrs", options: { bold: true } }, { text: "Run Hrs", options: { bold: true } }, { text: "Downtime Hrs", options: { bold: true } }, { text: "Availability %", options: { bold: true } }, { text: "Utilization %", options: { bold: true } }],
+        ...availabilityByType.slice(0, 16).map((r) => [r.equipment_type, r.scheduled_hours.toFixed(1), r.run_hours.toFixed(1), r.downtime_hours.toFixed(1), r.availability_pct == null ? "N/A" : `${r.availability_pct.toFixed(2)}%`, r.utilization_pct == null ? "N/A" : `${r.utilization_pct.toFixed(2)}%`]),
       ],
       { x: 0.5, y: 1.1, w: 12.3, h: 5.6, fontSize: 12, border: { pt: 1, color: "C8C8C8" } }
     );
