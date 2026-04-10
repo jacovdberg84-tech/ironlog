@@ -4201,6 +4201,7 @@ async function saveRainDay() {
     });
     setText("rainDaysResult", JSON.stringify(res, null, 2));
     setStatus("Rain day saved.");
+    loadRainDays({ silentNoRange: true }).catch(() => {});
   } catch (e) {
     setText("rainDaysResult", String(e.message || e));
     setStatus("Save rain day failed.");
@@ -4217,13 +4218,14 @@ async function removeRainDay() {
     });
     setText("rainDaysResult", JSON.stringify(res, null, 2));
     setStatus("Rain day removed.");
+    loadRainDays({ silentNoRange: true }).catch(() => {});
   } catch (e) {
     setText("rainDaysResult", String(e.message || e));
     setStatus("Remove rain day failed.");
   }
 }
 
-async function loadRainDays() {
+function getRainDaysRangeQuery() {
   const month = (qs("costMonth")?.value || "").trim();
   const start = (qs("maintCostStart")?.value || "").trim();
   const end = (qs("maintCostEnd")?.value || "").trim();
@@ -4237,17 +4239,49 @@ async function loadRainDays() {
     q = `start=${encodeURIComponent(startMonth)}&end=${encodeURIComponent(endMonth)}`;
   } else if (start && end) {
     q = `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
-  } else {
-    alert("Select month or start/end first.");
+  }
+  return q;
+}
+
+function renderRainDaysWidget(res) {
+  const widget = qs("rainDaysWidget");
+  if (!widget) return;
+  const rows = Array.isArray(res?.rows) ? res.rows : [];
+  const start = String(res?.start || "");
+  const end = String(res?.end || "");
+  if (!rows.length) {
+    widget.innerHTML = `<div class="muted">No rain days recorded for ${start || "selected"}${end ? ` to ${end}` : ""}.</div>`;
+    return;
+  }
+  widget.innerHTML = `
+    <div><strong>Rain days (${rows.length})</strong> <span class="muted">${start} to ${end}</span></div>
+    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;">
+      ${rows.map((r) => `<span class="pill blue">🌧️ ${escapeHtml(String(r.rain_date || ""))}</span>`).join("")}
+    </div>
+    ${rows.some((r) => String(r.notes || "").trim())
+      ? `<div class="muted" style="margin-top:8px;">Notes: ${rows
+          .filter((r) => String(r.notes || "").trim())
+          .map((r) => `${escapeHtml(String(r.rain_date || ""))} (${escapeHtml(String(r.notes || ""))})`)
+          .join(" | ")}</div>`
+      : ""}
+  `;
+}
+
+async function loadRainDays(opts = {}) {
+  const q = getRainDaysRangeQuery();
+  if (!q) {
+    if (!opts.silentNoRange) alert("Select month or start/end first.");
     return;
   }
   setStatus("Loading rain days...");
   try {
     const res = await fetchJson(`${API}/api/reports/rain-days?${q}`);
     setText("rainDaysResult", JSON.stringify(res, null, 2));
+    renderRainDaysWidget(res);
     setStatus("Rain days loaded.");
   } catch (e) {
     setText("rainDaysResult", String(e.message || e));
+    renderRainDaysWidget({ rows: [], start: "", end: "" });
     setStatus("Load rain days failed.");
   }
 }
