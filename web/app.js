@@ -8242,6 +8242,7 @@ async function init() {
   qs("openDaily")?.addEventListener("click", openDailyPdf);
   qs("openWeekly")?.addEventListener("click", openWeeklyPdf);
   qs("openLubePdf")?.addEventListener("click", openLubePdf);
+  qs("openLubePdfFromLube")?.addEventListener("click", openLubePdf);
   qs("openStockMonitorPdf")?.addEventListener("click", openStockMonitorPdf);
   qs("downloadStockMonitorPdf")?.addEventListener("click", downloadStockMonitorPdf);
   qs("openOperationsPdf")?.addEventListener("click", () => openOperationsPdf(false));
