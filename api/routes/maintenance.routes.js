@@ -68,6 +68,33 @@ function classifyDueStatus(remainingHours, nearDueHours = 50) {
   return "OK";
 }
 
+/** SQL fragment: stock_movements row is an outbound issue (consumption). */
+function sqlStockMovementOutbound(alias = "sm") {
+  const s = alias;
+  return `(LOWER(COALESCE(${s}.movement_type, '')) = 'out' OR COALESCE(${s}.quantity, 0) < 0)`;
+}
+
+/**
+ * SQL boolean expression (SQLite): parts row is bucketed as oil/lubricant, not hard parts.
+ * Uses parts.consumable_kind when set; otherwise part name/code heuristics.
+ */
+function sqlOilPartPredicate(alias = "p") {
+  const p = alias;
+  return `(
+  LOWER(TRIM(COALESCE(${p}.consumable_kind, ''))) IN ('oil', 'lube', 'lubricant', 'hydraulic', 'hydraulic_oil', 'coolant', 'grease', 'hyd fluid', 'hydraulic fluid')
+  OR (
+    TRIM(COALESCE(${p}.consumable_kind, '')) = ''
+    AND (
+      INSTR(LOWER(' ' || REPLACE(REPLACE(COALESCE(${p}.part_name, ''), '-', ' '), '_', ' ') || ' '), ' oil ') > 0
+      OR INSTR(LOWER(' ' || REPLACE(REPLACE(COALESCE(${p}.part_name, ''), '-', ' '), '_', ' ') || ' '), ' lube ') > 0
+      OR LOWER(TRIM(COALESCE(${p}.part_name, ''))) LIKE 'lubricant%'
+      OR LOWER(TRIM(COALESCE(${p}.part_code, ''))) LIKE 'oil%'
+      OR LOWER(TRIM(COALESCE(${p}.part_code, ''))) LIKE 'lube%'
+    )
+  )
+)`;
+}
+
 export default async function maintenanceRoutes(app) {
   const dataRoot = process.env.IRONLOG_DATA_DIR || process.cwd();
   await app.register(multipart, {
@@ -201,6 +228,10 @@ export default async function maintenanceRoutes(app) {
   ensureColumn("manager_damage_report_photos", "image_data TEXT", "image_data");
   ensureColumn("manager_damage_report_photos", "caption TEXT", "caption");
   ensureColumn("manager_damage_report_photos", "created_at TEXT", "created_at");
+  try {
+    const pt = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='parts' LIMIT 1`).get();
+    if (pt) ensureColumn("parts", "consumable_kind TEXT", "consumable_kind");
+  } catch {}
 
   // Backward compatibility for legacy schema where link column was manager_inspection_id.
   // Keep both readable by normalizing to inspection_id for all new queries/inserts.
@@ -1298,24 +1329,35 @@ export default async function maintenanceRoutes(app) {
       const closedStatuses = "'closed','completed','approved'";
       const hasWOCompletedAt = hasColumn("work_orders", "completed_at");
       const woCloseExpr = hasWOCompletedAt ? "COALESCE(w.completed_at, w.closed_at)" : "w.closed_at";
+      const smOutSql = sqlStockMovementOutbound("sm");
+      const oilPartSql = sqlOilPartPredicate("p");
 
-      const partsCost = hasTable("stock_movements") && hasTable("work_orders")
-        ? Number(
-            db.prepare(`
-              SELECT COALESCE(SUM(ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0)), 0) AS v
-              FROM stock_movements sm
-              JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
-              WHERE ${woCloseExpr} IS NOT NULL
-                AND DATE(${woCloseExpr}) BETWEEN ? AND ?
-                AND (
-                  LOWER(COALESCE(sm.movement_type, '')) = 'out'
-                  OR COALESCE(sm.quantity, 0) < 0
-                )
-            `).get(start, end)?.v || 0
-          )
-        : 0;
+      const partsCost =
+        hasTable("stock_movements") && hasTable("work_orders")
+          ? Number(
+              hasTable("parts")
+                ? db.prepare(`
+                    SELECT COALESCE(SUM(ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0)), 0) AS v
+                    FROM stock_movements sm
+                    JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
+                    JOIN parts p ON p.id = sm.part_id
+                    WHERE ${woCloseExpr} IS NOT NULL
+                      AND DATE(${woCloseExpr}) BETWEEN ? AND ?
+                      AND (${smOutSql})
+                      AND NOT (${oilPartSql})
+                  `).get(start, end)?.v || 0
+                : db.prepare(`
+                    SELECT COALESCE(SUM(ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0)), 0) AS v
+                    FROM stock_movements sm
+                    JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
+                    WHERE ${woCloseExpr} IS NOT NULL
+                      AND DATE(${woCloseExpr}) BETWEEN ? AND ?
+                      AND (${smOutSql})
+                  `).get(start, end)?.v || 0
+            )
+          : 0;
 
-      const oilCost = hasTable("oil_logs")
+      const oilCostFromLogs = hasTable("oil_logs")
         ? Number(
             db.prepare(`
               SELECT COALESCE(SUM(COALESCE(quantity, 0) * COALESCE(unit_cost, 0)), 0) AS v
@@ -1324,6 +1366,24 @@ export default async function maintenanceRoutes(app) {
             `).get(start, end)?.v || 0
           )
         : 0;
+
+      const oilCostFromWoStock =
+        hasTable("stock_movements") && hasTable("work_orders") && hasTable("parts")
+          ? Number(
+              db.prepare(`
+                SELECT COALESCE(SUM(ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0)), 0) AS v
+                FROM stock_movements sm
+                JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
+                JOIN parts p ON p.id = sm.part_id
+                WHERE ${woCloseExpr} IS NOT NULL
+                  AND DATE(${woCloseExpr}) BETWEEN ? AND ?
+                  AND (${smOutSql})
+                  AND (${oilPartSql})
+              `).get(start, end)?.v || 0
+            )
+          : 0;
+
+      const oilCost = oilCostFromLogs + oilCostFromWoStock;
 
       const laborCost = hasTable("work_orders")
         ? Number(
@@ -1389,19 +1449,43 @@ export default async function maintenanceRoutes(app) {
           const remaining = nextDue - current;
           const status = classifyDueStatus(remaining, nearDueHours);
 
-          const hist = hasTable("work_orders") && hasTable("stock_movements")
-            ? db.prepare(`
-                SELECT
-                  COUNT(DISTINCT w.id) AS service_events,
-                  COALESCE(SUM(ABS(COALESCE(sm.quantity, 0))), 0) AS parts_qty_total,
-                  COALESCE(SUM(ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0)), 0) AS parts_cost_total
-                FROM work_orders w
-                LEFT JOIN stock_movements sm ON sm.reference = ('work_order:' || w.id)
-                WHERE LOWER(COALESCE(w.source, '')) = 'service'
-                  AND COALESCE(w.reference_id, 0) = ?
-                  AND LOWER(COALESCE(w.status, '')) IN (${closedStatuses})
-              `).get(Number(p.plan_id || 0))
-            : null;
+          const hist =
+            hasTable("work_orders") && hasTable("stock_movements")
+              ? hasTable("parts")
+                ? db.prepare(`
+                    SELECT
+                      COUNT(DISTINCT w.id) AS service_events,
+                      COALESCE(SUM(CASE WHEN sm.id IS NOT NULL AND (${smOutSql}) AND NOT (${oilPartSql})
+                        THEN ABS(COALESCE(sm.quantity, 0)) ELSE 0 END), 0) AS parts_qty_total,
+                      COALESCE(SUM(CASE WHEN sm.id IS NOT NULL AND (${smOutSql}) AND NOT (${oilPartSql})
+                        THEN ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0) ELSE 0 END), 0) AS parts_cost_total,
+                      COALESCE(SUM(CASE WHEN sm.id IS NOT NULL AND (${smOutSql}) AND (${oilPartSql})
+                        THEN ABS(COALESCE(sm.quantity, 0)) ELSE 0 END), 0) AS oil_qty_sm_total,
+                      COALESCE(SUM(CASE WHEN sm.id IS NOT NULL AND (${smOutSql}) AND (${oilPartSql})
+                        THEN ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0) ELSE 0 END), 0) AS oil_cost_sm_total
+                    FROM work_orders w
+                    LEFT JOIN stock_movements sm ON sm.reference = ('work_order:' || w.id)
+                    LEFT JOIN parts p ON p.id = sm.part_id
+                    WHERE LOWER(COALESCE(w.source, '')) = 'service'
+                      AND COALESCE(w.reference_id, 0) = ?
+                      AND LOWER(COALESCE(w.status, '')) IN (${closedStatuses})
+                  `).get(Number(p.plan_id || 0))
+                : db.prepare(`
+                    SELECT
+                      COUNT(DISTINCT w.id) AS service_events,
+                      COALESCE(SUM(CASE WHEN sm.id IS NOT NULL AND (${smOutSql})
+                        THEN ABS(COALESCE(sm.quantity, 0)) ELSE 0 END), 0) AS parts_qty_total,
+                      COALESCE(SUM(CASE WHEN sm.id IS NOT NULL AND (${smOutSql})
+                        THEN ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0) ELSE 0 END), 0) AS parts_cost_total,
+                      0 AS oil_qty_sm_total,
+                      0 AS oil_cost_sm_total
+                    FROM work_orders w
+                    LEFT JOIN stock_movements sm ON sm.reference = ('work_order:' || w.id)
+                    WHERE LOWER(COALESCE(w.source, '')) = 'service'
+                      AND COALESCE(w.reference_id, 0) = ?
+                      AND LOWER(COALESCE(w.status, '')) IN (${closedStatuses})
+                  `).get(Number(p.plan_id || 0))
+              : null;
 
           const serviceEvents = Number(hist?.service_events || 0);
           const avgPartsQty = serviceEvents > 0 ? Number(hist.parts_qty_total || 0) / serviceEvents : 0;
@@ -1424,8 +1508,14 @@ export default async function maintenanceRoutes(app) {
                   )
               `).get(Number(p.asset_id || 0), Number(p.plan_id || 0))
             : null;
-          const avgOilQty = serviceEvents > 0 ? Number(oilAvg?.oil_qty_total || 0) / serviceEvents : 0;
-          const avgOilCost = serviceEvents > 0 ? Number(oilAvg?.oil_cost_total || 0) / serviceEvents : 0;
+          const oilQtyLogs = Number(oilAvg?.oil_qty_total || 0);
+          const oilCostLogsPlan = Number(oilAvg?.oil_cost_total || 0);
+          const oilQtySm = Number(hist?.oil_qty_sm_total || 0);
+          const oilCostSm = Number(hist?.oil_cost_sm_total || 0);
+          const avgOilQty =
+            serviceEvents > 0 ? (oilQtyLogs + oilQtySm) / serviceEvents : 0;
+          const avgOilCost =
+            serviceEvents > 0 ? (oilCostLogsPlan + oilCostSm) / serviceEvents : 0;
 
           const serviceKitCost = avgPartsCost + avgOilCost;
           const manual = inputByPlan.get(Number(p.plan_id || 0)) || null;
@@ -1503,6 +1593,8 @@ export default async function maintenanceRoutes(app) {
         },
         costs: {
           stores_oil_cost: Number(oilCost.toFixed(2)),
+          stores_oil_from_logs: Number(oilCostFromLogs.toFixed(2)),
+          stores_oil_from_work_orders: Number(oilCostFromWoStock.toFixed(2)),
           stores_parts_cost: Number(partsCost.toFixed(2)),
           maintenance_labor_cost: Number(laborCost.toFixed(2)),
           weekly_total_cost: Number((oilCost + partsCost + laborCost).toFixed(2)),
@@ -1550,8 +1642,22 @@ export default async function maintenanceRoutes(app) {
               { metric: "Range", value: `${start} to ${end}` },
               { metric: "Open Work Orders", value: Number(data?.kpis?.open_work_orders || 0) },
               { metric: "Upcoming Services Flagged", value: Number(data?.kpis?.upcoming_services_flagged || 0) },
-              { metric: "Stores Oil Cost", value: Number(data?.costs?.stores_oil_cost || 0).toFixed(2) },
-              { metric: "Stores Parts Cost", value: Number(data?.costs?.stores_parts_cost || 0).toFixed(2) },
+              {
+                metric: "Stores parts (excl. oil/lube SKUs)",
+                value: Number(data?.costs?.stores_parts_cost || 0).toFixed(2),
+              },
+              {
+                metric: "Oil cost — lube log entries",
+                value: Number(data?.costs?.stores_oil_from_logs || 0).toFixed(2),
+              },
+              {
+                metric: "Oil cost — WO stock (oil/lube lines)",
+                value: Number(data?.costs?.stores_oil_from_work_orders || 0).toFixed(2),
+              },
+              {
+                metric: "Stores oil total",
+                value: Number(data?.costs?.stores_oil_cost || 0).toFixed(2),
+              },
               { metric: "Maintenance Labor Cost", value: Number(data?.costs?.maintenance_labor_cost || 0).toFixed(2) },
               { metric: "Weekly Total Cost", value: Number(data?.costs?.weekly_total_cost || 0).toFixed(2) },
               { metric: "Upcoming Service Forecast Cost", value: Number(data?.costs?.upcoming_service_forecast_cost || 0).toFixed(2) },

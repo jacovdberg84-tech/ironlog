@@ -440,7 +440,7 @@
           <tbody id="wfUpcomingBody"></tbody>
         </table>
       </div>
-      <small class="muted">Forecast uses historical closed service work orders and linked stores/oil usage as planning guidance.</small>
+      <small class="muted">Forecast uses historical closed service work orders. Store lines are split into oil vs parts using part <code>consumable_kind</code> (oil, lube, …) when set, otherwise part name/code hints. Lube log entries count toward oil; WO-issued oil/lube SKUs count toward oil, not avg parts.</small>
       <hr class="hr-soft" />
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <h3 style="margin:0;">Manual Upcoming Service Inputs (Store-Priced)</h3>
