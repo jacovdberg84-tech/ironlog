@@ -518,6 +518,91 @@ export default async function ironmindRoutes(app) {
       return null;
     }
   }
+
+  async function tryAnswerIronmindAskWithAi({ question, start, end, assetCode = "", history = [] }) {
+    const cfg = getAiConfig();
+    if (cfg.provider !== "openai") return null;
+    const latest = getLatestIronmindReport("daily_admin");
+    const summary = String(latest?.summary || "").slice(0, 2500);
+    const fleet = db.prepare(`
+      SELECT
+        COALESCE(SUM(l.hours_down), 0) AS downtime_hours,
+        COUNT(DISTINCT l.breakdown_id) AS incidents
+      FROM breakdown_downtime_logs l
+      WHERE l.log_date BETWEEN ? AND ?
+    `).get(start, end);
+    const openBreakdowns = Number(db.prepare(`SELECT COUNT(*) AS c FROM breakdowns WHERE status='OPEN'`).get()?.c || 0);
+    const topDown = db.prepare(`
+      SELECT a.asset_code, COALESCE(SUM(l.hours_down), 0) AS downtime_hours
+      FROM breakdown_downtime_logs l
+      JOIN breakdowns b ON b.id = l.breakdown_id
+      JOIN assets a ON a.id = b.asset_id
+      WHERE l.log_date BETWEEN ? AND ?
+      GROUP BY a.asset_code
+      ORDER BY downtime_hours DESC, a.asset_code ASC
+      LIMIT 5
+    `).all(start, end);
+    const assetContext = assetCode
+      ? db.prepare(`
+          SELECT a.asset_code, a.asset_name, a.category
+          FROM assets a
+          WHERE UPPER(a.asset_code) = UPPER(?)
+          LIMIT 1
+        `).get(assetCode)
+      : null;
+    const system = [
+      "You are IronMind, a maintenance intelligence assistant for plant operations.",
+      "Answer practically and clearly with operational context.",
+      "Do not ask for asset code unless absolutely needed.",
+      "Use available fleet context and provide actionable next steps.",
+      "If uncertain, say what data is missing and still provide best guidance.",
+    ].join(" ");
+    const hist = Array.isArray(history)
+      ? history.slice(-6).flatMap((h) => {
+          const q = String(h?.question || "").trim();
+          const a = String(h?.answer || "").trim();
+          const arr = [];
+          if (q) arr.push({ role: "user", content: q });
+          if (a) arr.push({ role: "assistant", content: a });
+          return arr;
+        })
+      : [];
+    const context = {
+      period: { start, end },
+      fleet: {
+        downtime_hours: Number(fleet?.downtime_hours || 0),
+        incidents: Number(fleet?.incidents || 0),
+        open_breakdowns: openBreakdowns,
+        top_downtime_assets: topDown,
+      },
+      asset_context: assetContext || null,
+      latest_summary: summary || null,
+    };
+    try {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${cfg.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: cfg.model || "gpt-4o-mini",
+          temperature: 0.2,
+          messages: [
+            { role: "system", content: system },
+            ...hist,
+            { role: "user", content: `Context JSON:\n${JSON.stringify(context)}\n\nQuestion:\n${question}` },
+          ],
+        }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      const text = String(data?.choices?.[0]?.message?.content || "").trim();
+      return text || null;
+    } catch {
+      return null;
+    }
+  }
   function buildFallbackRsgPlan({ equipmentLabel, serviceHours }) {
     return {
       service_title: `${equipmentLabel} - ${serviceHours}hr service`,
@@ -708,7 +793,10 @@ export default async function ironmindRoutes(app) {
       const start = isDate(body.start) ? String(body.start) : parsed.start;
       const end = isDate(body.end) ? String(body.end) : parsed.end;
       const assetCode = String(body.asset_code || parseAssetCode(question)).trim().toUpperCase();
+      const history = Array.isArray(body.history) ? body.history : [];
       const qLower = question.toLowerCase();
+      const live = await tryAnswerIronmindAskWithAi({ question, start, end, assetCode, history });
+      if (live) return reply.send({ ok: true, short_answer: live });
       const buildFleetSnapshotText = () => {
         const totalDowntime = Number(db.prepare(`
           SELECT COALESCE(SUM(l.hours_down), 0) AS h

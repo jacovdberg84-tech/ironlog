@@ -2284,6 +2284,7 @@ async function askIronmindQuestion() {
   const input = qs("ironmindAskInput");
   const out = qs("ironmindAskResult");
   const date = qs("date")?.value || todayLocalYmd();
+  window.__ironmindAskHistory = Array.isArray(window.__ironmindAskHistory) ? window.__ironmindAskHistory : [];
   const question = String(input?.value || "").trim();
   if (!question) {
     if (out) out.innerHTML = `<small class="muted">Type a question first.</small>`;
@@ -2294,11 +2295,21 @@ async function askIronmindQuestion() {
     const res = await fetchJson(`${API}/api/ironmind/ask`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, date }),
+      body: JSON.stringify({ question, date, history: window.__ironmindAskHistory.slice(-6) }),
     });
     const short = String(res?.short_answer || res?.answer || res?.message || "No answer returned.");
     const safe = escapeHtml(short).replace(/\n/g, "<br>");
-    if (out) out.innerHTML = `<div>${safe}</div>`;
+    window.__ironmindAskHistory.push({ question, answer: short });
+    window.__ironmindAskHistory = window.__ironmindAskHistory.slice(-12);
+    if (out) {
+      const items = window.__ironmindAskHistory.map((h) => `
+        <div style="margin-bottom:10px;">
+          <div><b>You:</b> ${escapeHtml(String(h.question || ""))}</div>
+          <div><b>IronMind:</b> ${escapeHtml(String(h.answer || "")).replace(/\n/g, "<br>")}</div>
+        </div>
+      `).join("");
+      out.innerHTML = items || `<div>${safe}</div>`;
+    }
     setStatus("IRONMIND question answered.");
   } catch (e) {
     if (out) out.innerHTML = `<small class="muted">Question failed: ${escapeHtml(e.message || String(e))}</small>`;
