@@ -2035,28 +2035,14 @@ async function loadDashboard() {
   setText("lubeEntries", Array.isArray(lube.rows) ? lube.rows.length : 0);
   setText("lubeAssets", Array.isArray(lube.rows) ? lube.rows.length : 0);
   setText("cLubeCost", fmtMoney(lube.total_lube_cost != null ? lube.total_lube_cost : data?.cost_engine?.lube_cost));
-  const lubeList = qs("lubeList");
-  if (lubeList) {
-    lubeList.innerHTML = "";
-    (lube.rows || []).forEach((r) => {
-      const byOilType = Array.isArray(r.by_oil_type) ? r.by_oil_type : [];
-      const byOilHtml = byOilType.length
-        ? byOilType.map((x) =>
-          `<div>• ${x.oil_type}: ${Number(x.qty || 0).toFixed(1)} qty | ${fmtMoney(x.lube_cost || 0)}</div>`
-        ).join("")
-        : `<div>• No oil type split available</div>`;
-      lubeList.appendChild(
-        item(
-          `<div style="padding:8px 0; line-height:1.45;">` +
-          `<div><b>${r.asset_code}</b> — ${r.asset_name || r.asset_code || "Unknown equipment"}</div>` +
-          `<div><small>Total issued: ${Number(r.qty || 0).toFixed(1)} qty | Total cost: ${fmtMoney(r.total_lube_cost ?? r.lube_cost)}</small></div>` +
-          `<div style="margin-top:6px;"><small><b>Oil type breakdown:</b></small>${byOilHtml}</div>` +
-          `</div>`
-        )
-      );
-    });
-    if (!lube.rows?.length) lubeList.appendChild(item("<small>No lube logs for this date.</small>"));
-  }
+  lubeUsageCache = {
+    rows: Array.isArray(lube.rows) ? lube.rows.map((r) => ({
+      ...r,
+      qty_total: Number(r.qty ?? 0),
+      total_lube_cost: Number(r.total_lube_cost ?? r.lube_cost ?? 0),
+    })) : [],
+  };
+  renderLubeUsageTable(lubeUsageCache);
 
   await loadStockMonitor().catch(() => {});
   await loadIronmindInsight({ silent: true }).catch(() => {});
@@ -2459,6 +2445,97 @@ function getDefaultLubeRange() {
   return { start: fmt(start), end: fmt(end) };
 }
 
+let lubeUsageCache = null;
+
+function isPartLikeOilType(v) {
+  const t = String(v || "").trim();
+  if (!t) return true;
+  const lower = t.toLowerCase();
+  const knownOilWords = ["oil", "lube", "lub", "hyd", "hydraulic", "grease", "coolant", "atf", "engine"];
+  if (knownOilWords.some((w) => lower.includes(w))) return false;
+  // Typical stock/part-like key: uppercase-ish code with digits/hyphen/underscore and no spaces.
+  return /^[a-z0-9][a-z0-9\-_/.]{2,24}$/i.test(t) && !/\s/.test(t);
+}
+
+function renderLubeUsageTable(payload) {
+  const lubeList = qs("lubeList");
+  if (!lubeList) return;
+  const dataRows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const assetFilter = String(qs("lubeFilterAsset")?.value || "").trim().toLowerCase();
+  const oilTypeFilter = String(qs("lubeFilterOilType")?.value || "").trim().toLowerCase();
+  const hidePartLike = Boolean(qs("lubeHidePartLike")?.checked);
+
+  const flat = [];
+  for (const r of dataRows) {
+    const assetCode = String(r.asset_code || "");
+    const assetName = String(r.asset_name || "");
+    if (assetFilter && !assetCode.toLowerCase().includes(assetFilter)) continue;
+    const byType = Array.isArray(r.by_oil_type) ? r.by_oil_type : [];
+    const normalized = byType.length
+      ? byType.map((x) => ({
+          oil_type: String(x.oil_type || "UNSPECIFIED"),
+          qty: Number(x.qty ?? x.qty_total ?? 0),
+          cost: Number(x.lube_cost ?? x.total_lube_cost ?? 0),
+        }))
+      : [{
+          oil_type: "UNSPECIFIED",
+          qty: Number(r.qty ?? r.qty_total ?? 0),
+          cost: Number(r.lube_cost ?? r.total_lube_cost ?? 0),
+        }];
+
+    for (const t of normalized) {
+      if (hidePartLike && isPartLikeOilType(t.oil_type)) continue;
+      if (oilTypeFilter && !String(t.oil_type || "").toLowerCase().includes(oilTypeFilter)) continue;
+      flat.push({
+        asset_code: assetCode,
+        asset_name: assetName,
+        oil_type: t.oil_type,
+        qty: t.qty,
+        cost: t.cost,
+      });
+    }
+  }
+
+  if (!flat.length) {
+    lubeList.innerHTML = `<small>No lube rows match your filters.</small>`;
+    return;
+  }
+
+  const visibleAssets = new Set(flat.map((r) => r.asset_code)).size;
+  const visibleQty = flat.reduce((s, r) => s + Number(r.qty || 0), 0);
+  const visibleCost = flat.reduce((s, r) => s + Number(r.cost || 0), 0);
+
+  lubeList.innerHTML = `
+    <div style="overflow:auto;">
+      <table class="gridTable" style="min-width:1100px;">
+        <thead>
+          <tr>
+            <th>Asset Code</th>
+            <th>Equipment</th>
+            <th>Oil Type</th>
+            <th style="text-align:right;">Qty</th>
+            <th style="text-align:right;">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${flat.map((r) => `
+            <tr>
+              <td style="padding:10px 8px;">${esc(r.asset_code || "-")}</td>
+              <td style="padding:10px 8px;">${esc(r.asset_name || r.asset_code || "-")}</td>
+              <td style="padding:10px 8px;">${esc(r.oil_type || "UNSPECIFIED")}</td>
+              <td style="padding:10px 8px; text-align:right;">${Number(r.qty || 0).toFixed(1)}</td>
+              <td style="padding:10px 8px; text-align:right;">${fmtMoney(r.cost || 0)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+    <div class="muted" style="margin-top:8px;">
+      Showing ${flat.length} oil-type lines across ${visibleAssets} assets | visible qty ${visibleQty.toFixed(1)} | visible cost ${fmtMoney(visibleCost)}
+    </div>
+  `;
+}
+
 async function loadLubeUsage() {
   const start = qs("lubeStart")?.value || "";
   const end = qs("lubeEnd")?.value || "";
@@ -2475,29 +2552,8 @@ async function loadLubeUsage() {
   setText("lubeEntries", Number(data.summary?.entries || 0));
   setText("lubeAssets", Number(data.summary?.assets || 0));
   setText("cLubeCost", fmtMoney(data.summary?.total_lube_cost || 0));
-
-  const lubeList = qs("lubeList");
-  if (lubeList) {
-    lubeList.innerHTML = "";
-    (data.rows || []).forEach((r) => {
-      const byOilType = Array.isArray(r.by_oil_type) ? r.by_oil_type : [];
-      const byOilHtml = byOilType.length
-        ? byOilType.map((x) =>
-          `<div>• ${x.oil_type}: ${Number(x.qty_total || 0).toFixed(1)} qty | ${fmtMoney(x.total_lube_cost || 0)}</div>`
-        ).join("")
-        : `<div>• No oil type split available</div>`;
-      lubeList.appendChild(
-        item(
-          `<div style="padding:8px 0; line-height:1.45;">` +
-          `<div><b>${r.asset_code}</b> — ${r.asset_name || r.asset_code || "Unknown equipment"}</div>` +
-          `<div><small>Total issued: ${Number(r.qty_total || 0).toFixed(1)} qty | Total cost: ${fmtMoney(r.total_lube_cost || 0)} | Entries: ${Number(r.entries || 0)}</small></div>` +
-          `<div style="margin-top:6px;"><small><b>Oil type breakdown:</b></small>${byOilHtml}</div>` +
-          `</div>`
-        )
-      );
-    });
-    if (!data.rows?.length) lubeList.appendChild(item("<small>No lube usage in this period.</small>"));
-  }
+  lubeUsageCache = data;
+  renderLubeUsageTable(data);
 
   setStatus("Lube usage ready.");
 }
@@ -7855,6 +7911,15 @@ async function init() {
   qs("loadLube")?.addEventListener("click", () =>
     loadLubeUsage().catch((e) => setStatus("Lube error: " + e.message))
   );
+  qs("lubeFilterAsset")?.addEventListener("input", () => {
+    if (lubeUsageCache) renderLubeUsageTable(lubeUsageCache);
+  });
+  qs("lubeFilterOilType")?.addEventListener("input", () => {
+    if (lubeUsageCache) renderLubeUsageTable(lubeUsageCache);
+  });
+  qs("lubeHidePartLike")?.addEventListener("change", () => {
+    if (lubeUsageCache) renderLubeUsageTable(lubeUsageCache);
+  });
   qs("loadLubeAnalytics")?.addEventListener("click", () =>
     loadLubeAnalytics().catch((e) => setStatus("Lube analytics error: " + e.message))
   );
