@@ -60,6 +60,40 @@ function getAssetCurrentHours(assetId) {
   return Number(getAssetCurrentHoursInfo(assetId).hours || 0);
 }
 
+/** Meter / usage as of inspection date (daily rows with work_date <= as_of). Falls back to current fleet logic. */
+function getAssetHoursInfoAsOf(assetId, asOfYmd) {
+  const aid = Number(assetId || 0);
+  if (!aid || !isDate(String(asOfYmd || "").trim())) return getAssetCurrentHoursInfo(aid);
+  const asOf = String(asOfYmd).trim();
+
+  const meter = db.prepare(`
+    SELECT closing_hours AS latest_closing
+    FROM daily_hours
+    WHERE asset_id = ?
+      AND closing_hours IS NOT NULL
+      AND work_date <= ?
+    ORDER BY work_date DESC, id DESC
+    LIMIT 1
+  `).get(aid, asOf);
+  const closing = meter?.latest_closing == null ? null : Number(meter.latest_closing);
+  if (closing != null && Number.isFinite(closing)) {
+    return { hours: closing, source: "daily_closing" };
+  }
+
+  const fromDailyHours = db.prepare(`
+    SELECT COALESCE(SUM(hours_run), 0) AS total_hours
+    FROM daily_hours
+    WHERE asset_id = ?
+      AND is_used = 1
+      AND hours_run > 0
+      AND work_date <= ?
+  `).get(aid, asOf);
+  const th = Number(fromDailyHours?.total_hours || 0);
+  if (th > 0) return { hours: th, source: "daily_sum" };
+
+  return getAssetCurrentHoursInfo(aid);
+}
+
 function classifyDueStatus(remainingHours, nearDueHours = 50) {
   const remaining = Number(remainingHours || 0);
   const threshold = Math.max(1, Number(nearDueHours || 50));
@@ -612,7 +646,7 @@ export default async function maintenanceRoutes(app) {
 
     // =====================================================
   // GET LIVE HOURS FOR ONE ASSET
-  // GET /api/maintenance/asset/:id/live-hours
+  // GET /api/maintenance/asset/:id/live-hours?as_of=YYYY-MM-DD (optional; meter/usage up to that date)
   // =====================================================
   app.get("/asset/:id/live-hours", async (req, reply) => {
     try {
@@ -637,7 +671,10 @@ export default async function maintenanceRoutes(app) {
         });
       }
 
-      const currentInfo = getAssetCurrentHoursInfo(assetId);
+      const asOf = String(req.query?.as_of || "").trim();
+      const currentInfo = isDate(asOf)
+        ? getAssetHoursInfoAsOf(assetId, asOf)
+        : getAssetCurrentHoursInfo(assetId);
       const current_hours = Number(currentInfo.hours || 0);
 
       return reply.send({
@@ -645,6 +682,7 @@ export default async function maintenanceRoutes(app) {
         asset_id: asset.id,
         asset_code: asset.asset_code,
         asset_name: asset.asset_name,
+        as_of: isDate(asOf) ? asOf : null,
         current_hours: Number(current_hours.toFixed(1)),
         current_hours_source: currentInfo.source
       });
@@ -2426,7 +2464,7 @@ export default async function maintenanceRoutes(app) {
       const asset = db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE id = ?`).get(asset_id);
       if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
 
-      const liveInfo = getAssetCurrentHoursInfo(asset_id);
+      const liveInfo = getAssetHoursInfoAsOf(asset_id, inspection_date);
       const liveSnap = Number(liveInfo.hours || 0);
       const liveSource = String(liveInfo.source || "");
 

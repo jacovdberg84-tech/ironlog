@@ -1783,6 +1783,7 @@ function collectManagerInspectionParts() {
 
 async function pullManagerInspectionLiveHours() {
   const assetId = Number(document.getElementById("miAsset")?.value || 0);
+  const inspectionDate = String(document.getElementById("miDate")?.value || "").trim();
   const meta = document.getElementById("miLiveMeta");
   const inp = document.getElementById("miMachineHours");
   if (!assetId) {
@@ -1791,14 +1792,36 @@ async function pullManagerInspectionLiveHours() {
   }
   if (meta) meta.textContent = "Loading live hours…";
   try {
-    const res = await fetch(`${API}/maintenance/asset/${assetId}/live-hours`, { headers: authHeaders() });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to load live hours");
-    const h = Number(data.current_hours || 0);
+    const q = new URLSearchParams();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(inspectionDate)) q.set("as_of", inspectionDate);
+    const qs = q.toString();
+    const url = `${API}/maintenance/asset/${assetId}/live-hours${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: authHeaders() });
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      throw new Error(`Live hours response was not JSON (HTTP ${res.status}).`);
+    }
+    if (!res.ok) throw new Error(data?.error || "Failed to load live hours");
+    const h = Number(data.current_hours ?? 0);
     const src = String(data.current_hours_source || "");
-    if (inp) inp.value = Number.isFinite(h) ? String(h.toFixed(1)) : "";
-    if (meta) meta.textContent = `Live: ${h.toFixed(1)} h (${src || "—"})`;
+    const asOf = data.as_of ? ` up to ${data.as_of}` : "";
+    if (inp) inp.value = Number.isFinite(h) ? String(Number(h).toFixed(1)) : "";
+    const srcLabel =
+      {
+        daily_closing: "Daily closing",
+        daily_sum: "Daily sum",
+        asset_hours: "Asset hours",
+      }[src] || src || "—";
+    let line = `Live${asOf}: ${Number.isFinite(h) ? h.toFixed(1) : "—"} h (${srcLabel})`;
+    if (Number.isFinite(h) && h <= 0) {
+      line +=
+        " — No meter or usage found for this asset/date; add Daily Input or enter hours manually.";
+    }
+    if (meta) meta.textContent = line;
   } catch (e) {
+    console.error("pullManagerInspectionLiveHours:", e);
     if (meta) meta.textContent = e.message || String(e);
   }
 }
@@ -2816,12 +2839,23 @@ document.addEventListener("DOMContentLoaded", () => {
   renderManagerInspectionChecklist();
   const miPartsBody = document.getElementById("miPartsBody");
   if (miPartsBody && !miPartsBody.querySelector("tr")) addManagerInspectionPartRow();
-  document.getElementById("miPullLiveHoursBtn")?.addEventListener("click", () => pullManagerInspectionLiveHours().catch(() => {}));
+  document.getElementById("miPullLiveHoursBtn")?.addEventListener("click", () =>
+    pullManagerInspectionLiveHours().catch((e) => console.error(e))
+  );
   document.getElementById("miAddPartRowBtn")?.addEventListener("click", () => addManagerInspectionPartRow());
-  document.getElementById("miAsset")?.addEventListener("change", () => {
-    const meta = document.getElementById("miLiveMeta");
-    if (meta) meta.textContent = "";
-  });
+  const miReloadHours = () => {
+    const id = Number(document.getElementById("miAsset")?.value || 0);
+    if (!id) {
+      const meta = document.getElementById("miLiveMeta");
+      const inp = document.getElementById("miMachineHours");
+      if (meta) meta.textContent = "";
+      if (inp) inp.value = "";
+      return;
+    }
+    pullManagerInspectionLiveHours().catch((e) => console.error(e));
+  };
+  document.getElementById("miAsset")?.addEventListener("change", miReloadHours);
+  document.getElementById("miDate")?.addEventListener("change", miReloadHours);
   document.getElementById("saveMiBtn")?.addEventListener("click", saveManagerInspection);
   document.getElementById("saveDrBtn")?.addEventListener("click", saveDamageReport);
   document.getElementById("loadMiBtn")?.addEventListener("click", loadManagerInspections);
