@@ -1406,8 +1406,6 @@ export default async function reportsRoutes(app) {
     };
 
     const bdF = dateFilter("b.breakdown_date");
-    const breakdownParams = [date, date, date];
-    if (hasBreakdownEndAt) breakdownParams.push(date);
     const breakdowns = db.prepare(`
       SELECT
         b.breakdown_date AS date,
@@ -1477,10 +1475,23 @@ export default async function reportsRoutes(app) {
         `).all(asset.id, ...compF.params)
       : [];
 
+    const siteCode = String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
+    const opsF = dateFilter("r.report_date");
+    const opsSlips = hasTable("ops_slip_reports")
+      ? db.prepare(`
+          SELECT r.id, r.slip_type, r.report_date AS date, r.created_by
+          FROM ops_slip_reports r
+          WHERE r.asset_id = ? AND r.site_code = ? ${opsF.sql}
+          ORDER BY r.report_date DESC, r.id DESC
+          LIMIT 300
+        `).all(asset.id, siteCode, ...opsF.params)
+      : [];
+
     const breakdownsPdf = breakdowns.slice(0, 60);
     const workOrdersPdf = workOrders.slice(0, 60);
     const getSlipsPdf = getSlips.slice(0, 60);
     const componentSlipsPdf = componentSlips.slice(0, 60);
+    const opsSlipsPdf = opsSlips.slice(0, 60);
 
     const oilF = dateFilter("o.log_date");
     const oil = db.prepare(`
@@ -1588,6 +1599,7 @@ export default async function reportsRoutes(app) {
           { k: "Work Orders", v: workOrders.length },
           { k: "GET Slips", v: getSlips.length },
           { k: "Component Slips", v: componentSlips.length },
+          { k: "Ops slips (PDF)", v: opsSlips.length },
           { k: "Total Downtime (hrs)", v: fmtNum(breakdowns.reduce((a, r) => a + Number(r.downtime_hours || 0), 0), 1) },
           { k: "Parts Used (qty)", v: fmtNum(partsUsed?.qty || 0, 0) },
           { k: "Oil Used (qty)", v: fmtNum(oil?.oil_qty || 0, 1) },
@@ -1684,6 +1696,27 @@ export default async function reportsRoutes(app) {
                 hours: r.hours_at_change == null ? "-" : fmtNum(r.hours_at_change, 1),
               }))
             : [{ id: "-", date: "-", component: "-", serial: "-", hours: "-" }]
+        );
+
+        sectionTitle(doc, "Breakdown Ops slips (saved PDF reports)");
+        table(
+          doc,
+          [
+            { key: "id", label: "Slip#", width: 0.12, align: "right" },
+            { key: "date", label: "Report date", width: 0.16 },
+            { key: "stype", label: "Type", width: 0.22 },
+            { key: "by", label: "Recorded by", width: 0.18 },
+            { key: "note", label: "Note", width: 0.32 },
+          ],
+          opsSlipsPdf.length
+            ? opsSlipsPdf.map((r) => ({
+                id: String(r.id),
+                date: r.date || "",
+                stype: String(r.slip_type || "").replace(/_/g, " "),
+                by: compactCell(r.created_by || "-", 40),
+                note: "See IRONLOG Breakdown Ops → open PDF for full detail",
+              }))
+            : [{ id: "-", date: "-", stype: "-", by: "-", note: "No ops slips in range" }]
         );
       },
       {

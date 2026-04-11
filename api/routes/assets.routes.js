@@ -162,6 +162,8 @@ export default async function assetRoutes(app) {
     const asset = getAssetByCode.get(asset_code);
     if (!asset) return reply.code(404).send({ error: "Asset not found" });
 
+    const siteCode = String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
+
     const startOk = start && isDate(start);
     const endOk = end && isDate(end);
 
@@ -462,6 +464,98 @@ export default async function assetRoutes(app) {
       });
     }
 
+    // ---- BREAKDOWN OPS SLIPS (hose / GET / component / tyre — stored in ops_slip_reports)
+    const summarizeOpsSlipForHistory = (slip_type, payload_json) => {
+      let p = {};
+      try {
+        p = JSON.parse(String(payload_json || "{}"));
+      } catch {
+        return { parse_error: true };
+      }
+      const picturesAttached = Array.isArray(p.pictures) ? p.pictures.length : 0;
+      const base = { pictures_attached: picturesAttached };
+      if (slip_type === "hose_failure") {
+        return {
+          ...base,
+          date_fitted: p.date_fitted || null,
+          reason: p.reason_fitted ? String(p.reason_fitted).slice(0, 240) : null,
+          preventable: Boolean(p.preventable),
+          hose_part_code: p.hose_part_code || null,
+          oil_loss_part_code: p.oil_loss_part_code || null,
+          hose_qty: p.hose_qty,
+          oil_loss_qty: p.oil_loss_qty,
+          slip_total_usd: p.slip_total_usd,
+        };
+      }
+      if (slip_type === "get_change") {
+        return {
+          ...base,
+          part_code: p.part_code || null,
+          part_qty: p.part_qty,
+          supplier: p.supplier || null,
+          date_changed: p.date_changed || null,
+          description_part_code: p.description_part_code || null,
+          hours_fitted: p.hours_fitted,
+        };
+      }
+      if (slip_type === "component_change") {
+        return {
+          ...base,
+          date_changed: p.date_changed || null,
+          component_type: p.component_type || null,
+          part_code: p.part_code || null,
+          reason: p.reason ? String(p.reason).slice(0, 200) : null,
+          hours_in_service: p.hours_in_service,
+          line_total_usd: p.cost,
+        };
+      }
+      if (slip_type === "tyre_change") {
+        const tyres = Array.isArray(p.tyres) ? p.tyres : [];
+        return {
+          ...base,
+          tyre_lines: tyres.length,
+          positions: tyres.map((t) => t.position).filter(Boolean).slice(0, 10),
+        };
+      }
+      return base;
+    };
+
+    let opsSlipEvents = [];
+    if (hasTable("ops_slip_reports")) {
+      const opsF = dateFilter("r.report_date");
+      const slipTitle = {
+        hose_failure: "Hose failure slip",
+        get_change: "G.E.T. change slip",
+        component_change: "Component change slip",
+        tyre_change: "Tyre change slip",
+      };
+      const rows = db
+        .prepare(
+          `
+        SELECT r.id, r.slip_type, r.report_date AS date, r.created_at, r.created_by, r.payload_json
+        FROM ops_slip_reports r
+        WHERE r.asset_id = ? AND r.site_code = ? ${opsF.sql}
+        ORDER BY r.report_date DESC, r.id DESC
+        LIMIT 200
+      `
+        )
+        .all(asset.id, siteCode, ...opsF.params);
+
+      opsSlipEvents = rows.map((r) => ({
+        type: "ops_slip",
+        date: r.date,
+        title: `${slipTitle[r.slip_type] || "Ops slip"} #${r.id}`,
+        work_order_id: null,
+        details: {
+          slip_id: Number(r.id),
+          slip_type: r.slip_type,
+          created_at: r.created_at,
+          created_by: r.created_by || null,
+          summary: summarizeOpsSlipForHistory(r.slip_type, r.payload_json),
+        },
+      }));
+    }
+
     // ---- DAMAGE REPORTS (schema-flexible / optional tables)
     let damageEvents = [];
     const damageTable = firstExistingTable([
@@ -672,6 +766,7 @@ export default async function assetRoutes(app) {
       ...workOrders,
       ...getSlipEvents,
       ...componentSlipEvents,
+      ...opsSlipEvents,
       ...damageEvents,
       ...tyreChangeEvents,
       ...tyreInspectionEvents,
@@ -687,6 +782,7 @@ export default async function assetRoutes(app) {
         work_orders: workOrders.length,
         get_slips: getSlipEvents.length,
         component_slips: componentSlipEvents.length,
+        ops_slips: opsSlipEvents.length,
         damage_reports: damageEvents.length,
         tyre_changes: tyreChangeEvents.length,
         tyre_inspections: tyreInspectionEvents.length,

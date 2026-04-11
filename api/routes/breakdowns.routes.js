@@ -375,30 +375,9 @@ export default async function breakdownRoutes(app) {
   });
 
   // ---------------------------
-  // Get one breakdown (with logs + components)
-  // ---------------------------
-  app.get("/:id", async (req, reply) => {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: "Invalid breakdown id" });
-
-    const b = getBreakdownById.get(id);
-    if (!b) return reply.code(404).send({ error: "Breakdown not found" });
-
-    return {
-      ...b,
-      critical: Boolean(b.critical),
-      downtime_total_hours: Number(b.downtime_total_hours || 0),
-      get_used: Boolean(b.get_used),
-      get_hours_fitted: b.get_hours_fitted == null ? null : Number(b.get_hours_fitted),
-      get_hours_changed: b.get_hours_changed == null ? null : Number(b.get_hours_changed),
-      downtime_logs: listDowntimeLogs.all(id).map(l => ({ ...l, hours_down: Number(l.hours_down || 0) })),
-      components: listComponentLines.all(id),
-    };
-  });
-
-  // ---------------------------
   // Find open breakdown for asset_code (Daily Input helper)
   // GET /api/breakdowns/open?asset_code=A300AM
+  // NOTE: Must be registered before /:id so "open" is not captured as an id.
   // ---------------------------
   app.get("/open", async (req, reply) => {
     const asset_code = String(req.query.asset_code || "").trim();
@@ -421,6 +400,29 @@ export default async function breakdownRoutes(app) {
       ? listOpenBreakdownsAllForDate.all(date)
       : listOpenBreakdownsAll.all();
     return { ok: true, rows: rows.map((r) => ({ ...r })) };
+  });
+
+  // ---------------------------
+  // Get one breakdown (with logs + components)
+  // GET /api/breakdowns/:id
+  // ---------------------------
+  app.get("/:id", async (req, reply) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: "Invalid breakdown id" });
+
+    const b = getBreakdownById.get(id);
+    if (!b) return reply.code(404).send({ error: "Breakdown not found" });
+
+    return {
+      ...b,
+      critical: Boolean(b.critical),
+      downtime_total_hours: Number(b.downtime_total_hours || 0),
+      get_used: Boolean(b.get_used),
+      get_hours_fitted: b.get_hours_fitted == null ? null : Number(b.get_hours_fitted),
+      get_hours_changed: b.get_hours_changed == null ? null : Number(b.get_hours_changed),
+      downtime_logs: listDowntimeLogs.all(id).map(l => ({ ...l, hours_down: Number(l.hours_down || 0) })),
+      components: listComponentLines.all(id),
+    };
   });
 
   // ---------------------------

@@ -602,6 +602,31 @@ async function fetchJson(url, opts) {
   return data;
 }
 
+/** Opens a PDF (or other binary) in a new tab using the same auth headers as API calls. */
+async function openAuthedPdf(url) {
+  const res = await fetch(url, { headers: authHeaders() });
+  const blob = await res.blob();
+  if (!res.ok) {
+    if (res.status === 401) {
+      const had = Boolean(getAuthToken());
+      clearAuthSession();
+      if (had) {
+        showLoginGate(true);
+        updateAuthChrome();
+      }
+    }
+    let msg = await blob.text().catch(() => "");
+    try {
+      const j = JSON.parse(msg);
+      msg = j.error || j.message || msg;
+    } catch {}
+    throw new Error(msg || `Request failed (${res.status})`);
+  }
+  const u = URL.createObjectURL(blob);
+  window.open(u, "_blank", "noopener,noreferrer");
+  setTimeout(() => URL.revokeObjectURL(u), 120000);
+}
+
 function getRoleAllowedTabs(role) {
   const r = String(role || "").toLowerCase();
   if (r === "operator") return ["dash", "daily", "fuel", "lube", "legal", "operations", "ironmind", "docs", "vehicle"];
@@ -8245,6 +8270,43 @@ async function populateHistoryAssets() {
   }
 }
 
+function formatOpsSlipHistoryExtra(ev) {
+  const d = ev.details || {};
+  const slipId = Number(d.slip_id || 0);
+  const st = String(d.slip_type || "");
+  const s = d.summary || {};
+  const bits = [];
+  if (s.parse_error) bits.push("Summary could not be read from saved slip.");
+  else {
+    const pic = Number(s.pictures_attached || 0);
+    if (pic > 0) bits.push(`${pic} attached picture(s) on PDF slip`);
+    if (st === "hose_failure") {
+      if (s.hose_part_code) bits.push(`Hose part: ${s.hose_part_code}`);
+      if (s.oil_loss_part_code) bits.push(`Oil loss part: ${s.oil_loss_part_code}`);
+      if (s.reason) bits.push(String(s.reason));
+      if (s.preventable) bits.push("Tagged preventable");
+    } else if (st === "get_change") {
+      if (s.part_code) bits.push(`Part: ${s.part_code}`);
+      if (s.date_changed) bits.push(`Changed: ${s.date_changed}`);
+    } else if (st === "component_change") {
+      if (s.component_type) bits.push(`Component: ${s.component_type}`);
+      if (s.part_code) bits.push(`Part: ${s.part_code}`);
+      if (s.reason) bits.push(String(s.reason));
+    } else if (st === "tyre_change") {
+      if (s.tyre_lines) bits.push(`${s.tyre_lines} tyre line(s)`);
+      if (Array.isArray(s.positions) && s.positions.length) bits.push(`Positions: ${s.positions.join(", ")}`);
+    }
+  }
+  const lines = bits.length
+    ? bits.map((b) => `<small>${escapeHtml(b)}</small>`).join("<br>")
+    : `<small>Operational slip (Breakdown Ops).</small>`;
+  const who = d.created_by ? `<br><small>${escapeHtml(String(d.created_by))}</small>` : "";
+  const btn = slipId
+    ? `<br><button type="button" class="btn small" data-ops-slip-pdf="${slipId}">Open slip PDF</button>`
+    : "";
+  return `<br>${lines}${who}${btn}`;
+}
+
 function pillForType(t) {
   if (t === "breakdown") return "<span class='pill red'>BD</span>";
   if (t === "service") return "<span class='pill blue'>SV</span>";
@@ -8254,6 +8316,7 @@ function pillForType(t) {
   if (t === "tyre_change") return "<span class='pill orange'>TY CHG</span>";
   if (t === "tyre_inspection") return "<span class='pill blue'>TY INSP</span>";
   if (t === "work_order") return "<span class='pill blue'>WO</span>";
+  if (t === "ops_slip") return "<span class='pill' style='background:#5b21b6;color:#fff;'>OPS</span>";
   return "<span class='pill'>EV</span>";
 }
 
@@ -8300,6 +8363,9 @@ async function loadAssetHistory() {
   if (summaryEl) {
     summaryEl.innerHTML = `
       <div class="pill blue">Events: ${Number(counts.events_total || 0)}</div>
+      <div class="pill red">Breakdowns: ${Number(counts.breakdowns || 0)}</div>
+      <div class="pill blue">Work Orders: ${Number(counts.work_orders || 0)}</div>
+      <div class="pill" style="background:#5b21b6;color:#fff;">Ops slips: ${Number(counts.ops_slips || 0)}</div>
       <div class="pill blue">GET Slips: ${Number(counts.get_slips || 0)}</div>
       <div class="pill blue">Component Slips: ${Number(counts.component_slips || 0)}</div>
       <div class="pill red">Damage Reports: ${Number(counts.damage_reports || 0)}</div>
@@ -8368,6 +8434,8 @@ async function loadAssetHistory() {
           }${
             ev.details?.tread_depth != null ? `<br><small>Tread: ${ev.details.tread_depth}</small>` : ""
           }${ev.details?.notes ? `<br><small>${ev.details.notes}</small>` : ""}${photoBlock}`
+        : ev.type === "ops_slip"
+        ? formatOpsSlipHistoryExtra(ev)
         : "";
 
     list.appendChild(item(`${pillForType(ev.type)} <b>${ev.date}</b> — ${ev.title}${wo}${extra}`));
@@ -9150,6 +9218,21 @@ async function init() {
     loadAssetHistory().catch((e) => setStatus("History error: " + e.message))
   );
   qs("downloadHistoryPdf")?.addEventListener("click", downloadAssetHistoryPdf);
+
+  qs("historyList")?.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-ops-slip-pdf]");
+    if (!btn) return;
+    e.preventDefault();
+    const id = btn.getAttribute("data-ops-slip-pdf");
+    if (!id) return;
+    try {
+      setStatus("Opening slip PDF...");
+      await openAuthedPdf(`${API}/api/breakdown-ops/slips/${encodeURIComponent(id)}/pdf`);
+      setStatus("PDF opened ✅");
+    } catch (err) {
+      setStatus("PDF error: " + (err.message || err));
+    }
+  });
 
   qs("showArchived")?.addEventListener("change", () => {
     populateHistoryAssets().catch(() => {});
