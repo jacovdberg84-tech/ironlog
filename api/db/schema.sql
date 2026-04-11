@@ -353,3 +353,17 @@ INSERT INTO asset_hours (asset_id, total_hours, last_updated)
 SELECT id, 0, datetime('now')
 FROM assets
 WHERE id NOT IN (SELECT asset_id FROM asset_hours);
+
+CREATE TABLE IF NOT EXISTS ops_slip_reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  site_code TEXT NOT NULL DEFAULT 'main',
+  slip_type TEXT NOT NULL,
+  asset_id INTEGER NOT NULL,
+  report_date TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_by TEXT,
+  FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_ops_slip_site_date ON ops_slip_reports(site_code, report_date);
+CREATE INDEX IF NOT EXISTS idx_ops_slip_type ON ops_slip_reports(slip_type);

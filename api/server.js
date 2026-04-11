@@ -24,6 +24,7 @@ import syncRoutes from "./routes/sync.routes.js";
 import docsRoutes from "./routes/docs.routes.js";
 import ironmindRoutes from "./routes/ironmind.routes.js";
 import inspectproRoutes from "./routes/inspectpro.routes.js";
+import breakdownOpsRoutes from "./routes/breakdownOps.routes.js";
 import { ironlogAuthHook } from "./auth/hook.js";
 
 export function buildServer() {
@@ -48,6 +49,7 @@ export function buildServer() {
   app.register(hoursRoutes, { prefix: "/api/hours" });
   app.register(uploadRoutes, { prefix: "/api/upload" });
   app.register(breakdownRoutes, { prefix: "/api/breakdowns" });
+  app.register(breakdownOpsRoutes, { prefix: "/api/breakdown-ops" });
 app.register(workOrderRoutes, { prefix: "/api/workorders" });
 app.register(stockRoutes, { prefix: "/api/stock" });
 app.register(kpiRoutes, { prefix: "/api/kpi" });

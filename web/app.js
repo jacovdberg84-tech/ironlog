@@ -3966,6 +3966,15 @@ function switchTab(key) {
   if (panel) panel.classList.add("show");
   const tabSelect = qs("tabSelect");
   if (tabSelect && tabSelect.value !== k) tabSelect.value = k;
+  if (k === "Breakdowns") {
+    const today = new Date().toISOString().slice(0, 10);
+    if (qs("boEnsureDate") && !qs("boEnsureDate").value) qs("boEnsureDate").value = today;
+    if (qs("boSlipDate") && !qs("boSlipDate").value) qs("boSlipDate").value = today;
+    initBoTyreRows();
+    updateBoSlipFormVisibility();
+    refreshBreakdownOpsPanels();
+    loadBoSlipSavedList().catch(() => {});
+  }
 }
 
 function initTabs() {
@@ -4509,6 +4518,333 @@ function downloadOperationsXlsx() {
    ACTIONS
 ========================= */
 
+async function loadBreakdownOpsOpen() {
+  const list = qs("boOpenList");
+  if (!list) return;
+  const d = (qs("boOpenDate")?.value || "").trim();
+  const q = d ? `?date=${encodeURIComponent(d)}` : "";
+  setSkeleton("boOpenList", 1);
+  try {
+    const data = await fetchJson(`${API}/api/breakdowns/open-all${q}`);
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    list.innerHTML = "";
+    if (!rows.length) {
+      list.appendChild(item("<small>No open incidents for this filter.</small>"));
+      return;
+    }
+    rows.forEach((r) => {
+      const bid = Number(r.id || 0);
+      const wo = r.primary_work_order_id != null ? Number(r.primary_work_order_id) : "";
+      const desc = escapeHtml(r.description || "");
+      const code = escapeHtml(r.asset_code || "");
+      const woSt = escapeHtml(String(r.primary_work_order_status || ""));
+      list.appendChild(
+        item(
+          `<div><b>#${bid}</b> <span class="pill blue">${code}</span> <span class="pill orange">OPEN</span></div>` +
+            `<small>${desc}</small><br/>` +
+            `<small>WO: ${wo ? `#${wo} (${woSt})` : "—"} | Start: ${escapeHtml(String(r.start_at || r.breakdown_date || "—"))}</small><br/>` +
+            `<button type="button" class="bo-copy-wo" data-wo="${wo}">Copy WO #</button> ` +
+            `<button type="button" class="bo-close-bdn" data-id="${bid}">Close incident</button>`
+        )
+      );
+    });
+  } catch (e) {
+    list.innerHTML = "";
+    list.appendChild(item(`<span class="message-error">${escapeHtml(e.message || String(e))}</span>`));
+  }
+}
+
+async function loadBreakdownOpsRecent() {
+  const list = qs("boRecentList");
+  if (!list) return;
+  setSkeleton("boRecentList", 1);
+  try {
+    const rows = await fetchJson(`${API}/api/breakdowns`);
+    const slice = (Array.isArray(rows) ? rows : []).slice(0, 20);
+    list.innerHTML = "";
+    if (!slice.length) {
+      list.appendChild(item("<small>No breakdowns found.</small>"));
+      return;
+    }
+    slice.forEach((r) => {
+      const st = String(r.status || "").toUpperCase();
+      list.appendChild(
+        item(
+          `<b>#${r.id}</b> ${escapeHtml(r.asset_code || "")} <span class="pill ${st === "OPEN" ? "orange" : "blue"}">${escapeHtml(r.status || "")}</span> ` +
+            `${escapeHtml(r.breakdown_date || "")}<br/><small>${escapeHtml(r.description || "")}</small>`
+        )
+      );
+    });
+  } catch (e) {
+    list.innerHTML = "";
+    list.appendChild(item(`<span class="message-error">${escapeHtml(e.message || String(e))}</span>`));
+  }
+}
+
+function refreshBreakdownOpsPanels() {
+  loadBreakdownOpsOpen().catch(() => {});
+  loadBreakdownOpsRecent().catch(() => {});
+}
+
+function initBoTyreRows() {
+  const tb = qs("boTyreTbody");
+  if (!tb || tb.dataset.ready === "1") return;
+  tb.dataset.ready = "1";
+  for (let i = 0; i < 10; i++) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${i + 1}</td>
+      <td><input class="w-90" id="boT${i}_pos" placeholder="e.g. FL" /></td>
+      <td><input class="w-120" id="boT${i}_sout" /></td>
+      <td><input class="w-120" id="boT${i}_sin" /></td>
+      <td><input class="w-90" id="boT${i}_tread" /></td>
+      <td><input class="w-140" id="boT${i}_reason" /></td>
+      <td><input class="w-90" type="number" step="0.1" min="0" id="boT${i}_hu" /></td>
+      <td><input class="w-90" type="number" step="0.1" min="0" id="boT${i}_hf" /></td>
+      <td><input class="w-120" id="boT${i}_part" list="partCodeOptions" /></td>
+      <td><input class="w-90" type="number" step="0.01" min="0" id="boT${i}_cost" placeholder="ov." /></td>
+      <td><input class="w-120" id="boT${i}_make" list="partCodeOptions" placeholder="Make code" /></td>`;
+    tb.appendChild(tr);
+  }
+}
+
+function updateBoSlipFormVisibility() {
+  const t = qs("boSlipType")?.value || "hose_failure";
+  const map = {
+    hose_failure: "boWrapHose",
+    get_change: "boWrapGet",
+    component_change: "boWrapComp",
+    tyre_change: "boWrapTyre",
+  };
+  Object.values(map).forEach((id) => {
+    const el = qs(id);
+    if (el) el.style.display = "none";
+  });
+  const showId = map[t];
+  if (showId && qs(showId)) qs(showId).style.display = "";
+  if (t === "tyre_change") initBoTyreRows();
+}
+
+function numOrUndef(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function collectBoTyreRows() {
+  const tyres = [];
+  for (let i = 0; i < 10; i++) {
+    const position = String(qs(`boT${i}_pos`)?.value || "").trim();
+    const serial_removed = String(qs(`boT${i}_sout`)?.value || "").trim();
+    const serial_new = String(qs(`boT${i}_sin`)?.value || "").trim();
+    const tread_left = String(qs(`boT${i}_tread`)?.value || "").trim();
+    const reason = String(qs(`boT${i}_reason`)?.value || "").trim();
+    const hours_in_use = numOrUndef(qs(`boT${i}_hu`)?.value);
+    const hours_fitted = numOrUndef(qs(`boT${i}_hf`)?.value);
+    const part_code = String(qs(`boT${i}_part`)?.value || "").trim();
+    const cost_manual = numOrUndef(qs(`boT${i}_cost`)?.value);
+    const tyre_make_part_code = String(qs(`boT${i}_make`)?.value || "").trim();
+    if (
+      !position &&
+      !serial_removed &&
+      !serial_new &&
+      !reason &&
+      !part_code &&
+      !tyre_make_part_code &&
+      hours_in_use == null &&
+      hours_fitted == null
+    ) {
+      continue;
+    }
+    tyres.push({
+      position,
+      serial_removed,
+      serial_new,
+      tread_left,
+      reason,
+      hours_in_use,
+      hours_fitted,
+      part_code,
+      cost_manual,
+      tyre_make_part_code,
+    });
+  }
+  return tyres;
+}
+
+async function saveBoSlipReport() {
+  const slip_type = String(qs("boSlipType")?.value || "").trim();
+  const asset_code = String(qs("boSlipAsset")?.value || "").trim();
+  const report_date = String(qs("boSlipDate")?.value || "").trim();
+  if (!asset_code || !report_date) {
+    alert("Asset code and report date are required.");
+    return;
+  }
+  let body = { slip_type, asset_code, report_date };
+  if (slip_type === "hose_failure") {
+    Object.assign(body, {
+      date_fitted: String(qs("boHoseDateFitted")?.value || "").trim(),
+      reason_fitted: String(qs("boHoseReason")?.value || "").trim(),
+      preventable: Boolean(qs("boHosePreventable")?.checked),
+      hose_part_code: String(qs("boHosePart")?.value || "").trim(),
+      oil_loss_part_code: String(qs("boOilPart")?.value || "").trim(),
+      hose_cost_manual: numOrUndef(qs("boHoseCostOv")?.value),
+      oil_cost_manual: numOrUndef(qs("boOilCostOv")?.value),
+      notes: String(qs("boHoseNotes")?.value || "").trim() || undefined,
+    });
+  } else if (slip_type === "get_change") {
+    Object.assign(body, {
+      hours_fitted: numOrUndef(qs("boGetHours")?.value),
+      part_code: String(qs("boGetPart")?.value || "").trim(),
+      supplier: String(qs("boGetSupplier")?.value || "").trim(),
+      date_changed: String(qs("boGetDateChg")?.value || "").trim(),
+      description_part_code: String(qs("boGetDescPart")?.value || "").trim(),
+      notes: String(qs("boGetNotes")?.value || "").trim() || undefined,
+    });
+  } else if (slip_type === "component_change") {
+    Object.assign(body, {
+      date_changed: String(qs("boCompDate")?.value || "").trim(),
+      hours_in_service: numOrUndef(qs("boCompHrsSvc")?.value),
+      reason: String(qs("boCompReason")?.value || "").trim(),
+      component_type: String(qs("boCompType")?.value || "").trim(),
+      part_code: String(qs("boCompPart")?.value || "").trim(),
+      cost_manual: numOrUndef(qs("boCompCostOv")?.value),
+      notes: String(qs("boCompNotes")?.value || "").trim() || undefined,
+    });
+  } else if (slip_type === "tyre_change") {
+    const tyres = collectBoTyreRows();
+    if (!tyres.length) {
+      alert("Enter at least one tyre line.");
+      return;
+    }
+    Object.assign(body, { tyres, notes: String(qs("boTyreNotes")?.value || "").trim() || undefined });
+  } else {
+    alert("Unknown slip type.");
+    return;
+  }
+
+  setStatus("Saving slip report...");
+  try {
+    const res = await fetchJson(`${API}/api/breakdown-ops/slips`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setText("boSlipResult", JSON.stringify(res, null, 2));
+    setStatus("Slip saved.");
+    if (res.id) {
+      window.open(`${API}/api/breakdown-ops/slips/${res.id}/pdf`, "_blank");
+    }
+    await loadBoSlipSavedList();
+  } catch (e) {
+    setText("boSlipResult", String(e.message || e));
+    setStatus("Slip save failed.");
+  }
+}
+
+async function loadBoSlipSavedList() {
+  const list = qs("boSlipSavedList");
+  if (!list) return;
+  list.innerHTML = `<div class="muted">Loading…</div>`;
+  try {
+    const data = await fetchJson(`${API}/api/breakdown-ops/slips`);
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    list.innerHTML = "";
+    if (!rows.length) {
+      list.appendChild(item("<small>No slip reports saved yet.</small>"));
+      return;
+    }
+    rows.slice(0, 40).forEach((r) => {
+      const label = escapeHtml(String(r.slip_type || "").replace(/_/g, " "));
+      list.appendChild(
+        item(
+          `<b>#${r.id}</b> <span class="pill blue">${label}</span> ${escapeHtml(r.asset_code || "")} · ${escapeHtml(r.report_date || "")}<br/>` +
+            `<button type="button" class="bo-slip-pdf" data-id="${Number(r.id)}">Open PDF</button>`
+        )
+      );
+    });
+  } catch (e) {
+    list.innerHTML = "";
+    list.appendChild(item(`<span class="message-error">${escapeHtml(e.message || String(e))}</span>`));
+  }
+}
+
+function openBoSlipPdf(id) {
+  const n = Number(id || 0);
+  if (!n) return;
+  window.open(`${API}/api/breakdown-ops/slips/${n}/pdf`, "_blank");
+}
+
+async function ensureOpenBreakdownOps() {
+  const asset_code = (qs("boEnsureAsset")?.value || "").trim();
+  const breakdown_date = (qs("boEnsureDate")?.value || "").trim() || new Date().toISOString().slice(0, 10);
+  if (!asset_code) return alert("Enter asset code.");
+  setStatus("Ensuring open breakdown...");
+  try {
+    const res = await fetchJson(`${API}/api/breakdowns/ensure-open`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ asset_code, breakdown_date, description: "Down - Breakdown Ops" }),
+    });
+    setText("boEnsureResult", JSON.stringify(res, null, 2));
+    if (res.primary_work_order_id && qs("iWo")) qs("iWo").value = String(res.primary_work_order_id);
+    setStatus("Ensure open complete.");
+    await loadBreakdownOpsOpen();
+    await loadBreakdownOpsRecent();
+  } catch (e) {
+    setText("boEnsureResult", String(e.message || e));
+    setStatus("Ensure open failed.");
+  }
+}
+
+async function pullBreakdownOpsLiveHours() {
+  const hint = qs("boLiveHoursHint");
+  const code = (qs("sqAsset")?.value || "").trim();
+  const asOf =
+    (qs("sqDate")?.value || "").trim() || (qs("date")?.value || "").trim() || new Date().toISOString().slice(0, 10);
+  if (!code) {
+    alert("Enter asset code on the short breakdown line first.");
+    return;
+  }
+  if (hint) hint.textContent = "Loading…";
+  try {
+    const rows = await fetchJson(`${API}/api/assets?include_archived=0`);
+    const arr = Array.isArray(rows) ? rows : [];
+    const a = arr.find((x) => String(x.asset_code || "").toUpperCase() === code.toUpperCase());
+    if (!a) throw new Error("Asset not found");
+    const q = asOf ? `?as_of=${encodeURIComponent(asOf)}` : "";
+    const data = await fetchJson(`${API}/api/maintenance/asset/${a.id}/live-hours${q}`);
+    const h = Number(data.current_hours || 0);
+    const src = String(data.current_hours_source || "");
+    if (hint) {
+      hint.textContent = `Meter (as of ${asOf}): ${h.toFixed(1)} h (${src}).`;
+    }
+    setStatus("Live meter loaded.");
+  } catch (e) {
+    if (hint) hint.textContent = e.message || String(e);
+  }
+}
+
+async function closeBreakdownFromOps(breakdownId) {
+  const id = Number(breakdownId || 0);
+  if (!id) return;
+  if (!confirm(`Close breakdown #${id}? Component work orders must be closed first.`)) return;
+  setStatus("Closing breakdown...");
+  try {
+    await fetchJson(`${API}/api/breakdowns/${id}/close`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    setStatus("Breakdown closed.");
+    await loadBreakdownOpsOpen();
+    await loadBreakdownOpsRecent();
+    await loadDashboard().catch(() => {});
+  } catch (e) {
+    alert(e.message || String(e));
+    setStatus("Close failed.");
+  }
+}
+
 async function createBreakdown() {
   const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
   const payload = {
@@ -4529,6 +4865,7 @@ async function createBreakdown() {
     setText("breakdownResult", JSON.stringify(res, null, 2));
     setStatus("Breakdown created.");
     await loadDashboard().catch(() => {});
+    refreshBreakdownOpsPanels();
   } catch (e) {
     setText("breakdownResult", String(e.message || e));
     setStatus("Breakdown failed.");
@@ -4598,6 +4935,7 @@ async function submitShortBreakdown() {
     setText("shortBreakdownResult", JSON.stringify(res, null, 2));
     setStatus("Short breakdown logged.");
     await loadDashboard().catch(() => {});
+    refreshBreakdownOpsPanels();
   } catch (e) {
     setText("shortBreakdownResult", String(e.message || e));
     setStatus("Short breakdown failed.");
@@ -8447,6 +8785,42 @@ async function init() {
   qs("saveRainDayBtn")?.addEventListener("click", () => saveRainDay().catch((e) => setStatus("Rain day save error: " + e.message)));
   qs("removeRainDayBtn")?.addEventListener("click", () => removeRainDay().catch((e) => setStatus("Rain day remove error: " + e.message)));
   qs("loadRainDaysBtn")?.addEventListener("click", () => loadRainDays().catch((e) => setStatus("Rain day load error: " + e.message)));
+
+  qs("boRefreshOpen")?.addEventListener("click", () =>
+    loadBreakdownOpsOpen().catch((e) => setStatus("Open list error: " + e.message))
+  );
+  qs("boRefreshRecent")?.addEventListener("click", () =>
+    loadBreakdownOpsRecent().catch((e) => setStatus("Recent list error: " + e.message))
+  );
+  qs("boEnsureOpen")?.addEventListener("click", () =>
+    ensureOpenBreakdownOps().catch((e) => setStatus("Ensure open error: " + e.message))
+  );
+  qs("boPullLiveHours")?.addEventListener("click", () =>
+    pullBreakdownOpsLiveHours().catch((e) => setStatus("Live hours error: " + e.message))
+  );
+  qs("boOpenList")?.addEventListener("click", (ev) => {
+    const w = ev.target?.closest?.(".bo-copy-wo");
+    if (w) {
+      const wo = w.getAttribute("data-wo");
+      if (wo && qs("iWo")) qs("iWo").value = String(wo);
+      setStatus(`Copied WO #${wo} for parts issue.`);
+      return;
+    }
+    const c = ev.target?.closest?.(".bo-close-bdn");
+    if (c) closeBreakdownFromOps(c.getAttribute("data-id")).catch(() => {});
+  });
+
+  qs("boSlipType")?.addEventListener("change", updateBoSlipFormVisibility);
+  qs("boSlipSave")?.addEventListener("click", () =>
+    saveBoSlipReport().catch((e) => setStatus("Slip save error: " + e.message))
+  );
+  qs("boSlipLoadList")?.addEventListener("click", () =>
+    loadBoSlipSavedList().catch((e) => setStatus("Slip list error: " + e.message))
+  );
+  qs("boSlipSavedList")?.addEventListener("click", (ev) => {
+    const b = ev.target?.closest?.(".bo-slip-pdf");
+    if (b) openBoSlipPdf(b.getAttribute("data-id"));
+  });
 
   qs("makeBreakdown")?.addEventListener("click", () =>
     createBreakdown().catch((e) => setStatus("Breakdown error: " + e.message))
