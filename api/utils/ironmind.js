@@ -1,4 +1,5 @@
 import { db } from "../db/client.js";
+import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "./fleetHoursKpiScope.js";
 
 function nowIso() {
   return new Date().toISOString();
@@ -586,24 +587,31 @@ function buildStructuredData(reportDate) {
   `).get();
 
   const dailyCoverage = db.prepare(`
-    SELECT COUNT(DISTINCT asset_id) AS c
-    FROM daily_hours
-    WHERE work_date = ? AND is_used = 1
+    SELECT COUNT(DISTINCT dh.asset_id) AS c
+    FROM daily_hours dh
+    JOIN assets a ON a.id = dh.asset_id
+    WHERE dh.work_date = ?
+      ${andDailyHoursFleetHoursOnly("dh", "a")}
   `).get(reportDate);
 
   const kpiRow = db.prepare(`
     SELECT
-      COALESCE(SUM(scheduled_hours), 0) AS scheduled_hours,
-      COALESCE(SUM(hours_run), 0) AS run_hours,
-      COUNT(DISTINCT asset_id) AS used_assets
-    FROM daily_hours
-    WHERE work_date = ? AND is_used = 1
+      COALESCE(SUM(dh.scheduled_hours), 0) AS scheduled_hours,
+      COALESCE(SUM(dh.hours_run), 0) AS run_hours,
+      COUNT(DISTINCT dh.asset_id) AS used_assets
+    FROM daily_hours dh
+    JOIN assets a ON a.id = dh.asset_id
+    WHERE dh.work_date = ?
+      ${andDailyHoursFleetHoursOnly("dh", "a")}
   `).get(reportDate);
 
   const downtimeRow = db.prepare(`
     SELECT COALESCE(SUM(l.hours_down), 0) AS downtime_hours, COUNT(*) AS log_count
     FROM breakdown_downtime_logs l
+    JOIN breakdowns b ON b.id = l.breakdown_id
+    JOIN assets a ON a.id = b.asset_id
     WHERE l.log_date = ?
+      ${andAssetFleetHoursOnly("a")}
   `).get(reportDate);
 
   const planRows = db.prepare(`

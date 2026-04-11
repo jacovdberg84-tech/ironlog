@@ -1,5 +1,6 @@
 // IRONLOG/api/routes/kpi.routes.js
 import { db } from "../db/client.js";
+import { andDailyHoursFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -23,10 +24,8 @@ export default async function kpiRoutes(app) {
       FROM daily_hours dh
       JOIN assets a ON a.id = dh.asset_id
       WHERE dh.work_date = ?
-        AND dh.is_used = 1
         AND dh.hours_run > 0
-        AND a.active = 1
-        AND a.is_standby = 0
+        ${andDailyHoursFleetHoursOnly("dh", "a")}
     `).all(date);
 
     const used_count = usedAssets.length;
@@ -37,10 +36,8 @@ export default async function kpiRoutes(app) {
       FROM daily_hours dh
       JOIN assets a ON a.id = dh.asset_id
       WHERE dh.work_date = ?
-        AND dh.is_used = 1
         AND dh.hours_run > 0
-        AND a.active = 1
-        AND a.is_standby = 0
+        ${andDailyHoursFleetHoursOnly("dh", "a")}
     `).get(date);
 
     const run_hours = Number(runRow.run_hours || 0);
@@ -55,9 +52,10 @@ export default async function kpiRoutes(app) {
           AND b.asset_id IN (
             SELECT DISTINCT dh.asset_id
             FROM daily_hours dh
+            JOIN assets a ON a.id = dh.asset_id
             WHERE dh.work_date = ?
-              AND dh.is_used = 1
               AND dh.hours_run > 0
+              ${andDailyHoursFleetHoursOnly("dh", "a")}
           )
       `).get(date, date);
       downtime_hours = Number(downtimeRow.dt || 0);
@@ -124,10 +122,8 @@ export default async function kpiRoutes(app) {
       FROM daily_hours dh
       JOIN assets a ON a.id = dh.asset_id
       WHERE dh.work_date BETWEEN ? AND ?
-        AND dh.is_used = 1
         AND dh.hours_run > 0
-        AND a.active = 1
-        AND a.is_standby = 0
+        ${andDailyHoursFleetHoursOnly("dh", "a")}
       GROUP BY dh.work_date
       ORDER BY dh.work_date
     `).all(start, end);

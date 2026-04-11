@@ -1,6 +1,7 @@
 // IRONLOG/api/routes/dashboard.routes.js
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
+import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
 
 function todayYYYYMMDD() {
   return new Date().toISOString().slice(0, 10);
@@ -137,7 +138,7 @@ export default async function dashboardRoutes(app) {
   // Prepared statements (reuse)
   // -----------------------------
 
-  // Per-asset production rows for the day (standby excluded)
+  // Per-asset production rows for the day (daily standby + master standby + km assets excluded from hour-based KPI pool)
   const getDayAssetHours = db.prepare(`
     SELECT
       dh.asset_id,
@@ -158,9 +159,7 @@ export default async function dashboardRoutes(app) {
     FROM daily_hours dh
     JOIN assets a ON a.id = dh.asset_id
     WHERE dh.work_date = ?
-      AND dh.is_used = 1
-      AND a.active = 1
-      AND a.is_standby = 0
+      ${andDailyHoursFleetHoursOnly("dh", "a")}
   `);
   const getActiveFleetAssets = db.prepare(`
     SELECT id AS asset_id, asset_code, asset_name, category, utilization_mode, km_per_hour_factor
@@ -178,8 +177,7 @@ export default async function dashboardRoutes(app) {
     JOIN breakdowns b ON b.id = l.breakdown_id
     JOIN assets a ON a.id = b.asset_id
     WHERE l.log_date = ?
-      AND a.active = 1
-      AND a.is_standby = 0
+      ${andAssetFleetHoursOnly("a")}
     GROUP BY b.asset_id
   `);
   const getOpenBreakdownAssetIdsByDay = db.prepare(`
@@ -188,8 +186,7 @@ export default async function dashboardRoutes(app) {
     JOIN assets a ON a.id = b.asset_id
     WHERE b.status = 'OPEN'
       AND b.breakdown_date <= ?
-      AND a.active = 1
-      AND a.is_standby = 0
+      ${andAssetFleetHoursOnly("a")}
   `);
   const breakdownDowntimeCol = getBreakdownDowntimeColumn();
   const getDayAssetDowntimeFallback = db.prepare(`
@@ -199,8 +196,7 @@ export default async function dashboardRoutes(app) {
     FROM breakdowns b
     JOIN assets a ON a.id = b.asset_id
     WHERE b.breakdown_date = ?
-      AND a.active = 1
-      AND a.is_standby = 0
+      ${andAssetFleetHoursOnly("a")}
     GROUP BY b.asset_id
   `);
 
@@ -310,6 +306,13 @@ export default async function dashboardRoutes(app) {
 
       for (const a of extraAssets) {
         const assetId = Number(a.asset_id || 0);
+        const modeExtra = isToyotaHiluxAsset(a)
+          ? "km"
+          : String(a.utilization_mode || "").trim().toLowerCase() === "km"
+            ? "km"
+            : "hours";
+        if (modeExtra === "km") continue;
+
         const scheduled = Math.max(0, Number(scheduledFallback || 0));
         const loggedDownRaw = Math.max(0, Number(downtimeByAsset.get(assetId) || 0));
         const loggedDown = loggedDownRaw > 0

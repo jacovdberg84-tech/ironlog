@@ -12,6 +12,7 @@ import {
   table,
   ensurePageSpace,
 } from "../utils/pdfGenerator.js";
+import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
 
 let maintenanceMasterSchedulerStarted = false;
 
@@ -278,9 +279,7 @@ function kpiDaily(date, scheduled) {
     FROM daily_hours dh
     JOIN assets a ON a.id = dh.asset_id
     WHERE dh.work_date = ?
-      AND dh.is_used = 1
-      AND a.active = 1
-      AND a.is_standby = 0
+      ${andDailyHoursFleetHoursOnly("dh", "a")}
   `).get(date);
 
   const used_assets = Number(usedRow.used_assets || 0);
@@ -290,9 +289,7 @@ function kpiDaily(date, scheduled) {
     FROM daily_hours dh
     JOIN assets a ON a.id = dh.asset_id
     WHERE dh.work_date = ?
-      AND dh.is_used = 1
-      AND a.active = 1
-      AND a.is_standby = 0
+      ${andDailyHoursFleetHoursOnly("dh", "a")}
   `).get(date);
 
   const run_hours = Number(runRow.run_hours || 0);
@@ -306,9 +303,7 @@ function kpiDaily(date, scheduled) {
     FROM daily_hours dh
     JOIN assets a ON a.id = dh.asset_id
     WHERE dh.work_date = ?
-      AND dh.is_used = 1
-      AND a.active = 1
-      AND a.is_standby = 0
+      ${andDailyHoursFleetHoursOnly("dh", "a")}
   `).get(Number(scheduled || 0), date);
   const utilization_base_hours = Number(utilBaseRow?.utilization_base_hours || 0);
   const available_hours = utilization_base_hours;
@@ -318,10 +313,9 @@ function kpiDaily(date, scheduled) {
     FROM breakdown_downtime_logs l
     JOIN breakdowns b ON b.id = l.breakdown_id
     JOIN assets a ON a.id = b.asset_id
-    JOIN daily_hours dh ON dh.asset_id = b.asset_id AND dh.work_date = ? AND dh.is_used = 1
+    JOIN daily_hours dh ON dh.asset_id = b.asset_id AND dh.work_date = ?
     WHERE l.log_date = ?
-      AND a.active = 1
-      AND a.is_standby = 0
+      ${andDailyHoursFleetHoursOnly("dh", "a")}
   `).get(date, date);
   let downtime_hours = Number(dtLogsRow?.downtime_hours || 0);
   const openNoLogRow = db.prepare(`
@@ -333,17 +327,16 @@ function kpiDaily(date, scheduled) {
     ), 0) AS assumed_down_hours
     FROM breakdowns b
     JOIN assets a ON a.id = b.asset_id
-    JOIN daily_hours dh ON dh.asset_id = b.asset_id AND dh.work_date = ? AND dh.is_used = 1
+    JOIN daily_hours dh ON dh.asset_id = b.asset_id AND dh.work_date = ?
     WHERE b.status = 'OPEN'
       AND b.breakdown_date <= ?
-      AND a.active = 1
-      AND a.is_standby = 0
       AND NOT EXISTS (
         SELECT 1
         FROM breakdown_downtime_logs l
         WHERE l.breakdown_id = b.id
           AND l.log_date = ?
       )
+      ${andDailyHoursFleetHoursOnly("dh", "a")}
   `).get(Number(scheduled || 0), date, date, date);
   downtime_hours += Number(openNoLogRow?.assumed_down_hours || 0);
 
@@ -370,10 +363,8 @@ function kpiRange(start, end, scheduled, opts = {}) {
     FROM daily_hours dh
     JOIN assets a ON a.id = dh.asset_id
     WHERE dh.work_date BETWEEN ? AND ?
-      AND dh.is_used = 1
       AND dh.hours_run > 0
-      AND a.active = 1
-      AND a.is_standby = 0
+      ${andDailyHoursFleetHoursOnly("dh", "a")}
     GROUP BY dh.work_date
     ORDER BY dh.work_date
   `).all(start, end);
@@ -4641,23 +4632,28 @@ export default async function reportsRoutes(app) {
     const rainCount = rainDates.length;
     const rainPlaceholders = rainDates.length ? rainDates.map(() => "?").join(",") : "";
     const runRow = db.prepare(`
-      SELECT COALESCE(SUM(hours_run), 0) AS run_hours
-      FROM daily_hours
-      WHERE work_date BETWEEN ? AND ?
-        AND is_used = 1
-        AND hours_run > 0
+      SELECT COALESCE(SUM(dh.hours_run), 0) AS run_hours
+      FROM daily_hours dh
+      JOIN assets a ON a.id = dh.asset_id
+      WHERE dh.work_date BETWEEN ? AND ?
+        AND dh.hours_run > 0
+        ${andDailyHoursFleetHoursOnly("dh", "a")}
     `).get(period.start, period.end);
     const schedRow = db.prepare(`
-      SELECT COALESCE(SUM(scheduled_hours), 0) AS scheduled_hours
-      FROM daily_hours
-      WHERE work_date BETWEEN ? AND ?
+      SELECT COALESCE(SUM(dh.scheduled_hours), 0) AS scheduled_hours
+      FROM daily_hours dh
+      JOIN assets a ON a.id = dh.asset_id
+      WHERE dh.work_date BETWEEN ? AND ?
+        ${andDailyHoursFleetHoursOnly("dh", "a")}
     `).get(period.start, period.end);
     let rainSchedHours = 0;
     if (rainDates.length) {
       const rainSched = db.prepare(`
-        SELECT COALESCE(SUM(scheduled_hours), 0) AS h
-        FROM daily_hours
-        WHERE work_date IN (${rainPlaceholders})
+        SELECT COALESCE(SUM(dh.scheduled_hours), 0) AS h
+        FROM daily_hours dh
+        JOIN assets a ON a.id = dh.asset_id
+        WHERE dh.work_date IN (${rainPlaceholders})
+        ${andDailyHoursFleetHoursOnly("dh", "a")}
       `).get(...rainDates);
       rainSchedHours = Number(rainSched?.h || 0);
     }
@@ -4670,10 +4666,11 @@ export default async function reportsRoutes(app) {
       SELECT
         LOWER(IFNULL(a.category, 'uncategorized')) AS equipment_type,
         COALESCE(SUM(dh.scheduled_hours), 0) AS scheduled_hours,
-        COALESCE(SUM(CASE WHEN dh.is_used = 1 THEN dh.hours_run ELSE 0 END), 0) AS run_hours
+        COALESCE(SUM(dh.hours_run), 0) AS run_hours
       FROM daily_hours dh
       JOIN assets a ON a.id = dh.asset_id
       WHERE dh.work_date BETWEEN ? AND ?
+        ${andDailyHoursFleetHoursOnly("dh", "a")}
       GROUP BY LOWER(IFNULL(a.category, 'uncategorized'))
       ORDER BY equipment_type ASC
     `).all(period.start, period.end);
@@ -4685,6 +4682,7 @@ export default async function reportsRoutes(app) {
       JOIN breakdowns b ON b.id = l.breakdown_id
       JOIN assets a ON a.id = b.asset_id
       WHERE l.log_date BETWEEN ? AND ?
+        ${andAssetFleetHoursOnly("a")}
       GROUP BY LOWER(IFNULL(a.category, 'uncategorized'))
     `).all(period.start, period.end);
     const downtimeByType = new Map(availByTypeDowntime.map((r) => [String(r.equipment_type || ""), Number(r.downtime_hours || 0)]));
@@ -4697,6 +4695,7 @@ export default async function reportsRoutes(app) {
         FROM daily_hours dh
         JOIN assets a ON a.id = dh.asset_id
         WHERE dh.work_date IN (${rainPlaceholders})
+          ${andDailyHoursFleetHoursOnly("dh", "a")}
         GROUP BY LOWER(IFNULL(a.category, 'uncategorized'))
       `).all(...rainDates);
       for (const r of rowsRainType) rainSchedByType.set(String(r.equipment_type || ""), Number(r.rain_scheduled_hours || 0));
