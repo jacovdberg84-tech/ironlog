@@ -550,7 +550,6 @@ export default async function dashboardRoutes(app) {
     let mtd_scheduled = 0;
     let mtd_run = 0;
     let mtd_downtime = 0;
-    let mtd_utilization_base = 0;
     let mtd_day_count = 0;
     const mtdAssetIds = new Set();
     eachDateInclusiveYMD(mtdStart, date, (dayStr) => {
@@ -559,7 +558,6 @@ export default async function dashboardRoutes(app) {
       mtd_scheduled += dr.scheduled_hours;
       mtd_run += dr.run_hours;
       mtd_downtime += dr.downtime_hours;
-      mtd_utilization_base += Number(dr.utilization_base_hours || 0);
       dr.contributingAssetIds.forEach((id) => mtdAssetIds.add(id));
     });
 
@@ -580,8 +578,9 @@ export default async function dashboardRoutes(app) {
     const available_hours = Math.max(0, mtd_scheduled - mtd_downtime);
     const availability =
       mtd_scheduled > 0 ? (available_hours / mtd_scheduled) * 100 : null;
+    // Same rule as /asset-kpi/weekly: utilization = run / available (not run / scheduled).
     const utilization =
-      mtd_utilization_base > 0 ? (mtd_run / mtd_utilization_base) * 100 : null;
+      available_hours > 0 ? (mtd_run / available_hours) * 100 : null;
     const used_assets = mtdAssetIds.size;
 
     const scheduled_hours = mtd_scheduled;
@@ -1009,7 +1008,7 @@ export default async function dashboardRoutes(app) {
         used_assets,
         scheduled_hours,
         available_hours,
-        utilization_base_hours: Number(mtd_utilization_base.toFixed(2)),
+        utilization_base_hours: Number(available_hours.toFixed(2)),
         run_hours: mtd_run,
         downtime_hours,
         availability: availability == null ? null : Number(availability.toFixed(2)),
