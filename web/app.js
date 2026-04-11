@@ -4654,6 +4654,87 @@ function numOrUndef(v) {
   return Number.isFinite(n) ? n : undefined;
 }
 
+const BO_SLIP_PIC_MAX = 4;
+const BO_SLIP_PIC_MAX_BYTES = 512 * 1024;
+let boSlipPicturesPayload = [];
+
+function clearBoSlipPhotosUi() {
+  boSlipPicturesPayload = [];
+  const inp = qs("boSlipPhotosInput");
+  if (inp) inp.value = "";
+  const prev = qs("boSlipPhotosPreview");
+  if (prev) prev.innerHTML = "";
+}
+
+function renderBoSlipPhotosPreview() {
+  const prev = qs("boSlipPhotosPreview");
+  if (!prev) return;
+  prev.innerHTML = "";
+  boSlipPicturesPayload.forEach((p, idx) => {
+    const wrap = document.createElement("div");
+    wrap.style.cssText =
+      "position:relative;border:1px solid #cbd5e1;border-radius:6px;padding:4px;background:#f8fafc;";
+    const img = document.createElement("img");
+    img.src = `data:${p.mime};base64,${p.data_base64}`;
+    img.alt = "";
+    img.style.cssText = "max-width:120px;max-height:90px;display:block;";
+    const rm = document.createElement("button");
+    rm.type = "button";
+    rm.textContent = "Remove";
+    rm.style.cssText = "font-size:11px;margin-top:4px;";
+    rm.addEventListener("click", () => {
+      boSlipPicturesPayload = boSlipPicturesPayload.filter((_, i) => i !== idx);
+      renderBoSlipPhotosPreview();
+    });
+    wrap.appendChild(img);
+    wrap.appendChild(rm);
+    prev.appendChild(wrap);
+  });
+}
+
+async function boSlipReadPictureFile(file) {
+  const mime = String(file.type || "").toLowerCase();
+  if (mime !== "image/jpeg" && mime !== "image/png") {
+    alert(`${file.name}: only JPEG or PNG images are supported.`);
+    return null;
+  }
+  if (file.size > BO_SLIP_PIC_MAX_BYTES) {
+    alert(`${file.name} is larger than 512 KB. Choose a smaller file or compress the image.`);
+    return null;
+  }
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const s = String(fr.result || "");
+      const i = s.indexOf(",");
+      const b64 = i >= 0 ? s.slice(i + 1) : "";
+      resolve(b64 ? { mime, data_base64: b64 } : null);
+    };
+    fr.onerror = () => reject(new Error("Read failed"));
+    fr.readAsDataURL(file);
+  });
+}
+
+async function onBoSlipPhotosInputChange(ev) {
+  const input = ev.target;
+  const files = input?.files ? Array.from(input.files) : [];
+  if (!files.length) return;
+  for (const f of files) {
+    if (boSlipPicturesPayload.length >= BO_SLIP_PIC_MAX) {
+      alert(`Maximum ${BO_SLIP_PIC_MAX} pictures.`);
+      break;
+    }
+    try {
+      const pic = await boSlipReadPictureFile(f);
+      if (pic) boSlipPicturesPayload.push(pic);
+    } catch {
+      setStatus("Could not read one of the pictures.");
+    }
+  }
+  input.value = "";
+  renderBoSlipPhotosPreview();
+}
+
 function collectBoTyreRows() {
   const tyres = [];
   for (let i = 0; i < 10; i++) {
@@ -4746,6 +4827,13 @@ async function saveBoSlipReport() {
     return;
   }
 
+  if (boSlipPicturesPayload.length) {
+    body.pictures = boSlipPicturesPayload.map((p) => ({
+      mime: p.mime,
+      data_base64: p.data_base64,
+    }));
+  }
+
   setStatus("Saving slip report...");
   try {
     const res = await fetchJson(`${API}/api/breakdown-ops/slips`, {
@@ -4755,6 +4843,7 @@ async function saveBoSlipReport() {
     });
     setText("boSlipResult", JSON.stringify(res, null, 2));
     setStatus("Slip saved.");
+    clearBoSlipPhotosUi();
     if (res.id) {
       window.open(`${API}/api/breakdown-ops/slips/${res.id}/pdf`, "_blank");
     }
@@ -8836,6 +8925,13 @@ async function init() {
   });
 
   qs("boSlipType")?.addEventListener("change", updateBoSlipFormVisibility);
+  qs("boSlipPhotosInput")?.addEventListener("change", (e) =>
+    onBoSlipPhotosInputChange(e).catch((err) => setStatus(String(err.message || err)))
+  );
+  qs("boSlipPhotosClear")?.addEventListener("click", () => {
+    clearBoSlipPhotosUi();
+    setStatus("Slip pictures cleared.");
+  });
   qs("boSlipSave")?.addEventListener("click", () =>
     saveBoSlipReport().catch((e) => setStatus("Slip save error: " + e.message))
   );

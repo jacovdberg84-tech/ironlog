@@ -32,7 +32,9 @@ export function buildServer() {
   const app = Fastify({
     // In packaged Electron (Windows GUI), stdout/stderr can be unavailable.
     // Disable Fastify/Pino console logger there to avoid EBADF write crashes.
-    logger: isDesktopRuntime ? false : true
+    logger: isDesktopRuntime ? false : true,
+    // Ops slip reports may include several base64 photos (see breakdown-ops /slips).
+    bodyLimit: 4 * 1024 * 1024,
   });
 
   app.register(cors, { origin: true });

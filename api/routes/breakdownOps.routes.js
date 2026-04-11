@@ -1,8 +1,66 @@
 // IRONLOG/api/routes/breakdownOps.routes.js — Breakdown Ops slip reports (hose, GET, component, tyre)
 import { db } from "../db/client.js";
 import path from "node:path";
-import fs from "node:fs";
-import { buildPdfBuffer, sectionTitle, kvLine, table, tryDrawLogo } from "../utils/pdfGenerator.js";
+import {
+  buildPdfBuffer,
+  sectionTitle,
+  kvLine,
+  table,
+  tryDrawLogo,
+  ensurePageSpace,
+} from "../utils/pdfGenerator.js";
+
+const SLIP_PICTURE_ALLOWED_MIME = new Set(["image/jpeg", "image/png"]);
+const SLIP_PICTURE_MAX_COUNT = 4;
+const SLIP_PICTURE_MAX_BYTES = 512 * 1024;
+
+function slipContentWidth(doc) {
+  return doc.page.width - doc.page.margins.left - doc.page.margins.right;
+}
+
+/** Accept client { mime, data_base64 }[]; strip invalid / oversized. */
+function normalizeSlipPictures(body) {
+  const raw = body?.pictures;
+  if (!Array.isArray(raw) || !raw.length) return [];
+  const out = [];
+  for (const pic of raw) {
+    if (out.length >= SLIP_PICTURE_MAX_COUNT) break;
+    const mime = String(pic?.mime || "").trim().toLowerCase();
+    const b64 = String(pic?.data_base64 || "").replace(/\s/g, "");
+    if (!SLIP_PICTURE_ALLOWED_MIME.has(mime) || !b64) continue;
+    let buf;
+    try {
+      buf = Buffer.from(b64, "base64");
+    } catch {
+      continue;
+    }
+    if (!buf.length || buf.length > SLIP_PICTURE_MAX_BYTES) continue;
+    out.push({ mime, data_base64: buf.toString("base64") });
+  }
+  return out;
+}
+
+function drawSlipPictures(doc, payload) {
+  const pics = Array.isArray(payload?.pictures) ? payload.pictures : [];
+  if (!pics.length) return;
+  const margin = doc.page.margins.left;
+  const maxW = slipContentWidth(doc);
+  const maxH = 220;
+  sectionTitle(doc, "Photos");
+  for (const pic of pics) {
+    ensurePageSpace(doc, maxH + 36);
+    try {
+      const buf = Buffer.from(String(pic.data_base64 || ""), "base64");
+      if (!buf.length) continue;
+      const y0 = doc.y;
+      doc.image(buf, margin, y0, { fit: [maxW, maxH] });
+      doc.y = y0 + maxH + 14;
+    } catch {
+      doc.font("Helvetica").fontSize(9).fillColor("#666666").text("(Photo could not be embedded.)", margin, doc.y);
+      doc.moveDown(0.6);
+    }
+  }
+}
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -218,6 +276,7 @@ export default async function breakdownOpsRoutes(app) {
       return reply.code(400).send({ ok: false, error: "At least one tyre line is required" });
     }
 
+    payload.pictures = normalizeSlipPictures(req.body || {});
     payload = enrichPayload(slip_type, payload);
     const site_code = getSiteCode(req);
     const created_by = getUser(req);
@@ -383,33 +442,33 @@ export default async function breakdownOpsRoutes(app) {
       const tyres = Array.isArray(payload.tyres) ? payload.tyres : [];
       if (!tyres.length) {
         doc.font("Helvetica").fontSize(10).text("No tyre lines.");
-        return;
+      } else {
+        const cols = [
+          { key: "pos", label: "Pos", width: 0.06 },
+          { key: "serOut", label: "Serial out", width: 0.1 },
+          { key: "serIn", label: "Serial in", width: 0.1 },
+          { key: "tread", label: "Tread", width: 0.07 },
+          { key: "reason", label: "Reason", width: 0.12 },
+          { key: "hu", label: "Hrs use", width: 0.07 },
+          { key: "hf", label: "Hrs fit", width: 0.07 },
+          { key: "part", label: "Part", width: 0.1 },
+          { key: "cost", label: "Cost", width: 0.07 },
+          { key: "make", label: "Make", width: 0.1 },
+        ];
+        const trows = tyres.map((t, i) => ({
+          pos: t.position || String(i + 1),
+          serOut: compactCell(t.serial_removed, 24),
+          serIn: compactCell(t.serial_new, 24),
+          tread: compactCell(t.tread_left, 12),
+          reason: compactCell(t.reason, 40),
+          hu: t.hours_in_use != null ? String(t.hours_in_use) : "",
+          hf: t.hours_fitted != null ? String(t.hours_fitted) : "",
+          part: compactCell(t.part_code, 20),
+          cost: Number(t.cost || 0).toFixed(2),
+          make: compactCell(t.tyre_make_part_code, 16),
+        }));
+        table(doc, cols, trows, { compact: true, fontSize: 7 });
       }
-      const cols = [
-        { key: "pos", label: "Pos", width: 0.06 },
-        { key: "serOut", label: "Serial out", width: 0.1 },
-        { key: "serIn", label: "Serial in", width: 0.1 },
-        { key: "tread", label: "Tread", width: 0.07 },
-        { key: "reason", label: "Reason", width: 0.12 },
-        { key: "hu", label: "Hrs use", width: 0.07 },
-        { key: "hf", label: "Hrs fit", width: 0.07 },
-        { key: "part", label: "Part", width: 0.1 },
-        { key: "cost", label: "Cost", width: 0.07 },
-        { key: "make", label: "Make", width: 0.1 },
-      ];
-      const trows = tyres.map((t, i) => ({
-        pos: t.position || String(i + 1),
-        serOut: compactCell(t.serial_removed, 24),
-        serIn: compactCell(t.serial_new, 24),
-        tread: compactCell(t.tread_left, 12),
-        reason: compactCell(t.reason, 40),
-        hu: t.hours_in_use != null ? String(t.hours_in_use) : "",
-        hf: t.hours_fitted != null ? String(t.hours_fitted) : "",
-        part: compactCell(t.part_code, 20),
-        cost: Number(t.cost || 0).toFixed(2),
-        make: compactCell(t.tyre_make_part_code, 16),
-      }));
-      table(doc, cols, trows, { compact: true, fontSize: 7 });
       if (payload.notes) {
         sectionTitle(doc, "Notes");
         doc.font("Helvetica").fontSize(10).text(compactCell(payload.notes, 2000), {
@@ -417,6 +476,7 @@ export default async function breakdownOpsRoutes(app) {
         });
       }
     }
+    drawSlipPictures(doc, payload);
   }
 
   app.get("/slips/:id/pdf", async (req, reply) => {
