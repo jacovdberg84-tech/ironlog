@@ -2687,6 +2687,28 @@ export default async function reportsRoutes(app) {
     const photoCaptionCol = pickExistingColumn("manager_inspection_photos", ["caption", "note", "notes", "description"], "caption");
     const photoCreatedCol = pickExistingColumn("manager_inspection_photos", ["created_at", "uploaded_at", "created_on"], "created_at");
 
+    const hasMiMachineHours = hasColumn("manager_inspections", "machine_hours");
+    const hasMiLiveSnap = hasColumn("manager_inspections", "live_hours_snapshot");
+    const hasMiChecklist = hasColumn("manager_inspections", "checklist_json");
+    const hasMiParts = hasColumn("manager_inspections", "required_parts_json");
+    const hasMiWo = hasColumn("manager_inspections", "work_order_id");
+    const legacyMeterSql = `COALESCE((
+          SELECT MAX(dh.closing_hours)
+          FROM daily_hours dh
+          WHERE dh.asset_id = mi.asset_id
+            AND dh.closing_hours IS NOT NULL
+            AND dh.work_date <= mi.inspection_date
+        ), 0)`;
+    const machineHoursSelect = hasMiMachineHours
+      ? `COALESCE(mi.machine_hours, ${legacyMeterSql})`
+      : legacyMeterSql;
+    const liveSnapSelect = hasMiLiveSnap
+      ? `COALESCE(mi.live_hours_snapshot, ${legacyMeterSql})`
+      : legacyMeterSql;
+    const liveSrcSelect = hasColumn("manager_inspections", "live_hours_source")
+      ? `mi.live_hours_source`
+      : `''`;
+
     const inspection = db.prepare(`
       SELECT
         mi.id,
@@ -2694,13 +2716,12 @@ export default async function reportsRoutes(app) {
         mi.${miInspectorCol} AS inspector_name,
         mi.notes,
         mi.created_at,
-        COALESCE((
-          SELECT MAX(dh.closing_hours)
-          FROM daily_hours dh
-          WHERE dh.asset_id = mi.asset_id
-            AND dh.closing_hours IS NOT NULL
-            AND dh.work_date <= mi.inspection_date
-        ), 0) AS machine_hours,
+        ${machineHoursSelect} AS machine_hours,
+        ${liveSnapSelect} AS live_hours_snapshot,
+        ${liveSrcSelect} AS live_hours_source,
+        ${hasMiChecklist ? "mi.checklist_json" : `''`} AS checklist_json,
+        ${hasMiParts ? "mi.required_parts_json" : `''`} AS required_parts_json,
+        ${hasMiWo ? "mi.work_order_id" : `NULL`} AS work_order_id,
         a.asset_code,
         a.asset_name,
         a.category
@@ -2729,10 +2750,51 @@ export default async function reportsRoutes(app) {
           { k: "Inspector", v: inspection.inspector_name || "-" },
           { k: "Asset Code", v: inspection.asset_code || "" },
           { k: "Asset Name", v: inspection.asset_name || "" },
-          { k: "Machine Hours", v: Number(inspection.machine_hours || 0).toFixed(1) },
+          { k: "Recorded machine hours", v: Number(inspection.machine_hours || 0).toFixed(1) },
+          {
+            k: "Live hours (snapshot)",
+            v: `${Number(inspection.live_hours_snapshot ?? inspection.machine_hours ?? 0).toFixed(1)}${
+              inspection.live_hours_source ? ` (${inspection.live_hours_source})` : ""
+            }`,
+          },
+          { k: "Work order", v: inspection.work_order_id ? `#${inspection.work_order_id}` : "—" },
           { k: "Category", v: inspection.category || "" },
           { k: "Created At", v: inspection.created_at || "" },
         ], 2);
+
+        let checklist = [];
+        try {
+          const cj = JSON.parse(String(inspection.checklist_json || "[]"));
+          if (Array.isArray(cj)) checklist = cj;
+        } catch {}
+        if (checklist.length) {
+          sectionTitle(doc, "Checklist");
+          doc.font("Helvetica").fontSize(10).fillColor("#111111");
+          for (const c of checklist) {
+            const st = c.ok === true ? "OK" : c.ok === false ? "FAIL" : "N/A";
+            doc.text(`• ${String(c.label || c.key || "")}: ${st}${c.note ? ` — ${c.note}` : ""}`, {
+              width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+            });
+            doc.moveDown(0.15);
+          }
+        }
+
+        let reqParts = [];
+        try {
+          const pj = JSON.parse(String(inspection.required_parts_json || "[]"));
+          if (Array.isArray(pj)) reqParts = pj;
+        } catch {}
+        if (reqParts.length) {
+          sectionTitle(doc, "Required parts");
+          doc.font("Helvetica").fontSize(10).fillColor("#111111");
+          for (const p of reqParts) {
+            doc.text(
+              `• ${String(p.part_code || "")} × ${Number(p.qty || 0)}${p.note ? ` — ${p.note}` : ""}`,
+              { width: doc.page.width - doc.page.margins.left - doc.page.margins.right }
+            );
+            doc.moveDown(0.15);
+          }
+        }
 
         sectionTitle(doc, "Notes");
         doc
@@ -2814,6 +2876,8 @@ export default async function reportsRoutes(app) {
       params.push(assetId);
     }
 
+    const hasMiMh = hasColumn("manager_inspections", "machine_hours");
+    const hasMiWo = hasColumn("manager_inspections", "work_order_id");
     const rows = db.prepare(`
       SELECT
         mi.id,
@@ -2821,6 +2885,8 @@ export default async function reportsRoutes(app) {
         mi.inspection_date,
         mi.${miInspectorCol} AS inspector_name,
         mi.notes,
+        ${hasMiMh ? "mi.machine_hours" : "NULL"} AS machine_hours,
+        ${hasMiWo ? "mi.work_order_id" : "NULL"} AS work_order_id,
         a.asset_code,
         a.asset_name
       FROM manager_inspections mi
@@ -2871,12 +2937,14 @@ export default async function reportsRoutes(app) {
         table(
           doc,
           [
-            { key: "id", label: "ID", width: 0.08, align: "right" },
-            { key: "date", label: "Date", width: 0.13 },
-            { key: "asset", label: "Asset", width: 0.18 },
-            { key: "name", label: "Asset Name", width: 0.22 },
-            { key: "inspector", label: "Inspector", width: 0.14 },
-            { key: "notes", label: "Notes", width: 0.25 },
+            { key: "id", label: "ID", width: 0.07, align: "right" },
+            { key: "date", label: "Date", width: 0.11 },
+            { key: "asset", label: "Asset", width: 0.14 },
+            { key: "name", label: "Asset Name", width: 0.18 },
+            { key: "hrs", label: "Hrs", width: 0.07, align: "right" },
+            { key: "wo", label: "WO", width: 0.07, align: "right" },
+            { key: "inspector", label: "Inspector", width: 0.12 },
+            { key: "notes", label: "Notes", width: 0.24 },
           ],
           rows.length
             ? rows.map((r) => ({
@@ -2884,14 +2952,21 @@ export default async function reportsRoutes(app) {
                 date: r.inspection_date || "",
                 asset: r.asset_code || "",
                 name: r.asset_name || "",
+                hrs:
+                  r.machine_hours != null && Number.isFinite(Number(r.machine_hours))
+                    ? Number(r.machine_hours).toFixed(1)
+                    : "—",
+                wo: r.work_order_id ? String(r.work_order_id) : "—",
                 inspector: r.inspector_name || "-",
-                notes: compactCell(r.notes || "", 120),
+                notes: compactCell(r.notes || "", 100),
               }))
             : [{
                 id: "-",
                 date: "-",
                 asset: "-",
                 name: "No inspections found in selected period",
+                hrs: "-",
+                wo: "-",
                 inspector: "-",
                 notes: "-",
               }]

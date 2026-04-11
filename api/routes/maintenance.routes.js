@@ -219,6 +219,12 @@ export default async function maintenanceRoutes(app) {
   ensureColumn("manager_inspections", "uuid TEXT", "uuid");
   ensureColumn("manager_inspections", "site_code TEXT DEFAULT 'main'", "site_code");
   ensureColumn("manager_inspections", "updated_at TEXT", "updated_at");
+  ensureColumn("manager_inspections", "machine_hours REAL", "machine_hours");
+  ensureColumn("manager_inspections", "live_hours_snapshot REAL", "live_hours_snapshot");
+  ensureColumn("manager_inspections", "live_hours_source TEXT", "live_hours_source");
+  ensureColumn("manager_inspections", "checklist_json TEXT", "checklist_json");
+  ensureColumn("manager_inspections", "required_parts_json TEXT", "required_parts_json");
+  ensureColumn("manager_inspections", "work_order_id INTEGER", "work_order_id");
   ensureColumn("manager_inspection_photos", "uuid TEXT", "uuid");
   ensureColumn("manager_inspection_photos", "site_code TEXT DEFAULT 'main'", "site_code");
   ensureColumn("manager_inspection_photos", "updated_at TEXT", "updated_at");
@@ -1858,6 +1864,7 @@ export default async function maintenanceRoutes(app) {
       const rows = hasPartsTable
         ? db.prepare(`
             SELECT
+              p.id,
               p.part_code,
               p.part_name,
               COALESCE(SUM(sm.quantity), 0) AS on_hand,
@@ -2270,6 +2277,12 @@ export default async function maintenanceRoutes(app) {
           mi.inspection_date,
           mi.inspector_name,
           mi.notes,
+          mi.machine_hours,
+          mi.live_hours_snapshot,
+          mi.live_hours_source,
+          mi.checklist_json,
+          mi.required_parts_json,
+          mi.work_order_id,
           mi.created_at,
           a.asset_code,
           a.asset_name
@@ -2304,16 +2317,100 @@ export default async function maintenanceRoutes(app) {
 
       return reply.send({
         ok: true,
-        rows: rows.map((r) => ({
-          ...r,
-          photos: photosByInspection.get(Number(r.id)) || [],
-        })),
+        rows: rows.map((r) => {
+          let checklist = [];
+          let required_parts = [];
+          try {
+            const cj = JSON.parse(String(r.checklist_json || "[]"));
+            if (Array.isArray(cj)) checklist = cj;
+          } catch {}
+          try {
+            const pj = JSON.parse(String(r.required_parts_json || "[]"));
+            if (Array.isArray(pj)) required_parts = pj;
+          } catch {}
+          return {
+            ...r,
+            checklist,
+            required_parts,
+            photos: photosByInspection.get(Number(r.id)) || [],
+          };
+        }),
       });
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message });
     }
   });
+
+  function normalizeInspectionChecklist(raw) {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((x) => ({
+        key: String(x?.key || "").trim(),
+        label: String(x?.label || "").trim(),
+        ok: x?.ok === true ? true : x?.ok === false ? false : null,
+        note: String(x?.note || "").trim() || null,
+      }))
+      .filter((x) => x.key && x.label);
+  }
+
+  function normalizeInspectionParts(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const x of raw) {
+      const part_code = String(x?.part_code || "").trim();
+      const qty = Math.max(0, Number(x?.qty || 0));
+      if (!part_code || !Number.isFinite(qty) || qty <= 0) continue;
+      let part_id = x?.part_id != null ? Number(x.part_id) : null;
+      if (!part_id || part_id <= 0) {
+        const pr = db.prepare(`SELECT id FROM parts WHERE UPPER(TRIM(part_code)) = UPPER(TRIM(?)) LIMIT 1`).get(part_code);
+        part_id = pr?.id != null ? Number(pr.id) : null;
+      }
+      out.push({
+        part_id,
+        part_code,
+        qty,
+        note: String(x?.note || "").trim() || null,
+      });
+    }
+    return out;
+  }
+
+  function buildInspectionWorkOrderNotes({
+    inspectionId,
+    inspection_date,
+    asset_code,
+    asset_name,
+    checklist,
+    required_parts,
+    notes,
+  }) {
+    const lines = [
+      `Manager inspection #${inspectionId} (${inspection_date})`,
+      `Asset: ${asset_code || ""} — ${asset_name || ""}`,
+      "",
+    ];
+    if (checklist.length) {
+      lines.push("Checklist:");
+      for (const c of checklist) {
+        const st = c.ok === true ? "OK" : c.ok === false ? "FAIL" : "N/A";
+        lines.push(`- ${c.label}: ${st}${c.note ? ` (${c.note})` : ""}`);
+      }
+      lines.push("");
+    }
+    if (required_parts.length) {
+      lines.push("Required parts:");
+      for (const p of required_parts) {
+        lines.push(`- ${p.part_code} × ${p.qty}${p.note ? ` — ${p.note}` : ""}`);
+      }
+      lines.push("");
+    }
+    if (notes) {
+      lines.push("Inspector notes:");
+      lines.push(notes);
+    }
+    return lines.join("\n").trim();
+  }
 
   app.post("/inspections", async (req, reply) => {
     try {
@@ -2326,15 +2423,82 @@ export default async function maintenanceRoutes(app) {
       if (!asset_id) return reply.code(400).send({ ok: false, error: "asset_id is required" });
       if (!isDate(inspection_date)) return reply.code(400).send({ ok: false, error: "inspection_date must be YYYY-MM-DD" });
 
-      const asset = db.prepare(`SELECT id FROM assets WHERE id = ?`).get(asset_id);
+      const asset = db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE id = ?`).get(asset_id);
       if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
 
-      const ins = db.prepare(`
-        INSERT INTO manager_inspections (asset_id, uuid, site_code, inspection_date, inspector_name, notes, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-      `).run(asset_id, crypto.randomUUID(), site_code, inspection_date, inspector_name, notes);
+      const liveInfo = getAssetCurrentHoursInfo(asset_id);
+      const liveSnap = Number(liveInfo.hours || 0);
+      const liveSource = String(liveInfo.source || "");
 
-      return reply.send({ ok: true, id: Number(ins.lastInsertRowid) });
+      let machine_hours = null;
+      const mhRaw = req.body?.machine_hours;
+      if (mhRaw != null && mhRaw !== "") {
+        const n = Number(mhRaw);
+        if (Number.isFinite(n) && n >= 0) machine_hours = n;
+      }
+      if (machine_hours == null) machine_hours = liveSnap;
+
+      const checklist = normalizeInspectionChecklist(req.body?.checklist);
+      const checklist_json = JSON.stringify(checklist);
+      const required_parts = normalizeInspectionParts(req.body?.required_parts);
+      const required_parts_json = JSON.stringify(required_parts);
+
+      const anyChecklistFail = checklist.some((c) => c.ok === false);
+      const hasParts = required_parts.length > 0;
+      const createExplicit = Boolean(req.body?.create_work_order);
+      const createOnIssues = req.body?.create_work_order_on_issues !== false;
+      const shouldCreateWo =
+        createExplicit || (createOnIssues && (anyChecklistFail || hasParts));
+
+      const ins = db.prepare(`
+        INSERT INTO manager_inspections (
+          asset_id, uuid, site_code, inspection_date, inspector_name, notes,
+          machine_hours, live_hours_snapshot, live_hours_source,
+          checklist_json, required_parts_json, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `).run(
+        asset_id,
+        crypto.randomUUID(),
+        site_code,
+        inspection_date,
+        inspector_name,
+        notes,
+        machine_hours,
+        liveSnap,
+        liveSource,
+        checklist_json,
+        required_parts_json
+      );
+
+      const inspectionId = Number(ins.lastInsertRowid);
+      let work_order_id = null;
+
+      if (shouldCreateWo) {
+        ensureColumn("work_orders", "completion_notes", "completion_notes TEXT");
+        const woNotes = buildInspectionWorkOrderNotes({
+          inspectionId,
+          inspection_date,
+          asset_code: String(asset.asset_code || ""),
+          asset_name: String(asset.asset_name || ""),
+          checklist,
+          required_parts,
+          notes,
+        });
+        const wo = db.prepare(`
+          INSERT INTO work_orders (asset_id, source, reference_id, status)
+          VALUES (?, 'inspection', ?, 'open')
+        `).run(asset_id, inspectionId);
+        work_order_id = Number(wo.lastInsertRowid);
+        if (work_order_id > 0 && hasColumn("work_orders", "completion_notes") && woNotes) {
+          db.prepare(`UPDATE work_orders SET completion_notes = ? WHERE id = ?`).run(woNotes, work_order_id);
+        }
+        if (work_order_id > 0) {
+          db.prepare(`UPDATE manager_inspections SET work_order_id = ? WHERE id = ?`).run(work_order_id, inspectionId);
+        }
+      }
+
+      return reply.send({ ok: true, id: inspectionId, work_order_id });
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message });

@@ -1283,19 +1283,40 @@ async function saveManagerInspection() {
   const inspector_name = String(document.getElementById("miInspector")?.value || "").trim();
   const notes = String(document.getElementById("miNotes")?.value || "").trim();
   const msg = document.getElementById("miMsg");
+  const mhRaw = String(document.getElementById("miMachineHours")?.value || "").trim();
+  const machine_hours = mhRaw === "" ? null : Number(mhRaw);
+  if (machine_hours != null && !Number.isFinite(machine_hours)) {
+    return alert("Machine hours must be a number.");
+  }
+  const checklist = collectManagerInspectionChecklist();
+  const required_parts = collectManagerInspectionParts();
+  const create_work_order = document.getElementById("miCreateWoAlways")?.checked === true;
+  const create_work_order_on_issues = document.getElementById("miAutoWoOnIssues")?.checked !== false;
+
   if (!asset_id) return alert("Select an asset.");
   if (!inspection_date) return alert("Select inspection date.");
   if (msg) msg.textContent = "Saving inspection...";
   try {
     const res = await fetch(`${API}/maintenance/inspections`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ asset_id, inspection_date, inspector_name, notes }),
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        asset_id,
+        inspection_date,
+        inspector_name,
+        notes,
+        machine_hours,
+        checklist,
+        required_parts,
+        create_work_order,
+        create_work_order_on_issues,
+      }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to save inspection");
-    if (msg) msg.textContent = "Inspection saved.";
-    document.getElementById("miNotes").value = "";
+    const wo = data.work_order_id ? ` Work order #${data.work_order_id} created.` : "";
+    if (msg) msg.textContent = `Inspection saved.${wo}`;
+    resetManagerInspectionForm();
     await loadManagerInspections();
   } catch (e) {
     if (msg) msg.textContent = `Save error: ${e.message || e}`;
@@ -1528,10 +1549,35 @@ function inspectionCard(r) {
       }).join("")}</div>`
     : `<small class="muted">No photos yet.</small>`;
 
+  const hrs =
+    r.machine_hours != null && Number.isFinite(Number(r.machine_hours))
+      ? Number(r.machine_hours).toFixed(1)
+      : "—";
+  const live =
+    r.live_hours_snapshot != null && Number.isFinite(Number(r.live_hours_snapshot))
+      ? `${Number(r.live_hours_snapshot).toFixed(1)} (${esc(r.live_hours_source || "—")})`
+      : "—";
+  const wo =
+    r.work_order_id != null && Number(r.work_order_id) > 0
+      ? `<b>WO #${Number(r.work_order_id)}</b>`
+      : `<span class="muted">No WO</span>`;
+  const chk = Array.isArray(r.checklist) ? r.checklist : [];
+  const fails = chk.filter((c) => c.ok === false);
+  const failLine = fails.length
+    ? `<div style="margin-top:4px;"><small class="status-overdue">Checklist fail: ${fails.map((c) => esc(c.label || c.key)).join("; ")}</small></div>`
+    : "";
+  const parts = Array.isArray(r.required_parts) ? r.required_parts : [];
+  const partsLine = parts.length
+    ? `<div style="margin-top:4px;"><small><b>Parts:</b> ${parts.map((p) => `${esc(p.part_code)} × ${esc(String(p.qty))}`).join(", ")}</small></div>`
+    : "";
+
   return `
     <div class="card">
       <div><b>${esc(r.asset_code)}</b> - ${esc(r.asset_name || "")}</div>
       <div><small>Date: ${esc(r.inspection_date)} | Inspector: ${esc(r.inspector_name || "-")}</small></div>
+      <div><small>Machine hrs: ${esc(hrs)} | Live snapshot: ${live} | ${wo}</small></div>
+      ${failLine}
+      ${partsLine}
       <div style="margin-top:6px;"><small>${esc(r.notes || "")}</small></div>
       <div style="margin-top:8px;">${photoHtml}</div>
       <div class="row stack-10" style="margin-top:8px;">
@@ -1557,7 +1603,9 @@ async function loadManagerInspections() {
   if (start) q.set("start", start);
   if (end) q.set("end", end);
   try {
-    const res = await fetch(`${API}/maintenance/inspections${q.toString() ? `?${q.toString()}` : ""}`);
+    const res = await fetch(`${API}/maintenance/inspections${q.toString() ? `?${q.toString()}` : ""}`, {
+      headers: authHeaders(),
+    });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to load inspections");
     const rows = Array.isArray(data.rows) ? data.rows : [];
@@ -1638,18 +1686,143 @@ function refreshWeeklyForumInputsTable() {
     : `<tr><td colspan="4" class="muted">No manual inputs saved.</td></tr>`;
 }
 function refreshWeeklyForumPartsDatalist() {
-  const dl = document.getElementById("wfPartsList");
-  if (!dl) return;
-  dl.innerHTML = wfPartsCache.map((p) => {
+  const html = wfPartsCache.map((p) => {
     const code = String(p.part_code || "").trim();
     const desc = `${code} - ${String(p.part_name || "")} | on hand ${Number(p.on_hand || 0).toFixed(2)} | unit ${Number(p.latest_unit_cost || 0).toFixed(2)}`;
     return `<option value="${esc(code)}">${esc(desc)}</option>`;
   }).join("");
+  const dl = document.getElementById("wfPartsList");
+  if (dl) dl.innerHTML = html;
+  const dlMi = document.getElementById("miPartsList");
+  if (dlMi) dlMi.innerHTML = html;
 }
 function getWfPartByCode(codeIn) {
   const code = String(codeIn || "").trim().toUpperCase();
   if (!code) return null;
   return wfPartsCache.find((p) => String(p.part_code || "").trim().toUpperCase() === code) || null;
+}
+function getMiPartByCode(codeIn) {
+  return getWfPartByCode(codeIn);
+}
+
+const MANAGER_INSPECTION_CHECKLIST = [
+  { key: "structure", label: "Structure / visible damage" },
+  { key: "fluids", label: "Fluids / leaks" },
+  { key: "tyres", label: "Tyres / undercarriage" },
+  { key: "safety", label: "Safety & access (rails, steps, extinguisher)" },
+  { key: "cabin", label: "Cabin / visibility / instruments" },
+  { key: "attachments", label: "GET / tools / attachments" },
+  { key: "housekeeping", label: "Housekeeping" },
+  { key: "noise", label: "Operation / unusual noise" },
+];
+
+function renderManagerInspectionChecklist() {
+  const host = document.getElementById("miChecklist");
+  if (!host) return;
+  host.innerHTML = MANAGER_INSPECTION_CHECKLIST.map(
+    (row) => `
+    <div class="row stack-10" style="align-items:center; flex-wrap:wrap; gap:8px;">
+      <span style="min-width:240px; font-size:13px;">${esc(row.label)}</span>
+      <span class="row stack-10" style="gap:10px;">
+        <label><input type="radio" name="miChk-${esc(row.key)}" value="ok" /> OK</label>
+        <label><input type="radio" name="miChk-${esc(row.key)}" value="fail" /> Fail</label>
+        <label><input type="radio" name="miChk-${esc(row.key)}" value="na" /> N/A</label>
+      </span>
+      <input type="text" class="w-200 mi-chk-note" data-mi-chk="${esc(row.key)}" placeholder="Note (optional)" />
+    </div>`
+  ).join("");
+}
+
+function collectManagerInspectionChecklist() {
+  return MANAGER_INSPECTION_CHECKLIST.map((row) => {
+    const sel = document.querySelector(`input[name="miChk-${row.key}"]:checked`);
+    const val = sel ? String(sel.value || "") : "";
+    let ok = null;
+    if (val === "ok") ok = true;
+    else if (val === "fail") ok = false;
+    const noteEl = document.querySelector(`input.mi-chk-note[data-mi-chk="${row.key}"]`);
+    const note = String(noteEl?.value || "").trim() || null;
+    return { key: row.key, label: row.label, ok, note };
+  });
+}
+
+function addManagerInspectionPartRow(partCode = "", qty = "", note = "") {
+  const body = document.getElementById("miPartsBody");
+  if (!body) return;
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><input class="mi-part-code" type="text" list="miPartsList" style="min-width:160px;" value="${esc(partCode)}" /></td>
+    <td><input class="mi-part-qty" type="number" step="0.01" min="0" style="width:90px;" value="${esc(qty)}" /></td>
+    <td><input class="mi-part-note" type="text" style="min-width:140px;" value="${esc(note)}" /></td>
+    <td><button type="button" class="mi-part-remove">Remove</button></td>`;
+  body.appendChild(tr);
+  tr.querySelector(".mi-part-remove")?.addEventListener("click", () => {
+    tr.remove();
+  });
+}
+
+function collectManagerInspectionParts() {
+  const body = document.getElementById("miPartsBody");
+  if (!body) return [];
+  const out = [];
+  body.querySelectorAll("tr").forEach((tr) => {
+    const part_code = String(tr.querySelector(".mi-part-code")?.value || "").trim();
+    const qty = Number(tr.querySelector(".mi-part-qty")?.value || 0);
+    const note = String(tr.querySelector(".mi-part-note")?.value || "").trim() || null;
+    if (!part_code || !Number.isFinite(qty) || qty <= 0) return;
+    const meta = getMiPartByCode(part_code);
+    out.push({
+      part_id: meta?.id != null ? Number(meta.id) : null,
+      part_code,
+      qty,
+      note,
+    });
+  });
+  return out;
+}
+
+async function pullManagerInspectionLiveHours() {
+  const assetId = Number(document.getElementById("miAsset")?.value || 0);
+  const meta = document.getElementById("miLiveMeta");
+  const inp = document.getElementById("miMachineHours");
+  if (!assetId) {
+    if (meta) meta.textContent = "Select an asset first.";
+    return;
+  }
+  if (meta) meta.textContent = "Loading live hours…";
+  try {
+    const res = await fetch(`${API}/maintenance/asset/${assetId}/live-hours`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load live hours");
+    const h = Number(data.current_hours || 0);
+    const src = String(data.current_hours_source || "");
+    if (inp) inp.value = Number.isFinite(h) ? String(h.toFixed(1)) : "";
+    if (meta) meta.textContent = `Live: ${h.toFixed(1)} h (${src || "—"})`;
+  } catch (e) {
+    if (meta) meta.textContent = e.message || String(e);
+  }
+}
+
+function resetManagerInspectionForm() {
+  document.getElementById("miNotes").value = "";
+  MANAGER_INSPECTION_CHECKLIST.forEach((row) => {
+    document.querySelectorAll(`input[name="miChk-${row.key}"]`).forEach((r) => {
+      r.checked = false;
+    });
+    const ne = document.querySelector(`input.mi-chk-note[data-mi-chk="${row.key}"]`);
+    if (ne) ne.value = "";
+  });
+  const body = document.getElementById("miPartsBody");
+  if (body) {
+    body.innerHTML = "";
+    addManagerInspectionPartRow();
+  }
+  const auto = document.getElementById("miAutoWoOnIssues");
+  if (auto) auto.checked = true;
+  const al = document.getElementById("miCreateWoAlways");
+  if (al) al.checked = false;
+  const lm = document.getElementById("miLiveMeta");
+  if (lm) lm.textContent = "";
 }
 function refreshWfDraftEditor() {
   const body = document.getElementById("wfItemsEditorBody");
@@ -2640,6 +2813,15 @@ document.addEventListener("DOMContentLoaded", () => {
     mpWeekEnd.value = w.end;
   }
   if (mpMonth && !mpMonth.value) mpMonth.value = mpMonthLabel();
+  renderManagerInspectionChecklist();
+  const miPartsBody = document.getElementById("miPartsBody");
+  if (miPartsBody && !miPartsBody.querySelector("tr")) addManagerInspectionPartRow();
+  document.getElementById("miPullLiveHoursBtn")?.addEventListener("click", () => pullManagerInspectionLiveHours().catch(() => {}));
+  document.getElementById("miAddPartRowBtn")?.addEventListener("click", () => addManagerInspectionPartRow());
+  document.getElementById("miAsset")?.addEventListener("change", () => {
+    const meta = document.getElementById("miLiveMeta");
+    if (meta) meta.textContent = "";
+  });
   document.getElementById("saveMiBtn")?.addEventListener("click", saveManagerInspection);
   document.getElementById("saveDrBtn")?.addEventListener("click", saveDamageReport);
   document.getElementById("loadMiBtn")?.addEventListener("click", loadManagerInspections);

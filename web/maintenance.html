@@ -356,7 +356,40 @@
         <input id="miDate" type="date" />
         <input id="miInspector" class="w-200" placeholder="Inspector name" />
       </div>
-      <textarea id="miNotes" rows="3" placeholder="Inspection notes..." style="width:100%;"></textarea>
+      <div class="row stack-10" style="align-items:flex-end; flex-wrap:wrap;">
+        <div>
+          <small class="muted">Machine hours (recorded)</small><br />
+          <input id="miMachineHours" type="number" step="0.1" min="0" class="w-200" placeholder="Hours" />
+        </div>
+        <button type="button" id="miPullLiveHoursBtn">Pull from live hours</button>
+        <div id="miLiveMeta" class="muted" style="min-width:200px;"></div>
+      </div>
+      <div style="margin-top:12px;">
+        <div style="font-weight:600; margin-bottom:8px;">Manager checklist</div>
+        <div id="miChecklist" class="stack-10"></div>
+      </div>
+      <div style="margin-top:12px;">
+        <div style="font-weight:600; margin-bottom:8px;">Required parts</div>
+        <table class="gridTable" style="min-width:520px;">
+          <thead>
+            <tr><th>Part code</th><th>Qty</th><th>Note</th><th></th></tr>
+          </thead>
+          <tbody id="miPartsBody"></tbody>
+        </table>
+        <datalist id="miPartsList"></datalist>
+        <button type="button" id="miAddPartRowBtn" style="margin-top:8px;">Add part line</button>
+      </div>
+      <div class="row stack-10" style="margin-top:12px; flex-wrap:wrap;">
+        <label style="display:flex; align-items:center; gap:6px;">
+          <input id="miAutoWoOnIssues" type="checkbox" checked />
+          Auto-create work order when any checklist item fails or parts are listed
+        </label>
+        <label style="display:flex; align-items:center; gap:6px;">
+          <input id="miCreateWoAlways" type="checkbox" />
+          Always create work order (follow-up) on save
+        </label>
+      </div>
+      <textarea id="miNotes" rows="3" placeholder="Additional notes..." style="width:100%;"></textarea>
       <div class="row stack-10">
         <button id="saveMiBtn">Save Inspection</button>
       </div>
