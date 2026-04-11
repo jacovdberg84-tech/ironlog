@@ -185,6 +185,31 @@ h3{margin:0 0 8px 0}
 .muted{color:var(--muted); margin:6px 0 0 0}
 
 .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+.section-head-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:10px;
+  margin:0 0 10px 0;
+}
+.section-head-row h3,
+.section-head-row h4{
+  margin:0;
+}
+button.sectionToggleBtn{
+  font-size:0.85rem;
+  padding:4px 10px;
+  border:1px solid var(--line);
+  background:var(--card2, #f3f4f6);
+  border-radius:6px;
+  cursor:pointer;
+  color:var(--muted);
+}
+button.sectionToggleBtn:hover{
+  border-color:var(--accent);
+  color:var(--ink);
+}
 
 /* AI docs: keep Ask AI generator in a dedicated right panel */
 #tab-docs .docs-request-layout{

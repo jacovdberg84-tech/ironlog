@@ -666,7 +666,11 @@
     <!-- STOCK ON HAND -->
     <section class="panel" id="tab-stock">
       <div class="card stack-12">
-        <h3>Stores</h3>
+        <div class="section-head-row">
+          <h3>Stores</h3>
+          <button type="button" class="sectionToggleBtn" data-section-body="spStoresBody" data-storage-key="ironlog_section_stock_on_hand">Hide</button>
+        </div>
+        <div id="spStoresBody" class="section-collapsible stack-12">
         <div class="row">
           <input id="spFilter" class="w-200" placeholder="Filter part code..." />
           <select id="spSort" class="w-200">
@@ -694,10 +698,15 @@
         <div class="list" id="spList"></div>
         <h4>Recent Stock Movements</h4>
         <div class="list" id="spRecent"></div>
+        </div>
       </div>
 
       <div class="card stack-12">
-        <h3>Stores Allocation</h3>
+        <div class="section-head-row">
+          <h3>Stores Allocation</h3>
+          <button type="button" class="sectionToggleBtn" data-section-body="spAllocBody" data-storage-key="ironlog_section_stock_alloc">Hide</button>
+        </div>
+        <div id="spAllocBody" class="section-collapsible stack-12">
         <div class="row">
           <input id="saPart" list="partCodeOptions" class="w-200" placeholder="Part code" />
           <input id="saQty" class="w-90" type="number" step="0.1" min="0.1" value="1" />
@@ -714,10 +723,15 @@
 
         <h4>Recent Allocations</h4>
         <div id="storeAllocList" class="list"></div>
+        </div>
       </div>
 
       <div class="card stack-12">
-        <h3>Manual Stock Entry</h3>
+        <div class="section-head-row">
+          <h3>Manual Stock Entry</h3>
+          <button type="button" class="sectionToggleBtn" data-section-body="spManualBody" data-storage-key="ironlog_section_stock_manual">Hide</button>
+        </div>
+        <div id="spManualBody" class="section-collapsible stack-12">
         <div class="row">
           <input id="msPart" list="partCodeOptions" class="w-200" placeholder="Part code" />
           <input id="msPartDesc" class="w-200" placeholder="Part description (required for new codes)" />
@@ -742,10 +756,15 @@
           <span class="muted">Converted to USD using configured rates (ZAR/MZN per 1 USD).</span>
         </div>
         <pre class="output" id="manualStockResult"></pre>
+        </div>
       </div>
 
       <div class="card stack-12">
-        <h3>Inventory Control</h3>
+        <div class="section-head-row">
+          <h3>Inventory Control</h3>
+          <button type="button" class="sectionToggleBtn" data-section-body="spIcBody" data-storage-key="ironlog_section_stock_inventory">Hide</button>
+        </div>
+        <div id="spIcBody" class="section-collapsible stack-12">
         <div class="row">
           <input id="icPartCode" list="partCodeOptions" class="w-200" placeholder="Part code" />
           <button id="icLoad">Load Control</button>
@@ -763,10 +782,15 @@
         </div>
         <div class="list" id="icLubeLowList"></div>
         <pre class="output" id="inventoryControlResult"></pre>
+        </div>
       </div>
 
       <div class="card stack-12">
-        <h3>Location Management</h3>
+        <div class="section-head-row">
+          <h3>Location Management</h3>
+          <button type="button" class="sectionToggleBtn" data-section-body="spLocBody" data-storage-key="ironlog_section_stock_locations">Hide</button>
+        </div>
+        <div id="spLocBody" class="section-collapsible stack-12">
         <div class="row">
           <button id="locLoad">Load Locations</button>
           <label class="chk">
@@ -785,6 +809,7 @@
         </div>
         <div class="list" id="locList"></div>
         <pre class="output" id="locResult"></pre>
+        </div>
       </div>
     </section>
 
@@ -1752,21 +1777,31 @@
         <h3>Breakdown Ops</h3>
 
         <div class="card">
-          <h4>Open incidents</h4>
+          <div class="section-head-row">
+            <h4>Open incidents</h4>
+            <button type="button" class="sectionToggleBtn" data-section-body="boOpenBody" data-storage-key="ironlog_section_bo_open">Hide</button>
+          </div>
+          <div id="boOpenBody" class="section-collapsible">
           <p class="muted">Active breakdowns with an open (or non-terminal) primary work order. Use for shift handover.</p>
           <div class="row">
             <label class="chk">Filter by start date <input id="boOpenDate" type="date" /></label>
             <button type="button" id="boRefreshOpen">Refresh</button>
           </div>
           <div class="list" id="boOpenList"></div>
+          </div>
         </div>
 
         <div class="card">
-          <h4>Recent breakdowns</h4>
+          <div class="section-head-row">
+            <h4>Recent breakdowns</h4>
+            <button type="button" class="sectionToggleBtn" data-section-body="boRecentBody" data-storage-key="ironlog_section_bo_recent">Hide</button>
+          </div>
+          <div id="boRecentBody" class="section-collapsible">
           <div class="row">
             <button type="button" id="boRefreshRecent">Refresh</button>
           </div>
           <div class="list" id="boRecentList"></div>
+          </div>
         </div>
 
         <div class="card">

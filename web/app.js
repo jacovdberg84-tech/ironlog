@@ -3990,6 +3990,30 @@ function initTabs() {
   }
 }
 
+function initSectionCollapseToggles() {
+  document.querySelectorAll("button.sectionToggleBtn[data-section-body][data-storage-key]").forEach((btn) => {
+    const bodyId = btn.getAttribute("data-section-body");
+    const key = btn.getAttribute("data-storage-key");
+    if (!bodyId || !key) return;
+    const body = document.getElementById(bodyId);
+    if (!(body instanceof HTMLElement)) return;
+
+    function applyHidden(hidden) {
+      body.style.display = hidden ? "none" : "";
+      btn.textContent = hidden ? "Show" : "Hide";
+      btn.setAttribute("aria-expanded", hidden ? "false" : "true");
+    }
+
+    applyHidden(localStorage.getItem(key) === "1");
+
+    btn.addEventListener("click", () => {
+      const willHide = body.style.display !== "none";
+      applyHidden(willHide);
+      localStorage.setItem(key, willHide ? "1" : "0");
+    });
+  });
+}
+
 /* =========================
    UPLOADS
 ========================= */
@@ -8251,6 +8275,7 @@ async function init() {
   await disableLegacyServiceWorkers();
   await tryInitialSession();
   initTabs();
+  initSectionCollapseToggles();
   initSessionControls();
   initVehicleCheckTab();
   applyRoleVisibility();
