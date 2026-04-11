@@ -238,12 +238,15 @@ export default async function dashboardRoutes(app) {
   `)
     : null;
 
+  /** OPEN breakdowns used to impute downtime when no log rows exist for that day — only same calendar month as the KPI day (no March-started carry into April MTD). */
   const getOpenBreakdownAssetIdsByDayNoSite = db.prepare(`
     SELECT DISTINCT b.asset_id
     FROM breakdowns b
     JOIN assets a ON a.id = b.asset_id
     WHERE b.status = 'OPEN'
       AND b.breakdown_date <= ?
+      AND LENGTH(TRIM(COALESCE(b.breakdown_date, ''))) >= 7
+      AND substr(TRIM(b.breakdown_date), 1, 7) = substr(?, 1, 7)
       ${andAssetFleetHoursOnly("a")}
   `);
   const getOpenBreakdownAssetIdsByDayWithSite = bdOnlySiteSql
@@ -253,6 +256,8 @@ export default async function dashboardRoutes(app) {
     JOIN assets a ON a.id = b.asset_id
     WHERE b.status = 'OPEN'
       AND b.breakdown_date <= ?
+      AND LENGTH(TRIM(COALESCE(b.breakdown_date, ''))) >= 7
+      AND substr(TRIM(b.breakdown_date), 1, 7) = substr(?, 1, 7)
       ${andAssetFleetHoursOnly("a")}
       ${bdOnlySiteSql}
   `)
@@ -383,8 +388,8 @@ export default async function dashboardRoutes(app) {
     );
     const openBreakdownAssets = new Set(
       (getOpenBreakdownAssetIdsByDayWithSite && bdOnlySiteSql
-        ? getOpenBreakdownAssetIdsByDayWithSite.all(dayStr, siteCode)
-        : getOpenBreakdownAssetIdsByDayNoSite.all(dayStr)
+        ? getOpenBreakdownAssetIdsByDayWithSite.all(dayStr, dayStr, siteCode)
+        : getOpenBreakdownAssetIdsByDayNoSite.all(dayStr, dayStr)
       ).map((r) => Number(r.asset_id || 0))
     );
     const assetIdsInHours = new Set(assetRows.map((r) => Number(r.asset_id || 0)));
@@ -703,6 +708,9 @@ export default async function dashboardRoutes(app) {
     // Machine-available hours (MTD) = planned − downtime (capped per asset-day).
     // Availability = machine-available ÷ planned = (planned − downtime) / planned.
     // Utilization = run ÷ planned (same denominator as the plan, not reduced by downtime).
+    // Logged downtime uses breakdown_downtime_logs.log_date = each day. OPEN-breakdown imputed
+    // downtime (when logs are zero) only applies if breakdown_date is in the same YYYY-MM as that day
+    // so prior-month incidents do not inflate the current month.
     // =========================
 
     const dayK = computeFleetKpiForDay(date, scheduledFallback, { includePerAsset: true, siteCode });

@@ -131,6 +131,28 @@ function hasTable(name) {
   return Boolean(row);
 }
 
+/** Same open-WO rules as dashboard.routes.js (status normalization, closed_at, optional completed_at, breakdown link). */
+function workOrderOpenSqlFragments() {
+  const hasWOCompletedAt = hasColumn("work_orders", "completed_at");
+  const hasBreakdownStatus = hasColumn("breakdowns", "status");
+  const woCompletedFilter = hasWOCompletedAt
+    ? "AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')"
+    : "";
+  const breakdownOpenFilter = hasBreakdownStatus
+    ? `AND (
+          w.source <> 'breakdown'
+          OR TRIM(LOWER(COALESCE(b.status, ''))) IN ('open', 'in_progress')
+        )`
+    : "";
+  return {
+    joinBreakdown: "LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'",
+    openStatusWhere: "REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')",
+    notClosedWhere: "AND (w.closed_at IS NULL OR TRIM(COALESCE(w.closed_at, '')) = '')",
+    woCompletedFilter,
+    breakdownOpenFilter,
+  };
+}
+
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
@@ -286,11 +308,26 @@ function computeAssetRiskSignals(reportDate) {
     row.overdue_hours = Math.max(Number(row.overdue_hours || 0), Number(overdue || 0));
   }
 
+  const woFrag = workOrderOpenSqlFragments();
   const woAges = db.prepare(`
-    SELECT w.asset_id, MAX(CAST((julianday('now') - julianday(COALESCE(w.opened_at, datetime('now')))) * 24 AS INTEGER)) AS max_age
+    SELECT w.asset_id, MAX(CAST((
+      julianday('now') - julianday(
+        COALESCE(
+          CASE
+            WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(b.start_at), ''), NULLIF(TRIM(b.breakdown_date), ''), w.opened_at)
+            ELSE w.opened_at
+          END,
+          datetime('now')
+        )
+      )
+    ) * 24 AS INTEGER)) AS max_age
     FROM work_orders w
     JOIN assets a ON a.id = w.asset_id
-    WHERE w.status IN ('open', 'assigned', 'in_progress', 'completed')
+    ${woFrag.joinBreakdown}
+    WHERE ${woFrag.openStatusWhere}
+      ${woFrag.notClosedWhere}
+      ${woFrag.woCompletedFilter}
+      ${woFrag.breakdownOpenFilter}
       AND a.active = 1
       AND IFNULL(a.is_standby, 0) = 0
     GROUP BY w.asset_id
@@ -496,6 +533,7 @@ async function callIronmindAi(structuredData, opts = {}) {
       ? "- Each key should contain 4-8 concise but specific bullets with asset codes, magnitudes, and action intent where possible."
       : "- Each key must be an array of short strings.",
     "- Predictive statements must be evidence-based from trend signals only; never present certainty.",
+    "- Field open_work_orders_count is the authoritative number of open work orders; use it (not the length of openWorkOrders) when stating totals.",
   ].join("\n");
   const contextBlock = contextNotes ? `\n\nAdditional operator context:\n${contextNotes}` : "";
   const userPrompt = `Structured plant data for report date ${structuredData.report_date}:\n${JSON.stringify(structuredData, null, 2)}${contextBlock}`;
@@ -652,15 +690,40 @@ function buildStructuredData(reportDate) {
     .sort((a, b) => Number(b.overdue_hours || 0) - Number(a.overdue_hours || 0))
     .slice(0, 8);
 
+  const woFrag = workOrderOpenSqlFragments();
+  const openWorkOrderCountRow = db.prepare(`
+    SELECT COUNT(*) AS c
+    FROM work_orders w
+    ${woFrag.joinBreakdown}
+    WHERE ${woFrag.openStatusWhere}
+      ${woFrag.notClosedWhere}
+      ${woFrag.woCompletedFilter}
+      ${woFrag.breakdownOpenFilter}
+  `).get();
+
   const openWorkOrders = db.prepare(`
     SELECT
       w.id,
       a.asset_code,
       w.status,
-      CAST((julianday('now') - julianday(COALESCE(w.opened_at, datetime('now')))) * 24 AS INTEGER) AS age_hours
+      CAST((
+        julianday('now') - julianday(
+          COALESCE(
+            CASE
+              WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(b.start_at), ''), NULLIF(TRIM(b.breakdown_date), ''), w.opened_at)
+              ELSE w.opened_at
+            END,
+            datetime('now')
+          )
+        )
+      ) * 24 AS INTEGER) AS age_hours
     FROM work_orders w
     JOIN assets a ON a.id = w.asset_id
-    WHERE w.status IN ('open', 'assigned', 'in_progress', 'completed')
+    ${woFrag.joinBreakdown}
+    WHERE ${woFrag.openStatusWhere}
+      ${woFrag.notClosedWhere}
+      ${woFrag.woCompletedFilter}
+      ${woFrag.breakdownOpenFilter}
     ORDER BY age_hours DESC
     LIMIT 8
   `).all().map((r) => ({
@@ -846,6 +909,7 @@ function buildStructuredData(reportDate) {
       utilization_pct: Number(utilizationPct.toFixed(2)),
     },
     overdueMaintenance,
+    open_work_orders_count: Number(openWorkOrderCountRow?.c || 0),
     openWorkOrders,
     lowStockCritical,
     downtimeTop,
@@ -859,6 +923,7 @@ function buildStructuredData(reportDate) {
       assets_with_daily_entry: Number(dailyCoverage?.c || 0),
       breakdown_logs: Number(downtimeRow?.log_count || 0),
       operations_daily_rows: Number(siteOpsCount?.c || 0),
+      open_work_orders: Number(openWorkOrderCountRow?.c || 0),
     },
   };
 }
