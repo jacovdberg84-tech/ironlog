@@ -40,6 +40,10 @@ function eachDateInclusiveYMD(startStr, endStr, fn) {
   }
 }
 
+function siteCodeFromReq(req) {
+  return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
+}
+
 export default async function dashboardRoutes(app) {
   ensureAuditTable(db);
 
@@ -138,8 +142,23 @@ export default async function dashboardRoutes(app) {
   // Prepared statements (reuse)
   // -----------------------------
 
+  const dailyHoursHasSite = hasColumn("daily_hours", "site_code");
+  const breakdownsHasSite = hasColumn("breakdowns", "site_code");
+  const downtimeLogsHasSite = hasColumn("breakdown_downtime_logs", "site_code");
+  const dhSiteSql = dailyHoursHasSite
+    ? `AND LOWER(TRIM(COALESCE(NULLIF(dh.site_code, ''), 'main'))) = ?`
+    : "";
+  const bdLogSiteSql = downtimeLogsHasSite
+    ? `AND LOWER(TRIM(COALESCE(NULLIF(l.site_code, ''), NULLIF(b.site_code, ''), 'main'))) = ?`
+    : breakdownsHasSite
+      ? `AND LOWER(TRIM(COALESCE(NULLIF(b.site_code, ''), 'main'))) = ?`
+      : "";
+  const bdOnlySiteSql = breakdownsHasSite
+    ? `AND LOWER(TRIM(COALESCE(NULLIF(b.site_code, ''), 'main'))) = ?`
+    : "";
+
   // Per-asset production rows for the day (daily standby + master standby + km assets excluded from hour-based KPI pool)
-  const getDayAssetHours = db.prepare(`
+  const getDayAssetHoursNoSite = db.prepare(`
     SELECT
       dh.asset_id,
       a.asset_code,
@@ -161,6 +180,31 @@ export default async function dashboardRoutes(app) {
     WHERE dh.work_date = ?
       ${andDailyHoursFleetHoursOnly("dh", "a")}
   `);
+  const getDayAssetHoursWithSite = dailyHoursHasSite
+    ? db.prepare(`
+    SELECT
+      dh.asset_id,
+      a.asset_code,
+      a.asset_name,
+      a.category,
+      COALESCE(NULLIF(TRIM(dh.input_unit), ''), '') AS input_unit,
+      CASE
+        WHEN (
+          (INSTR(LOWER(COALESCE(a.asset_name, '')), 'toyota') > 0 AND INSTR(LOWER(COALESCE(a.asset_name, '')), 'hilux') > 0)
+          OR INSTR(LOWER(COALESCE(a.asset_code, '')), 'hilux') > 0
+        ) THEN 'km'
+        ELSE 'hours'
+      END AS utilization_mode,
+      COALESCE(NULLIF(a.km_per_hour_factor, 0), 10.0) AS km_per_hour_factor,
+      COALESCE(dh.scheduled_hours, 0) AS scheduled_hours,
+      COALESCE(dh.hours_run, 0) AS run_hours
+    FROM daily_hours dh
+    JOIN assets a ON a.id = dh.asset_id
+    WHERE dh.work_date = ?
+      ${dhSiteSql}
+      ${andDailyHoursFleetHoursOnly("dh", "a")}
+  `)
+    : null;
   const getActiveFleetAssets = db.prepare(`
     SELECT id AS asset_id, asset_code, asset_name, category, utilization_mode, km_per_hour_factor
     FROM assets
@@ -168,8 +212,7 @@ export default async function dashboardRoutes(app) {
       AND is_standby = 0
   `);
 
-  // Per-asset downtime for the day from downtime logs (standby excluded)
-  const getDayAssetDowntime = db.prepare(`
+  const getDayAssetDowntimeNoSite = db.prepare(`
     SELECT
       b.asset_id,
       COALESCE(SUM(l.hours_down), 0) AS downtime_hours
@@ -180,7 +223,22 @@ export default async function dashboardRoutes(app) {
       ${andAssetFleetHoursOnly("a")}
     GROUP BY b.asset_id
   `);
-  const getOpenBreakdownAssetIdsByDay = db.prepare(`
+  const getDayAssetDowntimeWithSite = bdLogSiteSql
+    ? db.prepare(`
+    SELECT
+      b.asset_id,
+      COALESCE(SUM(l.hours_down), 0) AS downtime_hours
+    FROM breakdown_downtime_logs l
+    JOIN breakdowns b ON b.id = l.breakdown_id
+    JOIN assets a ON a.id = b.asset_id
+    WHERE l.log_date = ?
+      ${andAssetFleetHoursOnly("a")}
+      ${bdLogSiteSql}
+    GROUP BY b.asset_id
+  `)
+    : null;
+
+  const getOpenBreakdownAssetIdsByDayNoSite = db.prepare(`
     SELECT DISTINCT b.asset_id
     FROM breakdowns b
     JOIN assets a ON a.id = b.asset_id
@@ -188,8 +246,20 @@ export default async function dashboardRoutes(app) {
       AND b.breakdown_date <= ?
       ${andAssetFleetHoursOnly("a")}
   `);
+  const getOpenBreakdownAssetIdsByDayWithSite = bdOnlySiteSql
+    ? db.prepare(`
+    SELECT DISTINCT b.asset_id
+    FROM breakdowns b
+    JOIN assets a ON a.id = b.asset_id
+    WHERE b.status = 'OPEN'
+      AND b.breakdown_date <= ?
+      ${andAssetFleetHoursOnly("a")}
+      ${bdOnlySiteSql}
+  `)
+    : null;
+
   const breakdownDowntimeCol = getBreakdownDowntimeColumn();
-  const getDayAssetDowntimeFallback = db.prepare(`
+  const getDayAssetDowntimeFallbackNoSite = db.prepare(`
     SELECT
       b.asset_id,
       COALESCE(SUM(COALESCE(b.${breakdownDowntimeCol}, 0)), 0) AS downtime_hours
@@ -199,9 +269,21 @@ export default async function dashboardRoutes(app) {
       ${andAssetFleetHoursOnly("a")}
     GROUP BY b.asset_id
   `);
+  const getDayAssetDowntimeFallbackWithSite = bdOnlySiteSql
+    ? db.prepare(`
+    SELECT
+      b.asset_id,
+      COALESCE(SUM(COALESCE(b.${breakdownDowntimeCol}, 0)), 0) AS downtime_hours
+    FROM breakdowns b
+    JOIN assets a ON a.id = b.asset_id
+    WHERE b.breakdown_date = ?
+      ${andAssetFleetHoursOnly("a")}
+      ${bdOnlySiteSql}
+    GROUP BY b.asset_id
+  `)
+    : null;
 
-  // Downtime reasons summary (from downtime log notes)
-  const getDowntimeReasons = db.prepare(`
+  const getDowntimeReasonsNoSite = db.prepare(`
     SELECT
       CASE
         WHEN l.notes IS NULL OR TRIM(l.notes) = '' THEN 'Unspecified'
@@ -211,11 +293,69 @@ export default async function dashboardRoutes(app) {
       COALESCE(SUM(l.hours_down), 0) AS hours_down,
       COUNT(DISTINCT l.breakdown_id) AS incidents
     FROM breakdown_downtime_logs l
+    JOIN breakdowns b ON b.id = l.breakdown_id
+    JOIN assets a ON a.id = b.asset_id
     WHERE l.log_date = ?
+      ${andAssetFleetHoursOnly("a")}
     GROUP BY reason
     ORDER BY hours_down DESC, incidents DESC
     LIMIT 8
   `);
+  const getDowntimeReasonsWithSite = bdLogSiteSql
+    ? db.prepare(`
+    SELECT
+      CASE
+        WHEN l.notes IS NULL OR TRIM(l.notes) = '' THEN 'Unspecified'
+        WHEN INSTR(l.notes, '—') > 0 THEN TRIM(SUBSTR(l.notes, INSTR(l.notes, '—') + 1))
+        ELSE 'Unspecified'
+      END AS reason,
+      COALESCE(SUM(l.hours_down), 0) AS hours_down,
+      COUNT(DISTINCT l.breakdown_id) AS incidents
+    FROM breakdown_downtime_logs l
+    JOIN breakdowns b ON b.id = l.breakdown_id
+    JOIN assets a ON a.id = b.asset_id
+    WHERE l.log_date = ?
+      ${andAssetFleetHoursOnly("a")}
+      ${bdLogSiteSql}
+    GROUP BY reason
+    ORDER BY hours_down DESC, incidents DESC
+    LIMIT 8
+  `)
+    : null;
+
+  const majorDowntimeNoSite = db.prepare(`
+      SELECT
+        a.asset_code,
+        b.description,
+        SUM(l.hours_down) AS downtime_hours,
+        b.critical
+      FROM breakdown_downtime_logs l
+      JOIN breakdowns b ON b.id = l.breakdown_id
+      JOIN assets a ON a.id = b.asset_id
+      WHERE l.log_date = ?
+        ${andAssetFleetHoursOnly("a")}
+      GROUP BY l.breakdown_id
+      ORDER BY downtime_hours DESC
+      LIMIT 5
+    `);
+  const majorDowntimeWithSite = bdLogSiteSql
+    ? db.prepare(`
+      SELECT
+        a.asset_code,
+        b.description,
+        SUM(l.hours_down) AS downtime_hours,
+        b.critical
+      FROM breakdown_downtime_logs l
+      JOIN breakdowns b ON b.id = l.breakdown_id
+      JOIN assets a ON a.id = b.asset_id
+      WHERE l.log_date = ?
+        ${andAssetFleetHoursOnly("a")}
+        ${bdLogSiteSql}
+      GROUP BY l.breakdown_id
+      ORDER BY downtime_hours DESC
+      LIMIT 5
+    `)
+    : null;
 
   /**
    * Fleet KPI for one calendar day (same rules as dashboard split KPI).
@@ -223,16 +363,29 @@ export default async function dashboardRoutes(app) {
    */
   function computeFleetKpiForDay(dayStr, scheduledFallback, opts = {}) {
     const includePerAsset = Boolean(opts.includePerAsset);
-    const assetRows = getDayAssetHours.all(dayStr);
-    const logDowntimeRows = getDayAssetDowntime.all(dayStr);
+    const siteCode = String(opts.siteCode || "main").trim().toLowerCase() || "main";
+
+    const assetRows = dailyHoursHasSite && getDayAssetHoursWithSite
+      ? getDayAssetHoursWithSite.all(dayStr, siteCode)
+      : getDayAssetHoursNoSite.all(dayStr);
+
+    const logDowntimeRows =
+      getDayAssetDowntimeWithSite && bdLogSiteSql
+        ? getDayAssetDowntimeWithSite.all(dayStr, siteCode)
+        : getDayAssetDowntimeNoSite.all(dayStr);
     const downtimeRows = logDowntimeRows.length
       ? logDowntimeRows
-      : getDayAssetDowntimeFallback.all(dayStr);
+      : getDayAssetDowntimeFallbackWithSite && bdOnlySiteSql
+        ? getDayAssetDowntimeFallbackWithSite.all(dayStr, siteCode)
+        : getDayAssetDowntimeFallbackNoSite.all(dayStr);
     const downtimeByAsset = new Map(
       downtimeRows.map((r) => [Number(r.asset_id || 0), Number(r.downtime_hours || 0)])
     );
     const openBreakdownAssets = new Set(
-      getOpenBreakdownAssetIdsByDay.all(dayStr).map((r) => Number(r.asset_id || 0))
+      (getOpenBreakdownAssetIdsByDayWithSite && bdOnlySiteSql
+        ? getOpenBreakdownAssetIdsByDayWithSite.all(dayStr, siteCode)
+        : getOpenBreakdownAssetIdsByDayNoSite.all(dayStr)
+      ).map((r) => Number(r.asset_id || 0))
     );
     const assetIdsInHours = new Set(assetRows.map((r) => Number(r.asset_id || 0)));
 
@@ -290,7 +443,9 @@ export default async function dashboardRoutes(app) {
     });
 
     const activeFleetIds = getActiveFleetAssets.all().map((r) => Number(r.asset_id || 0));
-    const missingFleetIds = activeFleetIds.filter((id) => id > 0 && !assetIdsInHours.has(id));
+    const missingFleetIds = dailyHoursHasSite
+      ? []
+      : activeFleetIds.filter((id) => id > 0 && !assetIdsInHours.has(id));
     const downtimeOnlyIds = downtimeRows
       .map((r) => Number(r.asset_id || 0))
       .filter((id) => id > 0 && !assetIdsInHours.has(id));
@@ -387,11 +542,12 @@ export default async function dashboardRoutes(app) {
       return reply.code(400).send({ ok: false, error: "start must be <= end" });
     }
 
+    const siteCode = siteCodeFromReq(req);
     const assetMap = new Map();
     let daysInRange = 0;
     eachDateInclusiveYMD(start, end, (dayStr) => {
       daysInRange += 1;
-      const k = computeFleetKpiForDay(dayStr, scheduledFallback, { includePerAsset: true });
+      const k = computeFleetKpiForDay(dayStr, scheduledFallback, { includePerAsset: true, siteCode });
       for (const row of k.per_asset_kpi || []) {
         const id = Number(row.asset_id || 0);
         if (!id) continue;
@@ -535,6 +691,7 @@ export default async function dashboardRoutes(app) {
     const scheduledFallback = Number.isFinite(scheduledRaw) && scheduledRaw > 0
       ? scheduledRaw
       : 10;
+    const siteCode = siteCodeFromReq(req);
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return reply.code(400).send({ error: "date must be YYYY-MM-DD" });
@@ -548,7 +705,7 @@ export default async function dashboardRoutes(app) {
     // Utilization = run ÷ planned (same denominator as the plan, not reduced by downtime).
     // =========================
 
-    const dayK = computeFleetKpiForDay(date, scheduledFallback, { includePerAsset: true });
+    const dayK = computeFleetKpiForDay(date, scheduledFallback, { includePerAsset: true, siteCode });
     const per_asset_kpi = dayK.per_asset_kpi;
     const run_hours = dayK.run_hours;
 
@@ -560,15 +717,15 @@ export default async function dashboardRoutes(app) {
     const mtdAssetIds = new Set();
     eachDateInclusiveYMD(mtdStart, date, (dayStr) => {
       mtd_day_count += 1;
-      const dr = computeFleetKpiForDay(dayStr, scheduledFallback, { includePerAsset: false });
+      const dr = computeFleetKpiForDay(dayStr, scheduledFallback, { includePerAsset: false, siteCode });
       mtd_scheduled += dr.scheduled_hours;
       mtd_run += dr.run_hours;
       mtd_downtime += dr.downtime_hours;
       dr.contributingAssetIds.forEach((id) => mtdAssetIds.add(id));
     });
 
-    // Safety fallback: if MTD scheduled remained zero, derive from active fleet.
-    if (mtd_scheduled <= 0 && scheduledFallback > 0 && mtd_day_count > 0) {
+    // Safety fallback: if MTD scheduled remained zero, derive from active fleet (single-site DBs only).
+    if (!dailyHoursHasSite && mtd_scheduled <= 0 && scheduledFallback > 0 && mtd_day_count > 0) {
       const activeFleetCountRow = db.prepare(`
         SELECT COUNT(*) AS c
         FROM assets
@@ -581,12 +738,21 @@ export default async function dashboardRoutes(app) {
       }
     }
 
-    const available_hours = Math.max(0, mtd_scheduled - mtd_downtime);
-    const availability =
-      mtd_scheduled > 0 ? (available_hours / mtd_scheduled) * 100 : null;
-    const utilization =
+    const available_hours_mtd = Math.max(0, mtd_scheduled - mtd_downtime);
+    const availability_mtd =
+      mtd_scheduled > 0 ? (available_hours_mtd / mtd_scheduled) * 100 : null;
+    const utilization_mtd =
       mtd_scheduled > 0 ? (mtd_run / mtd_scheduled) * 100 : null;
     const used_assets = mtdAssetIds.size;
+
+    const day_scheduled = dayK.scheduled_hours;
+    const day_run = dayK.run_hours;
+    const day_downtime = dayK.downtime_hours;
+    const available_hours_day = Math.max(0, day_scheduled - day_downtime);
+    const availability =
+      day_scheduled > 0 ? (available_hours_day / day_scheduled) * 100 : null;
+    const utilization =
+      day_scheduled > 0 ? (day_run / day_scheduled) * 100 : null;
 
     const scheduled_hours = mtd_scheduled;
     const downtime_hours = mtd_downtime;
@@ -646,27 +812,21 @@ export default async function dashboardRoutes(app) {
         ${breakdownOpenFilter}
     `).get();
 
-    // Major downtime list (use downtime logs aggregated per breakdown for this day)
-    const majorDowntime = db.prepare(`
-      SELECT
-        a.asset_code,
-        b.description,
-        SUM(l.hours_down) AS downtime_hours,
-        b.critical
-      FROM breakdown_downtime_logs l
-      JOIN breakdowns b ON b.id = l.breakdown_id
-      JOIN assets a ON a.id = b.asset_id
-      WHERE l.log_date = ?
-      GROUP BY l.breakdown_id
-      ORDER BY downtime_hours DESC
-      LIMIT 5
-    `).all(date).map(r => ({
+    const majorDowntime = (
+      majorDowntimeWithSite && bdLogSiteSql
+        ? majorDowntimeWithSite.all(date, siteCode)
+        : majorDowntimeNoSite.all(date)
+    ).map((r) => ({
       ...r,
       downtime_hours: Number(r.downtime_hours || 0),
-      critical: Boolean(r.critical)
+      critical: Boolean(r.critical),
     }));
 
-    const downtimeReasons = getDowntimeReasons.all(date).map(r => ({
+    const downtimeReasons = (
+      getDowntimeReasonsWithSite && bdLogSiteSql
+        ? getDowntimeReasonsWithSite.all(date, siteCode)
+        : getDowntimeReasonsNoSite.all(date)
+    ).map((r) => ({
       reason: r.reason,
       hours_down: Number(r.hours_down || 0),
       incidents: Number(r.incidents || 0)
@@ -1010,15 +1170,21 @@ export default async function dashboardRoutes(app) {
       scheduled_hours_per_asset: scheduledFallback,
 
       kpi: {
+        site_code: siteCode,
         used_assets,
         scheduled_hours,
-        available_hours,
+        available_hours: Number(available_hours_mtd.toFixed(2)),
         utilization_base_hours: Number(mtd_scheduled.toFixed(2)),
-        run_hours: mtd_run,
+        run_hours: day_run,
+        run_hours_mtd: Number(mtd_run.toFixed(2)),
         downtime_hours,
         availability: availability == null ? null : Number(availability.toFixed(2)),
         utilization: utilization == null ? null : Number(utilization.toFixed(2)),
-        basis: "mtd",
+        availability_mtd: availability_mtd == null ? null : Number(availability_mtd.toFixed(2)),
+        utilization_mtd: utilization_mtd == null ? null : Number(utilization_mtd.toFixed(2)),
+        scheduled_hours_day: Number(day_scheduled.toFixed(2)),
+        downtime_hours_day: Number(day_downtime.toFixed(2)),
+        basis: "selected_day_gauges_mtd_meta",
         mtd_start: mtdStart,
         mtd_end: date,
       },

@@ -1762,23 +1762,30 @@ async function loadDashboard() {
   const _kpiTh = getThresholds();
   setSpeedo(qs("availNeedle"), qs("gAvailVal"), data?.kpi?.availability, { goodAt: _kpiTh.availTarget, warnAt: _kpiTh.availCrit });
   setSpeedo(qs("utilNeedle"), qs("gUtilVal"), data?.kpi?.utilization, { goodAt: _kpiTh.utilTarget, warnAt: _kpiTh.utilCrit });
-  updateKpiAlertBanner(data?.kpi?.availability, data?.kpi?.utilization);
+  updateKpiAlertBanner(
+    data?.kpi?.availability_mtd ?? data?.kpi?.availability,
+    data?.kpi?.utilization_mtd ?? data?.kpi?.utilization
+  );
 
   const mtdRange =
     data.kpi?.mtd_start && data.kpi?.mtd_end
       ? `${data.kpi.mtd_start} → ${data.kpi.mtd_end}`
       : "";
+  const k = data.kpi || {};
+  const siteTag = k.site_code ? ` · Site: ${k.site_code}` : "";
   setText(
     "availMeta",
-    mtdRange
-      ? `MTD ${mtdRange} · Used assets: ${data.kpi.used_assets} | Avail hrs: ${data.kpi.available_hours} | Downtime: ${data.kpi.downtime_hours}`
-      : `Used assets: ${data.kpi.used_assets} | Avail hrs: ${data.kpi.available_hours} | Downtime: ${data.kpi.downtime_hours}`
+    `Gauges: selected day (${data.date || ""})${siteTag}. ` +
+      (mtdRange
+        ? `MTD ${mtdRange} · Distinct assets (MTD): ${k.used_assets ?? "—"} | Planned−down (MTD) hrs: ${k.available_hours ?? "—"} | Downtime (MTD): ${k.downtime_hours ?? "—"}`
+        : `Distinct assets (MTD): ${k.used_assets ?? "—"} | Planned−down (MTD) hrs: ${k.available_hours ?? "—"} | Downtime (MTD): ${k.downtime_hours ?? "—"}`)
   );
   setText(
     "utilMeta",
-    mtdRange
-      ? `MTD ${mtdRange} · Run hrs: ${data.kpi.run_hours} | Planned hrs (denominator): ${Number(data.kpi.utilization_base_hours || 0).toFixed(1)} | Scheduled/asset (header): ${data.scheduled_hours_per_asset}`
-      : `Run hrs: ${data.kpi.run_hours} | Planned hrs (denominator): ${Number(data.kpi.utilization_base_hours || 0).toFixed(1)} | Scheduled/asset: ${data.scheduled_hours_per_asset}`
+    `Day planned hrs: ${Number(k.scheduled_hours_day ?? 0).toFixed(1)} · Day run hrs: ${Number(k.run_hours ?? 0).toFixed(1)}. ` +
+      (mtdRange
+        ? `MTD ${mtdRange} · Run (MTD): ${Number(k.run_hours_mtd ?? k.run_hours ?? 0).toFixed(1)} | Planned (MTD): ${Number(k.utilization_base_hours || 0).toFixed(1)} | MTD util: ${k.utilization_mtd != null ? `${Number(k.utilization_mtd).toFixed(2)}%` : "—"} | Scheduled/asset (header): ${data.scheduled_hours_per_asset}`
+        : `Run (MTD): ${Number(k.run_hours_mtd ?? k.run_hours ?? 0).toFixed(1)} | Planned (MTD): ${Number(k.utilization_base_hours || 0).toFixed(1)} | Scheduled/asset: ${data.scheduled_hours_per_asset}`)
   );
   const debugToggle = qs("kpiDebugToggle");
   const debugList = qs("kpiDebugList");
@@ -1801,7 +1808,13 @@ async function loadDashboard() {
           )
         );
       });
-      if (!rows.length) debugList.appendChild(item("<small>No production assets found for selected date (per-asset rows are for this day only; gauges are month-to-date).</small>"));
+      if (!rows.length) {
+        debugList.appendChild(
+          item(
+            "<small>No hour-meter production assets for this site/date (per-asset rows = selected day; gauges = selected day; MTD figures in subtitles).</small>"
+          )
+        );
+      }
     }
   }
 
