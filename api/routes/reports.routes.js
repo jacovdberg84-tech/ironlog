@@ -582,11 +582,11 @@ function buildDailyExecutiveSummarySheet(wb, p) {
   rowPair("Total run hours recorded", p.kpi.run_hours);
   rowPair("Downtime hours (breakdowns on running fleet)", p.kpi.downtime_hours);
   rowPair(
-    "Availability (% of available hours not lost to downtime)",
+    "Availability (% of planned hours not lost to downtime; planned = scheduled hours from daily input)",
     p.kpi.availability == null ? "N/A" : `${p.kpi.availability}%`,
   );
   rowPair(
-    "Utilization (% of available hours converted to run hours)",
+    "Utilization (run hours ÷ planned scheduled hours; planned is not reduced by downtime)",
     p.kpi.utilization == null ? "N/A" : `${p.kpi.utilization}%`,
   );
 
@@ -773,7 +773,7 @@ function buildGmWeeklyExecutiveSheet(wb, p) {
 
   ws.mergeCells("B4:D4");
   ws.getCell("B4").value =
-    "Availability and utilization are month-to-date (first of month through report date). Breakdown downtime uses daily downtime logs when present so multi-day incidents carry across the month.";
+    "Availability and utilization are month-to-date (first of month through report date). Availability = (planned − downtime) ÷ planned. Utilization = run hours ÷ planned (planned = scheduled hours from daily input; not reduced by downtime). Breakdown downtime uses daily downtime logs when present so multi-day incidents carry across the month.";
   ws.getCell("B4").font = { size: 10, color: { argb: "FF475569" } };
   ws.getCell("B4").alignment = { wrapText: true };
 
@@ -810,11 +810,11 @@ function buildGmWeeklyExecutiveSheet(wb, p) {
 
   section("i–iii. Fleet performance (month-to-date)");
   rowPair(
-    "Equipment availability (% of available hours not lost to downtime, MTD)",
+    "Equipment availability (% of planned hours not lost to downtime, MTD)",
     p.kpi.availability == null ? "N/A" : `${p.kpi.availability}%`,
   );
   rowPair(
-    "Utilization (% of available hours converted to run hours, MTD)",
+    "Utilization (run hours ÷ planned scheduled hours MTD; same planned base as availability denominator)",
     p.kpi.utilization == null ? "N/A" : `${p.kpi.utilization}%`,
   );
   rowPair(
@@ -863,7 +863,7 @@ function buildGmWeeklyExecutiveSheet(wb, p) {
   ws.mergeCells(`B${r}:D${r + 2}`);
   const foot = ws.getCell(`B${r}`);
   foot.value =
-    "Notes: Availability, utilization, and reliability KPIs use month-to-date from the first of the report month through the download date. Downtime for availability and MTTR uses summed daily breakdown_downtime_logs when those rows exist in the period (so downtime carries from the day it was logged). If no daily logs exist for the month, downtime falls back to summing incidents by breakdown report date. Failure count includes any distinct incident with downtime logged in MTD even if the incident was reported earlier. MTBF = operating hours ÷ failure count; MTTR = total downtime hours ÷ failure count. PM compliance is a meter snapshot at report date. See the Downtime by asset sheet for MTD hours per machine.";
+    "Notes: Availability, utilization, and reliability KPIs use month-to-date from the first of the report month through the download date. Utilization divides run hours by planned scheduled hours (same planned base as the availability denominator, not post-downtime available hours). Downtime for availability and MTTR uses summed daily breakdown_downtime_logs when those rows exist in the period (so downtime carries from the day it was logged). If no daily logs exist for the month, downtime falls back to summing incidents by breakdown report date. Failure count includes any distinct incident with downtime logged in MTD even if the incident was reported earlier. MTBF = operating hours ÷ failure count; MTTR = total downtime hours ÷ failure count. PM compliance is a meter snapshot at report date. See the Downtime by asset sheet for MTD hours per machine.";
   foot.font = { size: 9, italic: true, color: { argb: "FF64748B" } };
   foot.alignment = { wrapText: true, vertical: "top" };
 

@@ -326,6 +326,7 @@ export default async function dashboardRoutes(app) {
         scheduled_hours += scheduled;
         run_hours += runEff;
         downtime_hours += cappedDown;
+        utilization_base_hours += scheduled;
 
         const s = Number(scheduled.toFixed(2));
         const runN = Number(runEff.toFixed(2));
@@ -438,7 +439,7 @@ export default async function dashboardRoutes(app) {
         downtime_hours: Number(a.downtime_hours.toFixed(2)),
         available_hours: Number(avail.toFixed(2)),
         availability_pct: pct(avail, sched),
-        utilization_pct: pct(run, avail),
+        utilization_pct: pct(run, sched),
       };
     });
 
@@ -484,7 +485,7 @@ export default async function dashboardRoutes(app) {
         downtime_hours: Number(c.downtime_hours.toFixed(2)),
         available_hours: Number(avail.toFixed(2)),
         availability_pct: pct(avail, sched),
-        utilization_pct: pct(run, avail),
+        utilization_pct: pct(run, sched),
       };
     });
 
@@ -509,7 +510,7 @@ export default async function dashboardRoutes(app) {
       days_in_range: daysInRange,
       definitions: {
         availability_pct: "(sum of available hours) / (sum of scheduled hours) × 100; available = scheduled − downtime (capped per day).",
-        utilization_pct: "(sum of effective run hours) / (sum of available hours) × 100 (matches main dashboard KPI).",
+        utilization_pct: "(sum of effective run hours) / (sum of scheduled hours) × 100; same denominator as the plan (matches main dashboard MTD utilization).",
       },
       fleet: {
         scheduled_hours: Number(fleet_sched.toFixed(2)),
@@ -517,7 +518,7 @@ export default async function dashboardRoutes(app) {
         run_hours: Number(fleet_run.toFixed(2)),
         downtime_hours: Number(fleet_down.toFixed(2)),
         availability_pct: pct(fleet_avail, fleet_sched),
-        utilization_pct: pct(fleet_run, fleet_avail),
+        utilization_pct: pct(fleet_run, fleet_sched),
       },
       by_category,
       by_asset,
@@ -538,8 +539,10 @@ export default async function dashboardRoutes(app) {
 
     // =========================
     // KPI (Split) — gauges: month-to-date through selected date; per-asset table: selected day
-    // Availability = (Scheduled - Downtime) / Scheduled
-    // Utilization  = Run / (Scheduled - Downtime)
+    // Planned hours = sum of per-asset scheduled (daily_hours.scheduled_hours, else header fallback).
+    // Machine-available hours (MTD) = planned − downtime (capped per asset-day).
+    // Availability = machine-available ÷ planned = (planned − downtime) / planned.
+    // Utilization = run ÷ planned (same denominator as the plan, not reduced by downtime).
     // =========================
 
     const dayK = computeFleetKpiForDay(date, scheduledFallback, { includePerAsset: true });
@@ -578,9 +581,8 @@ export default async function dashboardRoutes(app) {
     const available_hours = Math.max(0, mtd_scheduled - mtd_downtime);
     const availability =
       mtd_scheduled > 0 ? (available_hours / mtd_scheduled) * 100 : null;
-    // Same rule as /asset-kpi/weekly: utilization = run / available (not run / scheduled).
     const utilization =
-      available_hours > 0 ? (mtd_run / available_hours) * 100 : null;
+      mtd_scheduled > 0 ? (mtd_run / mtd_scheduled) * 100 : null;
     const used_assets = mtdAssetIds.size;
 
     const scheduled_hours = mtd_scheduled;
@@ -1008,7 +1010,7 @@ export default async function dashboardRoutes(app) {
         used_assets,
         scheduled_hours,
         available_hours,
-        utilization_base_hours: Number(available_hours.toFixed(2)),
+        utilization_base_hours: Number(mtd_scheduled.toFixed(2)),
         run_hours: mtd_run,
         downtime_hours,
         availability: availability == null ? null : Number(availability.toFixed(2)),

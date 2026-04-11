@@ -769,7 +769,7 @@ function buildStructuredData(reportDate) {
   const downtime = Number(downtimeRow?.downtime_hours || 0);
   const available = Math.max(0, scheduled - downtime);
   const availabilityPct = scheduled > 0 ? (available / scheduled) * 100 : 0;
-  const utilizationPct = available > 0 ? (run / available) * 100 : 0;
+  const utilizationPct = scheduled > 0 ? (run / scheduled) * 100 : 0;
   const assetRiskSignals = computeAssetRiskSignals(reportDate);
   const topRiskAssets = assetRiskSignals
     .filter((r) => Number(r.risk_score || 0) >= 35)
