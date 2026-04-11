@@ -97,17 +97,54 @@ function lookupPart(code) {
     )
     .get(String(code).trim());
   if (!row) return null;
+  const unit_cost = Number(row.unit_cost || 0);
   return {
     id: Number(row.id),
     part_code: String(row.part_code || ""),
     part_name: String(row.part_name || ""),
-    unit_cost: Number(row.unit_cost || 0),
+    unit_cost,
+    /** Same field — Stock On Hand treats parts.unit_cost as USD after receipt conversion. */
+    unit_cost_usd: unit_cost,
   };
 }
 
 function compactCell(v, max = 200) {
   const s = String(v ?? "");
   return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+/** Money on slips: Stores master uses USD (same as Stock On Hand list). */
+function fmtUsd(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "$0.00";
+  return `$${n.toFixed(2)}`;
+}
+
+function slipTotalUsd(slipType, payload) {
+  if (payload.slip_total_usd != null && Number.isFinite(Number(payload.slip_total_usd))) {
+    return Number(payload.slip_total_usd);
+  }
+  if (slipType === "hose_failure") return Number(payload.hose_cost || 0) + Number(payload.oil_cost || 0);
+  if (slipType === "get_change") {
+    const a = Number(payload.part_line_est);
+    const b = Number(payload.description_line_est);
+    return (Number.isFinite(a) ? a : 0) + (Number.isFinite(b) ? b : 0);
+  }
+  if (slipType === "component_change") return Number(payload.cost || 0);
+  if (slipType === "tyre_change") {
+    return (Array.isArray(payload.tyres) ? payload.tyres : []).reduce((s, t) => s + Number(t.cost || 0), 0);
+  }
+  return 0;
+}
+
+function drawSlipUsdTotals(doc, slipType, payload) {
+  sectionTitle(doc, "Totals (USD)");
+  kvLine(
+    doc,
+    "Pricing basis",
+    "Line amounts use Stores parts.unit_cost (USD per unit) × qty; manual overrides are USD line totals."
+  );
+  kvLine(doc, "This slip total", fmtUsd(slipTotalUsd(slipType, payload)));
 }
 
 const SLIP_TYPES = new Set(["hose_failure", "get_change", "component_change", "tyre_change"]);
@@ -150,7 +187,11 @@ export default async function breakdownOpsRoutes(app) {
     if (!part_code) return reply.code(400).send({ ok: false, error: "part_code required" });
     const p = lookupPart(part_code);
     if (!p) return reply.send({ ok: true, found: false, part: null });
-    return reply.send({ ok: true, found: true, part: p });
+    return reply.send({
+      ok: true,
+      found: true,
+      part: { ...p, currency: "USD", note: "unit_cost is USD (Stores master, same as stock list)." },
+    });
   });
 
   /** Latest GET / hose lines from asset register (get_change_slips) or last ops slip for this site. */
@@ -342,18 +383,13 @@ export default async function breakdownOpsRoutes(app) {
       const oq = normSlipQty(payload.oil_loss_qty, 1);
       payload.hose_qty = hq;
       payload.oil_loss_qty = oq;
-      payload.hose_cost =
-        payload.hose_cost_manual != null && Number.isFinite(payload.hose_cost_manual)
-          ? Number(payload.hose_cost_manual)
-          : hose
-            ? Number(hose.unit_cost || 0) * hq
-            : 0;
-      payload.oil_cost =
-        payload.oil_cost_manual != null && Number.isFinite(payload.oil_cost_manual)
-          ? Number(payload.oil_cost_manual)
-          : oil
-            ? Number(oil.unit_cost || 0) * oq
-            : 0;
+      const hoseMan = payload.hose_cost_manual != null && Number.isFinite(payload.hose_cost_manual);
+      const oilMan = payload.oil_cost_manual != null && Number.isFinite(payload.oil_cost_manual);
+      payload.hose_cost_is_manual = hoseMan;
+      payload.oil_cost_is_manual = oilMan;
+      payload.hose_cost = hoseMan ? Number(payload.hose_cost_manual) : hose ? Number(hose.unit_cost || 0) * hq : 0;
+      payload.oil_cost = oilMan ? Number(payload.oil_cost_manual) : oil ? Number(oil.unit_cost || 0) * oq : 0;
+      payload.slip_total_usd = Number(payload.hose_cost) + Number(payload.oil_cost);
     } else if (slip_type === "get_change") {
       const p = lookupPart(payload.part_code);
       const d = lookupPart(payload.description_part_code);
@@ -364,32 +400,31 @@ export default async function breakdownOpsRoutes(app) {
       const dq = payload.description_part_qty;
       payload.part_line_est = p ? Number(p.unit_cost || 0) * pq : null;
       payload.description_line_est = d ? Number(d.unit_cost || 0) * dq : null;
+      const a = payload.part_line_est;
+      const b = payload.description_line_est;
+      payload.slip_total_usd = (Number.isFinite(a) ? a : 0) + (Number.isFinite(b) ? b : 0);
     } else if (slip_type === "component_change") {
       const p = lookupPart(payload.part_code);
       payload._resolved = { part: p };
-      payload.cost =
-        payload.cost_manual != null && Number.isFinite(payload.cost_manual)
-          ? Number(payload.cost_manual)
-          : p
-            ? p.unit_cost
-            : 0;
+      const costMan = payload.cost_manual != null && Number.isFinite(payload.cost_manual);
+      payload.cost_is_manual = costMan;
+      payload.cost = costMan ? Number(payload.cost_manual) : p ? Number(p.unit_cost || 0) : 0;
+      payload.slip_total_usd = Number(payload.cost || 0);
     } else if (slip_type === "tyre_change") {
       payload.tyres = (payload.tyres || []).map((t) => {
         const part = lookupPart(t.part_code);
         const make = lookupPart(t.tyre_make_part_code);
-        const cost =
-          t.cost_manual != null && Number.isFinite(t.cost_manual)
-            ? Number(t.cost_manual)
-            : part
-              ? part.unit_cost
-              : 0;
+        const costMan = t.cost_manual != null && Number.isFinite(t.cost_manual);
+        const cost = costMan ? Number(t.cost_manual) : part ? Number(part.unit_cost || 0) : 0;
         return {
           ...t,
           cost,
+          cost_is_manual: costMan,
           _part: part,
           _make: make,
         };
       });
+      payload.slip_total_usd = payload.tyres.reduce((s, t) => s + Number(t.cost || 0), 0);
     }
     return payload;
   }
@@ -533,15 +568,29 @@ export default async function breakdownOpsRoutes(app) {
       kvLine(doc, "Hose qty", String(hq));
       if (payload._resolved?.hose) {
         kvLine(doc, "Hose description", payload._resolved.hose.part_name || "—");
+        if (payload.hose_cost_is_manual !== true) {
+          kvLine(doc, "Hose unit (Stores USD)", fmtUsd(payload._resolved.hose.unit_cost));
+        }
       }
-      kvLine(doc, "Hose line total (R)", Number(payload.hose_cost || 0).toFixed(2));
+      kvLine(
+        doc,
+        "Hose line total (USD)",
+        payload.hose_cost_is_manual === true ? `${fmtUsd(payload.hose_cost)} (manual)` : fmtUsd(payload.hose_cost)
+      );
       kvLine(doc, "Oil loss part (stores)", payload.oil_loss_part_code || "—");
       const oq = normSlipQty(payload.oil_loss_qty, 1);
       kvLine(doc, "Oil loss qty", String(oq));
       if (payload._resolved?.oil_loss) {
         kvLine(doc, "Oil part description", payload._resolved.oil_loss.part_name || "—");
+        if (payload.oil_cost_is_manual !== true) {
+          kvLine(doc, "Oil unit (Stores USD)", fmtUsd(payload._resolved.oil_loss.unit_cost));
+        }
       }
-      kvLine(doc, "Oil loss line total (R)", Number(payload.oil_cost || 0).toFixed(2));
+      kvLine(
+        doc,
+        "Oil loss line total (USD)",
+        payload.oil_cost_is_manual === true ? `${fmtUsd(payload.oil_cost)} (manual)` : fmtUsd(payload.oil_cost)
+      );
       if (payload.notes) {
         sectionTitle(doc, "Notes");
         doc.font("Helvetica").fontSize(10).fillColor("#111").text(compactCell(payload.notes, 2000), {
@@ -553,9 +602,12 @@ export default async function breakdownOpsRoutes(app) {
       kvLine(doc, "Hours fitted", payload.hours_fitted != null ? String(payload.hours_fitted) : "—");
       kvLine(doc, "Part number (stores)", payload.part_code || "—");
       kvLine(doc, "Part qty", String(normSlipQty(payload.part_qty, 1)));
-      if (payload._resolved?.part) kvLine(doc, "Part name", payload._resolved.part.part_name || "—");
+      if (payload._resolved?.part) {
+        kvLine(doc, "Part name", payload._resolved.part.part_name || "—");
+        kvLine(doc, "Part unit (Stores USD)", fmtUsd(payload._resolved.part.unit_cost));
+      }
       if (payload.part_line_est != null && Number.isFinite(payload.part_line_est)) {
-        kvLine(doc, "Part line (est. R)", Number(payload.part_line_est).toFixed(2));
+        kvLine(doc, "Part line total (USD est.)", fmtUsd(payload.part_line_est));
       }
       kvLine(doc, "Supplier", payload.supplier || "—");
       kvLine(doc, "Date changed", payload.date_changed || "—");
@@ -565,13 +617,16 @@ export default async function breakdownOpsRoutes(app) {
       }
       if (payload._resolved?.description) {
         kvLine(doc, "Description (from stores)", payload._resolved.description.part_name || "—");
+        kvLine(doc, "Description unit (Stores USD)", fmtUsd(payload._resolved.description.unit_cost));
+      } else if (payload.description_part_code) {
+        kvLine(doc, "Description part", "(code not in Stores master)");
       }
       if (
         payload.description_part_code &&
         payload.description_line_est != null &&
         Number.isFinite(payload.description_line_est)
       ) {
-        kvLine(doc, "Description line (est. R)", Number(payload.description_line_est).toFixed(2));
+        kvLine(doc, "Description line total (USD est.)", fmtUsd(payload.description_line_est));
       }
       if (payload.notes) {
         sectionTitle(doc, "Notes");
@@ -586,8 +641,17 @@ export default async function breakdownOpsRoutes(app) {
       kvLine(doc, "Reason for changing", compactCell(payload.reason, 300) || "—");
       kvLine(doc, "Component type", payload.component_type || "—");
       kvLine(doc, "Part number (stores)", payload.part_code || "—");
-      if (payload._resolved?.part) kvLine(doc, "Part name", payload._resolved.part.part_name || "—");
-      kvLine(doc, "Cost (R)", Number(payload.cost || 0).toFixed(2));
+      if (payload._resolved?.part) {
+        kvLine(doc, "Part name", payload._resolved.part.part_name || "—");
+        if (payload.cost_is_manual !== true) {
+          kvLine(doc, "Part unit (Stores USD)", fmtUsd(payload._resolved.part.unit_cost));
+        }
+      }
+      kvLine(
+        doc,
+        "Line total (USD)",
+        payload.cost_is_manual === true ? `${fmtUsd(payload.cost)} (manual)` : fmtUsd(payload.cost)
+      );
       if (payload.notes) {
         sectionTitle(doc, "Notes");
         doc.font("Helvetica").fontSize(10).text(compactCell(payload.notes, 2000), {
@@ -609,7 +673,7 @@ export default async function breakdownOpsRoutes(app) {
           { key: "hu", label: "Hrs use", width: 0.07 },
           { key: "hf", label: "Hrs fit", width: 0.07 },
           { key: "part", label: "Part", width: 0.1 },
-          { key: "cost", label: "Cost", width: 0.07 },
+          { key: "cost", label: "Line USD", width: 0.08 },
           { key: "make", label: "Make", width: 0.1 },
         ];
         const trows = tyres.map((t, i) => ({
@@ -621,10 +685,20 @@ export default async function breakdownOpsRoutes(app) {
           hu: t.hours_in_use != null ? String(t.hours_in_use) : "",
           hf: t.hours_fitted != null ? String(t.hours_fitted) : "",
           part: compactCell(t.part_code, 20),
-          cost: Number(t.cost || 0).toFixed(2),
+          cost: t.cost_is_manual === true ? `${fmtUsd(t.cost)}*` : fmtUsd(t.cost),
           make: compactCell(t.tyre_make_part_code, 16),
         }));
         table(doc, cols, trows, { compact: true, fontSize: 7 });
+        if (tyres.some((t) => t.cost_is_manual === true)) {
+          doc.moveDown(0.2);
+          doc
+            .font("Helvetica")
+            .fontSize(8)
+            .fillColor("#555555")
+            .text("* Manual line amount (USD). Other lines use Stores parts.unit_cost (USD).", doc.page.margins.left, doc.y, {
+              width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+            });
+        }
       }
       if (payload.notes) {
         sectionTitle(doc, "Notes");
@@ -633,6 +707,7 @@ export default async function breakdownOpsRoutes(app) {
         });
       }
     }
+    drawSlipUsdTotals(doc, slipType, payload);
     drawSlipPictures(doc, payload);
   }
 
