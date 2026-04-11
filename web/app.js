@@ -1773,9 +1773,13 @@ async function loadDashboard() {
       : "";
   const k = data.kpi || {};
   const siteTag = k.site_code ? ` · Site: ${k.site_code}` : "";
+  const gaugeNote =
+    k.gauge_basis === "mtd"
+      ? "Gauges use MTD (no planned hour-meter time on the selected day). "
+      : `Gauges use selected day (${data.date || ""}). `;
   setText(
     "availMeta",
-    `Gauges: selected day (${data.date || ""})${siteTag}. ` +
+    `${gaugeNote}${siteTag}` +
       (mtdRange
         ? `MTD ${mtdRange} · Distinct assets (MTD): ${k.used_assets ?? "—"} | Planned−down (MTD) hrs: ${k.available_hours ?? "—"} | Downtime (MTD): ${k.downtime_hours ?? "—"}`
         : `Distinct assets (MTD): ${k.used_assets ?? "—"} | Planned−down (MTD) hrs: ${k.available_hours ?? "—"} | Downtime (MTD): ${k.downtime_hours ?? "—"}`)

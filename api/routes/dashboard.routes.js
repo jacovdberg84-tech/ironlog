@@ -749,10 +749,16 @@ export default async function dashboardRoutes(app) {
     const day_run = dayK.run_hours;
     const day_downtime = dayK.downtime_hours;
     const available_hours_day = Math.max(0, day_scheduled - day_downtime);
-    const availability =
+    const availability_day =
       day_scheduled > 0 ? (available_hours_day / day_scheduled) * 100 : null;
-    const utilization =
+    const utilization_day =
       day_scheduled > 0 ? (day_run / day_scheduled) * 100 : null;
+    // Gauges: prefer selected day; if that day has no hour-meter planned time, use MTD so the dash is not stuck on N/A.
+    const gauge_basis = day_scheduled > 0 ? "selected_day" : "mtd";
+    const availability =
+      availability_day != null ? availability_day : availability_mtd;
+    const utilization =
+      utilization_day != null ? utilization_day : utilization_mtd;
 
     const scheduled_hours = mtd_scheduled;
     const downtime_hours = mtd_downtime;
@@ -1171,6 +1177,7 @@ export default async function dashboardRoutes(app) {
 
       kpi: {
         site_code: siteCode,
+        gauge_basis,
         used_assets,
         scheduled_hours,
         available_hours: Number(available_hours_mtd.toFixed(2)),
@@ -1180,11 +1187,13 @@ export default async function dashboardRoutes(app) {
         downtime_hours,
         availability: availability == null ? null : Number(availability.toFixed(2)),
         utilization: utilization == null ? null : Number(utilization.toFixed(2)),
+        availability_day: availability_day == null ? null : Number(availability_day.toFixed(2)),
+        utilization_day: utilization_day == null ? null : Number(utilization_day.toFixed(2)),
         availability_mtd: availability_mtd == null ? null : Number(availability_mtd.toFixed(2)),
         utilization_mtd: utilization_mtd == null ? null : Number(utilization_mtd.toFixed(2)),
         scheduled_hours_day: Number(day_scheduled.toFixed(2)),
         downtime_hours_day: Number(day_downtime.toFixed(2)),
-        basis: "selected_day_gauges_mtd_meta",
+        basis: "gauges_day_or_mtd_fallback_meta_mtd",
         mtd_start: mtdStart,
         mtd_end: date,
       },
