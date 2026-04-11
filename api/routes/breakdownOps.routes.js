@@ -112,6 +112,22 @@ function compactCell(v, max = 200) {
 
 const SLIP_TYPES = new Set(["hose_failure", "get_change", "component_change", "tyre_change"]);
 
+function normSlipQty(v, def = 1) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return def;
+  return Math.min(n, 99999);
+}
+
+function hasTable(name) {
+  try {
+    return Boolean(
+      db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1`).get(String(name || ""))
+    );
+  } catch {
+    return false;
+  }
+}
+
 export default async function breakdownOpsRoutes(app) {
   db.prepare(`
     CREATE TABLE IF NOT EXISTS ops_slip_reports (
@@ -137,6 +153,115 @@ export default async function breakdownOpsRoutes(app) {
     return reply.send({ ok: true, found: true, part: p });
   });
 
+  /** Latest GET / hose lines from asset register (get_change_slips) or last ops slip for this site. */
+  app.get("/slip-asset-hints", async (req, reply) => {
+    const asset_code = String(req.query?.asset_code || "").trim();
+    if (!asset_code) return reply.code(400).send({ ok: false, error: "asset_code required" });
+    const asset = db
+      .prepare(`SELECT id, asset_code, asset_name FROM assets WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?)) LIMIT 1`)
+      .get(asset_code);
+    if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
+    const aid = Number(asset.id);
+    const site_code = getSiteCode(req);
+
+    let get_change = null;
+    let get_change_source = null;
+    if (hasTable("get_change_slips") && hasTable("get_change_items")) {
+      const slip = db
+        .prepare(
+          `SELECT id, slip_date, notes, location FROM get_change_slips WHERE asset_id = ? ORDER BY slip_date DESC, id DESC LIMIT 1`
+        )
+        .get(aid);
+      if (slip) {
+        const items = db
+          .prepare(
+            `SELECT position, part_code, part_name, qty, reason FROM get_change_items WHERE slip_id = ? ORDER BY id ASC LIMIT 2`
+          )
+          .all(slip.id);
+        if (items.length) {
+          const a = items[0];
+          const b = items[1] || null;
+          get_change = {
+            hours_fitted: null,
+            part_code: String(a.part_code || "").trim(),
+            part_qty: normSlipQty(a.qty, 1),
+            supplier: String(slip.location || "").trim() || undefined,
+            date_changed: String(slip.slip_date || "").trim(),
+            description_part_code: b ? String(b.part_code || "").trim() : "",
+            description_part_qty: b ? normSlipQty(b.qty, 1) : 1,
+            notes: String(slip.notes || "").trim() || undefined,
+          };
+          get_change_source = "get_change_slip";
+        }
+      }
+    }
+    if (!get_change) {
+      const row = db
+        .prepare(
+          `SELECT payload_json, report_date FROM ops_slip_reports
+           WHERE site_code = ? AND asset_id = ? AND slip_type = 'get_change'
+           ORDER BY report_date DESC, id DESC LIMIT 1`
+        )
+        .get(site_code, aid);
+      if (row) {
+        try {
+          const p = JSON.parse(String(row.payload_json || "{}"));
+          get_change = {
+            hours_fitted: p.hours_fitted != null && p.hours_fitted !== "" ? Number(p.hours_fitted) : null,
+            part_code: String(p.part_code || "").trim(),
+            part_qty: normSlipQty(p.part_qty, 1),
+            supplier: String(p.supplier || "").trim() || undefined,
+            date_changed: String(p.date_changed || row.report_date || "").trim(),
+            description_part_code: String(p.description_part_code || "").trim(),
+            description_part_qty: normSlipQty(p.description_part_qty, 1),
+            notes: p.notes ? String(p.notes).trim() : undefined,
+          };
+          get_change_source = "last_ops_slip";
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    let hose_failure = null;
+    let hose_failure_source = null;
+    const hr = db
+      .prepare(
+        `SELECT payload_json, report_date FROM ops_slip_reports
+         WHERE site_code = ? AND asset_id = ? AND slip_type = 'hose_failure'
+         ORDER BY report_date DESC, id DESC LIMIT 1`
+      )
+      .get(site_code, aid);
+    if (hr) {
+      try {
+        const p = JSON.parse(String(hr.payload_json || "{}"));
+        hose_failure = {
+          date_fitted: String(p.date_fitted || hr.report_date || "").trim(),
+          reason_fitted: String(p.reason_fitted || "").trim(),
+          preventable: Boolean(p.preventable),
+          hose_part_code: String(p.hose_part_code || "").trim(),
+          hose_qty: normSlipQty(p.hose_qty, 1),
+          oil_loss_part_code: String(p.oil_loss_part_code || "").trim(),
+          oil_loss_qty: normSlipQty(p.oil_loss_qty, 1),
+          notes: p.notes ? String(p.notes).trim() : undefined,
+        };
+        hose_failure_source = "last_ops_slip";
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return {
+      ok: true,
+      asset_code: asset.asset_code,
+      asset_name: asset.asset_name,
+      get_change,
+      get_change_source,
+      hose_failure,
+      hose_failure_source,
+    };
+  });
+
   function normalizePayload(slip_type, body) {
     if (slip_type === "hose_failure") {
       return {
@@ -145,6 +270,8 @@ export default async function breakdownOpsRoutes(app) {
         preventable: Boolean(body.preventable),
         hose_part_code: String(body.hose_part_code || "").trim(),
         oil_loss_part_code: String(body.oil_loss_part_code || "").trim(),
+        hose_qty: normSlipQty(body.hose_qty, 1),
+        oil_loss_qty: normSlipQty(body.oil_loss_qty, 1),
         hose_cost_manual: body.hose_cost_manual != null && body.hose_cost_manual !== "" ? Number(body.hose_cost_manual) : null,
         oil_cost_manual: body.oil_cost_manual != null && body.oil_cost_manual !== "" ? Number(body.oil_cost_manual) : null,
         notes: String(body.notes || "").trim() || null,
@@ -154,9 +281,11 @@ export default async function breakdownOpsRoutes(app) {
       return {
         hours_fitted: body.hours_fitted != null && body.hours_fitted !== "" ? Number(body.hours_fitted) : null,
         part_code: String(body.part_code || "").trim(),
+        part_qty: normSlipQty(body.part_qty, 1),
         supplier: String(body.supplier || "").trim(),
         date_changed: String(body.date_changed || "").trim(),
         description_part_code: String(body.description_part_code || "").trim(),
+        description_part_qty: normSlipQty(body.description_part_qty, 1),
         notes: String(body.notes || "").trim() || null,
       };
     }
@@ -209,22 +338,32 @@ export default async function breakdownOpsRoutes(app) {
       resolved.hose = hose;
       resolved.oil_loss = oil;
       payload._resolved = resolved;
+      const hq = normSlipQty(payload.hose_qty, 1);
+      const oq = normSlipQty(payload.oil_loss_qty, 1);
+      payload.hose_qty = hq;
+      payload.oil_loss_qty = oq;
       payload.hose_cost =
         payload.hose_cost_manual != null && Number.isFinite(payload.hose_cost_manual)
           ? Number(payload.hose_cost_manual)
           : hose
-            ? hose.unit_cost
+            ? Number(hose.unit_cost || 0) * hq
             : 0;
       payload.oil_cost =
         payload.oil_cost_manual != null && Number.isFinite(payload.oil_cost_manual)
           ? Number(payload.oil_cost_manual)
           : oil
-            ? oil.unit_cost
+            ? Number(oil.unit_cost || 0) * oq
             : 0;
     } else if (slip_type === "get_change") {
       const p = lookupPart(payload.part_code);
       const d = lookupPart(payload.description_part_code);
+      payload.part_qty = normSlipQty(payload.part_qty, 1);
+      payload.description_part_qty = normSlipQty(payload.description_part_qty, 1);
       payload._resolved = { part: p, description: d };
+      const pq = payload.part_qty;
+      const dq = payload.description_part_qty;
+      payload.part_line_est = p ? Number(p.unit_cost || 0) * pq : null;
+      payload.description_line_est = d ? Number(d.unit_cost || 0) * dq : null;
     } else if (slip_type === "component_change") {
       const p = lookupPart(payload.part_code);
       payload._resolved = { part: p };
@@ -390,15 +529,19 @@ export default async function breakdownOpsRoutes(app) {
       kvLine(doc, "Reason fitted", compactCell(payload.reason_fitted, 400) || "—");
       kvLine(doc, "Failure preventable", payload.preventable ? "Yes" : "No");
       kvLine(doc, "Hose part (stores)", payload.hose_part_code || "—");
+      const hq = normSlipQty(payload.hose_qty, 1);
+      kvLine(doc, "Hose qty", String(hq));
       if (payload._resolved?.hose) {
         kvLine(doc, "Hose description", payload._resolved.hose.part_name || "—");
       }
-      kvLine(doc, "Hose cost (R)", Number(payload.hose_cost || 0).toFixed(2));
+      kvLine(doc, "Hose line total (R)", Number(payload.hose_cost || 0).toFixed(2));
       kvLine(doc, "Oil loss part (stores)", payload.oil_loss_part_code || "—");
+      const oq = normSlipQty(payload.oil_loss_qty, 1);
+      kvLine(doc, "Oil loss qty", String(oq));
       if (payload._resolved?.oil_loss) {
         kvLine(doc, "Oil part description", payload._resolved.oil_loss.part_name || "—");
       }
-      kvLine(doc, "Oil loss cost (R)", Number(payload.oil_cost || 0).toFixed(2));
+      kvLine(doc, "Oil loss line total (R)", Number(payload.oil_cost || 0).toFixed(2));
       if (payload.notes) {
         sectionTitle(doc, "Notes");
         doc.font("Helvetica").fontSize(10).fillColor("#111").text(compactCell(payload.notes, 2000), {
@@ -409,12 +552,26 @@ export default async function breakdownOpsRoutes(app) {
       sectionTitle(doc, "G.E.T. details");
       kvLine(doc, "Hours fitted", payload.hours_fitted != null ? String(payload.hours_fitted) : "—");
       kvLine(doc, "Part number (stores)", payload.part_code || "—");
+      kvLine(doc, "Part qty", String(normSlipQty(payload.part_qty, 1)));
       if (payload._resolved?.part) kvLine(doc, "Part name", payload._resolved.part.part_name || "—");
+      if (payload.part_line_est != null && Number.isFinite(payload.part_line_est)) {
+        kvLine(doc, "Part line (est. R)", Number(payload.part_line_est).toFixed(2));
+      }
       kvLine(doc, "Supplier", payload.supplier || "—");
       kvLine(doc, "Date changed", payload.date_changed || "—");
       kvLine(doc, "Description part (stores)", payload.description_part_code || "—");
+      if (payload.description_part_code) {
+        kvLine(doc, "Description part qty", String(normSlipQty(payload.description_part_qty, 1)));
+      }
       if (payload._resolved?.description) {
         kvLine(doc, "Description (from stores)", payload._resolved.description.part_name || "—");
+      }
+      if (
+        payload.description_part_code &&
+        payload.description_line_est != null &&
+        Number.isFinite(payload.description_line_est)
+      ) {
+        kvLine(doc, "Description line (est. R)", Number(payload.description_line_est).toFixed(2));
       }
       if (payload.notes) {
         sectionTitle(doc, "Notes");

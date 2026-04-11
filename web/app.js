@@ -4776,6 +4776,61 @@ function collectBoTyreRows() {
   return tyres;
 }
 
+function boSlipQtyOrUndef(el) {
+  const n = Number(el?.value);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return n;
+}
+
+async function pullBoSlipFromAsset() {
+  const asset_code = String(qs("boSlipAsset")?.value || "").trim();
+  if (!asset_code) {
+    alert("Enter asset code first.");
+    return;
+  }
+  const slip_type = String(qs("boSlipType")?.value || "").trim();
+  setStatus("Loading asset slip hints...");
+  try {
+    const data = await fetchJson(
+      `${API}/api/breakdown-ops/slip-asset-hints?asset_code=${encodeURIComponent(asset_code)}`
+    );
+    if (slip_type === "get_change" && data.get_change) {
+      const h = data.get_change;
+      const gh = qs("boGetHours");
+      if (gh && h.hours_fitted != null && Number.isFinite(Number(h.hours_fitted))) gh.value = String(h.hours_fitted);
+      if (qs("boGetPart")) qs("boGetPart").value = h.part_code || "";
+      if (qs("boGetPartQty")) qs("boGetPartQty").value = String(h.part_qty != null ? h.part_qty : 1);
+      if (qs("boGetSupplier")) qs("boGetSupplier").value = h.supplier || "";
+      if (qs("boGetDateChg")) qs("boGetDateChg").value = h.date_changed || "";
+      if (qs("boGetDescPart")) qs("boGetDescPart").value = h.description_part_code || "";
+      if (qs("boGetDescPartQty")) qs("boGetDescPartQty").value = String(h.description_part_qty != null ? h.description_part_qty : 1);
+      if (h.notes && qs("boGetNotes")) qs("boGetNotes").value = h.notes;
+      setStatus(`G.E.T. fields filled from ${data.get_change_source || "asset"}.`);
+    } else if (slip_type === "hose_failure" && data.hose_failure) {
+      const h = data.hose_failure;
+      if (qs("boHoseDateFitted")) qs("boHoseDateFitted").value = h.date_fitted || "";
+      if (qs("boHoseReason")) qs("boHoseReason").value = h.reason_fitted || "";
+      if (qs("boHosePreventable")) qs("boHosePreventable").checked = Boolean(h.preventable);
+      if (qs("boHosePart")) qs("boHosePart").value = h.hose_part_code || "";
+      if (qs("boHoseQty")) qs("boHoseQty").value = String(h.hose_qty != null ? h.hose_qty : 1);
+      if (qs("boOilPart")) qs("boOilPart").value = h.oil_loss_part_code || "";
+      if (qs("boOilQty")) qs("boOilQty").value = String(h.oil_loss_qty != null ? h.oil_loss_qty : 1);
+      if (h.notes && qs("boHoseNotes")) qs("boHoseNotes").value = h.notes;
+      setStatus(`Hose fields filled from ${data.hose_failure_source || "asset"}.`);
+    } else {
+      setStatus(
+        slip_type === "get_change"
+          ? "No GET data: add a GET change slip on the asset (Assets → history) or save a G.E.T. slip first."
+          : slip_type === "hose_failure"
+            ? "No prior hose failure slip for this asset yet."
+            : "Pull from asset applies to G.E.T. or Hose failure slips."
+      );
+    }
+  } catch (e) {
+    setStatus("Asset hints failed: " + (e.message || e));
+  }
+}
+
 async function saveBoSlipReport() {
   const slip_type = String(qs("boSlipType")?.value || "").trim();
   const asset_code = String(qs("boSlipAsset")?.value || "").trim();
@@ -4792,6 +4847,8 @@ async function saveBoSlipReport() {
       preventable: Boolean(qs("boHosePreventable")?.checked),
       hose_part_code: String(qs("boHosePart")?.value || "").trim(),
       oil_loss_part_code: String(qs("boOilPart")?.value || "").trim(),
+      hose_qty: boSlipQtyOrUndef(qs("boHoseQty")),
+      oil_loss_qty: boSlipQtyOrUndef(qs("boOilQty")),
       hose_cost_manual: numOrUndef(qs("boHoseCostOv")?.value),
       oil_cost_manual: numOrUndef(qs("boOilCostOv")?.value),
       notes: String(qs("boHoseNotes")?.value || "").trim() || undefined,
@@ -4800,9 +4857,11 @@ async function saveBoSlipReport() {
     Object.assign(body, {
       hours_fitted: numOrUndef(qs("boGetHours")?.value),
       part_code: String(qs("boGetPart")?.value || "").trim(),
+      part_qty: boSlipQtyOrUndef(qs("boGetPartQty")),
       supplier: String(qs("boGetSupplier")?.value || "").trim(),
       date_changed: String(qs("boGetDateChg")?.value || "").trim(),
       description_part_code: String(qs("boGetDescPart")?.value || "").trim(),
+      description_part_qty: boSlipQtyOrUndef(qs("boGetDescPartQty")),
       notes: String(qs("boGetNotes")?.value || "").trim() || undefined,
     });
   } else if (slip_type === "component_change") {
@@ -8932,6 +8991,9 @@ async function init() {
     clearBoSlipPhotosUi();
     setStatus("Slip pictures cleared.");
   });
+  qs("boSlipPullAsset")?.addEventListener("click", () =>
+    pullBoSlipFromAsset().catch((e) => setStatus("Pull from asset error: " + (e.message || e)))
+  );
   qs("boSlipSave")?.addEventListener("click", () =>
     saveBoSlipReport().catch((e) => setStatus("Slip save error: " + e.message))
   );

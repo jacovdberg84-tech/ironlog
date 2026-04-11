@@ -1818,7 +1818,7 @@
         <div class="card">
           <h4>Operational slip reports (PDF)</h4>
           <p class="muted">
-            Generate PDF slips for hose failures, G.E.T., components, and tyres. Part codes pull <b>description and unit cost</b> from Stores when the part exists; use manual cost fields to override. Optional <b>JPEG/PNG photos</b> (up to four, 512 KB each) are embedded in the PDF.
+            Generate PDF slips for hose failures, G.E.T., components, and tyres. Part codes pull <b>description and unit cost</b> from Stores when the part exists; use manual line-total overrides on hose slips when needed. Optional <b>JPEG/PNG photos</b> (up to four, 512 KB each) are embedded in the PDF. Hose and G.E.T. support <b>quantities</b> (stores: unit × qty). <b>Pull from asset</b> fills from the latest GET change slip on the asset file or the last saved slip.
           </p>
           <div class="row stack-10" style="flex-wrap:wrap;">
             <label>Report type
@@ -1831,6 +1831,9 @@
             </label>
             <input id="boSlipAsset" list="assetCodeOptions" class="w-200" placeholder="Asset code" />
             <label class="chk">Report date <input id="boSlipDate" type="date" /></label>
+            <button type="button" id="boSlipPullAsset" title="Fill G.E.T. or Hose fields from the asset register or last slip">
+              Pull from asset
+            </button>
             <button type="button" id="boSlipSave">Save &amp; open PDF</button>
             <button type="button" id="boSlipLoadList">Refresh saved list</button>
           </div>
@@ -1854,9 +1857,11 @@
             </div>
             <div class="row stack-10" style="flex-wrap:wrap;">
               <input id="boHosePart" list="partCodeOptions" class="w-200" placeholder="Hose part code (stores)" />
-              <input id="boHoseCostOv" class="w-140" type="number" min="0" step="0.01" placeholder="Hose cost override" />
+              <label class="chk">Qty <input id="boHoseQty" class="w-70" type="number" min="0.01" step="0.01" value="1" /></label>
+              <input id="boHoseCostOv" class="w-140" type="number" min="0" step="0.01" placeholder="Hose line total override" />
               <input id="boOilPart" list="partCodeOptions" class="w-200" placeholder="Oil loss part code (stores)" />
-              <input id="boOilCostOv" class="w-140" type="number" min="0" step="0.01" placeholder="Oil cost override" />
+              <label class="chk">Qty <input id="boOilQty" class="w-70" type="number" min="0.01" step="0.01" value="1" /></label>
+              <input id="boOilCostOv" class="w-140" type="number" min="0" step="0.01" placeholder="Oil line total override" />
             </div>
             <input id="boHoseNotes" class="minw-260" placeholder="Notes (optional)" style="width:100%;" />
           </div>
@@ -1866,9 +1871,11 @@
             <div class="row stack-10" style="flex-wrap:wrap;">
               <input id="boGetHours" class="w-140" type="number" min="0" step="0.1" placeholder="Hours fitted" />
               <input id="boGetPart" list="partCodeOptions" class="w-200" placeholder="Part number (stores)" />
+              <label class="chk">Qty <input id="boGetPartQty" class="w-70" type="number" min="0.01" step="0.01" value="1" /></label>
               <input id="boGetSupplier" class="w-200" placeholder="Supplier" />
               <label class="chk">Date changed <input id="boGetDateChg" type="date" /></label>
               <input id="boGetDescPart" list="partCodeOptions" class="w-220" placeholder="Description part code (stores)" />
+              <label class="chk">Desc qty <input id="boGetDescPartQty" class="w-70" type="number" min="0.01" step="0.01" value="1" /></label>
             </div>
             <input id="boGetNotes" class="minw-260" placeholder="Notes (optional)" style="width:100%;" />
           </div>
