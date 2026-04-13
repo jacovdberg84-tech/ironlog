@@ -165,6 +165,54 @@ function hasTable(name) {
   }
 }
 
+function getAssetHoursInfoAsOf(assetId, asOfYmd) {
+  const aid = Number(assetId || 0);
+  const asOf = String(asOfYmd || "").trim();
+  if (!aid || !/^\d{4}-\d{2}-\d{2}$/.test(asOf)) {
+    return { hours: null, source: "unknown", as_of: null };
+  }
+
+  const meter = db.prepare(`
+    SELECT closing_hours AS latest_closing
+    FROM daily_hours
+    WHERE asset_id = ?
+      AND closing_hours IS NOT NULL
+      AND work_date <= ?
+    ORDER BY work_date DESC, id DESC
+    LIMIT 1
+  `).get(aid, asOf);
+  const closing = meter?.latest_closing == null ? null : Number(meter.latest_closing);
+  if (closing != null && Number.isFinite(closing)) {
+    return { hours: closing, source: "daily_closing", as_of: asOf };
+  }
+
+  const fromDailyHours = db.prepare(`
+    SELECT COALESCE(SUM(hours_run), 0) AS total_hours
+    FROM daily_hours
+    WHERE asset_id = ?
+      AND is_used = 1
+      AND hours_run > 0
+      AND work_date <= ?
+  `).get(aid, asOf);
+  const total = Number(fromDailyHours?.total_hours || 0);
+  if (Number.isFinite(total) && total > 0) {
+    return { hours: total, source: "daily_sum", as_of: asOf };
+  }
+
+  const fallback = db.prepare(`
+    SELECT hours
+    FROM assets
+    WHERE id = ?
+    LIMIT 1
+  `).get(aid);
+  const assetHours = fallback?.hours == null ? null : Number(fallback.hours);
+  if (assetHours != null && Number.isFinite(assetHours)) {
+    return { hours: assetHours, source: "asset_hours", as_of: asOf };
+  }
+
+  return { hours: null, source: "unknown", as_of: asOf };
+}
+
 export default async function breakdownOpsRoutes(app) {
   db.prepare(`
     CREATE TABLE IF NOT EXISTS ops_slip_reports (
@@ -452,6 +500,16 @@ export default async function breakdownOpsRoutes(app) {
 
     payload.pictures = normalizeSlipPictures(req.body || {});
     payload = enrichPayload(slip_type, payload);
+    if (payload.current_hours == null || payload.current_hours === "") {
+      const hrsInfo = getAssetHoursInfoAsOf(asset.id, report_date);
+      if (Number.isFinite(Number(hrsInfo.hours))) {
+        payload.current_hours = Number(Number(hrsInfo.hours).toFixed(1));
+      } else {
+        payload.current_hours = null;
+      }
+      payload.current_hours_source = hrsInfo.source || "unknown";
+      payload.current_hours_as_of = hrsInfo.as_of || report_date;
+    }
     const site_code = getSiteCode(req);
     const created_by = getUser(req);
 
@@ -557,6 +615,14 @@ export default async function breakdownOpsRoutes(app) {
     kvLine(doc, "Date", String(row.report_date || ""));
     kvLine(doc, "Asset", `${row.asset_code || ""} — ${row.asset_name || ""}`);
     kvLine(doc, "Recorded by", String(row.created_by || "-"));
+    if (payload.current_hours != null && payload.current_hours !== "") {
+      const src = String(payload.current_hours_source || "").trim();
+      const asOf = String(payload.current_hours_as_of || row.report_date || "").trim();
+      const bits = [`${Number(payload.current_hours).toFixed(1)} h`];
+      if (asOf) bits.push(`as of ${asOf}`);
+      if (src) bits.push(src);
+      kvLine(doc, "Current hours", bits.join(" · "));
+    }
 
     if (slipType === "hose_failure") {
       sectionTitle(doc, "Details");
