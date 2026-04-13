@@ -7403,21 +7403,33 @@ function calcDailyPreviewKpis() {
 
   let totalScheduled = 0;
   let totalRun = 0;
+  let totalDowntime = 0;
 
   for (const r of used) {
-    totalScheduled += Number(r.scheduled_hours || 0);
-    totalRun += Number(r.hours_run || 0);
+    const scheduled = Math.max(0, Number(r.scheduled_hours || 0));
+    const runRaw = Math.max(0, Number(r.hours_run || 0));
+    const runEff = Math.min(runRaw, scheduled);
+    const downRaw = r.is_down
+      ? (Number.isFinite(Number(r.down_hours)) ? Number(r.down_hours) : scheduled)
+      : 0;
+    const downEff = Math.min(Math.max(0, downRaw), scheduled);
+
+    totalScheduled += scheduled;
+    totalRun += runEff;
+    totalDowntime += downEff;
   }
 
-  const ratio = totalScheduled > 0 ? totalRun / totalScheduled : null;
-  const pct = ratio == null ? null : ratio * 100;
+  const utilization = totalScheduled > 0 ? (totalRun / totalScheduled) * 100 : null;
+  const available = Math.max(0, totalScheduled - totalDowntime);
+  const availability = totalScheduled > 0 ? (available / totalScheduled) * 100 : null;
 
   return {
     usedCount,
     totalScheduled,
     totalRun,
-    availability: pct,
-    utilization: pct,
+    totalDowntime,
+    availability,
+    utilization,
   };
 }
 
@@ -7425,16 +7437,23 @@ function renderDailyPreview() {
   setText("dailySummary", daySummary());
 
   const k = calcDailyPreviewKpis();
+  const th = getThresholds();
 
   setText("kUsed", `Used: ${k.usedCount}`);
   setText("kSched", `Scheduled: ${k.totalScheduled.toFixed(1).replace(/\.0$/, "")}`);
   setText("kRun", `Run: ${k.totalRun.toFixed(1).replace(/\.0$/, "")}`);
 
-  setSpeedo(qs("pAvailNeedle"), qs("pAvailVal"), k.availability);
-  setSpeedo(qs("pUtilNeedle"), qs("pUtilVal"), k.utilization);
+  setSpeedo(qs("pAvailNeedle"), qs("pAvailVal"), k.availability, {
+    goodAt: th.availTarget,
+    warnAt: th.availCrit,
+  });
+  setSpeedo(qs("pUtilNeedle"), qs("pUtilVal"), k.utilization, {
+    goodAt: th.utilTarget,
+    warnAt: th.utilCrit,
+  });
 
   if (k.totalScheduled === 0) setText("kNote", "Preview waiting for scheduled/run hours. Standby excluded.");
-  else setText("kNote", "Preview uses Production rows only. Standby excluded.");
+  else setText("kNote", `Preview uses production rows only (standby excluded). Down hours counted: ${k.totalDowntime.toFixed(1).replace(/\.0$/, "")}.`);
 }
 
 /* -------- DOWN helper -------- */
