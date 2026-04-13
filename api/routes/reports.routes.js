@@ -2783,7 +2783,6 @@ export default async function reportsRoutes(app) {
           },
           { k: "Work order", v: inspection.work_order_id ? `#${inspection.work_order_id}` : "—" },
           { k: "Category", v: inspection.category || "" },
-          { k: "Created At", v: inspection.created_at || "" },
         ], 2);
 
         let checklist = [];
