@@ -10251,7 +10251,29 @@ async function loadDocDrafts() {
   });
 }
 
+function initDarkMode() {
+  const toggle = document.getElementById("darkModeToggle");
+  if (!toggle) return;
+  
+  const saved = localStorage.getItem("ironlog-theme");
+  if (saved === "dark") {
+    document.documentElement.setAttribute("data-theme", "dark");
+  }
+  
+  toggle.addEventListener("click", () => {
+    const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+    if (isDark) {
+      document.documentElement.removeAttribute("data-theme");
+      localStorage.setItem("ironlog-theme", "light");
+    } else {
+      document.documentElement.setAttribute("data-theme", "dark");
+      localStorage.setItem("ironlog-theme", "dark");
+    }
+  });
+}
+
 // Keep startup reliable even if script placement changes
 document.addEventListener("DOMContentLoaded", () => {
+  initDarkMode();
   init().catch((e) => console.error(e));
 });
