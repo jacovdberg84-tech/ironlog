@@ -2869,59 +2869,182 @@
 
     <!-- LDV VEHICLE CHECK (photos + damage pins) -->
     <section class="panel" id="tab-vehicle">
-      <div class="card stack-12">
-        <h3>LDV vehicle check</h3>
-        <p class="muted">
-          Record a check for a <strong>light vehicle</strong> asset, add <strong>photos</strong>, then <strong>click on each photo</strong> to drop pins for dents, scratches, or other damage.
-          Pins are saved as fractions of the image so they stay aligned when you zoom. Similar workflow to Maintenance → Manager Inspections, with damage pinpointing on the picture.
-        </p>
-        <div class="row">
-          <label>Vehicle (asset)
-            <select id="vcAsset" class="w-260"></select>
-          </label>
-          <label>Check date
-            <input id="vcDate" type="date" />
-          </label>
-          <label>Registration (optional)
-            <input id="vcReg" class="w-160" placeholder="e.g. ABC 123 GP" />
-          </label>
-          <label>Odometer km
-            <input id="vcOdo" class="w-110" type="number" step="1" min="0" placeholder="km" />
-          </label>
+      <div class="asset-cards-grid">
+        <!-- LDV Checks Header -->
+        <div class="dash-card full-width">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"></path><path d="M17 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"></path><path d="M5 17h-2v-6l2-5h9l4 5h1a2 2 0 0 1 2 2v4h-2m-4 0h-6m-6 -6h15m-6 0v-5"></path></svg>
+              </div>
+              <div>
+                <h3>LDV Vehicle Check</h3>
+                <p class="muted small">Record checks for light vehicles, add photos, and pin damage locations</p>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="row">
-          <label>Inspector
-            <input id="vcInspector" class="w-200" placeholder="Name" />
-          </label>
-          <label>Notes
-            <input id="vcNotes" class="minw-260" placeholder="General condition notes" />
-          </label>
-          <button type="button" id="vcCreateCheck">Start check</button>
-          <span class="muted" id="vcCheckIdLabel"></span>
+
+        <!-- New Check Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+              </div>
+              <div>
+                <h3>New Vehicle Check</h3>
+                <p class="muted small">Start a new inspection for a vehicle</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Vehicle (Asset)</label>
+                <select id="vcAsset" class="w-full"></select>
+              </div>
+              <div class="form-field">
+                <label>Check Date</label>
+                <input id="vcDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Registration</label>
+                <input id="vcReg" class="w-full" placeholder="e.g. ABC 123 GP" />
+              </div>
+              <div class="form-field">
+                <label>Odometer (km)</label>
+                <input id="vcOdo" type="number" step="1" min="0" class="w-full" placeholder="km" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Inspector</label>
+                <input id="vcInspector" class="w-full" placeholder="Inspector name" />
+              </div>
+              <div class="form-field form-field-full">
+                <label>Notes</label>
+                <input id="vcNotes" class="w-full" placeholder="General condition notes" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="vcCreateCheck" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                  Start Check
+                </button>
+                <span class="muted" id="vcCheckIdLabel"></span>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="row">
-          <label>Add photo
-            <input id="vcPhotoFile" type="file" accept="image/jpeg,image/png,image/webp" />
-          </label>
-          <button type="button" id="vcUploadPhoto" disabled>Upload photo</button>
-          <button type="button" id="vcLoadChecks">Refresh list</button>
-          <button type="button" id="vcOpenPdf">Open check PDF</button>
-          <button type="button" id="vcDownloadPdf">Download check PDF</button>
+
+        <!-- Photo Upload Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+              </div>
+              <div>
+                <h3>Photo Upload</h3>
+                <p class="muted small">Add photos and click to pin damage locations</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Add Photo</label>
+                <input id="vcPhotoFile" type="file" accept="image/jpeg,image/png,image/webp" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="vcUploadPhoto" class="btn btn-primary" disabled>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                  Upload
+                </button>
+                <button id="vcLoadChecks" class="btn btn-secondary btn-sm">Refresh</button>
+              </div>
+            </div>
+            <div class="info-note">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              <span>Click on uploaded photos to drop damage pins (dents, scratches, etc.)</span>
+            </div>
+            <div id="vcPhotoEditor" class="stack-12"></div>
+          </div>
         </div>
-        <div class="row">
-          <label>From
-            <input id="vcStart" type="date" />
-          </label>
-          <label>To
-            <input id="vcEnd" type="date" />
-          </label>
-          <button type="button" id="vcOpenBulkPdf">Open range PDF</button>
-          <button type="button" id="vcDownloadBulkPdf">Download range PDF</button>
+
+        <!-- PDF Reports Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+              </div>
+              <div>
+                <h3>PDF Reports</h3>
+                <p class="muted small">Generate and download check reports</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>From</label>
+                <input id="vcStart" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>To</label>
+                <input id="vcEnd" type="date" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="vcOpenPdf" class="btn btn-secondary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                  Open PDF
+                </button>
+                <button id="vcDownloadPdf" class="btn btn-secondary btn-sm">Download</button>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field form-field-action">
+                <button id="vcOpenBulkPdf" class="btn btn-secondary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                  Open Range PDF
+                </button>
+                <button id="vcDownloadBulkPdf" class="btn btn-secondary btn-sm">Download Range</button>
+              </div>
+            </div>
+          </div>
         </div>
-        <div id="vcPhotoEditor" class="stack-12"></div>
-        <h4>Recent checks</h4>
-        <div class="list" id="vcChecksList"></div>
-        <pre class="output" id="vcResult"></pre>
+
+        <!-- Recent Checks Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              </div>
+              <div>
+                <h3>Recent Checks</h3>
+                <p class="muted small">View and manage recent vehicle inspections</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="list" id="vcChecksList"></div>
+            <pre class="output" id="vcResult"></pre>
+          </div>
+        </div>
       </div>
     </section>
 
