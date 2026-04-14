@@ -2865,6 +2865,46 @@ body.sidebar-collapsed .main-content {
   align-items: center;
 }
 
+/* Dispatch Lanes */
+.dispatch-lanes {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.dispatch-lane {
+  background: #f9fafb;
+  border-radius: 8px;
+  padding: 12px;
+  min-height: 150px;
+}
+
+.dispatch-lane-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  font-size: 13px;
+  color: #374151;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.lane-count {
+  background: #e5e7eb;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+
+/* KPI Pill Variants */
+.kpi-pill-orange {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
 /* Maintenance Section Wrapper */
 .maint-section {
   display: none;

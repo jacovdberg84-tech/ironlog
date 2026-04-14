@@ -2042,282 +2042,771 @@
 
     <!-- OPERATIONS -->
     <section class="panel" id="tab-operations">
-      <div class="card stack-12">
-        <h3>Site Operations (Quarry)</h3>
-        <div class="card">
-          <h4>Daily Entry</h4>
-          <div class="row">
-            <label class="chk">Date <input id="opSiteDate" type="date" /></label>
-            <label class="chk">Shift
-              <select id="opSiteShift" class="w-140">
-                <option value="day">Day</option>
-                <option value="night">Night</option>
-              </select>
-            </label>
-            <label class="chk">Zone
-              <select id="opSiteZone" class="w-200"></select>
-            </label>
-            <input id="opSiteMaterial" class="w-200" placeholder="Material type (granite/sand)" />
-            <input id="opSitePlanned" class="w-140" type="number" min="0" step="0.01" placeholder="Planned tonnage" />
-            <input id="opSiteActual" class="w-140" type="number" min="0" step="0.01" placeholder="Actual tonnage" />
-            <input id="opSiteLoads" class="w-140" type="number" min="0" step="1" placeholder="Loads count" />
-            <input id="opSiteCycle" class="w-140" type="number" min="0" step="0.01" placeholder="Avg cycle time" />
-            <input id="opSiteOperator" class="w-200" placeholder="Operator" />
-            <input id="opSiteNotes" class="minw-260" placeholder="Notes" />
-            <button id="saveSiteDailyEntry">Save Daily Entry</button>
-            <button id="loadSiteDailyEntries">Load Daily Entries</button>
+      <div class="asset-cards-grid">
+        <!-- Site Operations Header -->
+        <div class="dash-card full-width">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 20h20M5 20V10l7-7 7 7v10M9 20v-6h6v6"></path></svg>
+              </div>
+              <div>
+                <h3>Site Operations (Quarry)</h3>
+                <p class="muted small">Daily operations, delays, targets, and client performance tracking</p>
+              </div>
+            </div>
           </div>
-          <div class="row">
-            <input id="opSiteDailyId" class="w-140" type="number" min="1" placeholder="Daily entry ID" />
-            <input id="opSiteEqAssetId" class="w-140" type="number" min="1" placeholder="Asset ID" />
-            <input id="opSiteEqRole" class="w-200" placeholder="Role (loader/truck/dozer)" />
-            <input id="opSiteEqHours" class="w-140" type="number" min="0" step="0.01" placeholder="Hours used" />
-            <button id="saveSiteEquipmentUsage">Link Equipment Usage</button>
-            <button id="loadSiteEquipmentUsage">Load Equipment Links</button>
-          </div>
-          <div class="list" id="siteEquipmentUsageList"></div>
-          <div class="list" id="siteDailyList"></div>
-          <pre class="output" id="siteDailyResult"></pre>
         </div>
 
-        <div class="card">
-          <h4>Dashboard</h4>
-          <div class="row">
-            <label class="chk">As at <input id="opSiteDashDate" type="date" /></label>
-            <button id="loadSiteDashboard">Load Site Dashboard</button>
+        <!-- Daily Entry Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+              </div>
+              <div>
+                <h3>Daily Entry</h3>
+                <p class="muted small">Log daily site operations and equipment usage</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
           </div>
-          <div class="row">
-            <div class="pill blue">Today Tons: <span id="opSiteKpiTodayTons">0</span></div>
-            <div class="pill orange">Target vs Actual %: <span id="opSiteKpiAchieved">0</span></div>
-            <div class="pill blue">Loads Moved: <span id="opSiteKpiLoads">0</span></div>
-            <div class="pill">Active Zones: <span id="opSiteKpiZones">0</span></div>
-            <div class="pill blue">Week Total: <span id="opSiteKpiWeekTotal">0</span></div>
-            <div class="pill red">Breakdown Hrs: <span id="opSiteKpiBreakdownLoss">0</span></div>
-            <div class="pill red">Ops Delay Hrs: <span id="opSiteKpiOpsLoss">0</span></div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Date</label>
+                <input id="opSiteDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Shift</label>
+                <select id="opSiteShift" class="w-full">
+                  <option value="day">Day</option>
+                  <option value="night">Night</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Zone</label>
+                <select id="opSiteZone" class="w-full"></select>
+              </div>
+              <div class="form-field">
+                <label>Material</label>
+                <input id="opSiteMaterial" class="w-full" placeholder="granite/sand" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Planned (ton)</label>
+                <input id="opSitePlanned" type="number" min="0" step="0.01" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Actual (ton)</label>
+                <input id="opSiteActual" type="number" min="0" step="0.01" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Loads</label>
+                <input id="opSiteLoads" type="number" min="0" step="1" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Avg Cycle</label>
+                <input id="opSiteCycle" type="number" min="0" step="0.01" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Operator</label>
+                <input id="opSiteOperator" class="w-full" placeholder="Operator name" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field form-field-full">
+                <label>Notes</label>
+                <input id="opSiteNotes" class="w-full" placeholder="Additional notes" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="saveSiteDailyEntry" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                  Save
+                </button>
+                <button id="loadSiteDailyEntries" class="btn btn-secondary">Load Entries</button>
+              </div>
+            </div>
+            <div class="info-note" style="margin-top: 12px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+              <span>Equipment Usage - Link assets to daily operations</span>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Daily Entry ID</label>
+                <input id="opSiteDailyId" type="number" min="1" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Asset ID</label>
+                <input id="opSiteEqAssetId" type="number" min="1" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Role</label>
+                <input id="opSiteEqRole" class="w-full" placeholder="loader/truck/dozer" />
+              </div>
+              <div class="form-field">
+                <label>Hours Used</label>
+                <input id="opSiteEqHours" type="number" min="0" step="0.01" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="saveSiteEquipmentUsage" class="btn btn-secondary">Link</button>
+                <button id="loadSiteEquipmentUsage" class="btn btn-secondary btn-sm">Load</button>
+              </div>
+            </div>
+            <div class="list" id="siteEquipmentUsageList"></div>
+            <div class="list" id="siteDailyList"></div>
+            <pre class="output" id="siteDailyResult"></pre>
           </div>
-          <div class="list" id="siteDashboardList"></div>
         </div>
 
-        <div class="card">
-          <h4>Operational Delays</h4>
-          <div class="row">
-            <label class="chk">Date <input id="opDelayDate" type="date" /></label>
-            <select id="opDelayType" class="w-200">
-              <option value="weather">weather</option>
-              <option value="logistics">logistics</option>
-              <option value="blasting">blasting</option>
-              <option value="staffing">staffing</option>
-              <option value="no_trucks">no_trucks</option>
-            </select>
-            <input id="opDelayHours" class="w-140" type="number" min="0" step="0.01" placeholder="Hours lost" />
-            <input id="opDelayImpact" class="w-140" type="number" min="0" step="0.01" placeholder="Impact tonnage" />
-            <input id="opDelayNotes" class="minw-260" placeholder="Delay notes" />
-            <button id="saveSiteDelay">Save Delay</button>
-            <button id="loadSiteDelays">Load Delays</button>
+        <!-- Dashboard Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+              </div>
+              <div>
+                <h3>Site Dashboard</h3>
+                <p class="muted small">Live site operations overview</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
           </div>
-          <div class="list" id="siteDelayList"></div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>As at</label>
+                <input id="opSiteDashDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadSiteDashboard" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                  Load Dashboard
+                </button>
+              </div>
+            </div>
+            <div class="kpi-pills">
+              <span class="kpi-pill kpi-pill-blue"><strong>Today:</strong> <span id="opSiteKpiTodayTons">0</span> ton</span>
+              <span class="kpi-pill kpi-pill-orange"><strong>vs Target:</strong> <span id="opSiteKpiAchieved">0</span>%</span>
+              <span class="kpi-pill"><strong>Loads:</strong> <span id="opSiteKpiLoads">0</span></span>
+              <span class="kpi-pill"><strong>Zones:</strong> <span id="opSiteKpiZones">0</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Week:</strong> <span id="opSiteKpiWeekTotal">0</span></span>
+              <span class="kpi-pill kpi-pill-red"><strong>Breakdown:</strong> <span id="opSiteKpiBreakdownLoss">0</span>h</span>
+              <span class="kpi-pill kpi-pill-red"><strong>Ops Delay:</strong> <span id="opSiteKpiOpsLoss">0</span>h</span>
+            </div>
+            <div class="list" id="siteDashboardList"></div>
+          </div>
         </div>
 
-        <div class="card">
-          <h4>Targets and Zones</h4>
-          <div class="row">
-            <label class="chk">Target Date <input id="opTargetDate" type="date" /></label>
-            <input id="opTargetMaterial" class="w-200" placeholder="Material" />
-            <input id="opTargetTonnage" class="w-140" type="number" min="0" step="0.01" placeholder="Target tonnage" />
-            <button id="saveSiteTarget">Save Target</button>
-            <button id="loadSiteTargets">Load Targets</button>
+        <!-- Operational Delays Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef2f2; color: #dc2626;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              </div>
+              <div>
+                <h3>Operational Delays</h3>
+                <p class="muted small">Track and analyze operational delays</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
           </div>
-          <div class="row">
-            <input id="opZoneName" class="w-200" placeholder="Zone name (Pit A / Bench 2)" />
-            <label class="chk"><input id="opZoneActive" type="checkbox" checked /> Active</label>
-            <button id="saveSiteZone">Save Zone</button>
-            <button id="loadSiteZones">Load Zones</button>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Date</label>
+                <input id="opDelayDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Type</label>
+                <select id="opDelayType" class="w-full">
+                  <option value="weather">weather</option>
+                  <option value="logistics">logistics</option>
+                  <option value="blasting">blasting</option>
+                  <option value="staffing">staffing</option>
+                  <option value="no_trucks">no_trucks</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Hours Lost</label>
+                <input id="opDelayHours" type="number" min="0" step="0.01" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Impact (ton)</label>
+                <input id="opDelayImpact" type="number" min="0" step="0.01" class="w-full" />
+              </div>
+              <div class="form-field form-field-full">
+                <label>Notes</label>
+                <input id="opDelayNotes" class="w-full" placeholder="Delay notes" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="saveSiteDelay" class="btn btn-primary">Save</button>
+                <button id="loadSiteDelays" class="btn btn-secondary">Load</button>
+              </div>
+            </div>
+            <div class="list" id="siteDelayList"></div>
           </div>
-          <div class="list" id="siteTargetList"></div>
-          <div class="list" id="siteZoneList"></div>
         </div>
 
-        <div class="row">
-          <label class="chk">Date <input id="opDate" type="date" /></label>
-          <input id="opTonnesMoved" class="w-140" type="number" min="0" step="0.01" placeholder="Tonnes moved" />
-          <input id="opProductType" class="w-200" placeholder="Product (e.g. 19mm, dust)" />
-          <input id="opProductProduced" class="w-140" type="number" min="0" step="0.01" placeholder="Product produced" />
-          <input id="opTrucksLoaded" class="w-140" type="number" min="0" step="1" placeholder="Trucks loaded" />
-          <input id="opLoadsCount" class="w-140" type="number" min="0" step="1" placeholder="Load cycles" />
-          <input id="opCrusherFeedTonnes" class="w-140" type="number" min="0" step="0.01" placeholder="Crusher feed t" />
-          <input id="opCrusherOutputTonnes" class="w-140" type="number" min="0" step="0.01" placeholder="Crusher output t" />
-          <input id="opCrusherHours" class="w-140" type="number" min="0" step="0.01" placeholder="Crusher hours" />
-          <input id="opCrusherDowntime" class="w-140" type="number" min="0" step="0.01" placeholder="Crusher downtime h" />
-          <button id="saveOperationEntry">Save Operations Entry</button>
-        </div>
-        <div class="row">
-          <label class="chk">From <input id="opFrom" type="date" /></label>
-          <label class="chk">To <input id="opTo" type="date" /></label>
-          <button id="loadOperations">Load Operations</button>
-          <button id="openOperationsPdf">Open Ops PDF</button>
-          <button id="downloadOperationsPdf">Download Ops PDF</button>
-          <button id="downloadOperationsXlsx">Download Ops Excel</button>
-        </div>
-        <div class="row">
-          <div class="pill blue">Tonnes Moved: <span id="opKpiTonnes">0</span></div>
-          <div class="pill blue">Produced: <span id="opKpiProduced">0</span></div>
-          <div class="pill orange">Trucks Loaded: <span id="opKpiLoaded">0</span></div>
-          <div class="pill orange">Load Cycles: <span id="opKpiLoads">0</span></div>
-          <div class="pill blue">Crusher Perf %: <span id="opKpiCrusherPerf">0</span></div>
-          <div class="pill" id="opCloseStatusPill">Day Status: OPEN</div>
-        </div>
-        <div class="card">
-          <h4>Daily Closing Checklist</h4>
-          <div class="row">
-            <input id="opCloseShift" class="w-200" placeholder="Shift (Day/Night)" />
-            <input id="opCloseSupervisor" class="w-200" placeholder="Supervisor sign-off name" />
+        <!-- Targets and Zones Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
+              </div>
+              <div>
+                <h3>Targets & Zones</h3>
+                <p class="muted small">Set operational targets and manage zones</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
           </div>
-          <div class="row">
-            <label class="chk"><input id="opCloseChkWeighbridge" type="checkbox" /> Weighbridge reconciled</label>
-            <label class="chk"><input id="opCloseChkTrucks" type="checkbox" /> Trucks reconciled</label>
-            <label class="chk"><input id="opCloseChkClient" type="checkbox" /> Client delivery confirmed</label>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Target Date</label>
+                <input id="opTargetDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Material</label>
+                <input id="opTargetMaterial" class="w-full" placeholder="Material" />
+              </div>
+              <div class="form-field">
+                <label>Tonnage</label>
+                <input id="opTargetTonnage" type="number" min="0" step="0.01" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="saveSiteTarget" class="btn btn-primary">Save</button>
+                <button id="loadSiteTargets" class="btn btn-secondary btn-sm">Load</button>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Zone Name</label>
+                <input id="opZoneName" class="w-full" placeholder="Pit A / Bench 2" />
+              </div>
+              <div class="form-field">
+                <label class="checkbox-label" style="margin-top: 24px;">
+                  <input id="opZoneActive" type="checkbox" checked />
+                  <span>Active</span>
+                </label>
+              </div>
+              <div class="form-field form-field-action">
+                <button id="saveSiteZone" class="btn btn-primary">Save</button>
+                <button id="loadSiteZones" class="btn btn-secondary btn-sm">Load</button>
+              </div>
+            </div>
+            <div class="list" id="siteTargetList"></div>
+            <div class="list" id="siteZoneList"></div>
           </div>
-          <div class="row">
-            <input id="opCloseVariance" class="minw-260" placeholder="Variance note (if any)" />
-            <input id="opReopenReason" class="minw-260" placeholder="Re-open reason (required when reopening closed day)" />
-            <button id="saveOperationsClosingDraft">Save Closing Draft</button>
-            <button id="closeOperationsDay">Close Day</button>
-            <button id="reopenOperationsDay">Re-open Day</button>
-          </div>
-          <pre class="output" id="operationsClosingResult"></pre>
-          <div class="list" id="operationsClosingHistory"></div>
         </div>
-        <div class="card">
-          <h4>Client Monthly Performance</h4>
-          <div class="row">
-            <label class="chk">Metric
-              <select id="opClientMetric" class="w-200">
-                <option value="delivered">Delivered Product</option>
-                <option value="trucks">Trucks Delivered</option>
-                <option value="tonnes">Tonnes Moved</option>
-              </select>
-            </label>
-            <label class="chk">Top N
-              <select id="opClientTopN" class="w-140">
-                <option value="5">Top 5</option>
-                <option value="8" selected>Top 8</option>
-                <option value="10">Top 10</option>
-              </select>
-            </label>
+
+        <!-- Operations Entry Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+              </div>
+              <div>
+                <h3>Operations Entry</h3>
+                <p class="muted small">Record tonnes moved, crusher performance, and production data</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
           </div>
-          <div id="opClientChart" class="cost-trend-chart"></div>
-          <div class="list" id="opClientPerfList"></div>
-          <p class="muted">Top clients by delivered product for selected period.</p>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Date</label>
+                <input id="opDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Tonnes Moved</label>
+                <input id="opTonnesMoved" type="number" min="0" step="0.01" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Product</label>
+                <input id="opProductType" class="w-full" placeholder="19mm, dust" />
+              </div>
+              <div class="form-field">
+                <label>Produced</label>
+                <input id="opProductProduced" type="number" min="0" step="0.01" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Trucks</label>
+                <input id="opTrucksLoaded" type="number" min="0" step="1" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Loads</label>
+                <input id="opLoadsCount" type="number" min="0" step="1" class="w-full" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Crusher Feed (t)</label>
+                <input id="opCrusherFeedTonnes" type="number" min="0" step="0.01" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Crusher Output (t)</label>
+                <input id="opCrusherOutputTonnes" type="number" min="0" step="0.01" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Crusher Hours</label>
+                <input id="opCrusherHours" type="number" min="0" step="0.01" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Downtime (h)</label>
+                <input id="opCrusherDowntime" type="number" min="0" step="0.01" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="saveOperationEntry" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                  Save Entry
+                </button>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>From</label>
+                <input id="opFrom" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>To</label>
+                <input id="opTo" type="date" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadOperations" class="btn btn-secondary">Load</button>
+                <button id="openOperationsPdf" class="btn btn-secondary btn-sm">Open PDF</button>
+                <button id="downloadOperationsPdf" class="btn btn-secondary btn-sm">Download PDF</button>
+                <button id="downloadOperationsXlsx" class="btn btn-secondary btn-sm">Excel</button>
+              </div>
+            </div>
+            <div class="kpi-pills">
+              <span class="kpi-pill kpi-pill-blue"><strong>Tonnes:</strong> <span id="opKpiTonnes">0</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Produced:</strong> <span id="opKpiProduced">0</span></span>
+              <span class="kpi-pill kpi-pill-orange"><strong>Trucks:</strong> <span id="opKpiLoaded">0</span></span>
+              <span class="kpi-pill kpi-pill-orange"><strong>Loads:</strong> <span id="opKpiLoads">0</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Crusher:</strong> <span id="opKpiCrusherPerf">0</span>%</span>
+              <span class="kpi-pill"><strong>Status:</strong> <span id="opCloseStatusPill">OPEN</span></span>
+            </div>
+            <div class="list" id="operationsList"></div>
+            <pre class="output" id="operationsResult"></pre>
+          </div>
         </div>
-        <div class="list" id="operationsList"></div>
-        <pre class="output" id="operationsResult"></pre>
+
+        <!-- Daily Closing Checklist Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+              </div>
+              <div>
+                <h3>Daily Closing Checklist</h3>
+                <p class="muted small">Close or reopen operations day</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Shift</label>
+                <input id="opCloseShift" class="w-full" placeholder="Day/Night" />
+              </div>
+              <div class="form-field">
+                <label>Supervisor</label>
+                <input id="opCloseSupervisor" class="w-full" placeholder="Sign-off name" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label class="checkbox-label">
+                  <input id="opCloseChkWeighbridge" type="checkbox" />
+                  <span>Weighbridge reconciled</span>
+                </label>
+              </div>
+              <div class="form-field">
+                <label class="checkbox-label">
+                  <input id="opCloseChkTrucks" type="checkbox" />
+                  <span>Trucks reconciled</span>
+                </label>
+              </div>
+              <div class="form-field">
+                <label class="checkbox-label">
+                  <input id="opCloseChkClient" type="checkbox" />
+                  <span>Client confirmed</span>
+                </label>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Variance Note</label>
+                <input id="opCloseVariance" class="w-full" placeholder="If any variance" />
+              </div>
+              <div class="form-field">
+                <label>Re-open Reason</label>
+                <input id="opReopenReason" class="w-full" placeholder="Required when reopening" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="saveOperationsClosingDraft" class="btn btn-secondary">Save Draft</button>
+                <button id="closeOperationsDay" class="btn btn-success">Close Day</button>
+                <button id="reopenOperationsDay" class="btn btn-danger btn-sm">Re-open</button>
+              </div>
+            </div>
+            <pre class="output" id="operationsClosingResult"></pre>
+            <div class="list" id="operationsClosingHistory"></div>
+          </div>
+        </div>
+
+        <!-- Client Performance Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+              </div>
+              <div>
+                <h3>Client Performance</h3>
+                <p class="muted small">Monthly client delivery metrics</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Metric</label>
+                <select id="opClientMetric" class="w-full">
+                  <option value="delivered">Delivered Product</option>
+                  <option value="trucks">Trucks Delivered</option>
+                  <option value="tonnes">Tonnes Moved</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Top N</label>
+                <select id="opClientTopN" class="w-full">
+                  <option value="5">Top 5</option>
+                  <option value="8" selected>Top 8</option>
+                  <option value="10">Top 10</option>
+                </select>
+              </div>
+            </div>
+            <div id="opClientChart" class="cost-trend-chart"></div>
+            <div class="list" id="opClientPerfList"></div>
+          </div>
+        </div>
       </div>
     </section>
 
     <!-- DISPATCH -->
     <section class="panel" id="tab-dispatch">
-      <div class="card stack-12">
-        <h3>Dispatch Board</h3>
-        <div class="row">
-          <label class="chk">Date <input id="dpDate" type="date" /></label>
-          <input id="dpTripNo" class="w-140" placeholder="Trip no (optional)" />
-          <input id="dpTruckReg" class="w-140" placeholder="Truck reg" />
-          <input id="dpDriver" class="w-140" placeholder="Driver" />
-          <input id="dpProduct" class="w-200" placeholder="Product type" />
-          <input id="dpClient" class="w-200" placeholder="Client" />
-          <input id="dpTargetTonnes" class="w-140" type="number" min="0" step="0.01" placeholder="Target tonnes" />
-          <input id="dpActualTonnes" class="w-140" type="number" min="0" step="0.01" placeholder="Actual tonnes" />
-          <input id="dpNotes" class="minw-260" placeholder="Notes (optional)" />
-          <button id="createDispatchTrip">Create Trip</button>
-        </div>
-        <div class="row">
-          <label class="chk">Variance tolerance %
-            <input id="dpVarTolerance" class="w-110" type="number" min="0" step="1" value="10" />
-          </label>
-          <label class="chk"><input id="dpOnlyBreaches" type="checkbox" /> Show only breaches</label>
-          <label class="chk">From <input id="dpFrom" type="date" /></label>
-          <label class="chk">To <input id="dpTo" type="date" /></label>
-          <select id="dpStatusFilter" class="w-200">
-            <option value="">All statuses</option>
-            <option value="queued">queued</option>
-            <option value="loading">loading</option>
-            <option value="in_transit">in_transit</option>
-            <option value="delivered">delivered</option>
-            <option value="returned">returned</option>
-          </select>
-          <button id="loadDispatchTrips">Load Trips</button>
-        </div>
-        <div class="row">
-          <div class="pill blue">Trips: <span id="dpKpiTrips">0</span></div>
-          <div class="pill blue">Delivered Tonnes: <span id="dpKpiDeliveredTonnes">0</span></div>
-          <div class="pill orange">Avg Turnaround (hrs): <span id="dpKpiTurnaround">0</span></div>
-          <div class="pill blue">Delivered with POD %: <span id="dpKpiPodPct">-</span></div>
-          <div class="pill red">Open Exceptions: <span id="dpKpiExceptionsOpen">0</span></div>
-          <div class="pill">Queued: <span id="dpKpiQueued">0</span></div>
-          <div class="pill">Loading: <span id="dpKpiLoading">0</span></div>
-          <div class="pill">In Transit: <span id="dpKpiTransit">0</span></div>
-          <div class="pill">Delivered: <span id="dpKpiDelivered">0</span></div>
-          <div class="pill">Returned: <span id="dpKpiReturned">0</span></div>
-          <div class="pill red">Variance Breaches: <span id="dpKpiVarianceBreach">0</span></div>
-        </div>
-        <div class="grid stack-12">
-          <div class="card sf-lane sf-lane-plan"><h4>Queued</h4><div class="list" id="dpLaneQueued"></div></div>
-          <div class="card sf-lane sf-lane-review"><h4>Loading</h4><div class="list" id="dpLaneLoading"></div></div>
-          <div class="card sf-lane sf-lane-route"><h4>In Transit</h4><div class="list" id="dpLaneTransit"></div></div>
-          <div class="card sf-lane sf-lane-po-ready"><h4>Delivered</h4><div class="list" id="dpLaneDelivered"></div></div>
-          <div class="card sf-lane sf-lane-receive"><h4>Returned</h4><div class="list" id="dpLaneReturned"></div></div>
-        </div>
-        <div class="card">
-          <h4>POD + Exceptions</h4>
-          <div class="row">
-            <input id="dpActionTripId" class="w-110" type="number" min="1" step="1" placeholder="Trip ID" />
-            <label class="chk"><input id="dpRequirePodDelivered" type="checkbox" checked /> Require POD before Delivered</label>
+      <div class="asset-cards-grid">
+        <!-- Dispatch Header -->
+        <div class="dash-card full-width">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+              </div>
+              <div>
+                <h3>Dispatch Board</h3>
+                <p class="muted small">Manage trips, POD, and track delivery performance</p>
+              </div>
+            </div>
           </div>
-          <div class="row">
-            <input id="dpPodRef" class="w-200" placeholder="POD ref number" />
-            <input id="dpPodLink" class="minw-260" placeholder="POD link / file path (optional)" />
-            <button id="saveDispatchPod">Save POD</button>
-          </div>
-          <div class="row">
-            <select id="dpExType" class="w-200">
-              <option value="shortage">shortage</option>
-              <option value="over_delivery">over_delivery</option>
-              <option value="delay">delay</option>
-              <option value="rejection">rejection</option>
-              <option value="damage">damage</option>
-              <option value="other">other</option>
-            </select>
-            <select id="dpExSeverity" class="w-140">
-              <option value="low">low</option>
-              <option value="medium" selected>medium</option>
-              <option value="high">high</option>
-              <option value="critical">critical</option>
-            </select>
-            <input id="dpExOwner" class="w-200" placeholder="Exception owner" />
-            <input id="dpExNote" class="minw-260" placeholder="Exception note" />
-            <button id="createDispatchException">Raise Exception</button>
-          </div>
-          <div class="row">
-            <select id="dpExStatusFilter" class="w-200">
-              <option value="">All exception statuses</option>
-              <option value="open">open</option>
-              <option value="resolved">resolved</option>
-              <option value="waived">waived</option>
-            </select>
-            <label class="chk"><input id="dpExOnlyOpen" type="checkbox" /> Only Open Exceptions</label>
-            <input id="dpExResolveNote" class="minw-260" placeholder="Resolution note" />
-            <button id="loadDispatchExceptions">Load Exceptions</button>
-          </div>
-          <div class="row">
-            <div class="pill red">Open Critical: <span id="dpExKpiCritical">0</span></div>
-            <div class="pill orange">Open High: <span id="dpExKpiHigh">0</span></div>
-            <div class="pill blue">Open Medium: <span id="dpExKpiMedium">0</span></div>
-            <div class="pill">Open Low: <span id="dpExKpiLow">0</span></div>
-          </div>
-          <div class="list" id="dispatchExceptionsList"></div>
         </div>
-        <div class="list" id="dispatchList"></div>
-        <pre class="output" id="dispatchResult"></pre>
+
+        <!-- Create Trip Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+              </div>
+              <div>
+                <h3>Create Trip</h3>
+                <p class="muted small">Add new dispatch trip</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Date</label>
+                <input id="dpDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Trip No</label>
+                <input id="dpTripNo" class="w-full" placeholder="Optional" />
+              </div>
+              <div class="form-field">
+                <label>Truck Reg</label>
+                <input id="dpTruckReg" class="w-full" placeholder="Truck registration" />
+              </div>
+              <div class="form-field">
+                <label>Driver</label>
+                <input id="dpDriver" class="w-full" placeholder="Driver name" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Product</label>
+                <input id="dpProduct" class="w-full" placeholder="Product type" />
+              </div>
+              <div class="form-field">
+                <label>Client</label>
+                <input id="dpClient" class="w-full" placeholder="Client name" />
+              </div>
+              <div class="form-field">
+                <label>Target (ton)</label>
+                <input id="dpTargetTonnes" type="number" min="0" step="0.01" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Actual (ton)</label>
+                <input id="dpActualTonnes" type="number" min="0" step="0.01" class="w-full" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field form-field-full">
+                <label>Notes</label>
+                <input id="dpNotes" class="w-full" placeholder="Optional notes" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="createDispatchTrip" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                  Create Trip
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dispatch Lanes Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+              </div>
+              <div>
+                <h3>Dispatch Lanes</h3>
+                <p class="muted small">Kanban view of all trips</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Variance %</label>
+                <input id="dpVarTolerance" type="number" min="0" step="1" value="10" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label class="checkbox-label" style="margin-top: 24px;">
+                  <input id="dpOnlyBreaches" type="checkbox" />
+                  <span>Only breaches</span>
+                </label>
+              </div>
+              <div class="form-field">
+                <label>From</label>
+                <input id="dpFrom" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>To</label>
+                <input id="dpTo" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Status</label>
+                <select id="dpStatusFilter" class="w-full">
+                  <option value="">All</option>
+                  <option value="queued">queued</option>
+                  <option value="loading">loading</option>
+                  <option value="in_transit">in_transit</option>
+                  <option value="delivered">delivered</option>
+                  <option value="returned">returned</option>
+                </select>
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadDispatchTrips" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                  Load Trips
+                </button>
+              </div>
+            </div>
+            <div class="kpi-pills">
+              <span class="kpi-pill kpi-pill-blue"><strong>Trips:</strong> <span id="dpKpiTrips">0</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Delivered:</strong> <span id="dpKpiDeliveredTonnes">0</span>t</span>
+              <span class="kpi-pill kpi-pill-orange"><strong>Turnaround:</strong> <span id="dpKpiTurnaround">0</span>h</span>
+              <span class="kpi-pill kpi-pill-blue"><strong>POD %:</strong> <span id="dpKpiPodPct">-</span></span>
+              <span class="kpi-pill kpi-pill-red"><strong>Exceptions:</strong> <span id="dpKpiExceptionsOpen">0</span></span>
+            </div>
+            <div class="dispatch-lanes">
+              <div class="dispatch-lane">
+                <div class="dispatch-lane-header">Queued <span id="dpKpiQueued" class="lane-count">0</span></div>
+                <div class="list" id="dpLaneQueued"></div>
+              </div>
+              <div class="dispatch-lane">
+                <div class="dispatch-lane-header">Loading <span id="dpKpiLoading" class="lane-count">0</span></div>
+                <div class="list" id="dpLaneLoading"></div>
+              </div>
+              <div class="dispatch-lane">
+                <div class="dispatch-lane-header">In Transit <span id="dpKpiTransit" class="lane-count">0</span></div>
+                <div class="list" id="dpLaneTransit"></div>
+              </div>
+              <div class="dispatch-lane">
+                <div class="dispatch-lane-header">Delivered <span id="dpKpiDelivered" class="lane-count">0</span></div>
+                <div class="list" id="dpLaneDelivered"></div>
+              </div>
+              <div class="dispatch-lane">
+                <div class="dispatch-lane-header">Returned <span id="dpKpiReturned" class="lane-count">0</span></div>
+                <div class="list" id="dpLaneReturned"></div>
+              </div>
+            </div>
+            <div class="kpi-pills" style="margin-top: 12px;">
+              <span class="kpi-pill kpi-pill-red"><strong>Variance:</strong> <span id="dpKpiVarianceBreach">0</span></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- POD & Exceptions Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef2f2; color: #dc2626;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+              </div>
+              <div>
+                <h3>POD & Exceptions</h3>
+                <p class="muted small">Proof of delivery and exception management</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Trip ID</label>
+                <input id="dpActionTripId" type="number" min="1" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label class="checkbox-label" style="margin-top: 24px;">
+                  <input id="dpRequirePodDelivered" type="checkbox" checked />
+                  <span>Require POD before delivered</span>
+                </label>
+              </div>
+              <div class="form-field">
+                <label>POD Ref</label>
+                <input id="dpPodRef" class="w-full" placeholder="POD reference" />
+              </div>
+              <div class="form-field form-field-full">
+                <label>POD Link</label>
+                <input id="dpPodLink" class="w-full" placeholder="File path (optional)" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="saveDispatchPod" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                  Save POD
+                </button>
+              </div>
+            </div>
+            <hr style="margin: 16px 0; border: none; border-top: 1px solid #e5e7eb;">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Exception Type</label>
+                <select id="dpExType" class="w-full">
+                  <option value="shortage">shortage</option>
+                  <option value="over_delivery">over_delivery</option>
+                  <option value="delay">delay</option>
+                  <option value="rejection">rejection</option>
+                  <option value="damage">damage</option>
+                  <option value="other">other</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Severity</label>
+                <select id="dpExSeverity" class="w-full">
+                  <option value="low">low</option>
+                  <option value="medium" selected>medium</option>
+                  <option value="high">high</option>
+                  <option value="critical">critical</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Owner</label>
+                <input id="dpExOwner" class="w-full" placeholder="Exception owner" />
+              </div>
+              <div class="form-field form-field-full">
+                <label>Note</label>
+                <input id="dpExNote" class="w-full" placeholder="Exception note" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="createDispatchException" class="btn btn-danger">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                  Raise Exception
+                </button>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Status Filter</label>
+                <select id="dpExStatusFilter" class="w-full">
+                  <option value="">All</option>
+                  <option value="open">open</option>
+                  <option value="resolved">resolved</option>
+                  <option value="waived">waived</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label class="checkbox-label" style="margin-top: 24px;">
+                  <input id="dpExOnlyOpen" type="checkbox" />
+                  <span>Only open</span>
+                </label>
+              </div>
+              <div class="form-field form-field-full">
+                <label>Resolution Note</label>
+                <input id="dpExResolveNote" class="w-full" placeholder="Resolution note" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadDispatchExceptions" class="btn btn-secondary">Load Exceptions</button>
+              </div>
+            </div>
+            <div class="kpi-pills">
+              <span class="kpi-pill kpi-pill-red"><strong>Critical:</strong> <span id="dpExKpiCritical">0</span></span>
+              <span class="kpi-pill kpi-pill-orange"><strong>High:</strong> <span id="dpExKpiHigh">0</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Medium:</strong> <span id="dpExKpiMedium">0</span></span>
+              <span class="kpi-pill"><strong>Low:</strong> <span id="dpExKpiLow">0</span></span>
+            </div>
+            <div class="list" id="dispatchExceptionsList"></div>
+          </div>
+        </div>
       </div>
     </section>
 
