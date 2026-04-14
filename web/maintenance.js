@@ -24,6 +24,82 @@ function ensureMaintenanceAccess() {
   return false;
 }
 
+function initMaintSidebar() {
+  const sidebar = document.getElementById("sidebar");
+  const toggle = document.getElementById("sidebarToggle");
+  const overlay = document.getElementById("sidebarOverlay");
+  
+  if (!sidebar) return;
+  
+  // Toggle handler
+  toggle?.addEventListener("click", () => {
+    sidebar.classList.toggle("collapsed");
+    overlay?.classList.toggle("active");
+  });
+  
+  // Close sidebar on mobile when clicking overlay
+  overlay?.addEventListener("click", () => {
+    sidebar.classList.remove("collapsed");
+    overlay.classList.remove("active");
+  });
+  
+  // Navigation item clicks
+  sidebar.querySelectorAll(".nav-item").forEach((item) => {
+    item.addEventListener("click", (e) => {
+      e.preventDefault();
+      const section = item.dataset.section;
+      if (!section) return;
+      
+      // Highlight active item
+      sidebar.querySelectorAll(".nav-item").forEach(i => i.classList.remove("active"));
+      item.classList.add("active");
+      
+      // Scroll to section or trigger button
+      scrollToSection(section);
+      
+      // Close mobile sidebar
+      if (window.innerWidth <= 1024) {
+        sidebar.classList.add("collapsed");
+        overlay?.classList.remove("active");
+      }
+    });
+  });
+  
+  // Handle window resize
+  window.addEventListener("resize", () => {
+    if (window.innerWidth > 1024) {
+      sidebar.classList.remove("collapsed");
+      overlay?.classList.remove("active");
+    }
+  });
+}
+
+function scrollToSection(section) {
+  const sectionMap = {
+    "maintenance": "showMainMaintBtn",
+    "service-history": "showServiceHistoryBtn",
+    "manager-inspections": "showManagerInspectionsBtn",
+    "artisan-inspections": "showArtisanInspectionsBtn",
+    "weekly-forum": "showWeeklyForumBtn",
+    "asset-kpi": "showAssetKpiBtn",
+    "histogram": "showHistogramBtn",
+    "sync-admin": "showSyncAdminBtn"
+  };
+  
+  const btnId = sectionMap[section];
+  if (btnId) {
+    const btn = document.getElementById(btnId);
+    if (btn) {
+      btn.click();
+      // Scroll to content
+      const mainContent = document.getElementById("mainContent");
+      if (mainContent) {
+        mainContent.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+  }
+}
+
 function getSessionRole() {
   return String(localStorage.getItem(ROLE_KEY) || "admin").trim().toLowerCase() || "admin";
 }
@@ -2920,6 +2996,9 @@ async function importRsgProfilesCsv() {
 document.addEventListener("DOMContentLoaded", () => {
   if (!ensureMaintenanceAccess()) return;
   console.log("Maintenance UI loaded");
+
+  // Sidebar navigation
+  initMaintSidebar();
 
   const generateBtn = document.getElementById("generateBtn");
   const savePlanBtn = document.getElementById("savePlanBtn");

@@ -754,87 +754,127 @@
 
     <!-- DAILY INPUT -->
     <section class="panel" id="tab-daily">
-      <div class="card stack-12">
-        <h3>Daily Input</h3>
-        <p class="muted">
-          Opening hours auto-load from yesterday closing. Production assets must generate hours.
-          Standby assets cannot generate hours and are excluded from KPI calculations.
-          For vehicle rows, switch unit to KM - these rows are operational and excluded from Avail/Util KPI.
-        </p>
+      <!-- Daily Input Header -->
+      <div class="daily-header">
+        <div class="daily-header-left">
+          <h2>Daily Input</h2>
+          <p class="muted">Track production hours, downtime, and operational status for each asset</p>
+        </div>
+        <div class="daily-header-right">
+          <!-- NET BANNER -->
+          <div id="netBanner" class="netBanner">
+            <span id="netDot" class="dot"></span>
+            <span id="netText">ONLINE</span>
+            <span id="qCount" class="qCount hidden">Queued: 0</span>
+            <button id="syncNow" class="syncBtn hidden">Sync</button>
+          </div>
+        </div>
+      </div>
 
-        <!-- NET BANNER -->
-        <div id="netBanner" class="netBanner">
-          <span id="netDot" class="dot"></span>
-          <span id="netText">ONLINE</span>
-          <span id="qCount" class="qCount hidden">Queued: 0</span>
-          <button id="syncNow" class="syncBtn hidden">Sync now</button>
+      <!-- KPI Preview Cards -->
+      <div class="daily-kpi-cards">
+        <div class="kpi-card-mini kpi-avail">
+          <div class="kpi-card-mini-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+          </div>
+          <div class="kpi-card-mini-content">
+            <span class="kpi-card-mini-value" id="pAvailVal">N/A</span>
+            <span class="kpi-card-mini-label">Preview Avail</span>
+          </div>
         </div>
 
-        <div class="row stack-10">
-          <button id="loadDaily">Load Day</button>
-          <button id="copyYesterday">Copy Yesterday</button>
-          <label class="chk">
+        <div class="kpi-card-mini kpi-util">
+          <div class="kpi-card-mini-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          </div>
+          <div class="kpi-card-mini-content">
+            <span class="kpi-card-mini-value" id="pUtilVal">N/A</span>
+            <span class="kpi-card-mini-label">Preview Util</span>
+          </div>
+        </div>
+
+        <div class="kpi-card-mini kpi-scheduled">
+          <div class="kpi-card-mini-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          </div>
+          <div class="kpi-card-mini-content">
+            <span class="kpi-card-mini-value" id="kSched">0</span>
+            <span class="kpi-card-mini-label">Scheduled</span>
+          </div>
+        </div>
+
+        <div class="kpi-card-mini kpi-run">
+          <div class="kpi-card-mini-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          </div>
+          <div class="kpi-card-mini-content">
+            <span class="kpi-card-mini-value" id="kRun">0</span>
+            <span class="kpi-card-mini-label">Run</span>
+          </div>
+        </div>
+
+        <div class="kpi-card-mini kpi-used">
+          <div class="kpi-card-mini-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+          </div>
+          <div class="kpi-card-mini-content">
+            <span class="kpi-card-mini-value" id="kUsed">0</span>
+            <span class="kpi-card-mini-label">Used</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Bar -->
+      <div class="daily-actions">
+        <div class="daily-actions-left">
+          <button id="loadDaily" class="btn btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+            Load Day
+          </button>
+          <button id="copyYesterday" class="btn btn-secondary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            Copy Yesterday
+          </button>
+          <button id="saveDaily" class="btn btn-accent">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+            Save Day
+          </button>
+        </div>
+        <div class="daily-actions-center">
+          <label class="daily-filter-toggle">
             <input id="dailyDownOnly" type="checkbox" />
-            Show DOWN only
+            <span class="toggle-label">Show DOWN only</span>
           </label>
-
-          <label class="chk">Bulk scheduled
-            <input id="bulkSched" class="w-90" type="number" value="10" min="0" max="24" step="0.5" />
-          </label>
-          <button id="applyBulkSched">Apply</button>
-
-          <button id="saveDaily">Save Day</button>
-          <button id="runShiftSelfCheck">Run Shift Self-Check</button>
-          <button id="exportShiftSelfCheck">Export Self-Check TXT</button>
-          <div class="muted ml-auto" id="dailySummary"></div>
-        </div>
-
-        <!-- PREVIEW KPI -->
-        <div class="dailyKpi">
-          <div class="kpiLine">
-            <div class="pill blue" id="kUsed">Used: 0</div>
-            <div class="pill blue" id="kSched">Scheduled: 0</div>
-            <div class="pill blue" id="kRun">Run: 0</div>
-            <div class="muted" id="kNote"></div>
-          </div>
-
-          <div class="kpiGauges">
-            <div class="miniSpeedo speedo">
-              <div class="speedo-face">
-                <div class="speedo-arc"></div>
-                <div class="speedo-ticks"></div>
-                <div class="speedo-mark m0">0</div>
-                <div class="speedo-mark m50">50</div>
-                <div class="speedo-mark m100">100</div>
-                <div class="speedo-needle" id="pAvailNeedle"></div>
-                <div class="speedo-cap"></div>
-              </div>
-              <div class="speedo-readout">
-                <div class="speedo-value" id="pAvailVal">N/A</div>
-                <div class="speedo-label">PREVIEW AVAIL</div>
-              </div>
-            </div>
-
-            <div class="miniSpeedo speedo">
-              <div class="speedo-face">
-                <div class="speedo-arc"></div>
-                <div class="speedo-ticks"></div>
-                <div class="speedo-mark m0">0</div>
-                <div class="speedo-mark m50">50</div>
-                <div class="speedo-mark m100">100</div>
-                <div class="speedo-needle" id="pUtilNeedle"></div>
-                <div class="speedo-cap"></div>
-              </div>
-              <div class="speedo-readout">
-                <div class="speedo-value" id="pUtilVal">N/A</div>
-                <div class="speedo-label">PREVIEW UTIL</div>
-              </div>
-            </div>
+          <div class="bulk-sched">
+            <label>
+              <span>Bulk scheduled hrs</span>
+              <input id="bulkSched" class="w-80" type="number" value="10" min="0" max="24" step="0.5" />
+            </label>
+            <button id="applyBulkSched" class="btn btn-secondary btn-sm">Apply</button>
           </div>
         </div>
+        <div class="daily-actions-right">
+          <button id="runShiftSelfCheck" class="btn btn-secondary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+            Self-Check
+          </button>
+          <button id="exportShiftSelfCheck" class="btn btn-secondary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            Export TXT
+          </button>
+          <div class="daily-summary" id="dailySummary"></div>
+        </div>
+      </div>
 
-        <!-- TABLE -->
-        <div class="tableWrap stack-12">
+      <!-- Info Banner -->
+      <div class="daily-info-banner">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+        <span>Opening hours auto-load from yesterday closing. Production assets must generate hours. Standby assets are excluded from KPI. For vehicle rows, switch unit to KM.</span>
+      </div>
+
+      <!-- Data Table -->
+      <div class="daily-table-container">
+        <div class="tableWrap">
           <table class="gridTable">
             <thead>
               <tr>
@@ -850,10 +890,11 @@
             <tbody id="dailyBody"></tbody>
           </table>
         </div>
-
-        <pre class="output" id="dailyResult"></pre>
-        <pre class="output" id="shiftSelfCheckResult"></pre>
       </div>
+
+      <!-- Output areas -->
+      <pre class="output" id="dailyResult"></pre>
+      <pre class="output" id="shiftSelfCheckResult"></pre>
     </section>
 
     <!-- ASSETS -->

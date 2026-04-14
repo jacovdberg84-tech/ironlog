@@ -5,28 +5,109 @@
   <title>IRONLOG Maintenance</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./styles.css?v=2" />
+  <link rel="stylesheet" href="./styles.css?v=3" />
 </head>
-<body class="page-shell">
-  <div class="page-header">
-    <h2 style="margin:0; display:flex; align-items:center; gap:10px;">
-      <img src="./aml_logo.png" alt="AML logo" style="height:30px; width:auto; display:block;" />
-      <span>Maintenance Management</span>
-    </h2>
-    <div class="page-header-actions">
-      <button id="showMainMaintBtn">Main Maintenance</button>
-      <button id="showManagerInspectionsBtn">Manager Inspections</button>
-      <button id="showArtisanInspectionsBtn">Artisan Inspections</button>
-      <button id="showWeeklyForumBtn">Weekly Forum</button>
-      <button id="showAssetKpiBtn">Asset KPI</button>
-      <button id="showHistogramBtn">Histogram</button>
-      <button id="showSyncAdminBtn">Sync Admin</button>
-      <button onclick="location.href='workorders.html'">Work Orders</button>
-      <button onclick="location.href='index.html?tab=Breakdowns'">Breakdown Ops</button>
-      <button onclick="location.href='index.html?tab=ironmind'">IronMind</button>
-      <button onclick="location.href='index.html'">Dashboard</button>
+<body class="page-shell has-sidebar">
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+  
+  <header class="topbar">
+    <div class="topbar-left">
+      <button class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+      </button>
+      <div class="brand">
+        <div class="logo">
+          <img src="./aml_logo.png" alt="AML logo" />
+        </div>
+        <div>
+          <div class="title">IRONLOG</div>
+          <div class="subtitle">Maintenance</div>
+        </div>
+      </div>
     </div>
-  </div>
+    <div class="topbar-center">
+      <div class="section-breadcrumb">
+        <span class="breadcrumb-item active">Maintenance</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="session-info">
+        <span id="sessionRolesBadge" class="pill blue">admin</span>
+      </div>
+      <div class="quick-links">
+        <button onclick="location.href='index.html'" class="btn btn-secondary btn-sm">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          Dashboard
+        </button>
+        <button onclick="location.href='workorders.html'" class="btn btn-secondary btn-sm">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+          Work Orders
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-content">
+      <div class="nav-section">
+        <div class="nav-section-title">Maintenance</div>
+        <a href="#" class="nav-item active" data-section="maintenance">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+          <span>Maintenance Plans</span>
+        </a>
+        <a href="#" class="nav-item" data-section="service-history">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          <span>Service History</span>
+        </a>
+        <a href="#" class="nav-item" data-section="manager-inspections">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><polyline points="17 11 19 13 23 9"></polyline></svg>
+          <span>Manager Inspections</span>
+        </a>
+        <a href="#" class="nav-item" data-section="artisan-inspections">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+          <span>Artisan Inspections</span>
+        </a>
+        <a href="#" class="nav-item" data-section="weekly-forum">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          <span>Weekly Forum</span>
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-title">Analytics</div>
+        <a href="#" class="nav-item" data-section="asset-kpi">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+          <span>Asset KPI</span>
+        </a>
+        <a href="#" class="nav-item" data-section="histogram">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+          <span>Histogram</span>
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-title">System</div>
+        <a href="#" class="nav-item" data-section="sync-admin">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+          <span>Sync Admin</span>
+        </a>
+        <a href="#" class="nav-item" data-section="breakdowns" onclick="location.href='index.html?tab=Breakdowns'; return false;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          <span>Breakdown Ops</span>
+        </a>
+        <a href="#" class="nav-item" data-section="ironmind" onclick="location.href='index.html?tab=ironmind'; return false;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.5-.8 2.8-2 3.5V11h2a3 3 0 0 1 3 3v1H5v-1a3 3 0 0 1 3-3h2V9.5A4 4 0 0 1 12 2z"></path></svg>
+          <span>IronMind AI</span>
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="main-content" id="mainContent">
 
   <section class="panel show page-section">
   <div class="panel-header">

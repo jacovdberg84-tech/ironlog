@@ -3211,3 +3211,364 @@ body.sidebar-collapsed .main-content {
 .report-card-header:hover .report-card-title h3 {
   color: #2563eb;
 }
+
+/* =========================
+   MAINTENANCE SIDEBAR
+========================= */
+
+.has-sidebar .topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  gap: 16px;
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.has-sidebar .main-content {
+  margin-left: 260px;
+  margin-top: 64px;
+  padding: 24px;
+  min-height: calc(100vh - 64px);
+  background: #f6f8fb;
+  transition: margin-left 0.3s ease;
+}
+
+.has-sidebar .sidebar {
+  position: fixed;
+  top: 64px;
+  left: 0;
+  bottom: 0;
+  width: 260px;
+  background: #ffffff;
+  border-right: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  z-index: 900;
+  overflow-y: auto;
+  transition: transform 0.3s ease;
+}
+
+.has-sidebar .sidebar.collapsed {
+  transform: translateX(-100%);
+}
+
+.has-sidebar .sidebar-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.has-sidebar .sidebar-toggle:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.has-sidebar .brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.has-sidebar .logo img {
+  height: 32px;
+  width: auto;
+}
+
+.has-sidebar .title {
+  font-weight: 800;
+  font-size: 18px;
+  color: #1f2937;
+}
+
+.has-sidebar .subtitle {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.topbar-center {
+  flex: 1;
+}
+
+.section-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.breadcrumb-item {
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.breadcrumb-item.active {
+  color: #1f2937;
+  font-weight: 600;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.quick-links {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-sm {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+/* =========================
+   DAILY INPUT REDESIGN
+========================= */
+
+.daily-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.daily-header-left h2 {
+  font-size: 24px;
+  font-weight: 800;
+  color: #1f2937;
+  margin: 0 0 4px 0;
+}
+
+.daily-header-left p {
+  font-size: 14px;
+  color: #6b7280;
+  margin: 0;
+}
+
+.daily-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* KPI Mini Cards */
+.daily-kpi-cards {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+@media (max-width: 1200px) {
+  .daily-kpi-cards {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .daily-kpi-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.kpi-card-mini {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.kpi-card-mini:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+.kpi-card-mini-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.kpi-avail .kpi-card-mini-icon { background: #dbeafe; color: #2563eb; }
+.kpi-util .kpi-card-mini-icon { background: #d1fae5; color: #059669; }
+.kpi-scheduled .kpi-card-mini-icon { background: #e0e7ff; color: #4f46e5; }
+.kpi-run .kpi-card-mini-icon { background: #fce7f3; color: #db2777; }
+.kpi-used .kpi-card-mini-icon { background: #fef3c7; color: #d97706; }
+
+.kpi-card-mini-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.kpi-card-mini-value {
+  font-size: 24px;
+  font-weight: 800;
+  color: #1f2937;
+  line-height: 1;
+}
+
+.kpi-card-mini-label {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 4px;
+}
+
+/* Action Bar */
+.daily-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.daily-actions-left,
+.daily-actions-center,
+.daily-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.daily-actions-left {
+  flex: 1;
+}
+
+.daily-actions-right {
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.daily-filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.daily-filter-toggle:hover {
+  background: #f3f4f6;
+}
+
+.daily-filter-toggle input {
+  width: 16px;
+  height: 16px;
+}
+
+.toggle-label {
+  font-size: 13px;
+  color: #4b5563;
+  font-weight: 500;
+}
+
+.bulk-sched {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bulk-sched label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.bulk-sched input {
+  width: 70px;
+}
+
+.daily-summary {
+  font-size: 13px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+/* Info Banner */
+.daily-info-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: #1e40af;
+}
+
+.daily-info-banner svg {
+  flex-shrink: 0;
+  color: #3b82f6;
+}
+
+/* Table Container */
+.daily-table-container {
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  overflow: hidden;
+}
+
+.daily-table-container .tableWrap {
+  border: none;
+  border-radius: 0;
+}
+
+/* Old netBanner style adjustment */
+.netBanner {
+  padding: 8px 12px;
+}
+
+.netBanner .dot {
+  width: 8px;
+  height: 8px;
+}
+
+.netBanner.offline .dot { background: #ff4b4b; }
+.netBanner.syncing .dot { background: #ffc14b; }
+
+/* Old pills in dailyKpi hidden */
+#tab-daily .kpiLine { display: none; }
+#tab-daily .kpiGauges { display: none; }
