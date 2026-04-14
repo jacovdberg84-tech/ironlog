@@ -163,6 +163,25 @@ export default async function maintenanceRoutes(app) {
       FOREIGN KEY (inspection_id) REFERENCES manager_inspections(id) ON DELETE CASCADE
     )
   `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS artisan_inspections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      asset_id INTEGER NOT NULL,
+      uuid TEXT UNIQUE,
+      site_code TEXT DEFAULT 'main',
+      inspection_date TEXT NOT NULL,
+      inspector_name TEXT,
+      shift TEXT,
+      notes TEXT,
+      machine_hours REAL,
+      live_hours_snapshot REAL,
+      live_hours_source TEXT,
+      checklist_json TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE RESTRICT
+    )
+  `).run();
 
   db.prepare(`
     CREATE TABLE IF NOT EXISTS manager_damage_reports (
@@ -259,6 +278,14 @@ export default async function maintenanceRoutes(app) {
   ensureColumn("manager_inspections", "checklist_json TEXT", "checklist_json");
   ensureColumn("manager_inspections", "required_parts_json TEXT", "required_parts_json");
   ensureColumn("manager_inspections", "work_order_id INTEGER", "work_order_id");
+  ensureColumn("artisan_inspections", "uuid TEXT", "uuid");
+  ensureColumn("artisan_inspections", "site_code TEXT DEFAULT 'main'", "site_code");
+  ensureColumn("artisan_inspections", "updated_at TEXT", "updated_at");
+  ensureColumn("artisan_inspections", "machine_hours REAL", "machine_hours");
+  ensureColumn("artisan_inspections", "live_hours_snapshot REAL", "live_hours_snapshot");
+  ensureColumn("artisan_inspections", "live_hours_source TEXT", "live_hours_source");
+  ensureColumn("artisan_inspections", "checklist_json TEXT", "checklist_json");
+  ensureColumn("artisan_inspections", "shift TEXT", "shift");
   ensureColumn("manager_inspection_photos", "uuid TEXT", "uuid");
   ensureColumn("manager_inspection_photos", "site_code TEXT DEFAULT 'main'", "site_code");
   ensureColumn("manager_inspection_photos", "updated_at TEXT", "updated_at");
@@ -2392,6 +2419,18 @@ export default async function maintenanceRoutes(app) {
       .filter((x) => x.key && x.label);
   }
 
+  function normalizeArtisanInspectionChecklist(raw) {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((x) => ({
+        key: String(x?.key || "").trim(),
+        label: String(x?.label || "").trim(),
+        ok: x?.ok === true ? true : x?.ok === false ? false : null,
+        note: String(x?.note || "").trim() || null,
+      }))
+      .filter((x) => x.key && x.label);
+  }
+
   function normalizeInspectionParts(raw) {
     if (!Array.isArray(raw)) return [];
     const out = [];
@@ -2598,6 +2637,127 @@ export default async function maintenanceRoutes(app) {
         file_path: `/${relPath}`,
         caption,
       });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  // =====================================================
+  // ARTISAN INSPECTIONS (daily general checklist)
+  // =====================================================
+  app.get("/artisan-inspections", async (req, reply) => {
+    try {
+      const assetId = Number(req.query?.asset_id || 0);
+      const start = String(req.query?.start || "").trim();
+      const end = String(req.query?.end || "").trim();
+      const params = [];
+      const where = [];
+      if (assetId > 0) {
+        where.push("ai.asset_id = ?");
+        params.push(assetId);
+      }
+      if (isDate(start)) {
+        where.push("ai.inspection_date >= ?");
+        params.push(start);
+      }
+      if (isDate(end)) {
+        where.push("ai.inspection_date <= ?");
+        params.push(end);
+      }
+
+      const rows = db.prepare(`
+        SELECT
+          ai.id,
+          ai.asset_id,
+          ai.inspection_date,
+          ai.inspector_name,
+          ai.shift,
+          ai.notes,
+          ai.machine_hours,
+          ai.live_hours_snapshot,
+          ai.live_hours_source,
+          ai.checklist_json,
+          ai.created_at,
+          a.asset_code,
+          a.asset_name
+        FROM artisan_inspections ai
+        JOIN assets a ON a.id = ai.asset_id
+        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+        ORDER BY ai.inspection_date DESC, ai.id DESC
+      `).all(...params);
+
+      return reply.send({
+        ok: true,
+        rows: rows.map((r) => {
+          let checklist = [];
+          try {
+            const cj = JSON.parse(String(r.checklist_json || "[]"));
+            if (Array.isArray(cj)) checklist = cj;
+          } catch {}
+          return { ...r, checklist };
+        }),
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  app.post("/artisan-inspections", async (req, reply) => {
+    try {
+      const asset_id = Number(req.body?.asset_id || 0);
+      const inspection_date = String(req.body?.inspection_date || "").trim() || new Date().toISOString().slice(0, 10);
+      const inspector_name = String(req.body?.inspector_name || "").trim() || null;
+      const shift = String(req.body?.shift || "").trim().toLowerCase() || null;
+      const notes = String(req.body?.notes || "").trim() || null;
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+
+      if (!asset_id) return reply.code(400).send({ ok: false, error: "asset_id is required" });
+      if (!isDate(inspection_date)) return reply.code(400).send({ ok: false, error: "inspection_date must be YYYY-MM-DD" });
+      if (shift && !["day", "night"].includes(shift)) {
+        return reply.code(400).send({ ok: false, error: "shift must be day or night" });
+      }
+
+      const asset = db.prepare(`SELECT id FROM assets WHERE id = ?`).get(asset_id);
+      if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
+
+      const liveInfo = getAssetHoursInfoAsOf(asset_id, inspection_date);
+      const liveSnap = Number(liveInfo.hours || 0);
+      const liveSource = String(liveInfo.source || "");
+
+      let machine_hours = null;
+      const mhRaw = req.body?.machine_hours;
+      if (mhRaw != null && mhRaw !== "") {
+        const n = Number(mhRaw);
+        if (Number.isFinite(n) && n >= 0) machine_hours = n;
+      }
+      if (machine_hours == null) machine_hours = liveSnap;
+
+      const checklist = normalizeArtisanInspectionChecklist(req.body?.checklist);
+      const checklist_json = JSON.stringify(checklist);
+
+      const ins = db.prepare(`
+        INSERT INTO artisan_inspections (
+          asset_id, uuid, site_code, inspection_date, inspector_name, shift, notes,
+          machine_hours, live_hours_snapshot, live_hours_source, checklist_json, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `).run(
+        asset_id,
+        crypto.randomUUID(),
+        site_code,
+        inspection_date,
+        inspector_name,
+        shift,
+        notes,
+        machine_hours,
+        liveSnap,
+        liveSource,
+        checklist_json
+      );
+
+      return reply.send({ ok: true, id: Number(ins.lastInsertRowid) });
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message });

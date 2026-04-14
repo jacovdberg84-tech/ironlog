@@ -2697,6 +2697,121 @@ export default async function reportsRoutes(app) {
       .send(pdf);
   });
 
+  // GET /api/reports/artisan-inspection/:id.pdf?download=1
+  app.get("/artisan-inspection/:id.pdf", async (req, reply) => {
+    const id = Number(req.params?.id || 0);
+    const download = String(req.query?.download || "").trim() === "1";
+    if (!Number.isFinite(id) || id <= 0) {
+      return reply.code(400).send({ error: "valid inspection id required" });
+    }
+
+    const aiInspectorCol = pickExistingColumn("artisan_inspections", ["inspector_name", "inspector"], "inspector_name");
+    const hasAiMachineHours = hasColumn("artisan_inspections", "machine_hours");
+    const hasAiLiveSnap = hasColumn("artisan_inspections", "live_hours_snapshot");
+    const hasAiShift = hasColumn("artisan_inspections", "shift");
+    const hasAiChecklist = hasColumn("artisan_inspections", "checklist_json");
+    const hasAiLiveSource = hasColumn("artisan_inspections", "live_hours_source");
+    const legacyMeterSql = `COALESCE((
+          SELECT MAX(dh.closing_hours)
+          FROM daily_hours dh
+          WHERE dh.asset_id = ai.asset_id
+            AND dh.closing_hours IS NOT NULL
+            AND dh.work_date <= ai.inspection_date
+        ), 0)`;
+    const machineHoursSelect = hasAiMachineHours
+      ? `COALESCE(ai.machine_hours, ${legacyMeterSql})`
+      : legacyMeterSql;
+    const liveSnapSelect = hasAiLiveSnap
+      ? `COALESCE(ai.live_hours_snapshot, ${legacyMeterSql})`
+      : legacyMeterSql;
+    const liveSourceSelect = hasAiLiveSource ? "ai.live_hours_source" : "''";
+
+    const inspection = db.prepare(`
+      SELECT
+        ai.id,
+        ai.inspection_date,
+        ai.${aiInspectorCol} AS inspector_name,
+        ai.notes,
+        ${hasAiShift ? "ai.shift" : "''"} AS shift,
+        ${machineHoursSelect} AS machine_hours,
+        ${liveSnapSelect} AS live_hours_snapshot,
+        ${liveSourceSelect} AS live_hours_source,
+        ${hasAiChecklist ? "ai.checklist_json" : `''`} AS checklist_json,
+        a.asset_code,
+        a.asset_name,
+        a.category
+      FROM artisan_inspections ai
+      JOIN assets a ON a.id = ai.asset_id
+      WHERE ai.id = ?
+    `).get(id);
+    if (!inspection) return reply.code(404).send({ error: "artisan inspection not found" });
+
+    const logoPath = path.join(process.cwd(), "branding", "logo.png");
+    const pdf = await buildPdfBuffer(
+      (doc) => {
+        tryDrawLogo(doc, logoPath);
+
+        sectionTitle(doc, "Daily Artisan Inspection");
+        kvGrid(doc, [
+          { k: "Inspection #", v: inspection.id },
+          { k: "Date", v: inspection.inspection_date || "" },
+          { k: "Shift", v: inspection.shift ? String(inspection.shift).toUpperCase() : "—" },
+          { k: "Inspector", v: inspection.inspector_name || "-" },
+          { k: "Asset Code", v: inspection.asset_code || "" },
+          { k: "Asset Name", v: inspection.asset_name || "" },
+          { k: "Recorded machine hours", v: Number(inspection.machine_hours || 0).toFixed(1) },
+          {
+            k: "Live hours (snapshot)",
+            v: `${Number(inspection.live_hours_snapshot ?? inspection.machine_hours ?? 0).toFixed(1)}${
+              inspection.live_hours_source ? ` (${inspection.live_hours_source})` : ""
+            }`,
+          },
+          { k: "Category", v: inspection.category || "" },
+        ], 2);
+
+        let checklist = [];
+        try {
+          const cj = JSON.parse(String(inspection.checklist_json || "[]"));
+          if (Array.isArray(cj)) checklist = cj;
+        } catch {}
+        if (checklist.length) {
+          sectionTitle(doc, "General checklist");
+          doc.font("Helvetica").fontSize(10).fillColor("#111111");
+          for (const c of checklist) {
+            const st = c.ok === true ? "OK" : c.ok === false ? "FAIL" : "N/A";
+            doc.text(`• ${String(c.label || c.key || "")}: ${st}${c.note ? ` — ${c.note}` : ""}`, {
+              width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+            });
+            doc.moveDown(0.15);
+          }
+        }
+
+        sectionTitle(doc, "Notes");
+        doc
+          .font("Helvetica")
+          .fontSize(10)
+          .fillColor("#111111")
+          .text(compactCell(inspection.notes || "-", 2000), {
+            width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+          });
+      },
+      {
+        title: "IRONLOG",
+        subtitle: "Artisan Inspection Report",
+        rightText: `Inspection #${inspection.id}`,
+        showPageNumbers: true,
+      }
+    );
+
+    reply
+      .header("Content-Type", "application/pdf")
+      .header(
+        "Content-Disposition",
+        `${download ? "attachment" : "inline"}; filename="AML_Artisan_Inspection_${inspection.id}.pdf"`
+      )
+      .send(pdf);
+  });
+
   // GET /api/reports/manager-inspection/:id.pdf?download=1
   app.get("/manager-inspection/:id.pdf", async (req, reply) => {
     const id = Number(req.params?.id || 0);

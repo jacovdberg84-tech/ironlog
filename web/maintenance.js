@@ -835,12 +835,14 @@ function syncHeaders() {
 function setTopView(view) {
   const main = document.getElementById("mainMaintenanceCards");
   const mi = document.getElementById("managerInspectionsCard");
+  const ai = document.getElementById("artisanInspectionsCard");
   const wf = document.getElementById("weeklyForumCard");
   const kpi = document.getElementById("assetKpiCard");
   const hist = document.getElementById("histogramCard");
   const sync = document.getElementById("syncAdminCard");
   const btnMain = document.getElementById("showMainMaintBtn");
   const btnMi = document.getElementById("showManagerInspectionsBtn");
+  const btnAi = document.getElementById("showArtisanInspectionsBtn");
   const btnWf = document.getElementById("showWeeklyForumBtn");
   const btnKpi = document.getElementById("showAssetKpiBtn");
   const btnHist = document.getElementById("showHistogramBtn");
@@ -849,6 +851,7 @@ function setTopView(view) {
 
   main.style.display = view === "main" ? "" : "none";
   mi.style.display = view === "mi" ? "" : "none";
+  if (ai) ai.style.display = view === "ai" ? "" : "none";
   wf.style.display = view === "wf" ? "" : "none";
   if (kpi) kpi.style.display = view === "kpi" ? "" : "none";
   if (hist) hist.style.display = view === "hist" ? "" : "none";
@@ -862,6 +865,7 @@ function setTopView(view) {
   };
   styleBtn(btnMain, view === "main");
   styleBtn(btnMi, view === "mi");
+  styleBtn(btnAi, view === "ai");
   styleBtn(btnWf, view === "wf");
   styleBtn(btnKpi, view === "kpi");
   styleBtn(btnHist, view === "hist");
@@ -1253,6 +1257,8 @@ async function syncCheckpointLastPull() {
 async function loadAssetsForInspection() {
   const selA = document.getElementById("miAsset");
   const selF = document.getElementById("miFilterAsset");
+  const aiA = document.getElementById("aiAsset");
+  const aiF = document.getElementById("aiFilterAsset");
   const drA = document.getElementById("drAsset");
   const drF = document.getElementById("drFilterAsset");
   if (!selA || !selF) return;
@@ -1267,11 +1273,15 @@ async function loadAssetsForInspection() {
       .join("");
     selA.innerHTML = `<option value="">Select asset</option>${opts}`;
     selF.innerHTML = `<option value="">All assets</option>${opts}`;
+    if (aiA) aiA.innerHTML = `<option value="">Select asset</option>${opts}`;
+    if (aiF) aiF.innerHTML = `<option value="">All assets</option>${opts}`;
     if (drA) drA.innerHTML = `<option value="">Select asset</option>${opts}`;
     if (drF) drF.innerHTML = `<option value="">All assets</option>${opts}`;
   } catch (e) {
     selA.innerHTML = `<option value="">Assets load failed</option>`;
     selF.innerHTML = `<option value="">Assets load failed</option>`;
+    if (aiA) aiA.innerHTML = `<option value="">Assets load failed</option>`;
+    if (aiF) aiF.innerHTML = `<option value="">Assets load failed</option>`;
     if (drA) drA.innerHTML = `<option value="">Assets load failed</option>`;
     if (drF) drF.innerHTML = `<option value="">Assets load failed</option>`;
   }
@@ -1846,6 +1856,197 @@ function resetManagerInspectionForm() {
   if (al) al.checked = false;
   const lm = document.getElementById("miLiveMeta");
   if (lm) lm.textContent = "";
+}
+
+const ARTISAN_INSPECTION_CHECKLIST = [
+  { key: "prestart", label: "Pre-start visual condition (machine / plant)" },
+  { key: "guards", label: "Guards, covers, and safety devices" },
+  { key: "hydraulics", label: "Hydraulic hoses, leaks, and fittings" },
+  { key: "electrical", label: "Electrical panels / cabling / lights" },
+  { key: "lubrication", label: "Lubrication points / levels" },
+  { key: "brakes_steering", label: "Brakes / steering / controls response" },
+  { key: "alarms", label: "Alarms, horn, and warning systems" },
+  { key: "housekeeping", label: "Housekeeping around machine / plant" },
+];
+
+function renderArtisanInspectionChecklist() {
+  const host = document.getElementById("aiChecklist");
+  if (!host) return;
+  host.innerHTML = ARTISAN_INSPECTION_CHECKLIST.map(
+    (row) => `
+    <div class="row stack-10" style="align-items:center; flex-wrap:wrap; gap:8px;">
+      <span style="min-width:240px; font-size:13px;">${esc(row.label)}</span>
+      <span class="row stack-10" style="gap:10px;">
+        <label><input type="radio" name="aiChk-${esc(row.key)}" value="ok" /> OK</label>
+        <label><input type="radio" name="aiChk-${esc(row.key)}" value="fail" /> Fail</label>
+        <label><input type="radio" name="aiChk-${esc(row.key)}" value="na" /> N/A</label>
+      </span>
+      <input type="text" class="w-200 ai-chk-note" data-ai-chk="${esc(row.key)}" placeholder="Note (optional)" />
+    </div>`
+  ).join("");
+}
+
+function collectArtisanInspectionChecklist() {
+  return ARTISAN_INSPECTION_CHECKLIST.map((row) => {
+    const sel = document.querySelector(`input[name="aiChk-${row.key}"]:checked`);
+    const val = sel ? String(sel.value || "") : "";
+    let ok = null;
+    if (val === "ok") ok = true;
+    else if (val === "fail") ok = false;
+    const noteEl = document.querySelector(`input.ai-chk-note[data-ai-chk="${row.key}"]`);
+    const note = String(noteEl?.value || "").trim() || null;
+    return { key: row.key, label: row.label, ok, note };
+  });
+}
+
+async function pullArtisanInspectionLiveHours() {
+  const assetId = Number(document.getElementById("aiAsset")?.value || 0);
+  const inspectionDate = String(document.getElementById("aiDate")?.value || "").trim();
+  const meta = document.getElementById("aiLiveMeta");
+  const inp = document.getElementById("aiMachineHours");
+  if (!assetId) {
+    if (meta) meta.textContent = "Select an asset first.";
+    return;
+  }
+  if (meta) meta.textContent = "Loading live hours…";
+  try {
+    const q = new URLSearchParams();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(inspectionDate)) q.set("as_of", inspectionDate);
+    const qs = q.toString();
+    const url = `${API}/maintenance/asset/${assetId}/live-hours${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || "Failed to load live hours");
+    const h = Number(data.current_hours ?? 0);
+    const src = String(data.current_hours_source || "");
+    const asOf = data.as_of ? ` up to ${data.as_of}` : "";
+    if (inp) inp.value = Number.isFinite(h) ? String(Number(h).toFixed(1)) : "";
+    const srcLabel = {
+      daily_closing: "Daily closing",
+      daily_sum: "Daily sum",
+      asset_hours: "Asset hours",
+    }[src] || src || "—";
+    if (meta) meta.textContent = `Live${asOf}: ${Number.isFinite(h) ? h.toFixed(1) : "—"} h (${srcLabel})`;
+  } catch (e) {
+    if (meta) meta.textContent = e.message || String(e);
+  }
+}
+
+function resetArtisanInspectionForm() {
+  const notes = document.getElementById("aiNotes");
+  if (notes) notes.value = "";
+  const shift = document.getElementById("aiShift");
+  if (shift) shift.value = "";
+  const live = document.getElementById("aiLiveMeta");
+  if (live) live.textContent = "";
+  ARTISAN_INSPECTION_CHECKLIST.forEach((row) => {
+    document.querySelectorAll(`input[name="aiChk-${row.key}"]`).forEach((r) => {
+      r.checked = false;
+    });
+    const ne = document.querySelector(`input.ai-chk-note[data-ai-chk="${row.key}"]`);
+    if (ne) ne.value = "";
+  });
+}
+
+async function saveArtisanInspection() {
+  const asset_id = Number(document.getElementById("aiAsset")?.value || 0);
+  const inspection_date = String(document.getElementById("aiDate")?.value || "").trim();
+  const inspector_name = String(document.getElementById("aiInspector")?.value || "").trim();
+  const shift = String(document.getElementById("aiShift")?.value || "").trim().toLowerCase();
+  const notes = String(document.getElementById("aiNotes")?.value || "").trim();
+  const msg = document.getElementById("aiMsg");
+  const mhRaw = String(document.getElementById("aiMachineHours")?.value || "").trim();
+  const machine_hours = mhRaw === "" ? null : Number(mhRaw);
+  if (machine_hours != null && !Number.isFinite(machine_hours)) {
+    return alert("Machine hours must be a number.");
+  }
+  const checklist = collectArtisanInspectionChecklist();
+
+  if (!asset_id) return alert("Select an asset.");
+  if (!inspection_date) return alert("Select inspection date.");
+  if (msg) msg.textContent = "Saving artisan inspection...";
+  try {
+    const res = await fetch(`${API}/maintenance/artisan-inspections`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        asset_id,
+        inspection_date,
+        inspector_name,
+        shift: shift || null,
+        notes,
+        machine_hours,
+        checklist,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save artisan inspection");
+    if (msg) msg.textContent = "Artisan inspection saved.";
+    resetArtisanInspectionForm();
+    await loadArtisanInspections();
+  } catch (e) {
+    if (msg) msg.textContent = `Save error: ${e.message || e}`;
+  }
+}
+
+function openArtisanInspectionPdf(id, download = false) {
+  const n = Number(id || 0);
+  if (!n) return;
+  const q = download ? "?download=1" : "";
+  window.open(`${API}/reports/artisan-inspection/${n}.pdf${q}`, "_blank");
+}
+
+function artisanInspectionCard(r) {
+  const hrs = r.machine_hours != null && Number.isFinite(Number(r.machine_hours))
+    ? Number(r.machine_hours).toFixed(1)
+    : "—";
+  const live = r.live_hours_snapshot != null && Number.isFinite(Number(r.live_hours_snapshot))
+    ? `${Number(r.live_hours_snapshot).toFixed(1)} (${esc(r.live_hours_source || "—")})`
+    : "—";
+  const shift = String(r.shift || "").trim();
+  const chk = Array.isArray(r.checklist) ? r.checklist : [];
+  const fails = chk.filter((c) => c.ok === false);
+  const failLine = fails.length
+    ? `<div style="margin-top:4px;"><small class="status-overdue">Checklist fail: ${fails.map((c) => esc(c.label || c.key)).join("; ")}</small></div>`
+    : "";
+
+  return `
+    <div class="card">
+      <div><b>${esc(r.asset_code)}</b> - ${esc(r.asset_name || "")}</div>
+      <div><small>Date: ${esc(r.inspection_date)}${shift ? ` | Shift: ${esc(shift.toUpperCase())}` : ""} | Artisan: ${esc(r.inspector_name || "-")}</small></div>
+      <div><small>Machine hrs: ${esc(hrs)} | Live snapshot: ${live}</small></div>
+      ${failLine}
+      <div style="margin-top:6px;"><small>${esc(r.notes || "")}</small></div>
+      <div class="row stack-10" style="margin-top:8px;">
+        <button data-ai-open-pdf="${Number(r.id)}">Open PDF</button>
+        <button data-ai-download-pdf="${Number(r.id)}">Download PDF</button>
+      </div>
+    </div>
+  `;
+}
+
+async function loadArtisanInspections() {
+  const list = document.getElementById("aiList");
+  if (!list) return;
+  list.innerHTML = `<div class="skeleton-block"></div>`;
+  const asset_id = String(document.getElementById("aiFilterAsset")?.value || "").trim();
+  const start = String(document.getElementById("aiStart")?.value || "").trim();
+  const end = String(document.getElementById("aiEnd")?.value || "").trim();
+  const q = new URLSearchParams();
+  if (asset_id) q.set("asset_id", asset_id);
+  if (start) q.set("start", start);
+  if (end) q.set("end", end);
+  try {
+    const res = await fetch(`${API}/maintenance/artisan-inspections${q.toString() ? `?${q.toString()}` : ""}`, {
+      headers: authHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load artisan inspections");
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    list.innerHTML = rows.length ? rows.map(artisanInspectionCard).join("") : `<div class="muted">No artisan inspections found.</div>`;
+  } catch (e) {
+    list.innerHTML = `<div class="message-error">Artisan inspection load error: ${esc(e.message || e)}</div>`;
+  }
 }
 function refreshWfDraftEditor() {
   const body = document.getElementById("wfItemsEditorBody");
@@ -2756,11 +2957,15 @@ document.addEventListener("DOMContentLoaded", () => {
     loadInspectproStatus().catch(() => {});
   }, 20000);
   const miDate = document.getElementById("miDate");
+  const aiDate = document.getElementById("aiDate");
   const drDate = document.getElementById("drDate");
   if (miDate && !miDate.value) miDate.value = new Date().toISOString().slice(0, 10);
+  if (aiDate && !aiDate.value) aiDate.value = new Date().toISOString().slice(0, 10);
   if (drDate && !drDate.value) drDate.value = new Date().toISOString().slice(0, 10);
   const miStart = document.getElementById("miStart");
   const miEnd = document.getElementById("miEnd");
+  const aiStart = document.getElementById("aiStart");
+  const aiEnd = document.getElementById("aiEnd");
   const drStart = document.getElementById("drStart");
   const drEnd = document.getElementById("drEnd");
   if (miStart && !miStart.value) {
@@ -2769,6 +2974,12 @@ document.addEventListener("DOMContentLoaded", () => {
     miStart.value = d.toISOString().slice(0, 10);
   }
   if (miEnd && !miEnd.value) miEnd.value = new Date().toISOString().slice(0, 10);
+  if (aiStart && !aiStart.value) {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    aiStart.value = d.toISOString().slice(0, 10);
+  }
+  if (aiEnd && !aiEnd.value) aiEnd.value = new Date().toISOString().slice(0, 10);
   if (drStart && !drStart.value) {
     const d = new Date();
     d.setDate(d.getDate() - 30);
@@ -2837,6 +3048,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (mpMonth && !mpMonth.value) mpMonth.value = mpMonthLabel();
   renderManagerInspectionChecklist();
+  renderArtisanInspectionChecklist();
   const miPartsBody = document.getElementById("miPartsBody");
   if (miPartsBody && !miPartsBody.querySelector("tr")) addManagerInspectionPartRow();
   document.getElementById("miPullLiveHoursBtn")?.addEventListener("click", () =>
@@ -2856,9 +3068,27 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   document.getElementById("miAsset")?.addEventListener("change", miReloadHours);
   document.getElementById("miDate")?.addEventListener("change", miReloadHours);
+  const aiReloadHours = () => {
+    const id = Number(document.getElementById("aiAsset")?.value || 0);
+    if (!id) {
+      const meta = document.getElementById("aiLiveMeta");
+      const inp = document.getElementById("aiMachineHours");
+      if (meta) meta.textContent = "";
+      if (inp) inp.value = "";
+      return;
+    }
+    pullArtisanInspectionLiveHours().catch((e) => console.error(e));
+  };
+  document.getElementById("aiPullLiveHoursBtn")?.addEventListener("click", () =>
+    pullArtisanInspectionLiveHours().catch((e) => console.error(e))
+  );
+  document.getElementById("aiAsset")?.addEventListener("change", aiReloadHours);
+  document.getElementById("aiDate")?.addEventListener("change", aiReloadHours);
   document.getElementById("saveMiBtn")?.addEventListener("click", saveManagerInspection);
+  document.getElementById("saveAiBtn")?.addEventListener("click", saveArtisanInspection);
   document.getElementById("saveDrBtn")?.addEventListener("click", saveDamageReport);
   document.getElementById("loadMiBtn")?.addEventListener("click", loadManagerInspections);
+  document.getElementById("loadAiBtn")?.addEventListener("click", loadArtisanInspections);
   document.getElementById("loadDrBtn")?.addEventListener("click", loadDamageReports);
   document.getElementById("openDrBulkPdfBtn")?.addEventListener("click", () => openDamageReportsBulkPdf(false));
   document.getElementById("downloadDrBulkPdfBtn")?.addEventListener("click", () => openDamageReportsBulkPdf(true));
@@ -2887,6 +3117,19 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!id) return;
     uploadInspectionPhoto(id).catch((e) => alert(`Photo upload failed: ${e.message || e}`));
   });
+  document.getElementById("aiList")?.addEventListener("click", (evt) => {
+    const openPdf = evt.target?.closest?.("button[data-ai-open-pdf]");
+    if (openPdf) {
+      const id = Number(openPdf.getAttribute("data-ai-open-pdf") || 0);
+      if (id) openArtisanInspectionPdf(id, false);
+      return;
+    }
+    const dlPdf = evt.target?.closest?.("button[data-ai-download-pdf]");
+    if (dlPdf) {
+      const id = Number(dlPdf.getAttribute("data-ai-download-pdf") || 0);
+      if (id) openArtisanInspectionPdf(id, true);
+    }
+  });
   document.getElementById("drList")?.addEventListener("click", (evt) => {
     const openPdf = evt.target?.closest?.("button[data-dr-open-pdf]");
     if (openPdf) {
@@ -2908,6 +3151,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   loadAssetsForInspection().catch(() => {});
   loadManagerInspections().catch(() => {});
+  loadArtisanInspections().catch(() => {});
   loadDamageReports().catch(() => {});
   loadWeeklyForumSummary().catch(() => {});
   loadWeeklyForumActions().catch(() => {});
@@ -2926,6 +3170,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("syncCheckpointBtn")?.addEventListener("click", syncCheckpointLastPull);
   document.getElementById("showMainMaintBtn")?.addEventListener("click", () => setTopView("main"));
   document.getElementById("showManagerInspectionsBtn")?.addEventListener("click", () => setTopView("mi"));
+  document.getElementById("showArtisanInspectionsBtn")?.addEventListener("click", () => setTopView("ai"));
   document.getElementById("showWeeklyForumBtn")?.addEventListener("click", () => setTopView("wf"));
   document.getElementById("showAssetKpiBtn")?.addEventListener("click", () => setTopView("kpi"));
   document.getElementById("showHistogramBtn")?.addEventListener("click", () => setTopView("hist"));

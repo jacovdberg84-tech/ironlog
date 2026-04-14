@@ -16,6 +16,7 @@
     <div class="page-header-actions">
       <button id="showMainMaintBtn">Main Maintenance</button>
       <button id="showManagerInspectionsBtn">Manager Inspections</button>
+      <button id="showArtisanInspectionsBtn">Artisan Inspections</button>
       <button id="showWeeklyForumBtn">Weekly Forum</button>
       <button id="showAssetKpiBtn">Asset KPI</button>
       <button id="showHistogramBtn">Histogram</button>
@@ -471,6 +472,48 @@
         <button id="downloadDrBulkPdfPhotosBtn">Download Damage PDF (Photos)</button>
       </div>
       <div id="drList" class="list"></div>
+    </div>
+
+    <div id="artisanInspectionsCard" class="card stack-24" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0;">Daily Artisan Inspections</h3>
+      </div>
+      <div class="row stack-10">
+        <select id="aiAsset" class="w-200"></select>
+        <input id="aiDate" type="date" />
+        <select id="aiShift" class="w-200">
+          <option value="">Shift (optional)</option>
+          <option value="day">Day</option>
+          <option value="night">Night</option>
+        </select>
+        <input id="aiInspector" class="w-200" placeholder="Artisan name" />
+      </div>
+      <div class="row stack-10" style="align-items:flex-end; flex-wrap:wrap;">
+        <div>
+          <small class="muted">Machine hours (recorded)</small><br />
+          <input id="aiMachineHours" type="number" step="0.1" min="0" class="w-200" placeholder="Hours" />
+        </div>
+        <button type="button" id="aiPullLiveHoursBtn">Pull from live hours</button>
+        <div id="aiLiveMeta" class="muted" style="min-width:200px;"></div>
+      </div>
+      <div style="margin-top:12px;">
+        <div style="font-weight:600; margin-bottom:8px;">General machine / plant checklist</div>
+        <div id="aiChecklist" class="stack-10"></div>
+      </div>
+      <textarea id="aiNotes" rows="3" placeholder="Additional notes..." style="width:100%;"></textarea>
+      <div class="row stack-10">
+        <button id="saveAiBtn">Save Artisan Inspection</button>
+      </div>
+      <div id="aiMsg" class="muted"></div>
+
+      <hr class="hr-soft" />
+      <div class="row stack-10">
+        <select id="aiFilterAsset" class="w-200"></select>
+        <input id="aiStart" type="date" />
+        <input id="aiEnd" type="date" />
+        <button id="loadAiBtn">Load Inspections</button>
+      </div>
+      <div id="aiList" class="list"></div>
     </div>
 
     <div id="weeklyForumCard" class="card stack-24" style="display:none;">
