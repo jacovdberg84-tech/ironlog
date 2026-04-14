@@ -108,7 +108,7 @@ function initMaintCollapsibles() {
   });
 }
 
-function scrollToSection(section) {
+function viewForSection(section) {
   const viewMap = {
     "maintenance": "main",
     "service-history": "main",
@@ -117,10 +117,13 @@ function scrollToSection(section) {
     "weekly-forum": "wf",
     "asset-kpi": "kpi",
     "histogram": "hist",
-    "sync-admin": "sync"
+    "sync-admin": "sync",
   };
-  
-  const targetView = viewMap[section];
+  return viewMap[String(section || "").trim()] || "";
+}
+
+function scrollToSection(section) {
+  const targetView = viewForSection(section);
   if (targetView) {
     setTopView(targetView);
     
@@ -1013,22 +1016,22 @@ function setTopView(view) {
       if (planSection) planSection.style.display = "";
       break;
     case "mi":
-      if (mi) mi.style.display = "";
+      if (mi) mi.style.display = "block";
       break;
     case "ai":
-      if (ai) ai.style.display = "";
+      if (ai) ai.style.display = "block";
       break;
     case "wf":
-      if (wf) wf.style.display = "";
+      if (wf) wf.style.display = "block";
       break;
     case "kpi":
-      if (kpi) kpi.style.display = "";
+      if (kpi) kpi.style.display = "block";
       break;
     case "hist":
-      if (hist) hist.style.display = "";
+      if (hist) hist.style.display = "block";
       break;
     case "sync":
-      if (sync) sync.style.display = "";
+      if (sync) sync.style.display = "block";
       break;
   }
 
@@ -3124,6 +3127,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Sidebar navigation
   initMaintSidebar();
+  // Fallback delegated handler: ensures section switching always works
+  // even if direct listeners are interrupted by future sidebar markup edits.
+  document.addEventListener("click", (evt) => {
+    const item = evt.target instanceof HTMLElement ? evt.target.closest(".nav-item[data-section]") : null;
+    if (!item) return;
+    const section = String(item.getAttribute("data-section") || "").trim();
+    const v = viewForSection(section);
+    if (!v) return;
+    evt.preventDefault();
+    setTopView(v);
+  });
   
   // Initialize collapsible cards
   initMaintCollapsibles();
