@@ -2787,6 +2787,84 @@ body.sidebar-collapsed .main-content {
   display: none;
 }
 
+.dash-card.collapsed {
+  background: #fafafa;
+}
+
+.dash-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dash-card-actions .report-card-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: #f3f4f6;
+  border-radius: 8px;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dash-card-actions .report-card-toggle:hover {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+/* IronMind specific styles */
+.ironmind-context {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.ironmind-context:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.ironmind-body {
+  margin-top: 12px;
+  padding: 12px;
+  background: #f9fafb;
+  border-radius: 8px;
+  min-height: 60px;
+}
+
+.ironmind-history-pane {
+  margin-top: 16px;
+  padding: 12px;
+  background: #f9fafb;
+  border-radius: 8px;
+}
+
+.ironmind-history-pane summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #374151;
+}
+
+.ironmind-history-pane summary:hover {
+  color: #1f2937;
+}
+
+.ironmind-history-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
 /* Maintenance Section Wrapper */
 .maint-section {
   display: none;

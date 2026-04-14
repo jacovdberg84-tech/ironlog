@@ -545,99 +545,215 @@
 
     <!-- IRONMIND -->
     <section class="panel" id="tab-ironmind">
-      <div class="card stack-12">
-        <h3>IronMind (Maintenance Intelligence)</h3>
-        <p class="muted">Daily insights, predicted failures, and RSG work-order generation.</p>
-      </div>
-
-      <div class="card" style="margin:12px 0;">
-        <div class="metric-header">IRONMIND Daily Insight</div>
-        <div class="row">
-          <button id="ironmindRefreshBtn">Refresh Insight</button>
-          <small class="muted" id="ironmindMeta">No report loaded yet.</small>
-          <small class="muted" id="ironmindHealth">OpenAI status: checking...</small>
-        </div>
-        <div class="row stack-6">
-          <textarea
-            id="ironmindContext"
-            class="ironmind-context"
-            rows="4"
-            placeholder="Optional extra context for IRONMIND (weather, incidents, priorities, planned constraints)..."
-          ></textarea>
-          <label class="chk">
-            <input id="ironmindDetailMode" type="checkbox" />
-            More detailed insight
-          </label>
-        </div>
-        <div class="row stack-6">
-          <textarea
-            id="ironmindAskInput"
-            class="ironmind-context"
-            rows="3"
-            placeholder="Ask IronMind anything about maintenance, risk, downtime, PM overdue, fuel trends, and operations context... (Ctrl+Enter to send)"
-          ></textarea>
-          <button id="ironmindAskBtn">Ask</button>
-          <button id="ironmindResetMemoryBtn" type="button">Reset Memory</button>
-        </div>
-        <div class="output ironmind-body" id="ironmindAskResult">
-          <small class="muted">Ask a question for short operational answers.</small>
-        </div>
-        <div class="output ironmind-body" id="ironmindSummary">
-          <small class="muted">Loading IRONMIND insight...</small>
-        </div>
-        <details class="ironmind-history-pane">
-          <summary>IRONMIND history (last 7 days)</summary>
-          <div class="row stack-6 ironmind-history-controls">
-            <label class="chk">
-              <input id="ironmindShowMissingDays" type="checkbox" />
-              Include missing days
-            </label>
-            <button id="ironmindReloadHistory">Reload history</button>
+      <div class="asset-cards-grid">
+        <!-- IronMind Header Card -->
+        <div class="dash-card full-width">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.5-.8 2.8-2 3.5V11h2a3 3 0 0 1 3 3v1H5v-1a3 3 0 0 1 3-3h2V9.5A4 4 0 0 1 12 2z"></path></svg>
+              </div>
+              <div>
+                <h3>IronMind (Maintenance Intelligence)</h3>
+                <p class="muted small">Daily insights, predicted failures, and RSG work-order generation.</p>
+              </div>
+            </div>
           </div>
-          <div class="list" id="ironmindHistoryList">
-            <small class="muted">No history loaded yet.</small>
-          </div>
-        </details>
-      </div>
-
-      <div class="card" style="margin:12px 0;">
-        <h3>IronMind Hour Thresholds</h3>
-        <p class="muted">Tune trusted daily run-hour caps used for overdue/anomaly calculations.</p>
-        <div class="row stack-6">
-          <label>Global
-            <input id="ironmindMaxRunGlobal" type="number" min="1" step="1" value="24" class="w-110" />
-          </label>
-          <label>LDV
-            <input id="ironmindMaxRunLdv" type="number" min="1" step="1" value="16" class="w-110" />
-          </label>
-          <label>Truck
-            <input id="ironmindMaxRunTruck" type="number" min="1" step="1" value="18" class="w-110" />
-          </label>
-          <label>Heavy
-            <input id="ironmindMaxRunHeavy" type="number" min="1" step="1" value="24" class="w-110" />
-          </label>
-          <button id="ironmindSaveSettingsBtn">Save Thresholds</button>
         </div>
-        <small class="muted" id="ironmindSettingsMeta">Using current thresholds.</small>
-      </div>
 
-      <div class="grid stack-12">
-        <div class="card">
-          <h3>Top Predicted Failures (7d)</h3>
-          <div class="list" id="riskBoardList"></div>
-          <p class="muted">Highest current equipment risk by score and confidence.</p>
-        </div>
-        <div class="card">
-          <h3>RSG Service Guide -> Work Order</h3>
-          <div class="row">
-            <input id="ironmindRsgAssetCode" list="assetCodeOptions" class="w-140" placeholder="Asset code" />
-            <input id="ironmindRsgHours" class="w-110" type="number" min="250" step="50" value="2000" />
-            <button id="ironmindRsgPlanBtn">Generate Plan</button>
-            <button id="ironmindRsgPreviewPdfBtn">Preview PDF</button>
-            <button id="ironmindRsgDownloadPdfBtn">Download PDF</button>
-            <button id="ironmindRsgCreateWoBtn">Create WO</button>
+        <!-- Daily Insight Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              </div>
+              <div>
+                <h3>IRONMIND Daily Insight</h3>
+                <p class="muted small" id="ironmindMeta">No report loaded yet.</p>
+              </div>
+            </div>
+            <div class="dash-card-actions">
+              <span class="dash-card-badge" id="ironmindHealth">OpenAI: checking...</span>
+              <button class="report-card-toggle" aria-label="Toggle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+              </button>
+            </div>
           </div>
-          <pre class="output" id="ironmindRsgResult"></pre>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field form-field-action">
+                <button id="ironmindRefreshBtn" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                  Refresh Insight
+                </button>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field form-field-full">
+                <label>Extra Context</label>
+                <textarea id="ironmindContext" class="ironmind-context" rows="3" placeholder="Optional extra context for IRONMIND (weather, incidents, priorities, planned constraints)..."></textarea>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label class="checkbox-label">
+                  <input id="ironmindDetailMode" type="checkbox" />
+                  <span>More detailed insight</span>
+                </label>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field form-field-full">
+                <label>Ask IronMind</label>
+                <textarea id="ironmindAskInput" class="ironmind-context" rows="2" placeholder="Ask IronMind anything about maintenance, risk, downtime, PM overdue, fuel trends... (Ctrl+Enter to send)"></textarea>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="ironmindAskBtn" class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                Ask
+              </button>
+              <button id="ironmindResetMemoryBtn" class="btn btn-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+                Reset Memory
+              </button>
+            </div>
+            <div class="output ironmind-body" id="ironmindAskResult">
+              <small class="muted">Ask a question for short operational answers.</small>
+            </div>
+            <div class="output ironmind-body" id="ironmindSummary">
+              <small class="muted">Loading IRONMIND insight...</small>
+            </div>
+            <details class="ironmind-history-pane" style="margin-top: 16px;">
+              <summary><b>IRONMIND history (last 7 days)</b></summary>
+              <div class="row stack-6 ironmind-history-controls" style="margin-top: 10px;">
+                <label class="checkbox-label">
+                  <input id="ironmindShowMissingDays" type="checkbox" />
+                  <span>Include missing days</span>
+                </label>
+                <button id="ironmindReloadHistory" class="btn btn-secondary btn-sm">Reload history</button>
+              </div>
+              <div class="list" id="ironmindHistoryList">
+                <small class="muted">No history loaded yet.</small>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <!-- Hour Thresholds Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              </div>
+              <div>
+                <h3>Hour Thresholds</h3>
+                <p class="muted small">Trusted daily run-hour caps for overdue/anomaly calculations</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Global</label>
+                <input id="ironmindMaxRunGlobal" type="number" min="1" step="1" value="24" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>LDV</label>
+                <input id="ironmindMaxRunLdv" type="number" min="1" step="1" value="16" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Truck</label>
+                <input id="ironmindMaxRunTruck" type="number" min="1" step="1" value="18" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Heavy</label>
+                <input id="ironmindMaxRunHeavy" type="number" min="1" step="1" value="24" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="ironmindSaveSettingsBtn" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                  Save
+                </button>
+              </div>
+            </div>
+            <small class="muted" id="ironmindSettingsMeta">Using current thresholds.</small>
+          </div>
+        </div>
+
+        <!-- Top Predicted Failures Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef2f2; color: #dc2626;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+              </div>
+              <div>
+                <h3>Top Predicted Failures (7d)</h3>
+                <p class="muted small">Highest equipment risk by score and confidence</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="list" id="riskBoardList"></div>
+          </div>
+        </div>
+
+        <!-- RSG Service Guide Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+              </div>
+              <div>
+                <h3>RSG Service Guide</h3>
+                <p class="muted small">Generate service guide and create work orders</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Asset Code</label>
+                <input id="ironmindRsgAssetCode" list="assetCodeOptions" class="w-full" placeholder="Select asset" />
+              </div>
+              <div class="form-field">
+                <label>Service Hours</label>
+                <input id="ironmindRsgHours" type="number" min="250" step="50" value="2000" class="w-full" />
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="ironmindRsgPlanBtn" class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+                Generate Plan
+              </button>
+              <button id="ironmindRsgPreviewPdfBtn" class="btn btn-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                Preview PDF
+              </button>
+              <button id="ironmindRsgDownloadPdfBtn" class="btn btn-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Download PDF
+              </button>
+              <button id="ironmindRsgCreateWoBtn" class="btn btn-success">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+                Create WO
+              </button>
+            </div>
+            <pre class="output" id="ironmindRsgResult"></pre>
+          </div>
         </div>
       </div>
     </section>
