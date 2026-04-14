@@ -1815,7 +1815,9 @@ async function loadManagerInspections() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to load inspections");
-    const rows = Array.isArray(data.rows) ? data.rows : [];
+    const rows = Array.isArray(data.rows)
+      ? data.rows
+      : (Array.isArray(data.data) ? data.data : []);
     list.innerHTML = rows.length ? rows.map(inspectionCard).join("") : `<div class="muted">No inspections found.</div>`;
   } catch (e) {
     list.innerHTML = `<div class="message-error">Inspection load error: ${esc(e.message || e)}</div>`;
@@ -2271,7 +2273,9 @@ async function loadArtisanInspections() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to load artisan inspections");
-    const rows = Array.isArray(data.rows) ? data.rows : [];
+    const rows = Array.isArray(data.rows)
+      ? data.rows
+      : (Array.isArray(data.data) ? data.data : []);
     list.innerHTML = rows.length ? rows.map(artisanInspectionCard).join("") : `<div class="muted">No artisan inspections found.</div>`;
   } catch (e) {
     list.innerHTML = `<div class="message-error">Artisan inspection load error: ${esc(e.message || e)}</div>`;
