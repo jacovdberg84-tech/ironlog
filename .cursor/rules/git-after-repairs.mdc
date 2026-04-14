@@ -1,0 +1,15 @@
+---
+description: After fixes/repairs, share concrete git pull, add, commit, and push commands for this repo.
+alwaysApply: true
+---
+
+# Git commands after repairs
+
+When you complete a bugfix, repair, or substantive change in this repository, end the response with a short **Git** block for the user (Windows PowerShell, repo at `c:\IRONLOG`):
+
+1. `git pull` (before commit if they may be behind remote).
+2. `git status` and `git add` with the **actual paths** touched in that change.
+3. `git commit -m "..."` with a clear, grammatical one-line message.
+4. `git push`.
+
+Use full paths in examples when helpful (e.g. `c:\IRONLOG\web\app.js`). Keep the block minimal and copy-paste friendly.
