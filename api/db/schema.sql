@@ -367,3 +367,27 @@ CREATE TABLE IF NOT EXISTS ops_slip_reports (
 );
 CREATE INDEX IF NOT EXISTS idx_ops_slip_site_date ON ops_slip_reports(site_code, report_date);
 CREATE INDEX IF NOT EXISTS idx_ops_slip_type ON ops_slip_reports(slip_type);
+
+/* =========================
+   TASKS
+   Simple task management for team collaboration
+========================= */
+CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'open',     -- open | in_progress | done
+  priority TEXT NOT NULL DEFAULT 'medium', -- high | medium | low
+  project TEXT,                             -- Project/category name
+  assigned_to TEXT,                         -- Username
+  due_date TEXT,                           -- YYYY-MM-DD
+  site_code TEXT NOT NULL DEFAULT 'main',
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority);
+CREATE INDEX IF NOT EXISTS idx_tasks_site ON tasks(site_code);
+CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to);

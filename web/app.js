@@ -8738,6 +8738,7 @@ async function init() {
   initSettingsDropdown();
   initGlobalSearch();
   initReportCardCollapsible();
+  initTasks();
   applyRoleVisibility();
   applyI18n();
   applyGlobalPageTranslation();
@@ -10270,6 +10271,187 @@ function initDarkMode() {
       localStorage.setItem("ironlog-theme", "dark");
     }
   });
+}
+
+// Task Management
+async function loadTasks() {
+  const listEl = qs("tasksList");
+  if (!listEl) return;
+  
+  const status = qs("taskFilterStatus")?.value || "";
+  const priority = qs("taskFilterPriority")?.value || "";
+  const assigned = qs("taskFilterAssigned")?.value || "";
+  
+  let url = `${API}/tasks?`;
+  if (status) url += `status=${encodeURIComponent(status)}&`;
+  if (priority) url += `priority=${encodeURIComponent(priority)}&`;
+  if (assigned) url += `assigned=${encodeURIComponent(assigned)}&`;
+  
+  try {
+    const res = await fetchJson(url);
+    if (!res.tasks?.length) {
+      listEl.innerHTML = `<div class="item"><small class="muted">No tasks found.</small></div>`;
+      return;
+    }
+    
+    listEl.innerHTML = res.tasks.map(task => {
+      const priorityClass = task.priority === "high" ? "pill-red" : task.priority === "medium" ? "pill-orange" : "";
+      const statusClass = task.status === "done" ? "pill-green" : task.status === "in_progress" ? "pill-blue" : "pill-gray";
+      const dueClass = task.due_date && task.status !== "done" ? (new Date(task.due_date) < new Date() ? "text-danger" : "") : "";
+      const checked = task.status === "done" ? "checked" : "";
+      const strikethrough = task.status === "done" ? "text-decoration:line-through;opacity:0.6" : "";
+      
+      return `<div class="item" style="border-left:3px solid ${task.priority === 'high' ? '#dc2626' : task.priority === 'medium' ? '#d97706' : '#16a34a'}; padding-left:12px; margin-bottom:8px;">
+        <div style="display:flex; align-items:flex-start; gap:12px;">
+          <input type="checkbox" ${checked} data-task-toggle="${task.id}" style="margin-top:4px;" />
+          <div style="flex:1;">
+            <div style="font-weight:500; ${strikethrough}">${escapeHtml(task.title)}</div>
+            ${task.description ? `<small class="muted">${escapeHtml(task.description)}</small><br/>` : ""}
+            <div style="margin-top:6px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+              <span class="pill ${statusClass}" data-task-status="${task.id}" style="cursor:pointer;">${task.status.replace("_", " ")}</span>
+              <span class="pill ${priorityClass}">${task.priority}</span>
+              ${task.project ? `<span class="pill pill-blue">${escapeHtml(task.project)}</span>` : ""}
+              ${task.assigned_to ? `<span class="muted" style="font-size:11px;">👤 ${escapeHtml(task.assigned_to)}</span>` : ""}
+              ${task.due_date ? `<span class="muted ${dueClass}" style="font-size:11px;">📅 ${task.due_date}</span>` : ""}
+              <button class="btn btn-secondary btn-sm" data-task-edit="${task.id}" style="padding:2px 8px; font-size:11px;">Edit</button>
+              <button class="btn btn-secondary btn-sm" data-task-delete="${task.id}" style="padding:2px 8px; font-size:11px; color:#dc2626;">Delete</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }).join("");
+    
+    // Add event listeners
+    listEl.querySelectorAll("[data-task-toggle]").forEach(cb => {
+      cb.addEventListener("change", async (e) => {
+        const id = e.target.dataset.taskToggle;
+        const done = e.target.checked;
+        await fetchJson(`${API}/tasks/${id}`, {
+          method: "PUT",
+          body: JSON.stringify({ status: done ? "done" : "open" })
+        });
+        loadTasks();
+        loadTasksStats();
+      });
+    });
+    
+    listEl.querySelectorAll("[data-task-status]").forEach(el => {
+      el.addEventListener("click", async (e) => {
+        const id = e.target.dataset.taskStatus;
+        const current = e.target.textContent.trim().replace(" ", "_");
+        const statuses = ["open", "in_progress", "done"];
+        const currentIdx = statuses.indexOf(current);
+        const next = statuses[(currentIdx + 1) % statuses.length];
+        await fetchJson(`${API}/tasks/${id}`, {
+          method: "PUT",
+          body: JSON.stringify({ status: next })
+        });
+        loadTasks();
+        loadTasksStats();
+      });
+    });
+    
+    listEl.querySelectorAll("[data-task-edit]").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        const id = e.target.dataset.taskEdit;
+        const res = await fetchJson(`${API}/tasks/${id}`);
+        if (res.task) {
+          qs("taskTitle").value = res.task.title || "";
+          qs("taskDescription").value = res.task.description || "";
+          qs("taskProject").value = res.task.project || "";
+          qs("taskPriority").value = res.task.priority || "medium";
+          qs("taskAssigned").value = res.task.assigned_to || "";
+          qs("taskDueDate").value = res.task.due_date || "";
+          qs("taskTitle").dataset.editId = id;
+          qs("createTaskBtn").textContent = "Update Task";
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+      });
+    });
+    
+    listEl.querySelectorAll("[data-task-delete]").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        if (!confirm("Delete this task?")) return;
+        const id = e.target.dataset.taskDelete;
+        await fetchJson(`${API}/tasks/${id}`, { method: "DELETE" });
+        loadTasks();
+        loadTasksStats();
+      });
+    });
+  } catch (err) {
+    listEl.innerHTML = `<div class="item"><small class="muted">Error loading tasks.</small></div>`;
+  }
+}
+
+async function loadTasksStats() {
+  const statsEl = qs("tasksStats");
+  if (!statsEl) return;
+  
+  try {
+    const res = await fetchJson(`${API}/tasks/stats/summary`);
+    if (res.ok) {
+      statsEl.innerHTML = `
+        <span class="kpi-pill"><strong>Total:</strong> ${res.total}</span>
+        <span class="kpi-pill kpi-pill-blue"><strong>Open:</strong> ${res.open}</span>
+        <span class="kpi-pill kpi-pill-orange"><strong>In Progress:</strong> ${res.in_progress}</span>
+        <span class="kpi-pill kpi-pill-green"><strong>Done:</strong> ${res.done}</span>
+      `;
+    }
+  } catch (err) {
+    console.error("Failed to load tasks stats", err);
+  }
+}
+
+function initTasks() {
+  const createBtn = qs("createTaskBtn");
+  const loadBtn = qs("loadTasksBtn");
+  
+  createBtn?.addEventListener("click", async () => {
+    const title = qs("taskTitle")?.value?.trim();
+    if (!title) {
+      alert("Task title is required");
+      return;
+    }
+    
+    const editId = qs("taskTitle").dataset.editId;
+    const data = {
+      title,
+      description: qs("taskDescription")?.value?.trim() || null,
+      project: qs("taskProject")?.value?.trim() || null,
+      priority: qs("taskPriority")?.value || "medium",
+      assigned_to: qs("taskAssigned")?.value?.trim() || null,
+      due_date: qs("taskDueDate")?.value || null
+    };
+    
+    try {
+      if (editId) {
+        await fetchJson(`${API}/tasks/${editId}`, { method: "PUT", body: JSON.stringify(data) });
+        delete qs("taskTitle").dataset.editId;
+        createBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg> Create Task`;
+      } else {
+        await fetchJson(`${API}/tasks`, { method: "POST", body: JSON.stringify(data) });
+      }
+      
+      // Clear form
+      qs("taskTitle").value = "";
+      qs("taskDescription").value = "";
+      qs("taskProject").value = "";
+      qs("taskPriority").value = "medium";
+      qs("taskAssigned").value = "";
+      qs("taskDueDate").value = "";
+      
+      loadTasks();
+      loadTasksStats();
+    } catch (err) {
+      alert("Failed to save task");
+    }
+  });
+  
+  loadBtn?.addEventListener("click", loadTasks);
+  
+  // Load tasks and stats when tab is opened
+  loadTasks();
+  loadTasksStats();
 }
 
 // Keep startup reliable even if script placement changes

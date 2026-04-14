@@ -25,6 +25,7 @@ import docsRoutes from "./routes/docs.routes.js";
 import ironmindRoutes from "./routes/ironmind.routes.js";
 import inspectproRoutes from "./routes/inspectpro.routes.js";
 import breakdownOpsRoutes from "./routes/breakdownOps.routes.js";
+import tasksRoutes from "./routes/tasks.routes.js";
 import { ironlogAuthHook } from "./auth/hook.js";
 
 export function buildServer() {
@@ -71,5 +72,6 @@ app.register(syncRoutes, { prefix: "/api/sync" });
 app.register(docsRoutes, { prefix: "/api/docs" });
 app.register(ironmindRoutes, { prefix: "/api/ironmind" });
 app.register(inspectproRoutes, { prefix: "/api/integrations/inspectpro" });
+  app.register(tasksRoutes, { prefix: "/api" });
   return app;
 }

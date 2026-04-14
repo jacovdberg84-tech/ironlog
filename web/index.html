@@ -213,6 +213,10 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
           <span>Audit Trail</span>
         </a>
+        <a href="#" class="nav-item" data-tab="tasks" id="navTasks">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+          <span>Tasks</span>
+        </a>
         <a href="#" class="nav-item" data-tab="admin" id="navAdmin">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
           <span>User Admin</span>
@@ -3791,6 +3795,160 @@
           <div class="report-card-body">
             <div class="list" id="vcChecksList"></div>
             <pre class="output" id="vcResult"></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TASKS -->
+    <section class="panel" id="tab-tasks">
+      <div class="asset-cards-grid">
+        <!-- Tasks Header -->
+        <div class="dash-card full-width">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+              </div>
+              <div>
+                <h3>Task Management</h3>
+                <p class="muted small">Create and track tasks across your team</p>
+              </div>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <div class="kpi-pills" id="tasksStats"></div>
+          </div>
+        </div>
+
+        <!-- Create Task Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+              </div>
+              <div>
+                <h3>Create New Task</h3>
+                <p class="muted small">Add a task to track work</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field" style="flex:2;">
+                <label>Task Title *</label>
+                <input id="taskTitle" class="w-full" placeholder="What needs to be done?" />
+              </div>
+              <div class="form-field">
+                <label>Project</label>
+                <input id="taskProject" class="w-full" placeholder="Project name (optional)" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Priority</label>
+                <select id="taskPriority" class="w-full">
+                  <option value="high">High</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Assigned To</label>
+                <input id="taskAssigned" class="w-full" placeholder="Username" />
+              </div>
+              <div class="form-field">
+                <label>Due Date</label>
+                <input id="taskDueDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="createTaskBtn" class="btn btn-primary" style="margin-top:22px;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                  Create Task
+                </button>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field form-field-full">
+                <label>Description</label>
+                <textarea id="taskDescription" class="w-full" rows="2" placeholder="Additional details (optional)"></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tasks Filter Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+              </div>
+              <div>
+                <h3>Filter Tasks</h3>
+                <p class="muted small">Find specific tasks</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Status</label>
+                <select id="taskFilterStatus" class="w-full">
+                  <option value="">All</option>
+                  <option value="open">Open</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="done">Done</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Priority</label>
+                <select id="taskFilterPriority" class="w-full">
+                  <option value="">All</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Assigned To</label>
+                <input id="taskFilterAssigned" class="w-full" placeholder="Username" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadTasksBtn" class="btn btn-primary" style="margin-top:22px;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                  Load Tasks
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tasks List Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+              </div>
+              <div>
+                <h3>Task List</h3>
+                <p class="muted small">Click status to update, or edit to modify</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="list" id="tasksList"></div>
           </div>
         </div>
       </div>

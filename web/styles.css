@@ -342,6 +342,14 @@ select, input{
 .orange{background:#fffbeb; border:1px solid #fcd34d; color:#92400e}
 .blue{background:#eff6ff; border:1px solid #93c5fd; color:#1e3a8a}
 
+.pill-red{background:#fef2f2; border:1px solid #fca5a5; color:#991b1b}
+.pill-orange{background:#fffbeb; border:1px solid #fcd34d; color:#92400e}
+.pill-blue{background:#eff6ff; border:1px solid #93c5fd; color:#1e3a8a}
+.pill-green{background:#f0fdf4; border:1px solid #86efac; color:#166534}
+.pill-gray{background:#f3f4f6; border:1px solid #d1d5db; color:#374151}
+
+.text-danger{color:#dc2626 !important}
+
 .list{display:flex; flex-direction:column; gap:6px}
 .item{
   padding:8px;
