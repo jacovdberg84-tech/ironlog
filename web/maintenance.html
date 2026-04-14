@@ -486,6 +486,7 @@
           <option value="day">Day</option>
           <option value="night">Night</option>
         </select>
+        <input id="aiFormNumber" class="w-200" placeholder="Form No." />
         <input id="aiInspector" class="w-200" placeholder="Artisan name" />
       </div>
       <div class="row stack-10" style="align-items:flex-end; flex-wrap:wrap;">
@@ -502,6 +503,8 @@
       </div>
       <textarea id="aiNotes" rows="3" placeholder="Additional notes..." style="width:100%;"></textarea>
       <div class="row stack-10">
+        <button id="openAiBlankPdfBtn">Open Blank Form PDF</button>
+        <button id="downloadAiBlankPdfBtn">Download Blank Form PDF</button>
         <button id="saveAiBtn">Save Artisan Inspection</button>
       </div>
       <div id="aiMsg" class="muted"></div>

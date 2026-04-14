@@ -1937,6 +1937,8 @@ function resetArtisanInspectionForm() {
   if (notes) notes.value = "";
   const shift = document.getElementById("aiShift");
   if (shift) shift.value = "";
+  const formNo = document.getElementById("aiFormNumber");
+  if (formNo) formNo.value = generateArtisanFormNumber();
   const live = document.getElementById("aiLiveMeta");
   if (live) live.textContent = "";
   ARTISAN_INSPECTION_CHECKLIST.forEach((row) => {
@@ -1948,11 +1950,20 @@ function resetArtisanInspectionForm() {
   });
 }
 
+function generateArtisanFormNumber() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}`;
+  const rand = Math.floor(Math.random() * 900 + 100);
+  return `AI-${stamp}-${rand}`;
+}
+
 async function saveArtisanInspection() {
   const asset_id = Number(document.getElementById("aiAsset")?.value || 0);
   const inspection_date = String(document.getElementById("aiDate")?.value || "").trim();
   const inspector_name = String(document.getElementById("aiInspector")?.value || "").trim();
   const shift = String(document.getElementById("aiShift")?.value || "").trim().toLowerCase();
+  const form_number = String(document.getElementById("aiFormNumber")?.value || "").trim();
   const notes = String(document.getElementById("aiNotes")?.value || "").trim();
   const msg = document.getElementById("aiMsg");
   const mhRaw = String(document.getElementById("aiMachineHours")?.value || "").trim();
@@ -1974,6 +1985,7 @@ async function saveArtisanInspection() {
         inspection_date,
         inspector_name,
         shift: shift || null,
+        form_number: form_number || null,
         notes,
         machine_hours,
         checklist,
@@ -2004,6 +2016,7 @@ function artisanInspectionCard(r) {
     ? `${Number(r.live_hours_snapshot).toFixed(1)} (${esc(r.live_hours_source || "—")})`
     : "—";
   const shift = String(r.shift || "").trim();
+  const formNo = String(r.form_number || "").trim();
   const chk = Array.isArray(r.checklist) ? r.checklist : [];
   const fails = chk.filter((c) => c.ok === false);
   const failLine = fails.length
@@ -2014,6 +2027,7 @@ function artisanInspectionCard(r) {
     <div class="card">
       <div><b>${esc(r.asset_code)}</b> - ${esc(r.asset_name || "")}</div>
       <div><small>Date: ${esc(r.inspection_date)}${shift ? ` | Shift: ${esc(shift.toUpperCase())}` : ""} | Artisan: ${esc(r.inspector_name || "-")}</small></div>
+      <div><small>Form No: <b>${esc(formNo || "-")}</b></small></div>
       <div><small>Machine hrs: ${esc(hrs)} | Live snapshot: ${live}</small></div>
       ${failLine}
       <div style="margin-top:6px;"><small>${esc(r.notes || "")}</small></div>
@@ -2023,6 +2037,24 @@ function artisanInspectionCard(r) {
       </div>
     </div>
   `;
+}
+
+function openArtisanBlankFormPdf(download = false) {
+  const date = String(document.getElementById("aiDate")?.value || "").trim();
+  const assetId = String(document.getElementById("aiAsset")?.value || "").trim();
+  const shift = String(document.getElementById("aiShift")?.value || "").trim();
+  const inspector = String(document.getElementById("aiInspector")?.value || "").trim();
+  const formNoEl = document.getElementById("aiFormNumber");
+  if (formNoEl && !String(formNoEl.value || "").trim()) formNoEl.value = generateArtisanFormNumber();
+  const formNo = String(formNoEl?.value || "").trim();
+  const q = new URLSearchParams();
+  if (date) q.set("date", date);
+  if (assetId) q.set("asset_id", assetId);
+  if (shift) q.set("shift", shift);
+  if (inspector) q.set("inspector_name", inspector);
+  if (formNo) q.set("form_number", formNo);
+  if (download) q.set("download", "1");
+  window.open(`${API}/reports/artisan-inspection-form.pdf?${q.toString()}`, "_blank");
 }
 
 async function loadArtisanInspections() {
@@ -2958,9 +2990,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }, 20000);
   const miDate = document.getElementById("miDate");
   const aiDate = document.getElementById("aiDate");
+  const aiFormNo = document.getElementById("aiFormNumber");
   const drDate = document.getElementById("drDate");
   if (miDate && !miDate.value) miDate.value = new Date().toISOString().slice(0, 10);
   if (aiDate && !aiDate.value) aiDate.value = new Date().toISOString().slice(0, 10);
+  if (aiFormNo && !aiFormNo.value) aiFormNo.value = generateArtisanFormNumber();
   if (drDate && !drDate.value) drDate.value = new Date().toISOString().slice(0, 10);
   const miStart = document.getElementById("miStart");
   const miEnd = document.getElementById("miEnd");
@@ -3084,6 +3118,8 @@ document.addEventListener("DOMContentLoaded", () => {
   );
   document.getElementById("aiAsset")?.addEventListener("change", aiReloadHours);
   document.getElementById("aiDate")?.addEventListener("change", aiReloadHours);
+  document.getElementById("openAiBlankPdfBtn")?.addEventListener("click", () => openArtisanBlankFormPdf(false));
+  document.getElementById("downloadAiBlankPdfBtn")?.addEventListener("click", () => openArtisanBlankFormPdf(true));
   document.getElementById("saveMiBtn")?.addEventListener("click", saveManagerInspection);
   document.getElementById("saveAiBtn")?.addEventListener("click", saveArtisanInspection);
   document.getElementById("saveDrBtn")?.addEventListener("click", saveDamageReport);

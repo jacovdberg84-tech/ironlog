@@ -41,6 +41,14 @@ function compactCell(v, max = 140) {
   return s.length > max ? `${s.slice(0, Math.max(1, max - 1))}...` : s;
 }
 
+function makeArtisanFormNumber() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}`;
+  const rand = Math.floor(Math.random() * 900 + 100);
+  return `AI-${stamp}-${rand}`;
+}
+
 function parseIsoDate(d) {
   if (!d) return null;
   const s = String(d || "").trim().slice(0, 10);
@@ -2697,6 +2705,92 @@ export default async function reportsRoutes(app) {
       .send(pdf);
   });
 
+  // GET /api/reports/artisan-inspection-form.pdf?asset_id=123&date=YYYY-MM-DD&shift=day|night&inspector_name=...&form_number=...&download=1
+  app.get("/artisan-inspection-form.pdf", async (req, reply) => {
+    const download = String(req.query?.download || "").trim() === "1";
+    const assetId = Number(req.query?.asset_id || 0);
+    const date = String(req.query?.date || "").trim();
+    const shift = String(req.query?.shift || "").trim().toLowerCase();
+    const inspectorName = String(req.query?.inspector_name || "").trim();
+    const formNumber = String(req.query?.form_number || "").trim() || makeArtisanFormNumber();
+
+    let asset = null;
+    if (assetId > 0) {
+      asset = db.prepare(`SELECT id, asset_code, asset_name, category FROM assets WHERE id = ?`).get(assetId);
+    }
+
+    const safeDate = isDate(date) ? date : "";
+    const safeShift = ["day", "night"].includes(shift) ? shift.toUpperCase() : "";
+    const logoPath = path.join(process.cwd(), "branding", "logo.png");
+    const checklistRows = [
+      "Pre-start visual condition (machine / plant)",
+      "Guards, covers, and safety devices",
+      "Hydraulic hoses, leaks, and fittings",
+      "Electrical panels / cabling / lights",
+      "Lubrication points / levels",
+      "Brakes / steering / controls response",
+      "Alarms, horn, and warning systems",
+      "Housekeeping around machine / plant",
+    ];
+
+    const pdf = await buildPdfBuffer(
+      (doc) => {
+        tryDrawLogo(doc, logoPath);
+        sectionTitle(doc, "Daily Artisan Inspection (Blank Form)");
+        kvGrid(doc, [
+          { k: "Form No.", v: formNumber },
+          { k: "Date", v: safeDate || "________________" },
+          { k: "Shift", v: safeShift || "________________" },
+          { k: "Artisan", v: inspectorName || "________________" },
+          { k: "Asset Code", v: asset?.asset_code || "________________" },
+          { k: "Asset Name", v: asset?.asset_name || "________________" },
+          { k: "Category", v: asset?.category || "________________" },
+          { k: "Machine Hours", v: "________________" },
+        ], 2);
+
+        sectionTitle(doc, "General checklist (tick one)");
+        doc.font("Helvetica").fontSize(10).fillColor("#111111");
+        checklistRows.forEach((label, idx) => {
+          doc.text(`${idx + 1}. ${label}    [ ] OK   [ ] FAIL   [ ] N/A    Note: ______________________________`, {
+            width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+          });
+          doc.moveDown(0.25);
+        });
+
+        sectionTitle(doc, "Notes");
+        for (let i = 0; i < 5; i += 1) {
+          doc.text("________________________________________________________________________________________", {
+            width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+          });
+          doc.moveDown(0.2);
+        }
+
+        doc.moveDown(0.6);
+        doc.text("Artisan signature: ____________________________    Time returned: ____________________", {
+          width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+        });
+        doc.moveDown(0.2);
+        doc.text("Supervisor received by: _______________________    Date: _____________________________", {
+          width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+        });
+      },
+      {
+        title: "IRONLOG",
+        subtitle: "Artisan Inspection Blank Form",
+        rightText: `Form ${formNumber}`,
+        showPageNumbers: true,
+      }
+    );
+
+    reply
+      .header("Content-Type", "application/pdf")
+      .header(
+        "Content-Disposition",
+        `${download ? "attachment" : "inline"}; filename="AML_Artisan_Inspection_Form_${formNumber}.pdf"`
+      )
+      .send(pdf);
+  });
+
   // GET /api/reports/artisan-inspection/:id.pdf?download=1
   app.get("/artisan-inspection/:id.pdf", async (req, reply) => {
     const id = Number(req.params?.id || 0);
@@ -2731,6 +2825,7 @@ export default async function reportsRoutes(app) {
         ai.id,
         ai.inspection_date,
         ai.${aiInspectorCol} AS inspector_name,
+        ${hasColumn("artisan_inspections", "form_number") ? "ai.form_number" : "''"} AS form_number,
         ai.notes,
         ${hasAiShift ? "ai.shift" : "''"} AS shift,
         ${machineHoursSelect} AS machine_hours,
@@ -2754,6 +2849,7 @@ export default async function reportsRoutes(app) {
         sectionTitle(doc, "Daily Artisan Inspection");
         kvGrid(doc, [
           { k: "Inspection #", v: inspection.id },
+          { k: "Form No.", v: inspection.form_number || "—" },
           { k: "Date", v: inspection.inspection_date || "" },
           { k: "Shift", v: inspection.shift ? String(inspection.shift).toUpperCase() : "—" },
           { k: "Inspector", v: inspection.inspector_name || "-" },

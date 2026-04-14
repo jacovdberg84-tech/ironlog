@@ -286,6 +286,7 @@ export default async function maintenanceRoutes(app) {
   ensureColumn("artisan_inspections", "live_hours_source TEXT", "live_hours_source");
   ensureColumn("artisan_inspections", "checklist_json TEXT", "checklist_json");
   ensureColumn("artisan_inspections", "shift TEXT", "shift");
+  ensureColumn("artisan_inspections", "form_number TEXT", "form_number");
   ensureColumn("manager_inspection_photos", "uuid TEXT", "uuid");
   ensureColumn("manager_inspection_photos", "site_code TEXT DEFAULT 'main'", "site_code");
   ensureColumn("manager_inspection_photos", "updated_at TEXT", "updated_at");
@@ -2672,6 +2673,7 @@ export default async function maintenanceRoutes(app) {
           ai.asset_id,
           ai.inspection_date,
           ai.inspector_name,
+          ai.form_number,
           ai.shift,
           ai.notes,
           ai.machine_hours,
@@ -2709,6 +2711,7 @@ export default async function maintenanceRoutes(app) {
       const asset_id = Number(req.body?.asset_id || 0);
       const inspection_date = String(req.body?.inspection_date || "").trim() || new Date().toISOString().slice(0, 10);
       const inspector_name = String(req.body?.inspector_name || "").trim() || null;
+      const form_number = String(req.body?.form_number || "").trim() || null;
       const shift = String(req.body?.shift || "").trim().toLowerCase() || null;
       const notes = String(req.body?.notes || "").trim() || null;
       const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
@@ -2739,16 +2742,17 @@ export default async function maintenanceRoutes(app) {
 
       const ins = db.prepare(`
         INSERT INTO artisan_inspections (
-          asset_id, uuid, site_code, inspection_date, inspector_name, shift, notes,
+          asset_id, uuid, site_code, inspection_date, inspector_name, form_number, shift, notes,
           machine_hours, live_hours_snapshot, live_hours_source, checklist_json, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `).run(
         asset_id,
         crypto.randomUUID(),
         site_code,
         inspection_date,
         inspector_name,
+        form_number,
         shift,
         notes,
         machine_hours,
