@@ -74,6 +74,40 @@ function initMaintSidebar() {
   });
 }
 
+function initMaintCollapsibles() {
+  document.querySelectorAll(".maintenance-card.collapsible").forEach((card) => {
+    const header = card.querySelector(".maintenance-card-header");
+    const toggle = card.querySelector(".maintenance-card-toggle");
+    
+    if (!header || !toggle) return;
+    
+    const toggleCollapse = () => {
+      const isCollapsed = card.classList.toggle("collapsed");
+      card.dataset.collapsed = isCollapsed;
+      const cardTitle = card.querySelector("h3")?.textContent?.trim() || "";
+      localStorage.setItem(`maint_card_${cardTitle}`, isCollapsed ? "1" : "0");
+    };
+    
+    header.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleCollapse();
+    });
+    
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleCollapse();
+    });
+    
+    // Restore saved state
+    const cardTitle = card.querySelector("h3")?.textContent?.trim() || "";
+    const savedState = localStorage.getItem(`maint_card_${cardTitle}`);
+    if (savedState === "1") {
+      card.classList.add("collapsed");
+      card.dataset.collapsed = "true";
+    }
+  });
+}
+
 function scrollToSection(section) {
   const viewMap = {
     "maintenance": "main",
@@ -930,42 +964,79 @@ function syncHeaders() {
 
 function setTopView(view) {
   const main = document.getElementById("mainMaintenanceCards");
-  const mi = document.getElementById("managerInspectionsCard");
-  const ai = document.getElementById("artisanInspectionsCard");
-  const wf = document.getElementById("weeklyForumCard");
-  const kpi = document.getElementById("assetKpiCard");
-  const hist = document.getElementById("histogramCard");
-  const sync = document.getElementById("syncAdminCard");
-  const btnMain = document.getElementById("showMainMaintBtn");
-  const btnMi = document.getElementById("showManagerInspectionsBtn");
-  const btnAi = document.getElementById("showArtisanInspectionsBtn");
-  const btnWf = document.getElementById("showWeeklyForumBtn");
-  const btnKpi = document.getElementById("showAssetKpiBtn");
-  const btnHist = document.getElementById("showHistogramBtn");
-  const btnSync = document.getElementById("showSyncAdminBtn");
-  if (!main || !mi || !wf || !sync) return;
+  const mi = document.getElementById("managerInspectionsSection");
+  const ai = document.getElementById("artisanInspectionsSection");
+  const wf = document.getElementById("weeklyForumSection");
+  const kpi = document.getElementById("assetKpiSection");
+  const hist = document.getElementById("histogramSection");
+  const sync = document.getElementById("syncAdminSection");
 
-  main.style.display = view === "main" ? "" : "none";
-  mi.style.display = view === "mi" ? "" : "none";
-  if (ai) ai.style.display = view === "ai" ? "" : "none";
-  wf.style.display = view === "wf" ? "" : "none";
-  if (kpi) kpi.style.display = view === "kpi" ? "" : "none";
-  if (hist) hist.style.display = view === "hist" ? "" : "none";
-  sync.style.display = view === "sync" ? "" : "none";
+  // Hide all sections first
+  if (main) main.style.display = "none";
+  if (mi) mi.style.display = "none";
+  if (ai) ai.style.display = "none";
+  if (wf) wf.style.display = "none";
+  if (kpi) kpi.style.display = "none";
+  if (hist) hist.style.display = "none";
+  if (sync) sync.style.display = "none";
 
-  const styleBtn = (btn, active) => {
-    if (!btn) return;
-    btn.style.borderColor = active ? "#3b82f6" : "";
-    btn.style.background = active ? "#13233c" : "";
-    btn.style.color = active ? "#fff" : "";
-  };
-  styleBtn(btnMain, view === "main");
-  styleBtn(btnMi, view === "mi");
-  styleBtn(btnAi, view === "ai");
-  styleBtn(btnWf, view === "wf");
-  styleBtn(btnKpi, view === "kpi");
-  styleBtn(btnHist, view === "hist");
-  styleBtn(btnSync, view === "sync");
+  // Show the selected section
+  switch (view) {
+    case "main":
+      if (main) main.style.display = "";
+      break;
+    case "mi":
+      if (mi) mi.style.display = "";
+      break;
+    case "ai":
+      if (ai) ai.style.display = "";
+      break;
+    case "wf":
+      if (wf) wf.style.display = "";
+      break;
+    case "kpi":
+      if (kpi) kpi.style.display = "";
+      break;
+    case "hist":
+      if (hist) hist.style.display = "";
+      break;
+    case "sync":
+      if (sync) sync.style.display = "";
+      break;
+  }
+
+  // Update active state in sidebar
+  const sidebar = document.getElementById("sidebar");
+  if (sidebar) {
+    sidebar.querySelectorAll(".nav-item").forEach((item) => {
+      const section = item.dataset.section;
+      let isActive = false;
+      switch (view) {
+        case "main":
+          isActive = section === "maintenance" || section === "service-history";
+          break;
+        case "mi":
+          isActive = section === "manager-inspections";
+          break;
+        case "ai":
+          isActive = section === "artisan-inspections";
+          break;
+        case "wf":
+          isActive = section === "weekly-forum";
+          break;
+        case "kpi":
+          isActive = section === "asset-kpi";
+          break;
+        case "hist":
+          isActive = section === "histogram";
+          break;
+        case "sync":
+          isActive = section === "sync-admin";
+          break;
+      }
+      item.classList.toggle("active", isActive);
+    });
+  }
 }
 
 async function loadHistogramEvents() {
@@ -3019,6 +3090,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Sidebar navigation
   initMaintSidebar();
+  
+  // Initialize collapsible cards
+  initMaintCollapsibles();
 
   const generateBtn = document.getElementById("generateBtn");
   const savePlanBtn = document.getElementById("savePlanBtn");

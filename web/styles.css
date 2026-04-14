@@ -2787,6 +2787,86 @@ body.sidebar-collapsed .main-content {
   display: none;
 }
 
+/* Maintenance Section Wrapper */
+.maint-section {
+  display: none;
+}
+
+.maint-section .card {
+  margin-bottom: 16px;
+}
+
+/* Maintenance Collapsible Cards */
+.maintenance-card {
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.maintenance-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  cursor: pointer;
+  user-select: none;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.maintenance-card-header:hover {
+  background: #f3f4f6;
+}
+
+.maintenance-card-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.maintenance-card-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: #e5e7eb;
+  border-radius: 8px;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.maintenance-card-toggle:hover {
+  background: #d1d5db;
+  color: #374151;
+}
+
+.maintenance-card-toggle svg {
+  transition: transform 0.2s;
+}
+
+.maintenance-card-body {
+  padding: 16px;
+}
+
+.maintenance-card.collapsed .maintenance-card-toggle svg {
+  transform: rotate(180deg);
+}
+
+.maintenance-card.collapsed .maintenance-card-body {
+  display: none;
+}
+
+.maintenance-card.collapsed {
+  background: #fafafa;
+}
+
 .dash-card.collapsed {
   background: #fafafa;
 }

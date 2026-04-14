@@ -164,16 +164,26 @@
 
   <div class="page-section">
     <div id="mainMaintenanceCards">
-    <div class="card stack-24">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <h3 style="margin:0;">Maintenance Plans</h3>
+    <div class="maintenance-card collapsible" data-collapsed="false">
+      <div class="maintenance-card-header">
+        <h3>Maintenance Plans</h3>
+        <button class="maintenance-card-toggle" aria-label="Toggle">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+        </button>
       </div>
-      <div id="plansList" class="card-grid"></div>
+      <div class="maintenance-card-body">
+        <div id="plansList" class="card-grid"></div>
+      </div>
     </div>
 
-    <div class="card stack-24">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <h3 style="margin:0;">Service History (Live)</h3>
+    <div class="maintenance-card collapsible" data-collapsed="false">
+      <div class="maintenance-card-header">
+        <h3>Service History (Live)</h3>
+        <button class="maintenance-card-toggle" aria-label="Toggle">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+        </button>
+      </div>
+      <div class="maintenance-card-body">
         <div class="row stack-10">
           <label>
             View
@@ -188,25 +198,25 @@
           </label>
           <div class="muted" id="histMeta">As of: -</div>
         </div>
-      </div>
-      <div style="overflow:auto;">
-        <table class="gridTable" style="min-width:980px;">
-          <thead>
-            <tr>
-              <th>Equipment</th>
-              <th>Service</th>
-              <th>Last Serviced</th>
-              <th style="text-align:right;">Current Hours</th>
-              <th style="text-align:right;">Hours To Next</th>
-              <th style="text-align:right;">Avg / Day</th>
-              <th>Est. Service Date</th>
-            </tr>
-          </thead>
-          <tbody id="histBody"></tbody>
-        </table>
-      </div>
-      <div class="muted mini" style="margin-top:8px;">
-        Estimated date is calculated from average daily run hours per equipment (from Daily Input).
+        <div style="overflow:auto;">
+          <table class="gridTable" style="min-width:980px;">
+            <thead>
+              <tr>
+                <th>Equipment</th>
+                <th>Service</th>
+                <th>Last Serviced</th>
+                <th style="text-align:right;">Current Hours</th>
+                <th style="text-align:right;">Hours To Next</th>
+                <th style="text-align:right;">Avg / Day</th>
+                <th>Est. Service Date</th>
+              </tr>
+            </thead>
+            <tbody id="histBody"></tbody>
+          </table>
+        </div>
+        <div class="muted mini" style="margin-top:8px;">
+          Estimated date is calculated from average daily run hours per equipment (from Daily Input).
+        </div>
       </div>
     </div>
 
@@ -429,10 +439,12 @@
     </div>
     </div>
 
-    <div id="managerInspectionsCard" class="card stack-24">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <h3 style="margin:0;">Manager Inspections</h3>
-      </div>
+    <!-- Manager Inspections Section -->
+    <div id="managerInspectionsSection" class="maint-section" style="display:none;">
+      <div class="card stack-24">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0;">Manager Inspections</h3>
+        </div>
       <div class="row stack-10">
         <select id="miAsset" class="w-200"></select>
         <input id="miDate" type="date" />
@@ -553,12 +565,15 @@
         <button id="downloadDrBulkPdfPhotosBtn">Download Damage PDF (Photos)</button>
       </div>
       <div id="drList" class="list"></div>
+      </div>
     </div>
 
-    <div id="artisanInspectionsCard" class="card stack-24" style="display:none;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <h3 style="margin:0;">Daily Artisan Inspections</h3>
-      </div>
+    <!-- Artisan Inspections Section -->
+    <div id="artisanInspectionsSection" class="maint-section" style="display:none;">
+      <div class="card stack-24">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0;">Daily Artisan Inspections</h3>
+        </div>
       <div class="row stack-10">
         <select id="aiAsset" class="w-200"></select>
         <input id="aiDate" type="date" />
@@ -598,12 +613,15 @@
         <button id="loadAiBtn">Load Inspections</button>
       </div>
       <div id="aiList" class="list"></div>
+      </div>
     </div>
 
-    <div id="weeklyForumCard" class="card stack-24" style="display:none;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <h3 style="margin:0;">Weekly Forum Dashboard</h3>
-      </div>
+    <!-- Weekly Forum Section -->
+    <div id="weeklyForumSection" class="maint-section" style="display:none;">
+      <div class="card stack-24">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0;">Weekly Forum Dashboard</h3>
+        </div>
       <div class="row stack-10">
         <label>
           Start Date
@@ -796,11 +814,14 @@
         </table>
       </div>
     </div>
+    </div>
 
-    <div id="assetKpiCard" class="card stack-24" style="display:none;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <h3 style="margin:0;">KPI per asset — weekly usage</h3>
-      </div>
+    <!-- Asset KPI Section -->
+    <div id="assetKpiSection" class="maint-section" style="display:none;">
+      <div class="card stack-24">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0;">KPI per asset — weekly usage</h3>
+        </div>
       <p class="muted" style="margin:0 0 12px 0;">
         Uses the same rules as the main dashboard: <strong>availability</strong> = available ÷ planned (available = scheduled − downtime, capped per day),
         <strong>utilization</strong> = run ÷ planned (scheduled hours total, same denominator as availability). Tables are sorted by utilization (highest first) so you can see which equipment performed best.
@@ -868,11 +889,14 @@
         </table>
       </div>
     </div>
+    </div>
 
-    <div id="histogramCard" class="card stack-24" style="display:none;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <h3 style="margin:0;">Histogram Event Tracker</h3>
-      </div>
+    <!-- Histogram Section -->
+    <div id="histogramSection" class="maint-section" style="display:none;">
+      <div class="card stack-24">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0;">Histogram Event Tracker</h3>
+        </div>
       <div class="form-grid">
         <label>
           Event Date
@@ -953,11 +977,14 @@
         </table>
       </div>
     </div>
+    </div>
 
-    <div id="syncAdminCard" class="card stack-24">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <h3 style="margin:0;">Sync Admin (Hybrid)</h3>
-      </div>
+    <!-- Sync Admin Section -->
+    <div id="syncAdminSection" class="maint-section">
+      <div class="card stack-24">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0;">Sync Admin (Hybrid)</h3>
+        </div>
       <div class="row stack-10">
         <input id="syncPeer" class="w-200" placeholder="Peer name (e.g. laptop-a)" />
         <input id="syncSinceId" type="number" min="0" step="1" value="0" placeholder="Since outbox id" />
@@ -977,8 +1004,9 @@
       <div id="syncMsg" class="muted">Ready.</div>
       <pre id="syncOutput" style="margin:0; max-height:320px; overflow:auto; background:#0f172a; color:#e2e8f0; border-radius:8px; padding:10px; font-size:12px;">{}</pre>
     </div>
+    </div>
   </div>
 
-  <script src="./maintenance.js?v=12"></script>
+  <script src="./maintenance.js?v=13"></script>
 </body>
 </html>
