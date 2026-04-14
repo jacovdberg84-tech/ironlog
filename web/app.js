@@ -20,7 +20,95 @@ const DEFAULT_ROLE = "admin";
 const DEFAULT_USER = "admin";
 const DEFAULT_SITE = "main";
 const LANG_KEY = "ironlog_lang";
+const SIDEBAR_COLLAPSED_KEY = "ironlog_sidebar_collapsed";
 const DEFAULT_LANG = "en";
+
+// Sidebar navigation
+function initSidebar() {
+  const sidebar = qs("sidebar");
+  const toggle = qs("sidebarToggle");
+  const overlay = qs("sidebarOverlay");
+  
+  if (!sidebar) return;
+  
+  // Restore collapsed state
+  if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1") {
+    sidebar.classList.add("collapsed");
+    document.body.classList.add("sidebar-collapsed");
+  }
+  
+  // Toggle handler
+  toggle?.addEventListener("click", () => {
+    const isCollapsed = sidebar.classList.toggle("collapsed");
+    document.body.classList.toggle("sidebar-collapsed", isCollapsed);
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, isCollapsed ? "1" : "0");
+    
+    // On mobile, toggle overlay
+    if (window.innerWidth <= 1024) {
+      sidebar.classList.toggle("mobile-open", !isCollapsed);
+      overlay?.classList.toggle("active", !isCollapsed);
+    }
+  });
+  
+  // Close sidebar on mobile when clicking overlay
+  overlay?.addEventListener("click", () => {
+    sidebar.classList.remove("mobile-open");
+    overlay.classList.remove("active");
+  });
+  
+  // Navigation item clicks
+  sidebar.querySelectorAll(".nav-item").forEach((item) => {
+    item.addEventListener("click", (e) => {
+      e.preventDefault();
+      const tab = item.dataset.tab;
+      if (!tab) return;
+      
+      // Check maintenance gate
+      if (isMaintenanceChildTab(tab) && !hasMaintenanceAccessGate()) {
+        maintenanceAccessGate();
+        return;
+      }
+      
+      switchTab(tab);
+      
+      // Close mobile sidebar
+      if (window.innerWidth <= 1024) {
+        sidebar.classList.remove("mobile-open");
+        overlay?.classList.remove("active");
+      }
+    });
+  });
+  
+  // Handle window resize
+  window.addEventListener("resize", () => {
+    if (window.innerWidth > 1024) {
+      sidebar.classList.remove("mobile-open");
+      overlay?.classList.remove("active");
+    }
+  });
+}
+
+function updateSidebarActiveState(activeTab) {
+  const sidebar = qs("sidebar");
+  if (!sidebar) return;
+  
+  sidebar.querySelectorAll(".nav-item").forEach((item) => {
+    item.classList.toggle("active", item.dataset.tab === activeTab);
+  });
+  
+  // Sync mobile nav
+  const mobileSelect = qs("tabSelect");
+  if (mobileSelect) {
+    mobileSelect.value = activeTab;
+  }
+  
+  // Update user display
+  const userDisplay = qs("sessionUserDisplay");
+  if (userDisplay) userDisplay.textContent = getSessionUser();
+  const siteDisplay = qs("sessionSiteDisplay");
+  if (siteDisplay) siteDisplay.textContent = getSessionSite();
+}
+
 function maintenanceAccessGate() {
   const alreadyOk = sessionStorage.getItem(MAINT_LOCK_KEY) === "1";
   if (alreadyOk) {
@@ -694,11 +782,32 @@ function applyRoleVisibility() {
       opt.hidden = !allowed.has(opt.value) || blockedByMaintenanceGate;
     });
   }
+  
+  // Update sidebar nav items visibility
+  const sidebar = qs("sidebar");
+  if (sidebar) {
+    sidebar.querySelectorAll(".nav-item").forEach((item) => {
+      const tab = item.dataset.tab;
+      if (!tab) return;
+      if (tab === "admin") {
+        item.style.display = roles.some((r) => ["admin", "supervisor"].includes(r)) ? "" : "none";
+        return;
+      }
+      if (tab === "maintenance") {
+        item.style.display = allowed.has("maintenance") ? "" : "none";
+        return;
+      }
+      const blockedByMaintenanceGate = isMaintenanceChildTab(tab) && !hasMaintenanceAccessGate();
+      item.style.display = (!allowed.has(tab) || blockedByMaintenanceGate) ? "none" : "";
+    });
+    
+    // Hide nav sections that are empty
+    sidebar.querySelectorAll(".nav-section").forEach((section) => {
+      const visibleItems = section.querySelectorAll(".nav-item:not([style*='display: none'])");
+      section.style.display = visibleItems.length === 0 ? "none" : "";
+    });
+  }
 
-  const maintBtn = qs("openMaintenanceBtn");
-  if (maintBtn) maintBtn.style.display = allowed.has("maintenance") ? "" : "none";
-  const siteBtn = qs("openSiteOpsBtn");
-  if (siteBtn) siteBtn.style.display = allowed.has("operations") ? "" : "none";
   const reopenBtn = qs("reopenOperationsDay");
   if (reopenBtn) reopenBtn.style.display = roles.some((r) => ["admin", "supervisor"].includes(r)) ? "" : "none";
 
@@ -716,6 +825,110 @@ function applyRoleVisibility() {
   } else if (tabSelect) {
     tabSelect.value = activeKey;
   }
+  
+  updateSidebarActiveState(activeKey);
+}
+
+function initGlobalSearch() {
+  const searchInput = qs("globalSearch");
+  if (!searchInput) return;
+  
+  let debounceTimer;
+  
+  searchInput.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      const query = String(searchInput.value || "").trim();
+      if (!query) return;
+      
+      // Map common search terms to tabs
+      const tabMappings = {
+        "dashboard": "dash",
+        "daily": "daily",
+        "assets": "assets",
+        "fuel": "fuel",
+        "lube": "lube",
+        "stores": "stock",
+        "legal": "legal",
+        "reports": "reports",
+        "approvals": "approvals",
+        "supply": "procurement",
+        "operations": "operations",
+        "dispatch": "dispatch",
+        "quality": "quality",
+        "audit": "audit",
+        "vehicle": "vehicle",
+        "admin": "admin",
+        "ai": "docs",
+        "ironmind": "ironmind"
+      };
+      
+      const lowerQuery = query.toLowerCase();
+      
+      // Check for tab matches first
+      for (const [key, tab] of Object.entries(tabMappings)) {
+        if (lowerQuery.includes(key)) {
+          switchTab(tab);
+          searchInput.value = "";
+          setStatus(`Navigated to ${tab}`);
+          return;
+        }
+      }
+      
+      // Asset code search - navigate to assets tab
+      if (query.match(/^[A-Z]{2,}\d{0,4}$/i) || query.match(/^[A-Z0-9-]+$/)) {
+        switchTab("assets");
+        setStatus(`Search: ${query} - check Assets tab`);
+        searchInput.value = "";
+        return;
+      }
+    }, 300);
+  });
+  
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const query = String(searchInput.value || "").trim();
+      if (query) {
+        setStatus(`Search: "${query}"`);
+      }
+    }
+    if (e.key === "Escape") {
+      searchInput.value = "";
+      searchInput.blur();
+    }
+  });
+}
+
+function initSettingsDropdown() {
+  const dropdown = qs("settingsDropdown");
+  const btn = qs("settingsBtn");
+  if (!dropdown || !btn) return;
+  
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dropdown.classList.toggle("active");
+  });
+  
+  document.addEventListener("click", (e) => {
+    if (!dropdown.contains(e.target)) {
+      dropdown.classList.remove("active");
+    }
+  });
+  
+  // Sync dropdown values with header values
+  const syncValues = () => {
+    const userEl = qs("sessionUser");
+    const roleEl = qs("sessionRole");
+    const siteEl = qs("sessionSite");
+    const langEl = qs("languageSelect");
+    if (userEl) userEl.value = getSessionUser();
+    if (roleEl) roleEl.value = getSessionRole();
+    if (siteEl) siteEl.value = getSessionSite();
+    if (langEl) langEl.value = getLang();
+  };
+  
+  btn.addEventListener("mouseenter", syncValues);
 }
 
 function initSessionControls() {
@@ -4017,6 +4230,7 @@ function switchTab(key) {
     refreshBreakdownOpsPanels();
     loadBoSlipSavedList().catch(() => {});
   }
+  updateSidebarActiveState(k);
 }
 
 function initTabs() {
@@ -4381,6 +4595,12 @@ function downloadMaintenanceCostByEquipmentXlsx() {
     ? `month=${encodeURIComponent(month)}`
     : `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
   window.open(`${API}/api/reports/maintenance-cost-by-equipment.xlsx?${q}`, "_blank");
+}
+
+function downloadMtdOpeningHoursXlsx() {
+  const month = (qs("mtdOpeningMonth")?.value || "").trim();
+  const q = month ? `?month=${encodeURIComponent(month)}` : "";
+  window.open(`${API}/api/reports/mtd-opening-hours.xlsx${q}`, "_blank");
 }
 
 function openMaintenanceCostByEquipmentPdf(download = false) {
@@ -8526,16 +8746,23 @@ async function unarchiveSelectedAsset() {
 async function init() {
   await disableLegacyServiceWorkers();
   await tryInitialSession();
+  initSidebar();
   initTabs();
   initSectionCollapseToggles();
   initSessionControls();
   initVehicleCheckTab();
+  initSettingsDropdown();
+  initGlobalSearch();
   applyRoleVisibility();
   applyI18n();
   applyGlobalPageTranslation();
 
   const dateEl = qs("date");
   if (dateEl) dateEl.value = todayLocalYmd();
+  const mtdMonthEl = qs("mtdOpeningMonth");
+  if (mtdMonthEl && !mtdMonthEl.value) {
+    mtdMonthEl.value = (dateEl?.value || todayLocalYmd()).slice(0, 7);
+  }
 
   qs("refresh")?.addEventListener("click", () =>
     loadDashboard().catch((e) => setStatus("Dashboard error: " + e.message))
@@ -9055,6 +9282,7 @@ async function init() {
   qs("openDailyXlsx")?.addEventListener("click", openDailyXlsx);
   qs("openGmWeeklyXlsx")?.addEventListener("click", openGmWeeklyXlsx);
   qs("downloadCostMonthlyXlsx")?.addEventListener("click", downloadCostMonthlyXlsx);
+  qs("downloadMtdOpeningHoursXlsx")?.addEventListener("click", downloadMtdOpeningHoursXlsx);
   qs("downloadMaintenanceCostByEquipmentXlsx")?.addEventListener("click", downloadMaintenanceCostByEquipmentXlsx);
   qs("openMaintenanceCostByEquipmentPdf")?.addEventListener("click", () => openMaintenanceCostByEquipmentPdf(false));
   qs("downloadMaintenanceCostByEquipmentPdf")?.addEventListener("click", () => openMaintenanceCostByEquipmentPdf(true));

@@ -8,84 +8,250 @@
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body class="page-shell">
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
   <header class="topbar">
-    <div class="brand">
-      <div class="logo">
-        <img src="./aml_logo.png" alt="AML logo" />
-      </div>
-      <div>
-        <div class="title">IRONLOG</div>
-        <div class="subtitle">Ops Dashboard</div>
+    <div class="topbar-left">
+      <button class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+      </button>
+      <div class="brand">
+        <div class="logo">
+          <img src="./aml_logo.png" alt="AML logo" />
+        </div>
+        <div>
+          <div class="title">IRONLOG</div>
+          <div class="subtitle">Ops Dashboard</div>
+        </div>
       </div>
     </div>
 
-    <div class="controls">
-      <label>User
-        <input id="sessionUser" class="w-140" placeholder="username" value="admin" />
-      </label>
-      <label>Role
-        <select id="sessionRole" class="w-140">
-          <option value="admin">admin</option>
-          <option value="supervisor">supervisor</option>
-          <option value="stores">stores</option>
-          <option value="artisan">artisan</option>
-          <option value="operator">operator</option>
-        </select>
-      </label>
-      <span id="sessionRolesBadge" class="pill blue" title="Active session roles">Roles: admin</span>
-      <label>Site
-        <input id="sessionSite" class="w-140" placeholder="site code" value="main" />
-      </label>
-      <label>Language
-        <select id="languageSelect" class="w-140">
-          <option value="en">English</option>
-          <option value="af">Afrikaans</option>
-          <option value="zu">isiZulu</option>
-          <option value="pt">Portuguese (PT)</option>
-        </select>
-      </label>
-      <button id="applySessionRole">Apply Role</button>
-      <button type="button" id="logoutBtn" style="display:none">Log out</button>
-      <label>Date
+    <div class="topbar-center">
+      <div class="quick-search">
+        <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" id="globalSearch" placeholder="Search assets, WOs, parts..." />
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <div class="session-info">
+        <span id="sessionRolesBadge" class="pill blue" title="Active session roles">Roles: admin</span>
+        <span class="session-meta">
+          <span id="sessionUserDisplay">admin</span> · 
+          <span id="sessionSiteDisplay">main</span>
+        </span>
+      </div>
+      <button id="refresh" class="icon-btn" title="Refresh">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="23 4 23 10 17 10"></polyline>
+          <polyline points="1 20 1 14 7 14"></polyline>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+        </svg>
+      </button>
+      <label class="icon-btn-label">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="16" y1="2" x2="16" y2="6"></line>
+          <line x1="8" y1="2" x2="8" y2="6"></line>
+          <line x1="3" y1="10" x2="21" y2="10"></line>
+        </svg>
         <input id="date" type="date" />
       </label>
-      <label>Scheduled hrs
+      <label class="icon-btn-label">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg>
         <input id="scheduled" type="number" value="10" min="0" max="24" step="0.5" />
       </label>
-      <button id="refresh">Refresh</button>
+      <div class="dropdown-menu" id="settingsDropdown">
+        <button class="icon-btn" id="settingsBtn" title="Settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+        <div class="dropdown-content" id="settingsContent">
+          <div class="dropdown-section">
+            <label>User<input id="sessionUser" placeholder="username" value="admin" /></label>
+            <label>Role
+              <select id="sessionRole">
+                <option value="admin">admin</option>
+                <option value="supervisor">supervisor</option>
+                <option value="stores">stores</option>
+                <option value="artisan">artisan</option>
+                <option value="operator">operator</option>
+              </select>
+            </label>
+            <label>Site<input id="sessionSite" placeholder="site code" value="main" /></label>
+            <label>Language
+              <select id="languageSelect">
+                <option value="en">English</option>
+                <option value="af">Afrikaans</option>
+                <option value="zu">isiZulu</option>
+                <option value="pt">Portuguese (PT)</option>
+              </select>
+            </label>
+          </div>
+          <div class="dropdown-actions">
+            <button id="applySessionRole" class="primary">Apply</button>
+            <button type="button" id="logoutBtn" style="display:none">Logout</button>
+          </div>
+        </div>
+      </div>
     </div>
   </header>
 
-  <div class="wrap">
-    <!-- TABS -->
-    <nav class="tabs">
-      <label class="chk">Section
-        <select id="tabSelect" class="w-200">
-          <option value="dash">📊 Dashboard</option>
-          <option value="daily">📝 Daily Input</option>
-          <option value="assets">🛠️ Assets</option>
-          <option value="fuel">⛽ Fuel</option>
-          <option value="lube">🧴 Lube</option>
-          <option value="stock">📦 Stores</option>
-          <option value="legal">📚 Legal Docs</option>
-          <option value="uploads">📤 CSV Uploads</option>
-          <option value="reports">📄 Reports</option>
-          <option value="approvals">✅ Approvals</option>
-          <option value="procurement">🏗️ Supply Flow</option>
-          <option value="operations">🏭 Site Operations</option>
-          <option value="dispatch">🚚 Dispatch</option>
-          <option value="quality">🧪 Data Quality</option>
-          <option value="audit">🔎 Audit Trail</option>
-          <option value="vehicle">🚐 LDV vehicle check</option>
-          <option value="admin">👤 User admin</option>
-          <option value="docs">🌐 AI Documents</option>
-        </select>
-      </label>
-      <button id="openDailyXlsx">Download Daily Excel</button>
-      <button id="openGmWeeklyXlsx">GM Weekly (M&amp;E) Excel</button>
-      <button id="openMaintenanceBtn" onclick="maintenanceAccessGate()">Maintenance</button>
-      <button id="openSiteOpsBtn" onclick="document.getElementById('tabSelect').value='operations';document.getElementById('tabSelect').dispatchEvent(new Event('change'))">Site</button>
-    </nav>
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-content">
+      <div class="nav-section">
+        <div class="nav-section-title">Operations</div>
+        <a href="#" class="nav-item" data-tab="dash">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          <span>Dashboard</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="daily">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+          <span>Daily Input</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="maintenance" onclick="maintenanceAccessGate(); return false;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+          <span>Maintenance</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="operations">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 20h20"></path><path d="M5 20V10l7-7 7 7v10"></path><path d="M9 20v-6h6v6"></path></svg>
+          <span>Site Operations</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="dispatch">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+          <span>Dispatch</span>
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-title">Assets & Equipment</div>
+        <a href="#" class="nav-item" data-tab="assets">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
+          <span>Assets</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="fuel">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 22h18"></path><path d="M5 22V9a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v13"></path><path d="M11 9V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v3"></path><path d="M17 13h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2"></path></svg>
+          <span>Fuel</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="lube">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 2v8L8 12l-2-2V2"></path><path d="M14 2v8l2 2 2-2V2"></path><rect x="7" y="12" width="10" height="10"></rect></svg>
+          <span>Lube</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="vehicle">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="6" width="22" height="10" rx="2"></rect><circle cx="6" cy="16" r="2"></circle><circle cx="18" cy="16" r="2"></circle></svg>
+          <span>LDV Checks</span>
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-title">Inventory</div>
+        <a href="#" class="nav-item" data-tab="stock">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+          <span>Stores</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="procurement">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+          <span>Supply Flow</span>
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-title">Compliance & Quality</div>
+        <a href="#" class="nav-item" data-tab="legal">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          <span>Legal Docs</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="approvals">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+          <span>Approvals</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="quality">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+          <span>Data Quality</span>
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-title">Intelligence</div>
+        <a href="#" class="nav-item" data-tab="ironmind">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.5-.8 2.8-2 3.5V11h2a3 3 0 0 1 3 3v1H5v-1a3 3 0 0 1 3-3h2V9.5A4 4 0 0 1 12 2z"></path><path d="M9 14l2 2 4-4"></path></svg>
+          <span>IronMind AI</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="docs">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          <span>AI Documents</span>
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-title">System</div>
+        <a href="#" class="nav-item" data-tab="reports">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+          <span>Reports</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="uploads">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+          <span>CSV Uploads</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="audit">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          <span>Audit Trail</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="admin" id="navAdmin">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+          <span>User Admin</span>
+        </a>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="quick-actions">
+        <button id="openDailyXlsx" class="quick-action-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+          Daily Excel
+        </button>
+        <button id="openGmWeeklyXlsx" class="quick-action-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          GM Weekly
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <div class="main-content" id="mainContent">
+    <div class="mobile-nav" id="mobileNav">
+      <select id="tabSelect">
+        <option value="dash">Dashboard</option>
+        <option value="daily">Daily Input</option>
+        <option value="assets">Assets</option>
+        <option value="fuel">Fuel</option>
+        <option value="lube">Lube</option>
+        <option value="stock">Stores</option>
+        <option value="legal">Legal Docs</option>
+        <option value="uploads">CSV Uploads</option>
+        <option value="reports">Reports</option>
+        <option value="approvals">Approvals</option>
+        <option value="procurement">Supply Flow</option>
+        <option value="operations">Site Operations</option>
+        <option value="dispatch">Dispatch</option>
+        <option value="quality">Data Quality</option>
+        <option value="audit">Audit Trail</option>
+        <option value="vehicle">LDV vehicle check</option>
+        <option value="admin">User admin</option>
+        <option value="docs">AI Documents</option>
+      </select>
+    </div>
 
     <!-- STATUS -->
     <div class="card stack-12">
@@ -1682,6 +1848,16 @@
           <button id="removeRainDayBtn">Remove Rain Day</button>
           <button id="loadRainDaysBtn">List Rain Days (period)</button>
         </div>
+        <div class="reports-mtd-card">
+          <div class="reports-mtd-head">MTD Equipment Opening Hours (Excel)</div>
+          <p class="muted">Exports opening meter hours logged per day with a clean day-by-day equipment matrix.</p>
+          <div class="row">
+            <label class="chk">Month
+              <input id="mtdOpeningMonth" type="month" />
+            </label>
+            <button id="downloadMtdOpeningHoursXlsx">Download MTD Opening Hours Excel</button>
+          </div>
+        </div>
         <div id="rainDaysWidget" class="card stack-12" style="padding:10px;">
           <div class="muted">Weather widget: load rain days for selected month or period.</div>
         </div>
@@ -2019,6 +2195,6 @@
   <datalist id="partCodeOptions"></datalist>
   <datalist id="locationCodeOptions"></datalist>
 
-  <script src="./app.js?v=2"></script>
+  <script src="./app.js?v=3"></script>
 </body>
 </html>

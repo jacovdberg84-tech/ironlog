@@ -4086,6 +4086,134 @@ export default async function reportsRoutes(app) {
       .send(Buffer.from(buffer));
   });
 
+  // =========================
+  // MTD OPENING HOURS XLSX
+  // =========================
+  // GET /api/reports/mtd-opening-hours.xlsx?month=YYYY-MM
+  app.get("/mtd-opening-hours.xlsx", async (req, reply) => {
+    const monthRaw = String(req.query?.month || "").trim();
+    const month = monthRaw || todayYmd().slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      return reply.code(400).send({ error: "month must be YYYY-MM" });
+    }
+
+    const start = `${month}-01`;
+    const end = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0))
+      .toISOString()
+      .slice(0, 10);
+    if (!isDate(start) || !isDate(end)) {
+      return reply.code(400).send({ error: "Invalid month range" });
+    }
+
+    const rows = db.prepare(`
+      SELECT
+        dh.work_date,
+        a.asset_code,
+        a.asset_name,
+        a.category,
+        dh.is_used,
+        dh.opening_hours,
+        dh.closing_hours,
+        dh.hours_run
+      FROM daily_hours dh
+      JOIN assets a ON a.id = dh.asset_id
+      WHERE dh.work_date BETWEEN ? AND ?
+      ORDER BY a.asset_code ASC, dh.work_date ASC
+    `).all(start, end);
+
+    const daysInMonth = Number(end.slice(-2));
+    const dayKeys = Array.from({ length: daysInMonth }, (_, i) => String(i + 1).padStart(2, "0"));
+
+    const byAsset = new Map();
+    rows.forEach((r) => {
+      const code = String(r.asset_code || "").trim();
+      if (!code) return;
+      if (!byAsset.has(code)) {
+        byAsset.set(code, {
+          asset_code: code,
+          asset_name: r.asset_name || "",
+          category: r.category || "",
+          used_days: 0,
+          logged_days: 0,
+          ...Object.fromEntries(dayKeys.map((d) => [`d${d}`, null])),
+        });
+      }
+      const rec = byAsset.get(code);
+      const day = String(r.work_date || "").slice(-2);
+      const opening = r.opening_hours == null ? null : Number(r.opening_hours);
+      if (opening != null) rec[`d${day}`] = opening;
+      rec.logged_days += 1;
+      if (Number(r.is_used || 0) === 1) rec.used_days += 1;
+    });
+
+    const pivotRows = Array.from(byAsset.values()).sort((a, b) => String(a.asset_code).localeCompare(String(b.asset_code)));
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "IRONLOG";
+    wb.created = new Date();
+
+    addTableSheet(
+      wb,
+      "Opening Detail",
+      [
+        { header: "Date", key: "work_date", width: 12 },
+        { header: "Asset code", key: "asset_code", width: 14 },
+        { header: "Asset name", key: "asset_name", width: 28 },
+        { header: "Category", key: "category", width: 14 },
+        { header: "Production use (Y/N)", key: "is_used", width: 18 },
+        { header: "Opening meter (h)", key: "opening_hours", width: 16 },
+        { header: "Closing meter (h)", key: "closing_hours", width: 16 },
+        { header: "Run hours", key: "hours_run", width: 12 },
+      ],
+      rows.map((r) => ({
+        work_date: r.work_date || "",
+        asset_code: r.asset_code || "",
+        asset_name: r.asset_name || "",
+        category: r.category || "",
+        is_used: Number(r.is_used || 0) === 1 ? "Y" : "N",
+        opening_hours: r.opening_hours == null ? null : Number(r.opening_hours),
+        closing_hours: r.closing_hours == null ? null : Number(r.closing_hours),
+        hours_run: r.hours_run == null ? null : Number(r.hours_run),
+      }))
+    );
+
+    addTableSheet(
+      wb,
+      "MTD by Equipment",
+      [
+        { header: "Asset code", key: "asset_code", width: 14 },
+        { header: "Asset name", key: "asset_name", width: 24 },
+        { header: "Category", key: "category", width: 14 },
+        { header: "Days logged", key: "logged_days", width: 12 },
+        { header: "Used days", key: "used_days", width: 10 },
+        ...dayKeys.map((d) => ({ header: d, key: `d${d}`, width: 9 })),
+      ],
+      pivotRows
+    );
+
+    const summary = wb.addWorksheet("Summary");
+    summary.columns = [
+      { header: "Metric", key: "metric", width: 38 },
+      { header: "Value", key: "value", width: 20 },
+    ];
+    summary.addRows([
+      { metric: "Month", value: month },
+      { metric: "Period start", value: start },
+      { metric: "Period end", value: end },
+      { metric: "Equipment with logs", value: pivotRows.length },
+      { metric: "Daily rows logged", value: rows.length },
+      {
+        metric: "Opening meter values captured",
+        value: rows.reduce((acc, r) => acc + (r.opening_hours == null ? 0 : 1), 0),
+      },
+    ]);
+
+    const buffer = await wb.xlsx.writeBuffer();
+    reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header("Content-Disposition", `attachment; filename="IRONLOG_MTD_Opening_Hours_${month}.xlsx"`)
+      .send(Buffer.from(buffer));
+  });
+
   // GET /api/reports/gm-weekly.xlsx?end=YYYY-MM-DD&scheduled=10
   // GM pack: MTD availability/utilization; downtime from daily logs when present; MTBF/MTTR; PM; spares; forecast.
   app.get("/gm-weekly.xlsx", async (req, reply) => {
