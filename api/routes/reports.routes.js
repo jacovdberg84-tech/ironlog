@@ -6081,6 +6081,52 @@ export default async function reportsRoutes(app) {
       LIMIT 100
     `).all(start, end);
 
+    const fuelUsageSummary = db.prepare(`
+      SELECT
+        COALESCE(SUM(fl.liters), 0) AS fuel_liters,
+        COALESCE(SUM(COALESCE(fl.hours_run, 0)), 0) AS run_hours_ref,
+        COUNT(*) AS entries
+      FROM fuel_logs fl
+      WHERE fl.log_date BETWEEN ? AND ?
+    `).get(start, end);
+
+    const oilUsageSummary = db.prepare(`
+      SELECT
+        COALESCE(SUM(ol.quantity), 0) AS oil_qty,
+        COUNT(*) AS entries
+      FROM oil_logs ol
+      WHERE ol.log_date BETWEEN ? AND ?
+    `).get(start, end);
+
+    const fuelUsageByAsset = db.prepare(`
+      SELECT
+        a.asset_code,
+        a.asset_name,
+        COALESCE(SUM(fl.liters), 0) AS fuel_liters,
+        COALESCE(SUM(COALESCE(fl.hours_run, 0)), 0) AS run_hours_ref,
+        COUNT(*) AS entries
+      FROM fuel_logs fl
+      JOIN assets a ON a.id = fl.asset_id
+      WHERE fl.log_date BETWEEN ? AND ?
+      GROUP BY a.id
+      ORDER BY fuel_liters DESC
+      LIMIT 25
+    `).all(start, end);
+
+    const oilUsageByAsset = db.prepare(`
+      SELECT
+        a.asset_code,
+        a.asset_name,
+        COALESCE(SUM(ol.quantity), 0) AS oil_qty,
+        COUNT(*) AS entries
+      FROM oil_logs ol
+      JOIN assets a ON a.id = ol.asset_id
+      WHERE ol.log_date BETWEEN ? AND ?
+      GROUP BY a.id
+      ORDER BY oil_qty DESC
+      LIMIT 25
+    `).all(start, end);
+
     const pdf = await buildPdfBuffer(
       (doc) => {
         const logoPath = path.join(process.cwd(), "branding", "logo.png");
@@ -6131,6 +6177,58 @@ export default async function reportsRoutes(app) {
             trucks: fmtNum(r.trucks_delivered, 0),
             delivered: fmtNum(r.product_delivered, 2),
           }))
+        );
+
+        sectionTitle(doc, "Fuel & Oil Usage (Stores / Logs)");
+        kvGrid(doc, [
+          { label: "Fuel issued (L)", value: fmtNum(fuelUsageSummary?.fuel_liters || 0, 2) },
+          { label: "Fuel log entries", value: fmtNum(fuelUsageSummary?.entries || 0, 0) },
+          { label: "Fuel run hours reference", value: fmtNum(fuelUsageSummary?.run_hours_ref || 0, 1) },
+          { label: "Oil/Lube issued (qty)", value: fmtNum(oilUsageSummary?.oil_qty || 0, 2) },
+          { label: "Oil log entries", value: fmtNum(oilUsageSummary?.entries || 0, 0) },
+        ], 2);
+
+        sectionTitle(doc, "Fuel Usage by Asset (Top 25)");
+        table(
+          doc,
+          [
+            { key: "asset", label: "Asset", width: 0.38 },
+            { key: "entries", label: "Entries", width: 0.12, align: "right" },
+            { key: "fuel", label: "Fuel (L)", width: 0.20, align: "right" },
+            { key: "hrs", label: "Run hrs ref", width: 0.16, align: "right" },
+            { key: "lph", label: "L/hr", width: 0.14, align: "right" },
+          ],
+          fuelUsageByAsset.length
+            ? fuelUsageByAsset.map((r) => {
+                const liters = Number(r.fuel_liters || 0);
+                const runHours = Number(r.run_hours_ref || 0);
+                const lph = runHours > 0 ? liters / runHours : null;
+                return {
+                  asset: compactCell(`${r.asset_code || ""} - ${r.asset_name || ""}`, 70),
+                  entries: fmtNum(r.entries, 0),
+                  fuel: fmtNum(liters, 2),
+                  hrs: fmtNum(runHours, 1),
+                  lph: lph == null ? "-" : fmtNum(lph, 2),
+                };
+              })
+            : [{ asset: "No fuel usage in period", entries: "-", fuel: "-", hrs: "-", lph: "-" }]
+        );
+
+        sectionTitle(doc, "Oil/Lube Usage by Asset (Top 25)");
+        table(
+          doc,
+          [
+            { key: "asset", label: "Asset", width: 0.58 },
+            { key: "entries", label: "Entries", width: 0.14, align: "right" },
+            { key: "qty", label: "Oil qty", width: 0.28, align: "right" },
+          ],
+          oilUsageByAsset.length
+            ? oilUsageByAsset.map((r) => ({
+                asset: compactCell(`${r.asset_code || ""} - ${r.asset_name || ""}`, 90),
+                entries: fmtNum(r.entries, 0),
+                qty: fmtNum(r.oil_qty, 2),
+              }))
+            : [{ asset: "No oil usage in period", entries: "-", qty: "-" }]
         );
 
         sectionTitle(doc, "Entry Detail");
