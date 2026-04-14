@@ -2042,74 +2042,203 @@
 
     <!-- LEGAL DOCS -->
     <section class="panel" id="tab-legal">
-      <div class="card stack-12">
-        <h3>Department Legal Documents</h3>
+      <div class="asset-cards-grid">
+        <!-- Legal Docs Header -->
+        <div class="dash-card full-width">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef2f2; color: #dc2626;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+              </div>
+              <div>
+                <h3>Department Legal Documents</h3>
+                <p class="muted small">Upload, manage, and track legal document compliance</p>
+              </div>
+            </div>
+          </div>
+        </div>
 
-        <h4>Upload Document</h4>
-        <div class="row">
-          <select id="legalDepartment" class="w-200"></select>
-          <input id="legalTitle" class="w-200" placeholder="Title" />
-          <input id="legalDocType" class="w-140" placeholder="Doc type" />
-          <input id="legalVersion" class="w-110" placeholder="Version" />
-          <input id="legalOwner" class="w-140" placeholder="Owner" />
-          <input id="legalEffectiveDate" type="date" />
-          <input id="legalExpiryDate" type="date" />
-          <input id="legalFile" type="file" />
-          <button id="legalUploadBtn">Upload</button>
+        <!-- Upload Document Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+              </div>
+              <div>
+                <h3>Upload Document</h3>
+                <p class="muted small">Add new legal documents to the library</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Department</label>
+                <select id="legalDepartment" class="w-full"></select>
+              </div>
+              <div class="form-field">
+                <label>Title</label>
+                <input id="legalTitle" class="w-full" placeholder="Document title" />
+              </div>
+              <div class="form-field">
+                <label>Doc Type</label>
+                <input id="legalDocType" class="w-full" placeholder="e.g. Certificate" />
+              </div>
+              <div class="form-field">
+                <label>Version</label>
+                <input id="legalVersion" class="w-full" placeholder="e.g. 1.0" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Owner</label>
+                <input id="legalOwner" class="w-full" placeholder="Document owner" />
+              </div>
+              <div class="form-field">
+                <label>Effective Date</label>
+                <input id="legalEffectiveDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Expiry Date</label>
+                <input id="legalExpiryDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <label>File</label>
+                <input id="legalFile" type="file" class="w-full" />
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="legalUploadBtn" class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                Upload Document
+              </button>
+            </div>
+            <pre class="output" id="legalUploadResult"></pre>
+          </div>
         </div>
-        <pre class="output" id="legalUploadResult"></pre>
 
-        <h4>Document Library</h4>
-        <div class="row">
-          <div class="pill red">Expired: <span id="legalExpiredCount">0</span></div>
-          <div class="pill orange">Due 30d: <span id="legalDue30Count">0</span></div>
-          <div class="pill orange">Due 60d: <span id="legalDue60Count">0</span></div>
-          <div class="pill blue">Due 90d: <span id="legalDue90Count">0</span></div>
+        <!-- Expiry Monitor Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              </div>
+              <div>
+                <h3>Expiry Monitor</h3>
+                <p class="muted small">Track document expiration dates</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="kpi-pills">
+              <span class="kpi-pill kpi-pill-red"><strong>Expired:</strong> <span id="legalExpiredCount">0</span></span>
+              <span class="kpi-pill kpi-pill-orange"><strong>Due 30d:</strong> <span id="legalDue30Count">0</span></span>
+              <span class="kpi-pill kpi-pill-orange"><strong>Due 60d:</strong> <span id="legalDue60Count">0</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Due 90d:</strong> <span id="legalDue90Count">0</span></span>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Window (days)</label>
+                <input id="legalExpiryDays" type="number" min="1" max="3650" value="90" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadLegalExpiryBtn" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                  Load Monitor
+                </button>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="openLegalCompliancePdf" class="btn btn-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                Open PDF
+              </button>
+              <button id="downloadLegalCompliancePdf" class="btn btn-secondary btn-sm">Download PDF</button>
+            </div>
+          </div>
         </div>
-        <div class="row">
-          <label class="chk">Window (days)
-            <input id="legalExpiryDays" class="w-90" type="number" min="1" max="3650" value="90" />
-          </label>
-          <button id="loadLegalExpiryBtn">Load Expiry Monitor</button>
-          <button id="openLegalCompliancePdf">Open Compliance PDF</button>
-          <button id="downloadLegalCompliancePdf">Download Compliance PDF</button>
+
+        <!-- Document Library Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+              </div>
+              <div>
+                <h3>Document Library</h3>
+                <p class="muted small">Search, filter, and manage legal documents</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Department</label>
+                <select id="legalFilterDepartment" class="w-full">
+                  <option value="">All departments</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Status</label>
+                <select id="legalFilterStatus" class="w-full">
+                  <option value="">All statuses</option>
+                  <option value="draft">draft</option>
+                  <option value="pending_approval">pending_approval</option>
+                  <option value="approved">approved</option>
+                  <option value="rejected">rejected</option>
+                  <option value="superseded">superseded</option>
+                </select>
+              </div>
+              <div class="form-field form-field-full">
+                <label>Search</label>
+                <input id="legalSearch" class="w-full" placeholder="Search title/type/owner..." />
+              </div>
+              <div class="form-field">
+                <label class="checkbox-label" style="margin-top: 24px;">
+                  <input id="legalIncludeInactive" type="checkbox" />
+                  <span>Include archived</span>
+                </label>
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadLegalBtn" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                  Load Library
+                </button>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field form-field-full">
+                <label>Action Note</label>
+                <input id="legalActionNote" class="w-full" placeholder="Action note (submit/approve/reject/supersede)" />
+              </div>
+              <div class="form-field">
+                <label>Supersedes Doc ID</label>
+                <input id="legalSupersedesId" type="number" min="1" class="w-full" placeholder="Previous doc ID" disabled />
+              </div>
+            </div>
+            <div class="info-note" style="margin-top: 12px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              <span>Workflow: draft → pending_approval → approved → superseded. Rejected docs can be resubmitted.</span>
+            </div>
+            <small id="legalSupersedeHint" class="muted" style="display:none;">
+              Supersede selected: enter the previous approved document ID, then click Supersede again.
+            </small>
+            <pre class="output" id="legalActionResult"></pre>
+            <div class="list" id="legalList" style="margin-top: 12px;"></div>
+          </div>
         </div>
-        <div class="row">
-          <select id="legalFilterDepartment" class="w-200">
-            <option value="">All departments</option>
-          </select>
-          <select id="legalFilterStatus" class="w-200">
-            <option value="">All statuses</option>
-            <option value="draft">draft</option>
-            <option value="pending_approval">pending_approval</option>
-            <option value="approved">approved</option>
-            <option value="rejected">rejected</option>
-            <option value="superseded">superseded</option>
-          </select>
-          <input id="legalSearch" class="w-200" placeholder="Search title/type/owner..." />
-          <label class="chk">
-            <input id="legalIncludeInactive" type="checkbox" />
-            Include archived
-          </label>
-          <button id="loadLegalBtn">Load Library</button>
-        </div>
-        <div class="row">
-          <input id="legalActionNote" class="minw-260" placeholder="Action note (used for submit/approve/reject/supersede)" />
-          <input id="legalSupersedesId" class="w-140" type="number" min="1" placeholder="Supersedes Doc ID" disabled />
-        </div>
-        <div class="row">
-          <small id="legalSupersedeHint" class="muted" style="display:none;">
-            Supersede selected: enter the previous approved document ID, then click Supersede again.
-          </small>
-        </div>
-        <div class="row">
-          <small class="muted">
-            Workflow: draft -> pending_approval -> approved -> superseded.
-            Rejected docs can be resubmitted (rejected -> pending_approval).
-          </small>
-        </div>
-        <pre class="output" id="legalActionResult"></pre>
-        <div class="list" id="legalList"></div>
       </div>
     </section>
 
@@ -2144,109 +2273,277 @@
 
     <!-- PROCUREMENT -->
     <section class="panel" id="tab-procurement">
-      <div class="card stack-12">
-        <h3>IRONLOG Supply Flow</h3>
-        <p class="muted">Plan -> Review -> Approval Route -> Approve -> PO Ready -> Receive</p>
-        <div class="row sf-legend">
-          <span class="pill sf-chip sf-chip-plan">📋 Plan</span>
-          <span class="pill sf-chip sf-chip-review">🔎 Review</span>
-          <span class="pill sf-chip sf-chip-route">🛣️ Approval Route</span>
-          <span class="pill sf-chip sf-chip-approve">✅ Approvals</span>
-          <span class="pill sf-chip sf-chip-po-ready">🧾 PO Ready</span>
-          <span class="pill sf-chip sf-chip-receive">📦 Receive</span>
-        </div>
-        <div class="row">
-          <input id="prPartCode" list="partCodeOptions" class="w-140" placeholder="Part code" />
-          <input id="prQty" class="w-110" type="number" min="0.1" step="0.1" placeholder="Qty requested" value="1" />
-          <input id="prValue" class="w-140" type="number" min="0" step="0.01" placeholder="Req value (R)" />
-          <input id="prNeedBy" type="date" />
-          <select id="prBillTo" class="w-140">
-            <option value="workshop">Bill: workshop</option>
-            <option value="site">Bill: site</option>
-          </select>
-          <select id="prRequestType" class="w-140">
-            <option value="site">Type: site</option>
-            <option value="workshop">Type: workshop</option>
-          </select>
-          <input id="prSupplier" class="w-200" placeholder="Supplier (optional)" />
-          <input id="prPo" class="w-140" placeholder="PO Number (optional)" />
-          <input id="prNotes" class="minw-260" placeholder="Notes (optional)" />
-          <button id="createRequisition">Create Requisition</button>
-        </div>
-        <div class="card stack-12">
-          <h4>Approval Routing by Value</h4>
-          <div class="row">
-            <input id="prTier1Max" class="w-140" type="number" min="0" step="0.01" placeholder="Tier 1 max value" />
-            <input id="prTier1Chain" class="minw-260" placeholder="Tier 1 chain (comma names)" />
-          </div>
-          <div class="row">
-            <input id="prTier2Max" class="w-140" type="number" min="0" step="0.01" placeholder="Tier 2 max value" />
-            <input id="prTier2Chain" class="minw-260" placeholder="Tier 2 chain (comma names)" />
-          </div>
-          <div class="row">
-            <input id="prTier3Chain" class="minw-260" placeholder="Tier 3 chain (> Tier 2 max)" />
-            <input id="prApproverChain" class="minw-260" placeholder="Manual override chain (optional)" />
-            <button id="prSaveChainConfig">Save Chain Rules</button>
-          </div>
-          <div class="row">
-            <span class="pill" id="prChainTierBadge">TIER</span>
-            <div class="pill blue">Chain Preview: <span id="prChainPreview">-</span></div>
-          </div>
-          <p class="muted">Higher requisition value uses a higher approval chain automatically.</p>
-        </div>
-        <div class="row">
-          <button class="pill blue" id="prKpiAll">All: <span id="prAllCount">0</span></button>
-          <button class="pill orange" id="prKpiApprovedOpen">Approved Not Received: <span id="prApprovedOpenCount">0</span></button>
-          <button class="pill blue" id="prKpiInFlow">In Flow: <span id="prInFlowCount">0</span></button>
-        </div>
-        <div class="grid stack-12">
-          <div class="card sf-lane sf-lane-plan">
-            <h4 class="sf-lane-title"><span>📋</span><span>Plan</span><button class="pill sf-count" id="sfCountPlan" data-sf-status="draft" title="Filter list: Plan (draft)">0</button></h4>
-            <div class="list" id="sfPlan"></div>
-          </div>
-          <div class="card sf-lane sf-lane-review">
-            <h4 class="sf-lane-title"><span>🔎</span><span>Review</span><button class="pill sf-count" id="sfCountReview" data-sf-status="finalized" title="Filter list: Review (finalized)">0</button></h4>
-            <div class="list" id="sfReview"></div>
-          </div>
-          <div class="card sf-lane sf-lane-route">
-            <h4 class="sf-lane-title"><span>🛣️</span><span>Approval Route</span><button class="pill sf-count" id="sfCountRoute" data-sf-status="posted" title="Filter list: Approval Route (posted)">0</button></h4>
-            <div class="list" id="sfRoute"></div>
-          </div>
-          <div class="card sf-lane sf-lane-approve">
-            <h4 class="sf-lane-title"><span>✅</span><span>Approvals</span><button class="pill sf-count" id="sfCountApprove" data-sf-status="approval_in_progress" title="Filter list: Approvals (approval_in_progress)">0</button></h4>
-            <div class="list" id="sfApprove"></div>
-          </div>
-          <div class="card sf-lane sf-lane-po-ready">
-            <h4 class="sf-lane-title"><span>🧾</span><span>PO Ready</span><button class="pill sf-count" id="sfCountPoReady" data-sf-status="approved_all" title="Filter list: PO Ready (approved_all)">0</button></h4>
-            <div class="list" id="sfPoReady"></div>
-          </div>
-          <div class="card sf-lane sf-lane-receive">
-            <h4 class="sf-lane-title"><span>📦</span><span>Receive</span><button class="pill sf-count" id="sfCountReceive" data-sf-status="approved" title="Filter list: Receive (approved + received)">0</button></h4>
-            <div class="list" id="sfReceive"></div>
+      <div class="asset-cards-grid">
+        <!-- Supply Flow Header -->
+        <div class="dash-card full-width">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #e0e7ff; color: #4338ca;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              </div>
+              <div>
+                <h3>IRONLOG Supply Flow</h3>
+                <p class="muted small">Plan → Review → Approval Route → Approve → PO Ready → Receive</p>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="row">
-          <select id="prStatusFilter" class="w-200">
-            <option value="">All statuses</option>
-            <option value="draft">draft</option>
-            <option value="finalized">finalized</option>
-            <option value="posted">posted</option>
-            <option value="approval_in_progress">approval_in_progress</option>
-            <option value="approved_all">approved_all</option>
-            <option value="pending_approval">pending_approval</option>
-            <option value="approved">approved</option>
-            <option value="received">received</option>
-          </select>
-          <select id="prTierFilter" class="w-200">
-            <option value="">All tiers</option>
-            <option value="tier_1">Tier 1</option>
-            <option value="tier_2">Tier 2</option>
-            <option value="tier_3">Tier 3</option>
-          </select>
-          <button id="loadRequisitions">Load Requisitions</button>
+
+        <!-- Create Requisition Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+              </div>
+              <div>
+                <h3>Create Requisition</h3>
+                <p class="muted small">Add new purchase requisitions</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Part Code</label>
+                <input id="prPartCode" list="partCodeOptions" class="w-full" placeholder="Select part" />
+              </div>
+              <div class="form-field">
+                <label>Qty</label>
+                <input id="prQty" type="number" min="0.1" step="0.1" value="1" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Value (R)</label>
+                <input id="prValue" type="number" min="0" step="0.01" class="w-full" placeholder="Req value" />
+              </div>
+              <div class="form-field">
+                <label>Need By</label>
+                <input id="prNeedBy" type="date" class="w-full" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Bill To</label>
+                <select id="prBillTo" class="w-full">
+                  <option value="workshop">workshop</option>
+                  <option value="site">site</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Type</label>
+                <select id="prRequestType" class="w-full">
+                  <option value="site">site</option>
+                  <option value="workshop">workshop</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Supplier (optional)</label>
+                <input id="prSupplier" class="w-full" placeholder="Supplier name" />
+              </div>
+              <div class="form-field">
+                <label>PO Number (optional)</label>
+                <input id="prPo" class="w-full" placeholder="PO #" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field form-field-full">
+                <label>Notes</label>
+                <input id="prNotes" class="w-full" placeholder="Optional notes" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="createRequisition" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+                  Create Requisition
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="list" id="procurementList"></div>
-        <pre class="output" id="procurementResult"></pre>
+
+        <!-- Approval Routing Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+              </div>
+              <div>
+                <h3>Approval Routing by Value</h3>
+                <p class="muted small">Configure tier-based approval chains</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Tier 1 Max Value</label>
+                <input id="prTier1Max" type="number" min="0" step="0.01" class="w-full" placeholder="e.g. 5000" />
+              </div>
+              <div class="form-field form-field-full">
+                <label>Tier 1 Chain (comma names)</label>
+                <input id="prTier1Chain" class="w-full" placeholder="Name1, Name2" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Tier 2 Max Value</label>
+                <input id="prTier2Max" type="number" min="0" step="0.01" class="w-full" placeholder="e.g. 20000" />
+              </div>
+              <div class="form-field form-field-full">
+                <label>Tier 2 Chain (comma names)</label>
+                <input id="prTier2Chain" class="w-full" placeholder="Name1, Name2, Name3" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field form-field-full">
+                <label>Tier 3 Chain (> Tier 2)</label>
+                <input id="prTier3Chain" class="w-full" placeholder="Name1, Name2, Name3, Name4" />
+              </div>
+              <div class="form-field form-field-full">
+                <label>Manual Override Chain</label>
+                <input id="prApproverChain" class="w-full" placeholder="Optional override" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="prSaveChainConfig" class="btn btn-primary">Save Rules</button>
+              </div>
+            </div>
+            <div class="kpi-pills">
+              <span class="kpi-pill"><strong>Tier:</strong> <span id="prChainTierBadge">-</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Preview:</strong> <span id="prChainPreview">-</span></span>
+            </div>
+            <p class="muted small">Higher requisition value uses a higher approval chain automatically.</p>
+          </div>
+        </div>
+
+        <!-- KPI Summary Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+              </div>
+              <div>
+                <h3>Summary</h3>
+                <p class="muted small">Requisition statistics</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="kpi-pills">
+              <span class="kpi-pill kpi-pill-blue"><strong>All:</strong> <span id="prAllCount">0</span></span>
+              <span class="kpi-pill kpi-pill-orange"><strong>Approved Not Received:</strong> <span id="prApprovedOpenCount">0</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>In Flow:</strong> <span id="prInFlowCount">0</span></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Supply Flow Kanban Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+              </div>
+              <div>
+                <h3>Supply Flow Kanban</h3>
+                <p class="muted small">Visual workflow: Plan → Review → Route → Approve → PO Ready → Receive</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="supply-flow-lanes">
+              <div class="supply-flow-lane">
+                <div class="supply-flow-lane-header">📋 Plan <span id="sfCountPlan" class="lane-count">0</span></div>
+                <div class="list" id="sfPlan"></div>
+              </div>
+              <div class="supply-flow-lane">
+                <div class="supply-flow-lane-header">🔎 Review <span id="sfCountReview" class="lane-count">0</span></div>
+                <div class="list" id="sfReview"></div>
+              </div>
+              <div class="supply-flow-lane">
+                <div class="supply-flow-lane-header">🛣️ Route <span id="sfCountRoute" class="lane-count">0</span></div>
+                <div class="list" id="sfRoute"></div>
+              </div>
+              <div class="supply-flow-lane">
+                <div class="supply-flow-lane-header">✅ Approvals <span id="sfCountApprove" class="lane-count">0</span></div>
+                <div class="list" id="sfApprove"></div>
+              </div>
+              <div class="supply-flow-lane">
+                <div class="supply-flow-lane-header">🧾 PO Ready <span id="sfCountPoReady" class="lane-count">0</span></div>
+                <div class="list" id="sfPoReady"></div>
+              </div>
+              <div class="supply-flow-lane">
+                <div class="supply-flow-lane-header">📦 Receive <span id="sfCountReceive" class="lane-count">0</span></div>
+                <div class="list" id="sfReceive"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Requisition List Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+              </div>
+              <div>
+                <h3>All Requisitions</h3>
+                <p class="muted small">Filter and load all requisitions</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Status</label>
+                <select id="prStatusFilter" class="w-full">
+                  <option value="">All statuses</option>
+                  <option value="draft">draft</option>
+                  <option value="finalized">finalized</option>
+                  <option value="posted">posted</option>
+                  <option value="approval_in_progress">approval_in_progress</option>
+                  <option value="approved_all">approved_all</option>
+                  <option value="pending_approval">pending_approval</option>
+                  <option value="approved">approved</option>
+                  <option value="received">received</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Tier</label>
+                <select id="prTierFilter" class="w-full">
+                  <option value="">All tiers</option>
+                  <option value="tier_1">Tier 1</option>
+                  <option value="tier_2">Tier 2</option>
+                  <option value="tier_3">Tier 3</option>
+                </select>
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadRequisitions" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                  Load
+                </button>
+              </div>
+            </div>
+            <div class="list" id="procurementList" style="margin-top: 12px;"></div>
+            <pre class="output" id="procurementResult"></pre>
+          </div>
+        </div>
       </div>
     </section>
 

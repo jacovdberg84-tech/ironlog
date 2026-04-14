@@ -2899,6 +2899,41 @@ body.sidebar-collapsed .main-content {
   font-size: 11px;
 }
 
+/* Supply Flow Lanes */
+.supply-flow-lanes {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+  overflow-x: auto;
+}
+
+.supply-flow-lane {
+  background: #f9fafb;
+  border-radius: 8px;
+  padding: 12px;
+  min-height: 200px;
+}
+
+.supply-flow-lane-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  font-size: 12px;
+  color: #374151;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.supply-flow-lane-header .lane-count {
+  background: #e5e7eb;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+
 /* KPI Pill Variants */
 .kpi-pill-orange {
   background: #fff7ed;
