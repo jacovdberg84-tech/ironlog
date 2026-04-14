@@ -96,6 +96,20 @@
   --space-5:24px;
 }
 
+[data-theme="dark"]{
+  --bg:#0f172a;
+  --bg-soft:#1e293b;
+  --card:#1e293b;
+  --card-soft:#334155;
+  --ink:#f1f5f9;
+  --muted:#94a3b8;
+  --line:#475569;
+  --accent:#60a5fa;
+  --success:#4ade80;
+  --warn:#fbbf24;
+  --danger:#f87171;
+}
+
 *{box-sizing:border-box}
 body{
   margin:0;
@@ -4386,4 +4400,50 @@ body.sidebar-collapsed .main-content {
   font-size: 11px;
   color: #3b82f6;
   font-weight: 500;
+}
+
+/* Dark Mode */
+[data-theme="dark"] body {
+  background:
+    radial-gradient(1000px 500px at 10% -20%, rgba(96,165,250,0.1), transparent 50%),
+    radial-gradient(900px 500px at 100% -30%, rgba(74,222,128,0.08), transparent 45%),
+    var(--bg);
+}
+
+[data-theme="dark"] .topbar,
+[data-theme="dark"] .sidebar,
+[data-theme="dark"] .footer {
+  background: var(--card);
+  border-color: var(--line);
+}
+
+[data-theme="dark"] .panel,
+[data-theme="dark"] .card,
+[data-theme="dark"] .dash-card,
+[data-theme="dark"] .maintenance-card {
+  background: var(--card);
+  border-color: var(--line);
+}
+
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  background: var(--bg-soft);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+[data-theme="dark"] table th {
+  background: var(--bg-soft);
+  border-color: var(--line);
+}
+
+[data-theme="dark"] table td {
+  border-color: var(--line);
+}
+
+[data-theme="dark"] .pill {
+  background: var(--card-soft);
+  border-color: var(--line);
+  color: var(--ink);
 }
