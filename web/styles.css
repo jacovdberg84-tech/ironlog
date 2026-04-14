@@ -3147,3 +3147,67 @@ body.sidebar-collapsed .main-content {
     grid-column: 1;
   }
 }
+
+/* Collapsible Report Cards */
+.report-card.collapsible {
+  overflow: hidden;
+}
+
+.report-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  cursor: pointer;
+  user-select: none;
+}
+
+.report-card-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex: 1;
+}
+
+.report-card-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: #f3f4f6;
+  border-radius: 8px;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.report-card-toggle:hover {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.report-card-body {
+  padding-top: 16px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+/* Collapsed state */
+.report-card.collapsed .report-card-toggle svg {
+  transform: rotate(180deg);
+}
+
+.report-card.collapsed .report-card-body {
+  display: none;
+}
+
+.report-card.collapsed {
+  background: #fafafa;
+}
+
+/* Clickable header indicator */
+.report-card-header:hover .report-card-title h3 {
+  color: #2563eb;
+}

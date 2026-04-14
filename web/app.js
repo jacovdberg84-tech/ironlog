@@ -900,6 +900,41 @@ function initGlobalSearch() {
   });
 }
 
+function initReportCardCollapsible() {
+  document.querySelectorAll(".report-card.collapsible").forEach((card) => {
+    const header = card.querySelector(".report-card-header");
+    const toggle = card.querySelector(".report-card-toggle");
+    
+    if (!header || !toggle) return;
+    
+    const toggleCollapse = () => {
+      const isCollapsed = card.classList.toggle("collapsed");
+      card.dataset.collapsed = isCollapsed;
+      localStorage.setItem(`report_card_${card.querySelector("h3")?.textContent?.trim() || ""}`, isCollapsed ? "1" : "0");
+    };
+    
+    header.addEventListener("click", (e) => {
+      if (e.target.closest(".report-card-toggle")) {
+        toggleCollapse();
+      } else {
+        toggleCollapse();
+      }
+    });
+    
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleCollapse();
+    });
+    
+    const cardName = card.querySelector("h3")?.textContent?.trim() || "";
+    const savedState = localStorage.getItem(`report_card_${cardName}`);
+    if (savedState === "1") {
+      card.classList.add("collapsed");
+      card.dataset.collapsed = "true";
+    }
+  });
+}
+
 function initSettingsDropdown() {
   const dropdown = qs("settingsDropdown");
   const btn = qs("settingsBtn");
@@ -8753,6 +8788,7 @@ async function init() {
   initVehicleCheckTab();
   initSettingsDropdown();
   initGlobalSearch();
+  initReportCardCollapsible();
   applyRoleVisibility();
   applyI18n();
   applyGlobalPageTranslation();
