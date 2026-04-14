@@ -901,8 +901,8 @@ function initGlobalSearch() {
 }
 
 function initReportCardCollapsible() {
-  document.querySelectorAll(".report-card.collapsible").forEach((card) => {
-    const header = card.querySelector(".report-card-header");
+  document.querySelectorAll(".report-card.collapsible, .dash-card.collapsible").forEach((card) => {
+    const header = card.querySelector(".report-card-header") || card.querySelector(".dash-card-header");
     const toggle = card.querySelector(".report-card-toggle");
     
     if (!header || !toggle) return;

@@ -2763,6 +2763,215 @@ body.sidebar-collapsed .main-content {
   margin-top: 20px;
 }
 
+/* Asset Cards Grid */
+.asset-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.asset-cards-grid .full-width {
+  grid-column: 1 / -1;
+}
+
+/* Dash Card Collapsible */
+.dash-card.collapsible {
+  overflow: hidden;
+}
+
+.dash-card.collapsed .report-card-toggle svg {
+  transform: rotate(180deg);
+}
+
+.dash-card.collapsed .report-card-body {
+  display: none;
+}
+
+.dash-card.collapsed {
+  background: #fafafa;
+}
+
+/* Dash Card Icon */
+.dash-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: #f3f4f6;
+  color: #6b7280;
+  flex-shrink: 0;
+}
+
+/* Dash Card Title */
+.dash-card-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex: 1;
+}
+
+.dash-card-title h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0 0 2px 0;
+}
+
+.dash-card-title p {
+  margin: 0;
+  font-size: 12px;
+}
+
+/* Form Row */
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+/* Form Field */
+.form-field {
+  flex: 1;
+  min-width: 120px;
+}
+
+.form-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 4px;
+}
+
+.form-field input,
+.form-field select,
+.form-field textarea {
+  width: 100%;
+}
+
+.form-field.form-field-action {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: auto;
+}
+
+.form-field.form-field-action .btn {
+  white-space: nowrap;
+}
+
+.form-field.form-field-full {
+  flex-basis: 100%;
+}
+
+/* KPI Pills */
+.kpi-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.kpi-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: #f3f4f6;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #374151;
+}
+
+.kpi-pill strong {
+  font-weight: 600;
+}
+
+.kpi-pill-red {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.kpi-pill-green {
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.kpi-pill-blue {
+  background: #eff6ff;
+  color: #1e40af;
+}
+
+/* Info Note */
+.info-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #eff6ff;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #1e40af;
+  margin-bottom: 12px;
+}
+
+.info-note svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* Action Buttons */
+.action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* History Summary */
+.history-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  background: #f9fafb;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.history-summary .summary-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #ffffff;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.history-summary .summary-item strong {
+  font-weight: 600;
+}
+
+/* Checkbox Label */
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
 .cost-setup-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));

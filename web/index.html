@@ -644,111 +644,277 @@
 
     <!-- LUBE -->
     <section class="panel" id="tab-lube">
-      <div class="card stack-12">
-        <h3>Lube Usage</h3>
-        <div class="row">
-          <label class="chk">Start
-            <input id="lubeStart" type="date" />
-          </label>
-          <label class="chk">End
-            <input id="lubeEnd" type="date" />
-          </label>
-          <input id="lubeFilterAsset" class="w-140" placeholder="Filter asset code" />
-          <input id="lubeFilterOilType" class="w-200" placeholder="Filter oil type" />
-          <label class="chk">
-            <input id="lubeHidePartLike" type="checkbox" checked />
-            Hide part-like oil types
-          </label>
-          <button id="loadLube">Load Lube</button>
-          <button id="openLubePdfFromLube">Open Lube PDF</button>
+      <!-- Lube Header -->
+      <div class="section-header">
+        <div class="section-header-left">
+          <h2>Lube & Fluids</h2>
+          <p class="muted">Track lubricant usage, manage stock, and set reorder alerts</p>
         </div>
-        <div class="row lubeKpiRow">
-          <div class="pill blue">Qty Total: <span id="lubeQtyTotal">0</span></div>
-          <div class="pill blue">Entries: <span id="lubeEntries">0</span></div>
-          <div class="pill blue">Assets: <span id="lubeAssets">0</span></div>
-        </div>
-        <div class="list" id="lubeList"></div>
-        <p class="muted">Oil/lubricant consumption by machine for selected period.</p>
       </div>
 
-      <div class="card stack-12">
-        <h3>Issue Lube (to Equipment / Work Order)</h3>
-        <div class="row">
-          <input id="mlAsset" list="assetCodeOptions" class="w-140" placeholder="Asset code" />
-          <input id="mlDate" type="date" />
-          <input id="mlPart" list="partCodeOptions" class="w-140" placeholder="Lube stock no" />
-          <input id="mlPartDesc" class="w-200" placeholder="Part description" disabled />
-          <input id="mlLocation" list="locationCodeOptions" class="w-140" placeholder="Location code" />
-          <input id="mlType" class="w-200" placeholder="Lube/Oil type (optional)" />
-          <button id="loadLubeStock">Check Lube Stock</button>
-          <input id="mlQty" class="w-90" type="number" step="0.1" min="0.1" value="1" />
-          <button id="saveManualLube">Save Lube</button>
+      <div class="asset-cards-grid">
+        <!-- Lube Usage Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path></svg>
+              </div>
+              <div>
+                <h3>Lube Usage</h3>
+                <p class="muted small">Oil and lubricant consumption by machine</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Start Date</label>
+                <input id="lubeStart" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>End Date</label>
+                <input id="lubeEnd" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Filter Asset</label>
+                <input id="lubeFilterAsset" class="w-full" placeholder="Asset code" />
+              </div>
+              <div class="form-field">
+                <label>Oil Type</label>
+                <input id="lubeFilterOilType" class="w-full" placeholder="Filter oil type" />
+              </div>
+            </div>
+            <div class="form-row">
+              <label class="checkbox-label">
+                <input id="lubeHidePartLike" type="checkbox" checked />
+                <span>Hide part-like oil types</span>
+              </label>
+              <button id="loadLube" class="btn btn-primary">Load Lube</button>
+              <button id="openLubePdfFromLube" class="btn btn-secondary">Open PDF</button>
+            </div>
+            <div class="kpi-pills">
+              <span class="kpi-pill">Qty Total: <strong id="lubeQtyTotal">0</strong></span>
+              <span class="kpi-pill">Entries: <strong id="lubeEntries">0</strong></span>
+              <span class="kpi-pill">Assets: <strong id="lubeAssets">0</strong></span>
+            </div>
+            <div class="list" id="lubeList"></div>
+          </div>
         </div>
-        <div id="mlLubeQuickLine" class="muted mini"></div>
-        <div class="row">
-          <div class="pill blue">Available Qty: <span id="mlAvailableQty">-</span></div>
-          <div class="pill orange">Stock: <span id="mlAvailablePart">-</span></div>
-        </div>
-        <div id="mlQtyWarn" class="message-error"></div>
-        <div class="list" id="lubeStockList"></div>
-        <pre class="output" id="manualLubeResult"></pre>
-        <p class="muted">
-          This section is for issuing lube to equipment (and will link to work orders when provided).
-          Minimum stock and reorder monitoring is managed below.
-        </p>
-      </div>
 
-      <div class="card stack-12">
-        <h3>Lube Minimums & Reorder Alerts</h3>
-        <div class="row">
-          <input id="lubeMinPart" list="partCodeOptions" class="w-140" placeholder="Lube stock no" />
-          <input id="lubeMinPartDesc" class="w-200" placeholder="Part description" disabled />
-          <input id="lubeMinValue" class="w-110" type="number" step="0.1" min="0" placeholder="Min stock" />
-          <button id="lubeMinSetOne">Set Minimum</button>
-          <input id="lubeMinStockValue" class="w-110" type="number" step="0.1" min="0" value="210" />
-          <button id="setLubeMin210">Set Global Lube Min</button>
-          <button id="lubeMinRefresh">Refresh Alerts</button>
+        <!-- Issue Lube Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+              </div>
+              <div>
+                <h3>Issue Lube to Equipment</h3>
+                <p class="muted small">Issue lubricant to equipment or work orders</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Asset Code</label>
+                <input id="mlAsset" list="assetCodeOptions" class="w-full" placeholder="Asset code" />
+              </div>
+              <div class="form-field">
+                <label>Date</label>
+                <input id="mlDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Lube Stock No</label>
+                <input id="mlPart" list="partCodeOptions" class="w-full" placeholder="Stock code" />
+              </div>
+              <div class="form-field">
+                <label>Location</label>
+                <input id="mlLocation" list="locationCodeOptions" class="w-full" placeholder="Location" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Part Description</label>
+                <input id="mlPartDesc" class="w-full" placeholder="Description" disabled />
+              </div>
+              <div class="form-field">
+                <label>Lube/Oil Type</label>
+                <input id="mlType" class="w-full" placeholder="Type (optional)" />
+              </div>
+              <div class="form-field">
+                <label>Quantity</label>
+                <input id="mlQty" class="w-full" type="number" step="0.1" min="0.1" value="1" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadLubeStock" class="btn btn-secondary">Check Stock</button>
+                <button id="saveManualLube" class="btn btn-primary">Save Lube</button>
+              </div>
+            </div>
+            <div id="mlLubeQuickLine" class="muted mini"></div>
+            <div class="kpi-pills">
+              <span class="kpi-pill kpi-pill-blue">Available: <strong id="mlAvailableQty">-</strong></span>
+              <span class="kpi-pill kpi-pill-orange">Stock: <strong id="mlAvailablePart">-</strong></span>
+            </div>
+            <div id="mlQtyWarn" class="message-error"></div>
+            <div class="list" id="lubeStockList"></div>
+            <pre class="output" id="manualLubeResult"></pre>
+          </div>
         </div>
-        <div class="list" id="lubeReorderList"></div>
-        <pre class="output" id="lubeMinResult"></pre>
-        <p class="muted">Flags lube items that are below (or near) minimum stock, so you can reorder in time.</p>
-      </div>
 
-      <div class="card stack-12">
-        <h3>Receive Lube Stock (Top-up)</h3>
-        <div class="row">
-          <input id="lrPart" list="partCodeOptions" class="w-140" placeholder="Lube stock no" />
-          <input id="lrPartDesc" class="w-200" placeholder="Part description" disabled />
-          <input id="lrLocation" list="locationCodeOptions" class="w-140" placeholder="Location code" />
-          <input id="lrQty" class="w-110" type="number" step="0.1" min="0.1" value="20" />
-          <input id="lrRef" class="minw-260" placeholder="Reference (e.g. delivery note)" />
-          <button id="receiveLube">Receive Stock</button>
+        <!-- Reorder Alerts Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon dash-card-icon-warning">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+              </div>
+              <div>
+                <h3>Lube Minimums & Reorder Alerts</h3>
+                <p class="muted small">Set minimum stock levels and track reorder status</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Lube Stock No</label>
+                <input id="lubeMinPart" list="partCodeOptions" class="w-full" placeholder="Stock code" />
+              </div>
+              <div class="form-field">
+                <label>Part Description</label>
+                <input id="lubeMinPartDesc" class="w-full" placeholder="Description" disabled />
+              </div>
+              <div class="form-field">
+                <label>Min Stock Value</label>
+                <input id="lubeMinValue" class="w-full" type="number" step="0.1" min="0" placeholder="Min stock" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="lubeMinSetOne" class="btn btn-primary">Set Minimum</button>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Global Lube Min</label>
+                <input id="lubeMinStockValue" class="w-full" type="number" step="0.1" min="0" value="210" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="setLubeMin210" class="btn btn-secondary">Set Global Min</button>
+                <button id="lubeMinRefresh" class="btn btn-secondary">Refresh Alerts</button>
+              </div>
+            </div>
+            <div class="list" id="lubeReorderList"></div>
+            <pre class="output" id="lubeMinResult"></pre>
+          </div>
         </div>
-        <pre class="output" id="receiveLubeResult"></pre>
-        <p class="muted">Adds stock IN for the selected lube item (does not issue to an asset).</p>
-      </div>
 
-      <div class="card stack-12">
-        <h3>Lube Analytics (Type + Stock)</h3>
-        <div class="row">
-          <label class="chk">Months
-            <input id="lubeMonths" class="w-90" type="number" min="1" max="24" value="6" />
-          </label>
-          <button id="loadLubeAnalytics">Load Analytics</button>
+        <!-- Receive Stock Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon dash-card-icon-success">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              </div>
+              <div>
+                <h3>Receive Lube Stock</h3>
+                <p class="muted small">Add stock to inventory (top-up)</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Lube Stock No</label>
+                <input id="lrPart" list="partCodeOptions" class="w-full" placeholder="Stock code" />
+              </div>
+              <div class="form-field">
+                <label>Part Description</label>
+                <input id="lrPartDesc" class="w-full" placeholder="Description" disabled />
+              </div>
+              <div class="form-field">
+                <label>Location</label>
+                <input id="lrLocation" list="locationCodeOptions" class="w-full" placeholder="Location" />
+              </div>
+              <div class="form-field">
+                <label>Quantity</label>
+                <input id="lrQty" class="w-full" type="number" step="0.1" min="0.1" value="20" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="receiveLube" class="btn btn-primary">Receive Stock</button>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field form-field-full">
+                <label>Reference (e.g. delivery note)</label>
+                <input id="lrRef" class="w-full" placeholder="Reference" />
+              </div>
+            </div>
+            <pre class="output" id="receiveLubeResult"></pre>
+          </div>
         </div>
-        <div class="row">
-          <input id="lubeMapOilKey" class="w-200" placeholder="Oil type key (exact)" />
-          <input id="lubeMapPartCode" list="partCodeOptions" class="w-140" placeholder="Stock code" />
-          <button id="saveLubeMap">Save Mapping</button>
-          <button id="loadLubeMaps">Load Mappings</button>
+
+        <!-- Lube Analytics Card -->
+        <div class="dash-card collapsible" data-collapsed="true">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon dash-card-icon-purple">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+              </div>
+              <div>
+                <h3>Lube Analytics</h3>
+                <p class="muted small">Type analysis and stock monitoring</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Analysis Period (months)</label>
+                <input id="lubeMonths" class="w-full" type="number" min="1" max="24" value="6" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadLubeAnalytics" class="btn btn-primary">Load Analytics</button>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Oil Type Key</label>
+                <input id="lubeMapOilKey" class="w-full" placeholder="Oil type key (exact)" />
+              </div>
+              <div class="form-field">
+                <label>Stock Code</label>
+                <input id="lubeMapPartCode" list="partCodeOptions" class="w-full" placeholder="Stock code" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="saveLubeMap" class="btn btn-secondary">Save Mapping</button>
+                <button id="loadLubeMaps" class="btn btn-secondary">Load Mappings</button>
+              </div>
+            </div>
+            <div class="kpi-pills">
+              <span class="kpi-pill kpi-pill-blue">Oil Types: <strong id="laTypes">0</strong></span>
+              <span class="kpi-pill kpi-pill-blue">Total Qty: <strong id="laQty">0</strong></span>
+              <span class="kpi-pill kpi-pill-red">Low Risk: <strong id="laLowRisk">0</strong></span>
+            </div>
+            <div class="list" id="lubeMapList"></div>
+            <div class="list" id="lubeAnalyticsList"></div>
+          </div>
         </div>
-        <div class="row lubeKpiRow">
-          <div class="pill blue">Oil Types: <span id="laTypes">0</span></div>
-          <div class="pill blue">Total Qty: <span id="laQty">0</span></div>
-          <div class="pill red">Low Risk: <span id="laLowRisk">0</span></div>
-        </div>
-        <div class="list" id="lubeMapList"></div>
-        <div class="list" id="lubeAnalyticsList"></div>
       </div>
     </section>
 
@@ -884,65 +1050,155 @@
 
     <!-- ASSETS -->
     <section class="panel" id="tab-assets">
-      <div class="card stack-12">
-        <h3>Assets</h3>
-
-        <h4>Add Contractor / Hired Asset</h4>
-        <div class="row stack-10">
-          <input id="caContractor" class="w-200" placeholder="Contractor name" />
-          <input id="caCode" class="w-140" placeholder="Asset code (optional)" />
-          <input id="caName" class="w-200" placeholder="Asset name / unit" />
-          <input id="caCategory" class="w-200" placeholder="Category" value="Contractor Hire" />
-          <label class="chk">
-            <input id="caStandby" type="checkbox" />
-            Standby
-          </label>
-          <button id="saveContractorAsset">Add Contractor Asset</button>
+      <!-- Assets Header -->
+      <div class="section-header">
+        <div class="section-header-left">
+          <h2>Assets & Equipment</h2>
+          <p class="muted">Manage assets, view history, and track contractor equipment</p>
         </div>
-        <pre class="output" id="contractorAssetResult"></pre>
+      </div>
 
-        <hr class="hr-soft" />
-
-        <div class="row stack-6">
-          <label class="chk">
-            <input type="checkbox" id="showArchived" />
-            Show archived / scrapped assets
-          </label>
+      <div class="asset-cards-grid">
+        <!-- Add Contractor Asset Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>
+              </div>
+              <div>
+                <h3>Add Contractor / Hired Asset</h3>
+                <p class="muted small">Register new contractor or hired equipment</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Contractor Name</label>
+                <input id="caContractor" class="w-full" placeholder="Contractor name" />
+              </div>
+              <div class="form-field">
+                <label>Asset Code (optional)</label>
+                <input id="caCode" class="w-full" placeholder="Asset code" />
+              </div>
+              <div class="form-field">
+                <label>Asset Name / Unit</label>
+                <input id="caName" class="w-full" placeholder="Asset name / unit" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Category</label>
+                <input id="caCategory" class="w-full" placeholder="Category" value="Contractor Hire" />
+              </div>
+              <div class="form-field form-field-checkbox">
+                <label class="checkbox-label">
+                  <input id="caStandby" type="checkbox" />
+                  <span>Standby Asset</span>
+                </label>
+              </div>
+              <div class="form-field form-field-action">
+                <button id="saveContractorAsset" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                  Add Asset
+                </button>
+              </div>
+            </div>
+            <pre class="output" id="contractorAssetResult"></pre>
+          </div>
         </div>
 
-        <div class="row stack-10">
-          <label class="chk">Asset
-            <select id="histAsset"></select>
-          </label>
-
-          <button id="btnArchiveAsset" class="dangerBtn">Archive</button>
-          <button id="btnUnarchiveAsset" class="okBtn">Unarchive</button>
+        <!-- Archive/Unarchive Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg>
+              </div>
+              <div>
+                <h3>Archive Management</h3>
+                <p class="muted small">Archive or restore assets</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field form-field-full">
+                <label>Select Asset</label>
+                <select id="histAsset" class="w-full"></select>
+              </div>
+            </div>
+            <div class="form-row">
+              <label class="checkbox-label">
+                <input type="checkbox" id="showArchived" />
+                <span>Show archived / scrapped assets</span>
+              </label>
+            </div>
+            <div class="action-buttons">
+              <button id="btnArchiveAsset" class="btn btn-danger">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                Archive
+              </button>
+              <button id="btnUnarchiveAsset" class="btn btn-success">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+                Unarchive
+              </button>
+            </div>
+          </div>
         </div>
 
-        <hr class="hr-soft" />
-
-        <h3>Asset History</h3>
-
-        <div class="row">
-          <label class="chk">Start
-            <input id="histStart" type="date" />
-          </label>
-
-          <label class="chk">End
-            <input id="histEnd" type="date" />
-          </label>
-
-          <button id="loadHistory">Load History</button>
-          <button id="downloadHistoryPdf">Download History PDF</button>
+        <!-- Asset History Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              </div>
+              <div>
+                <h3>Asset History</h3>
+                <p class="muted small">View breakdowns, downtime, work orders, and component changes</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Start Date</label>
+                <input id="histStart" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>End Date</label>
+                <input id="histEnd" type="date" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadHistory" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                  Load History
+                </button>
+                <button id="downloadHistoryPdf" class="btn btn-secondary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                  Download PDF
+                </button>
+              </div>
+            </div>
+            <div id="historySummary" class="history-summary"></div>
+            <div id="historyList" class="list"></div>
+            <div class="info-note">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              <span>Photos from InspectPro: breakdown_photos and work_order_photos</span>
+            </div>
+          </div>
         </div>
-
-        <div id="historySummary" class="row stack-10"></div>
-        <div id="historyList" class="list stack-10"></div>
-        <p class="muted">Breakdowns, downtime logs, work orders, GET slips, component changes.</p>
-        <p class="muted">
-          Photo source: add images from InspectPro workflows (operator breakdown photos and artisan WO before/after photos).
-          IRONLOG reads linked records from <code>breakdown_photos</code> and <code>work_order_photos</code>.
-        </p>
       </div>
     </section>
 
@@ -1098,130 +1354,333 @@
 
     <!-- FUEL -->
     <section class="panel" id="tab-fuel">
-      <div class="card stack-12">
-        <h3>Fuel Input & OEM Benchmark</h3>
-
-        <h4 class="fuelSectionTitle">Manual Fuel Input</h4>
-        <div class="row">
-          <input id="fuelAsset" list="assetCodeOptions" class="w-140" placeholder="Asset code" />
-          <input id="fuelDate" type="date" />
-          <input id="fuelLiters" class="w-110" type="number" step="0.1" min="0.1" value="1" />
-          <input id="fuelHoursRun" class="w-110" type="number" step="0.1" min="0" placeholder="Meter run" />
-          <select id="fuelMeterUnit" class="w-110">
-            <option value="hours">hours</option>
-            <option value="km">km</option>
-          </select>
-          <input id="fuelSource" class="minw-260" placeholder="Source / notes (optional)" />
-          <button id="saveFuelLog">Save Fuel</button>
-        </div>
-        <details class="stack-12" style="margin-top:10px;">
-          <summary><b>Mass fuel input (paste)</b> — backfill from end of Feb</summary>
-          <p class="muted" style="margin:6px 0 0 0;">
-            Paste rows as CSV (comma) or TSV (tab). Columns:
-            <code>asset_code,log_date,liters,meter_unit,meter_run_value,source</code>.
-            Example: <code>LDV01,2026-02-28,60,km,480,bowser</code>
-          </p>
-          <textarea id="fuelMassPaste" rows="6" style="width:100%;" placeholder="Paste rows here..."></textarea>
-          <div class="row">
-            <button id="fuelMassImportBtn" type="button">Import pasted rows</button>
+      <div class="asset-cards-grid">
+        <!-- Manual Fuel Input Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 22h18M6 18V8a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v10M6 10h12M10 6V4M14 6V4"></path></svg>
+              </div>
+              <div>
+                <h3>Manual Fuel Input</h3>
+                <p class="muted small">Log fuel entries for assets</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
           </div>
-          <pre class="output" id="fuelMassResult"></pre>
-        </details>
-        <details class="stack-12" style="margin-top:10px;">
-          <summary><b>Import FAMS fuel file</b> (direct)</summary>
-          <p class="muted" style="margin:6px 0 0 0;">
-            Upload the FAMS export directly (columns like
-            <code>Reg/Registration, Date, Volume, Measurement, KMHour</code>).
-          </p>
-          <div class="row">
-            <input id="fuelFamsFile" type="file" accept=".csv,.txt" />
-            <select id="fuelFamsConflictMode" class="w-180">
-              <option value="skip">Skip existing days</option>
-              <option value="overwrite">Overwrite existing days</option>
-            </select>
-            <button id="fuelFamsUploadBtn" type="button">Import FAMS Fuel File</button>
-            <input id="fuelRepairAssetCode" list="assetCodeOptions" class="w-140" placeholder="Asset code (optional)" />
-            <button id="fuelRepairMeterChainBtn" type="button">Repair Meter Chain</button>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Asset Code</label>
+                <input id="fuelAsset" list="assetCodeOptions" class="w-full" placeholder="Select asset" />
+              </div>
+              <div class="form-field">
+                <label>Date</label>
+                <input id="fuelDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Liters</label>
+                <input id="fuelLiters" type="number" step="0.1" min="0.1" value="1" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Meter Run</label>
+                <input id="fuelHoursRun" type="number" step="0.1" min="0" placeholder="Value" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Unit</label>
+                <select id="fuelMeterUnit" class="w-full">
+                  <option value="hours">hours</option>
+                  <option value="km">km</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field form-field-full">
+                <label>Source / Notes</label>
+                <input id="fuelSource" class="w-full" placeholder="Optional notes" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="saveFuelLog" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                  Save Fuel
+                </button>
+              </div>
+            </div>
+            <pre class="output" id="fuelInputResult"></pre>
           </div>
-          <div class="row">
-            <input id="fuelClearFromDate" type="date" />
-            <input id="fuelClearAssetCode" list="assetCodeOptions" class="w-140" placeholder="Asset code (optional)" />
-            <label class="chk">
-              <input id="fuelClearDailyHours" type="checkbox" checked />
-              Also clear daily meters
-            </label>
-            <button id="fuelClearPreviewBtn" type="button">Preview Clear Impact</button>
-            <button id="fuelClearFromDateBtn" type="button">Clear Fuel From Date</button>
+        </div>
+
+        <!-- Mass Fuel Input Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+              </div>
+              <div>
+                <h3>Mass Fuel Input</h3>
+                <p class="muted small">Paste or import multiple fuel entries</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
           </div>
-          <pre class="output" id="fuelClearPreviewResult"></pre>
-          <pre class="output" id="fuelFamsResult"></pre>
-        </details>
-        <pre class="output" id="fuelInputResult"></pre>
+          <div class="report-card-body">
+            <div class="info-note">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              <span>CSV format: asset_code,log_date,liters,meter_unit,meter_run_value,source</span>
+            </div>
+            <div class="form-row">
+              <div class="form-field form-field-full">
+                <textarea id="fuelMassPaste" rows="5" class="w-full" placeholder="Paste rows here...&#10;Example: LDV01,2026-02-28,60,km,480,bowser"></textarea>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="fuelMassImportBtn" class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                Import Pasted Rows
+              </button>
+            </div>
+            <pre class="output" id="fuelMassResult"></pre>
+          </div>
+        </div>
 
-        <h4 class="fuelSectionTitle">OEM Baseline (L/hr) Editor</h4>
-        <div class="row">
-          <input id="fuelBaseAsset" list="assetCodeOptions" class="w-140" placeholder="Asset code" />
-          <input id="fuelBaseValue" class="w-110" type="number" step="0.01" min="0.01" value="5.0" />
-          <span id="fuelBaseUnitLabel" class="muted">L/hr</span>
-          <button id="loadFuelBaseline">Load Baseline</button>
-          <button id="saveFuelBaseline">Save Baseline</button>
+        <!-- FAMS Import Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+              </div>
+              <div>
+                <h3>Import FAMS Fuel File</h3>
+                <p class="muted small">Upload FAMS export directly</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Upload FAMS File</label>
+                <input id="fuelFamsFile" type="file" accept=".csv,.txt" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Conflict Mode</label>
+                <select id="fuelFamsConflictMode" class="w-full">
+                  <option value="skip">Skip existing days</option>
+                  <option value="overwrite">Overwrite existing days</option>
+                </select>
+              </div>
+              <div class="form-field form-field-action">
+                <label>Asset Code (optional)</label>
+                <input id="fuelRepairAssetCode" list="assetCodeOptions" class="w-full" placeholder="For meter repair" />
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="fuelFamsUploadBtn" class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                Import FAMS File
+              </button>
+              <button id="fuelRepairMeterChainBtn" class="btn btn-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+                Repair Meter Chain
+              </button>
+            </div>
+            <div class="form-row" style="margin-top: 16px;">
+              <div class="form-field">
+                <label>Clear From Date</label>
+                <input id="fuelClearFromDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Asset Code (optional)</label>
+                <input id="fuelClearAssetCode" list="assetCodeOptions" class="w-full" placeholder="Leave empty for all" />
+              </div>
+              <div class="form-field">
+                <label class="checkbox-label" style="margin-top: 24px;">
+                  <input type="checkbox" id="fuelClearDailyHours" checked />
+                  <span>Also clear daily meters</span>
+                </label>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="fuelClearPreviewBtn" class="btn btn-secondary">Preview Impact</button>
+              <button id="fuelClearFromDateBtn" class="btn btn-danger">Clear Fuel From Date</button>
+            </div>
+            <pre class="output" id="fuelClearPreviewResult"></pre>
+            <pre class="output" id="fuelFamsResult"></pre>
+          </div>
         </div>
-        <pre class="output" id="fuelBaselineResult"></pre>
 
-        <h4 class="fuelSectionTitle">Fuel Benchmark</h4>
-        <div class="row">
-          <label class="chk">Start
-            <input id="fuelStart" type="date" />
-          </label>
-          <label class="chk">End
-            <input id="fuelEnd" type="date" />
-          </label>
-          <label class="chk">Mode
-            <select id="fuelModeFilter" class="w-110">
-              <option value="">all</option>
-              <option value="km">LDV (km/L)</option>
-              <option value="hours">Machines (L/hr)</option>
-            </select>
-          </label>
-          <input id="fuelAssetFilter" list="assetCodeOptions" class="w-140" placeholder="Equipment ID" />
-          <label class="chk">Tolerance
-            <input id="fuelTolerance" class="w-90" type="number" step="0.01" min="0" value="0.15" />
-          </label>
-          <label class="chk">
-            <input id="fuelDupOnly" type="checkbox" />
-            Duplicates only
-          </label>
-          <button id="loadFuelBenchmark">Load Benchmark</button>
-          <button id="openFuelBenchmarkPdf">Open PDF</button>
-          <button id="downloadFuelBenchmarkPdf">Download PDF</button>
+        <!-- OEM Baseline Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"></line><line x1="18" y1="20" x2="18" y2="4"></line><line x1="6" y1="20" x2="6" y2="16"></line></svg>
+              </div>
+              <div>
+                <h3>OEM Baseline (L/hr)</h3>
+                <p class="muted small">Set fuel consumption baselines</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Asset Code</label>
+                <input id="fuelBaseAsset" list="assetCodeOptions" class="w-full" placeholder="Select asset" />
+              </div>
+              <div class="form-field">
+                <label>Baseline Value</label>
+                <input id="fuelBaseValue" type="number" step="0.01" min="0.01" value="5.0" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label class="muted small">Unit</label>
+                <span id="fuelBaseUnitLabel" class="muted">L/hr</span>
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadFuelBaseline" class="btn btn-secondary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                  Load
+                </button>
+                <button id="saveFuelBaseline" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                  Save
+                </button>
+              </div>
+            </div>
+            <pre class="output" id="fuelBaselineResult"></pre>
+          </div>
         </div>
-        <div class="row">
-          <div class="pill blue">Fuel Total (L): <span id="fbFuelTotal">0</span></div>
-          <div class="pill blue">Hours Run: <span id="fbHoursTotal">0</span></div>
-          <div class="pill blue">Distance (km): <span id="fbKmTotal">0</span></div>
-          <div class="pill blue">Avg L/hr: <span id="fbAvgLph">0</span></div>
-          <div class="pill blue">Avg km/L: <span id="fbAvgKmpl">0</span></div>
-          <div class="pill red">Excessive: <span id="fbExcessive">0</span></div>
-        </div>
-        <div class="list" id="fuelBenchmarkList"></div>
 
-        <h4 class="fuelSectionTitle">Fuel Consumption Snapshots (Daily / Weekly / Monthly)</h4>
-        <div class="row">
-          <label class="chk">Start
-            <input id="fuelSnapStart" type="date" />
-          </label>
-          <label class="chk">End
-            <input id="fuelSnapEnd" type="date" />
-          </label>
-          <button id="loadFuelSnapshots">Load Snapshots</button>
+        <!-- Fuel Benchmark Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+              </div>
+              <div>
+                <h3>Fuel Benchmark</h3>
+                <p class="muted small">Compare actual vs OEM fuel consumption</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Start Date</label>
+                <input id="fuelStart" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>End Date</label>
+                <input id="fuelEnd" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Mode</label>
+                <select id="fuelModeFilter" class="w-full">
+                  <option value="">all</option>
+                  <option value="km">LDV (km/L)</option>
+                  <option value="hours">Machines (L/hr)</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Equipment ID</label>
+                <input id="fuelAssetFilter" list="assetCodeOptions" class="w-full" placeholder="Filter by asset" />
+              </div>
+              <div class="form-field">
+                <label>Tolerance</label>
+                <input id="fuelTolerance" type="number" step="0.01" min="0" value="0.15" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label class="checkbox-label" style="margin-top: 24px;">
+                  <input type="checkbox" id="fuelDupOnly" />
+                  <span>Duplicates only</span>
+                </label>
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadFuelBenchmark" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                  Load Benchmark
+                </button>
+              </div>
+            </div>
+            <div class="kpi-pills">
+              <span class="kpi-pill"><strong>Fuel Total:</strong> <span id="fbFuelTotal">0</span> L</span>
+              <span class="kpi-pill"><strong>Hours Run:</strong> <span id="fbHoursTotal">0</span></span>
+              <span class="kpi-pill"><strong>Distance:</strong> <span id="fbKmTotal">0</span> km</span>
+              <span class="kpi-pill"><strong>Avg L/hr:</strong> <span id="fbAvgLph">0</span></span>
+              <span class="kpi-pill"><strong>Avg km/L:</strong> <span id="fbAvgKmpl">0</span></span>
+              <span class="kpi-pill kpi-pill-red"><strong>Excessive:</strong> <span id="fbExcessive">0</span></span>
+            </div>
+            <div class="action-buttons" style="margin-top: 12px;">
+              <button id="openFuelBenchmarkPdf" class="btn btn-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                Open PDF
+              </button>
+              <button id="downloadFuelBenchmarkPdf" class="btn btn-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Download PDF
+              </button>
+            </div>
+            <div class="list" id="fuelBenchmarkList"></div>
+          </div>
         </div>
-        <div class="row">
-          <div class="pill blue">Daily excessive: <span id="fsDailyEx">0</span></div>
-          <div class="pill blue">Weekly excessive: <span id="fsWeeklyEx">0</span></div>
-          <div class="pill blue">Monthly excessive: <span id="fsMonthlyEx">0</span></div>
-        </div>
-        <div class="list" id="fuelSnapshotsList"></div>
 
+        <!-- Fuel Snapshots Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+              </div>
+              <div>
+                <h3>Fuel Consumption Snapshots</h3>
+                <p class="muted small">Daily / Weekly / Monthly analysis</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Start Date</label>
+                <input id="fuelSnapStart" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>End Date</label>
+                <input id="fuelSnapEnd" type="date" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadFuelSnapshots" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                  Load Snapshots
+                </button>
+              </div>
+            </div>
+            <div class="kpi-pills">
+              <span class="kpi-pill"><strong>Daily excessive:</strong> <span id="fsDailyEx">0</span></span>
+              <span class="kpi-pill"><strong>Weekly excessive:</strong> <span id="fsWeeklyEx">0</span></span>
+              <span class="kpi-pill"><strong>Monthly excessive:</strong> <span id="fsMonthlyEx">0</span></span>
+            </div>
+            <div class="list" id="fuelSnapshotsList"></div>
+          </div>
+        </div>
       </div>
     </section>
 

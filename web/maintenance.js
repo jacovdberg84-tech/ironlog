@@ -75,28 +75,48 @@ function initMaintSidebar() {
 }
 
 function scrollToSection(section) {
-  const sectionMap = {
-    "maintenance": "showMainMaintBtn",
-    "service-history": "showServiceHistoryBtn",
-    "manager-inspections": "showManagerInspectionsBtn",
-    "artisan-inspections": "showArtisanInspectionsBtn",
-    "weekly-forum": "showWeeklyForumBtn",
-    "asset-kpi": "showAssetKpiBtn",
-    "histogram": "showHistogramBtn",
-    "sync-admin": "showSyncAdminBtn"
+  const viewMap = {
+    "maintenance": "main",
+    "service-history": "main",
+    "manager-inspections": "mi",
+    "artisan-inspections": "ai",
+    "weekly-forum": "wf",
+    "asset-kpi": "kpi",
+    "histogram": "hist",
+    "sync-admin": "sync"
   };
   
-  const btnId = sectionMap[section];
-  if (btnId) {
-    const btn = document.getElementById(btnId);
-    if (btn) {
-      btn.click();
-      // Scroll to content
-      const mainContent = document.getElementById("mainContent");
-      if (mainContent) {
-        mainContent.scrollIntoView({ behavior: "smooth", block: "start" });
+  const targetView = viewMap[section];
+  if (targetView) {
+    setTopView(targetView);
+    
+    setTimeout(() => {
+      let targetEl = null;
+      
+      if (targetView === "main") {
+        const plansSection = document.querySelector(".panel h3");
+        targetEl = plansSection || document.getElementById("mainContent");
+      } else {
+        const sectionMap = {
+          "mi": "managerInspectionsCard",
+          "ai": "artisanInspectionsCard",
+          "wf": "weeklyForumCard",
+          "kpi": "assetKpiCard",
+          "hist": "histogramCard",
+          "sync": "syncAdminCard"
+        };
+        targetEl = document.getElementById(sectionMap[targetView]);
       }
-    }
+      
+      if (targetEl) {
+        targetEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else {
+        const mainContent = document.getElementById("mainContent");
+        if (mainContent) {
+          mainContent.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
+    }, 50);
   }
 }
 
