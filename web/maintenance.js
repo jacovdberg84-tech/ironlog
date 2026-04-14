@@ -1012,8 +1012,8 @@ function setTopView(view) {
   // Show the selected section
   switch (view) {
     case "main":
-      if (main) main.style.display = "";
-      if (planSection) planSection.style.display = "";
+      if (main) main.style.display = "block";
+      if (planSection) planSection.style.display = "block";
       break;
     case "mi":
       if (mi) mi.style.display = "block";
