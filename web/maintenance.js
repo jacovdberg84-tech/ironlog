@@ -970,6 +970,7 @@ function setTopView(view) {
   const kpi = document.getElementById("assetKpiSection");
   const hist = document.getElementById("histogramSection");
   const sync = document.getElementById("syncAdminSection");
+  const planSection = document.querySelector("section.panel.page-section");
 
   // Hide all sections first
   if (main) main.style.display = "none";
@@ -979,11 +980,13 @@ function setTopView(view) {
   if (kpi) kpi.style.display = "none";
   if (hist) hist.style.display = "none";
   if (sync) sync.style.display = "none";
+  if (planSection) planSection.style.display = "none";
 
   // Show the selected section
   switch (view) {
     case "main":
       if (main) main.style.display = "";
+      if (planSection) planSection.style.display = "";
       break;
     case "mi":
       if (mi) mi.style.display = "";
