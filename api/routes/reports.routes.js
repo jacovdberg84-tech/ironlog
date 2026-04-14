@@ -2750,11 +2750,33 @@ export default async function reportsRoutes(app) {
 
         sectionTitle(doc, "General checklist (tick one)");
         doc.font("Helvetica").fontSize(10).fillColor("#111111");
+        const leftX = doc.page.margins.left;
+        const contentW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+        const colOkX = leftX + contentW * 0.58;
+        const colFailX = leftX + contentW * 0.68;
+        const colNaX = leftX + contentW * 0.80;
+        const noteLabelX = leftX + contentW * 0.06;
+        const noteLineX = leftX + contentW * 0.16;
+        const noteLineW = contentW * 0.80;
+        doc.font("Helvetica-Bold").fontSize(9);
+        const headY = doc.y;
+        doc.text("OK", colOkX, headY);
+        doc.text("FAIL", colFailX, headY);
+        doc.text("N/A", colNaX, headY);
+        doc.moveDown(0.6);
+        doc.font("Helvetica").fontSize(10);
         checklistRows.forEach((label, idx) => {
-          doc.text(`${idx + 1}. ${label}    [ ] OK   [ ] FAIL   [ ] N/A    Note: ______________________________`, {
-            width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
-          });
-          doc.moveDown(0.25);
+          ensurePageSpace(doc, 42);
+          const rowY = doc.y;
+          doc.text(`${idx + 1}. ${label}`, leftX, rowY, { width: contentW * 0.55 });
+          doc.text("[ ]", colOkX, rowY);
+          doc.text("[ ]", colFailX, rowY);
+          doc.text("[ ]", colNaX, rowY);
+          const noteY = rowY + 13;
+          doc.text("Note:", noteLabelX, noteY);
+          doc.moveTo(noteLineX, noteY + 10).lineTo(noteLineX + noteLineW, noteY + 10).strokeColor("#777777").lineWidth(0.6).stroke();
+          doc.y = noteY + 14;
+          doc.moveDown(0.2);
         });
 
         sectionTitle(doc, "Notes");
