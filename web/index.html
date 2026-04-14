@@ -1320,150 +1320,360 @@
 
     <!-- STOCK ON HAND -->
     <section class="panel" id="tab-stock">
-      <div class="card stack-12">
-        <div class="section-head-row">
-          <h3>Stores</h3>
-          <button type="button" class="sectionToggleBtn" data-section-body="spStoresBody" data-storage-key="ironlog_section_stock_on_hand">Hide</button>
+      <div class="asset-cards-grid">
+        <!-- Stores Header -->
+        <div class="dash-card full-width">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              </div>
+              <div>
+                <h3>Stores</h3>
+                <p class="muted small">Stock on hand, allocations, inventory control, and location management</p>
+              </div>
+            </div>
+          </div>
         </div>
-        <div id="spStoresBody" class="section-collapsible stack-12">
-        <div class="row">
-          <input id="spFilter" class="w-200" placeholder="Filter part code..." />
-          <select id="spSort" class="w-200">
-            <option value="critical_then_low">Sort: Critical + Low first</option>
-            <option value="on_hand_asc">Sort: On hand (low to high)</option>
-            <option value="on_hand_desc">Sort: On hand (high to low)</option>
-            <option value="part_code_asc">Sort: Part code (A-Z)</option>
-            <option value="part_code_desc">Sort: Part code (Z-A)</option>
-          </select>
-          <label class="chk">
-            <input id="spOnlyLow" type="checkbox" />
-            Show only LOW
-          </label>
-          <button id="spLoad">Load Stock On Hand</button>
-          <button id="spExportCsv">Export CSV</button>
-          <button id="spOpenPdf">Open PDF</button>
-        </div>
-        <div class="row">
-          <div class="pill blue">Total Parts: <span id="spTotalParts">0</span></div>
-          <div class="pill red">Below Min: <span id="spBelowMin">0</span></div>
-          <div class="pill orange">Critical Below: <span id="spCriticalBelow">0</span></div>
-          <div class="pill blue">Total On Hand: <span id="spTotalOnHand">0</span></div>
-          <div class="pill blue">Stock Value: <span id="spTotalValue">$0.00</span></div>
-        </div>
-        <div class="list" id="spList"></div>
-        <h4>Recent Stock Movements</h4>
-        <div class="list" id="spRecent"></div>
-        </div>
-      </div>
 
-      <div class="card stack-12">
-        <div class="section-head-row">
-          <h3>Stores Allocation</h3>
-          <button type="button" class="sectionToggleBtn" data-section-body="spAllocBody" data-storage-key="ironlog_section_stock_alloc">Hide</button>
+        <!-- Stock On Hand Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+              </div>
+              <div>
+                <h3>Stock On Hand</h3>
+                <p class="muted small">View and manage inventory levels</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Filter</label>
+                <input id="spFilter" class="w-full" placeholder="Filter part code..." />
+              </div>
+              <div class="form-field">
+                <label>Sort By</label>
+                <select id="spSort" class="w-full">
+                  <option value="critical_then_low">Critical + Low first</option>
+                  <option value="on_hand_asc">On hand (low to high)</option>
+                  <option value="on_hand_desc">On hand (high to low)</option>
+                  <option value="part_code_asc">Part code (A-Z)</option>
+                  <option value="part_code_desc">Part code (Z-A)</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label class="checkbox-label" style="margin-top: 24px;">
+                  <input id="spOnlyLow" type="checkbox" />
+                  <span>Show only LOW</span>
+                </label>
+              </div>
+              <div class="form-field form-field-action">
+                <button id="spLoad" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                  Load Stock
+                </button>
+              </div>
+            </div>
+            <div class="kpi-pills">
+              <span class="kpi-pill kpi-pill-blue"><strong>Total Parts:</strong> <span id="spTotalParts">0</span></span>
+              <span class="kpi-pill kpi-pill-red"><strong>Below Min:</strong> <span id="spBelowMin">0</span></span>
+              <span class="kpi-pill kpi-pill-orange"><strong>Critical:</strong> <span id="spCriticalBelow">0</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>On Hand:</strong> <span id="spTotalOnHand">0</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Value:</strong> $<span id="spTotalValue">0.00</span></span>
+            </div>
+            <div class="action-buttons">
+              <button id="spExportCsv" class="btn btn-secondary btn-sm">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Export CSV
+              </button>
+              <button id="spOpenPdf" class="btn btn-secondary btn-sm">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                Open PDF
+              </button>
+            </div>
+            <div class="list" id="spList" style="margin-top: 12px;"></div>
+            <div class="info-note" style="margin-top: 16px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              <span>Recent Stock Movements</span>
+            </div>
+            <div class="list" id="spRecent"></div>
+          </div>
         </div>
-        <div id="spAllocBody" class="section-collapsible stack-12">
-        <div class="row">
-          <input id="saPart" list="partCodeOptions" class="w-200" placeholder="Part code" />
-          <input id="saQty" class="w-90" type="number" step="0.1" min="0.1" value="1" />
-          <input id="saLocation" list="locationCodeOptions" class="w-140" placeholder="Location code" />
-          <input id="saAsset" list="assetCodeOptions" class="w-140" placeholder="Asset code (optional)" />
-          <input id="saWo" class="w-140" placeholder="Work order ID (optional)" />
-          <input id="saDate" type="date" />
-          <input id="saIssuedBy" class="w-140" placeholder="Issued by" />
-          <button id="allocateStore">Allocate</button>
-          <button id="refreshAllocations">Refresh Allocations</button>
-        </div>
-        <input id="saNotes" class="minw-260" placeholder="Notes (optional)" />
-        <pre class="output" id="storeAllocResult"></pre>
 
-        <h4>Recent Allocations</h4>
-        <div id="storeAllocList" class="list"></div>
+        <!-- Stores Allocation Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><polyline points="17 11 19 13 23 9"></polyline></svg>
+              </div>
+              <div>
+                <h3>Stores Allocation</h3>
+                <p class="muted small">Allocate parts to assets or work orders</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Part Code</label>
+                <input id="saPart" list="partCodeOptions" class="w-full" placeholder="Select part" />
+              </div>
+              <div class="form-field">
+                <label>Quantity</label>
+                <input id="saQty" type="number" step="0.1" min="0.1" value="1" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Location</label>
+                <input id="saLocation" list="locationCodeOptions" class="w-full" placeholder="Location code" />
+              </div>
+              <div class="form-field">
+                <label>Asset (optional)</label>
+                <input id="saAsset" list="assetCodeOptions" class="w-full" placeholder="Asset code" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Work Order (optional)</label>
+                <input id="saWo" class="w-full" placeholder="WO ID" />
+              </div>
+              <div class="form-field">
+                <label>Date</label>
+                <input id="saDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Issued By</label>
+                <input id="saIssuedBy" class="w-full" placeholder="Your name" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="allocateStore" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><polyline points="17 11 19 13 23 9"></polyline></svg>
+                  Allocate
+                </button>
+                <button id="refreshAllocations" class="btn btn-secondary btn-sm">Refresh</button>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field form-field-full">
+                <label>Notes</label>
+                <input id="saNotes" class="w-full" placeholder="Optional notes" />
+              </div>
+            </div>
+            <pre class="output" id="storeAllocResult"></pre>
+            <div class="info-note" style="margin-top: 12px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              <span>Recent Allocations</span>
+            </div>
+            <div id="storeAllocList" class="list"></div>
+          </div>
         </div>
-      </div>
 
-      <div class="card stack-12">
-        <div class="section-head-row">
-          <h3>Manual Stock Entry</h3>
-          <button type="button" class="sectionToggleBtn" data-section-body="spManualBody" data-storage-key="ironlog_section_stock_manual">Hide</button>
+        <!-- Manual Stock Entry Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+              </div>
+              <div>
+                <h3>Manual Stock Entry</h3>
+                <p class="muted small">Add or adjust stock manually</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Part Code</label>
+                <input id="msPart" list="partCodeOptions" class="w-full" placeholder="Select part" />
+              </div>
+              <div class="form-field">
+                <label>Description (new codes)</label>
+                <input id="msPartDesc" class="w-full" placeholder="Part description" />
+              </div>
+              <div class="form-field">
+                <label>Location</label>
+                <input id="msLocation" list="locationCodeOptions" class="w-full" placeholder="Location code" />
+              </div>
+              <div class="form-field">
+                <label>Type</label>
+                <select id="msType" class="w-full">
+                  <option value="in">in</option>
+                  <option value="out">out</option>
+                  <option value="adjust">adjust</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Quantity</label>
+                <input id="msQty" type="number" step="0.1" value="1" class="w-full" />
+              </div>
+              <div class="form-field form-field-full">
+                <label>Reference</label>
+                <input id="msRef" class="w-full" placeholder="Optional reference" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="saveManualStock" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                  Save Stock
+                </button>
+              </div>
+            </div>
+            <div class="info-note" style="margin-top: 12px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              <span>Unit cost (receipts only) - Converted to USD using configured rates (ZAR/MZN per 1 USD).</span>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Unit Cost</label>
+                <input id="msUnitCost" type="number" step="0.01" min="0" class="w-full" placeholder="Per unit" />
+              </div>
+              <div class="form-field">
+                <label>Currency</label>
+                <select id="msCostCurrency" class="w-full">
+                  <option value="USD">USD</option>
+                  <option value="ZAR">ZAR</option>
+                  <option value="MZN">MZN</option>
+                </select>
+              </div>
+            </div>
+            <pre class="output" id="manualStockResult"></pre>
+          </div>
         </div>
-        <div id="spManualBody" class="section-collapsible stack-12">
-        <div class="row">
-          <input id="msPart" list="partCodeOptions" class="w-200" placeholder="Part code" />
-          <input id="msPartDesc" class="w-200" placeholder="Part description (required for new codes)" />
-          <input id="msLocation" list="locationCodeOptions" class="w-140" placeholder="Location code" />
-          <select id="msType" class="w-140">
-            <option value="in">in</option>
-            <option value="out">out</option>
-            <option value="adjust">adjust</option>
-          </select>
-          <input id="msQty" class="w-90" type="number" step="0.1" value="1" />
-          <input id="msRef" class="minw-260" placeholder="Reference (optional)" />
-          <button id="saveManualStock">Save Stock</button>
-        </div>
-        <div id="msCostRow" class="row">
-          <span class="muted">Unit cost (receipts only)</span>
-          <input id="msUnitCost" class="w-110" type="number" step="0.01" min="0" placeholder="Per unit" />
-          <select id="msCostCurrency" class="w-100">
-            <option value="USD">USD</option>
-            <option value="ZAR">ZAR</option>
-            <option value="MZN">MZN</option>
-          </select>
-          <span class="muted">Converted to USD using configured rates (ZAR/MZN per 1 USD).</span>
-        </div>
-        <pre class="output" id="manualStockResult"></pre>
-        </div>
-      </div>
 
-      <div class="card stack-12">
-        <div class="section-head-row">
-          <h3>Inventory Control</h3>
-          <button type="button" class="sectionToggleBtn" data-section-body="spIcBody" data-storage-key="ironlog_section_stock_inventory">Hide</button>
+        <!-- Inventory Control Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef2f2; color: #dc2626;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+              </div>
+              <div>
+                <h3>Inventory Control</h3>
+                <p class="muted small">Set minimums and submit cycle counts</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Part Code</label>
+                <input id="icPartCode" list="partCodeOptions" class="w-full" placeholder="Select part" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="icLoad" class="btn btn-secondary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                  Load
+                </button>
+              </div>
+            </div>
+            <div class="kpi-pills">
+              <span class="kpi-pill kpi-pill-blue"><strong>On Hand:</strong> <span id="icOnHand">-</span></span>
+              <span class="kpi-pill kpi-pill-orange"><strong>Min Stock:</strong> <span id="icMinStock">-</span></span>
+              <span class="kpi-pill kpi-pill-red"><strong>Below Min:</strong> <span id="icBelowMinTotal">0</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Lube Low:</strong> <span id="icLubeLowCount">0</span></span>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>New Min</label>
+                <input id="icMinInput" type="number" min="0" step="0.1" class="w-full" placeholder="Set minimum" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="icSaveMin" class="btn btn-primary">Set Minimum</button>
+              </div>
+              <div class="form-field">
+                <label>Counted Qty</label>
+                <input id="icCountedQty" type="number" min="0" step="0.1" class="w-full" placeholder="Actual count" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="icSubmitCount" class="btn btn-secondary">Submit Count</button>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field form-field-full">
+                <label>Cycle Count Reason</label>
+                <input id="icCountReason" class="w-full" placeholder="Reason for cycle count" />
+              </div>
+            </div>
+            <div class="list" id="icLubeLowList" style="margin-top: 12px;"></div>
+            <pre class="output" id="inventoryControlResult"></pre>
+          </div>
         </div>
-        <div id="spIcBody" class="section-collapsible stack-12">
-        <div class="row">
-          <input id="icPartCode" list="partCodeOptions" class="w-200" placeholder="Part code" />
-          <button id="icLoad">Load Control</button>
-          <div class="pill blue">On Hand: <span id="icOnHand">-</span></div>
-          <div class="pill orange">Min Stock: <span id="icMinStock">-</span></div>
-          <div class="pill red">Below Min Total: <span id="icBelowMinTotal">0</span></div>
-          <div class="pill blue">Lube Low: <span id="icLubeLowCount">0</span></div>
-        </div>
-        <div class="row">
-          <input id="icMinInput" class="w-110" type="number" min="0" step="0.1" placeholder="New min" />
-          <button id="icSaveMin">Set Part Minimum</button>
-          <input id="icCountedQty" class="w-110" type="number" min="0" step="0.1" placeholder="Counted qty" />
-          <input id="icCountReason" class="minw-260" placeholder="Cycle count reason (optional)" />
-          <button id="icSubmitCount">Submit Cycle Count</button>
-        </div>
-        <div class="list" id="icLubeLowList"></div>
-        <pre class="output" id="inventoryControlResult"></pre>
-        </div>
-      </div>
 
-      <div class="card stack-12">
-        <div class="section-head-row">
-          <h3>Location Management</h3>
-          <button type="button" class="sectionToggleBtn" data-section-body="spLocBody" data-storage-key="ironlog_section_stock_locations">Hide</button>
-        </div>
-        <div id="spLocBody" class="section-collapsible stack-12">
-        <div class="row">
-          <button id="locLoad">Load Locations</button>
-          <label class="chk">
-            <input id="locShowInactive" type="checkbox" />
-            Show inactive
-          </label>
-        </div>
-        <div class="row">
-          <input id="locCode" class="w-140" placeholder="Location code (e.g. MAIN)" />
-          <input id="locName" class="w-200" placeholder="Location name (optional)" />
-          <select id="locActive" class="w-140">
-            <option value="1">active</option>
-            <option value="0">inactive</option>
-          </select>
-          <button id="locSave">Save Location</button>
-        </div>
-        <div class="list" id="locList"></div>
-        <pre class="output" id="locResult"></pre>
+        <!-- Location Management Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #e0e7ff; color: #4338ca;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+              </div>
+              <div>
+                <h3>Location Management</h3>
+                <p class="muted small">Manage warehouse locations</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field form-field-action">
+                <button id="locLoad" class="btn btn-secondary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                  Load Locations
+                </button>
+              </div>
+              <div class="form-field">
+                <label class="checkbox-label" style="margin-top: 24px;">
+                  <input id="locShowInactive" type="checkbox" />
+                  <span>Show inactive</span>
+                </label>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Location Code</label>
+                <input id="locCode" class="w-full" placeholder="e.g. MAIN" />
+              </div>
+              <div class="form-field">
+                <label>Name (optional)</label>
+                <input id="locName" class="w-full" placeholder="Location name" />
+              </div>
+              <div class="form-field">
+                <label>Status</label>
+                <select id="locActive" class="w-full">
+                  <option value="1">active</option>
+                  <option value="0">inactive</option>
+                </select>
+              </div>
+              <div class="form-field form-field-action">
+                <button id="locSave" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                  Save
+                </button>
+              </div>
+            </div>
+            <div class="list" id="locList" style="margin-top: 12px;"></div>
+            <pre class="output" id="locResult"></pre>
+          </div>
         </div>
       </div>
     </section>
