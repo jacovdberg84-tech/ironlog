@@ -132,12 +132,12 @@ function scrollToSection(section) {
         targetEl = plansSection || document.getElementById("mainContent");
       } else {
         const sectionMap = {
-          "mi": "managerInspectionsCard",
-          "ai": "artisanInspectionsCard",
-          "wf": "weeklyForumCard",
-          "kpi": "assetKpiCard",
-          "hist": "histogramCard",
-          "sync": "syncAdminCard"
+          "mi": "managerInspectionsSection",
+          "ai": "artisanInspectionsSection",
+          "wf": "weeklyForumSection",
+          "kpi": "assetKpiSection",
+          "hist": "histogramSection",
+          "sync": "syncAdminSection"
         };
         targetEl = document.getElementById(sectionMap[targetView]);
       }
@@ -151,6 +151,30 @@ function scrollToSection(section) {
         }
       }
     }, 50);
+  }
+}
+
+function refreshTopViewData(view) {
+  switch (view) {
+    case "mi":
+      loadManagerInspections().catch(() => {});
+      break;
+    case "ai":
+      loadArtisanInspections().catch(() => {});
+      break;
+    case "wf":
+      loadWeeklyForumSummary().catch(() => {});
+      loadWeeklyForumActions().catch(() => {});
+      loadWeeklyForumInputs().catch(() => {});
+      break;
+    case "kpi":
+      loadAssetKpiWeekly().catch(() => {});
+      break;
+    case "sync":
+      syncLoadState().catch(() => {});
+      break;
+    default:
+      break;
   }
 }
 
@@ -1040,6 +1064,9 @@ function setTopView(view) {
       item.classList.toggle("active", isActive);
     });
   }
+
+  // Ensure section data refreshes when opened via sidebar navigation.
+  refreshTopViewData(view);
 }
 
 async function loadHistogramEvents() {
