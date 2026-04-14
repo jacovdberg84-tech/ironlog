@@ -7759,165 +7759,216 @@ function renderDailyTable() {
   body.innerHTML = "";
   const rowsToRender = dailyShowDownOnly ? dailyRows.filter((r) => !!r.is_down) : dailyRows;
 
+  // Create a container for card-style rows
+  const container = document.createElement("div");
+  container.className = "daily-rows-container";
+
   for (const r of rowsToRender) {
-    const tr = document.createElement("tr");
-    if (r.is_master_standby) tr.classList.add("standbyRow");
-    if (r.is_down) tr.classList.add("downRow");
-    if (r.error) tr.classList.add("errorRow");
+    const rowClass = [
+      "daily-row-card",
+      r.is_master_standby ? "standby" : "",
+      r.is_down ? "down" : "",
+      r.error ? "has-error" : "",
+      r.warning ? "has-warning" : ""
+    ].filter(Boolean).join(" ");
 
-    const tdA = document.createElement("td");
-    tdA.innerHTML = `<div class="rowAsset"><b>${r.asset_code}</b><small>${r.asset_name || ""}</small></div>`;
-    tr.appendChild(tdA);
+    const card = document.createElement("div");
+    card.className = rowClass;
 
-    const tdP = document.createElement("td");
-    tdP.className = "toggle";
+    // Asset Header
+    const assetHeader = document.createElement("div");
+    assetHeader.className = "daily-row-header";
+    assetHeader.innerHTML = `
+      <div class="daily-asset-info">
+        <span class="daily-asset-code">${r.asset_code}</span>
+        <span class="daily-asset-name">${r.asset_name || ""}</span>
+      </div>
+      <div class="daily-status-badge ${r.is_down ? 'status-down' : r.error ? 'status-error' : r.warning ? 'status-warning' : 'status-ok'}">
+        ${r.is_down ? '⬇ DOWN' : r.error ? '✕ ' + r.error : r.warning ? '⚠ ' + r.warning : r.is_used ? '▶ PRODUCTION' : '⏸ STANDBY'}
+      </div>
+    `;
+    card.appendChild(assetHeader);
 
-    const prodWrap = document.createElement("label");
-    prodWrap.className = "prodToggle";
-    const chkProd = document.createElement("input");
-    chkProd.type = "checkbox";
-    chkProd.checked = !!r.is_used;
-    chkProd.disabled = r.is_master_standby;
-    const prodTxt = document.createElement("span");
-    prodTxt.textContent = "PROD";
-    prodWrap.appendChild(chkProd);
-    prodWrap.appendChild(prodTxt);
+    // Main Content Grid
+    const contentGrid = document.createElement("div");
+    contentGrid.className = "daily-row-content";
 
-    chkProd.addEventListener("change", () => {
-      r.is_used = chkProd.checked;
+    // Left Column - Hours
+    const hoursCol = document.createElement("div");
+    hoursCol.className = "daily-hours-col";
+    hoursCol.innerHTML = `
+      <div class="daily-hours-grid">
+        <div class="daily-hour-field">
+          <label>Scheduled</label>
+          <input type="number" step="0.5" min="0" max="24" value="${fmt(r.scheduled_hours)}" class="daily-input" />
+        </div>
+        <div class="daily-hour-field">
+          <label>Opening</label>
+          <input type="number" step="0.1" value="${fmt(r.opening_hours)}" class="daily-input readonly" readonly title="${r.opening_from_date ? `Auto-filled from ${r.opening_from_date}` : 'Auto-filled from yesterday'}" />
+        </div>
+        <div class="daily-hour-field">
+          <label>Closing</label>
+          <input type="number" step="0.1" value="${fmt(r.closing_hours)}" class="daily-input ${r.is_down ? 'disabled' : ''}" ${r.is_down ? 'readonly' : ''} />
+        </div>
+        <div class="daily-hour-field">
+          <label>Run</label>
+          <div class="daily-run-display">${fmt(r.hours_run)} ${String(r.input_unit || "hours").toLowerCase() === "km" ? "km" : "hrs"}</div>
+        </div>
+      </div>
+    `;
+    contentGrid.appendChild(hoursCol);
+
+    // Right Column - Controls
+    const controlsCol = document.createElement("div");
+    controlsCol.className = "daily-controls-col";
+
+    // Production Toggle
+    const prodToggle = document.createElement("div");
+    prodToggle.className = "daily-toggle-group";
+    prodToggle.innerHTML = `
+      <label class="daily-toggle ${r.is_used ? 'active' : ''} ${r.is_master_standby ? 'disabled' : ''}">
+        <input type="checkbox" ${r.is_used ? 'checked' : ''} ${r.is_master_standby ? 'disabled' : ''} />
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        <span class="toggle-label">PROD</span>
+      </label>
+      <label class="daily-toggle down ${r.is_down ? 'active' : ''} ${r.is_master_standby || (r.is_down && r.down_lock) ? 'disabled' : ''}">
+        <input type="checkbox" ${r.is_down ? 'checked' : ''} ${r.is_master_standby || (r.is_down && r.down_lock) ? 'disabled' : ''} />
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        <span class="toggle-label">DOWN</span>
+      </label>
+    `;
+    controlsCol.appendChild(prodToggle);
+
+    // Unit selector
+    const unitSelect = document.createElement("div");
+    unitSelect.className = "daily-unit-select";
+    unitSelect.innerHTML = `
+      <select class="daily-select ${r.is_down && r.down_lock ? 'disabled' : ''}" ${r.is_down && r.down_lock ? 'disabled' : ''}>
+        <option value="hours" ${String(r.input_unit || "hours").toLowerCase() === "hours" ? 'selected' : ''}>HRS</option>
+        <option value="km" ${String(r.input_unit || "hours").toLowerCase() === "km" ? 'selected' : ''}>KM</option>
+      </select>
+      <button class="daily-btn-icon reset-unit" title="Reset to suggested (${r.suggested_input_unit || 'hours'})" ${r.is_down && r.down_lock ? 'disabled' : ''}>↺</button>
+    `;
+    controlsCol.appendChild(unitSelect);
+
+    contentGrid.appendChild(controlsCol);
+
+    // Down Details Row (shown when down)
+    if (r.is_down) {
+      const downDetails = document.createElement("div");
+      downDetails.className = "daily-down-details";
+      
+      const startYmd = String(r.breakdown_start_date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || "";
+      const calcDaysDown = (() => {
+        if (!startYmd) return null;
+        const endYmd = String(qs("date")?.value || todayLocalYmd());
+        const s = Date.parse(`${startYmd}T00:00:00`);
+        const e = Date.parse(`${endYmd}T00:00:00`);
+        if (!Number.isFinite(s) || !Number.isFinite(e) || e < s) return null;
+        return Math.floor((e - s) / 86400000) + 1;
+      })();
+
+      downDetails.innerHTML = `
+        <div class="down-details-grid">
+          <div class="down-field">
+            <label>Reason</label>
+            <select class="daily-select ${r.is_down && r.down_lock ? 'disabled' : ''}" ${r.is_down && r.down_lock ? 'disabled' : ''}>
+              <option value="">Select reason...</option>
+              <option value="Mechanical" ${r.down_reason === "Mechanical" ? 'selected' : ''}>Mechanical</option>
+              <option value="Electrical" ${r.down_reason === "Electrical" ? 'selected' : ''}>Electrical</option>
+              <option value="Hydraulics" ${r.down_reason === "Hydraulics" ? 'selected' : ''}>Hydraulics</option>
+              <option value="Tyres/Undercarriage" ${r.down_reason === "Tyres/Undercarriage" ? 'selected' : ''}>Tyres/Undercarriage</option>
+              <option value="Waiting parts" ${r.down_reason === "Waiting parts" ? 'selected' : ''}>Waiting parts</option>
+              <option value="No operator" ${r.down_reason === "No operator" ? 'selected' : ''}>No operator</option>
+              <option value="Weather/Access" ${r.down_reason === "Weather/Access" ? 'selected' : ''}>Weather/Access</option>
+            </select>
+          </div>
+          <div class="down-field">
+            <label>Down Hours</label>
+            <input type="number" step="0.5" min="0" max="24" value="${fmt(r.down_hours != null ? r.down_hours : Number(r.scheduled_hours || 0))}" class="daily-input" placeholder="0" />
+          </div>
+          <div class="down-field">
+            <label>Started</label>
+            <input type="date" value="${startYmd}" class="daily-input" />
+          </div>
+          <div class="down-field full">
+            <label>Comment</label>
+            <input type="text" value="${r.breakdown_comment || ''}" class="daily-input" placeholder="Breakdown comment..." />
+          </div>
+        </div>
+        ${startYmd ? `<div class="down-meta">Started: ${startYmd}${calcDaysDown != null ? ` | Days down: ${calcDaysDown}` : ""}</div>` : ""}
+        ${r.is_down && r.down_lock ? `<div class="down-lock-notice">Locked until WO is repaired (${r.lock_wo_status || "-"})</div>` : ""}
+      `;
+      contentGrid.appendChild(downDetails);
+    }
+
+    // Footer with opening source
+    if (r.opening_from_date) {
+      const footer = document.createElement("div");
+      footer.className = "daily-row-footer";
+      footer.innerHTML = `<span class="opening-source">Opening from: ${r.opening_from_date}</span>`;
+      contentGrid.appendChild(footer);
+    }
+
+    card.appendChild(contentGrid);
+    container.appendChild(card);
+
+    // Add event listeners
+    const inputs = card.querySelectorAll("input, select");
+
+    inputs.forEach(input => {
+      input.addEventListener("change", () => {
+        const type = input.type;
+        const cls = input.className;
+
+        if (type === "number") {
+          if (cls.includes("readonly")) {
+            r.opening_hours = toNum(input.value);
+          } else if (input.closest(".down-field") && input.previousElementSibling?.textContent === "Down Hours") {
+            r.down_hours = toNum(input.value) ?? 0;
+          } else if (input.previousElementSibling?.textContent === "Scheduled") {
+            r.scheduled_hours = toNum(input.value) ?? 0;
+          } else if (input.previousElementSibling?.textContent === "Closing") {
+            r.closing_hours = toNum(input.value);
+          }
+        } else if (type === "date") {
+          if (input.previousElementSibling?.textContent === "Started") {
+            r.breakdown_start_date = String(input.value || "").trim();
+          }
+        } else if (type === "text") {
+          if (input.previousElementSibling?.textContent === "Comment") {
+            r.breakdown_comment = String(input.value || "").trim();
+          }
+        } else if (input.tagName === "SELECT") {
+          if (cls.includes("daily-select") && !cls.includes("disabled")) {
+            if (input.closest(".down-field")) {
+              r.down_reason = String(input.value || "");
+            } else if (input.value === "hours" || input.value === "km") {
+              r.input_unit = input.value;
+            }
+          }
+        }
+
+        validateDailyRows();
+        renderDailyTable();
+        renderDailyPreview();
+      });
+    });
+
+    // Toggle listeners
+    const prodCheckbox = prodToggle.querySelector('input[type="checkbox"]:first-child');
+    const downCheckbox = prodToggle.querySelector('input[type="checkbox"]:last-child');
+
+    prodCheckbox?.addEventListener("change", () => {
+      r.is_used = prodCheckbox.checked;
       if (r.is_master_standby) r.is_used = false;
       validateDailyRows();
       renderDailyTable();
       renderDailyPreview();
     });
 
-    const downWrap = document.createElement("label");
-    downWrap.className = "downToggle";
-    const chkDown = document.createElement("input");
-    chkDown.type = "checkbox";
-    chkDown.checked = !!r.is_down;
-    chkDown.disabled = r.is_master_standby || (r.is_down && r.down_lock);
-    const downTxt = document.createElement("span");
-    downTxt.textContent = "DOWN";
-    downWrap.appendChild(chkDown);
-    downWrap.appendChild(downTxt);
-
-    const reason = document.createElement("select");
-    reason.style.marginLeft = "8px";
-    reason.disabled = !r.is_down || (r.is_down && r.down_lock);
-
-    const opts = [
-      "",
-      "Mechanical",
-      "Electrical",
-      "Hydraulics",
-      "Tyres/Undercarriage",
-      "Waiting parts",
-      "No operator",
-      "Weather/Access",
-    ];
-    for (const o of opts) {
-      const op = document.createElement("option");
-      op.value = o;
-      op.textContent = o === "" ? "Reason..." : o;
-      if ((r.down_reason || "") === o) op.selected = true;
-      reason.appendChild(op);
-    }
-
-    reason.addEventListener("change", () => {
-      r.down_reason = String(reason.value || "");
-    });
-
-    downWrap.appendChild(reason);
-    const unitSel = document.createElement("select");
-    unitSel.style.marginLeft = "8px";
-    ["hours", "km"].forEach((u) => {
-      const op = document.createElement("option");
-      op.value = u;
-      op.textContent = u.toUpperCase();
-      if (String(r.input_unit || "hours").toLowerCase() === u) op.selected = true;
-      unitSel.appendChild(op);
-    });
-    unitSel.disabled = !!(r.is_down && r.down_lock);
-    unitSel.addEventListener("change", () => {
-      r.input_unit = String(unitSel.value || "hours").toLowerCase();
-      validateDailyRows();
-      renderDailyTable();
-      renderDailyPreview();
-    });
-    downWrap.appendChild(unitSel);
-    const resetUnitBtn = document.createElement("button");
-    resetUnitBtn.type = "button";
-    resetUnitBtn.className = "miniBtn";
-    resetUnitBtn.style.marginLeft = "6px";
-    resetUnitBtn.textContent = "↺";
-    resetUnitBtn.title = "Reset unit to suggested default";
-    resetUnitBtn.disabled = !!(r.is_down && r.down_lock);
-    resetUnitBtn.addEventListener("click", () => {
-      const suggested = String(r.suggested_input_unit || "hours").toLowerCase() === "km" ? "km" : "hours";
-      r.input_unit = suggested;
-      unitSel.value = suggested;
-      validateDailyRows();
-      renderDailyTable();
-      renderDailyPreview();
-    });
-    downWrap.appendChild(resetUnitBtn);
-
-    // Down hrs input (for accurate availability downtime)
-    const downHrs = document.createElement("input");
-    downHrs.className = "cellInput";
-    downHrs.type = "number";
-    downHrs.step = "0.5";
-    downHrs.min = "0";
-    downHrs.max = "24";
-    downHrs.style.marginLeft = "8px";
-    downHrs.style.width = "88px";
-    downHrs.title = "Downtime hours for the day (0..Scheduled). Used for Availability.";
-    downHrs.placeholder = "Down hrs";
-    downHrs.disabled = !r.is_down; // editable even when locked (only DOWN flag/reason/unit are locked)
-    downHrs.value = fmt(r.down_hours != null ? r.down_hours : (r.is_down ? Number(r.scheduled_hours || 0) : 0));
-    downHrs.addEventListener("input", () => {
-      r.down_hours = toNum(downHrs.value) ?? 0;
-      validateDailyRows();
-      renderDailyPreview();
-    });
-    downHrs.addEventListener("change", () => {
-      r.down_hours = toNum(downHrs.value) ?? 0;
-      validateDailyRows();
-      renderDailyTable();
-      renderDailyPreview();
-    });
-    downWrap.appendChild(downHrs);
-
-    const downStart = document.createElement("input");
-    downStart.type = "date";
-    downStart.className = "cellInput";
-    downStart.style.marginLeft = "8px";
-    downStart.title = "Breakdown start date (manual correction)";
-    downStart.disabled = !r.is_down;
-    downStart.value = String(r.breakdown_start_date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || "";
-    downStart.addEventListener("change", () => {
-      r.breakdown_start_date = String(downStart.value || "").trim();
-      renderDailyTable();
-    });
-    downWrap.appendChild(downStart);
-
-    const downComment = document.createElement("input");
-    downComment.className = "cellInput";
-    downComment.type = "text";
-    downComment.style.marginLeft = "8px";
-    downComment.style.width = "220px";
-    downComment.placeholder = "Breakdown comment...";
-    downComment.disabled = !r.is_down;
-    downComment.value = String(r.breakdown_comment || "");
-    downComment.addEventListener("input", () => {
-      r.breakdown_comment = String(downComment.value || "").trim();
-    });
-    downWrap.appendChild(downComment);
-
-    chkDown.addEventListener("change", () => {
-      r.is_down = chkDown.checked;
-
+    downCheckbox?.addEventListener("change", () => {
+      r.is_down = downCheckbox.checked;
       if (r.is_down) {
         if (r.opening_hours != null) r.closing_hours = r.opening_hours;
         r.hours_run = 0;
@@ -7928,125 +7979,23 @@ function renderDailyTable() {
         r.breakdown_comment = "";
         r.breakdown_start_date = "";
       }
-
-      reason.disabled = !r.is_down;
-      downHrs.disabled = !r.is_down;
-      downStart.disabled = !r.is_down;
-      downComment.disabled = !r.is_down;
-
       validateDailyRows();
       renderDailyTable();
       renderDailyPreview();
     });
 
-    tdP.appendChild(prodWrap);
-    tdP.appendChild(downWrap);
-    tr.appendChild(tdP);
-
-    const tdS = document.createElement("td");
-    const sIn = document.createElement("input");
-    sIn.className = "cellInput";
-    sIn.type = "number";
-    sIn.step = "0.5";
-    sIn.min = "0";
-    sIn.max = "24";
-    sIn.value = fmt(r.scheduled_hours);
-
-    sIn.addEventListener("input", () => {
-      r.scheduled_hours = toNum(sIn.value) ?? 0;
-      validateDailyRows();
-      renderDailyPreview();
-    });
-    sIn.addEventListener("change", () => {
-      r.scheduled_hours = toNum(sIn.value) ?? 0;
+    // Reset unit button
+    const resetBtn = unitSelect.querySelector(".reset-unit");
+    resetBtn?.addEventListener("click", () => {
+      const suggested = String(r.suggested_input_unit || "hours").toLowerCase() === "km" ? "km" : "hours";
+      r.input_unit = suggested;
       validateDailyRows();
       renderDailyTable();
       renderDailyPreview();
     });
-
-    tdS.appendChild(sIn);
-    tr.appendChild(tdS);
-
-    const tdO = document.createElement("td");
-    const oIn = document.createElement("input");
-    oIn.className = "cellInput readonly";
-    oIn.type = "number";
-    oIn.step = "0.1";
-    oIn.value = fmt(r.opening_hours);
-    oIn.title = r.opening_from_date
-      ? `Auto-filled from closing on ${r.opening_from_date}`
-      : "Auto-filled from carry-forward closing (if available)";
-    oIn.disabled = false;
-
-    oIn.addEventListener("input", () => {
-      r.opening_hours = toNum(oIn.value);
-      validateDailyRows();
-      renderDailyPreview();
-    });
-    oIn.addEventListener("change", () => {
-      r.opening_hours = toNum(oIn.value);
-      validateDailyRows();
-      renderDailyTable();
-      renderDailyPreview();
-    });
-
-    tdO.appendChild(oIn);
-    tr.appendChild(tdO);
-
-    const tdC = document.createElement("td");
-    const cIn = document.createElement("input");
-    cIn.className = "cellInput";
-    cIn.type = "number";
-    cIn.step = "0.1";
-    cIn.value = fmt(r.closing_hours);
-    cIn.disabled = r.is_down;
-
-    cIn.addEventListener("input", () => {
-      r.closing_hours = toNum(cIn.value);
-      validateDailyRows();
-      renderDailyPreview();
-    });
-    cIn.addEventListener("change", () => {
-      r.closing_hours = toNum(cIn.value);
-      validateDailyRows();
-      renderDailyTable();
-      renderDailyPreview();
-    });
-
-    tdC.appendChild(cIn);
-    tr.appendChild(tdC);
-
-    const tdR = document.createElement("td");
-    tdR.textContent = `${fmt(r.hours_run)}${String(r.input_unit || "hours").toLowerCase() === "km" ? " km" : ""}`;
-    tr.appendChild(tdR);
-
-    const tdSt = document.createElement("td");
-    const startYmd = String(r.breakdown_start_date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || "";
-    const calcDaysDown = (() => {
-      if (!startYmd) return null;
-      const endYmd = String(qs("date")?.value || todayLocalYmd());
-      const s = Date.parse(`${startYmd}T00:00:00`);
-      const e = Date.parse(`${endYmd}T00:00:00`);
-      if (!Number.isFinite(s) || !Number.isFinite(e) || e < s) return null;
-      return Math.floor((e - s) / 86400000) + 1;
-    })();
-    if (r.is_down) {
-      const lockNote = r.is_down && r.down_lock ? `<br><small class="muted">Locked until WO is repaired (status: ${r.lock_wo_status || "-"})</small>` : "";
-      const downMeta = startYmd
-        ? `<br><small class="muted">Started: ${startYmd}${calcDaysDown != null ? ` | Days down: ${calcDaysDown}` : ""}</small>`
-        : "";
-      tdSt.innerHTML = `<span class="badge err">DOWN — ${r.down_reason || "No reason"}</span>${downMeta}${lockNote}`;
-    }
-    else if (r.error) tdSt.innerHTML = `<span class="badge err">${r.error}</span>`;
-    else if (r.warning) tdSt.innerHTML = `<span class="badge warn">${r.warning}</span>`;
-    else tdSt.innerHTML = `<span class="badge ok">${r.is_used ? "OK — PRODUCTION" : "OK — STANDBY"}</span>`;
-    if (r.opening_from_date) {
-      tdSt.innerHTML += `<br><span class="pill blue">Opening source: ${r.opening_from_date}</span>`;
-    }
-    tr.appendChild(tdSt);
-
-    body.appendChild(tr);
   }
+
+  body.appendChild(container);
 }
 
 async function loadDailyInput() {
