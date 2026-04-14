@@ -2244,30 +2244,100 @@
 
     <!-- APPROVALS -->
     <section class="panel" id="tab-approvals">
-      <div class="card stack-12">
-        <h3>Approval Workflows</h3>
-        <div class="row">
-          <select id="approvalStatus" class="w-200">
-            <option value="pending">Pending</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
-            <option value="">All statuses</option>
-          </select>
-          <input id="approvalModule" class="w-140" placeholder="Module (stock/workorders)" />
-          <input id="approvalAction" class="w-200" placeholder="Action (adjust_movement/close_work_order)" />
-          <button id="loadApprovals">Load Approvals</button>
+      <div class="asset-cards-grid">
+        <!-- Approvals Header -->
+        <div class="dash-card full-width">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+              </div>
+              <div>
+                <h3>Approval Workflows</h3>
+                <p class="muted small">Review and approve pending requests</p>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="row">
-          <input id="approvalDecisionNote" class="minw-260" placeholder="Decision note (optional)" />
+
+        <!-- KPI Summary Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+              </div>
+              <div>
+                <h3>Summary</h3>
+                <p class="muted small">Approval statistics</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="kpi-pills">
+              <span class="kpi-pill kpi-pill-blue" data-approval-kpi-filter="" style="cursor:pointer;"><strong>All:</strong> <span id="approvalAllCount">0</span></span>
+              <span class="kpi-pill kpi-pill-orange" data-approval-kpi-filter="pending" style="cursor:pointer;"><strong>Pending:</strong> <span id="approvalPendingCount">0</span></span>
+              <span class="kpi-pill kpi-pill-green" data-approval-kpi-filter="approved" style="cursor:pointer;"><strong>Approved Today:</strong> <span id="approvalApprovedTodayCount">0</span></span>
+              <span class="kpi-pill kpi-pill-red" data-approval-kpi-filter="rejected" style="cursor:pointer;"><strong>Rejected Today:</strong> <span id="approvalRejectedTodayCount">0</span></span>
+            </div>
+          </div>
         </div>
-        <div class="row" id="approvalKpiStrip">
-          <button class="pill blue" data-approval-kpi-filter="">All: <span id="approvalAllCount">0</span></button>
-          <button class="pill orange" data-approval-kpi-filter="pending">Pending: <span id="approvalPendingCount">0</span></button>
-          <button class="pill blue" data-approval-kpi-filter="approved">Approved Today: <span id="approvalApprovedTodayCount">0</span></button>
-          <button class="pill red" data-approval-kpi-filter="rejected">Rejected Today: <span id="approvalRejectedTodayCount">0</span></button>
+
+        <!-- Approvals List Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+              </div>
+              <div>
+                <h3>Pending Approvals</h3>
+                <p class="muted small">Review and take action on pending items</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Status</label>
+                <select id="approvalStatus" class="w-full">
+                  <option value="pending">Pending</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="">All statuses</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Module</label>
+                <input id="approvalModule" class="w-full" placeholder="stock/workorders" />
+              </div>
+              <div class="form-field">
+                <label>Action</label>
+                <input id="approvalAction" class="w-full" placeholder="adjust_movement/close_work_order" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadApprovals" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                  Load
+                </button>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field form-field-full">
+                <label>Decision Note</label>
+                <input id="approvalDecisionNote" class="w-full" placeholder="Decision note (optional)" />
+              </div>
+            </div>
+            <div class="list" id="approvalList" style="margin-top: 12px;"></div>
+            <pre class="output" id="approvalResult"></pre>
+          </div>
         </div>
-        <div class="list" id="approvalList"></div>
-        <pre class="output" id="approvalResult"></pre>
       </div>
     </section>
 
@@ -3319,42 +3389,135 @@
 
     <!-- DATA QUALITY -->
     <section class="panel" id="tab-quality">
-      <div class="card stack-12">
-        <h3>Data Quality Center</h3>
-        <div class="row">
-          <label class="chk">From <input id="qFrom" type="date" /></label>
-          <label class="chk">To <input id="qTo" type="date" /></label>
-          <select id="qSeverityFilter" class="w-140">
-            <option value="">All severity</option>
-            <option value="high">high</option>
-            <option value="medium">medium</option>
-            <option value="low">low</option>
-          </select>
-          <select id="qTypeFilter" class="w-260">
-            <option value="">All issue types</option>
-            <option value="daily_standby_with_run">daily_standby_with_run</option>
-            <option value="daily_production_no_schedule">daily_production_no_schedule</option>
-            <option value="daily_production_no_run">daily_production_no_run</option>
-            <option value="daily_hours_over_24">daily_hours_over_24</option>
-            <option value="dispatch_delivered_no_pod">dispatch_delivered_no_pod</option>
-            <option value="dispatch_exception_open">dispatch_exception_open</option>
-            <option value="approval_pending">approval_pending</option>
-          </select>
-          <button id="loadQualityCenter">Load Quality</button>
+      <div class="asset-cards-grid">
+        <!-- Data Quality Header -->
+        <div class="dash-card full-width">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef2f2; color: #dc2626;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+              </div>
+              <div>
+                <h3>Data Quality Center</h3>
+                <p class="muted small">Monitor and fix data quality issues</p>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="row">
-          <div class="pill blue">Total: <span id="qTotal">0</span></div>
-          <div class="pill red">High: <span id="qHigh">0</span></div>
-          <div class="pill orange">Medium: <span id="qMedium">0</span></div>
-          <div class="pill">Low: <span id="qLow">0</span></div>
-          <div class="pill">Daily: <span id="qDaily">0</span></div>
-          <div class="pill">POD Gaps: <span id="qPodGaps">0</span></div>
-          <div class="pill">Open Exceptions: <span id="qOpenExceptions">0</span></div>
-          <div class="pill">Pending Approvals: <span id="qPendingApprovals">0</span></div>
+
+        <!-- Quality Statistics Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+              </div>
+              <div>
+                <h3>Statistics</h3>
+                <p class="muted small">Issue counts by severity and type</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="kpi-pills">
+              <span class="kpi-pill kpi-pill-blue"><strong>Total:</strong> <span id="qTotal">0</span></span>
+              <span class="kpi-pill kpi-pill-red"><strong>High:</strong> <span id="qHigh">0</span></span>
+              <span class="kpi-pill kpi-pill-orange"><strong>Medium:</strong> <span id="qMedium">0</span></span>
+              <span class="kpi-pill"><strong>Low:</strong> <span id="qLow">0</span></span>
+            </div>
+            <div class="kpi-pills">
+              <span class="kpi-pill"><strong>Daily:</strong> <span id="qDaily">0</span></span>
+              <span class="kpi-pill kpi-pill-orange"><strong>POD Gaps:</strong> <span id="qPodGaps">0</span></span>
+              <span class="kpi-pill kpi-pill-red"><strong>Open Exceptions:</strong> <span id="qOpenExceptions">0</span></span>
+              <span class="kpi-pill kpi-pill-orange"><strong>Pending Approvals:</strong> <span id="qPendingApprovals">0</span></span>
+            </div>
+          </div>
         </div>
-        <div class="list" id="qualityList"></div>
-        <p class="muted">Tip: Use "Open Fix" on each row to jump to the right tab with context prefilled.</p>
-        <pre class="output" id="qualityResult"></pre>
+
+        <!-- Issue Filters Card -->
+        <div class="dash-card collapsible" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+              </div>
+              <div>
+                <h3>Filters</h3>
+                <p class="muted small">Filter quality issues by date and type</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>From</label>
+                <input id="qFrom" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>To</label>
+                <input id="qTo" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Severity</label>
+                <select id="qSeverityFilter" class="w-full">
+                  <option value="">All severity</option>
+                  <option value="high">high</option>
+                  <option value="medium">medium</option>
+                  <option value="low">low</option>
+                </select>
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadQualityCenter" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                  Load Quality
+                </button>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field form-field-full">
+                <label>Issue Type</label>
+                <select id="qTypeFilter" class="w-full">
+                  <option value="">All issue types</option>
+                  <option value="daily_standby_with_run">daily_standby_with_run</option>
+                  <option value="daily_production_no_schedule">daily_production_no_schedule</option>
+                  <option value="daily_production_no_run">daily_production_no_run</option>
+                  <option value="daily_hours_over_24">daily_hours_over_24</option>
+                  <option value="dispatch_delivered_no_pod">dispatch_delivered_no_pod</option>
+                  <option value="dispatch_exception_open">dispatch_exception_open</option>
+                  <option value="approval_pending">approval_pending</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Issues List Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+              </div>
+              <div>
+                <h3>Issues List</h3>
+                <p class="muted small">Use "Open Fix" to jump to the right tab with context prefilled</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="list" id="qualityList"></div>
+            <pre class="output" id="qualityResult"></pre>
+          </div>
+        </div>
       </div>
     </section>
 
