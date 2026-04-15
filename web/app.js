@@ -10274,6 +10274,56 @@ function initDarkMode() {
 }
 
 // Task Management
+let currentProjectFilter = "";
+let currentTaskId = null;
+
+async function loadProjects() {
+  try {
+    const res = await fetchJson(`${API}/projects`);
+    if (res.projects) {
+      const tabsEl = qs("projectTabs");
+      const projectSelect = qs("taskProject");
+      const projectsList = qs("projectsList");
+      
+      // Render project tabs
+      tabsEl.innerHTML = `<button class="project-tab ${!currentProjectFilter ? 'active' : ''}" data-project="">All Tasks</button>` +
+        res.projects.map(p => `
+          <button class="project-tab ${currentProjectFilter === p.name ? 'active' : ''}" data-project="${escapeHtml(p.name)}" style="--project-color:${escapeHtml(p.color || '#3b82f6')}">
+            <span class="project-dot"></span>
+            ${escapeHtml(p.name)}
+            <span class="project-count">${p.task_count || 0}</span>
+          </button>
+        `).join("");
+      
+      // Render project select dropdown
+      projectSelect.innerHTML = `<option value="">No Project</option>` +
+        res.projects.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join("");
+      
+      // Render projects list in sidebar
+      projectsList.innerHTML = res.projects.map(p => `
+        <div class="project-item" style="border-left:3px solid ${escapeHtml(p.color || '#3b82f6')};">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong style="font-size:13px;">${escapeHtml(p.name)}</strong>
+            <span class="muted" style="font-size:11px;">${p.task_count || 0} tasks</span>
+          </div>
+          ${p.description ? `<small class="muted">${escapeHtml(p.description)}</small>` : ""}
+        </div>
+      `).join("");
+      
+      // Add click handlers for project tabs
+      tabsEl.querySelectorAll(".project-tab").forEach(tab => {
+        tab.addEventListener("click", () => {
+          currentProjectFilter = tab.dataset.project;
+          loadProjects();
+          loadTasks();
+        });
+      });
+    }
+  } catch (err) {
+    console.error("Failed to load projects", err);
+  }
+}
+
 async function loadTasks() {
   const listEl = qs("tasksList");
   if (!listEl) return;
@@ -10286,6 +10336,7 @@ async function loadTasks() {
   if (status) url += `status=${encodeURIComponent(status)}&`;
   if (priority) url += `priority=${encodeURIComponent(priority)}&`;
   if (assigned) url += `assigned=${encodeURIComponent(assigned)}&`;
+  if (currentProjectFilter) url += `project=${encodeURIComponent(currentProjectFilter)}&`;
   
   try {
     const res = await fetchJson(url);
@@ -10293,6 +10344,289 @@ async function loadTasks() {
       listEl.innerHTML = `<div class="item"><small class="muted">No tasks found.</small></div>`;
       return;
     }
+    
+    listEl.innerHTML = res.tasks.map(task => {
+      const priorityClass = task.priority === "high" ? "pill-red" : task.priority === "medium" ? "pill-orange" : "";
+      const statusClass = task.status === "done" ? "pill-green" : task.status === "in_progress" ? "pill-blue" : "pill-gray";
+      const dueClass = task.due_date && task.status !== "done" ? (new Date(task.due_date) < new Date() ? "text-danger" : "") : "";
+      const checked = task.status === "done" ? "checked" : "";
+      const strikethrough = task.status === "done" ? "text-decoration:line-through;opacity:0.6" : "";
+      
+      return `<div class="item task-item ${currentTaskId === task.id ? 'active' : ''}" data-task-id="${task.id}" style="border-left:3px solid ${task.priority === 'high' ? '#dc2626' : task.priority === 'medium' ? '#d97706' : '#16a34a'}; padding-left:12px; margin-bottom:8px; cursor:pointer;">
+        <div style="display:flex; align-items:flex-start; gap:12px;">
+          <input type="checkbox" ${checked} data-task-toggle="${task.id}" style="margin-top:4px;" onclick="event.stopPropagation();" />
+          <div style="flex:1;">
+            <div style="font-weight:500; ${strikethrough}">${escapeHtml(task.title)}</div>
+            ${task.description ? `<small class="muted">${escapeHtml(task.description.substring(0, 80))}${task.description.length > 80 ? '...' : ''}</small><br/>` : ""}
+            <div style="margin-top:6px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+              <span class="pill ${statusClass}" data-task-status="${task.id}">${task.status.replace("_", " ")}</span>
+              <span class="pill ${priorityClass}">${task.priority}</span>
+              ${task.project ? `<span class="pill pill-blue">${escapeHtml(task.project)}</span>` : ""}
+              ${task.assigned_to ? `<span class="muted" style="font-size:11px;">${escapeHtml(task.assigned_to)}</span>` : ""}
+              ${task.due_date ? `<span class="muted ${dueClass}" style="font-size:11px;">${task.due_date}</span>` : ""}
+              ${task.comments_count > 0 ? `<span class="muted" style="font-size:11px;">💬 ${task.comments_count}</span>` : ""}
+              <button class="btn btn-secondary btn-sm" data-task-edit="${task.id}" style="padding:2px 8px; font-size:11px;" onclick="event.stopPropagation();">Edit</button>
+              <button class="btn btn-secondary btn-sm" data-task-delete="${task.id}" style="padding:2px 8px; font-size:11px; color:#dc2626;" onclick="event.stopPropagation();">X</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }).join("");
+    
+    // Add click handlers for viewing task details
+    listEl.querySelectorAll(".task-item").forEach(item => {
+      item.addEventListener("click", async (e) => {
+        const id = parseInt(item.dataset.taskId);
+        currentTaskId = id;
+        await loadTaskDetail(id);
+        loadTasks();
+      });
+    });
+    
+    // Add event listeners
+    listEl.querySelectorAll("[data-task-toggle]").forEach(cb => {
+      cb.addEventListener("change", async (e) => {
+        const id = e.target.dataset.taskToggle;
+        const done = e.target.checked;
+        await fetchJson(`${API}/tasks/${id}`, {
+          method: "PUT",
+          body: JSON.stringify({ status: done ? "done" : "open" })
+        });
+        loadTasks();
+        loadTasksStats();
+      });
+    });
+    
+    listEl.querySelectorAll("[data-task-status]").forEach(el => {
+      el.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const id = e.target.dataset.taskStatus;
+        const current = e.target.textContent.trim().replace(" ", "_");
+        const statuses = ["open", "in_progress", "done"];
+        const currentIdx = statuses.indexOf(current);
+        const next = statuses[(currentIdx + 1) % statuses.length];
+        await fetchJson(`${API}/tasks/${id}`, {
+          method: "PUT",
+          body: JSON.stringify({ status: next })
+        });
+        loadTasks();
+        loadTasksStats();
+      });
+    });
+    
+    listEl.querySelectorAll("[data-task-edit]").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        const id = e.target.dataset.taskEdit;
+        const res = await fetchJson(`${API}/tasks/${id}`);
+        if (res.task) {
+          qs("taskTitle").value = res.task.title || "";
+          qs("taskDescription").value = res.task.description || "";
+          qs("taskProject").value = res.task.project || "";
+          qs("taskPriority").value = res.task.priority || "medium";
+          qs("taskAssigned").value = res.task.assigned_to || "";
+          qs("taskDueDate").value = res.task.due_date || "";
+          qs("taskTitle").dataset.editId = id;
+          qs("createTaskBtn").textContent = "Update Task";
+        }
+      });
+    });
+    
+    listEl.querySelectorAll("[data-task-delete]").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        if (!confirm("Delete this task?")) return;
+        const id = e.target.dataset.taskDelete;
+        await fetchJson(`${API}/tasks/${id}`, { method: "DELETE" });
+        if (currentTaskId === parseInt(id)) {
+          currentTaskId = null;
+          qs("taskDetailPanel").style.display = "none";
+        }
+        loadTasks();
+        loadTasksStats();
+      });
+    });
+  } catch (err) {
+    listEl.innerHTML = `<div class="item"><small class="muted">Error loading tasks.</small></div>`;
+  }
+}
+
+async function loadTaskDetail(taskId) {
+  const panel = qs("taskDetailPanel");
+  const content = qs("taskDetailContent");
+  const comments = qs("taskComments");
+  
+  if (!panel || !content) return;
+  
+  try {
+    const res = await fetchJson(`${API}/tasks/${taskId}`);
+    if (res.task) {
+      const task = res.task;
+      const statusClass = task.status === "done" ? "pill-green" : task.status === "in_progress" ? "pill-blue" : "pill-gray";
+      const priorityClass = task.priority === "high" ? "pill-red" : task.priority === "medium" ? "pill-orange" : "";
+      const isOverdue = task.due_date && task.status !== "done" && new Date(task.due_date) < new Date();
+      
+      content.innerHTML = `
+        <h3 style="margin:0 0 8px 0;">${escapeHtml(task.title)}</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+          <span class="pill ${statusClass}">${task.status.replace("_", " ")}</span>
+          <span class="pill ${priorityClass}">${task.priority}</span>
+          ${task.project ? `<span class="pill pill-blue">${escapeHtml(task.project)}</span>` : ""}
+          ${isOverdue ? `<span class="pill pill-red">Overdue</span>` : ""}
+        </div>
+        ${task.description ? `<p style="margin:0 0 12px 0;color:var(--muted);">${escapeHtml(task.description)}</p>` : ""}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">
+          ${task.assigned_to ? `<div><span class="muted">Assigned:</span> ${escapeHtml(task.assigned_to)}</div>` : ""}
+          ${task.due_date ? `<div><span class="muted">Due:</span> <span class="${isOverdue ? 'text-danger' : ''}">${task.due_date}</span></div>` : ""}
+          <div><span class="muted">Created:</span> ${task.created_at ? task.created_at.split("T")[0] : ""}</div>
+        </div>
+      `;
+      
+      comments.innerHTML = task.comments?.length 
+        ? task.comments.map(c => `
+            <div class="comment-item">
+              <div class="comment-header">
+                <strong>${escapeHtml(c.author || "User")}</strong>
+                <span class="muted">${new Date(c.created_at).toLocaleString()}</span>
+              </div>
+              <p style="margin:4px 0 0 0;font-size:13px;">${escapeHtml(c.comment)}</p>
+              <button class="btn btn-link btn-sm" data-delete-comment="${c.id}" style="color:#dc2626;font-size:11px;padding:0;">Delete</button>
+            </div>
+          `).join("")
+        : `<small class="muted">No comments yet.</small>`;
+      
+      comments.querySelectorAll("[data-delete-comment]").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          if (!confirm("Delete this comment?")) return;
+          await fetchJson(`${API}/comments/${btn.dataset.deleteComment}`, { method: "DELETE" });
+          loadTaskDetail(taskId);
+        });
+      });
+      
+      qs("addCommentBtn").onclick = async () => {
+        const text = qs("newComment")?.value?.trim();
+        if (!text) return;
+        await fetchJson(`${API}/tasks/${taskId}/comments`, {
+          method: "POST",
+          body: JSON.stringify({ comment: text, author: "Current User" })
+        });
+        qs("newComment").value = "";
+        loadTaskDetail(taskId);
+      };
+      
+      panel.style.display = "block";
+    }
+  } catch (err) {
+    console.error("Failed to load task detail", err);
+  }
+}
+
+async function loadTasksStats() {
+  const statsEl = qs("tasksStats");
+  if (!statsEl) return;
+  
+  try {
+    const res = await fetchJson(`${API}/tasks/stats/summary`);
+    if (res.ok) {
+      statsEl.innerHTML = `
+        <span class="kpi-pill"><strong>Total:</strong> ${res.total}</span>
+        <span class="kpi-pill kpi-pill-blue"><strong>Open:</strong> ${res.open}</span>
+        <span class="kpi-pill kpi-pill-orange"><strong>In Progress:</strong> ${res.in_progress}</span>
+        <span class="kpi-pill kpi-pill-green"><strong>Done:</strong> ${res.done}</span>
+        ${res.overdue ? `<span class="kpi-pill kpi-pill-red"><strong>Overdue:</strong> ${res.overdue}</span>` : ""}
+      `;
+    }
+  } catch (err) {
+    console.error("Failed to load tasks stats", err);
+  }
+}
+
+function initTasks() {
+  const createBtn = qs("createTaskBtn");
+  const loadBtn = qs("loadTasksBtn");
+  const myTasksBtn = qs("myTasksBtn");
+  const closeDetailBtn = qs("closeTaskDetail");
+  const createProjectBtn = qs("createProjectBtn");
+  
+  createBtn?.addEventListener("click", async () => {
+    const title = qs("taskTitle")?.value?.trim();
+    if (!title) {
+      alert("Task title is required");
+      return;
+    }
+    
+    const editId = qs("taskTitle").dataset.editId;
+    const data = {
+      title,
+      description: qs("taskDescription")?.value?.trim() || null,
+      project: qs("taskProject")?.value?.trim() || null,
+      priority: qs("taskPriority")?.value || "medium",
+      assigned_to: qs("taskAssigned")?.value?.trim() || null,
+      due_date: qs("taskDueDate").value || null
+    };
+    
+    try {
+      if (editId) {
+        await fetchJson(`${API}/tasks/${editId}`, { method: "PUT", body: JSON.stringify(data) });
+        delete qs("taskTitle").dataset.editId;
+        createBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg> Create Task`;
+      } else {
+        await fetchJson(`${API}/tasks`, { method: "POST", body: JSON.stringify(data) });
+      }
+      
+      qs("taskTitle").value = "";
+      qs("taskDescription").value = "";
+      qs("taskProject").value = "";
+      qs("taskPriority").value = "medium";
+      qs("taskAssigned").value = "";
+      qs("taskDueDate").value = "";
+      
+      loadTasks();
+      loadTasksStats();
+      loadProjects();
+    } catch (err) {
+      alert("Failed to save task");
+    }
+  });
+  
+  loadBtn?.addEventListener("click", loadTasks);
+  
+  myTasksBtn?.addEventListener("click", async () => {
+    const username = prompt("Enter your username:");
+    if (!username) return;
+    qs("taskFilterAssigned").value = username;
+    currentProjectFilter = "";
+    await loadProjects();
+    loadTasks();
+  });
+  
+  closeDetailBtn?.addEventListener("click", () => {
+    qs("taskDetailPanel").style.display = "none";
+    currentTaskId = null;
+    loadTasks();
+  });
+  
+  createProjectBtn?.addEventListener("click", async () => {
+    const name = qs("newProjectName")?.value?.trim();
+    if (!name) {
+      alert("Project name is required");
+      return;
+    }
+    
+    try {
+      await fetchJson(`${API}/projects`, {
+        method: "POST",
+        body: JSON.stringify({ name, description: "", color: "#3b82f6" })
+      });
+      qs("newProjectName").value = "";
+      loadProjects();
+    } catch (err) {
+      alert("Failed to create project");
+    }
+  });
+  
+  loadTasks();
+  loadTasksStats();
+  loadProjects();
+}
     
     listEl.innerHTML = res.tasks.map(task => {
       const priorityClass = task.priority === "high" ? "pill-red" : task.priority === "medium" ? "pill-orange" : "";
