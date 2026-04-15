@@ -5020,8 +5020,8 @@ export default async function reportsRoutes(app) {
     const runHours = Number(runRow?.run_hours || 0);
     const scheduledHours = Number(schedRow?.scheduled_hours || 0);
     const adjustedScheduled = Math.max(0, scheduledHours - rainSchedHours);
-    const utilRaw = scheduledHours > 0 ? (runHours / scheduledHours) * 100 : null;
-    const utilAdj = adjustedScheduled > 0 ? (runHours / adjustedScheduled) * 100 : null;
+    const utilRaw = scheduledHours > 0 ? Math.min(100, (runHours / scheduledHours) * 100) : null;
+    const utilAdj = adjustedScheduled > 0 ? Math.min(100, (runHours / adjustedScheduled) * 100) : null;
     const availByTypeBase = db.prepare(`
       SELECT
         LOWER(IFNULL(a.category, 'uncategorized')) AS equipment_type,
