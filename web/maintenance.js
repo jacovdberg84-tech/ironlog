@@ -2650,6 +2650,60 @@ async function loadAssetKpiWeekly() {
   }
 }
 
+function exportAssetKpiToExcel() {
+  if (!akpLastResponse) {
+    alert("Load KPI data first before exporting.");
+    return;
+  }
+  
+  const data = akpLastResponse;
+  const filter = String(document.getElementById("akpCategoryFilter")?.value || "").trim();
+  
+  let csv = "Asset KPI Report\n";
+  csv += `Period: ${data.start || ""} to ${data.end || ""}\n`;
+  csv += `Generated: ${new Date().toISOString()}\n\n`;
+  
+  // Summary section
+  if (data.summary) {
+    csv += "Summary\n";
+    csv += `Total Scheduled Hours,${data.summary.total_scheduled || 0}\n`;
+    csv += `Total Available Hours,${data.summary.total_available || 0}\n`;
+    csv += `Total Run Hours,${data.summary.total_run || 0}\n`;
+    csv += `Total Downtime Hours,${data.summary.total_downtime || 0}\n`;
+    csv += `Fleet Availability %,${data.summary.fleet_availability_pct || 0}\n`;
+    csv += `Fleet Utilization %,${data.summary.fleet_utilization_pct || 0}\n\n`;
+  }
+  
+  // By Category section
+  csv += "By Category\n";
+  csv += "Category,Assets,Scheduled h,Available h,Run h,Downtime h,Availability %,Utilization %\n";
+  const categories = filter ? (data.by_category || []).filter(c => c.category === filter) : (data.by_category || []);
+  for (const cat of categories) {
+    csv += `"${cat.category || ""}",${cat.asset_count || 0},${cat.total_scheduled || 0},${cat.total_available || 0},${cat.total_run || 0},${cat.total_downtime || 0},${cat.availability_pct || 0},${cat.utilization_pct || 0}\n`;
+  }
+  csv += "\n";
+  
+  // By Asset section
+  csv += "Per Asset\n";
+  csv += "Asset,Category,Mode,Days w/ Data,Scheduled h,Available h,Run h,Downtime h,Availability %,Utilization %\n";
+  const assets = filter ? (data.by_asset || []).filter(a => a.category === filter) : (data.by_asset || []);
+  for (const asset of assets) {
+    csv += `"${asset.asset_code || ""}","${asset.category || ""}","${asset.mode || ""}",${asset.days_with_data || 0},${asset.total_scheduled || 0},${asset.total_available || 0},${asset.total_run || 0},${asset.total_downtime || 0},${asset.availability_pct || 0},${asset.utilization_pct || 0}\n`;
+  }
+  
+  // Download
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const dateTag = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `asset-kpi-${dateTag}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+}
+
 async function openWeeklyForumPdf(download = false) {
   const q = weeklyForumQueryString();
   const url = `${API}/maintenance/weekly-forum.pdf?${q}${download ? "&download=1" : ""}`;
@@ -3474,6 +3528,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
   document.getElementById("loadAssetKpiBtn")?.addEventListener("click", () => loadAssetKpiWeekly());
+  document.getElementById("exportAssetKpiBtn")?.addEventListener("click", () => exportAssetKpiToExcel());
   document.getElementById("mpRefreshStatusBtn")?.addEventListener("click", () => loadMaintenancePackStatus());
   document.getElementById("mpStatusBody")?.addEventListener("click", (evt) => {
     const gen = evt.target?.closest?.("button[data-mp-gen]");
