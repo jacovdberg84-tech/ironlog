@@ -10874,12 +10874,28 @@ function initTasks() {
     };
     
     try {
+      const notifyAssignee = qs("taskNotifyAssignee")?.checked !== false;
+      const actor = getSessionUser();
+      const assignee = String(data.assigned_to || "").trim();
+      let savedTaskId = null;
       if (editId) {
-        await fetchJson(`${API}/api/tasks/${editId}`, { method: "PUT", body: JSON.stringify(data) });
+        const updated = await fetchJson(`${API}/api/tasks/${editId}`, { method: "PUT", body: JSON.stringify(data) });
+        savedTaskId = Number(updated?.task?.id || editId || 0);
         delete qs("taskTitle").dataset.editId;
         createBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg> Create Task`;
       } else {
-        await fetchJson(`${API}/api/tasks`, { method: "POST", body: JSON.stringify(data) });
+        const created = await fetchJson(`${API}/api/tasks`, { method: "POST", body: JSON.stringify(data) });
+        savedTaskId = Number(created?.task?.id || 0);
+      }
+
+      if (notifyAssignee && savedTaskId && assignee) {
+        const msg = assignee === actor
+          ? `@${assignee} self-assigned this task.`
+          : `@${assignee} assigned by @${actor}.`;
+        await fetchJson(`${API}/api/tasks/${savedTaskId}/comments`, {
+          method: "POST",
+          body: JSON.stringify({ comment: msg, author: actor })
+        });
       }
       
       qs("taskTitle").value = "";
@@ -10888,6 +10904,7 @@ function initTasks() {
       qs("taskPriority").value = "medium";
       qs("taskAssigned").value = "";
       qs("taskDueDate").value = "";
+      if (qs("taskNotifyAssignee")) qs("taskNotifyAssignee").checked = true;
       
       loadTasks();
       loadTasksStats();
