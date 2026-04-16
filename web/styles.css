@@ -2348,6 +2348,42 @@ body {
   opacity: 0.55;
 }
 
+.task-workspace-header {
+  padding: 4px 20px 0;
+}
+
+.task-workspace-toggle {
+  border: 0;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 8px 0 6px;
+}
+
+.task-subheader {
+  color: #9ca3af;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 8px 20px 4px 54px;
+}
+
+.nav-subitem.project-link {
+  padding-left: 66px;
+}
+
+.nav-subitem.project-link::before {
+  width: 8px;
+  height: 8px;
+  opacity: 1;
+  background: var(--project-dot-color, #3b82f6);
+}
+
 .nav-item svg {
   flex-shrink: 0;
   opacity: 0.6;

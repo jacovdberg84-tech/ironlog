@@ -22,6 +22,8 @@ const DEFAULT_SITE = "main";
 const LANG_KEY = "ironlog_lang";
 const SIDEBAR_COLLAPSED_KEY = "ironlog_sidebar_collapsed";
 const DEFAULT_LANG = "en";
+const TASK_WORKSPACE_COLLAPSED_KEY = "ironlog_task_workspace_collapsed";
+const TASK_SAVED_VIEWS_KEY = "ironlog_task_saved_views";
 
 // Sidebar navigation
 function initSidebar() {
@@ -63,6 +65,11 @@ function initSidebar() {
       const tab = item.dataset.tab;
       if (!tab) return;
       const taskView = String(item.dataset.taskView || "").trim();
+      const taskProject = String(item.dataset.taskProject || "").trim();
+      const taskAssigned = String(item.dataset.taskAssigned || "").trim();
+      const taskStatus = String(item.dataset.taskStatus || "").trim();
+      const taskPriority = String(item.dataset.taskPriority || "").trim();
+      const activeKey = String(item.dataset.activeKey || "").trim();
       
       // Check maintenance gate
       if (isMaintenanceChildTab(tab) && !hasMaintenanceAccessGate()) {
@@ -72,7 +79,14 @@ function initSidebar() {
       
       switchTab(tab);
       if (tab === "tasks" && taskView) {
-        setTaskSidebarView(taskView, { refresh: true });
+        setTaskSidebarView(taskView, {
+          project: taskProject,
+          assigned: taskAssigned,
+          status: taskStatus,
+          priority: taskPriority,
+          activeKey,
+          refresh: true
+        });
       }
       
       // Close mobile sidebar
@@ -90,6 +104,8 @@ function initSidebar() {
       overlay?.classList.remove("active");
     }
   });
+
+  initTaskWorkspaceSidebar();
 }
 
 function updateSidebarActiveState(activeTab) {
@@ -726,10 +742,10 @@ async function openAuthedPdf(url) {
 
 function getRoleAllowedTabs(role) {
   const r = String(role || "").toLowerCase();
-  if (r === "operator") return ["dash", "daily", "fuel", "lube", "legal", "operations", "ironmind", "docs", "vehicle"];
-  if (r === "artisan") return ["dash", "maintenance", "Breakdowns", "reports", "fuel", "lube", "legal", "operations", "dispatch", "ironmind", "docs", "vehicle"];
-  if (r === "stores") return ["dash", "maintenance", "stock", "uploads", "reports", "legal", "procurement", "operations", "dispatch", "quality", "ironmind", "docs", "vehicle"];
-  if (r === "supervisor") return ["dash", "daily", "assets", "maintenance", "fuel", "lube", "stock", "legal", "uploads", "reports", "Breakdowns", "approvals", "procurement", "operations", "dispatch", "quality", "audit", "ironmind", "docs", "vehicle"];
+  if (r === "operator") return ["dash", "daily", "fuel", "lube", "legal", "operations", "ironmind", "docs", "vehicle", "tasks"];
+  if (r === "artisan") return ["dash", "maintenance", "Breakdowns", "reports", "fuel", "lube", "legal", "operations", "dispatch", "ironmind", "docs", "vehicle", "tasks"];
+  if (r === "stores") return ["dash", "maintenance", "stock", "uploads", "reports", "legal", "procurement", "operations", "dispatch", "quality", "ironmind", "docs", "vehicle", "tasks"];
+  if (r === "supervisor") return ["dash", "daily", "assets", "maintenance", "fuel", "lube", "stock", "legal", "uploads", "reports", "Breakdowns", "approvals", "procurement", "operations", "dispatch", "quality", "audit", "ironmind", "docs", "vehicle", "tasks"];
   return [
     "dash",
     "daily",
@@ -751,6 +767,7 @@ function getRoleAllowedTabs(role) {
     "ironmind",
     "docs",
     "vehicle",
+    "tasks",
     "admin",
   ];
 }
@@ -769,6 +786,8 @@ function getEffectiveAllowedTabs() {
   if (!list) {
     list = Array.from(new Set(roles.flatMap((r) => getRoleAllowedTabs(r))));
   }
+  // Keep task workspace reachable even when older saved tab overrides exist.
+  if (!list.includes("tasks")) list = [...list, "tasks"];
   // "admin" is not an assignable section in the multiselect; always allow the User admin tab for these roles
   if (roles.some((r) => ["admin", "supervisor"].includes(r)) && !list.includes("admin")) list = [...list, "admin"];
   return list;
@@ -10288,6 +10307,73 @@ let currentTaskId = null;
 let currentTaskView = "all";
 let currentTaskSidebarActiveKey = "";
 
+function getSavedTaskViews() {
+  try {
+    const raw = localStorage.getItem(TASK_SAVED_VIEWS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistSavedTaskViews(views) {
+  localStorage.setItem(TASK_SAVED_VIEWS_KEY, JSON.stringify(Array.isArray(views) ? views : []));
+}
+
+function renderTaskWorkspaceSavedViews() {
+  const wrap = qs("taskCustomViewSidebarLinks");
+  if (!wrap) return;
+  const views = getSavedTaskViews();
+  if (!views.length) {
+    wrap.innerHTML = `<div class="nav-item nav-subitem" style="pointer-events:none;"><span>No saved views</span></div>`;
+    return;
+  }
+  wrap.innerHTML = views
+    .map(
+      (v) => `
+      <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="${escapeHtml(v.view || "all")}" data-task-assigned="${escapeHtml(v.assigned || "")}" data-task-project="${escapeHtml(v.project || "")}" data-task-priority="${escapeHtml(v.priority || "")}" data-task-status="${escapeHtml(v.status || "")}" data-active-key="tasks:saved:${escapeHtml(v.id)}">
+        <span>${escapeHtml(v.name || "Saved View")}</span>
+      </a>
+    `
+    )
+    .join("");
+}
+
+function renderTaskWorkspaceProjectLinks(projects = []) {
+  const wrap = qs("taskProjectSidebarLinks");
+  if (!wrap) return;
+  if (!Array.isArray(projects) || !projects.length) {
+    wrap.innerHTML = `<div class="nav-item nav-subitem" style="pointer-events:none;"><span>No projects</span></div>`;
+    return;
+  }
+  wrap.innerHTML = projects
+    .map((p) => {
+      const color = escapeHtml(p.color || "#3b82f6");
+      const name = escapeHtml(p.name || "");
+      return `<a href="#" class="nav-item nav-subitem project-link" data-tab="tasks" data-task-view="all" data-task-project="${name}" data-active-key="tasks:project:${name}" style="--project-dot-color:${color};"><span>${name}</span></a>`;
+    })
+    .join("");
+}
+
+function initTaskWorkspaceSidebar() {
+  const toggle = qs("taskWorkspaceToggle");
+  const links = qs("taskWorkspaceLinks");
+  if (!toggle || !links) return;
+
+  const apply = (collapsed) => {
+    links.style.display = collapsed ? "none" : "";
+    toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  };
+
+  apply(localStorage.getItem(TASK_WORKSPACE_COLLAPSED_KEY) === "1");
+  toggle.addEventListener("click", () => {
+    const collapsed = links.style.display !== "none";
+    apply(collapsed);
+    localStorage.setItem(TASK_WORKSPACE_COLLAPSED_KEY, collapsed ? "1" : "0");
+  });
+}
+
 function normalizeDateOnly(value) {
   return String(value || "").trim().slice(0, 10);
 }
@@ -10306,20 +10392,32 @@ function taskMatchesSidebarView(task, view) {
 function setTaskSidebarView(view, options = {}) {
   const v = String(view || "all").trim().toLowerCase();
   const assignedEl = qs("taskFilterAssigned");
+  const statusEl = qs("taskFilterStatus");
+  const priorityEl = qs("taskFilterPriority");
   currentTaskView = v || "all";
 
+  if (statusEl && options.status !== undefined) statusEl.value = String(options.status || "");
+  if (priorityEl && options.priority !== undefined) priorityEl.value = String(options.priority || "");
+  if (options.project !== undefined) currentProjectFilter = String(options.project || "");
+
   if (assignedEl) {
-    if (currentTaskView === "mine") {
+    if (options.assigned !== undefined) {
+      assignedEl.value = String(options.assigned || "");
+    } else if (currentTaskView === "mine") {
       assignedEl.value = getSessionUser();
     } else if (options.clearAssigned !== false) {
       assignedEl.value = "";
     }
   }
 
-  if (currentTaskView === "mine") {
+  if (options.activeKey) {
+    currentTaskSidebarActiveKey = String(options.activeKey);
+  } else if (currentTaskView === "mine") {
     currentTaskSidebarActiveKey = "tasks:mine";
   } else if (["inbox", "today", "upcoming", "overdue"].includes(currentTaskView)) {
     currentTaskSidebarActiveKey = `tasks:${currentTaskView}`;
+  } else if (currentProjectFilter) {
+    currentTaskSidebarActiveKey = `tasks:project:${currentProjectFilter}`;
   } else {
     currentTaskSidebarActiveKey = "";
   }
@@ -10365,10 +10463,12 @@ async function loadProjects() {
       tabsEl.querySelectorAll(".project-tab").forEach(tab => {
         tab.addEventListener("click", () => {
           currentProjectFilter = tab.dataset.project;
+          currentTaskSidebarActiveKey = currentProjectFilter ? `tasks:project:${currentProjectFilter}` : "";
           loadProjects();
           loadTasks();
         });
       });
+      renderTaskWorkspaceProjectLinks(res.projects);
     }
   } catch (err) {
     console.error("Failed to load projects", err);
@@ -10595,8 +10695,23 @@ function initTasks() {
   const createBtn = qs("createTaskBtn");
   const loadBtn = qs("loadTasksBtn");
   const myTasksBtn = qs("myTasksBtn");
+  const saveViewBtn = qs("saveTaskViewBtn");
   const closeDetailBtn = qs("closeTaskDetail");
   const createProjectBtn = qs("createProjectBtn");
+  const statusFilterEl = qs("taskFilterStatus");
+  const priorityFilterEl = qs("taskFilterPriority");
+  const assignedFilterEl = qs("taskFilterAssigned");
+
+  const refreshFilterInputs = () => {
+    currentTaskView = "all";
+    currentTaskSidebarActiveKey = "";
+    updateSidebarActiveState("tasks");
+    loadTasks();
+  };
+
+  statusFilterEl?.addEventListener("change", refreshFilterInputs);
+  priorityFilterEl?.addEventListener("change", refreshFilterInputs);
+  assignedFilterEl?.addEventListener("change", refreshFilterInputs);
   
   createBtn?.addEventListener("click", async () => {
     const title = qs("taskTitle")?.value?.trim();
@@ -10652,6 +10767,27 @@ function initTasks() {
     await loadProjects();
     loadTasks();
   });
+
+  saveViewBtn?.addEventListener("click", () => {
+    const name = String(prompt("Saved view name:") || "").trim();
+    if (!name) return;
+    const status = qs("taskFilterStatus")?.value || "";
+    const priority = qs("taskFilterPriority")?.value || "";
+    const assigned = qs("taskFilterAssigned")?.value || "";
+    const existing = getSavedTaskViews();
+    const view = {
+      id: `${Date.now()}`,
+      name,
+      view: currentTaskView || "all",
+      status,
+      priority,
+      assigned,
+      project: currentProjectFilter || ""
+    };
+    existing.push(view);
+    persistSavedTaskViews(existing.slice(-12));
+    renderTaskWorkspaceSavedViews();
+  });
   
   closeDetailBtn?.addEventListener("click", () => {
     qs("taskDetailPanel").style.display = "none";
@@ -10681,6 +10817,7 @@ function initTasks() {
   loadTasks();
   loadTasksStats();
   loadProjects();
+  renderTaskWorkspaceSavedViews();
 }
 document.addEventListener("DOMContentLoaded", () => {
   initDarkMode();

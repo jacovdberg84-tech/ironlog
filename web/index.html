@@ -217,21 +217,30 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
           <span>Tasks</span>
         </a>
-        <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="inbox" data-active-key="tasks:inbox">
-          <span>Inbox</span>
-        </a>
-        <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="today" data-active-key="tasks:today">
-          <span>Today</span>
-        </a>
-        <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="upcoming" data-active-key="tasks:upcoming">
-          <span>Upcoming</span>
-        </a>
-        <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="overdue" data-active-key="tasks:overdue">
-          <span>Overdue</span>
-        </a>
-        <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="mine" data-active-key="tasks:mine">
-          <span>My Tasks</span>
-        </a>
+        <div class="task-workspace-header">
+          <button type="button" class="task-workspace-toggle" id="taskWorkspaceToggle" aria-expanded="true">Task Workspace</button>
+        </div>
+        <div id="taskWorkspaceLinks">
+          <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="inbox" data-active-key="tasks:inbox">
+            <span>Inbox</span>
+          </a>
+          <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="today" data-active-key="tasks:today">
+            <span>Today</span>
+          </a>
+          <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="upcoming" data-active-key="tasks:upcoming">
+            <span>Upcoming</span>
+          </a>
+          <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="overdue" data-active-key="tasks:overdue">
+            <span>Overdue</span>
+          </a>
+          <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="mine" data-active-key="tasks:mine">
+            <span>My Tasks</span>
+          </a>
+          <div class="task-subheader">Projects</div>
+          <div id="taskProjectSidebarLinks"></div>
+          <div class="task-subheader">Saved Views</div>
+          <div id="taskCustomViewSidebarLinks"></div>
+        </div>
         <a href="#" class="nav-item" data-tab="admin" id="navAdmin">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
           <span>User Admin</span>
@@ -3865,6 +3874,7 @@
                 </div>
                 <button id="loadTasksBtn" class="btn btn-primary">Refresh</button>
                 <button id="myTasksBtn" class="btn btn-secondary">My Tasks</button>
+                <button id="saveTaskViewBtn" class="btn btn-secondary">Save View</button>
               </div>
               <div class="list" id="tasksList"></div>
             </div>
