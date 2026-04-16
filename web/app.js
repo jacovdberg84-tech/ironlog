@@ -10386,6 +10386,24 @@ function renderTaskWorkspaceProjectLinks(projects = []) {
     .join("");
 }
 
+function setTaskApiIndicator(state, label) {
+  const el = qs("taskApiIndicator");
+  if (!el) return;
+  el.classList.remove("api-indicator-ok", "api-indicator-down", "api-indicator-unknown");
+  if (state === "ok") {
+    el.classList.add("api-indicator-ok");
+    el.textContent = label || "API online";
+    return;
+  }
+  if (state === "down") {
+    el.classList.add("api-indicator-down");
+    el.textContent = label || "API unavailable";
+    return;
+  }
+  el.classList.add("api-indicator-unknown");
+  el.textContent = label || "API checking...";
+}
+
 function initTaskWorkspaceSidebar() {
   const toggle = qs("taskWorkspaceToggle");
   const links = qs("taskWorkspaceLinks");
@@ -10532,6 +10550,7 @@ async function loadTasks() {
   
   try {
     const res = await fetchJson(url);
+    setTaskApiIndicator("ok", "API online");
     const filteredTasks = (res.tasks || []).filter((task) => taskMatchesSidebarView(task, currentTaskView));
     if (!filteredTasks.length) {
       listEl.innerHTML = `<div class="item"><small class="muted">No tasks found.</small></div>`;
@@ -10638,6 +10657,7 @@ async function loadTasks() {
       });
     });
   } catch (err) {
+    setTaskApiIndicator("down", "API unavailable");
     listEl.innerHTML = `<div class="item"><small class="muted">Error loading tasks.</small></div>`;
   }
 }
@@ -10719,6 +10739,7 @@ async function loadTasksStats() {
   try {
     const res = await fetchJson(`${API}/api/tasks/stats/summary`);
     if (res.ok) {
+      setTaskApiIndicator("ok", "API online");
       statsEl.innerHTML = `
         <span class="kpi-pill"><strong>Total:</strong> ${res.total}</span>
         <span class="kpi-pill kpi-pill-blue"><strong>Open:</strong> ${res.open}</span>
@@ -10728,11 +10749,13 @@ async function loadTasksStats() {
       `;
     }
   } catch (err) {
+    setTaskApiIndicator("down", "API unavailable");
     console.error("Failed to load tasks stats", err);
   }
 }
 
 function initTasks() {
+  setTaskApiIndicator("unknown", "API checking...");
   const createBtn = qs("createTaskBtn");
   const loadBtn = qs("loadTasksBtn");
   const myTasksBtn = qs("myTasksBtn");

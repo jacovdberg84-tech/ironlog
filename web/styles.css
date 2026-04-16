@@ -2416,6 +2416,31 @@ body {
   color: #1d4ed8;
 }
 
+.api-indicator {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.api-indicator-ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.api-indicator-down {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.api-indicator-unknown {
+  background: #e5e7eb;
+  color: #4b5563;
+}
+
 .nav-item svg {
   flex-shrink: 0;
   opacity: 0.6;
