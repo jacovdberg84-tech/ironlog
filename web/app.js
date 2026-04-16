@@ -10877,6 +10877,10 @@ function initTasks() {
       const notifyAssignee = qs("taskNotifyAssignee")?.checked !== false;
       const actor = getSessionUser();
       const assignee = String(data.assigned_to || "").trim();
+      const watchers = String(qs("taskWatchers")?.value || "")
+        .split(",")
+        .map((w) => w.trim())
+        .filter(Boolean);
       let savedTaskId = null;
       if (editId) {
         const updated = await fetchJson(`${API}/api/tasks/${editId}`, { method: "PUT", body: JSON.stringify(data) });
@@ -10897,12 +10901,23 @@ function initTasks() {
           body: JSON.stringify({ comment: msg, author: actor })
         });
       }
+      if (notifyAssignee && savedTaskId && watchers.length) {
+        const uniqueWatchers = Array.from(new Set(watchers)).filter((w) => w !== assignee);
+        if (uniqueWatchers.length) {
+          const watchMsg = `Watchers added by @${actor}: ${uniqueWatchers.map((w) => `@${w}`).join(" ")}`;
+          await fetchJson(`${API}/api/tasks/${savedTaskId}/comments`, {
+            method: "POST",
+            body: JSON.stringify({ comment: watchMsg, author: actor })
+          });
+        }
+      }
       
       qs("taskTitle").value = "";
       qs("taskDescription").value = "";
       qs("taskProject").value = "";
       qs("taskPriority").value = "medium";
       qs("taskAssigned").value = "";
+      qs("taskWatchers").value = "";
       qs("taskDueDate").value = "";
       if (qs("taskNotifyAssignee")) qs("taskNotifyAssignee").checked = true;
       
@@ -10952,7 +10967,10 @@ function initTasks() {
   });
   
   closeDetailBtn?.addEventListener("click", () => {
-    qs("taskDetailPanel").style.display = "none";
+    const content = qs("taskDetailContent");
+    if (content) content.innerHTML = `<small class="muted">Select a task from the list to open shared comments and collaboration tools.</small>`;
+    const comments = qs("taskComments");
+    if (comments) comments.innerHTML = `<small class="muted">No task selected.</small>`;
     currentTaskId = null;
     loadTasks();
   });

@@ -3918,6 +3918,10 @@
               </div>
               <div id="taskAssignQuickPicks" class="muted" style="font-size:12px;margin:-6px 0 8px;"></div>
               <div class="form-field">
+                <label>Watchers (shared updates)</label>
+                <input id="taskWatchers" placeholder="user1, user2" list="teamMemberList" />
+              </div>
+              <div class="form-field">
                 <label class="chk" style="display:flex;align-items:center;gap:8px;">
                   <input id="taskNotifyAssignee" type="checkbox" checked />
                   Notify assignee in task comments
@@ -3935,22 +3939,22 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
                 Create Task
               </button>
-              <small class="muted" style="display:block;margin-top:8px;">Team collaboration (Post As + @mentions) appears in Task Details after you click a task in the list.</small>
+              <small class="muted" style="display:block;margin-top:8px;">Collaboration area: use the Task Details card below (always visible) for Post As + @mentions.</small>
             </div>
           </div>
 
           <!-- Task Detail Panel -->
-          <div class="dash-card" id="taskDetailPanel" style="display:none;">
+          <div class="dash-card" id="taskDetailPanel">
             <div class="dash-card-header">
               <div class="dash-card-title">
-                <h3>Task Details</h3>
+                <h3>Task Details & Collaboration</h3>
               </div>
               <button class="report-card-toggle" id="closeTaskDetail" aria-label="Close">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
               </button>
             </div>
             <div class="report-card-body">
-              <div id="taskDetailContent"></div>
+              <div id="taskDetailContent"><small class="muted">Select a task from the list to open shared comments and collaboration tools.</small></div>
               <hr style="margin:16px 0; border-color:var(--line);" />
               <h4 style="margin:0 0 12px 0;">Comments</h4>
               <div id="taskComments"></div>
@@ -4679,6 +4683,6 @@
   <datalist id="locationCodeOptions"></datalist>
 
   <datalist id="teamMemberList"></datalist>
-  <script src="./app.js?v=4"></script>
+  <script src="./app.js?v=5"></script>
 </body>
 </html>
