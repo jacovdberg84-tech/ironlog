@@ -10469,7 +10469,7 @@ function setTaskSidebarView(view, options = {}) {
 
 async function loadProjects() {
   try {
-    const res = await fetchJson(`${API}/projects`);
+    const res = await fetchJson(`${API}/api/projects`);
     if (res.projects) {
       const tabsEl = qs("projectTabs");
       const projectSelect = qs("taskProject");
@@ -10524,7 +10524,7 @@ async function loadTasks() {
   const priority = qs("taskFilterPriority")?.value || "";
   const assigned = qs("taskFilterAssigned")?.value || "";
   
-  let url = `${API}/tasks?`;
+  let url = `${API}/api/tasks?`;
   if (status) url += `status=${encodeURIComponent(status)}&`;
   if (priority) url += `priority=${encodeURIComponent(priority)}&`;
   if (assigned) url += `assigned=${encodeURIComponent(assigned)}&`;
@@ -10581,7 +10581,7 @@ async function loadTasks() {
       cb.addEventListener("change", async (e) => {
         const id = e.target.dataset.taskToggle;
         const done = e.target.checked;
-        await fetchJson(`${API}/tasks/${id}`, {
+        await fetchJson(`${API}/api/tasks/${id}`, {
           method: "PUT",
           body: JSON.stringify({ status: done ? "done" : "open" })
         });
@@ -10598,7 +10598,7 @@ async function loadTasks() {
         const statuses = ["open", "in_progress", "done"];
         const currentIdx = statuses.indexOf(current);
         const next = statuses[(currentIdx + 1) % statuses.length];
-        await fetchJson(`${API}/tasks/${id}`, {
+        await fetchJson(`${API}/api/tasks/${id}`, {
           method: "PUT",
           body: JSON.stringify({ status: next })
         });
@@ -10610,7 +10610,7 @@ async function loadTasks() {
     listEl.querySelectorAll("[data-task-edit]").forEach(btn => {
       btn.addEventListener("click", async (e) => {
         const id = e.target.dataset.taskEdit;
-        const res = await fetchJson(`${API}/tasks/${id}`);
+        const res = await fetchJson(`${API}/api/tasks/${id}`);
         if (res.task) {
           qs("taskTitle").value = res.task.title || "";
           qs("taskDescription").value = res.task.description || "";
@@ -10628,7 +10628,7 @@ async function loadTasks() {
       btn.addEventListener("click", async (e) => {
         if (!confirm("Delete this task?")) return;
         const id = e.target.dataset.taskDelete;
-        await fetchJson(`${API}/tasks/${id}`, { method: "DELETE" });
+        await fetchJson(`${API}/api/tasks/${id}`, { method: "DELETE" });
         if (currentTaskId === parseInt(id)) {
           currentTaskId = null;
           qs("taskDetailPanel").style.display = "none";
@@ -10650,7 +10650,7 @@ async function loadTaskDetail(taskId) {
   if (!panel || !content) return;
   
   try {
-    const res = await fetchJson(`${API}/tasks/${taskId}`);
+    const res = await fetchJson(`${API}/api/tasks/${taskId}`);
     if (res.task) {
       const task = res.task;
       const statusClass = task.status === "done" ? "pill-green" : task.status === "in_progress" ? "pill-blue" : "pill-gray";
@@ -10689,7 +10689,7 @@ async function loadTaskDetail(taskId) {
       comments.querySelectorAll("[data-delete-comment]").forEach(btn => {
         btn.addEventListener("click", async () => {
           if (!confirm("Delete this comment?")) return;
-          await fetchJson(`${API}/comments/${btn.dataset.deleteComment}`, { method: "DELETE" });
+          await fetchJson(`${API}/api/comments/${btn.dataset.deleteComment}`, { method: "DELETE" });
           loadTaskDetail(taskId);
         });
       });
@@ -10697,7 +10697,7 @@ async function loadTaskDetail(taskId) {
       qs("addCommentBtn").onclick = async () => {
         const text = qs("newComment")?.value?.trim();
         if (!text) return;
-        await fetchJson(`${API}/tasks/${taskId}/comments`, {
+        await fetchJson(`${API}/api/tasks/${taskId}/comments`, {
           method: "POST",
           body: JSON.stringify({ comment: text, author: "Current User" })
         });
@@ -10717,7 +10717,7 @@ async function loadTasksStats() {
   if (!statsEl) return;
   
   try {
-    const res = await fetchJson(`${API}/tasks/stats/summary`);
+    const res = await fetchJson(`${API}/api/tasks/stats/summary`);
     if (res.ok) {
       statsEl.innerHTML = `
         <span class="kpi-pill"><strong>Total:</strong> ${res.total}</span>
@@ -10773,11 +10773,11 @@ function initTasks() {
     
     try {
       if (editId) {
-        await fetchJson(`${API}/tasks/${editId}`, { method: "PUT", body: JSON.stringify(data) });
+        await fetchJson(`${API}/api/tasks/${editId}`, { method: "PUT", body: JSON.stringify(data) });
         delete qs("taskTitle").dataset.editId;
         createBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg> Create Task`;
       } else {
-        await fetchJson(`${API}/tasks`, { method: "POST", body: JSON.stringify(data) });
+        await fetchJson(`${API}/api/tasks`, { method: "POST", body: JSON.stringify(data) });
       }
       
       qs("taskTitle").value = "";
@@ -10846,7 +10846,7 @@ function initTasks() {
     }
     
     try {
-      await fetchJson(`${API}/projects`, {
+      await fetchJson(`${API}/api/projects`, {
         method: "POST",
         body: JSON.stringify({ name, description: "", color: "#3b82f6" })
       });
