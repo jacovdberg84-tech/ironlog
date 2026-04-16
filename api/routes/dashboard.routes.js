@@ -370,6 +370,7 @@ export default async function dashboardRoutes(app) {
   function computeFleetKpiForDay(dayStr, scheduledFallback, opts = {}) {
     const includePerAsset = Boolean(opts.includePerAsset);
     const siteCode = String(opts.siteCode || "main").trim().toLowerCase() || "main";
+    const activeFleetIds = new Set(getActiveFleetAssets.all().map((r) => Number(r.asset_id || 0)).filter((id) => id > 0));
 
     const assetRows = dailyHoursHasSite && getDayAssetHoursWithSite
       ? getDayAssetHoursWithSite.all(dayStr, siteCode)
@@ -385,15 +386,20 @@ export default async function dashboardRoutes(app) {
         ? getDayAssetDowntimeFallbackWithSite.all(dayStr, siteCode)
         : getDayAssetDowntimeFallbackNoSite.all(dayStr);
     const downtimeByAsset = new Map(
-      downtimeRows.map((r) => [Number(r.asset_id || 0), Number(r.downtime_hours || 0)])
+      downtimeRows
+        .map((r) => [Number(r.asset_id || 0), Number(r.downtime_hours || 0)])
+        .filter(([assetId]) => activeFleetIds.has(assetId))
     );
     const openBreakdownAssets = new Set(
       (getOpenBreakdownAssetIdsByDayWithSite && bdOnlySiteSql
         ? getOpenBreakdownAssetIdsByDayWithSite.all(dayStr, dayStr, siteCode)
         : getOpenBreakdownAssetIdsByDayNoSite.all(dayStr, dayStr)
-      ).map((r) => Number(r.asset_id || 0))
+      )
+        .map((r) => Number(r.asset_id || 0))
+        .filter((assetId) => activeFleetIds.has(assetId))
     );
-    const assetIdsInHours = new Set(assetRows.map((r) => Number(r.asset_id || 0)));
+    const eligibleAssetRows = assetRows.filter((r) => activeFleetIds.has(Number(r.asset_id || 0)));
+    const assetIdsInHours = new Set(eligibleAssetRows.map((r) => Number(r.asset_id || 0)));
 
     let scheduled_hours = 0;
     let run_hours = 0;
@@ -402,7 +408,7 @@ export default async function dashboardRoutes(app) {
     const per_asset_kpi = includePerAsset ? [] : null;
     const contributingAssetIds = new Set();
 
-    assetRows.forEach((r) => {
+    eligibleAssetRows.forEach((r) => {
       const assetId = Number(r.asset_id || 0);
       const rowScheduled = Number(r.scheduled_hours);
       const scheduled = Math.max(
@@ -448,10 +454,9 @@ export default async function dashboardRoutes(app) {
       }
     });
 
-    const activeFleetIds = getActiveFleetAssets.all().map((r) => Number(r.asset_id || 0));
     const missingFleetIds = dailyHoursHasSite
       ? []
-      : activeFleetIds.filter((id) => id > 0 && !assetIdsInHours.has(id));
+      : Array.from(activeFleetIds).filter((id) => id > 0 && !assetIdsInHours.has(id));
     const downtimeOnlyIds = downtimeRows
       .map((r) => Number(r.asset_id || 0))
       .filter((id) => id > 0 && !assetIdsInHours.has(id));
