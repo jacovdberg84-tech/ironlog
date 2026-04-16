@@ -212,25 +212,6 @@ export default async function dashboardRoutes(app) {
     WHERE active = 1
       AND is_standby = 0
   `);
-  const getDayStandbyAssetIdsNoSite = db.prepare(`
-    SELECT DISTINCT dh.asset_id
-    FROM daily_hours dh
-    JOIN assets a ON a.id = dh.asset_id
-    WHERE dh.work_date = ?
-      AND COALESCE(dh.is_used, 1) = 0
-      AND ${andAssetFleetHoursOnly("a")}
-  `);
-  const getDayStandbyAssetIdsWithSite = dailyHoursHasSite
-    ? db.prepare(`
-    SELECT DISTINCT dh.asset_id
-    FROM daily_hours dh
-    JOIN assets a ON a.id = dh.asset_id
-    WHERE dh.work_date = ?
-      ${dhSiteSql}
-      AND COALESCE(dh.is_used, 1) = 0
-      AND ${andAssetFleetHoursOnly("a")}
-  `)
-    : null;
 
   const getDayAssetDowntimeNoSite = db.prepare(`
     SELECT
@@ -390,14 +371,6 @@ export default async function dashboardRoutes(app) {
     const includePerAsset = Boolean(opts.includePerAsset);
     const siteCode = String(opts.siteCode || "main").trim().toLowerCase() || "main";
     const activeFleetIds = new Set(getActiveFleetAssets.all().map((r) => Number(r.asset_id || 0)).filter((id) => id > 0));
-    const standbyForDay = new Set(
-      (dailyHoursHasSite && getDayStandbyAssetIdsWithSite
-        ? getDayStandbyAssetIdsWithSite.all(dayStr, siteCode)
-        : getDayStandbyAssetIdsNoSite.all(dayStr)
-      )
-        .map((r) => Number(r.asset_id || 0))
-        .filter((id) => activeFleetIds.has(id))
-    );
 
     const assetRows = dailyHoursHasSite && getDayAssetHoursWithSite
       ? getDayAssetHoursWithSite.all(dayStr, siteCode)
@@ -415,7 +388,7 @@ export default async function dashboardRoutes(app) {
     const downtimeByAsset = new Map(
       downtimeRows
         .map((r) => [Number(r.asset_id || 0), Number(r.downtime_hours || 0)])
-        .filter(([assetId]) => activeFleetIds.has(assetId) && !standbyForDay.has(assetId))
+        .filter(([assetId]) => activeFleetIds.has(assetId))
     );
     const openBreakdownAssets = new Set(
       (getOpenBreakdownAssetIdsByDayWithSite && bdOnlySiteSql
@@ -423,12 +396,9 @@ export default async function dashboardRoutes(app) {
         : getOpenBreakdownAssetIdsByDayNoSite.all(dayStr, dayStr)
       )
         .map((r) => Number(r.asset_id || 0))
-        .filter((assetId) => activeFleetIds.has(assetId) && !standbyForDay.has(assetId))
+        .filter((assetId) => activeFleetIds.has(assetId))
     );
-    const eligibleAssetRows = assetRows.filter((r) => {
-      const assetId = Number(r.asset_id || 0);
-      return activeFleetIds.has(assetId) && !standbyForDay.has(assetId);
-    });
+    const eligibleAssetRows = assetRows.filter((r) => activeFleetIds.has(Number(r.asset_id || 0)));
     const assetIdsInHours = new Set(eligibleAssetRows.map((r) => Number(r.asset_id || 0)));
 
     let scheduled_hours = 0;
@@ -486,10 +456,10 @@ export default async function dashboardRoutes(app) {
 
     const missingFleetIds = dailyHoursHasSite
       ? []
-      : Array.from(activeFleetIds).filter((id) => id > 0 && !assetIdsInHours.has(id) && !standbyForDay.has(id));
+      : Array.from(activeFleetIds).filter((id) => id > 0 && !assetIdsInHours.has(id));
     const downtimeOnlyIds = downtimeRows
       .map((r) => Number(r.asset_id || 0))
-      .filter((id) => id > 0 && !assetIdsInHours.has(id) && !standbyForDay.has(id));
+      .filter((id) => id > 0 && !assetIdsInHours.has(id));
     const includeIds = Array.from(new Set([...downtimeOnlyIds, ...missingFleetIds]));
     if (includeIds.length) {
       const uniq = includeIds.slice(0, 500);
