@@ -2453,7 +2453,7 @@ async function loadWeeklyForumSummary() {
 }
 
 let akpLastResponse = null;
-let akpLastWeeklySeries = [];
+let akpLastTrendSeries = [];
 let akpLastMeta = null;
 
 function akpCategoryNorm(cat) {
@@ -2527,27 +2527,24 @@ function akpFleetFromAssets(assetRows) {
   };
 }
 
-function akpWeekRanges(start, end) {
+function akpSelectedDayRanges(start, end) {
   const ranges = [];
   const cur = new Date(`${start}T00:00:00`);
   const last = new Date(`${end}T00:00:00`);
   while (cur <= last) {
-    const weekStart = new Date(cur);
-    const weekEnd = new Date(cur);
-    weekEnd.setDate(weekEnd.getDate() + 6);
-    if (weekEnd > last) weekEnd.setTime(last.getTime());
+    const day = cur.toISOString().slice(0, 10);
     ranges.push({
-      start: weekStart.toISOString().slice(0, 10),
-      end: weekEnd.toISOString().slice(0, 10),
-      label: `${weekStart.toISOString().slice(5, 10)} to ${weekEnd.toISOString().slice(5, 10)}`,
+      start: day,
+      end: day,
+      label: day.slice(5, 10),
     });
-    cur.setDate(cur.getDate() + 7);
+    cur.setDate(cur.getDate() + 1);
   }
   return ranges;
 }
 
-async function akpLoadWeeklySeries(start, end, sched) {
-  const ranges = akpWeekRanges(start, end);
+async function akpLoadTrendSeries(start, end, sched) {
+  const ranges = akpSelectedDayRanges(start, end);
   const out = [];
   for (const r of ranges) {
     const q = new URLSearchParams();
@@ -2556,7 +2553,7 @@ async function akpLoadWeeklySeries(start, end, sched) {
     q.set("scheduled", String(sched));
     const res = await fetch(`${API}/dashboard/asset-kpi/weekly?${q.toString()}`);
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to load weekly KPI trend");
+    if (!res.ok) throw new Error(data.error || "Failed to load KPI trend");
     out.push({ ...r, data });
   }
   return out;
@@ -2596,7 +2593,7 @@ function akpSvgBarChart(fleet) {
 }
 
 function akpSvgTrend(series, metricKey, color, label) {
-  if (!series.length) return `<div class="muted">No weekly data available.</div>`;
+  if (!series.length) return `<div class="muted">No data available for selected days.</div>`;
   const width = 420;
   const height = 220;
   const left = 40;
@@ -2668,7 +2665,7 @@ function renderAssetKpiVisuals(data) {
   const fleet = filterRaw ? akpFleetFromAssets(filteredAssets) : data.fleet || {};
   hoursEl.innerHTML = akpSvgBarChart(fleet);
   worstEl.innerHTML = akpRenderWorstAssets(filteredAssets);
-  const weeklySeries = (akpLastWeeklySeries || []).map((row) => {
+  const trendSeries = (akpLastTrendSeries || []).map((row) => {
     const fleetRow = akpFilteredFleet(row.data, filterRaw);
     return {
       label: row.label,
@@ -2676,8 +2673,8 @@ function renderAssetKpiVisuals(data) {
       utilization_pct: Number(fleetRow.utilization_pct || 0),
     };
   });
-  availEl.innerHTML = akpSvgTrend(weeklySeries, "availability_pct", "#2563eb", "Availability trend by week");
-  utilEl.innerHTML = akpSvgTrend(weeklySeries, "utilization_pct", "#16a34a", "Utilization trend by week");
+  availEl.innerHTML = akpSvgTrend(trendSeries, "availability_pct", "#2563eb", "Availability trend by selected day");
+  utilEl.innerHTML = akpSvgTrend(trendSeries, "utilization_pct", "#16a34a", "Utilization trend by selected day");
 }
 
 function refreshAkpCategoryFilterOptions(data, previousValue) {
@@ -2791,7 +2788,7 @@ async function loadAssetKpiWeekly() {
     if (!res.ok) throw new Error(data.error || "Failed to load asset KPI");
     akpLastResponse = data;
     akpLastMeta = { start, end, sched };
-    akpLastWeeklySeries = await akpLoadWeeklySeries(start, end, sched);
+    akpLastTrendSeries = await akpLoadTrendSeries(start, end, sched);
     refreshAkpCategoryFilterOptions(data, prevFilter);
     renderAssetKpiTables(data);
     msg.className = "message-success";
@@ -2801,7 +2798,7 @@ async function loadAssetKpiWeekly() {
       : `Loaded ${start} → ${end}. Higher utilization = more run hours per available hour.`;
   } catch (e) {
     akpLastResponse = null;
-    akpLastWeeklySeries = [];
+    akpLastTrendSeries = [];
     akpLastMeta = null;
     msg.className = "message-error";
     msg.textContent = `Error: ${e.message || e}`;
