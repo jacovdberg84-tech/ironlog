@@ -2453,6 +2453,8 @@ async function loadWeeklyForumSummary() {
 }
 
 let akpLastResponse = null;
+let akpLastWeeklySeries = [];
+let akpLastMeta = null;
 
 function akpCategoryNorm(cat) {
   const t = String(cat ?? "").trim();
@@ -2496,7 +2498,7 @@ function akpRollupCategoriesFromAssets(assetRows) {
       downtime_hours: Number(c.downtime_hours.toFixed(2)),
       available_hours: Number(avail.toFixed(2)),
       availability_pct: akpPct(avail, sched),
-      utilization_pct: akpPct(run, avail),
+      utilization_pct: akpPct(run, sched),
     };
   });
   rows.sort((x, y) => {
@@ -2521,8 +2523,161 @@ function akpFleetFromAssets(assetRows) {
     run_hours: Number(fleet_run.toFixed(2)),
     downtime_hours: Number(fleet_down.toFixed(2)),
     availability_pct: akpPct(fleet_avail, fleet_sched),
-    utilization_pct: akpPct(fleet_run, fleet_avail),
+    utilization_pct: akpPct(fleet_run, fleet_sched),
   };
+}
+
+function akpWeekRanges(start, end) {
+  const ranges = [];
+  const cur = new Date(`${start}T00:00:00`);
+  const last = new Date(`${end}T00:00:00`);
+  while (cur <= last) {
+    const weekStart = new Date(cur);
+    const weekEnd = new Date(cur);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    if (weekEnd > last) weekEnd.setTime(last.getTime());
+    ranges.push({
+      start: weekStart.toISOString().slice(0, 10),
+      end: weekEnd.toISOString().slice(0, 10),
+      label: `${weekStart.toISOString().slice(5, 10)} to ${weekEnd.toISOString().slice(5, 10)}`,
+    });
+    cur.setDate(cur.getDate() + 7);
+  }
+  return ranges;
+}
+
+async function akpLoadWeeklySeries(start, end, sched) {
+  const ranges = akpWeekRanges(start, end);
+  const out = [];
+  for (const r of ranges) {
+    const q = new URLSearchParams();
+    q.set("start", r.start);
+    q.set("end", r.end);
+    q.set("scheduled", String(sched));
+    const res = await fetch(`${API}/dashboard/asset-kpi/weekly?${q.toString()}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load weekly KPI trend");
+    out.push({ ...r, data });
+  }
+  return out;
+}
+
+function akpFilteredFleet(data, filterRaw) {
+  if (!filterRaw) return data?.fleet || {};
+  const assets = Array.isArray(data?.by_asset) ? data.by_asset.filter((a) => akpCategoryNorm(a.category) === filterRaw) : [];
+  return akpFleetFromAssets(assets);
+}
+
+function akpSvgBarChart(fleet) {
+  const scheduled = Number(fleet?.scheduled_hours || 0);
+  const run = Number(fleet?.run_hours || 0);
+  const down = Number(fleet?.downtime_hours || 0);
+  const max = Math.max(scheduled, run, down, 1);
+  const bars = [
+    { label: "Scheduled", value: scheduled, color: "#2563eb" },
+    { label: "Run", value: run, color: "#16a34a" },
+    { label: "Downtime", value: down, color: "#dc2626" },
+  ];
+  return `
+    <svg viewBox="0 0 420 220" width="100%" height="220" role="img" aria-label="Scheduled versus run versus downtime">
+      <line x1="40" y1="180" x2="390" y2="180" stroke="#cbd5e1" stroke-width="1"/>
+      ${bars.map((b, i) => {
+        const h = Math.max(2, (b.value / max) * 130);
+        const x = 70 + i * 110;
+        const y = 180 - h;
+        return `
+          <rect x="${x}" y="${y}" width="54" height="${h}" rx="8" fill="${b.color}"/>
+          <text x="${x + 27}" y="${y - 8}" text-anchor="middle" font-size="12" fill="#334155">${fmt1(b.value)}h</text>
+          <text x="${x + 27}" y="198" text-anchor="middle" font-size="12" fill="#475569">${b.label}</text>
+        `;
+      }).join("")}
+    </svg>
+  `;
+}
+
+function akpSvgTrend(series, metricKey, color, label) {
+  if (!series.length) return `<div class="muted">No weekly data available.</div>`;
+  const width = 420;
+  const height = 220;
+  const left = 40;
+  const bottom = 28;
+  const top = 20;
+  const plotW = width - left - 16;
+  const plotH = height - top - bottom;
+  const vals = series.map((s) => Number(s[metricKey] || 0));
+  const max = Math.max(...vals, 1);
+  const points = vals.map((v, i) => {
+    const x = left + (series.length === 1 ? plotW / 2 : (i * plotW) / (series.length - 1));
+    const y = top + plotH - (v / max) * plotH;
+    return { x, y, v, label: series[i].label };
+  });
+  const path = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+  return `
+    <svg viewBox="0 0 ${width} ${height}" width="100%" height="220" role="img" aria-label="${label}">
+      <line x1="${left}" y1="${top + plotH}" x2="${width - 8}" y2="${top + plotH}" stroke="#cbd5e1" stroke-width="1"/>
+      <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotH}" stroke="#cbd5e1" stroke-width="1"/>
+      <path d="${path}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      ${points.map((p) => `
+        <circle cx="${p.x}" cy="${p.y}" r="4" fill="${color}"/>
+        <text x="${p.x}" y="${top + plotH + 16}" text-anchor="middle" font-size="11" fill="#475569">${esc(p.label)}</text>
+        <text x="${p.x}" y="${p.y - 10}" text-anchor="middle" font-size="11" fill="#334155">${fmtPct(p.v)}</text>
+      `).join("")}
+    </svg>
+  `;
+}
+
+function akpRenderWorstAssets(assetRows) {
+  const rows = [...assetRows]
+    .filter((r) => r.scheduled_hours > 0)
+    .sort((a, b) => {
+      const au = a.utilization_pct == null ? 999 : a.utilization_pct;
+      const bu = b.utilization_pct == null ? 999 : b.utilization_pct;
+      if (au !== bu) return au - bu;
+      const aa = a.availability_pct == null ? 999 : a.availability_pct;
+      const ba = b.availability_pct == null ? 999 : b.availability_pct;
+      if (aa !== ba) return aa - ba;
+      return Number(b.downtime_hours || 0) - Number(a.downtime_hours || 0);
+    })
+    .slice(0, 5);
+  if (!rows.length) return `<div class="muted">No asset rows available for this selection.</div>`;
+  return `<div class="stack-10">${rows.map((r, idx) => `
+    <div style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
+        <strong>${idx + 1}. ${esc(r.asset_code || "—")} ${r.asset_name ? `- ${esc(r.asset_name)}` : ""}</strong>
+        <span class="muted">${esc(akpCategoryNorm(r.category))}</span>
+      </div>
+      <div class="muted" style="margin-top:4px;">
+        Scheduled ${fmt1(r.scheduled_hours)}h | Run ${fmt1(r.run_hours)}h | Downtime ${fmt1(r.downtime_hours)}h
+      </div>
+      <div style="margin-top:4px;">
+        Availability <strong>${fmtPct(r.availability_pct)}</strong> | Utilization <strong>${fmtPct(r.utilization_pct)}</strong>
+      </div>
+    </div>
+  `).join("")}</div>`;
+}
+
+function renderAssetKpiVisuals(data) {
+  const hoursEl = document.getElementById("akpHoursChart");
+  const availEl = document.getElementById("akpAvailabilityTrend");
+  const utilEl = document.getElementById("akpUtilizationTrend");
+  const worstEl = document.getElementById("akpWorstAssets");
+  const filterRaw = String(document.getElementById("akpCategoryFilter")?.value || "").trim();
+  if (!hoursEl || !availEl || !utilEl || !worstEl || !data) return;
+  const allAssets = Array.isArray(data.by_asset) ? data.by_asset : [];
+  const filteredAssets = filterRaw ? allAssets.filter((a) => akpCategoryNorm(a.category) === filterRaw) : allAssets;
+  const fleet = filterRaw ? akpFleetFromAssets(filteredAssets) : data.fleet || {};
+  hoursEl.innerHTML = akpSvgBarChart(fleet);
+  worstEl.innerHTML = akpRenderWorstAssets(filteredAssets);
+  const weeklySeries = (akpLastWeeklySeries || []).map((row) => {
+    const fleetRow = akpFilteredFleet(row.data, filterRaw);
+    return {
+      label: row.label,
+      availability_pct: Number(fleetRow.availability_pct || 0),
+      utilization_pct: Number(fleetRow.utilization_pct || 0),
+    };
+  });
+  availEl.innerHTML = akpSvgTrend(weeklySeries, "availability_pct", "#2563eb", "Availability trend by week");
+  utilEl.innerHTML = akpSvgTrend(weeklySeries, "utilization_pct", "#16a34a", "Utilization trend by week");
 }
 
 function refreshAkpCategoryFilterOptions(data, previousValue) {
@@ -2601,6 +2756,7 @@ function renderAssetKpiTables(data) {
         </tr>
       `).join("")
     : `<tr><td colspan="10" class="muted">${filterRaw ? "No rows for this type." : "No rows."}</td></tr>`;
+  renderAssetKpiVisuals(data);
 }
 
 async function loadAssetKpiWeekly() {
@@ -2634,6 +2790,8 @@ async function loadAssetKpiWeekly() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to load asset KPI");
     akpLastResponse = data;
+    akpLastMeta = { start, end, sched };
+    akpLastWeeklySeries = await akpLoadWeeklySeries(start, end, sched);
     refreshAkpCategoryFilterOptions(data, prevFilter);
     renderAssetKpiTables(data);
     msg.className = "message-success";
@@ -2643,6 +2801,8 @@ async function loadAssetKpiWeekly() {
       : `Loaded ${start} → ${end}. Higher utilization = more run hours per available hour.`;
   } catch (e) {
     akpLastResponse = null;
+    akpLastWeeklySeries = [];
+    akpLastMeta = null;
     msg.className = "message-error";
     msg.textContent = `Error: ${e.message || e}`;
     catBody.innerHTML = `<tr><td colspan="8" class="message-error">${esc(e.message || String(e))}</td></tr>`;
