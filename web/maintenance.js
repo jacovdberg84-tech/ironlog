@@ -2565,6 +2565,20 @@ function akpFilteredFleet(data, filterRaw) {
   return akpFleetFromAssets(assets);
 }
 
+function akpSeriesForAsset(assetId) {
+  return (akpLastTrendSeries || []).map((row) => {
+    const assetRow = (row.data?.by_asset || []).find((a) => Number(a.asset_id || 0) === Number(assetId || 0));
+    return {
+      label: row.label,
+      scheduled_hours: Number(assetRow?.scheduled_hours || 0),
+      run_hours: Number(assetRow?.run_hours || 0),
+      downtime_hours: Number(assetRow?.downtime_hours || 0),
+      availability_pct: Number(assetRow?.availability_pct || 0),
+      utilization_pct: Number(assetRow?.utilization_pct || 0),
+    };
+  });
+}
+
 function akpSvgBarChart(fleet) {
   const scheduled = Number(fleet?.scheduled_hours || 0);
   const run = Number(fleet?.run_hours || 0);
@@ -2653,6 +2667,20 @@ function akpRenderWorstAssets(assetRows) {
   `).join("")}</div>`;
 }
 
+function akpMiniBars(series) {
+  const totals = series.reduce((acc, s) => {
+    acc.scheduled += Number(s.scheduled_hours || 0);
+    acc.run += Number(s.run_hours || 0);
+    acc.down += Number(s.downtime_hours || 0);
+    return acc;
+  }, { scheduled: 0, run: 0, down: 0 });
+  return akpSvgBarChart({
+    scheduled_hours: totals.scheduled,
+    run_hours: totals.run,
+    downtime_hours: totals.down,
+  });
+}
+
 function renderAssetKpiVisuals(data) {
   const hoursEl = document.getElementById("akpHoursChart");
   const availEl = document.getElementById("akpAvailabilityTrend");
@@ -2738,20 +2766,41 @@ function renderAssetKpiTables(data) {
     : `<tr><td colspan="8" class="muted">${filterRaw ? "No assets in this type for the range." : "No production daily hours in range (check Daily Input / dates)."}</td></tr>`;
 
   assetBody.innerHTML = filteredAssets.length
-    ? filteredAssets.map((r) => `
-        <tr>
-          <td>${esc(r.asset_code || "—")} — ${esc(r.asset_name || "")}</td>
-          <td>${esc(r.category || "—")}</td>
-          <td>${esc(r.utilization_mode || "—")}</td>
-          <td style="text-align:right;">${Number(r.days_with_data || 0)} / ${Number(r.days_in_range || 0)}</td>
-          <td style="text-align:right;">${fmt1(r.scheduled_hours)}</td>
-          <td style="text-align:right;">${fmt1(r.available_hours)}</td>
-          <td style="text-align:right;">${fmt1(r.run_hours)}</td>
-          <td style="text-align:right;">${fmt1(r.downtime_hours)}</td>
-          <td style="text-align:right;">${fmtPct(r.availability_pct)}</td>
-          <td style="text-align:right;">${fmtPct(r.utilization_pct)}</td>
-        </tr>
-      `).join("")
+    ? filteredAssets.map((r) => {
+        const trend = akpSeriesForAsset(r.asset_id);
+        return `
+          <tr>
+            <td>${esc(r.asset_code || "—")} — ${esc(r.asset_name || "")}</td>
+            <td>${esc(r.category || "—")}</td>
+            <td>${esc(r.utilization_mode || "—")}</td>
+            <td style="text-align:right;">${Number(r.days_with_data || 0)} / ${Number(r.days_in_range || 0)}</td>
+            <td style="text-align:right;">${fmt1(r.scheduled_hours)}</td>
+            <td style="text-align:right;">${fmt1(r.available_hours)}</td>
+            <td style="text-align:right;">${fmt1(r.run_hours)}</td>
+            <td style="text-align:right;">${fmt1(r.downtime_hours)}</td>
+            <td style="text-align:right;">${fmtPct(r.availability_pct)}</td>
+            <td style="text-align:right;">${fmtPct(r.utilization_pct)}</td>
+          </tr>
+          <tr>
+            <td colspan="10" style="background:#fafafa;padding:12px;">
+              <div class="form-grid">
+                <div>
+                  <div class="muted" style="margin-bottom:6px;">Asset hours bar view</div>
+                  ${akpMiniBars(trend)}
+                </div>
+                <div>
+                  <div class="muted" style="margin-bottom:6px;">Availability trend</div>
+                  ${akpSvgTrend(trend, "availability_pct", "#2563eb", `Availability trend for ${esc(r.asset_code || "asset")}`)}
+                </div>
+                <div>
+                  <div class="muted" style="margin-bottom:6px;">Utilization trend</div>
+                  ${akpSvgTrend(trend, "utilization_pct", "#16a34a", `Utilization trend for ${esc(r.asset_code || "asset")}`)}
+                </div>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join("")
     : `<tr><td colspan="10" class="muted">${filterRaw ? "No rows for this type." : "No rows."}</td></tr>`;
   renderAssetKpiVisuals(data);
 }
@@ -2808,57 +2857,15 @@ async function loadAssetKpiWeekly() {
 }
 
 function exportAssetKpiToExcel() {
-  if (!akpLastResponse) {
+  if (!akpLastMeta) {
     alert("Load KPI data first before exporting.");
     return;
   }
-  
-  const data = akpLastResponse;
-  const filter = String(document.getElementById("akpCategoryFilter")?.value || "").trim();
-  
-  let csv = "Asset KPI Report\n";
-  csv += `Period: ${data.start || ""} to ${data.end || ""}\n`;
-  csv += `Generated: ${new Date().toISOString()}\n\n`;
-  
-  // Summary section
-  if (data.summary) {
-    csv += "Summary\n";
-    csv += `Total Scheduled Hours,${data.summary.total_scheduled || 0}\n`;
-    csv += `Total Available Hours,${data.summary.total_available || 0}\n`;
-    csv += `Total Run Hours,${data.summary.total_run || 0}\n`;
-    csv += `Total Downtime Hours,${data.summary.total_downtime || 0}\n`;
-    csv += `Fleet Availability %,${data.summary.fleet_availability_pct || 0}\n`;
-    csv += `Fleet Utilization %,${data.summary.fleet_utilization_pct || 0}\n\n`;
-  }
-  
-  // By Category section
-  csv += "By Category\n";
-  csv += "Category,Assets,Scheduled h,Available h,Run h,Downtime h,Availability %,Utilization %\n";
-  const categories = filter ? (data.by_category || []).filter(c => c.category === filter) : (data.by_category || []);
-  for (const cat of categories) {
-    csv += `"${cat.category || ""}",${cat.asset_count || 0},${cat.total_scheduled || 0},${cat.total_available || 0},${cat.total_run || 0},${cat.total_downtime || 0},${cat.availability_pct || 0},${cat.utilization_pct || 0}\n`;
-  }
-  csv += "\n";
-  
-  // By Asset section
-  csv += "Per Asset\n";
-  csv += "Asset,Category,Mode,Days w/ Data,Scheduled h,Available h,Run h,Downtime h,Availability %,Utilization %\n";
-  const assets = filter ? (data.by_asset || []).filter(a => a.category === filter) : (data.by_asset || []);
-  for (const asset of assets) {
-    csv += `"${asset.asset_code || ""}","${asset.category || ""}","${asset.mode || ""}",${asset.days_with_data || 0},${asset.total_scheduled || 0},${asset.total_available || 0},${asset.total_run || 0},${asset.total_downtime || 0},${asset.availability_pct || 0},${asset.utilization_pct || 0}\n`;
-  }
-  
-  // Download
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  const dateTag = new Date().toISOString().slice(0, 10);
-  a.href = url;
-  a.download = `asset-kpi-${dateTag}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 3000);
+  const q = new URLSearchParams();
+  q.set("start", akpLastMeta.start);
+  q.set("end", akpLastMeta.end);
+  q.set("scheduled", String(akpLastMeta.sched));
+  window.open(`${API}/dashboard/asset-kpi.xlsx?${q.toString()}`, "_blank");
 }
 
 async function openWeeklyForumPdf(download = false) {

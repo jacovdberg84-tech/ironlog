@@ -1,4 +1,5 @@
 // IRONLOG/api/routes/dashboard.routes.js
+import ExcelJS from "exceljs";
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
@@ -524,35 +525,24 @@ export default async function dashboardRoutes(app) {
     };
   }
 
-  // GET /api/dashboard/asset-kpi/weekly?start=YYYY-MM-DD&end=YYYY-MM-DD&scheduled=10
-  // Rolls up dashboard KPI rules (availability / utilization) across a date range per asset and by equipment category.
-  app.get("/asset-kpi/weekly", async (req, reply) => {
-    const startIn = String(req.query?.start || "").trim();
-    const endIn = String(req.query?.end || "").trim();
-    const scheduledRaw = Number(req.query?.scheduled ?? 10);
-    const scheduledFallback = Number.isFinite(scheduledRaw) && scheduledRaw > 0 ? scheduledRaw : 10;
-
-    const now = new Date();
-    const dow = now.getDay();
-    const mondayOffset = dow === 0 ? -6 : 1 - dow;
-    const monday = new Date(now);
-    monday.setHours(0, 0, 0, 0);
-    monday.setDate(monday.getDate() + mondayOffset);
-    const friday = new Date(monday);
-    friday.setDate(friday.getDate() + 4);
-    const ymd = (d) => d.toISOString().slice(0, 10);
-    const start = /^\d{4}-\d{2}-\d{2}$/.test(startIn) ? startIn : ymd(monday);
-    const end = /^\d{4}-\d{2}-\d{2}$/.test(endIn) ? endIn : ymd(friday);
-    if (start > end) {
-      return reply.code(400).send({ ok: false, error: "start must be <= end" });
-    }
-
-    const siteCode = siteCodeFromReq(req);
+  function buildAssetKpiRange(start, end, scheduledFallback, siteCode) {
     const assetMap = new Map();
+    const daily_series = [];
     let daysInRange = 0;
     eachDateInclusiveYMD(start, end, (dayStr) => {
       daysInRange += 1;
       const k = computeFleetKpiForDay(dayStr, scheduledFallback, { includePerAsset: true, siteCode });
+      const dayScheduled = Number(k.scheduled_hours || 0);
+      const dayRun = Number(k.run_hours || 0);
+      const dayDown = Number(k.downtime_hours || 0);
+      const dayAvail = Math.max(0, dayScheduled - dayDown);
+      daily_series.push({
+        date: dayStr,
+        scheduled_hours: Number(dayScheduled.toFixed(2)),
+        available_hours: Number(dayAvail.toFixed(2)),
+        run_hours: Number(dayRun.toFixed(2)),
+        downtime_hours: Number(dayDown.toFixed(2)),
+      });
       for (const row of k.per_asset_kpi || []) {
         const id = Number(row.asset_id || 0);
         if (!id) continue;
@@ -568,6 +558,7 @@ export default async function dashboardRoutes(app) {
             downtime_hours: 0,
             available_hours: 0,
             days_with_data: 0,
+            daily_points: [],
           });
         }
         const a = assetMap.get(id);
@@ -579,6 +570,13 @@ export default async function dashboardRoutes(app) {
         a.run_hours += r;
         a.downtime_hours += d;
         a.available_hours += v;
+        a.daily_points.push({
+          date: dayStr,
+          scheduled_hours: Number(s.toFixed(2)),
+          available_hours: Number(v.toFixed(2)),
+          run_hours: Number(r.toFixed(2)),
+          downtime_hours: Number(d.toFixed(2)),
+        });
         if (s > 0 || r > 0 || d > 0) a.days_with_data += 1;
       }
     });
@@ -604,6 +602,7 @@ export default async function dashboardRoutes(app) {
         available_hours: Number(avail.toFixed(2)),
         availability_pct: pct(avail, sched),
         utilization_pct: pct(run, sched),
+        daily_points: a.daily_points,
       };
     });
 
@@ -667,7 +666,7 @@ export default async function dashboardRoutes(app) {
     const fleet_run = by_asset.reduce((s, r) => s + r.run_hours, 0);
     const fleet_down = by_asset.reduce((s, r) => s + r.downtime_hours, 0);
 
-    return reply.send({
+    return {
       ok: true,
       range: { start, end },
       scheduled_fallback: scheduledFallback,
@@ -686,7 +685,99 @@ export default async function dashboardRoutes(app) {
       },
       by_category,
       by_asset,
+      daily_series,
+    };
+  }
+
+  // GET /api/dashboard/asset-kpi/weekly?start=YYYY-MM-DD&end=YYYY-MM-DD&scheduled=10
+  // Rolls up dashboard KPI rules (availability / utilization) across a date range per asset and by equipment category.
+  app.get("/asset-kpi/weekly", async (req, reply) => {
+    const startIn = String(req.query?.start || "").trim();
+    const endIn = String(req.query?.end || "").trim();
+    const scheduledRaw = Number(req.query?.scheduled ?? 10);
+    const scheduledFallback = Number.isFinite(scheduledRaw) && scheduledRaw > 0 ? scheduledRaw : 10;
+
+    const now = new Date();
+    const dow = now.getDay();
+    const mondayOffset = dow === 0 ? -6 : 1 - dow;
+    const monday = new Date(now);
+    monday.setHours(0, 0, 0, 0);
+    monday.setDate(monday.getDate() + mondayOffset);
+    const friday = new Date(monday);
+    friday.setDate(friday.getDate() + 4);
+    const ymd = (d) => d.toISOString().slice(0, 10);
+    const start = /^\d{4}-\d{2}-\d{2}$/.test(startIn) ? startIn : ymd(monday);
+    const end = /^\d{4}-\d{2}-\d{2}$/.test(endIn) ? endIn : ymd(friday);
+    if (start > end) {
+      return reply.code(400).send({ ok: false, error: "start must be <= end" });
+    }
+
+    const siteCode = siteCodeFromReq(req);
+    return reply.send(buildAssetKpiRange(start, end, scheduledFallback, siteCode));
+  });
+
+  app.get("/asset-kpi.xlsx", async (req, reply) => {
+    const startIn = String(req.query?.start || "").trim();
+    const endIn = String(req.query?.end || "").trim();
+    const scheduledRaw = Number(req.query?.scheduled ?? 10);
+    const scheduledFallback = Number.isFinite(scheduledRaw) && scheduledRaw > 0 ? scheduledRaw : 10;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startIn) || !/^\d{4}-\d{2}-\d{2}$/.test(endIn) || startIn > endIn) {
+      return reply.code(400).send({ ok: false, error: "Provide valid start/end dates" });
+    }
+    const siteCode = siteCodeFromReq(req);
+    const data = buildAssetKpiRange(startIn, endIn, scheduledFallback, siteCode);
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "IRONLOG";
+    wb.created = new Date();
+
+    const summary = wb.addWorksheet("Summary");
+    summary.addRow(["Asset KPI Report"]);
+    summary.addRow(["Period", `${startIn} to ${endIn}`]);
+    summary.addRow(["Scheduled fallback", scheduledFallback]);
+    summary.addRow([]);
+    summary.addRow(["Metric", "Value"]);
+    summary.addRow(["Scheduled Hours", data.fleet.scheduled_hours]);
+    summary.addRow(["Available Hours", data.fleet.available_hours]);
+    summary.addRow(["Run Hours", data.fleet.run_hours]);
+    summary.addRow(["Downtime Hours", data.fleet.downtime_hours]);
+    summary.addRow(["Availability %", data.fleet.availability_pct]);
+    summary.addRow(["Utilization %", data.fleet.utilization_pct]);
+
+    const cat = wb.addWorksheet("By Category");
+    cat.addRow(["Category", "Assets", "Scheduled h", "Available h", "Run h", "Downtime h", "Availability %", "Utilization %"]);
+    data.by_category.forEach((r) => cat.addRow([r.category, r.asset_count, r.scheduled_hours, r.available_hours, r.run_hours, r.downtime_hours, r.availability_pct, r.utilization_pct]));
+
+    const assets = wb.addWorksheet("By Asset");
+    assets.addRow(["Asset", "Name", "Category", "Mode", "Days with data", "Scheduled h", "Available h", "Run h", "Downtime h", "Availability %", "Utilization %"]);
+    data.by_asset.forEach((r) => assets.addRow([r.asset_code, r.asset_name, r.category, r.utilization_mode, r.days_with_data, r.scheduled_hours, r.available_hours, r.run_hours, r.downtime_hours, r.availability_pct, r.utilization_pct]));
+
+    const daily = wb.addWorksheet("Daily Trend");
+    daily.addRow(["Date", "Scheduled h", "Available h", "Run h", "Downtime h", "Availability %", "Utilization %"]);
+    data.daily_series.forEach((r) => {
+      const availPct = r.scheduled_hours > 0 ? Number(((r.available_hours / r.scheduled_hours) * 100).toFixed(1)) : null;
+      const utilPct = r.scheduled_hours > 0 ? Number(((r.run_hours / r.scheduled_hours) * 100).toFixed(1)) : null;
+      daily.addRow([r.date, r.scheduled_hours, r.available_hours, r.run_hours, r.downtime_hours, availPct, utilPct]);
     });
+
+    const assetDaily = wb.addWorksheet("Asset Daily Trend");
+    assetDaily.addRow(["Asset", "Date", "Scheduled h", "Available h", "Run h", "Downtime h", "Availability %", "Utilization %"]);
+    data.by_asset.forEach((asset) => {
+      (asset.daily_points || []).forEach((p) => {
+        const availPct = p.scheduled_hours > 0 ? Number(((p.available_hours / p.scheduled_hours) * 100).toFixed(1)) : null;
+        const utilPct = p.scheduled_hours > 0 ? Number(((p.run_hours / p.scheduled_hours) * 100).toFixed(1)) : null;
+        assetDaily.addRow([asset.asset_code, p.date, p.scheduled_hours, p.available_hours, p.run_hours, p.downtime_hours, availPct, utilPct]);
+      });
+    });
+
+    [summary, cat, assets, daily, assetDaily].forEach((ws) => {
+      ws.columns?.forEach((col) => { col.width = Math.min(24, Math.max(12, (col.header ? String(col.header).length : 12) + 2)); });
+    });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    return reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header("Content-Disposition", `attachment; filename="IRONLOG_Asset_KPI_${startIn}_to_${endIn}.xlsx"`)
+      .send(buffer);
   });
 
   // GET /api/dashboard?date=YYYY-MM-DD&scheduled=10
