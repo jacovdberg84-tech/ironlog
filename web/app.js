@@ -62,6 +62,7 @@ function initSidebar() {
       e.preventDefault();
       const tab = item.dataset.tab;
       if (!tab) return;
+      const taskView = String(item.dataset.taskView || "").trim();
       
       // Check maintenance gate
       if (isMaintenanceChildTab(tab) && !hasMaintenanceAccessGate()) {
@@ -70,6 +71,9 @@ function initSidebar() {
       }
       
       switchTab(tab);
+      if (tab === "tasks" && taskView) {
+        setTaskSidebarView(taskView, { refresh: true });
+      }
       
       // Close mobile sidebar
       if (window.innerWidth <= 1024) {
@@ -93,6 +97,11 @@ function updateSidebarActiveState(activeTab) {
   if (!sidebar) return;
   
   sidebar.querySelectorAll(".nav-item").forEach((item) => {
+    const activeKey = String(item.dataset.activeKey || "").trim();
+    if (activeKey && activeTab === "tasks" && currentTaskSidebarActiveKey) {
+      item.classList.toggle("active", activeKey === currentTaskSidebarActiveKey);
+      return;
+    }
     item.classList.toggle("active", item.dataset.tab === activeTab);
   });
   
@@ -10276,6 +10285,48 @@ function initDarkMode() {
 // Task Management
 let currentProjectFilter = "";
 let currentTaskId = null;
+let currentTaskView = "all";
+let currentTaskSidebarActiveKey = "";
+
+function normalizeDateOnly(value) {
+  return String(value || "").trim().slice(0, 10);
+}
+
+function taskMatchesSidebarView(task, view) {
+  const v = String(view || "all").trim().toLowerCase();
+  const due = normalizeDateOnly(task?.due_date);
+  const today = new Date().toISOString().slice(0, 10);
+  if (v === "today") return due === today;
+  if (v === "upcoming") return !!due && due > today;
+  if (v === "overdue") return !!due && due < today && String(task?.status || "").toLowerCase() !== "done";
+  if (v === "inbox") return !String(task?.project || "").trim();
+  return true;
+}
+
+function setTaskSidebarView(view, options = {}) {
+  const v = String(view || "all").trim().toLowerCase();
+  const assignedEl = qs("taskFilterAssigned");
+  currentTaskView = v || "all";
+
+  if (assignedEl) {
+    if (currentTaskView === "mine") {
+      assignedEl.value = getSessionUser();
+    } else if (options.clearAssigned !== false) {
+      assignedEl.value = "";
+    }
+  }
+
+  if (currentTaskView === "mine") {
+    currentTaskSidebarActiveKey = "tasks:mine";
+  } else if (["inbox", "today", "upcoming", "overdue"].includes(currentTaskView)) {
+    currentTaskSidebarActiveKey = `tasks:${currentTaskView}`;
+  } else {
+    currentTaskSidebarActiveKey = "";
+  }
+
+  updateSidebarActiveState("tasks");
+  if (options.refresh) loadTasks();
+}
 
 async function loadProjects() {
   try {
@@ -10340,12 +10391,13 @@ async function loadTasks() {
   
   try {
     const res = await fetchJson(url);
-    if (!res.tasks?.length) {
+    const filteredTasks = (res.tasks || []).filter((task) => taskMatchesSidebarView(task, currentTaskView));
+    if (!filteredTasks.length) {
       listEl.innerHTML = `<div class="item"><small class="muted">No tasks found.</small></div>`;
       return;
     }
     
-    listEl.innerHTML = res.tasks.map(task => {
+    listEl.innerHTML = filteredTasks.map(task => {
       const priorityClass = task.priority === "high" ? "pill-red" : task.priority === "medium" ? "pill-orange" : "";
       const statusClass = task.status === "done" ? "pill-green" : task.status === "in_progress" ? "pill-blue" : "pill-gray";
       const dueClass = task.due_date && task.status !== "done" ? (new Date(task.due_date) < new Date() ? "text-danger" : "") : "";
@@ -10594,6 +10646,9 @@ function initTasks() {
     if (!username) return;
     qs("taskFilterAssigned").value = username;
     currentProjectFilter = "";
+    currentTaskView = "all";
+    currentTaskSidebarActiveKey = "";
+    updateSidebarActiveState("tasks");
     await loadProjects();
     loadTasks();
   });

@@ -2333,6 +2333,21 @@ body {
   font-weight: 600;
 }
 
+.nav-subitem {
+  padding-left: 54px;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.nav-subitem::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.55;
+}
+
 .nav-item svg {
   flex-shrink: 0;
   opacity: 0.6;
