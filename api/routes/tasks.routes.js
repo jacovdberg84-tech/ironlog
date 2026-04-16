@@ -5,8 +5,6 @@ function getSiteCode(req) {
 }
 
 export default async function tasksRoutes(app) {
-  const SITE = "main";
-
   // =========================
   // PROJECTS
   // =========================
@@ -27,6 +25,7 @@ export default async function tasksRoutes(app) {
 
   app.post("/projects", async (req, reply) => {
     const { name, description, color } = req.body || {};
+    const site_code = getSiteCode(req);
     if (!name || !String(name).trim()) {
       return reply.code(400).send({ error: "Project name is required" });
     }
@@ -39,7 +38,7 @@ export default async function tasksRoutes(app) {
         String(name).trim(),
         description || null,
         color || "#3b82f6",
-        SITE,
+        site_code,
         req.headers["x-user"] || "system"
       );
       
@@ -124,6 +123,7 @@ export default async function tasksRoutes(app) {
 
   app.post("/tasks", async (req, reply) => {
     const { title, description, status, priority, project, assigned_to, due_date } = req.body || {};
+    const site_code = getSiteCode(req);
     
     if (!title || !String(title).trim()) {
       return reply.code(400).send({ error: "Title is required" });
@@ -140,7 +140,7 @@ export default async function tasksRoutes(app) {
       project || null,
       assigned_to || null,
       due_date || null,
-      SITE,
+      site_code,
       req.headers["x-user"] || "system"
     );
     

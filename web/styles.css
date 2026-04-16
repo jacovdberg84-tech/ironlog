@@ -2386,6 +2386,36 @@ body {
   background: var(--project-dot-color, #3b82f6);
 }
 
+.saved-view-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saved-view-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.task-saved-view-action {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #6b7280;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 5px;
+  cursor: pointer;
+}
+
+.task-saved-view-action:hover {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
 .nav-item svg {
   flex-shrink: 0;
   opacity: 0.6;

@@ -10333,11 +10333,41 @@ function renderTaskWorkspaceSavedViews() {
     .map(
       (v) => `
       <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="${escapeHtml(v.view || "all")}" data-task-assigned="${escapeHtml(v.assigned || "")}" data-task-project="${escapeHtml(v.project || "")}" data-task-priority="${escapeHtml(v.priority || "")}" data-task-status="${escapeHtml(v.status || "")}" data-active-key="tasks:saved:${escapeHtml(v.id)}">
-        <span>${escapeHtml(v.name || "Saved View")}</span>
+        <span class="saved-view-label">${escapeHtml(v.name || "Saved View")}</span>
+        <span class="saved-view-actions">
+          <button type="button" class="task-saved-view-action" data-task-view-action="rename" data-task-view-id="${escapeHtml(v.id)}" title="Rename view">Rename</button>
+          <button type="button" class="task-saved-view-action" data-task-view-action="delete" data-task-view-id="${escapeHtml(v.id)}" title="Delete view">Delete</button>
+        </span>
       </a>
     `
     )
     .join("");
+}
+
+function renameSavedTaskView(viewId) {
+  const id = String(viewId || "").trim();
+  if (!id) return;
+  const views = getSavedTaskViews();
+  const item = views.find((v) => String(v.id) === id);
+  if (!item) return;
+  const nextName = String(prompt("Rename saved view:", item.name || "Saved View") || "").trim();
+  if (!nextName) return;
+  item.name = nextName;
+  persistSavedTaskViews(views);
+  renderTaskWorkspaceSavedViews();
+}
+
+function deleteSavedTaskView(viewId) {
+  const id = String(viewId || "").trim();
+  if (!id) return;
+  const views = getSavedTaskViews();
+  const filtered = views.filter((v) => String(v.id) !== id);
+  persistSavedTaskViews(filtered);
+  if (currentTaskSidebarActiveKey === `tasks:saved:${id}`) {
+    currentTaskSidebarActiveKey = "";
+    updateSidebarActiveState("tasks");
+  }
+  renderTaskWorkspaceSavedViews();
 }
 
 function renderTaskWorkspaceProjectLinks(projects = []) {
@@ -10371,6 +10401,17 @@ function initTaskWorkspaceSidebar() {
     const collapsed = links.style.display !== "none";
     apply(collapsed);
     localStorage.setItem(TASK_WORKSPACE_COLLAPSED_KEY, collapsed ? "1" : "0");
+  });
+
+  links.addEventListener("click", (e) => {
+    const btn = e.target?.closest?.(".task-saved-view-action");
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const action = String(btn.dataset.taskViewAction || "").trim();
+    const id = String(btn.dataset.taskViewId || "").trim();
+    if (action === "rename") renameSavedTaskView(id);
+    if (action === "delete") deleteSavedTaskView(id);
   });
 }
 
@@ -10749,8 +10790,10 @@ function initTasks() {
       loadTasks();
       loadTasksStats();
       loadProjects();
+      setStatus(editId ? "Task updated." : "Task created.");
     } catch (err) {
-      alert("Failed to save task");
+      alert(`Failed to save task: ${err?.message || err}`);
+      setStatus("Task save failed.");
     }
   });
   
