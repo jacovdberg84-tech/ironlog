@@ -99,6 +99,10 @@ function isMonth(m) {
   return /^\d{4}-\d{2}$/.test(String(m || "").trim());
 }
 
+function isYmd(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
+}
+
 function monthRange(monthStr) {
   const [y, m] = String(monthStr).split("-").map((n) => Number(n));
   const start = new Date(Date.UTC(y, m - 1, 1));
