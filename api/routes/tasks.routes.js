@@ -224,7 +224,7 @@ export default async function tasksRoutes(app) {
 
   app.post("/tasks/:id/comments", async (req, reply) => {
     const task_id = req.params.id;
-    const { comment } = req.body || {};
+    const { comment, author } = req.body || {};
     
     const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(task_id);
     if (!task) {
@@ -241,7 +241,7 @@ export default async function tasksRoutes(app) {
     `).run(
       task_id,
       String(comment).trim(),
-      req.headers["x-user"] || "anonymous"
+      String(author || req.headers["x-user-name"] || req.headers["x-user"] || "anonymous").trim()
     );
     
     const newComment = db.prepare("SELECT * FROM task_comments WHERE id = ?").get(result.lastInsertRowid);

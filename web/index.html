@@ -3914,7 +3914,7 @@
               </div>
               <div class="form-field">
                 <label>Assigned To</label>
-                <input id="taskAssigned" placeholder="Username" />
+                <input id="taskAssigned" placeholder="Username" list="teamMemberList" />
               </div>
               <div class="form-field">
                 <label>Due Date</label>
@@ -3946,6 +3946,13 @@
               <hr style="margin:16px 0; border-color:var(--line);" />
               <h4 style="margin:0 0 12px 0;">Comments</h4>
               <div id="taskComments"></div>
+              <div class="form-row" style="margin-top:8px;">
+                <div class="form-field">
+                  <label>Post As</label>
+                  <select id="taskCommentAuthor"></select>
+                </div>
+              </div>
+              <div id="taskCommentMentions" class="muted" style="font-size:12px;margin:4px 0 8px;"></div>
               <div class="form-field" style="margin-top:12px;">
                 <textarea id="newComment" rows="2" placeholder="Add a comment..."></textarea>
               </div>
@@ -4663,6 +4670,7 @@
   <datalist id="partCodeOptions"></datalist>
   <datalist id="locationCodeOptions"></datalist>
 
+  <datalist id="teamMemberList"></datalist>
   <script src="./app.js?v=3"></script>
 </body>
 </html>

@@ -10309,6 +10309,7 @@ let currentProjectFilter = "";
 let currentTaskId = null;
 let currentTaskView = "all";
 let currentTaskSidebarActiveKey = "";
+let teamMembers = [];
 
 function getSavedTaskViews() {
   try {
@@ -10322,6 +10323,57 @@ function getSavedTaskViews() {
 
 function persistSavedTaskViews(views) {
   localStorage.setItem(TASK_SAVED_VIEWS_KEY, JSON.stringify(Array.isArray(views) ? views : []));
+}
+
+function renderTeamMemberInputs() {
+  const datalist = qs("teamMemberList");
+  const authorSelect = qs("taskCommentAuthor");
+  const mentions = qs("taskCommentMentions");
+  const members = Array.isArray(teamMembers) ? teamMembers : [];
+  const sorted = [...members].sort((a, b) => String(a.username || "").localeCompare(String(b.username || "")));
+  if (datalist) {
+    datalist.innerHTML = sorted
+      .map((m) => `<option value="${escapeHtml(m.username)}">${escapeHtml(m.full_name || m.username)}</option>`)
+      .join("");
+  }
+  if (authorSelect) {
+    const me = getSessionUser();
+    authorSelect.innerHTML = sorted
+      .map((m) => `<option value="${escapeHtml(m.username)}">${escapeHtml(m.full_name || m.username)}</option>`)
+      .join("");
+    if (sorted.some((m) => m.username === me)) authorSelect.value = me;
+  }
+  if (mentions) {
+    if (!sorted.length) {
+      mentions.innerHTML = "";
+      return;
+    }
+    mentions.innerHTML = `Tag team: ${sorted
+      .slice(0, 8)
+      .map(
+        (m) =>
+          `<button type="button" class="btn btn-secondary btn-sm" data-mention-user="${escapeHtml(m.username)}" style="margin:2px 4px 2px 0;padding:2px 8px;">@${escapeHtml(m.username)}</button>`
+      )
+      .join("")}`;
+    mentions.querySelectorAll("[data-mention-user]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const ta = qs("newComment");
+        if (!ta) return;
+        ta.value = `${ta.value || ""}${ta.value ? " " : ""}@${btn.dataset.mentionUser} `;
+        ta.focus();
+      });
+    });
+  }
+}
+
+async function loadTeamMembers() {
+  try {
+    const res = await fetchJson(`${API}/api/auth/team`);
+    teamMembers = Array.isArray(res.rows) ? res.rows : [];
+  } catch {
+    teamMembers = [{ username: getSessionUser(), full_name: null, role: getSessionRole() }];
+  }
+  renderTeamMemberInputs();
 }
 
 function renderTaskWorkspaceSavedViews() {
@@ -10696,8 +10748,9 @@ async function loadTaskDetail(taskId) {
         </div>
       `;
       
-      comments.innerHTML = task.comments?.length 
-        ? task.comments.map(c => `
+      const commentRows = Array.isArray(res.comments) ? res.comments : [];
+      comments.innerHTML = commentRows.length
+        ? commentRows.map(c => `
             <div class="comment-item">
               <div class="comment-header">
                 <strong>${escapeHtml(c.author || "User")}</strong>
@@ -10720,9 +10773,10 @@ async function loadTaskDetail(taskId) {
       qs("addCommentBtn").onclick = async () => {
         const text = qs("newComment")?.value?.trim();
         if (!text) return;
+        const author = String(qs("taskCommentAuthor")?.value || getSessionUser()).trim() || getSessionUser();
         await fetchJson(`${API}/api/tasks/${taskId}/comments`, {
           method: "POST",
-          body: JSON.stringify({ comment: text, author: "Current User" })
+          body: JSON.stringify({ comment: text, author })
         });
         qs("newComment").value = "";
         loadTaskDetail(taskId);
@@ -10886,6 +10940,7 @@ function initTasks() {
   loadTasks();
   loadTasksStats();
   loadProjects();
+  loadTeamMembers();
   renderTaskWorkspaceSavedViews();
 }
 document.addEventListener("DOMContentLoaded", () => {

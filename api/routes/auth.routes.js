@@ -316,6 +316,37 @@ export default async function authRoutes(app) {
     };
   });
 
+  // GET /api/auth/team
+  // Lightweight team directory for collaboration UIs.
+  app.get("/team", async (req) => {
+    const rows = db
+      .prepare(
+        `
+      SELECT username, full_name, role, roles_json
+      FROM users
+      WHERE active = 1
+      ORDER BY username ASC
+    `
+      )
+      .all()
+      .map((r) => ({
+        username: r.username,
+        full_name: r.full_name || null,
+        role: pickPrimaryRole(parseRoles(r.roles_json, r.role)),
+      }));
+
+    const sessionUser = String(getRequestUsername(req) || "").trim();
+    if (sessionUser && !rows.some((r) => r.username === sessionUser)) {
+      rows.unshift({
+        username: sessionUser,
+        full_name: null,
+        role: getRequestRole(req),
+      });
+    }
+
+    return { ok: true, rows };
+  });
+
   // GET /api/auth/users (admin only)
   app.get("/users", async (req, reply) => {
     if (!requireAdmin(req, reply)) return;
