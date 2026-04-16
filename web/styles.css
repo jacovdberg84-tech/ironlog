@@ -2349,7 +2349,7 @@ body {
 }
 
 .task-workspace-header {
-  padding: 4px 20px 0;
+  padding: 12px 20px 6px;
 }
 
 .task-workspace-toggle {
@@ -2361,7 +2361,9 @@ body {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   cursor: pointer;
-  padding: 8px 0 6px;
+  padding: 0;
+  text-align: left;
+  width: 100%;
 }
 
 .task-subheader {
@@ -2374,7 +2376,7 @@ body {
 }
 
 .nav-subitem.project-link {
-  padding-left: 66px;
+  padding-left: 54px;
 }
 
 .nav-subitem.project-link::before {
