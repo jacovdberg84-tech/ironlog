@@ -10627,4 +10627,7 @@ function initTasks() {
   loadTasksStats();
   loadProjects();
 }
-document.addEventListener( DOMContentLoaded, () => { initDarkMode(); init().catch((e) => console.error(e)); });
+document.addEventListener("DOMContentLoaded", () => {
+  initDarkMode();
+  init().catch((e) => console.error(e));
+});
