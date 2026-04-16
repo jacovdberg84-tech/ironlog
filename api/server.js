@@ -73,5 +73,7 @@ app.register(docsRoutes, { prefix: "/api/docs" });
 app.register(ironmindRoutes, { prefix: "/api/ironmind" });
 app.register(inspectproRoutes, { prefix: "/api/integrations/inspectpro" });
   app.register(tasksRoutes, { prefix: "/api" });
+  // Backward compatibility for stale cached frontend bundles still calling /tasks, /projects, /comments.
+  app.register(tasksRoutes);
   return app;
 }
