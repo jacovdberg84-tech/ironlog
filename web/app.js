@@ -10329,6 +10329,7 @@ function renderTeamMemberInputs() {
   const datalist = qs("teamMemberList");
   const authorSelect = qs("taskCommentAuthor");
   const mentions = qs("taskCommentMentions");
+  const quickAssign = qs("taskAssignQuickPicks");
   const members = Array.isArray(teamMembers) ? teamMembers : [];
   const sorted = [...members].sort((a, b) => String(a.username || "").localeCompare(String(b.username || "")));
   if (datalist) {
@@ -10361,6 +10362,27 @@ function renderTeamMemberInputs() {
         if (!ta) return;
         ta.value = `${ta.value || ""}${ta.value ? " " : ""}@${btn.dataset.mentionUser} `;
         ta.focus();
+      });
+    });
+  }
+  if (quickAssign) {
+    if (!sorted.length) {
+      quickAssign.innerHTML = "";
+      return;
+    }
+    quickAssign.innerHTML = `Quick assign: ${sorted
+      .slice(0, 8)
+      .map(
+        (m) =>
+          `<button type="button" class="btn btn-secondary btn-sm" data-assign-user="${escapeHtml(m.username)}" style="margin:2px 4px 2px 0;padding:2px 8px;">${escapeHtml(m.full_name || m.username)}</button>`
+      )
+      .join("")}`;
+    quickAssign.querySelectorAll("[data-assign-user]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const assigned = qs("taskAssigned");
+        if (!assigned) return;
+        assigned.value = String(btn.dataset.assignUser || "");
+        assigned.focus();
       });
     });
   }
