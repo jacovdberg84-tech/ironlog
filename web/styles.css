@@ -2349,21 +2349,53 @@ body {
 }
 
 .task-workspace-header {
-  padding: 12px 20px 6px;
+  padding: 0;
 }
 
 .task-workspace-toggle {
+  width: 100%;
   border: 0;
   background: transparent;
-  color: #9ca3af;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
   cursor: pointer;
-  padding: 0;
   text-align: left;
-  width: 100%;
+  justify-content: space-between;
+}
+
+.task-workspace-toggle::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  margin-left: auto;
+  transition: transform 0.15s ease;
+}
+
+.task-workspace-toggle[aria-expanded="true"]::after {
+  transform: rotate(225deg);
+}
+
+.task-workspace-toggle span {
+  flex: 1;
+}
+
+.task-workspace-toggle svg {
+  flex: 0 0 auto;
+}
+
+.task-workspace-toggle:hover,
+.task-workspace-toggle[aria-expanded="true"] {
+  color: #1f2937;
+}
+
+[data-theme="dark"] .task-workspace-toggle:hover,
+[data-theme="dark"] .task-workspace-toggle[aria-expanded="true"] {
+  color: var(--ink);
+}
+
+.task-workspace-toggle.nav-item {
+  cursor: pointer;
 }
 
 .task-subheader {
