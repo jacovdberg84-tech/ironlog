@@ -689,6 +689,9 @@ async function fetchJson(url, opts) {
   headers.set("x-site-code", getSessionSite());
   const tok = getAuthToken();
   if (tok) headers.set("Authorization", `Bearer ${tok}`);
+  if (typeof nextOpts.body === "string" && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
   nextOpts.headers = headers;
 
   const res = await fetch(url, nextOpts);
