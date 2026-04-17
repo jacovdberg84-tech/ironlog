@@ -3305,6 +3305,8 @@ async function loadFuelBenchmark() {
   const mode = String(qs("fuelModeFilter")?.value || "").trim();
   const assetCode = String(qs("fuelAssetFilter")?.value || "").trim();
   const duplicatesOnly = Boolean(qs("fuelDupOnly")?.checked);
+  const runToken = Date.now() + Math.random();
+  window.__fuelBenchmarkRunToken = runToken;
   if (!start || !end) return alert("Select start and end dates.");
 
   setStatus("Loading fuel benchmark...");
@@ -3316,6 +3318,7 @@ async function loadFuelBenchmark() {
     : await fetchJson(
       `${API}/api/dashboard/fuel?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&tolerance=${encodeURIComponent(tolerance)}&mode=${encodeURIComponent(mode)}&asset_code=${encodeURIComponent(assetCode)}`
     );
+  if (window.__fuelBenchmarkRunToken !== runToken) return;
 
   const rawRows = Array.isArray(data.rows) ? data.rows : [];
   const benchmarkRows = duplicatesOnly
@@ -3430,7 +3433,8 @@ async function loadFuelBenchmark() {
     if (weeklyEl) weeklyEl.innerHTML = `<small class="muted">Weekly summary is disabled while "Duplicates only" is enabled.</small>`;
     setStatus(`Duplicate filter ready (${Number(data.summary?.duplicate_rows || 0)} rows in ${Number(data.summary?.duplicate_groups || 0)} groups).`);
   } else {
-    await renderFuelWeeklySummary(start, end, tolerance, mode, assetCode).catch(() => {});
+    await renderFuelWeeklySummary(start, end, tolerance, mode, assetCode, runToken).catch(() => {});
+    if (window.__fuelBenchmarkRunToken !== runToken) return;
     setStatus("Fuel benchmark ready.");
   }
 }
@@ -3461,7 +3465,7 @@ function fuelWeekRanges(start, end) {
   return out;
 }
 
-async function renderFuelWeeklySummary(start, end, tolerance, mode, assetCode) {
+async function renderFuelWeeklySummary(start, end, tolerance, mode, assetCode, runToken = null) {
   const mount = qs("fuelWeeklySummaryList");
   if (!mount) return;
   const ranges = fuelWeekRanges(start, end);
@@ -3470,15 +3474,21 @@ async function renderFuelWeeklySummary(start, end, tolerance, mode, assetCode) {
     return;
   }
 
+  const MAX_WEEK_BUCKETS = 8;
+  if (ranges.length > MAX_WEEK_BUCKETS) {
+    mount.innerHTML = `<small class="muted">Weekly summary skipped for large ranges (${ranges.length} weeks). Please select up to 8 weeks for faster loading.</small>`;
+    return;
+  }
+
   mount.innerHTML = `<small class="muted">Loading weekly summary...</small>`;
-  const weekData = await Promise.all(
-    ranges.map(async (r) => {
-      const data = await fetchJson(
-        `${API}/api/dashboard/fuel?start=${encodeURIComponent(r.start)}&end=${encodeURIComponent(r.end)}&tolerance=${encodeURIComponent(tolerance)}&mode=${encodeURIComponent(mode)}&asset_code=${encodeURIComponent(assetCode)}`
-      );
-      return { ...r, data };
-    })
-  );
+  const weekData = [];
+  for (const r of ranges) {
+    if (runToken != null && window.__fuelBenchmarkRunToken !== runToken) return;
+    const data = await fetchJson(
+      `${API}/api/dashboard/fuel?start=${encodeURIComponent(r.start)}&end=${encodeURIComponent(r.end)}&tolerance=${encodeURIComponent(tolerance)}&mode=${encodeURIComponent(mode)}&asset_code=${encodeURIComponent(assetCode)}`
+    );
+    weekData.push({ ...r, data });
+  }
 
   mount.innerHTML = weekData.map((w) => {
     const rows = Array.isArray(w.data?.rows) ? w.data.rows : [];
