@@ -2901,6 +2901,52 @@ function exportAssetKpiToExcel() {
   window.open(`${API}/dashboard/asset-kpi.xlsx?${q.toString()}`, "_blank");
 }
 
+async function exportExecutivePackFromAssetKpi() {
+  const start = String(document.getElementById("akpStart")?.value || "").trim();
+  const end = String(document.getElementById("akpEnd")?.value || "").trim();
+  const scheduled = Math.max(0.5, Number(document.getElementById("akpScheduled")?.value || 10));
+  const msg = document.getElementById("akpMsg");
+  if (!start || !end) {
+    alert("Choose start and end dates first.");
+    return;
+  }
+  const q = new URLSearchParams();
+  q.set("start", start);
+  q.set("end", end);
+  q.set("scheduled", String(scheduled));
+  q.set("near_due_hours", "50");
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = "Generating executive pack...";
+  }
+  try {
+    const res = await fetch(`${API}/reports/executive-pack.xlsx?${q.toString()}`, { headers: authHeaders() });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(txt || `Executive pack request failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = `IRONLOG_Executive_Pack_${start}_to_${end}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = `Executive pack downloaded for ${start} to ${end}.`;
+    }
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = `Executive pack error: ${e.message || e}`;
+    }
+    alert(`Executive pack error: ${e.message || e}`);
+  }
+}
+
 async function openWeeklyForumPdf(download = false) {
   const q = weeklyForumQueryString();
   const url = `${API}/maintenance/weekly-forum.pdf?${q}${download ? "&download=1" : ""}`;
@@ -3726,6 +3772,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("loadAssetKpiBtn")?.addEventListener("click", () => loadAssetKpiWeekly());
   document.getElementById("exportAssetKpiBtn")?.addEventListener("click", () => exportAssetKpiToExcel());
+  document.getElementById("exportExecutivePackBtn")?.addEventListener("click", () => exportExecutivePackFromAssetKpi());
   document.getElementById("mpRefreshStatusBtn")?.addEventListener("click", () => loadMaintenancePackStatus());
   document.getElementById("mpStatusBody")?.addEventListener("click", (evt) => {
     const gen = evt.target?.closest?.("button[data-mp-gen]");
