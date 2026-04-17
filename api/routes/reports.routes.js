@@ -4827,6 +4827,18 @@ export default async function reportsRoutes(app) {
       GROUP BY a.id
     `).all(period.start, period.end);
 
+    const oilRows = db.prepare(`
+      SELECT
+        a.asset_code,
+        a.asset_name,
+        a.category,
+        COALESCE(SUM(COALESCE(o.quantity, 0) * COALESCE(o.unit_cost, ?)), 0) AS oil_cost
+      FROM oil_logs o
+      JOIN assets a ON a.id = o.asset_id
+      WHERE DATE(o.log_date) BETWEEN ? AND ?
+      GROUP BY a.id
+    `).all(defaults.lube_cost_per_qty_default, period.start, period.end);
+
     const laborRows = db.prepare(`
       SELECT
         a.asset_code,
@@ -4863,6 +4875,7 @@ export default async function reportsRoutes(app) {
           asset_code: code,
           asset_name: r.asset_name || "Unlinked",
           category: r.category || "Unassigned",
+          oil_cost: 0,
           parts_cost: 0,
           labor_hours: 0,
           labor_cost: 0,
@@ -4874,6 +4887,7 @@ export default async function reportsRoutes(app) {
       return byAsset.get(code);
     };
 
+    for (const r of oilRows) ensure(r).oil_cost += Number(r.oil_cost || 0);
     for (const r of partsRows) ensure(r).parts_cost += Number(r.parts_cost || 0);
     for (const r of laborRows) {
       const row = ensure(r);
@@ -4889,6 +4903,7 @@ export default async function reportsRoutes(app) {
     const rows = Array.from(byAsset.values())
       .map((r) => ({
         ...r,
+        oil_cost: Number(r.oil_cost.toFixed(2)),
         parts_cost: Number(r.parts_cost.toFixed(2)),
         labor_hours: Number(r.labor_hours.toFixed(2)),
         labor_cost: Number(r.labor_cost.toFixed(2)),
@@ -4900,12 +4915,13 @@ export default async function reportsRoutes(app) {
       .sort((a, b) => b.maintenance_total_cost - a.maintenance_total_cost);
 
     const totals = rows.reduce((acc, r) => {
+      acc.oil_cost += Number(r.oil_cost || 0);
       acc.parts_cost += Number(r.parts_cost || 0);
       acc.labor_cost += Number(r.labor_cost || 0);
       acc.downtime_cost += Number(r.downtime_cost || 0);
       acc.maintenance_total_cost += Number(r.maintenance_total_cost || 0);
       return acc;
-    }, { parts_cost: 0, labor_cost: 0, downtime_cost: 0, maintenance_total_cost: 0 });
+    }, { oil_cost: 0, parts_cost: 0, labor_cost: 0, downtime_cost: 0, maintenance_total_cost: 0 });
 
     return { rows, totals };
   };
@@ -4966,7 +4982,24 @@ export default async function reportsRoutes(app) {
       return reply.code(400).send({ error: "Provide month=YYYY-MM or start/end=YYYY-MM-DD" });
     }
     const { period, label } = resolved;
-    const { rows, totals } = buildMaintenanceCostByEquipment(period);
+    const { rows } = buildMaintenanceCostByEquipment(period);
+    const storeRows = rows
+      .map((r) => ({
+        asset_code: r.asset_code,
+        asset_name: r.asset_name,
+        category: r.category,
+        oil_cost: Number(r.oil_cost || 0),
+        parts_cost: Number(r.parts_cost || 0),
+        stores_total_cost: Number((Number(r.oil_cost || 0) + Number(r.parts_cost || 0)).toFixed(2)),
+      }))
+      .filter((r) => r.stores_total_cost > 0)
+      .sort((a, b) => b.stores_total_cost - a.stores_total_cost);
+    const storeTotals = storeRows.reduce((acc, r) => {
+      acc.oil_cost += Number(r.oil_cost || 0);
+      acc.parts_cost += Number(r.parts_cost || 0);
+      acc.stores_total_cost += Number(r.stores_total_cost || 0);
+      return acc;
+    }, { oil_cost: 0, parts_cost: 0, stores_total_cost: 0 });
 
     const wb = new ExcelJS.Workbook();
     wb.creator = "IRONLOG";
@@ -4979,36 +5012,29 @@ export default async function reportsRoutes(app) {
     ];
     wsSummary.getRow(1).font = { bold: true };
     wsSummary.addRow({ k: "Period", v: `${period.start} to ${period.end}` });
-    wsSummary.addRow({ k: "Equipment with maintenance cost", v: rows.length });
-    wsSummary.addRow({ k: "Parts cost total", v: Number(totals.parts_cost.toFixed(2)) });
-    wsSummary.addRow({ k: "Labor cost total", v: Number(totals.labor_cost.toFixed(2)) });
-    wsSummary.addRow({ k: "Downtime cost total", v: Number(totals.downtime_cost.toFixed(2)) });
-    wsSummary.addRow({ k: "Maintenance total cost", v: Number(totals.maintenance_total_cost.toFixed(2)) });
+    wsSummary.addRow({ k: "Equipment with stores issues", v: storeRows.length });
+    wsSummary.addRow({ k: "Oil cost total (stores issued)", v: Number(storeTotals.oil_cost.toFixed(2)) });
+    wsSummary.addRow({ k: "Parts cost total (stores issued)", v: Number(storeTotals.parts_cost.toFixed(2)) });
+    wsSummary.addRow({ k: "Stores total cost (oil + parts)", v: Number(storeTotals.stores_total_cost.toFixed(2)) });
 
     const ws = wb.addWorksheet("By Equipment");
     ws.columns = [
       { header: "Asset Code", key: "asset_code", width: 16 },
       { header: "Asset Name", key: "asset_name", width: 30 },
       { header: "Category", key: "category", width: 18 },
+      { header: "Oil Cost (Stores)", key: "oil_cost", width: 18 },
       { header: "Parts Cost", key: "parts_cost", width: 14 },
-      { header: "Labor Hours", key: "labor_hours", width: 12 },
-      { header: "Labor Cost", key: "labor_cost", width: 14 },
-      { header: "Downtime Hours", key: "downtime_hours", width: 14 },
-      { header: "Downtime Cost", key: "downtime_cost", width: 15 },
-      { header: "Maintenance Total", key: "maintenance_total_cost", width: 18 },
+      { header: "Stores Total (Oil + Parts)", key: "stores_total_cost", width: 24 },
     ];
     ws.getRow(1).font = { bold: true };
-    if (rows.length) ws.addRows(rows);
+    if (storeRows.length) ws.addRows(storeRows);
     else ws.addRow({
       asset_code: "-",
-      asset_name: "No maintenance cost records for selected period",
+      asset_name: "No oil/parts stores issues for selected period",
       category: "",
+      oil_cost: 0,
       parts_cost: 0,
-      labor_hours: 0,
-      labor_cost: 0,
-      downtime_hours: 0,
-      downtime_cost: 0,
-      maintenance_total_cost: 0,
+      stores_total_cost: 0,
     });
 
     const buffer = await wb.xlsx.writeBuffer();
