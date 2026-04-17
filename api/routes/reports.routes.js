@@ -5040,7 +5040,7 @@ export default async function reportsRoutes(app) {
     const buffer = await wb.xlsx.writeBuffer();
     reply
       .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-      .header("Content-Disposition", `attachment; filename="IRONLOG_Maintenance_Cost_By_Equipment_${label}.xlsx"`)
+      .header("Content-Disposition", `attachment; filename="IRONLOG_Maintenance_Stores_Cost_By_Equipment_${label}.xlsx"`)
       .send(Buffer.from(buffer));
   });
 
