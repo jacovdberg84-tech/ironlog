@@ -3352,12 +3352,14 @@ async function loadFuelBenchmark() {
     setText("fbAvgKmpl", "-");
     setText("fbExcessive", Number(benchmarkSummary.duplicate_rows || 0));
   } else {
-    setText("fbFuelTotal", Number(benchmarkSummary.fuel_liters || 0).toFixed(2));
-    setText("fbHoursTotal", Number(benchmarkSummary.hours_run || 0).toFixed(2));
-    setText("fbKmTotal", "0.00");
-    setText("fbAvgLph", benchmarkSummary.avg_lph == null ? "-" : Number(benchmarkSummary.avg_lph).toFixed(3));
-    setText("fbAvgKmpl", "-");
-    setText("fbExcessive", Number(benchmarkSummary.excessive_count || 0));
+    // Pills must reflect only the currently selected date range + filters.
+    const s = data.summary || {};
+    setText("fbFuelTotal", Number(s.fuel_liters || 0).toFixed(2));
+    setText("fbHoursTotal", Number(s.hours_run || 0).toFixed(2));
+    setText("fbKmTotal", Number(s.km_run || 0).toFixed(2));
+    setText("fbAvgLph", s.avg_lph == null ? "-" : Number(s.avg_lph).toFixed(3));
+    setText("fbAvgKmpl", s.avg_km_per_l == null ? "-" : Number(s.avg_km_per_l).toFixed(3));
+    setText("fbExcessive", Number(s.excessive_count || 0));
   }
 
   const list = qs("fuelBenchmarkList");
@@ -3424,10 +3426,105 @@ async function loadFuelBenchmark() {
   }
 
   if (duplicatesOnly) {
+    const weeklyEl = qs("fuelWeeklySummaryList");
+    if (weeklyEl) weeklyEl.innerHTML = `<small class="muted">Weekly summary is disabled while "Duplicates only" is enabled.</small>`;
     setStatus(`Duplicate filter ready (${Number(data.summary?.duplicate_rows || 0)} rows in ${Number(data.summary?.duplicate_groups || 0)} groups).`);
   } else {
+    await renderFuelWeeklySummary(start, end, tolerance, mode, assetCode).catch(() => {});
     setStatus("Fuel benchmark ready.");
   }
+}
+
+function fuelWeekRanges(start, end) {
+  const out = [];
+  const s = new Date(`${start}T00:00:00`);
+  const e = new Date(`${end}T00:00:00`);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || s > e) return out;
+  const d = new Date(s);
+  while (d <= e) {
+    const day = d.getDay(); // 0=Sun...6=Sat
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    const wkStart = new Date(d);
+    wkStart.setDate(d.getDate() + mondayOffset);
+    const wkEnd = new Date(wkStart);
+    wkEnd.setDate(wkStart.getDate() + 6);
+    const clipStart = wkStart < s ? new Date(s) : wkStart;
+    const clipEnd = wkEnd > e ? new Date(e) : wkEnd;
+    const fmt = (x) => x.toISOString().slice(0, 10);
+    out.push({
+      start: fmt(clipStart),
+      end: fmt(clipEnd),
+      week_label: `${fmt(wkStart)} to ${fmt(wkEnd)}`,
+    });
+    d.setDate(wkEnd.getDate() + 1);
+  }
+  return out;
+}
+
+async function renderFuelWeeklySummary(start, end, tolerance, mode, assetCode) {
+  const mount = qs("fuelWeeklySummaryList");
+  if (!mount) return;
+  const ranges = fuelWeekRanges(start, end);
+  if (!ranges.length) {
+    mount.innerHTML = `<small class="muted">No weekly buckets for selected dates.</small>`;
+    return;
+  }
+
+  mount.innerHTML = `<small class="muted">Loading weekly summary...</small>`;
+  const weekData = await Promise.all(
+    ranges.map(async (r) => {
+      const data = await fetchJson(
+        `${API}/api/dashboard/fuel?start=${encodeURIComponent(r.start)}&end=${encodeURIComponent(r.end)}&tolerance=${encodeURIComponent(tolerance)}&mode=${encodeURIComponent(mode)}&asset_code=${encodeURIComponent(assetCode)}`
+      );
+      return { ...r, data };
+    })
+  );
+
+  mount.innerHTML = weekData.map((w) => {
+    const rows = Array.isArray(w.data?.rows) ? w.data.rows : [];
+    const summary = w.data?.summary || {};
+    const effectiveMode = String(mode || "").trim().toLowerCase();
+    const hoursRows = rows.filter((r) => String(r.metric_mode || "hours") !== "km");
+    const kmRows = rows.filter((r) => String(r.metric_mode || "hours") === "km");
+    const weighted = hoursRows.reduce((acc, r) => {
+      const h = Number(r.hours_run || 0);
+      const o = Number(r.oem_lph || 0);
+      if (h > 0 && o > 0) {
+        acc.hours += h;
+        acc.oemFuel += o * h;
+      }
+      return acc;
+    }, { hours: 0, oemFuel: 0 });
+    const weightedKm = kmRows.reduce((acc, r) => {
+      const fuel = Number(r.fuel_liters || 0);
+      const o = Number(r.oem_km_per_l || 0);
+      if (fuel > 0 && o > 0) {
+        acc.fuel += fuel;
+        acc.oemKm += o * fuel;
+      }
+      return acc;
+    }, { fuel: 0, oemKm: 0 });
+    const oemLph = weighted.hours > 0 ? (weighted.oemFuel / weighted.hours) : null;
+    const actualLph = summary.avg_lph == null ? null : Number(summary.avg_lph);
+    const varianceLph = actualLph != null && oemLph != null ? (actualLph - oemLph) : null;
+    const oemKmpl = weightedKm.fuel > 0 ? (weightedKm.oemKm / weightedKm.fuel) : null;
+    const actualKmpl = summary.avg_km_per_l == null ? null : Number(summary.avg_km_per_l);
+    const varianceKmpl = actualKmpl != null && oemKmpl != null ? (actualKmpl - oemKmpl) : null;
+    const useKmVariance = effectiveMode === "km";
+    const varianceValue = useKmVariance ? varianceKmpl : varianceLph;
+    const varianceTone = varianceValue == null ? "blue" : (useKmVariance ? (varianceValue < 0 ? "red" : "green") : (varianceValue > 0 ? "red" : "green"));
+    const varianceTxt = varianceValue == null
+      ? "—"
+      : `${varianceValue > 0 ? "+" : ""}${varianceValue.toFixed(3)} ${useKmVariance ? "km/L" : "L/hr"}`;
+    const metricText = useKmVariance
+      ? `Distance ${Number(summary.km_run || 0).toFixed(2)}km | Avg ${summary.avg_km_per_l == null ? "-" : Number(summary.avg_km_per_l).toFixed(3)} km/L | OEM avg ${oemKmpl == null ? "-" : oemKmpl.toFixed(3)} km/L`
+      : `Hours ${Number(summary.hours_run || 0).toFixed(2)} | Avg ${summary.avg_lph == null ? "-" : Number(summary.avg_lph).toFixed(3)} L/hr | OEM avg ${oemLph == null ? "-" : oemLph.toFixed(3)} L/hr`;
+
+    return item(
+      `<div class="fuel-item-head"><b>Week:</b> ${w.week_label} <span class='pill blue'>Selected ${w.start} to ${w.end}</span></div>` +
+      `<small class="fuel-item-meta">Fuel ${Number(summary.fuel_liters || 0).toFixed(2)}L | ${metricText} | Variance <span class='pill ${varianceTone}'>${varianceTxt}</span> | Excessive ${Number(summary.excessive_count || 0)}</small>`
+    );
+  }).join("");
 }
 
 function openFuelBenchmarkPdf(download = false) {
