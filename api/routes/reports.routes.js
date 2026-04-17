@@ -3620,6 +3620,134 @@ export default async function reportsRoutes(app) {
       .send(pdf);
   });
 
+  // GET /api/reports/damage-reports.xlsx?start=YYYY-MM-DD&end=YYYY-MM-DD&asset_id=123
+  app.get("/damage-reports.xlsx", async (req, reply) => {
+    const start = String(req.query?.start || "").trim();
+    const end = String(req.query?.end || "").trim();
+    const assetId = Number(req.query?.asset_id || 0);
+    if (!isDate(start) || !isDate(end)) {
+      return reply.code(400).send({ error: "start and end (YYYY-MM-DD) required" });
+    }
+
+    const drInspectorCol = pickExistingColumn("manager_damage_reports", ["inspector_name", "inspector", "manager_name"], "inspector_name");
+    const drPhotoReportCol = pickExistingColumn("manager_damage_report_photos", ["damage_report_id", "manager_damage_report_id", "report_id"], "damage_report_id");
+
+    const where = ["dr.report_date >= ?", "dr.report_date <= ?"];
+    const params = [start, end];
+    if (assetId > 0) {
+      where.push("dr.asset_id = ?");
+      params.push(assetId);
+    }
+
+    const rows = db.prepare(`
+      SELECT
+        dr.id,
+        dr.asset_id,
+        dr.report_date,
+        dr.${drInspectorCol} AS inspector_name,
+        dr.hour_meter,
+        dr.damage_location,
+        dr.severity,
+        dr.damage_description,
+        dr.immediate_action,
+        dr.out_of_service,
+        dr.damage_time,
+        dr.responsible_person,
+        dr.pending_investigation,
+        dr.hse_report_available,
+        a.asset_code,
+        a.asset_name
+      FROM manager_damage_reports dr
+      JOIN assets a ON a.id = dr.asset_id
+      WHERE ${where.join(" AND ")}
+      ORDER BY dr.report_date DESC, dr.id DESC
+      LIMIT 5000
+    `).all(...params);
+
+    const photoCounts = new Map();
+    if (rows.length) {
+      const ids = rows.map((r) => Number(r.id || 0)).filter((n) => n > 0);
+      if (ids.length) {
+        const marks = ids.map(() => "?").join(",");
+        const grouped = db.prepare(`
+          SELECT ${drPhotoReportCol} AS damage_report_id, COUNT(*) AS photo_count
+          FROM manager_damage_report_photos
+          WHERE ${drPhotoReportCol} IN (${marks})
+          GROUP BY ${drPhotoReportCol}
+        `).all(...ids);
+        grouped.forEach((g) => photoCounts.set(Number(g.damage_report_id || 0), Number(g.photo_count || 0)));
+      }
+    }
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "IRONLOG";
+    wb.created = new Date();
+    const ws = wb.addWorksheet("Damage Reports");
+    ws.columns = [
+      { header: "Report ID", key: "id", width: 12 },
+      { header: "Report Date", key: "report_date", width: 14 },
+      { header: "Damage Time", key: "damage_time", width: 12 },
+      { header: "Asset Code", key: "asset_code", width: 14 },
+      { header: "Asset Name", key: "asset_name", width: 28 },
+      { header: "Inspector", key: "inspector_name", width: 20 },
+      { header: "Hour Meter", key: "hour_meter", width: 12 },
+      { header: "Severity", key: "severity", width: 12 },
+      { header: "Damage Location", key: "damage_location", width: 24 },
+      { header: "Responsible Person", key: "responsible_person", width: 24 },
+      { header: "Damage Description", key: "damage_description", width: 44 },
+      { header: "Immediate Action", key: "immediate_action", width: 36 },
+      { header: "Out Of Service", key: "out_of_service", width: 14 },
+      { header: "Pending Investigation", key: "pending_investigation", width: 18 },
+      { header: "HSE Report Available", key: "hse_report_available", width: 18 },
+      { header: "Photo Count", key: "photo_count", width: 12 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    rows.forEach((r) => {
+      ws.addRow({
+        id: Number(r.id || 0),
+        report_date: r.report_date || "",
+        damage_time: r.damage_time || "",
+        asset_code: r.asset_code || "",
+        asset_name: r.asset_name || "",
+        inspector_name: r.inspector_name || "",
+        hour_meter: r.hour_meter == null ? "" : Number(r.hour_meter || 0),
+        severity: String(r.severity || "").toUpperCase(),
+        damage_location: r.damage_location || "",
+        responsible_person: r.responsible_person || "",
+        damage_description: r.damage_description || "",
+        immediate_action: r.immediate_action || "",
+        out_of_service: Number(r.out_of_service || 0) ? "YES" : "NO",
+        pending_investigation: Number(r.pending_investigation || 0) ? "YES" : "NO",
+        hse_report_available: Number(r.hse_report_available || 0) ? "YES" : "NO",
+        photo_count: photoCounts.get(Number(r.id || 0)) || 0,
+      });
+    });
+    ws.views = [{ state: "frozen", ySplit: 1 }];
+
+    const summary = wb.addWorksheet("Summary");
+    summary.columns = [
+      { header: "Metric", key: "metric", width: 26 },
+      { header: "Value", key: "value", width: 24 },
+    ];
+    summary.getRow(1).font = { bold: true };
+    summary.addRows([
+      { metric: "Start Date", value: start },
+      { metric: "End Date", value: end },
+      { metric: "Asset Filter", value: assetId > 0 ? String(assetId) : "All assets" },
+      { metric: "Total Reports", value: rows.length },
+      { metric: "Assets Covered", value: new Set(rows.map((r) => Number(r.asset_id || 0))).size },
+      { metric: "Out Of Service", value: rows.filter((r) => Number(r.out_of_service || 0) === 1).length },
+      { metric: "Pending Investigation", value: rows.filter((r) => Number(r.pending_investigation || 0) === 1).length },
+      { metric: "HSE Report Available", value: rows.filter((r) => Number(r.hse_report_available || 0) === 1).length },
+    ]);
+
+    const buffer = await wb.xlsx.writeBuffer();
+    return reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header("Content-Disposition", `attachment; filename="AML_Damage_Reports_${start}_to_${end}.xlsx"`)
+      .send(Buffer.from(buffer));
+  });
+
   // =========================
   // STOCK MONITOR PDF
   // =========================

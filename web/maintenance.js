@@ -1723,6 +1723,21 @@ function openDamageReportsBulkPdf(download = false, withPhotos = false) {
   window.open(`${API}/reports/damage-reports.pdf?${q.toString()}`, "_blank");
 }
 
+function downloadDamageReportsXlsx() {
+  const start = String(document.getElementById("drStart")?.value || "").trim();
+  const end = String(document.getElementById("drEnd")?.value || "").trim();
+  const assetId = String(document.getElementById("drFilterAsset")?.value || "").trim();
+  if (!start || !end) {
+    alert("Select damage report start and end dates first.");
+    return;
+  }
+  const q = new URLSearchParams();
+  q.set("start", start);
+  q.set("end", end);
+  if (assetId) q.set("asset_id", assetId);
+  window.open(`${API}/reports/damage-reports.xlsx?${q.toString()}`, "_blank");
+}
+
 function openManagerInspectionPdf(id, download = false) {
   const n = Number(id || 0);
   if (!n) return;
@@ -3670,6 +3685,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("loadDrBtn")?.addEventListener("click", loadDamageReports);
   document.getElementById("openDrBulkPdfBtn")?.addEventListener("click", () => openDamageReportsBulkPdf(false));
   document.getElementById("downloadDrBulkPdfBtn")?.addEventListener("click", () => openDamageReportsBulkPdf(true));
+  document.getElementById("downloadDrBulkXlsxBtn")?.addEventListener("click", () => downloadDamageReportsXlsx());
   document.getElementById("openDrBulkPdfPhotosBtn")?.addEventListener("click", () => openDamageReportsBulkPdf(false, true));
   document.getElementById("downloadDrBulkPdfPhotosBtn")?.addEventListener("click", () => openDamageReportsBulkPdf(true, true));
   document.getElementById("openMiBulkPdfBtn")?.addEventListener("click", () => openManagerInspectionsBulkPdf(false));
