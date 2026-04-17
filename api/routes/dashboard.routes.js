@@ -230,7 +230,7 @@ export default async function dashboardRoutes(app) {
     WHERE dh.work_date = ?
       ${dhSiteSql}
       AND COALESCE(dh.is_used, 1) = 0
-      ${andDailyHoursFleetHoursOnly("dh", "a")}
+      ${andAssetFleetHoursOnly("a")}
   `)
     : null;
 
