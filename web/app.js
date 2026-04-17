@@ -3433,8 +3433,10 @@ async function loadFuelBenchmark() {
     if (weeklyEl) weeklyEl.innerHTML = `<small class="muted">Weekly summary is disabled while "Duplicates only" is enabled.</small>`;
     setStatus(`Duplicate filter ready (${Number(data.summary?.duplicate_rows || 0)} rows in ${Number(data.summary?.duplicate_groups || 0)} groups).`);
   } else {
-    await renderFuelWeeklySummary(start, end, tolerance, mode, assetCode, runToken).catch(() => {});
-    if (window.__fuelBenchmarkRunToken !== runToken) return;
+    const weeklyEl = qs("fuelWeeklySummaryList");
+    if (weeklyEl) {
+      weeklyEl.innerHTML = `<small class="muted">Weekly summary paused for performance. Use "Fuel Consumption Snapshots" below for date-range variance.</small>`;
+    }
     setStatus("Fuel benchmark ready.");
   }
 }
@@ -9711,8 +9713,8 @@ async function init() {
   loadSiteDashboard().catch(() => {});
   loadDispatchTrips().catch(() => {});
   loadQualityCenter().catch(() => {});
-  loadFuelBenchmark().catch(() => {});
-  loadFuelSnapshots().catch(() => {});
+  // Fuel endpoints are expensive on large datasets; keep initial page load responsive.
+  // Users can load these manually from the Fuel tab buttons.
   loadCostSettings().catch(() => {});
   loadLegalDepartments().catch(() => {});
   loadLegalDocs().catch(() => {});
