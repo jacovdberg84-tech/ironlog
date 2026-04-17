@@ -2568,13 +2568,21 @@ function akpFilteredFleet(data, filterRaw) {
 function akpSeriesForAsset(assetId) {
   return (akpLastTrendSeries || []).map((row) => {
     const assetRow = (row.data?.by_asset || []).find((a) => Number(a.asset_id || 0) === Number(assetId || 0));
+    const pctFromRow = (r, key) => {
+      if (!r) return null;
+      const v = r[key];
+      if (v == null || v === "") return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
     return {
       label: row.label,
       scheduled_hours: Number(assetRow?.scheduled_hours || 0),
       run_hours: Number(assetRow?.run_hours || 0),
       downtime_hours: Number(assetRow?.downtime_hours || 0),
-      availability_pct: Number(assetRow?.availability_pct || 0),
-      utilization_pct: Number(assetRow?.utilization_pct || 0),
+      // No by_asset row (e.g. daily standby) must not read as 0% — that was misleading on trend charts.
+      availability_pct: pctFromRow(assetRow, "availability_pct"),
+      utilization_pct: pctFromRow(assetRow, "utilization_pct"),
     };
   });
 }
@@ -2615,23 +2623,43 @@ function akpSvgTrend(series, metricKey, color, label) {
   const top = 20;
   const plotW = width - left - 16;
   const plotH = height - top - bottom;
-  const vals = series.map((s) => Number(s[metricKey] || 0));
-  const max = Math.max(...vals, 1);
-  const points = vals.map((v, i) => {
-    const x = left + (series.length === 1 ? plotW / 2 : (i * plotW) / (series.length - 1));
-    const y = top + plotH - (v / max) * plotH;
-    return { x, y, v, label: series[i].label };
+  const vals = series.map((s) => {
+    const raw = s[metricKey];
+    if (raw == null || raw === "") return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
   });
-  const path = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+  const finite = vals.filter((v) => v != null);
+  const max = Math.max(...finite, 1);
+  const xAt = (i) => left + (series.length === 1 ? plotW / 2 : (i * plotW) / (series.length - 1));
+  const yAt = (v) => top + plotH - (v / max) * plotH;
+  const points = vals.map((v, i) => ({
+    x: xAt(i),
+    y: v == null ? null : yAt(v),
+    v,
+    label: series[i].label,
+  }));
+  const pathParts = [];
+  let segmentOpen = false;
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    if (p.v == null) {
+      segmentOpen = false;
+      continue;
+    }
+    pathParts.push(`${segmentOpen ? "L" : "M"} ${p.x} ${p.y}`);
+    segmentOpen = true;
+  }
+  const path = pathParts.join(" ");
   return `
     <svg viewBox="0 0 ${width} ${height}" width="100%" height="220" role="img" aria-label="${label}">
       <line x1="${left}" y1="${top + plotH}" x2="${width - 8}" y2="${top + plotH}" stroke="#cbd5e1" stroke-width="1"/>
       <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotH}" stroke="#cbd5e1" stroke-width="1"/>
-      <path d="${path}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      ${path ? `<path d="${path}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
       ${points.map((p) => `
-        <circle cx="${p.x}" cy="${p.y}" r="4" fill="${color}"/>
+        ${p.v != null && p.y != null ? `<circle cx="${p.x}" cy="${p.y}" r="4" fill="${color}"/>` : ""}
         <text x="${p.x}" y="${top + plotH + 16}" text-anchor="middle" font-size="11" fill="#475569">${esc(p.label)}</text>
-        <text x="${p.x}" y="${p.y - 10}" text-anchor="middle" font-size="11" fill="#334155">${fmtPct(p.v)}</text>
+        <text x="${p.x}" y="${(p.y != null ? p.y : top + plotH) - 10}" text-anchor="middle" font-size="11" fill="#334155">${p.v != null ? fmtPct(p.v) : "—"}</text>
       `).join("")}
     </svg>
   `;
@@ -2695,10 +2723,15 @@ function renderAssetKpiVisuals(data) {
   worstEl.innerHTML = akpRenderWorstAssets(filteredAssets);
   const trendSeries = (akpLastTrendSeries || []).map((row) => {
     const fleetRow = akpFilteredFleet(row.data, filterRaw);
+    const pctOrNull = (v) => {
+      if (v == null || v === "") return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
     return {
       label: row.label,
-      availability_pct: Number(fleetRow.availability_pct || 0),
-      utilization_pct: Number(fleetRow.utilization_pct || 0),
+      availability_pct: pctOrNull(fleetRow.availability_pct),
+      utilization_pct: pctOrNull(fleetRow.utilization_pct),
     };
   });
   availEl.innerHTML = akpSvgTrend(trendSeries, "availability_pct", "#2563eb", "Availability trend by selected day");
