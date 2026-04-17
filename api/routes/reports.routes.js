@@ -136,6 +136,15 @@ function inclusiveDaysBetween(start, end) {
   return Math.round((b.getTime() - a.getTime()) / (24 * 3600 * 1000)) + 1;
 }
 
+function safeNum(v, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function asArray(v) {
+  return Array.isArray(v) ? v : [];
+}
+
 function hasBreakdownDowntimeLogsTable() {
   return Boolean(
     db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'breakdown_downtime_logs'`).get(),
@@ -6564,6 +6573,218 @@ export default async function reportsRoutes(app) {
     reply
       .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
       .header("Content-Disposition", `attachment; filename="IRONLOG_Operations_${start}_to_${end}.xlsx"`)
+      .send(Buffer.from(buffer));
+  });
+
+  // GET /api/reports/executive-pack.xlsx?start=YYYY-MM-DD&end=YYYY-MM-DD&scheduled=10&near_due_hours=50
+  app.get("/executive-pack.xlsx", async (req, reply) => {
+    const end = String(req.query?.end || "").trim() || todayYmd();
+    const start = String(req.query?.start || "").trim() || monthStartIso(end);
+    const scheduled = Math.max(0.5, Number(req.query?.scheduled || 10));
+    const nearDue = Math.max(1, Number(req.query?.near_due_hours || 50));
+    if (!isYmd(start) || !isYmd(end)) {
+      return reply.code(400).send({ error: "start and end must be YYYY-MM-DD" });
+    }
+    if (start > end) {
+      return reply.code(400).send({ error: "start must be <= end" });
+    }
+
+    const siteCode = String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
+    const sharedHeaders = {
+      "x-site-code": siteCode,
+      "x-user-role": String(req.headers["x-user-role"] || "admin"),
+    };
+    if (req.headers.authorization) sharedHeaders.authorization = String(req.headers.authorization);
+
+    async function injectJson(url) {
+      const res = await app.inject({ method: "GET", url, headers: sharedHeaders });
+      if (res.statusCode >= 400) throw new Error(`${url} -> HTTP ${res.statusCode}`);
+      try {
+        return JSON.parse(res.payload || "{}");
+      } catch {
+        return {};
+      }
+    }
+
+    const qCommon = `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+    const [
+      kpi,
+      fuel,
+      fuelDup,
+      wfSummary,
+      wfActions,
+      lube,
+      mgrIns,
+      artIns,
+      stock,
+    ] = await Promise.all([
+      injectJson(`/api/dashboard/asset-kpi/weekly?${qCommon}&scheduled=${encodeURIComponent(String(scheduled))}`).catch(() => ({})),
+      injectJson(`/api/dashboard/fuel?${qCommon}&tolerance=0.15`).catch(() => ({})),
+      injectJson(`/api/dashboard/fuel/duplicates?${qCommon}`).catch(() => ({})),
+      injectJson(`/api/maintenance/weekly-forum/summary?${qCommon}&near_due_hours=${encodeURIComponent(String(nearDue))}`).catch(() => ({})),
+      injectJson(`/api/maintenance/weekly-forum/actions?${qCommon}`).catch(() => ({})),
+      injectJson(`/api/dashboard/lube/analytics?${qCommon}`).catch(() => ({})),
+      injectJson(`/api/maintenance/inspections?${qCommon}`).catch(() => ({})),
+      injectJson(`/api/maintenance/artisan-inspections?${qCommon}`).catch(() => ({})),
+      injectJson("/api/stock/monitor").catch(() => ({})),
+    ]);
+
+    function autosizeColumns(ws, maxWidth = 45) {
+      ws.columns.forEach((col) => {
+        let width = 10;
+        col.eachCell({ includeEmpty: true }, (cell) => {
+          const len = String(cell.value ?? "").length;
+          width = Math.max(width, Math.min(maxWidth, len + 2));
+        });
+        col.width = width;
+      });
+    }
+    function writeRows(ws, headers, rows) {
+      ws.addRow(headers);
+      ws.getRow(1).font = { bold: true };
+      for (const row of rows) ws.addRow(headers.map((h) => row[h]));
+      ws.views = [{ state: "frozen", ySplit: 1 }];
+      autosizeColumns(ws);
+    }
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "IRONLOG";
+    wb.created = new Date();
+
+    {
+      const ws = wb.addWorksheet("00_Control");
+      const rows = [
+        { key: "start_date", value: start },
+        { key: "end_date", value: end },
+        { key: "site_code", value: siteCode },
+        { key: "generated_at", value: new Date().toISOString() },
+      ];
+      writeRows(ws, ["key", "value"], rows);
+    }
+    {
+      const ws = wb.addWorksheet("01_HSE_Summary");
+      const mgrRows = asArray(mgrIns.rows);
+      const artRows = asArray(artIns.rows);
+      const mgrFindings = mgrRows.reduce((acc, r) => acc + asArray(r.checklist).filter((c) => c?.ok === false).length, 0);
+      const artFindings = artRows.reduce((acc, r) => acc + asArray(r.checklist).filter((c) => c?.ok === false).length, 0);
+      const rows = [{
+        period_start: start,
+        period_end: end,
+        manager_inspections: mgrRows.length,
+        artisan_inspections: artRows.length,
+        inspections_total: mgrRows.length + artRows.length,
+        findings_open_proxy: mgrFindings + artFindings,
+      }];
+      writeRows(ws, Object.keys(rows[0]), rows);
+    }
+    {
+      const ws = wb.addWorksheet("03_Plant_Performance");
+      const rows = asArray(kpi.by_asset).map((r) => ({
+        asset_code: r.asset_code || "",
+        asset_name: r.asset_name || "",
+        category: r.category || "",
+        scheduled_hours: safeNum(r.scheduled_hours),
+        run_hours: safeNum(r.run_hours),
+        downtime_hours: safeNum(r.downtime_hours),
+        available_hours: safeNum(r.available_hours),
+        availability_pct: r.availability_pct == null ? null : safeNum(r.availability_pct),
+        utilization_pct: r.utilization_pct == null ? null : safeNum(r.utilization_pct),
+      }));
+      writeRows(ws, rows.length ? Object.keys(rows[0]) : ["asset_code", "asset_name", "category", "scheduled_hours", "run_hours", "downtime_hours", "available_hours", "availability_pct", "utilization_pct"], rows);
+    }
+    {
+      const ws = wb.addWorksheet("04_Maint_Cost_Machine");
+      const rows = asArray(wfSummary.upcoming_services).map((r) => ({
+        asset_code: r.asset_code || "",
+        asset_name: r.asset_name || "",
+        service_name: r.service_name || "",
+        remaining_hours: safeNum(r.remaining_hours),
+        avg_oil_cost: safeNum(r?.forecast?.avg_oil_cost),
+        avg_parts_cost: safeNum(r?.forecast?.avg_parts_cost),
+        est_service_kit_cost: safeNum(r?.forecast?.est_service_kit_cost),
+      }));
+      writeRows(ws, rows.length ? Object.keys(rows[0]) : ["asset_code", "asset_name", "service_name", "remaining_hours", "avg_oil_cost", "avg_parts_cost", "est_service_kit_cost"], rows);
+    }
+    {
+      const ws = wb.addWorksheet("05_Parts_Tracking");
+      const rows = asArray(stock.rows).map((r) => ({
+        part_code: r.part_code || "",
+        part_name: r.part_name || "",
+        category: r.category || "",
+        on_hand: safeNum(r.on_hand),
+        min_stock: safeNum(r.min_stock),
+        below_min_flag: safeNum(r.is_below_min),
+        critical_flag: safeNum(r.is_critical),
+      }));
+      writeRows(ws, rows.length ? Object.keys(rows[0]) : ["part_code", "part_name", "category", "on_hand", "min_stock", "below_min_flag", "critical_flag"], rows);
+    }
+    {
+      const ws = wb.addWorksheet("06_Production_Support");
+      const rows = asArray(wfActions.rows).map((r) => ({
+        action_date: r.action_date || "",
+        owner: r.owner || "",
+        action_text: r.action_text || "",
+        status: r.status || "",
+        due_date: r.due_date || "",
+      }));
+      writeRows(ws, rows.length ? Object.keys(rows[0]) : ["action_date", "owner", "action_text", "status", "due_date"], rows);
+    }
+    {
+      const ws = wb.addWorksheet("07_Lube_Cost_Machine");
+      const rows = asArray(lube.rows).map((r) => ({
+        asset_code: r.asset_code || "",
+        asset_name: r.asset_name || "",
+        lube_type: r.lube_type || "",
+        qty_total: safeNum(r.qty_total),
+        entries: safeNum(r.entries),
+        total_lube_cost: safeNum(r.total_lube_cost),
+      }));
+      writeRows(ws, rows.length ? Object.keys(rows[0]) : ["asset_code", "asset_name", "lube_type", "qty_total", "entries", "total_lube_cost"], rows);
+    }
+    {
+      const ws = wb.addWorksheet("08_Inspections");
+      const rows = [
+        { inspection_type: "manager", completed_count: asArray(mgrIns.rows).length },
+        { inspection_type: "artisan", completed_count: asArray(artIns.rows).length },
+        { inspection_type: "total", completed_count: asArray(mgrIns.rows).length + asArray(artIns.rows).length },
+      ];
+      writeRows(ws, ["inspection_type", "completed_count"], rows);
+    }
+    {
+      const ws = wb.addWorksheet("09_Fuel_Security");
+      const rows = asArray(fuel.rows).map((r) => ({
+        asset_code: r.asset_code || "",
+        asset_name: r.asset_name || "",
+        metric_mode: r.metric_mode || "",
+        fuel_liters: safeNum(r.fuel_liters),
+        hours_run: safeNum(r.hours_run),
+        actual_lph: r.actual_lph == null ? null : safeNum(r.actual_lph),
+        oem_lph: r.oem_lph == null ? null : safeNum(r.oem_lph),
+        variance_lph: r.variance_lph == null ? null : safeNum(r.variance_lph),
+        is_excessive: r.is_excessive ? 1 : 0,
+        duplicate_rows: asArray(fuelDup.rows).filter((d) => String(d.asset_code || "") === String(r.asset_code || "")).length,
+      }));
+      writeRows(ws, rows.length ? Object.keys(rows[0]) : ["asset_code", "asset_name", "metric_mode", "fuel_liters", "hours_run", "actual_lph", "oem_lph", "variance_lph", "is_excessive", "duplicate_rows"], rows);
+    }
+    {
+      const ws = wb.addWorksheet("10_Slide_Map");
+      const rows = [
+        { slide_no: 1, slide_title: "Safety (HSE)", sheet: "01_HSE_Summary" },
+        { slide_no: 2, slide_title: "Plant Performance", sheet: "03_Plant_Performance" },
+        { slide_no: 3, slide_title: "Breakdown & Maintenance (Cost/Machine)", sheet: "04_Maint_Cost_Machine" },
+        { slide_no: 4, slide_title: "Parts Tracking", sheet: "05_Parts_Tracking" },
+        { slide_no: 5, slide_title: "Production Support", sheet: "06_Production_Support" },
+        { slide_no: 6, slide_title: "Lubrication (Cost/Machine)", sheet: "07_Lube_Cost_Machine" },
+        { slide_no: 7, slide_title: "Inspections Done", sheet: "08_Inspections" },
+        { slide_no: 8, slide_title: "Security (Fuel Anomalies)", sheet: "09_Fuel_Security" },
+      ];
+      writeRows(ws, ["slide_no", "slide_title", "sheet"], rows);
+    }
+
+    const buffer = await wb.xlsx.writeBuffer();
+    return reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header("Content-Disposition", `attachment; filename="IRONLOG_Executive_Pack_${start}_to_${end}.xlsx"`)
       .send(Buffer.from(buffer));
   });
 }

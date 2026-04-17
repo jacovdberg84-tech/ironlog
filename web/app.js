@@ -3450,6 +3450,38 @@ function openFuelBenchmarkPdf(download = false) {
   window.open(url, "_blank");
 }
 
+async function downloadExecutivePackExcel() {
+  const start = (qs("fuelStart")?.value || "").trim();
+  const end = (qs("fuelEnd")?.value || "").trim();
+  if (!start || !end) return alert("Select start and end dates.");
+  setStatus("Generating executive pack...");
+  try {
+    const q = new URLSearchParams();
+    q.set("start", start);
+    q.set("end", end);
+    q.set("scheduled", "10");
+    q.set("near_due_hours", "50");
+    const res = await fetch(`${API}/api/reports/executive-pack.xlsx?${q.toString()}`, { headers: authHeaders() });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(txt || `Executive pack request failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `IRONLOG_Executive_Pack_${start}_to_${end}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    setStatus("Executive pack ready.");
+  } catch (e) {
+    setStatus("Executive pack error: " + (e.message || e));
+    alert(`Executive pack error: ${e.message || e}`);
+  }
+}
+
 function openFuelMachineHistoryPdf(assetCode, download = false) {
   const code = String(assetCode || "").trim();
   const start = (qs("fuelStart")?.value || "").trim() || (qs("fuelSnapStart")?.value || "").trim();
@@ -9226,6 +9258,9 @@ async function init() {
   });
   qs("openFuelBenchmarkPdf")?.addEventListener("click", () => openFuelBenchmarkPdf(false));
   qs("downloadFuelBenchmarkPdf")?.addEventListener("click", () => openFuelBenchmarkPdf(true));
+  qs("downloadExecutivePackXlsx")?.addEventListener("click", () => {
+    downloadExecutivePackExcel().catch((e) => setStatus("Executive pack error: " + e.message));
+  });
   qs("loadStockMonitor")?.addEventListener("click", () =>
     loadStockMonitor().catch((e) => setStatus("Stock monitor error: " + e.message))
   );
