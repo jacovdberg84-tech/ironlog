@@ -52,13 +52,28 @@ function parseRoles(raw, fallbackRole = "operator") {
   return out.length ? out : ["operator"];
 }
 
+function inspectproApiKeyMatches(req) {
+  const required = String(process.env.INSPECTPRO_INGEST_KEY || "").trim();
+  if (!required) return false;
+  const provided = String(req.headers["x-inspectpro-key"] || "").trim();
+  return provided === required;
+}
+
 export async function ironlogAuthHook(req, reply) {
   const url = req.url.split("?")[0];
   if (!url.startsWith("/api/")) return;
 
+  // InspectPro Manager: API key on X-InspectPro-Key (same as ingest routes).
+  // Allows POST/GET under these prefixes when IRONLOG_AUTH_REQUIRED is enabled.
+  if (
+    inspectproApiKeyMatches(req) &&
+    (url.startsWith("/api/integrations/inspectpro/") || url.startsWith("/api/manager/"))
+  ) {
+    return;
+  }
+
   if (url === "/api/auth/login" && req.method === "POST") return;
   if (url === "/api/auth/tabs" && req.method === "GET") return;
-  if (url === "/api/integrations/inspectpro/events" && req.method === "POST") return;
 
   const auth = String(req.headers.authorization || "");
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";

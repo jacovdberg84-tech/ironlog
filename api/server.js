@@ -72,6 +72,8 @@ app.register(syncRoutes, { prefix: "/api/sync" });
 app.register(docsRoutes, { prefix: "/api/docs" });
 app.register(ironmindRoutes, { prefix: "/api/ironmind" });
 app.register(inspectproRoutes, { prefix: "/api/integrations/inspectpro" });
+  // Same InspectPro ingest + pull routes under /api/manager/* for clients using that base path.
+  app.register(inspectproRoutes, { prefix: "/api/manager" });
   app.register(tasksRoutes, { prefix: "/api" });
   // Backward compatibility for stale cached frontend bundles still calling /tasks, /projects, /comments.
   app.register(tasksRoutes);

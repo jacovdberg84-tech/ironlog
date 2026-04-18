@@ -1,5 +1,6 @@
 // IRONLOG/api/routes/assets.routes.js
 import { db } from "../db/client.js";
+import { getAssetCurrentHoursInfo } from "../utils/assetMeterHours.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -18,6 +19,16 @@ export default async function assetRoutes(app) {
       created_at
     FROM assets
     WHERE asset_code = ?
+  `);
+
+  const getAssetById = db.prepare(`
+    SELECT
+      id, asset_code, asset_name, category,
+      active, is_standby,
+      archived, archive_reason, archived_at,
+      created_at
+    FROM assets
+    WHERE id = ?
   `);
 
   const insertAsset = db.prepare(`
@@ -147,6 +158,37 @@ export default async function assetRoutes(app) {
         is_standby: Number(updated.is_standby),
         archived: Number(updated.archived),
       },
+    };
+  });
+
+  // ------------------------------------------------------------
+  // Hour meter snapshot (e.g. InspectPro Manager)
+  // GET /api/assets/:asset_id_or_asset_code/hours
+  // Resolves numeric segment as asset id first, then asset_code.
+  // ------------------------------------------------------------
+  app.get("/:identifier/hours", async (req, reply) => {
+    const identifier = String(req.params.identifier || "").trim();
+    if (!identifier) return reply.code(404).send({ error: "Asset not found" });
+
+    let asset = null;
+    if (/^\d+$/.test(identifier)) {
+      asset = getAssetById.get(Number(identifier));
+    }
+    if (!asset) {
+      asset = getAssetByCode.get(identifier);
+    }
+    if (!asset) return reply.code(404).send({ error: "Asset not found" });
+
+    const meter = getAssetCurrentHoursInfo(asset.id);
+    return {
+      ok: true,
+      asset_id: asset.id,
+      asset_code: asset.asset_code,
+      asset_name: asset.asset_name,
+      category: asset.category ?? null,
+      current_hours: meter.hours,
+      hour_meter_source: meter.source,
+      latest_daily_work_date: meter.latest_work_date ?? null,
     };
   });
 

@@ -201,7 +201,7 @@ export default async function inspectproRoutes(app) {
   });
 
   // Compatibility aliases for integrators expecting direct paths.
-  app.post("/inspection", async (req, reply) => {
+  async function replyInspectionPayload(req, reply) {
     if (!requireInspectproKey(req, reply)) return;
     const body = { ...(req.body || {}), event_type: "inspection" };
     const { status, errorMessage, eventUuid, eventType, targetId, assetCode } = ingestEvent(body);
@@ -209,7 +209,11 @@ export default async function inspectproRoutes(app) {
       return reply.code(400).send({ ok: false, status, error: errorMessage, uuid: eventUuid, event_type: eventType });
     }
     return reply.send({ ok: true, status, uuid: eventUuid, event_type: eventType, target_id: targetId, asset_code: assetCode });
-  });
+  }
+
+  app.post("/inspection", replyInspectionPayload);
+  // Plural path used by Manager app docs / older clients.
+  app.post("/inspections", replyInspectionPayload);
 
   app.post("/damage-report", async (req, reply) => {
     if (!requireInspectproKey(req, reply)) return;
