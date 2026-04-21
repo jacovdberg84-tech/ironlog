@@ -34,8 +34,8 @@ export function buildServer() {
     // In packaged Electron (Windows GUI), stdout/stderr can be unavailable.
     // Disable Fastify/Pino console logger there to avoid EBADF write crashes.
     logger: isDesktopRuntime ? false : true,
-    // Ops slip reports may include several base64 photos (see breakdown-ops /slips).
-    bodyLimit: 4 * 1024 * 1024,
+    // Ops slip reports + InspectPro Manager may send many base64 photos in one JSON body.
+    bodyLimit: 40 * 1024 * 1024,
   });
 
   app.register(cors, { origin: true });
