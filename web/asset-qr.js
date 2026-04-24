@@ -11,6 +11,38 @@
     return "status unknown";
   }
 
+  function inferMakeModelFromAsset(payload) {
+    const asset = payload?.asset || {};
+    const fromPayloadMake = String(asset.make || "").trim();
+    const fromPayloadModel = String(asset.model || "").trim();
+    if (fromPayloadMake || fromPayloadModel) {
+      return {
+        make: fromPayloadMake || "-",
+        model: fromPayloadModel || "-",
+      };
+    }
+
+    const name = String(asset.asset_name || "").trim();
+    const code = String(asset.asset_code || "").trim();
+    const tokens = name.split(/\s+/).filter(Boolean);
+    let make = "";
+    let model = "";
+
+    if (tokens.length) make = tokens[0].toUpperCase();
+    if (tokens.length >= 2) {
+      const second = String(tokens[1] || "");
+      if (/[0-9]/.test(second) || second.length <= 12) model = second.toUpperCase();
+    }
+    if (!model && code) {
+      const codeToken = code.split(/[-_\s]/).find((t) => /[0-9]/.test(t));
+      if (codeToken) model = codeToken.toUpperCase();
+    }
+    return {
+      make: make || "-",
+      model: model || "-",
+    };
+  }
+
   async function fetchJson(url, options) {
     const res = await fetch(url, options);
     const text = await res.text();
@@ -45,8 +77,9 @@
 
     qs("sub").textContent = `Asset ${assetCode} loaded`;
     qs("machineCode").textContent = String(payload?.asset?.asset_code || assetCode);
-    qs("machineMake").textContent = String(payload?.asset?.make || "-");
-    qs("machineModel").textContent = String(payload?.asset?.model || "-");
+    const mm = inferMakeModelFromAsset(payload);
+    qs("machineMake").textContent = mm.make;
+    qs("machineModel").textContent = mm.model;
     const statusEl = qs("machineStatus");
     statusEl.textContent = status;
     statusEl.className = statusClass(status);
