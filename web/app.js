@@ -8404,9 +8404,10 @@ async function buildAssetQrImageData(assetCode) {
     body: JSON.stringify({}),
   });
   const qrText = String(res?.qr_text || "").trim();
-  if (!qrText) throw new Error("No QR text generated.");
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=${encodeURIComponent(qrText)}`;
-  return { qrUrl, qrText, payload: res?.qr_payload || {} };
+  const scanValue = String(res?.qr_payload?.scan_url || qrText || "").trim();
+  if (!scanValue) throw new Error("No QR value generated.");
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=${encodeURIComponent(scanValue)}`;
+  return { qrUrl, qrText, scanValue, payload: res?.qr_payload || {} };
 }
 
 async function downloadAssetQrPng(assetCode) {
@@ -8432,6 +8433,10 @@ async function downloadAssetQrPng(assetCode) {
 }
 
 async function downloadAllVisibleDailyQrs() {
+  if (typeof window.JSZip !== "function") {
+    alert("ZIP library failed to load. Check internet connection and try again.");
+    return;
+  }
   const rowsToUse = dailyShowDownOnly ? dailyRows.filter((r) => !!r.is_down) : dailyRows;
   const codes = Array.from(new Set(rowsToUse.map((r) => String(r.asset_code || "").trim()).filter(Boolean)));
   if (!codes.length) {
@@ -8439,7 +8444,8 @@ async function downloadAllVisibleDailyQrs() {
     return;
   }
 
-  setStatus(`Preparing ${codes.length} visible QR images...`);
+  setStatus(`Preparing ${codes.length} visible QR images for ZIP...`);
+  const zip = new window.JSZip();
   let ok = 0;
   let fail = 0;
   for (let i = 0; i < codes.length; i += 1) {
@@ -8449,22 +8455,29 @@ async function downloadAllVisibleDailyQrs() {
       const response = await fetch(qrUrl);
       if (!response.ok) throw new Error(`fetch ${response.status}`);
       const blob = await response.blob();
-      const objUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = objUrl;
-      a.download = `${code}_qr.png`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(objUrl);
+      zip.file(`${code}_qr.png`, blob);
       ok += 1;
-      setStatus(`Downloading QR ${i + 1}/${codes.length}: ${code}`);
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      setStatus(`Collecting QR ${i + 1}/${codes.length}: ${code}`);
+      await new Promise((resolve) => setTimeout(resolve, 120));
     } catch {
       fail += 1;
     }
   }
-  setStatus(`QR batch done: ${ok} downloaded${fail ? `, ${fail} failed` : ""} ✅`);
+  if (!ok) throw new Error("No QR images could be added to ZIP.");
+
+  setStatus("Building ZIP file...");
+  const zipBlob = await zip.generateAsync({ type: "blob" });
+  const dt = new Date();
+  const stamp = `${dt.getFullYear()}${String(dt.getMonth() + 1).padStart(2, "0")}${String(dt.getDate()).padStart(2, "0")}_${String(dt.getHours()).padStart(2, "0")}${String(dt.getMinutes()).padStart(2, "0")}`;
+  const objUrl = URL.createObjectURL(zipBlob);
+  const a = document.createElement("a");
+  a.href = objUrl;
+  a.download = `ironlog_visible_qr_${stamp}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objUrl);
+  setStatus(`QR ZIP ready: ${ok} included${fail ? `, ${fail} failed` : ""} ✅`);
 }
 
 async function generateDailyAssetQr() {
