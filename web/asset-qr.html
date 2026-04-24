@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IRONLOG Asset QR Detail</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1115;
+      --panel: #151a22;
+      --text: #e7edf5;
+      --muted: #98a3b3;
+      --accent: #3b82f6;
+      --line: #253044;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    h1 { margin: 0 0 8px; font-size: 24px; }
+    .muted { color: var(--muted); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    .kv {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: rgba(255,255,255,0.01);
+    }
+    .kv .k { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+    .kv .v { font-size: 15px; font-weight: 700; }
+    .status {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .status.down { color: #fca5a5; border-color: #7f1d1d; background: rgba(127,29,29,0.25); }
+    .status.production { color: #86efac; border-color: #14532d; background: rgba(20,83,45,0.25); }
+    .status.standby { color: #fde68a; border-color: #78350f; background: rgba(120,53,15,0.25); }
+    .status.unknown { color: #cbd5e1; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    button, a.btn {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 12px;
+      background: #1a2333;
+      color: var(--text);
+      text-decoration: none;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button.primary, a.btn.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 12px;
+      color: #d1d9e6;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Asset QR Detail</h1>
+      <div class="muted" id="sub">Loading...</div>
+      <div class="actions">
+        <a class="btn" href="/web/index.html">Open Ironlog Dashboard</a>
+        <button class="primary" id="refreshBtn">Refresh</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="grid">
+        <div class="kv"><div class="k">Machine</div><div class="v" id="machineCode">-</div></div>
+        <div class="kv"><div class="k">Status</div><div class="v"><span id="machineStatus" class="status unknown">UNKNOWN</span></div></div>
+        <div class="kv"><div class="k">Current Meter</div><div class="v" id="meter">-</div></div>
+        <div class="kv"><div class="k">Next Service</div><div class="v" id="nextService">-</div></div>
+        <div class="kv"><div class="k">Fuel (30d)</div><div class="v" id="fuel30d">-</div></div>
+        <div class="kv"><div class="k">Last Inspection</div><div class="v" id="inspectionDate">-</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="muted" style="margin-bottom:8px;">QR payload</div>
+      <pre id="payloadOut">{}</pre>
+    </div>
+  </div>
+
+  <script src="/web/asset-qr.js"></script>
+</body>
+</html>

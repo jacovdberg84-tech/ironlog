@@ -279,7 +279,15 @@ export default async function assetRoutes(app) {
     return sorted[0] || null;
   }
 
-  function buildQrProfile(asset) {
+  function resolveWebOrigin(req) {
+    const protoHeader = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+    const hostHeader = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
+    const proto = protoHeader || "http";
+    if (hostHeader) return `${proto}://${hostHeader}`;
+    return "";
+  }
+
+  function buildQrProfile(asset, req) {
     const meter = getAssetCurrentHoursInfo(asset.id);
     const currentHours = Number(Number(meter.hours || 0).toFixed(1));
 
@@ -324,6 +332,11 @@ export default async function assetRoutes(app) {
         asset_name: asset.asset_name || null,
         category: asset.category || null,
       },
+      scan_url: (() => {
+        const origin = resolveWebOrigin(req);
+        if (!origin) return `/web/asset-qr.html?asset_code=${encodeURIComponent(asset.asset_code)}`;
+        return `${origin}/web/asset-qr.html?asset_code=${encodeURIComponent(asset.asset_code)}`;
+      })(),
       status: buildMachineStatus(asset.id),
       meter: {
         current_hours: currentHours,
@@ -354,6 +367,7 @@ export default async function assetRoutes(app) {
     const inspectText = profile.inspections.last_inspection_date || "No inspection date";
     const qrText = [
       `IRONLOG ${asset.asset_code}`,
+      `Scan URL: ${profile.scan_url}`,
       `Status: ${profile.status}`,
       `Current meter: ${currentHours}h`,
       `Next service: ${nextDueText}`,
@@ -371,7 +385,7 @@ export default async function assetRoutes(app) {
     if (!asset) return reply.code(404).send({ error: "Asset not found" });
 
     const stored = getStoredQrProfile.get(asset.id);
-    const live = buildQrProfile(asset);
+    const live = buildQrProfile(asset, req);
     let storedPayload = null;
     if (stored?.qr_payload) {
       try {
@@ -402,7 +416,7 @@ export default async function assetRoutes(app) {
     const asset = getAssetByCode.get(asset_code);
     if (!asset) return reply.code(404).send({ error: "Asset not found" });
 
-    const built = buildQrProfile(asset);
+    const built = buildQrProfile(asset, req);
     upsertQrProfile.run(asset.id, JSON.stringify(built.profile), built.qrText);
 
     return {
