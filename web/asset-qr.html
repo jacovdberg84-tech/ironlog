@@ -76,13 +76,6 @@
       border-color: var(--accent);
       color: #fff;
     }
-    pre {
-      margin: 0;
-      white-space: pre-wrap;
-      word-break: break-word;
-      font-size: 12px;
-      color: #d1d9e6;
-    }
   </style>
 </head>
 <body>
@@ -91,7 +84,6 @@
       <h1>Asset QR Detail</h1>
       <div class="muted" id="sub">Loading...</div>
       <div class="actions">
-        <a class="btn" href="/web/index.html">Open Ironlog Dashboard</a>
         <button class="primary" id="refreshBtn">Refresh</button>
       </div>
     </div>
@@ -99,17 +91,14 @@
     <div class="card">
       <div class="grid">
         <div class="kv"><div class="k">Machine</div><div class="v" id="machineCode">-</div></div>
+        <div class="kv"><div class="k">Make</div><div class="v" id="machineMake">-</div></div>
+        <div class="kv"><div class="k">Model</div><div class="v" id="machineModel">-</div></div>
         <div class="kv"><div class="k">Status</div><div class="v"><span id="machineStatus" class="status unknown">UNKNOWN</span></div></div>
         <div class="kv"><div class="k">Current Meter</div><div class="v" id="meter">-</div></div>
         <div class="kv"><div class="k">Next Service</div><div class="v" id="nextService">-</div></div>
         <div class="kv"><div class="k">Fuel (30d)</div><div class="v" id="fuel30d">-</div></div>
         <div class="kv"><div class="k">Last Inspection</div><div class="v" id="inspectionDate">-</div></div>
       </div>
-    </div>
-
-    <div class="card">
-      <div class="muted" style="margin-bottom:8px;">QR payload</div>
-      <pre id="payloadOut">{}</pre>
     </div>
   </div>
 

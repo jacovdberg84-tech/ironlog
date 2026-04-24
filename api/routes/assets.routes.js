@@ -236,23 +236,39 @@ export default async function assetRoutes(app) {
   });
 
   function buildMachineStatus(assetId) {
-    const openBreakdown = db.prepare(`
-      SELECT id
+    const latestBreakdown = db.prepare(`
+      SELECT
+        breakdown_date,
+        status,
+        end_at
       FROM breakdowns
-      WHERE asset_id = ?
-        AND UPPER(COALESCE(status, 'OPEN')) = 'OPEN'
+      WHERE asset_id = ? 
       ORDER BY breakdown_date DESC, id DESC
       LIMIT 1
     `).get(assetId);
-    if (openBreakdown) return "DOWN";
-
     const latestDaily = db.prepare(`
-      SELECT is_used
+      SELECT is_used, work_date
       FROM daily_hours
       WHERE asset_id = ?
       ORDER BY work_date DESC, id DESC
       LIMIT 1
     `).get(assetId);
+
+    const isBreakdownOpen = (() => {
+      if (!latestBreakdown) return false;
+      const st = String(latestBreakdown.status || "").trim().toUpperCase();
+      if (st === "OPEN") return true;
+      if (st && st !== "OPEN") return false;
+      return !latestBreakdown.end_at;
+    })();
+
+    if (isBreakdownOpen) {
+      if (!latestDaily?.work_date) return "DOWN";
+      const bdDate = String(latestBreakdown.breakdown_date || "");
+      const dhDate = String(latestDaily.work_date || "");
+      if (bdDate && dhDate && bdDate >= dhDate) return "DOWN";
+    }
+
     if (!latestDaily) return "UNKNOWN";
     return Number(latestDaily.is_used) === 1 ? "PRODUCTION" : "STANDBY";
   }
@@ -310,6 +326,17 @@ export default async function assetRoutes(app) {
   }
 
   function buildQrProfile(asset, req) {
+    const makeCol = firstExistingColumn("assets", ["make", "asset_make", "manufacturer", "brand"]);
+    const modelCol = firstExistingColumn("assets", ["model", "asset_model"]);
+    let assetMake = null;
+    let assetModel = null;
+    if (makeCol || modelCol) {
+      const fields = [makeCol ? `${makeCol} AS make` : "NULL AS make", modelCol ? `${modelCol} AS model` : "NULL AS model"].join(", ");
+      const row = db.prepare(`SELECT ${fields} FROM assets WHERE id = ?`).get(asset.id);
+      assetMake = row?.make != null ? String(row.make).trim() || null : null;
+      assetModel = row?.model != null ? String(row.model).trim() || null : null;
+    }
+
     const meter = getAssetCurrentHoursInfo(asset.id);
     const currentHours = Number(Number(meter.hours || 0).toFixed(1));
 
@@ -353,6 +380,8 @@ export default async function assetRoutes(app) {
         asset_code: asset.asset_code,
         asset_name: asset.asset_name || null,
         category: asset.category || null,
+        make: assetMake,
+        model: assetModel,
       },
       scan_url: (() => {
         const origin = resolveWebOrigin(req);

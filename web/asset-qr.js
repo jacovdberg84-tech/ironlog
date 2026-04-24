@@ -45,6 +45,8 @@
 
     qs("sub").textContent = `Asset ${assetCode} loaded`;
     qs("machineCode").textContent = String(payload?.asset?.asset_code || assetCode);
+    qs("machineMake").textContent = String(payload?.asset?.make || "-");
+    qs("machineModel").textContent = String(payload?.asset?.model || "-");
     const statusEl = qs("machineStatus");
     statusEl.textContent = status;
     statusEl.className = statusClass(status);
@@ -54,7 +56,6 @@
       : "No active maintenance plan";
     qs("fuel30d").textContent = `${Number(fuel?.liters_last_30_days || 0).toFixed(1)} L`;
     qs("inspectionDate").textContent = String(payload?.inspections?.last_inspection_date || "No inspection date");
-    qs("payloadOut").textContent = JSON.stringify(payload, null, 2);
   }
 
   qs("refreshBtn")?.addEventListener("click", () => {
