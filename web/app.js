@@ -8426,6 +8426,84 @@ async function generateDailyAssetQr() {
   setStatus(`QR saved for ${assetCode} ✅`);
 }
 
+function printDailyAssetQr() {
+  const imgSrc = String(qs("dailyQrImg")?.src || "").trim();
+  const payloadText = String(qs("dailyQrText")?.textContent || "").trim();
+  if (!imgSrc || !payloadText) {
+    alert("Generate a QR first, then print.");
+    return;
+  }
+
+  let payload = null;
+  try {
+    payload = JSON.parse(payloadText);
+  } catch {
+    payload = null;
+  }
+  if (!payload) {
+    alert("QR payload is invalid. Generate the QR again.");
+    return;
+  }
+
+  const machine = String(payload.asset_code || "Unknown");
+  const status = String(payload.status || "UNKNOWN");
+  const nextService = String(payload.next_service_due || "No active maintenance plan");
+  const fuel = `${Number(payload.fuel_liters_last_30_days || 0).toFixed(1)} L (30 days)`;
+  const inspection = String(payload.last_inspection_date || "No inspection date");
+  const generated = String(payload.generated_at || "");
+
+  const win = window.open("", "_blank", "width=900,height=700");
+  if (!win) {
+    alert("Pop-up blocked. Allow pop-ups and try again.");
+    return;
+  }
+
+  const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>IRONLOG QR - ${machine}</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; color: #111; }
+    .sheet { border: 1px solid #222; border-radius: 10px; padding: 18px; max-width: 760px; }
+    h1 { margin: 0 0 10px; font-size: 22px; }
+    .meta { margin: 0 0 14px; font-size: 14px; }
+    .grid { display: grid; grid-template-columns: 240px 1fr; gap: 16px; align-items: start; }
+    img { width: 220px; height: 220px; border: 1px solid #999; }
+    .row { margin: 0 0 8px; font-size: 14px; }
+    .label { font-weight: 700; }
+    .raw { margin-top: 14px; padding: 10px; border: 1px dashed #999; white-space: pre-wrap; font-size: 12px; }
+    @media print {
+      body { margin: 0; }
+      .sheet { border: 0; border-radius: 0; padding: 8mm; max-width: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <h1>IRONLOG Machine QR</h1>
+    <div class="meta">Generated: ${generated || new Date().toISOString()}</div>
+    <div class="grid">
+      <div><img src="${imgSrc}" alt="Machine QR code" /></div>
+      <div>
+        <div class="row"><span class="label">Machine:</span> ${machine}</div>
+        <div class="row"><span class="label">Status:</span> ${status}</div>
+        <div class="row"><span class="label">Next service:</span> ${nextService}</div>
+        <div class="row"><span class="label">Fuel used:</span> ${fuel}</div>
+        <div class="row"><span class="label">Last inspection:</span> ${inspection}</div>
+      </div>
+    </div>
+    <div class="raw">${String(payload.qr_text || "").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
+  </div>
+  <script>window.onload = () => { window.focus(); window.print(); };</script>
+</body>
+</html>`;
+
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+}
+
 async function runShiftSelfCheck() {
   const date = qs("date")?.value || todayLocalYmd();
   const out = qs("shiftSelfCheckResult");
@@ -9549,6 +9627,7 @@ async function init() {
   qs("dailyQrGenerate")?.addEventListener("click", () =>
     generateDailyAssetQr().catch((e) => setStatus("QR generate error: " + e.message))
   );
+  qs("dailyQrPrint")?.addEventListener("click", printDailyAssetQr);
 
   // Net banner
   refreshNetBanner();
