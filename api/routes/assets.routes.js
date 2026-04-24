@@ -7,6 +7,16 @@ function isDate(s) {
 }
 
 export default async function assetRoutes(app) {
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS asset_qr_profiles (
+      asset_id INTEGER PRIMARY KEY,
+      qr_payload TEXT NOT NULL,
+      qr_text TEXT NOT NULL,
+      generated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    )
+  `).run();
+
   /* =========================
      PREPARED STATEMENTS
   ========================= */
@@ -30,6 +40,28 @@ export default async function assetRoutes(app) {
     FROM assets
     WHERE id = ?
   `);
+  const getStoredQrProfile = db.prepare(`
+    SELECT qr_payload, qr_text, generated_at
+    FROM asset_qr_profiles
+    WHERE asset_id = ?
+  `);
+  const upsertQrProfile = db.prepare(`
+    INSERT INTO asset_qr_profiles (asset_id, qr_payload, qr_text, generated_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT(asset_id) DO UPDATE SET
+      qr_payload = excluded.qr_payload,
+      qr_text = excluded.qr_text,
+      generated_at = datetime('now')
+  `);
+
+  function hasTable(tableName) {
+    const row = db.prepare(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name = ?
+    `).get(tableName);
+    return Boolean(row);
+  }
 
   const insertAsset = db.prepare(`
     INSERT INTO assets (
@@ -189,6 +221,195 @@ export default async function assetRoutes(app) {
       current_hours: meter.hours,
       hour_meter_source: meter.source,
       latest_daily_work_date: meter.latest_work_date ?? null,
+    };
+  });
+
+  function buildMachineStatus(assetId) {
+    const openBreakdown = db.prepare(`
+      SELECT id
+      FROM breakdowns
+      WHERE asset_id = ?
+        AND UPPER(COALESCE(status, 'OPEN')) = 'OPEN'
+      ORDER BY breakdown_date DESC, id DESC
+      LIMIT 1
+    `).get(assetId);
+    if (openBreakdown) return "DOWN";
+
+    const latestDaily = db.prepare(`
+      SELECT is_used
+      FROM daily_hours
+      WHERE asset_id = ?
+      ORDER BY work_date DESC, id DESC
+      LIMIT 1
+    `).get(assetId);
+    if (!latestDaily) return "UNKNOWN";
+    return Number(latestDaily.is_used) === 1 ? "PRODUCTION" : "STANDBY";
+  }
+
+  function buildInspectionSummary(assetId) {
+    const candidates = [];
+    if (hasTable("manager_inspections")) {
+      candidates.push(
+        db.prepare(`
+          SELECT DATE(MAX(COALESCE(inspection_date, check_date, created_at))) AS latest_date
+          FROM manager_inspections
+          WHERE asset_id = ?
+        `).get(assetId)?.latest_date || null
+      );
+    }
+    if (hasTable("tyre_inspections")) {
+      candidates.push(
+        db.prepare(`
+          SELECT DATE(MAX(COALESCE(inspection_date, check_date, created_at))) AS latest_date
+          FROM tyre_inspections
+          WHERE asset_id = ?
+        `).get(assetId)?.latest_date || null
+      );
+    }
+    if (hasTable("tire_inspections")) {
+      candidates.push(
+        db.prepare(`
+          SELECT DATE(MAX(COALESCE(inspection_date, check_date, created_at))) AS latest_date
+          FROM tire_inspections
+          WHERE asset_id = ?
+        `).get(assetId)?.latest_date || null
+      );
+    }
+    const sorted = candidates.filter(Boolean).sort().reverse();
+    return sorted[0] || null;
+  }
+
+  function buildQrProfile(asset) {
+    const meter = getAssetCurrentHoursInfo(asset.id);
+    const currentHours = Number(Number(meter.hours || 0).toFixed(1));
+
+    const planRows = db.prepare(`
+      SELECT service_name, interval_hours, last_service_hours
+      FROM maintenance_plans
+      WHERE asset_id = ?
+        AND active = 1
+      ORDER BY id ASC
+    `).all(asset.id);
+    const dueRows = planRows.map((p) => {
+      const nextDueHours = Number(p.last_service_hours || 0) + Number(p.interval_hours || 0);
+      const remaining = nextDueHours - currentHours;
+      return {
+        service_name: String(p.service_name || "Service"),
+        next_due_hours: Number(nextDueHours.toFixed(1)),
+        remaining_hours: Number(remaining.toFixed(1)),
+      };
+    }).sort((a, b) => a.remaining_hours - b.remaining_hours);
+    const nextService = dueRows[0] || null;
+
+    const fuel30d = db.prepare(`
+      SELECT
+        COALESCE(SUM(liters), 0) AS liters_30d,
+        MAX(log_date) AS latest_log_date
+      FROM fuel_logs
+      WHERE asset_id = ?
+        AND log_date >= DATE('now', '-30 day')
+    `).get(asset.id);
+    const latestFuel = db.prepare(`
+      SELECT log_date, liters
+      FROM fuel_logs
+      WHERE asset_id = ?
+      ORDER BY log_date DESC, id DESC
+      LIMIT 1
+    `).get(asset.id);
+
+    const profile = {
+      generated_at: new Date().toISOString(),
+      asset: {
+        asset_code: asset.asset_code,
+        asset_name: asset.asset_name || null,
+        category: asset.category || null,
+      },
+      status: buildMachineStatus(asset.id),
+      meter: {
+        current_hours: currentHours,
+        source: meter.source || "unknown",
+      },
+      next_service_due: nextService
+        ? {
+            service_name: nextService.service_name,
+            next_due_hours: nextService.next_due_hours,
+            remaining_hours: nextService.remaining_hours,
+            is_overdue: nextService.remaining_hours <= 0,
+          }
+        : null,
+      fuel: {
+        liters_last_30_days: Number(Number(fuel30d?.liters_30d || 0).toFixed(1)),
+        last_fill_date: latestFuel?.log_date || null,
+        last_fill_liters: latestFuel?.liters != null ? Number(Number(latestFuel.liters).toFixed(1)) : null,
+      },
+      inspections: {
+        last_inspection_date: buildInspectionSummary(asset.id),
+      },
+    };
+
+    const nextDueText = nextService
+      ? `${nextService.service_name} at ${nextService.next_due_hours}h (${nextService.remaining_hours}h remaining)`
+      : "No active maintenance plan";
+    const fuelText = `${profile.fuel.liters_last_30_days}L in last 30 days`;
+    const inspectText = profile.inspections.last_inspection_date || "No inspection date";
+    const qrText = [
+      `IRONLOG ${asset.asset_code}`,
+      `Status: ${profile.status}`,
+      `Current meter: ${currentHours}h`,
+      `Next service: ${nextDueText}`,
+      `Fuel: ${fuelText}`,
+      `Last inspection: ${inspectText}`,
+    ].join("\n");
+
+    return { profile, qrText };
+  }
+
+  app.get("/:asset_code/qr-profile", async (req, reply) => {
+    const asset_code = String(req.params.asset_code || "").trim();
+    if (!asset_code) return reply.code(400).send({ error: "Asset code is required" });
+    const asset = getAssetByCode.get(asset_code);
+    if (!asset) return reply.code(404).send({ error: "Asset not found" });
+
+    const stored = getStoredQrProfile.get(asset.id);
+    const live = buildQrProfile(asset);
+    let storedPayload = null;
+    if (stored?.qr_payload) {
+      try {
+        storedPayload = JSON.parse(String(stored.qr_payload || "{}"));
+      } catch {
+        storedPayload = null;
+      }
+    }
+
+    return {
+      ok: true,
+      asset_code: asset.asset_code,
+      stored: stored
+        ? {
+            qr_payload: storedPayload,
+            qr_text: stored.qr_text,
+            generated_at: stored.generated_at,
+          }
+        : null,
+      live_preview: live.profile,
+      live_qr_text: live.qrText,
+    };
+  });
+
+  app.post("/:asset_code/qr-profile/refresh", async (req, reply) => {
+    const asset_code = String(req.params.asset_code || "").trim();
+    if (!asset_code) return reply.code(400).send({ error: "Asset code is required" });
+    const asset = getAssetByCode.get(asset_code);
+    if (!asset) return reply.code(404).send({ error: "Asset not found" });
+
+    const built = buildQrProfile(asset);
+    upsertQrProfile.run(asset.id, JSON.stringify(built.profile), built.qrText);
+
+    return {
+      ok: true,
+      asset_code: asset.asset_code,
+      qr_payload: built.profile,
+      qr_text: built.qrText,
     };
   });
 

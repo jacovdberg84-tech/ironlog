@@ -8388,6 +8388,44 @@ renderDailyTable(); // re-render so errorRow highlighting appears
   await loadDailyInput().catch(() => {});
 }
 
+async function generateDailyAssetQr() {
+  const assetCode = String(qs("dailyQrAssetCode")?.value || "").trim();
+  if (!assetCode) {
+    alert("Enter/select an asset code first.");
+    return;
+  }
+  setStatus(`Generating QR for ${assetCode}...`);
+  const res = await fetchJson(`${API}/api/assets/${encodeURIComponent(assetCode)}/qr-profile/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  const qrText = String(res?.qr_text || "").trim();
+  if (!qrText) throw new Error("No QR text generated.");
+
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(qrText)}`;
+  const img = qs("dailyQrImg");
+  if (img) img.src = qrUrl;
+  const preview = qs("dailyQrPreview");
+  if (preview) preview.style.display = "block";
+
+  const payload = res?.qr_payload || {};
+  const service = payload?.next_service_due;
+  const out = {
+    asset_code: payload?.asset?.asset_code || assetCode,
+    status: payload?.status || "UNKNOWN",
+    next_service_due: service
+      ? `${service.service_name} @ ${service.next_due_hours}h (${service.remaining_hours}h remaining)`
+      : "No active maintenance plan",
+    fuel_liters_last_30_days: payload?.fuel?.liters_last_30_days ?? 0,
+    last_inspection_date: payload?.inspections?.last_inspection_date || null,
+    generated_at: payload?.generated_at || new Date().toISOString(),
+    qr_text: qrText,
+  };
+  setText("dailyQrText", JSON.stringify(out, null, 2));
+  setStatus(`QR saved for ${assetCode} ✅`);
+}
+
 async function runShiftSelfCheck() {
   const date = qs("date")?.value || todayLocalYmd();
   const out = qs("shiftSelfCheckResult");
@@ -9508,6 +9546,9 @@ async function init() {
     dailyShowDownOnly = !!qs("dailyDownOnly")?.checked;
     renderDailyTable();
   });
+  qs("dailyQrGenerate")?.addEventListener("click", () =>
+    generateDailyAssetQr().catch((e) => setStatus("QR generate error: " + e.message))
+  );
 
   // Net banner
   refreshNetBanner();
