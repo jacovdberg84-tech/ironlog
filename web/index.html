@@ -1182,6 +1182,12 @@
             <button id="dailyQrDownloadVisible" class="btn btn-secondary btn-sm">Download Visible QR ZIP</button>
             <button id="dailyQrPrintVisible" class="btn btn-secondary btn-sm">Print Visible QR Sheet</button>
           </div>
+          <div class="bulk-sched">
+            <label><span>Cols</span><input id="qrCols" class="w-80" type="number" min="1" max="8" step="1" value="4" /></label>
+            <label><span>QR mm</span><input id="qrSizeMm" class="w-80" type="number" min="12" max="60" step="1" value="28" /></label>
+            <label><span>Cell mm</span><input id="qrCellMm" class="w-80" type="number" min="20" max="80" step="1" value="45" /></label>
+            <label><span>Gap mm</span><input id="qrGapMm" class="w-80" type="number" min="0" max="20" step="1" value="4" /></label>
+          </div>
           <button id="runShiftSelfCheck" class="btn btn-secondary">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
             Self-Check

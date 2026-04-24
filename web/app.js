@@ -8504,6 +8504,11 @@ async function printVisibleDailyQrSheet() {
 
   if (!labels.length) throw new Error("Could not prepare any QR labels.");
 
+  const cols = Math.max(1, Math.min(8, Number(toNum(qs("qrCols")?.value) ?? 4)));
+  const qrSizeMm = Math.max(12, Math.min(60, Number(toNum(qs("qrSizeMm")?.value) ?? 28)));
+  const cellMm = Math.max(20, Math.min(80, Number(toNum(qs("qrCellMm")?.value) ?? 45)));
+  const gapMm = Math.max(0, Math.min(20, Number(toNum(qs("qrGapMm")?.value) ?? 4)));
+
   const win = window.open("", "_blank", "width=1100,height=800");
   if (!win) {
     alert("Pop-up blocked. Allow pop-ups and try again.");
@@ -8532,20 +8537,20 @@ async function printVisibleDailyQrSheet() {
     .head { margin-bottom: 6mm; font-size: 12px; }
     .grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 6mm 4mm;
+      grid-template-columns: repeat(${cols}, 1fr);
+      gap: ${Math.max(1, Math.round(gapMm * 1.2))}mm ${gapMm}mm;
     }
     .cell {
       border: 1px solid #bbb;
       border-radius: 4px;
       padding: 3mm 2mm;
       text-align: center;
-      min-height: 45mm;
+      min-height: ${cellMm}mm;
       break-inside: avoid;
     }
     .cell img {
-      width: 28mm;
-      height: 28mm;
+      width: ${qrSizeMm}mm;
+      height: ${qrSizeMm}mm;
       image-rendering: pixelated;
       display: block;
       margin: 0 auto 2mm;
@@ -8564,7 +8569,7 @@ async function printVisibleDailyQrSheet() {
 </head>
 <body>
   <div class="sheet">
-    <div class="head">IRONLOG QR Label Sheet | Total: ${labels.length} | Generated: ${new Date().toISOString()}</div>
+    <div class="head">IRONLOG QR Label Sheet | Total: ${labels.length} | Layout: ${cols} cols, QR ${qrSizeMm}mm, Cell ${cellMm}mm, Gap ${gapMm}mm | Generated: ${new Date().toISOString()}</div>
     <div class="grid">${cells}</div>
     <div class="no-print" style="margin-top:10px;font-size:12px;color:#555;">Use browser print scaling at 100% for label alignment.</div>
   </div>
