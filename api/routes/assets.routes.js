@@ -326,6 +326,32 @@ export default async function assetRoutes(app) {
   }
 
   function buildQrProfile(asset, req) {
+    function inferMakeModelFromName(name, code) {
+      const raw = String(name || "").trim();
+      if (!raw) return { make: null, model: null };
+      const parts = raw.split(/\s+/).filter(Boolean);
+      if (!parts.length) return { make: null, model: null };
+
+      // Typical names like "CAT 336D Excavator" => make CAT, model 336D
+      const make = parts[0] ? String(parts[0]).toUpperCase() : null;
+      let model = null;
+      if (parts.length >= 2) {
+        const second = String(parts[1] || "");
+        if (/[0-9]/.test(second) || second.length <= 12) {
+          model = second.toUpperCase();
+        }
+      }
+      // Fallback: derive model-ish token from asset code if name is sparse.
+      if (!model) {
+        const codeToken = String(code || "").split(/[-_\s]/).find((t) => /[0-9]/.test(t));
+        if (codeToken) model = codeToken.toUpperCase();
+      }
+      return {
+        make: make || null,
+        model: model || null,
+      };
+    }
+
     const makeCol = firstExistingColumn("assets", ["make", "asset_make", "manufacturer", "brand"]);
     const modelCol = firstExistingColumn("assets", ["model", "asset_model"]);
     let assetMake = null;
@@ -335,6 +361,11 @@ export default async function assetRoutes(app) {
       const row = db.prepare(`SELECT ${fields} FROM assets WHERE id = ?`).get(asset.id);
       assetMake = row?.make != null ? String(row.make).trim() || null : null;
       assetModel = row?.model != null ? String(row.model).trim() || null : null;
+    }
+    if (!assetMake || !assetModel) {
+      const inferred = inferMakeModelFromName(asset.asset_name, asset.asset_code);
+      if (!assetMake) assetMake = inferred.make;
+      if (!assetModel) assetModel = inferred.model;
     }
 
     const meter = getAssetCurrentHoursInfo(asset.id);
