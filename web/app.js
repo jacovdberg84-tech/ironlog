@@ -8431,6 +8431,42 @@ async function downloadAssetQrPng(assetCode) {
   setStatus(`QR image downloaded for ${code} ✅`);
 }
 
+async function downloadAllVisibleDailyQrs() {
+  const rowsToUse = dailyShowDownOnly ? dailyRows.filter((r) => !!r.is_down) : dailyRows;
+  const codes = Array.from(new Set(rowsToUse.map((r) => String(r.asset_code || "").trim()).filter(Boolean)));
+  if (!codes.length) {
+    alert("No visible assets to export.");
+    return;
+  }
+
+  setStatus(`Preparing ${codes.length} visible QR images...`);
+  let ok = 0;
+  let fail = 0;
+  for (let i = 0; i < codes.length; i += 1) {
+    const code = codes[i];
+    try {
+      const { qrUrl } = await buildAssetQrImageData(code);
+      const response = await fetch(qrUrl);
+      if (!response.ok) throw new Error(`fetch ${response.status}`);
+      const blob = await response.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objUrl;
+      a.download = `${code}_qr.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objUrl);
+      ok += 1;
+      setStatus(`Downloading QR ${i + 1}/${codes.length}: ${code}`);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    } catch {
+      fail += 1;
+    }
+  }
+  setStatus(`QR batch done: ${ok} downloaded${fail ? `, ${fail} failed` : ""} ✅`);
+}
+
 async function generateDailyAssetQr() {
   const assetCode = String(qs("dailyQrAssetCode")?.value || "").trim();
   if (!assetCode) {
@@ -9662,6 +9698,9 @@ async function init() {
     generateDailyAssetQr().catch((e) => setStatus("QR generate error: " + e.message))
   );
   qs("dailyQrPrint")?.addEventListener("click", printDailyAssetQr);
+  qs("dailyQrDownloadVisible")?.addEventListener("click", () =>
+    downloadAllVisibleDailyQrs().catch((e) => setStatus("Bulk QR download error: " + e.message))
+  );
 
   // Net banner
   refreshNetBanner();
