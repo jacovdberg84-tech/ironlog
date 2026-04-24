@@ -62,6 +62,17 @@ export default async function assetRoutes(app) {
     `).get(tableName);
     return Boolean(row);
   }
+  function hasColumn(tableName, columnName) {
+    if (!hasTable(tableName)) return false;
+    const cols = db.prepare(`PRAGMA table_info(${tableName})`).all();
+    return cols.some((c) => String(c.name || "") === String(columnName));
+  }
+  function firstExistingColumn(tableName, candidates) {
+    for (const c of candidates) {
+      if (hasColumn(tableName, c)) return c;
+    }
+    return null;
+  }
 
   const insertAsset = db.prepare(`
     INSERT INTO assets (
@@ -249,31 +260,40 @@ export default async function assetRoutes(app) {
   function buildInspectionSummary(assetId) {
     const candidates = [];
     if (hasTable("manager_inspections")) {
+      const dateCol = firstExistingColumn("manager_inspections", ["inspection_date", "check_date", "created_at"]);
+      if (dateCol) {
       candidates.push(
         db.prepare(`
-          SELECT DATE(MAX(COALESCE(inspection_date, check_date, created_at))) AS latest_date
+          SELECT DATE(MAX(${dateCol})) AS latest_date
           FROM manager_inspections
           WHERE asset_id = ?
         `).get(assetId)?.latest_date || null
       );
+      }
     }
     if (hasTable("tyre_inspections")) {
+      const dateCol = firstExistingColumn("tyre_inspections", ["inspection_date", "check_date", "created_at", "date"]);
+      if (dateCol) {
       candidates.push(
         db.prepare(`
-          SELECT DATE(MAX(COALESCE(inspection_date, check_date, created_at))) AS latest_date
+          SELECT DATE(MAX(${dateCol})) AS latest_date
           FROM tyre_inspections
           WHERE asset_id = ?
         `).get(assetId)?.latest_date || null
       );
+      }
     }
     if (hasTable("tire_inspections")) {
+      const dateCol = firstExistingColumn("tire_inspections", ["inspection_date", "check_date", "created_at", "date"]);
+      if (dateCol) {
       candidates.push(
         db.prepare(`
-          SELECT DATE(MAX(COALESCE(inspection_date, check_date, created_at))) AS latest_date
+          SELECT DATE(MAX(${dateCol})) AS latest_date
           FROM tire_inspections
           WHERE asset_id = ?
         `).get(assetId)?.latest_date || null
       );
+      }
     }
     const sorted = candidates.filter(Boolean).sort().reverse();
     return sorted[0] || null;
