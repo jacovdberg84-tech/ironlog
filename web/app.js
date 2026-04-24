@@ -7849,6 +7849,7 @@ function renderDailyTable() {
     assetHeader.innerHTML = `
       <div class="daily-asset-info">
         <span class="daily-asset-code">${r.asset_code}</span>
+        <button class="daily-btn-icon daily-asset-qr" title="Download QR PNG for ${r.asset_code}">QR</button>
         <span class="daily-asset-name">${r.asset_name || ""}</span>
       </div>
       <div class="daily-status-badge ${r.is_down ? 'status-down' : r.error ? 'status-error' : r.warning ? 'status-warning' : 'status-ok'}">
@@ -8060,6 +8061,12 @@ function renderDailyTable() {
       validateDailyRows();
       renderDailyTable();
       renderDailyPreview();
+    });
+
+    const assetQrBtn = assetHeader.querySelector(".daily-asset-qr");
+    assetQrBtn?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      downloadAssetQrPng(r.asset_code).catch((e) => setStatus("QR download error: " + e.message));
     });
   }
 
@@ -8388,6 +8395,42 @@ renderDailyTable(); // re-render so errorRow highlighting appears
   await loadDailyInput().catch(() => {});
 }
 
+async function buildAssetQrImageData(assetCode) {
+  const code = String(assetCode || "").trim();
+  if (!code) throw new Error("Asset code is required.");
+  const res = await fetchJson(`${API}/api/assets/${encodeURIComponent(code)}/qr-profile/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  const qrText = String(res?.qr_text || "").trim();
+  if (!qrText) throw new Error("No QR text generated.");
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=${encodeURIComponent(qrText)}`;
+  return { qrUrl, qrText, payload: res?.qr_payload || {} };
+}
+
+async function downloadAssetQrPng(assetCode) {
+  const code = String(assetCode || "").trim();
+  if (!code) {
+    alert("Asset code missing.");
+    return;
+  }
+  setStatus(`Preparing QR image for ${code}...`);
+  const { qrUrl } = await buildAssetQrImageData(code);
+  const response = await fetch(qrUrl);
+  if (!response.ok) throw new Error(`QR image fetch failed (${response.status})`);
+  const blob = await response.blob();
+  const objUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objUrl;
+  a.download = `${code}_qr.png`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objUrl);
+  setStatus(`QR image downloaded for ${code} ✅`);
+}
+
 async function generateDailyAssetQr() {
   const assetCode = String(qs("dailyQrAssetCode")?.value || "").trim();
   if (!assetCode) {
@@ -8395,21 +8438,12 @@ async function generateDailyAssetQr() {
     return;
   }
   setStatus(`Generating QR for ${assetCode}...`);
-  const res = await fetchJson(`${API}/api/assets/${encodeURIComponent(assetCode)}/qr-profile/refresh`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
-  });
-  const qrText = String(res?.qr_text || "").trim();
-  if (!qrText) throw new Error("No QR text generated.");
-
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(qrText)}`;
+  const { qrUrl, qrText, payload } = await buildAssetQrImageData(assetCode);
   const img = qs("dailyQrImg");
   if (img) img.src = qrUrl;
   const preview = qs("dailyQrPreview");
   if (preview) preview.style.display = "block";
 
-  const payload = res?.qr_payload || {};
   const service = payload?.next_service_due;
   const out = {
     asset_code: payload?.asset?.asset_code || assetCode,

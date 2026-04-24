@@ -300,6 +300,8 @@ export default async function assetRoutes(app) {
   }
 
   function resolveWebOrigin(req) {
+    const envBase = String(process.env.IRONLOG_PUBLIC_BASE_URL || "").trim().replace(/\/+$/, "");
+    if (envBase) return envBase;
     const protoHeader = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
     const hostHeader = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
     const proto = protoHeader || "http";
