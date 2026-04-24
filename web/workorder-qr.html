@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IRONLOG Work Order QR</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0f1115; --panel:#151a22; --line:#253044; --text:#e7edf5; --muted:#98a3b3; --accent:#3b82f6; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:Arial,sans-serif; background:var(--bg); color:var(--text); }
+    .wrap { max-width:980px; margin:0 auto; padding:20px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:12px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px; }
+    .kv { border:1px solid var(--line); border-radius:8px; padding:10px; }
+    .k { color:var(--muted); font-size:12px; margin-bottom:4px; }
+    .v { font-size:15px; font-weight:700; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; }
+    button { border:1px solid var(--line); border-radius:8px; padding:8px 12px; background:#1a2333; color:var(--text); cursor:pointer; }
+    button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+    textarea,input { width:100%; padding:10px; border-radius:8px; border:1px solid #2b3f63; background:#0b1628; color:#e8eefc; }
+    .status { display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid var(--line); font-size:12px; font-weight:700; }
+    .status.open { color:#fca5a5; border-color:#7f1d1d; background:rgba(127,29,29,.25); }
+    .status.in_progress,.status.assigned { color:#fde68a; border-color:#78350f; background:rgba(120,53,15,.25); }
+    .status.completed,.status.approved,.status.closed { color:#86efac; border-color:#14532d; background:rgba(20,83,45,.25); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h2 style="margin:0 0 6px;">Work Order QR Detail</h2>
+      <div id="woQrSub" class="k">Loading...</div>
+      <div class="row" style="margin-top:10px;">
+        <button class="primary" id="woQrRefresh">Refresh</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="grid">
+        <div class="kv"><div class="k">WO #</div><div class="v" id="woId">-</div></div>
+        <div class="kv"><div class="k">Status</div><div class="v"><span id="woStatus" class="status">-</span></div></div>
+        <div class="kv"><div class="k">Source</div><div class="v" id="woSource">-</div></div>
+        <div class="kv"><div class="k">Asset</div><div class="v" id="woAsset">-</div></div>
+        <div class="kv"><div class="k">Make / Model</div><div class="v" id="woMakeModel">-</div></div>
+        <div class="kv"><div class="k">Opened</div><div class="v" id="woOpened">-</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">Artisan Update</h3>
+      <div class="grid">
+        <div class="kv">
+          <div class="k">Artisan Name</div>
+          <input id="woArtisan" placeholder="Artisan name" />
+        </div>
+        <div class="kv">
+          <div class="k">New Status</div>
+          <select id="woNextStatus">
+            <option value="assigned">assigned</option>
+            <option value="in_progress">in_progress</option>
+            <option value="completed">completed</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:10px;">
+        <div class="k">Completion / Work Notes</div>
+        <textarea id="woNotes" rows="4" placeholder="Work done, defects found, follow-up needed..."></textarea>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button id="woSubmitUpdate">Submit Update</button>
+      </div>
+      <div id="woActionMsg" class="k" style="margin-top:8px;"></div>
+    </div>
+  </div>
+  <script src="/web/workorder-qr.js?v=1"></script>
+</body>
+</html>

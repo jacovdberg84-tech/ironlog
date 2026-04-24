@@ -4,6 +4,44 @@ import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 
 export default async function workOrderRoutes(app) {
   ensureAuditTable(db);
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS work_order_qr_profiles (
+      work_order_id INTEGER PRIMARY KEY,
+      qr_payload TEXT NOT NULL,
+      qr_text TEXT NOT NULL,
+      generated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE
+    )
+  `).run();
+
+  function hasTable(tableName) {
+    const row = db.prepare(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name = ?
+    `).get(tableName);
+    return Boolean(row);
+  }
+  function hasColumn(tableName, columnName) {
+    if (!hasTable(tableName)) return false;
+    const cols = db.prepare(`PRAGMA table_info(${tableName})`).all();
+    return cols.some((c) => String(c.name || "") === String(columnName));
+  }
+  function firstExistingColumn(tableName, candidates) {
+    for (const c of candidates) {
+      if (hasColumn(tableName, c)) return c;
+    }
+    return null;
+  }
+  function resolveWebOrigin(req) {
+    const envBase = String(process.env.IRONLOG_PUBLIC_BASE_URL || "").trim().replace(/\/+$/, "");
+    if (envBase) return envBase;
+    const protoHeader = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+    const hostHeader = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
+    const proto = protoHeader || "http";
+    if (hostHeader) return `${proto}://${hostHeader}`;
+    return "";
+  }
 
   function getRole(req) {
     return String(req.headers["x-user-role"] || "admin").trim().toLowerCase();
@@ -92,6 +130,89 @@ export default async function workOrderRoutes(app) {
     `).get(assetId);
 
     return Number(fromDailyHours?.total_hours || 0);
+  }
+
+  const getStoredWoQr = db.prepare(`
+    SELECT qr_payload, qr_text, generated_at
+    FROM work_order_qr_profiles
+    WHERE work_order_id = ?
+  `);
+  const upsertWoQr = db.prepare(`
+    INSERT INTO work_order_qr_profiles (work_order_id, qr_payload, qr_text, generated_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT(work_order_id) DO UPDATE SET
+      qr_payload = excluded.qr_payload,
+      qr_text = excluded.qr_text,
+      generated_at = datetime('now')
+  `);
+
+  function inferMakeModel(assetName, assetCode) {
+    const name = String(assetName || "").trim();
+    const code = String(assetCode || "").trim();
+    const tokens = name.split(/\s+/).filter(Boolean);
+    const make = tokens[0] ? String(tokens[0]).toUpperCase() : null;
+    let model = null;
+    if (tokens.length >= 2) {
+      const second = String(tokens[1] || "");
+      if (/[0-9]/.test(second) || second.length <= 12) model = second.toUpperCase();
+    }
+    if (!model && code) {
+      const codeToken = code.split(/[-_\s]/).find((t) => /[0-9]/.test(t));
+      if (codeToken) model = codeToken.toUpperCase();
+    }
+    return { make: make || null, model: model || null };
+  }
+
+  function buildWorkOrderQrProfile(wo, req) {
+    const makeCol = firstExistingColumn("assets", ["make", "asset_make", "manufacturer", "brand"]);
+    const modelCol = firstExistingColumn("assets", ["model", "asset_model"]);
+    let assetMake = null;
+    let assetModel = null;
+    if (makeCol || modelCol) {
+      const fields = [makeCol ? `${makeCol} AS make` : "NULL AS make", modelCol ? `${modelCol} AS model` : "NULL AS model"].join(", ");
+      const row = db.prepare(`SELECT ${fields} FROM assets WHERE id = ?`).get(wo.asset_id);
+      assetMake = row?.make != null ? String(row.make).trim() || null : null;
+      assetModel = row?.model != null ? String(row.model).trim() || null : null;
+    }
+    if (!assetMake || !assetModel) {
+      const inferred = inferMakeModel(wo.asset_name, wo.asset_code);
+      if (!assetMake) assetMake = inferred.make;
+      if (!assetModel) assetModel = inferred.model;
+    }
+
+    const origin = resolveWebOrigin(req);
+    const scanUrl = origin
+      ? `${origin}/web/workorder-qr.html?wo_id=${encodeURIComponent(String(wo.id))}`
+      : `/web/workorder-qr.html?wo_id=${encodeURIComponent(String(wo.id))}`;
+
+    const profile = {
+      generated_at: new Date().toISOString(),
+      work_order: {
+        id: Number(wo.id),
+        source: String(wo.source || ""),
+        status: String(wo.status || ""),
+        opened_at: wo.opened_at || null,
+        closed_at: wo.closed_at || null,
+      },
+      asset: {
+        asset_code: wo.asset_code || null,
+        asset_name: wo.asset_name || null,
+        category: wo.category || null,
+        make: assetMake,
+        model: assetModel,
+      },
+      scan_url: scanUrl,
+    };
+
+    const qrText = [
+      `IRONLOG WO #${wo.id}`,
+      `Scan URL: ${scanUrl}`,
+      `Asset: ${wo.asset_code || "-"}`,
+      `Status: ${String(wo.status || "").toUpperCase()}`,
+      `Source: ${String(wo.source || "")}`,
+    ].join("\n");
+
+    return { profile, qrText };
   }
 
   // List work orders (filter by status optional)
@@ -245,6 +366,67 @@ export default async function workOrderRoutes(app) {
     `).all(`work_order:${id}`);
 
     return { work_order: wo, breakdown, parts_issued: movements };
+  });
+
+  app.get("/:id/qr-profile", async (req, reply) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return reply.code(400).send({ error: "invalid id" });
+
+    const wo = db.prepare(`
+      SELECT
+        w.id, w.asset_id, w.source, w.status, w.opened_at, w.closed_at,
+        a.asset_code, a.asset_name, a.category
+      FROM work_orders w
+      JOIN assets a ON a.id = w.asset_id
+      WHERE w.id = ?
+    `).get(id);
+    if (!wo) return reply.code(404).send({ error: "work order not found" });
+
+    const built = buildWorkOrderQrProfile(wo, req);
+    const stored = getStoredWoQr.get(id);
+    let storedPayload = null;
+    if (stored?.qr_payload) {
+      try {
+        storedPayload = JSON.parse(String(stored.qr_payload || "{}"));
+      } catch {
+        storedPayload = null;
+      }
+    }
+
+    return {
+      ok: true,
+      work_order_id: id,
+      stored: stored
+        ? { qr_payload: storedPayload, qr_text: stored.qr_text, generated_at: stored.generated_at }
+        : null,
+      live_preview: built.profile,
+      live_qr_text: built.qrText,
+    };
+  });
+
+  app.post("/:id/qr-profile/refresh", async (req, reply) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return reply.code(400).send({ error: "invalid id" });
+
+    const wo = db.prepare(`
+      SELECT
+        w.id, w.asset_id, w.source, w.status, w.opened_at, w.closed_at,
+        a.asset_code, a.asset_name, a.category
+      FROM work_orders w
+      JOIN assets a ON a.id = w.asset_id
+      WHERE w.id = ?
+    `).get(id);
+    if (!wo) return reply.code(404).send({ error: "work order not found" });
+
+    const built = buildWorkOrderQrProfile(wo, req);
+    upsertWoQr.run(id, JSON.stringify(built.profile), built.qrText);
+
+    return {
+      ok: true,
+      work_order_id: id,
+      qr_payload: built.profile,
+      qr_text: built.qrText,
+    };
   });
     // Issue parts to a work order (creates stock movement OUT)
   // Body: { part_code, quantity }

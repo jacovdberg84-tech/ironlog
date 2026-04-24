@@ -141,10 +141,78 @@ function workOrderCard(wo) {
       <button data-pdf-id="${wo.id}" style="margin-top:8px;">Open PDF</button>
       <button data-pdf-download-id="${wo.id}" style="margin-top:8px;">Download PDF</button>
       <button data-view-id="${wo.id}" style="margin-top:8px;">View Detail</button>
+      <button data-wo-qr-open="${wo.id}" style="margin-top:8px;">Open QR Page</button>
+      <button data-wo-qr-print="${wo.id}" style="margin-top:8px;">Print WO QR</button>
+      <button data-wo-qr-png="${wo.id}" style="margin-top:8px;">Download WO QR PNG</button>
+      <button data-wo-qr-link="${wo.id}" style="margin-top:8px;">Copy WO Link</button>
       ${canRequestClose ? `<button data-request-close-id="${wo.id}" data-request-close-source="${String(wo.source || "").toLowerCase()}" style="margin-top:8px;">Request Close Approval</button>` : ""}
       ${canClose ? `<button data-close-id="${wo.id}" data-close-source="${String(wo.source || "").toLowerCase()}" style="margin-top:8px;">Close Work Order</button>` : ""}
     </div>
   `;
+}
+
+async function getWoQrData(woId) {
+  const id = Number(woId || 0);
+  if (!id) throw new Error("Invalid WO id");
+  const data = await fetchJson(`${API}/workorders/${id}/qr-profile/refresh`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({}),
+  });
+  const scanUrl = String(data?.qr_payload?.scan_url || "").trim();
+  const qrText = String(data?.qr_text || "").trim();
+  const value = scanUrl || qrText;
+  if (!value) throw new Error("No QR value generated");
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=${encodeURIComponent(value)}`;
+  return { scanUrl: scanUrl || `/web/workorder-qr.html?wo_id=${id}`, qrUrl };
+}
+
+async function openWoQrPage(woId) {
+  const data = await getWoQrData(woId);
+  window.open(data.scanUrl, "_blank");
+}
+
+async function downloadWoQrPng(woId) {
+  const data = await getWoQrData(woId);
+  const res = await fetch(data.qrUrl);
+  if (!res.ok) throw new Error(`QR image fetch failed (${res.status})`);
+  const blob = await res.blob();
+  const obj = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = obj;
+  a.download = `WO_${Number(woId)}_qr.png`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(obj);
+}
+
+async function printWoQr(woId) {
+  const data = await getWoQrData(woId);
+  const win = window.open("", "_blank", "width=900,height=700");
+  if (!win) throw new Error("Popup blocked");
+  const html = `<!doctype html><html><head><meta charset="utf-8"/><title>WO #${Number(woId)} QR</title>
+  <style>body{font-family:Arial,sans-serif;margin:20px;color:#111}.sheet{border:1px solid #333;border-radius:8px;padding:16px;max-width:500px}
+  img{width:220px;height:220px;border:1px solid #999}.k{font-size:14px;margin-top:8px}@media print{body{margin:0}.sheet{border:0;padding:8mm}}</style></head>
+  <body><div class="sheet"><h2 style="margin:0 0 8px;">IRONLOG WO #${Number(woId)}</h2><img src="${data.qrUrl}" alt="WO QR"/><div class="k">${data.scanUrl}</div></div>
+  <script>window.onload=()=>{window.focus();window.print();};</script></body></html>`;
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+}
+
+async function copyWoLink(woId) {
+  const data = await getWoQrData(woId);
+  await navigator.clipboard.writeText(data.scanUrl);
+}
+
+async function fetchJson(url, options) {
+  const res = await fetch(url, options);
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+  if (!res.ok) throw new Error(data?.error || data?.message || text || `Request failed (${res.status})`);
+  return data || {};
 }
 
 function renderParts(parts) {
@@ -723,6 +791,10 @@ document.addEventListener("DOMContentLoaded", () => {
       const rowSource = target.getAttribute("data-close-source");
       const requestCloseId = target.getAttribute("data-request-close-id");
       const requestCloseSource = target.getAttribute("data-request-close-source");
+      const woQrOpen = target.getAttribute("data-wo-qr-open");
+      const woQrPrint = target.getAttribute("data-wo-qr-print");
+      const woQrPng = target.getAttribute("data-wo-qr-png");
+      const woQrLink = target.getAttribute("data-wo-qr-link");
       if (pdfId) {
         openWorkOrderPdf(pdfId);
         return;
@@ -741,6 +813,22 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       if (requestCloseId) {
         openCloseModalForRow(requestCloseId, requestCloseSource);
+        return;
+      }
+      if (woQrOpen) {
+        openWoQrPage(woQrOpen).catch((e) => alert(`WO QR open failed: ${e.message}`));
+        return;
+      }
+      if (woQrPrint) {
+        printWoQr(woQrPrint).catch((e) => alert(`WO QR print failed: ${e.message}`));
+        return;
+      }
+      if (woQrPng) {
+        downloadWoQrPng(woQrPng).catch((e) => alert(`WO QR download failed: ${e.message}`));
+        return;
+      }
+      if (woQrLink) {
+        copyWoLink(woQrLink).then(() => alert(`WO #${woQrLink} link copied`)).catch((e) => alert(`WO link copy failed: ${e.message}`));
         return;
       }
       if (id) openCloseModalForRow(id, rowSource);
