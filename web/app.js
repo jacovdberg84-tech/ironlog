@@ -8582,6 +8582,27 @@ async function printVisibleDailyQrSheet() {
   setStatus(`Printable QR sheet ready (${labels.length} labels) ✅`);
 }
 
+function applyQrSheetPreset() {
+  const preset = String(qs("qrPreset")?.value || "custom");
+  const defs = {
+    small: { cols: 5, qr: 22, cell: 32, gap: 2 },
+    medium: { cols: 4, qr: 28, cell: 45, gap: 4 },
+    large: { cols: 3, qr: 35, cell: 55, gap: 5 },
+    avery_3474: { cols: 4, qr: 23, cell: 34, gap: 2 },
+    avery_l7163: { cols: 2, qr: 35, cell: 43, gap: 4 },
+  };
+  const target = defs[preset];
+  if (!target) return;
+  const setVal = (id, value) => {
+    const el = qs(id);
+    if (el) el.value = String(value);
+  };
+  setVal("qrCols", target.cols);
+  setVal("qrSizeMm", target.qr);
+  setVal("qrCellMm", target.cell);
+  setVal("qrGapMm", target.gap);
+}
+
 async function generateDailyAssetQr() {
   const assetCode = String(qs("dailyQrAssetCode")?.value || "").trim();
   if (!assetCode) {
@@ -9819,6 +9840,14 @@ async function init() {
   qs("dailyQrPrintVisible")?.addEventListener("click", () =>
     printVisibleDailyQrSheet().catch((e) => setStatus("QR sheet print error: " + e.message))
   );
+  qs("qrPreset")?.addEventListener("change", applyQrSheetPreset);
+  ["qrCols", "qrSizeMm", "qrCellMm", "qrGapMm"].forEach((id) => {
+    qs(id)?.addEventListener("input", () => {
+      const preset = qs("qrPreset");
+      if (preset && preset.value !== "custom") preset.value = "custom";
+    });
+  });
+  applyQrSheetPreset();
 
   // Net banner
   refreshNetBanner();

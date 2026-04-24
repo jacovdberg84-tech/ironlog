@@ -1183,6 +1183,17 @@
             <button id="dailyQrPrintVisible" class="btn btn-secondary btn-sm">Print Visible QR Sheet</button>
           </div>
           <div class="bulk-sched">
+            <label>
+              <span>Preset</span>
+              <select id="qrPreset" class="w-140">
+                <option value="custom">Custom</option>
+                <option value="small">Small (5 col)</option>
+                <option value="medium" selected>Medium (4 col)</option>
+                <option value="large">Large (3 col)</option>
+                <option value="avery_3474">Avery 3474 style</option>
+                <option value="avery_l7163">Avery L7163 style</option>
+              </select>
+            </label>
             <label><span>Cols</span><input id="qrCols" class="w-80" type="number" min="1" max="8" step="1" value="4" /></label>
             <label><span>QR mm</span><input id="qrSizeMm" class="w-80" type="number" min="12" max="60" step="1" value="28" /></label>
             <label><span>Cell mm</span><input id="qrCellMm" class="w-80" type="number" min="20" max="80" step="1" value="45" /></label>
