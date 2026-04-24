@@ -2,6 +2,11 @@
   function qs(id) {
     return document.getElementById(id);
   }
+  function setText(id, value) {
+    const el = qs(id);
+    if (!el) return;
+    el.textContent = value;
+  }
 
   function statusClass(value) {
     const v = String(value || "").toLowerCase();
@@ -63,11 +68,11 @@
     const url = new URL(window.location.href);
     const assetCode = String(url.searchParams.get("asset_code") || "").trim();
     if (!assetCode) {
-      qs("sub").textContent = "Missing asset_code in QR URL.";
+      setText("sub", "Missing asset_code in QR URL.");
       return;
     }
 
-    qs("sub").textContent = `Loading ${assetCode}...`;
+    setText("sub", `Loading ${assetCode}...`);
     const data = await fetchJson(`/api/assets/${encodeURIComponent(assetCode)}/qr-profile`);
     const payload = data?.live_preview || data?.stored?.qr_payload || {};
     const service = payload?.next_service_due;
@@ -75,29 +80,31 @@
     const fuel = payload?.fuel;
     const status = String(payload?.status || "UNKNOWN").toUpperCase();
 
-    qs("sub").textContent = `Asset ${assetCode} loaded`;
-    qs("machineCode").textContent = String(payload?.asset?.asset_code || assetCode);
+    setText("sub", `Asset ${assetCode} loaded`);
+    setText("machineCode", String(payload?.asset?.asset_code || assetCode));
     const mm = inferMakeModelFromAsset(payload);
-    qs("machineMake").textContent = mm.make;
-    qs("machineModel").textContent = mm.model;
+    setText("machineMake", mm.make);
+    setText("machineModel", mm.model);
     const statusEl = qs("machineStatus");
-    statusEl.textContent = status;
-    statusEl.className = statusClass(status);
-    qs("meter").textContent = meter?.current_hours != null ? `${Number(meter.current_hours).toFixed(1)}h` : "-";
-    qs("nextService").textContent = service
+    if (statusEl) {
+      statusEl.textContent = status;
+      statusEl.className = statusClass(status);
+    }
+    setText("meter", meter?.current_hours != null ? `${Number(meter.current_hours).toFixed(1)}h` : "-");
+    setText("nextService", service
       ? `${service.service_name} @ ${service.next_due_hours}h (${service.remaining_hours}h remaining)`
-      : "No active maintenance plan";
-    qs("fuel30d").textContent = `${Number(fuel?.liters_last_30_days || 0).toFixed(1)} L`;
-    qs("inspectionDate").textContent = String(payload?.inspections?.last_inspection_date || "No inspection date");
+      : "No active maintenance plan");
+    setText("fuel30d", `${Number(fuel?.liters_last_30_days || 0).toFixed(1)} L`);
+    setText("inspectionDate", String(payload?.inspections?.last_inspection_date || "No inspection date"));
   }
 
   qs("refreshBtn")?.addEventListener("click", () => {
     loadQrProfile().catch((e) => {
-      qs("sub").textContent = `Error: ${e.message || e}`;
+      setText("sub", `Error: ${e.message || e}`);
     });
   });
 
   loadQrProfile().catch((e) => {
-    qs("sub").textContent = `Error: ${e.message || e}`;
+    setText("sub", `Error: ${e.message || e}`);
   });
 })();
