@@ -8480,6 +8480,103 @@ async function downloadAllVisibleDailyQrs() {
   setStatus(`QR ZIP ready: ${ok} included${fail ? `, ${fail} failed` : ""} ✅`);
 }
 
+async function printVisibleDailyQrSheet() {
+  const rowsToUse = dailyShowDownOnly ? dailyRows.filter((r) => !!r.is_down) : dailyRows;
+  const codes = Array.from(new Set(rowsToUse.map((r) => String(r.asset_code || "").trim()).filter(Boolean)));
+  if (!codes.length) {
+    alert("No visible assets to print.");
+    return;
+  }
+
+  setStatus(`Building printable QR sheet for ${codes.length} asset(s)...`);
+  const labels = [];
+  for (let i = 0; i < codes.length; i += 1) {
+    const code = codes[i];
+    try {
+      const { qrUrl } = await buildAssetQrImageData(code);
+      labels.push({ code, qrUrl });
+      setStatus(`Preparing label ${i + 1}/${codes.length}: ${code}`);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    } catch {
+      // skip bad rows but continue
+    }
+  }
+
+  if (!labels.length) throw new Error("Could not prepare any QR labels.");
+
+  const win = window.open("", "_blank", "width=1100,height=800");
+  if (!win) {
+    alert("Pop-up blocked. Allow pop-ups and try again.");
+    return;
+  }
+  const cells = labels
+    .map(
+      (l) => `
+      <div class="cell">
+        <img src="${l.qrUrl}" alt="${l.code} QR" />
+        <div class="code">${l.code}</div>
+      </div>
+    `
+    )
+    .join("");
+  const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>IRONLOG QR Label Sheet</title>
+  <style>
+    @page { size: A4 portrait; margin: 8mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Arial, sans-serif; color: #111; }
+    .sheet { padding: 8mm; }
+    .head { margin-bottom: 6mm; font-size: 12px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6mm 4mm;
+    }
+    .cell {
+      border: 1px solid #bbb;
+      border-radius: 4px;
+      padding: 3mm 2mm;
+      text-align: center;
+      min-height: 45mm;
+      break-inside: avoid;
+    }
+    .cell img {
+      width: 28mm;
+      height: 28mm;
+      image-rendering: pixelated;
+      display: block;
+      margin: 0 auto 2mm;
+    }
+    .code {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      overflow-wrap: anywhere;
+    }
+    @media print {
+      .no-print { display: none; }
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="head">IRONLOG QR Label Sheet | Total: ${labels.length} | Generated: ${new Date().toISOString()}</div>
+    <div class="grid">${cells}</div>
+    <div class="no-print" style="margin-top:10px;font-size:12px;color:#555;">Use browser print scaling at 100% for label alignment.</div>
+  </div>
+  <script>window.onload = () => { window.focus(); window.print(); };</script>
+</body>
+</html>`;
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+  setStatus(`Printable QR sheet ready (${labels.length} labels) ✅`);
+}
+
 async function generateDailyAssetQr() {
   const assetCode = String(qs("dailyQrAssetCode")?.value || "").trim();
   if (!assetCode) {
@@ -9713,6 +9810,9 @@ async function init() {
   qs("dailyQrPrint")?.addEventListener("click", printDailyAssetQr);
   qs("dailyQrDownloadVisible")?.addEventListener("click", () =>
     downloadAllVisibleDailyQrs().catch((e) => setStatus("Bulk QR download error: " + e.message))
+  );
+  qs("dailyQrPrintVisible")?.addEventListener("click", () =>
+    printVisibleDailyQrSheet().catch((e) => setStatus("QR sheet print error: " + e.message))
   );
 
   // Net banner
