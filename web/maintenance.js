@@ -1,4 +1,5 @@
 const API = "/api";
+const selectedDuePlanIds = new Set();
 let lastSyncPull = { last_id: 0, events: [] };
 const ROLE_KEY = "ironlog_session_role";
 const ROLES_KEY = "ironlog_session_roles";
@@ -271,6 +272,10 @@ function dueCard(d) {
 
   return `
     <div class="card">
+      <label style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
+        <input type="checkbox" class="due-plan-select" data-plan-id="${Number(d.plan_id || 0)}" ${selectedDuePlanIds.has(Number(d.plan_id || 0)) ? "checked" : ""} />
+        <small>Select for work order</small>
+      </label>
       <div><strong>${d.asset_code}</strong> - ${d.asset_name}</div>
       <div><strong>Service:</strong> ${d.service_name}</div>
       <div><strong>Current Hours:</strong> ${Number(d.current_hours || 0).toFixed(1)}</div>
@@ -741,6 +746,10 @@ async function loadDue() {
     
 
     const due = Array.isArray(data.due) ? data.due : [];
+    const validPlanIds = new Set(due.map((x) => Number(x.plan_id || 0)).filter((x) => x > 0));
+    Array.from(selectedDuePlanIds).forEach((id) => {
+      if (!validPlanIds.has(id)) selectedDuePlanIds.delete(id);
+    });
     due.sort((a, b) => {
       const getRank = (d) => {
         const remaining = Number(d.remaining_hours || 0);
@@ -756,6 +765,14 @@ async function loadDue() {
     container.innerHTML = due.length
       ? due.map(dueCard).join("")
       : "<div>No due services found.</div>";
+    container.querySelectorAll(".due-plan-select").forEach((el) => {
+      el.addEventListener("change", () => {
+        const pid = Number(el.getAttribute("data-plan-id") || 0);
+        if (!pid) return;
+        if (el.checked) selectedDuePlanIds.add(pid);
+        else selectedDuePlanIds.delete(pid);
+      });
+    });
   } catch (err) {
     console.error("Due error:", err);
     container.innerHTML = `<div style="color:#ff8080;">Error loading due services: ${err.message}</div>`;
@@ -935,10 +952,21 @@ async function generateWO() {
       generateBtn.textContent = "Generating...";
     }
 
-    const res = await fetch(`${API}/maintenance/generate`, { method: "POST" });
+    const nearDueHours = getDueThresholdHours();
+    const selectedPlans = Array.from(selectedDuePlanIds);
+    const res = await fetch(`${API}/maintenance/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        near_due_hours: nearDueHours,
+        plan_ids: selectedPlans
+      })
+    });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to generate work orders");
-    alert(`Created ${Number(data.created_count || 0)} work orders`);
+    const mode = selectedPlans.length ? "selected plans" : "overdue plans";
+    alert(`Created ${Number(data.created_count || 0)} work orders (${mode})`);
+    selectedDuePlanIds.clear();
     await loadDue();
     await loadHistory();
   } catch (err) {

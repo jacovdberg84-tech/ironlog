@@ -1125,6 +1125,9 @@ export default async function maintenanceRoutes(app) {
       if (date && !isDate(date)) {
         return reply.code(400).send({ error: "date must be YYYY-MM-DD" });
       }
+      const nearDueHours = Math.max(1, Number(req.body?.near_due_hours || req.query?.near_due_hours || 50));
+      const planIdsRaw = Array.isArray(req.body?.plan_ids) ? req.body.plan_ids : [];
+      const requestedPlanIds = [...new Set(planIdsRaw.map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0))];
 
       const plans = date
         ? db.prepare(`
@@ -1191,9 +1194,12 @@ export default async function maintenanceRoutes(app) {
         for (const p of plans) {
           const current = getAssetCurrentHours(p.asset_id);
           const next_due = Number(p.last_service_hours || 0) + Number(p.interval_hours || 0);
-          const overdue = (next_due - current) <= 0;
-
-          if (!overdue) continue;
+          const remaining = next_due - current;
+          const isOverdue = remaining <= 0;
+          const isNearDue = remaining <= nearDueHours;
+          const isRequestedPlan = requestedPlanIds.includes(Number(p.plan_id || 0));
+          const shouldCreate = requestedPlanIds.length ? (isRequestedPlan && isNearDue) : isOverdue;
+          if (!shouldCreate) continue;
           if (hasOpenServiceWO.get(p.plan_id)) continue;
 
           const wo = insertWO.run(p.asset_id, p.plan_id);
@@ -1214,6 +1220,8 @@ export default async function maintenanceRoutes(app) {
 
       return reply.send({
         ok: true,
+        near_due_hours: nearDueHours,
+        requested_plan_count: requestedPlanIds.length,
         created_count: created.length,
         created
       });

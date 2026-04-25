@@ -37,6 +37,41 @@ function parsePayload(payloadJson) {
   }
 }
 
+function getAssetCurrentHours(assetId) {
+  const fromAssetHours = db.prepare(`
+    SELECT total_hours
+    FROM asset_hours
+    WHERE asset_id = ?
+  `).get(assetId);
+  const assetHours = fromAssetHours?.total_hours == null ? null : Number(fromAssetHours.total_hours);
+
+  const fromDailyClosing = db.prepare(`
+    SELECT closing_hours
+    FROM daily_hours
+    WHERE asset_id = ?
+      AND closing_hours IS NOT NULL
+    ORDER BY work_date DESC, id DESC
+    LIMIT 1
+  `).get(assetId);
+  const dailyClosing = fromDailyClosing?.closing_hours == null ? null : Number(fromDailyClosing.closing_hours);
+
+  if (assetHours != null && Number.isFinite(assetHours) && dailyClosing != null && Number.isFinite(dailyClosing)) {
+    if (Math.abs(assetHours - dailyClosing) > 5000) return dailyClosing;
+    return dailyClosing >= assetHours ? dailyClosing : assetHours;
+  }
+  if (dailyClosing != null && Number.isFinite(dailyClosing)) return dailyClosing;
+  if (assetHours != null && Number.isFinite(assetHours)) return assetHours;
+
+  const fromDailyHours = db.prepare(`
+    SELECT COALESCE(SUM(hours_run), 0) AS total_hours
+    FROM daily_hours
+    WHERE asset_id = ?
+      AND is_used = 1
+      AND hours_run > 0
+  `).get(assetId);
+  return Number(fromDailyHours?.total_hours || 0);
+}
+
 function closeWorkOrderWithPayload(approvalId, payload, req) {
   const woId = Number(payload?.work_order_id || 0);
   if (!Number.isFinite(woId) || woId <= 0) {
@@ -96,8 +131,7 @@ function closeWorkOrderWithPayload(approvalId, payload, req) {
     if (isService) {
       const planId = Number(wo.reference_id || 0);
       if (planId > 0) {
-        const row = db.prepare(`SELECT total_hours FROM asset_hours WHERE asset_id = ?`).get(Number(wo.asset_id || 0));
-        const current = Number(row?.total_hours || 0);
+        const current = getAssetCurrentHours(Number(wo.asset_id || 0));
         db.prepare(`UPDATE maintenance_plans SET last_service_hours = ? WHERE id = ?`).run(current, planId);
       }
     }

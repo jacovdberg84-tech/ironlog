@@ -116,10 +116,22 @@ export default async function workOrderRoutes(app) {
       FROM asset_hours
       WHERE asset_id = ?
     `).get(assetId);
-
-    if (fromAssetHours && fromAssetHours.total_hours != null) {
-      return Number(fromAssetHours.total_hours || 0);
+    const assetHours = fromAssetHours?.total_hours == null ? null : Number(fromAssetHours.total_hours);
+    const fromDailyClosing = db.prepare(`
+      SELECT closing_hours
+      FROM daily_hours
+      WHERE asset_id = ?
+        AND closing_hours IS NOT NULL
+      ORDER BY work_date DESC, id DESC
+      LIMIT 1
+    `).get(assetId);
+    const dailyClosing = fromDailyClosing?.closing_hours == null ? null : Number(fromDailyClosing.closing_hours);
+    if (assetHours != null && Number.isFinite(assetHours) && dailyClosing != null && Number.isFinite(dailyClosing)) {
+      if (Math.abs(assetHours - dailyClosing) > 5000) return dailyClosing;
+      return dailyClosing >= assetHours ? dailyClosing : assetHours;
     }
+    if (dailyClosing != null && Number.isFinite(dailyClosing)) return dailyClosing;
+    if (assetHours != null && Number.isFinite(assetHours)) return assetHours;
 
     const fromDailyHours = db.prepare(`
       SELECT COALESCE(SUM(hours_run), 0) AS total_hours
