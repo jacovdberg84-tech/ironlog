@@ -680,21 +680,38 @@ export default async function maintenanceRoutes(app) {
   // =====================================================
   app.post("/plans/:id/rebase-last-service", async (req, reply) => {
     try {
-      const id = Number(req.params?.id || 0);
-      if (!id) {
-        return reply.code(400).send({ ok: false, error: "Invalid plan id" });
+      const idFromPath = Number(req.params?.id || 0);
+      const idFromBody = Number(req.body?.plan_id || 0);
+      const id = idFromPath > 0 ? idFromPath : (idFromBody > 0 ? idFromBody : 0);
+
+      let plan = null;
+      if (id > 0) {
+        plan = db.prepare(`
+          SELECT mp.id, mp.asset_id, mp.service_name, a.asset_code, a.asset_name
+          FROM maintenance_plans mp
+          JOIN assets a ON a.id = mp.asset_id
+          WHERE mp.id = ?
+          LIMIT 1
+        `).get(id);
+      }
+      if (!plan) {
+        const assetId = Number(req.body?.asset_id || 0);
+        const serviceName = String(req.body?.service_name || "").trim();
+        if (assetId > 0 && serviceName) {
+          plan = db.prepare(`
+            SELECT mp.id, mp.asset_id, mp.service_name, a.asset_code, a.asset_name
+            FROM maintenance_plans mp
+            JOIN assets a ON a.id = mp.asset_id
+            WHERE mp.asset_id = ?
+              AND UPPER(TRIM(mp.service_name)) = UPPER(TRIM(?))
+            ORDER BY mp.active DESC, mp.id DESC
+            LIMIT 1
+          `).get(assetId, serviceName);
+        }
       }
 
-      const plan = db.prepare(`
-        SELECT mp.id, mp.asset_id, mp.service_name, a.asset_code, a.asset_name
-        FROM maintenance_plans mp
-        JOIN assets a ON a.id = mp.asset_id
-        WHERE mp.id = ?
-        LIMIT 1
-      `).get(id);
-
       if (!plan) {
-        return reply.code(404).send({ ok: false, error: "Maintenance plan not found" });
+        return reply.code(400).send({ ok: false, error: "Invalid plan id or plan lookup context" });
       }
 
       const currentInfo = getAssetCurrentHoursInfo(Number(plan.asset_id || 0));
@@ -705,11 +722,11 @@ export default async function maintenanceRoutes(app) {
         UPDATE maintenance_plans
         SET last_service_hours = ?
         WHERE id = ?
-      `).run(safeHours, id);
+      `).run(safeHours, Number(plan.id));
 
       return reply.send({
         ok: true,
-        id,
+        id: Number(plan.id),
         asset_id: Number(plan.asset_id || 0),
         asset_code: plan.asset_code,
         asset_name: plan.asset_name,

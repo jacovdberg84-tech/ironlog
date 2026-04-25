@@ -248,8 +248,10 @@ function syncLastServiceHoursFromLive() {
 
 function planCard(p) {
   const planId = Number(p.id ?? p.plan_id ?? 0);
+  const assetId = Number(p.asset_id || 0);
+  const serviceName = String(p.service_name || "");
   return `
-    <div class="card" data-plan-id="${planId}">
+    <div class="card" data-plan-id="${planId}" data-asset-id="${assetId}" data-service-name="${esc(serviceName)}">
       <div><strong>${p.asset_code}</strong> - ${p.asset_name}</div>
       <div><strong>Service:</strong> ${p.service_name}</div>
       <div><strong>Interval:</strong> ${Number(p.interval_hours || 0).toFixed(1)} hrs</div>
@@ -737,12 +739,19 @@ async function loadPlans() {
   }
 }
 
-async function rebasePlanLastServiceHours(id) {
+async function rebasePlanLastServiceHours(id, fallback = {}) {
   const planId = Number(id || 0);
-  if (!planId) throw new Error("Plan id missing on selected card. Please refresh and try again.");
-  const res = await fetch(`${API}/maintenance/plans/${planId}/rebase-last-service`, {
+  const url = planId
+    ? `${API}/maintenance/plans/${planId}/rebase-last-service`
+    : `${API}/maintenance/plans/0/rebase-last-service`;
+  const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" }
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      plan_id: planId || null,
+      asset_id: Number(fallback.asset_id || 0) || null,
+      service_name: String(fallback.service_name || "").trim() || null
+    })
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Failed to rebase last service hours");
@@ -3600,11 +3609,13 @@ document.addEventListener("DOMContentLoaded", () => {
     plansList.addEventListener("click", (e) => {
       const btn = e.target instanceof HTMLElement ? e.target.closest("button[data-plan-rebase-id]") : null;
       if (!btn) return;
+      const card = btn.closest(".card");
       const directId = Number(btn.getAttribute("data-plan-rebase-id") || 0);
-      const cardId = Number(btn.closest(".card")?.getAttribute("data-plan-id") || 0);
+      const cardId = Number(card?.getAttribute("data-plan-id") || 0);
       const planId = directId || cardId;
-      if (!planId) return;
-      rebasePlanLastServiceHours(planId).catch((err) => alert(err.message || err));
+      const assetId = Number(card?.getAttribute("data-asset-id") || 0);
+      const serviceName = String(card?.getAttribute("data-service-name") || "");
+      rebasePlanLastServiceHours(planId, { asset_id: assetId, service_name: serviceName }).catch((err) => alert(err.message || err));
     });
   }
 
