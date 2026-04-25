@@ -247,16 +247,19 @@ function syncLastServiceHoursFromLive() {
 }
 
 function planCard(p) {
+  const planId = Number(p.id ?? p.plan_id ?? 0);
   return `
-    <div class="card">
+    <div class="card" data-plan-id="${planId}">
       <div><strong>${p.asset_code}</strong> - ${p.asset_name}</div>
       <div><strong>Service:</strong> ${p.service_name}</div>
       <div><strong>Interval:</strong> ${Number(p.interval_hours || 0).toFixed(1)} hrs</div>
       <div><strong>Last Service:</strong> ${Number(p.last_service_hours || 0).toFixed(1)} hrs</div>
       <div><strong>Active:</strong> ${Number(p.active || 0) ? "Yes" : "No"}</div>
+      ${planId > 0 ? `
       <div style="margin-top:8px;">
-        <button type="button" data-plan-rebase-id="${Number(p.id || 0)}">Rebase Last Service to Current Hours</button>
+        <button type="button" data-plan-rebase-id="${planId}">Rebase Last Service to Current Hours</button>
       </div>
+      ` : `<div class="muted" style="margin-top:8px;">Plan ID missing — cannot rebase from this row.</div>`}
     </div>
   `;
 }
@@ -721,7 +724,10 @@ async function loadPlans() {
       throw new Error(data.error || "Failed to load plans");
     }
 
-    const plans = Array.isArray(data.plans) ? data.plans : [];
+    const plans = (Array.isArray(data.plans) ? data.plans : []).map((p) => ({
+      ...p,
+      id: Number(p?.id ?? p?.plan_id ?? 0) || 0
+    }));
     container.innerHTML = plans.length
       ? plans.map(planCard).join("")
       : "<div>No maintenance plans found.</div>";
@@ -733,7 +739,7 @@ async function loadPlans() {
 
 async function rebasePlanLastServiceHours(id) {
   const planId = Number(id || 0);
-  if (!planId) return;
+  if (!planId) throw new Error("Plan id missing on selected card. Please refresh and try again.");
   const res = await fetch(`${API}/maintenance/plans/${planId}/rebase-last-service`, {
     method: "POST",
     headers: { "Content-Type": "application/json" }
@@ -3594,7 +3600,9 @@ document.addEventListener("DOMContentLoaded", () => {
     plansList.addEventListener("click", (e) => {
       const btn = e.target instanceof HTMLElement ? e.target.closest("button[data-plan-rebase-id]") : null;
       if (!btn) return;
-      const planId = Number(btn.getAttribute("data-plan-rebase-id") || 0);
+      const directId = Number(btn.getAttribute("data-plan-rebase-id") || 0);
+      const cardId = Number(btn.closest(".card")?.getAttribute("data-plan-id") || 0);
+      const planId = directId || cardId;
       if (!planId) return;
       rebasePlanLastServiceHours(planId).catch((err) => alert(err.message || err));
     });
