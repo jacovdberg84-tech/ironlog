@@ -3008,6 +3008,22 @@ export default async function reportsRoutes(app) {
       ORDER BY id ASC
     `).all(id);
 
+    const parseComponentNotes = (raw) => {
+      const text = String(raw || "").trim();
+      if (!text) return [];
+      return text
+        .split(/\r?\n|;/)
+        .map((s) => String(s || "").trim())
+        .filter(Boolean)
+        .map((line) => {
+          const m = line.match(/^([^:|-]+)\s*[:|-]\s*(.+)$/);
+          if (m) {
+            return { component: String(m[1] || "").trim(), note: String(m[2] || "").trim() };
+          }
+          return { component: "General", note: line };
+        });
+    };
+
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
     const pdf = await buildPdfBuffer(
       (doc) => {
@@ -3038,14 +3054,16 @@ export default async function reportsRoutes(app) {
         } catch {}
         if (checklist.length) {
           sectionTitle(doc, "Checklist");
-          doc.font("Helvetica").fontSize(10).fillColor("#111111");
-          for (const c of checklist) {
-            const st = c.ok === true ? "OK" : c.ok === false ? "FAIL" : "N/A";
-            doc.text(`• ${String(c.label || c.key || "")}: ${st}${c.note ? ` — ${c.note}` : ""}`, {
-              width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
-            });
-            doc.moveDown(0.15);
-          }
+          table(
+            doc,
+            ["Component", "Status", "Note"],
+            checklist.map((c) => ({
+              Component: compactCell(String(c.label || c.key || "-"), 80),
+              Status: c.ok === true ? "OK" : c.ok === false ? "FAIL" : "N/A",
+              Note: compactCell(String(c.note || "-"), 150),
+            })),
+            [0.35, 0.15, 0.5]
+          );
         }
 
         let reqParts = [];
@@ -3065,14 +3083,27 @@ export default async function reportsRoutes(app) {
           }
         }
 
+        const noteRows = parseComponentNotes(inspection.notes);
         sectionTitle(doc, "Notes");
-        doc
-          .font("Helvetica")
-          .fontSize(10)
-          .fillColor("#111111")
-          .text(compactCell(inspection.notes || "-", 2000), {
-            width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
-          });
+        if (noteRows.length) {
+          table(
+            doc,
+            ["Component", "Notes"],
+            noteRows.map((n) => ({
+              Component: compactCell(n.component || "General", 80),
+              Notes: compactCell(n.note || "-", 180),
+            })),
+            [0.3, 0.7]
+          );
+        } else {
+          doc
+            .font("Helvetica")
+            .fontSize(10)
+            .fillColor("#111111")
+            .text("-", {
+              width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+            });
+        }
 
         sectionTitle(doc, "Photos");
         if (!photos.length) {

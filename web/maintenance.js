@@ -1763,6 +1763,24 @@ function openManagerInspectionsBulkPdf(download = false, withPhotos = false) {
 }
 
 function inspectionCard(r) {
+  const formatComponentNotesHtml = (raw) => {
+    const text = String(raw || "").trim();
+    if (!text) return "<small>-</small>";
+    const rows = text
+      .split(/\r?\n|;/)
+      .map((s) => String(s || "").trim())
+      .filter(Boolean)
+      .map((line) => {
+        const m = line.match(/^([^:|-]+)\s*[:|-]\s*(.+)$/);
+        if (m) return { component: String(m[1] || "").trim(), note: String(m[2] || "").trim() };
+        return { component: "General", note: line };
+      });
+    if (!rows.length) return "<small>-</small>";
+    return rows
+      .map((n) => `<small><b>${esc(n.component)}:</b> ${esc(n.note)}</small>`)
+      .join("<br/>");
+  };
+
   const photos = Array.isArray(r.photos) ? r.photos : [];
   const photoHtml = photos.length
     ? `<div class="row stack-10">${photos.map((p) => {
@@ -1803,7 +1821,7 @@ function inspectionCard(r) {
       <div><small>Machine hrs: ${esc(hrs)} | Live snapshot: ${live} | ${wo}</small></div>
       ${failLine}
       ${partsLine}
-      <div style="margin-top:6px;"><small>${esc(r.notes || "")}</small></div>
+      <div style="margin-top:6px;">${formatComponentNotesHtml(r.notes)}</div>
       <div style="margin-top:8px;">${photoHtml}</div>
       <div class="row stack-10" style="margin-top:8px;">
         <button data-mi-open-pdf="${Number(r.id)}">Open PDF</button>
