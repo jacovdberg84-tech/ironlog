@@ -674,6 +674,55 @@ export default async function maintenanceRoutes(app) {
     }
   });
 
+  // =====================================================
+  // MAINTENANCE PLANS - REBASE LAST SERVICE TO LIVE HOURS
+  // POST /api/maintenance/plans/:id/rebase-last-service
+  // =====================================================
+  app.post("/plans/:id/rebase-last-service", async (req, reply) => {
+    try {
+      const id = Number(req.params?.id || 0);
+      if (!id) {
+        return reply.code(400).send({ ok: false, error: "Invalid plan id" });
+      }
+
+      const plan = db.prepare(`
+        SELECT mp.id, mp.asset_id, mp.service_name, a.asset_code, a.asset_name
+        FROM maintenance_plans mp
+        JOIN assets a ON a.id = mp.asset_id
+        WHERE mp.id = ?
+        LIMIT 1
+      `).get(id);
+
+      if (!plan) {
+        return reply.code(404).send({ ok: false, error: "Maintenance plan not found" });
+      }
+
+      const currentInfo = getAssetCurrentHoursInfo(Number(plan.asset_id || 0));
+      const liveHours = Number(currentInfo.hours || 0);
+      const safeHours = Number.isFinite(liveHours) ? Number(liveHours.toFixed(2)) : 0;
+
+      db.prepare(`
+        UPDATE maintenance_plans
+        SET last_service_hours = ?
+        WHERE id = ?
+      `).run(safeHours, id);
+
+      return reply.send({
+        ok: true,
+        id,
+        asset_id: Number(plan.asset_id || 0),
+        asset_code: plan.asset_code,
+        asset_name: plan.asset_name,
+        service_name: plan.service_name,
+        last_service_hours: safeHours,
+        source: currentInfo.source
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
     // =====================================================
   // GET LIVE HOURS FOR ONE ASSET
   // GET /api/maintenance/asset/:id/live-hours?as_of=YYYY-MM-DD (optional; meter/usage up to that date)

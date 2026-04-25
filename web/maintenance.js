@@ -254,6 +254,9 @@ function planCard(p) {
       <div><strong>Interval:</strong> ${Number(p.interval_hours || 0).toFixed(1)} hrs</div>
       <div><strong>Last Service:</strong> ${Number(p.last_service_hours || 0).toFixed(1)} hrs</div>
       <div><strong>Active:</strong> ${Number(p.active || 0) ? "Yes" : "No"}</div>
+      <div style="margin-top:8px;">
+        <button type="button" data-plan-rebase-id="${Number(p.id || 0)}">Rebase Last Service to Current Hours</button>
+      </div>
     </div>
   `;
 }
@@ -726,6 +729,23 @@ async function loadPlans() {
     console.error("Plans error:", err);
     container.innerHTML = `<div style="color:#ff8080;">Error loading plans: ${err.message}</div>`;
   }
+}
+
+async function rebasePlanLastServiceHours(id) {
+  const planId = Number(id || 0);
+  if (!planId) return;
+  const res = await fetch(`${API}/maintenance/plans/${planId}/rebase-last-service`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to rebase last service hours");
+  await loadPlans();
+  await loadDue();
+  await loadHistory();
+  alert(
+    `Rebased ${data.asset_code || ""} ${data.service_name || ""} to ${Number(data.last_service_hours || 0).toFixed(1)} hours (${data.source || "source unknown"}).`
+  );
 }
 
 async function loadDue() {
@@ -3529,6 +3549,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const saveBackfillBtn = document.getElementById("saveBackfillBtn");
   const inspectproRefreshStatusBtn = document.getElementById("inspectproRefreshStatusBtn");
   const backfillBody = document.getElementById("backfillBody");
+  const plansList = document.getElementById("plansList");
   const useLiveEl = document.getElementById("planUseLiveForLastService");
 
   syncDueThresholdInput();
@@ -3567,6 +3588,15 @@ document.addEventListener("DOMContentLoaded", () => {
       } else if (action === "delete") {
         deleteBackfillHistory(id).catch((err) => alert(err.message || err));
       }
+    });
+  }
+  if (plansList) {
+    plansList.addEventListener("click", (e) => {
+      const btn = e.target instanceof HTMLElement ? e.target.closest("button[data-plan-rebase-id]") : null;
+      if (!btn) return;
+      const planId = Number(btn.getAttribute("data-plan-rebase-id") || 0);
+      if (!planId) return;
+      rebasePlanLastServiceHours(planId).catch((err) => alert(err.message || err));
     });
   }
 
