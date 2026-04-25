@@ -50,6 +50,7 @@ function getAssetCurrentHours(assetId) {
     FROM daily_hours
     WHERE asset_id = ?
       AND closing_hours IS NOT NULL
+      AND DATE(work_date) IS NOT NULL
     ORDER BY work_date DESC, id DESC
     LIMIT 1
   `).get(assetId);

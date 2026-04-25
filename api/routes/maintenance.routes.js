@@ -26,6 +26,7 @@ function getAssetCurrentHoursInfo(assetId) {
     FROM daily_hours
     WHERE asset_id = ?
       AND closing_hours IS NOT NULL
+      AND DATE(work_date) IS NOT NULL
     ORDER BY work_date DESC, id DESC
     LIMIT 1
   `).get(assetId);
@@ -71,6 +72,7 @@ function getAssetHoursInfoAsOf(assetId, asOfYmd) {
     FROM daily_hours
     WHERE asset_id = ?
       AND closing_hours IS NOT NULL
+      AND DATE(work_date) IS NOT NULL
       AND work_date <= ?
     ORDER BY work_date DESC, id DESC
     LIMIT 1
