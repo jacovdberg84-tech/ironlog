@@ -2259,6 +2259,7 @@ async function loadDashboard() {
   }
 
   const syncDiagList = qs("syncDiagList");
+  const syncDiagTrend = qs("syncDiagTrend");
   if (syncDiagList) {
     syncDiagList.innerHTML = "";
     try {
@@ -2274,6 +2275,28 @@ async function loadDashboard() {
       setText("sdOutboxUnsynced", String(unsyncedTotal));
       setText("sdOutboxErrors", String(outboxErrors));
       setText("sdPeers", String(peerCount));
+
+      // Keep a short local trend history to show direction.
+      const trendKey = "ironlog_sync_diag_trend_v1";
+      let trendRows = [];
+      try {
+        const raw = localStorage.getItem(trendKey);
+        const parsed = raw ? JSON.parse(raw) : [];
+        trendRows = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        trendRows = [];
+      }
+      trendRows.push({
+        t: new Date().toISOString(),
+        unsynced: Number(unsyncedTotal || 0),
+        errors: Number(outboxErrors || 0),
+      });
+      trendRows = trendRows.slice(-12);
+      try {
+        localStorage.setItem(trendKey, JSON.stringify(trendRows));
+      } catch {
+        // ignore localStorage write failures
+      }
 
       tableRows.slice(0, 5).forEach((r) => {
         syncDiagList.appendChild(
@@ -2291,6 +2314,35 @@ async function loadDashboard() {
       if (!tableRows.length) {
         syncDiagList.appendChild(item("<small>No outbox backlog detected.</small>"));
       }
+
+      if (syncDiagTrend) {
+        const maxUnsynced = Math.max(1, ...trendRows.map((r) => Number(r.unsynced || 0)));
+        const maxErrors = Math.max(1, ...trendRows.map((r) => Number(r.errors || 0)));
+        const pointsUnsynced = trendRows
+          .map((r, i) => {
+            const x = trendRows.length <= 1 ? 0 : (i / (trendRows.length - 1)) * 100;
+            const y = 100 - (Number(r.unsynced || 0) / maxUnsynced) * 100;
+            return `${x.toFixed(2)},${y.toFixed(2)}`;
+          })
+          .join(" ");
+        const pointsErrors = trendRows
+          .map((r, i) => {
+            const x = trendRows.length <= 1 ? 0 : (i / (trendRows.length - 1)) * 100;
+            const y = 100 - (Number(r.errors || 0) / maxErrors) * 100;
+            return `${x.toFixed(2)},${y.toFixed(2)}`;
+          })
+          .join(" ");
+        syncDiagTrend.innerHTML = `
+          <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <small class="muted">Backlog trend (last ${trendRows.length} samples)</small>
+            <small class="muted">Unsynced <span style="color:#2563eb;">●</span> Errors <span style="color:#dc2626;">●</span></small>
+          </div>
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" style="width:100%; height:90px; background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px;">
+            <polyline fill="none" stroke="#2563eb" stroke-width="2.2" points="${pointsUnsynced}"></polyline>
+            <polyline fill="none" stroke="#dc2626" stroke-width="2.2" points="${pointsErrors}"></polyline>
+          </svg>
+        `;
+      }
     } catch (e) {
       setText("sdOutboxUnsynced", "0");
       setText("sdOutboxErrors", "0");
@@ -2301,6 +2353,7 @@ async function loadDashboard() {
       } else {
         syncDiagList.appendChild(item(`<small>Sync diagnostics unavailable: ${escapeHtml(msg || "unknown error")}</small>`));
       }
+      if (syncDiagTrend) syncDiagTrend.innerHTML = "";
     }
   }
 
