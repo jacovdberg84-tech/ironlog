@@ -311,10 +311,15 @@ function histRow(r) {
     daily_sum: "Daily sum",
   };
   const src = sourceMap[String(r.current_hours_source || "").trim()] || "Unknown";
+  const backfillId = Number(r.last_service_history_id || 0);
+  const canDelete = String(r.last_service_source || "").trim() === "backfill" && backfillId > 0;
   return `
     <tr class="${hrsToNext <= 0 ? "downRow" : ""}">
       <td><b>${eq}</b></td>
-      <td>${r.service_name || "-"}</td>
+      <td>
+        ${r.service_name || "-"}
+        ${canDelete ? `<div style="margin-top:6px;"><button data-hist-backfill-del="${backfillId}">Remove duplicate</button></div>` : ""}
+      </td>
       <td>${last}</td>
       <td style="text-align:right;">${fmt1(r.current_hours)}<br><small class="muted">(${src})</small></td>
       <td style="text-align:right;"><span class="${warn}">${fmt1(r.remaining_hours)}</span></td>
@@ -397,6 +402,17 @@ async function loadHistory() {
   } catch (e) {
     body.innerHTML = `<tr><td colspan="7" class="message-error">History load error: ${e.message || e}</td></tr>`;
   }
+}
+
+async function deleteHistoryDuplicate(id) {
+  const iid = Number(id || 0);
+  if (!iid) throw new Error("Invalid history id");
+  if (!confirm("Remove this duplicate service history entry?")) return;
+  const res = await fetch(`${API}/maintenance/history/backfill/${iid}`, { method: "DELETE" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Failed to delete history entry");
+  await loadHistory();
+  await loadBackfillHistory();
 }
 
 async function loadBackfillHistory() {
@@ -3880,6 +3896,13 @@ document.addEventListener("DOMContentLoaded", () => {
     if (delBtn) {
       deleteHistogramEvent(Number(delBtn.getAttribute("data-hist-del") || 0));
     }
+  });
+  document.getElementById("histBody")?.addEventListener("click", (evt) => {
+    const delBtn = evt.target?.closest?.("button[data-hist-backfill-del]");
+    if (!delBtn) return;
+    deleteHistoryDuplicate(Number(delBtn.getAttribute("data-hist-backfill-del") || 0)).catch((err) =>
+      alert(err.message || err)
+    );
   });
   document.getElementById("loadAssetKpiBtn")?.addEventListener("click", () => loadAssetKpiWeekly());
   document.getElementById("exportAssetKpiBtn")?.addEventListener("click", () => exportAssetKpiToExcel());

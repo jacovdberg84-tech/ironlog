@@ -944,6 +944,7 @@ export default async function maintenanceRoutes(app) {
       `);
       const getLastBackfillServiced = db.prepare(`
         SELECT
+          h.id AS history_id,
           DATE(h.service_date) AS last_serviced_date,
           h.service_date AS last_serviced_at
         FROM maintenance_service_history h
@@ -980,7 +981,8 @@ export default async function maintenanceRoutes(app) {
         const lastBackfill = getLastBackfillServiced.get(Number(p.asset_id || 0), String(p.service_name || ""));
         const lastWoAt = String(lastWo?.last_serviced_at || "");
         const lastBackfillAt = String(lastBackfill?.last_serviced_at || "");
-        const last = lastBackfillAt && (!lastWoAt || lastBackfillAt > lastWoAt) ? lastBackfill : lastWo;
+        const useBackfill = Boolean(lastBackfillAt && (!lastWoAt || lastBackfillAt > lastWoAt));
+        const last = useBackfill ? lastBackfill : lastWo;
         const avgRow = getAvgDaily.get(Number(p.asset_id || 0), startDate, endDate);
         const totalRun = Number(avgRow?.total_run || 0);
         const dayCount = Number(avgRow?.day_count || 0);
@@ -996,6 +998,8 @@ export default async function maintenanceRoutes(app) {
           asset_name: p.asset_name,
           service_name: p.service_name,
           last_serviced_date: last?.last_serviced_date || null,
+          last_service_source: useBackfill ? "backfill" : (last?.last_serviced_at ? "work_order" : null),
+          last_service_history_id: useBackfill ? Number(lastBackfill?.history_id || 0) : null,
           current_hours: Number(current.toFixed(2)),
           current_hours_source: currentInfo.source,
           remaining_hours: Number(remaining.toFixed(2)),
