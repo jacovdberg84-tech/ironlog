@@ -2037,7 +2037,7 @@ export default async function reportsRoutes(app) {
     }
 
     const isLdvFleetCode = (code) => /^V(0[1-9]|1[0-4])AM$/i.test(String(code || "").trim());
-    const rows = fuelByAsset.map((r) => {
+    const benchmarkRows = fuelByAsset.map((r) => {
       const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
       const fuelRun = getRunFromFuel(r.asset_id, start, end) || {};
       const fuelKm = Number(fuelRun.km_run || 0);
@@ -2316,7 +2316,7 @@ export default async function reportsRoutes(app) {
     }
 
     const isLdvFleetCode = (code) => /^V(0[1-9]|1[0-4])AM$/i.test(String(code || "").trim());
-    const rows = fuelByAsset.map((r) => {
+    const benchmarkRows = fuelByAsset.map((r) => {
       const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
       const fuelRun = getRunFromFuel(r.asset_id, start, end) || {};
       const fuelKm = Number(fuelRun.km_run || 0);
@@ -2339,6 +2339,7 @@ export default async function reportsRoutes(app) {
         metric_mode: mode,
         asset_code: r.asset_code,
         asset_name: r.asset_name,
+        category: r.category || "",
         fuel_liters: Number(fuel.toFixed(2)),
         km_run: Number(km.toFixed(2)),
         hours_run: Number(hours.toFixed(2)),
@@ -2353,7 +2354,9 @@ export default async function reportsRoutes(app) {
         fill_count: fillCount,
         flag: is_excessive ? "EXCESSIVE" : "OK",
       };
-    }).filter((r) => r.fuel_liters > 0)
+    });
+    const rows = benchmarkRows
+      .filter((r) => r.fuel_liters > 0)
       .filter((r) => r.metric_mode !== "km")
       .filter((r) => !isLdvFleetCode(r.asset_code))
       .filter((r) => (assetFilter ? String(r.asset_code || "").trim().toLowerCase() === assetFilter : true))
@@ -2365,6 +2368,27 @@ export default async function reportsRoutes(app) {
         const bv = b.metric_mode === "km" ? Number(b.variance_km_per_l || -999) : Number(b.variance_lph || -999);
         return bv - av;
       });
+    const includedCodes = new Set(rows.map((r) => String(r.asset_code || "").trim().toLowerCase()).filter(Boolean));
+    const missingRows = benchmarkRows
+      .filter((r) => (assetFilter ? String(r.asset_code || "").trim().toLowerCase() === assetFilter : true))
+      .filter((r) => (modeFilter === "km" ? r.metric_mode === "km" : modeFilter === "hours" ? r.metric_mode === "hours" : true))
+      .filter((r) => !includedCodes.has(String(r.asset_code || "").trim().toLowerCase()))
+      .map((r) => {
+        let reason = "Excluded by report filters";
+        if (Number(r.fuel_liters || 0) <= 0) reason = "No fuel logs in selected period";
+        else if (String(r.metric_mode || "").toLowerCase() === "km") reason = "KM-mode asset excluded by current benchmark sheet";
+        else if (isLdvFleetCode(r.asset_code)) reason = "LDV fleet code excluded";
+        return {
+          asset_code: r.asset_code,
+          asset_name: r.asset_name,
+          category: r.category || "",
+          metric_mode: r.metric_mode,
+          fuel_liters: Number(r.fuel_liters || 0),
+          fill_count: Number(r.fill_count || 0),
+          reason,
+        };
+      })
+      .sort((a, b) => String(a.asset_code || "").localeCompare(String(b.asset_code || "")));
 
     const summary = rows.reduce(
       (acc, r) => {
@@ -2403,6 +2427,7 @@ export default async function reportsRoutes(app) {
       { field: "Mode filter", value: modeFilter || "all" },
       { field: "Asset filter", value: assetFilter || "all" },
       { field: "Assets", value: summary.assets },
+      { field: "Missing / Not Shown", value: missingRows.length },
       { field: "Excessive", value: summary.excessive },
       { field: "Fuel Total (L)", value: summary.fuel_liters },
       { field: "Hours Run", value: summary.hours_run },
@@ -2450,6 +2475,30 @@ export default async function reportsRoutes(app) {
         variance_km_per_l: "",
         fill_count: "",
         flag: "",
+      });
+    }
+
+    const wsMissing = wb.addWorksheet("Missing Equipment");
+    wsMissing.columns = [
+      { header: "Asset Code", key: "asset_code", width: 16 },
+      { header: "Asset Name", key: "asset_name", width: 32 },
+      { header: "Category", key: "category", width: 18 },
+      { header: "Mode", key: "metric_mode", width: 10 },
+      { header: "Fuel Liters", key: "fuel_liters", width: 12 },
+      { header: "Fill Count", key: "fill_count", width: 10 },
+      { header: "Reason", key: "reason", width: 42 },
+    ];
+    if (missingRows.length) {
+      wsMissing.addRows(missingRows);
+    } else {
+      wsMissing.addRow({
+        asset_code: "-",
+        asset_name: "No missing equipment for current filters",
+        category: "",
+        metric_mode: "",
+        fuel_liters: "",
+        fill_count: "",
+        reason: "",
       });
     }
 
