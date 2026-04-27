@@ -445,6 +445,97 @@ async function loadEscalations() {
   }
 }
 
+async function ackEscalation(id) {
+  const msg = document.getElementById("woEscInboxMsg");
+  try {
+    await fetchJson(`${API}/workorders/schedule/escalations/${Number(id)}/ack`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({}),
+    });
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = `Escalation #${Number(id)} acknowledged.`;
+    }
+    await loadEscalationInbox();
+    await loadEscalations();
+  } catch (err) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = err.message;
+    }
+  }
+}
+
+async function escalateToNextLevel(id) {
+  const msg = document.getElementById("woEscInboxMsg");
+  try {
+    const data = await fetchJson(`${API}/workorders/schedule/escalations/${Number(id)}/next`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({}),
+    });
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = `Escalated to level ${Number(data?.next_level || 0)} (${String(data?.next_role || "-")}).`;
+    }
+    await loadEscalationInbox();
+    await loadEscalations();
+  } catch (err) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = err.message;
+    }
+  }
+}
+
+async function loadEscalationInbox() {
+  const role = getSessionRole();
+  const msg = document.getElementById("woEscInboxMsg");
+  const box = document.getElementById("woEscInbox");
+  if (!box) return;
+  try {
+    const [escData, cfgData] = await Promise.all([
+      fetchJson(`${API}/workorders/schedule/escalations`, { headers: authHeaders() }),
+      fetchJson(`${API}/workorders/schedule/escalation-config`, { headers: authHeaders() }),
+    ]);
+    const rows = Array.isArray(escData?.rows) ? escData.rows : [];
+    const cfg = cfgData?.config || {};
+    const roleByLevel = {
+      1: String(cfg.level1_role || "supervisor").toLowerCase(),
+      2: String(cfg.level2_role || "manager").toLowerCase(),
+      3: String(cfg.level3_role || "admin").toLowerCase(),
+    };
+    const mine = rows.filter((r) => {
+      const lvl = Math.max(1, Number(r.chain_level || 1));
+      return String(roleByLevel[lvl] || "").toLowerCase() === String(role || "").toLowerCase() && String(r.status || "").toLowerCase() === "open";
+    });
+    box.innerHTML = mine.length
+      ? mine.map((r) => `
+        <div class="item row" style="justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px;">
+          <div>
+            <strong>Esc #${Number(r.id)}</strong> | WO #${Number(r.work_order_id)} (${esc(r.asset_code || "-")}) | Level ${Number(r.chain_level || 1)} | Threshold ${Number(r.threshold_hours || 0)}h
+          </div>
+          <div class="row" style="gap:6px;">
+            <button type="button" data-esc-ack="${Number(r.id)}">Acknowledge</button>
+            <button type="button" data-esc-next="${Number(r.id)}">Escalate Next</button>
+          </div>
+        </div>
+      `).join("")
+      : `<small class="muted">No open escalation notifications for your role (${esc(role)}).</small>`;
+    if (msg) {
+      msg.className = "muted";
+      msg.textContent = `${mine.length} open escalation(s) for ${role}.`;
+    }
+  } catch (err) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = err.message;
+    }
+    box.innerHTML = "";
+  }
+}
+
 async function loadInspectionQuality() {
   const el = document.getElementById("woInspectionQuality");
   if (!el) return;
@@ -1062,6 +1153,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const ruleSaveBtn = document.getElementById("woRuleSaveBtn");
   const rulesList = document.getElementById("woRulesList");
   const escSaveBtn = document.getElementById("woEscSaveBtn");
+  const escInbox = document.getElementById("woEscInbox");
 
   const roleBadge = document.getElementById("woRoleBadge");
   if (roleBadge) roleBadge.textContent = `Role: ${role}`;
@@ -1084,6 +1176,21 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!(target instanceof HTMLElement)) return;
       const delId = target.getAttribute("data-rule-del");
       if (delId) deleteAssignmentRule(delId);
+    });
+  }
+  if (escInbox) {
+    escInbox.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const ackId = target.getAttribute("data-esc-ack");
+      const nextId = target.getAttribute("data-esc-next");
+      if (ackId) {
+        ackEscalation(ackId);
+        return;
+      }
+      if (nextId) {
+        escalateToNextLevel(nextId);
+      }
     });
   }
   if (awaitingApprovalBtn && statusEl) {
@@ -1232,4 +1339,5 @@ document.addEventListener("DOMContentLoaded", () => {
   loadAssignmentRules();
   loadEscalationConfig();
   loadEscalations();
+  loadEscalationInbox();
 });

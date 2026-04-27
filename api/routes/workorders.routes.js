@@ -466,6 +466,78 @@ export default async function workOrderRoutes(app) {
     return { ok: true, rows };
   });
 
+  app.post("/schedule/escalations/:id/ack", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "manager"])) return;
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid escalation id" });
+    const row = db.prepare(`SELECT id, status FROM work_order_escalations WHERE id = ?`).get(id);
+    if (!row) return reply.code(404).send({ error: "escalation not found" });
+    if (String(row.status || "").toLowerCase() !== "open") return reply.code(409).send({ error: "escalation is not open" });
+    db.prepare(`UPDATE work_order_escalations SET status = 'acknowledged' WHERE id = ?`).run(id);
+    writeAudit(db, req, {
+      module: "workorders",
+      action: "escalation_ack",
+      entity_type: "work_order_escalation",
+      entity_id: id,
+      payload: {},
+    });
+    return { ok: true, id, status: "acknowledged" };
+  });
+
+  app.post("/schedule/escalations/:id/next", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "manager"])) return;
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid escalation id" });
+    const row = db.prepare(`
+      SELECT id, work_order_id, threshold_hours, chain_level, status
+      FROM work_order_escalations
+      WHERE id = ?
+    `).get(id);
+    if (!row) return reply.code(404).send({ error: "escalation not found" });
+    const currentLevel = Math.max(1, Number(row.chain_level || 1));
+    if (currentLevel >= 3) return reply.code(409).send({ error: "already at highest escalation level" });
+
+    const cfg = db.prepare(`
+      SELECT level1_role, level2_role, level3_role
+      FROM work_order_escalation_config WHERE id = 1
+    `).get() || { level1_role: "supervisor", level2_role: "manager", level3_role: "admin" };
+    const nextLevel = currentLevel + 1;
+    const roleByLevel = {
+      1: String(cfg.level1_role || "supervisor"),
+      2: String(cfg.level2_role || "manager"),
+      3: String(cfg.level3_role || "admin"),
+    };
+    const nextRole = roleByLevel[nextLevel] || "admin";
+
+    const det = db.prepare(`
+      SELECT detail_json FROM work_order_escalations WHERE id = ?
+    `).get(id);
+    let detail = {};
+    try { detail = det?.detail_json ? JSON.parse(String(det.detail_json)) : {}; } catch { detail = {}; }
+    detail.chain_level = nextLevel;
+    detail.escalation_role = nextRole;
+
+    const ins = db.prepare(`
+      INSERT INTO work_order_escalations (work_order_id, threshold_hours, chain_level, status, detail_json)
+      VALUES (?, ?, ?, 'open', ?)
+    `).run(Number(row.work_order_id), Number(row.threshold_hours), Number(nextLevel), JSON.stringify(detail));
+    const newEscId = Number(ins.lastInsertRowid || 0);
+    db.prepare(`
+      INSERT INTO work_order_escalation_notifications (escalation_id, role_target, message)
+      VALUES (?, ?, ?)
+    `).run(newEscId, nextRole, `WO #${Number(row.work_order_id)} escalated to level ${nextLevel}`);
+    db.prepare(`UPDATE work_order_escalations SET status = 'escalated' WHERE id = ?`).run(id);
+
+    writeAudit(db, req, {
+      module: "workorders",
+      action: "escalation_next_level",
+      entity_type: "work_order_escalation",
+      entity_id: id,
+      payload: { new_escalation_id: newEscId, next_level: nextLevel, next_role: nextRole },
+    });
+    return { ok: true, id, new_escalation_id: newEscId, next_level: nextLevel, next_role: nextRole };
+  });
+
   app.post("/:id/schedule", async (req, reply) => {
     if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
     const id = Number(req.params.id);
