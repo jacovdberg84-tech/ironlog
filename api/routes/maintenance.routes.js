@@ -263,6 +263,10 @@ export default async function maintenanceRoutes(app) {
     const rows = db.prepare(`PRAGMA table_info(${table})`).all();
     return rows.some((r) => String(r.name || "") === String(col));
   }
+  function hasTable(table) {
+    const r = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ? LIMIT 1`).get(String(table || ""));
+    return Boolean(r?.name);
+  }
   function ensureColumn(table, colDef, colName) {
     if (!hasColumn(table, colName)) db.prepare(`ALTER TABLE ${table} ADD COLUMN ${colDef}`).run();
   }
@@ -1181,18 +1185,21 @@ export default async function maintenanceRoutes(app) {
         return m;
       }, new Map());
 
-      const historicalParts = db.prepare(`
-        SELECT
-          LOWER(TRIM(COALESCE(mr.service_type, ''))) AS service_key,
-          COALESCE(mp.part_name, '') AS part_name,
-          AVG(COALESCE(mp.quantity, 0)) AS avg_qty
-        FROM maintenance_records mr
-        JOIN maintenance_parts mp ON mp.maintenance_record_id = mr.id
-        WHERE DATE(mr.maintenance_date) BETWEEN DATE(?) AND DATE(?)
-          AND TRIM(COALESCE(mr.service_type, '')) <> ''
-          AND TRIM(COALESCE(mp.part_name, '')) <> ''
-        GROUP BY service_key, part_name
-      `).all(startDate, endDate);
+      const canReadMaintenanceParts = hasTable("maintenance_records") && hasTable("maintenance_parts");
+      const historicalParts = canReadMaintenanceParts
+        ? db.prepare(`
+            SELECT
+              LOWER(TRIM(COALESCE(mr.service_type, ''))) AS service_key,
+              COALESCE(mp.part_name, '') AS part_name,
+              AVG(COALESCE(mp.quantity, 0)) AS avg_qty
+            FROM maintenance_records mr
+            JOIN maintenance_parts mp ON mp.maintenance_record_id = mr.id
+            WHERE DATE(mr.maintenance_date) BETWEEN DATE(?) AND DATE(?)
+              AND TRIM(COALESCE(mr.service_type, '')) <> ''
+              AND TRIM(COALESCE(mp.part_name, '')) <> ''
+            GROUP BY service_key, part_name
+          `).all(startDate, endDate)
+        : [];
       const partDemandMap = new Map();
       for (const r of historicalParts) {
         const serviceKey = String(r.service_key || "");
@@ -1329,28 +1336,33 @@ export default async function maintenanceRoutes(app) {
         WHERE a.active = 1
         GROUP BY a.id
       `).all(startDate, endDate);
-      const partsByAsset = db.prepare(`
-        SELECT
-          mr.asset_id,
-          COALESCE(SUM(COALESCE(mp.quantity, 0) * COALESCE(p.unit_cost, 0)), 0) AS parts_cost
-        FROM maintenance_records mr
-        JOIN maintenance_parts mp ON mp.maintenance_record_id = mr.id
-        LEFT JOIN parts p ON LOWER(TRIM(p.part_name)) = LOWER(TRIM(mp.part_name))
-        WHERE DATE(mr.maintenance_date) BETWEEN DATE(?) AND DATE(?)
-        GROUP BY mr.asset_id
-      `).all(startDate, endDate)
-        .reduce((m, r) => m.set(Number(r.asset_id || 0), Number(r.parts_cost || 0)), new Map());
-      const lubeByAsset = db.prepare(`
-        SELECT
-          mr.asset_id,
-          COALESCE(SUM(COALESCE(ml.quantity, 0) * COALESCE(p.unit_cost, 0)), 0) AS lube_cost
-        FROM maintenance_records mr
-        JOIN maintenance_lubes ml ON ml.maintenance_record_id = mr.id
-        LEFT JOIN parts p ON LOWER(TRIM(p.part_name)) LIKE '%' || LOWER(TRIM(ml.lube_type)) || '%'
-        WHERE DATE(mr.maintenance_date) BETWEEN DATE(?) AND DATE(?)
-        GROUP BY mr.asset_id
-      `).all(startDate, endDate)
-        .reduce((m, r) => m.set(Number(r.asset_id || 0), Number(r.lube_cost || 0)), new Map());
+      const canReadMaintenanceLubes = hasTable("maintenance_records") && hasTable("maintenance_lubes");
+      const partsByAsset = canReadMaintenanceParts
+        ? db.prepare(`
+            SELECT
+              mr.asset_id,
+              COALESCE(SUM(COALESCE(mp.quantity, 0) * COALESCE(p.unit_cost, 0)), 0) AS parts_cost
+            FROM maintenance_records mr
+            JOIN maintenance_parts mp ON mp.maintenance_record_id = mr.id
+            LEFT JOIN parts p ON LOWER(TRIM(p.part_name)) = LOWER(TRIM(mp.part_name))
+            WHERE DATE(mr.maintenance_date) BETWEEN DATE(?) AND DATE(?)
+            GROUP BY mr.asset_id
+          `).all(startDate, endDate)
+            .reduce((m, r) => m.set(Number(r.asset_id || 0), Number(r.parts_cost || 0)), new Map())
+        : new Map();
+      const lubeByAsset = canReadMaintenanceLubes
+        ? db.prepare(`
+            SELECT
+              mr.asset_id,
+              COALESCE(SUM(COALESCE(ml.quantity, 0) * COALESCE(p.unit_cost, 0)), 0) AS lube_cost
+            FROM maintenance_records mr
+            JOIN maintenance_lubes ml ON ml.maintenance_record_id = mr.id
+            LEFT JOIN parts p ON LOWER(TRIM(p.part_name)) LIKE '%' || LOWER(TRIM(ml.lube_type)) || '%'
+            WHERE DATE(mr.maintenance_date) BETWEEN DATE(?) AND DATE(?)
+            GROUP BY mr.asset_id
+          `).all(startDate, endDate)
+            .reduce((m, r) => m.set(Number(r.asset_id || 0), Number(r.lube_cost || 0)), new Map())
+        : new Map();
       const maintenanceCost = serviceCostRows
         .map((r) => {
           const aid = Number(r.asset_id || 0);

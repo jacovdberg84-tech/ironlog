@@ -114,6 +114,7 @@ function viewForSection(section) {
   const viewMap = {
     "maintenance": "main",
     "service-history": "main",
+    "maintenance-insights": "insights",
     "manager-inspections": "mi",
     "artisan-inspections": "ai",
     "weekly-forum": "wf",
@@ -142,7 +143,8 @@ function scrollToSection(section) {
           "wf": "weeklyForumSection",
           "kpi": "assetKpiSection",
           "hist": "histogramSection",
-          "sync": "syncAdminSection"
+          "sync": "syncAdminSection",
+          "insights": "maintenanceInsightsCard",
         };
         targetEl = document.getElementById(sectionMap[targetView]);
       }
@@ -174,6 +176,9 @@ function refreshTopViewData(view) {
       break;
     case "kpi":
       loadAssetKpiWeekly().catch(() => {});
+      break;
+    case "insights":
+      loadMaintenanceInsights().catch(() => {});
       break;
     case "sync":
       syncLoadState().catch(() => {});
@@ -1303,6 +1308,7 @@ function syncHeaders() {
 
 function setTopView(view) {
   const main = document.getElementById("mainMaintenanceCards");
+  const insightsCard = document.getElementById("maintenanceInsightsCard");
   const mi = document.getElementById("managerInspectionsSection");
   const ai = document.getElementById("artisanInspectionsSection");
   const wf = document.getElementById("weeklyForumSection");
@@ -1326,6 +1332,16 @@ function setTopView(view) {
     case "main":
       if (main) main.style.display = "block";
       if (planSection) planSection.style.display = "block";
+      if (insightsCard) insightsCard.style.display = "";
+      break;
+    case "insights":
+      if (main) main.style.display = "block";
+      if (planSection) planSection.style.display = "none";
+      if (main) {
+        main.querySelectorAll(":scope > .card").forEach((el) => {
+          el.style.display = el.id === "maintenanceInsightsCard" ? "" : "none";
+        });
+      }
       break;
     case "mi":
       if (mi) mi.style.display = "block";
@@ -1346,6 +1362,11 @@ function setTopView(view) {
       if (sync) sync.style.display = "block";
       break;
   }
+  if (view !== "insights" && main) {
+    main.querySelectorAll(":scope > .card").forEach((el) => {
+      el.style.display = "";
+    });
+  }
 
   // Update active state in sidebar
   const sidebar = document.getElementById("sidebar");
@@ -1356,6 +1377,9 @@ function setTopView(view) {
       switch (view) {
         case "main":
           isActive = section === "maintenance" || section === "service-history";
+          break;
+        case "insights":
+          isActive = section === "maintenance-insights";
           break;
         case "mi":
           isActive = section === "manager-inspections";
