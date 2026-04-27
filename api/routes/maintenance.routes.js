@@ -1562,6 +1562,120 @@ export default async function maintenanceRoutes(app) {
     }
   });
 
+  // GET /api/maintenance/insights.pdf?start=YYYY-MM-DD&end=YYYY-MM-DD&near_due_hours=50&download=1
+  app.get("/insights.pdf", async (req, reply) => {
+    try {
+      const q = new URLSearchParams();
+      const copy = (name, fallback = "") => {
+        const v = String(req.query?.[name] ?? fallback).trim();
+        if (v !== "") q.set(name, v);
+      };
+      copy("start");
+      copy("end");
+      copy("near_due_hours", "50");
+      copy("predictive_horizon_hours", "100");
+      copy("checklist_fail_threshold", "2");
+      copy("fuel_variance_threshold", "15");
+      const download = String(req.query?.download || "").trim() === "1";
+
+      const injected = await app.inject({
+        method: "GET",
+        url: `/api/maintenance/insights?${q.toString()}`,
+        headers: {
+          "x-user-name": String(req.headers?.["x-user-name"] || "system"),
+          "x-user-role": String(req.headers?.["x-user-role"] || "admin"),
+          "x-user-roles": String(req.headers?.["x-user-roles"] || "admin"),
+          "x-site-code": String(req.headers?.["x-site-code"] || "main"),
+        },
+      });
+      if (injected.statusCode >= 400) {
+        let payload = {};
+        try { payload = JSON.parse(String(injected.payload || "{}")); } catch {}
+        return reply.code(injected.statusCode).send(payload?.error ? payload : { ok: false, error: "Failed to build insights PDF" });
+      }
+      const data = JSON.parse(String(injected.payload || "{}"));
+      const start = String(data?.range?.start || "");
+      const end = String(data?.range?.end || "");
+
+      const pdf = await buildPdfBuffer((doc) => {
+        sectionTitle(doc, "Maintenance Insights Summary");
+        table(
+          doc,
+          ["Metric", "Value"],
+          [
+            { Metric: "Period", Value: `${start} to ${end}` },
+            { Metric: "Near Due Hours", Value: String(data?.range?.near_due_hours || "-") },
+            { Metric: "Predictive Horizon Hours", Value: String(data?.range?.predictive_horizon_hours || "-") },
+            { Metric: "Checklist Fail Threshold", Value: String(data?.range?.checklist_fail_threshold || "-") },
+            { Metric: "Fuel Variance Threshold (%)", Value: String(data?.range?.fuel_variance_threshold || "-") },
+          ],
+          [0.45, 0.55]
+        );
+
+        sectionTitle(doc, "Predictive At-Risk Plans");
+        const risk = Array.isArray(data?.predictive?.at_risk_plans) ? data.predictive.at_risk_plans : [];
+        table(
+          doc,
+          ["Asset", "Service", "Remaining Hrs", "Risk"],
+          risk.length
+            ? risk.slice(0, 20).map((r) => ({
+                Asset: `${String(r.asset_code || "-")} - ${String(r.asset_name || "-")}`,
+                Service: String(r.service_name || "-"),
+                "Remaining Hrs": Number(r.remaining_hours || 0).toFixed(1),
+                Risk: String(r.risk || "-"),
+              }))
+            : [{ Asset: "-", Service: "No at-risk plans", "Remaining Hrs": "-", Risk: "-" }],
+          [0.36, 0.28, 0.18, 0.18]
+        );
+
+        sectionTitle(doc, "SLA");
+        table(
+          doc,
+          ["Metric", "Hours"],
+          [
+            { Metric: "Open -> Assign", Hours: data?.sla?.avg_open_to_assign_hours ?? "-" },
+            { Metric: "Open -> Complete", Hours: data?.sla?.avg_open_to_complete_hours ?? "-" },
+            { Metric: "Complete -> Approve", Hours: data?.sla?.avg_complete_to_approve_hours ?? "-" },
+            { Metric: "Open -> Close", Hours: data?.sla?.avg_open_to_close_hours ?? "-" },
+            { Metric: "Service Work Orders", Hours: Number(data?.sla?.work_orders || 0) },
+          ],
+          [0.65, 0.35]
+        );
+
+        sectionTitle(doc, "Top Maintenance Cost Per Machine");
+        const costs = Array.isArray(data?.maintenance_cost) ? data.maintenance_cost : [];
+        table(
+          doc,
+          ["Asset", "Jobs", "Labor", "Parts", "Lube", "Total"],
+          costs.length
+            ? costs.slice(0, 20).map((r) => ({
+                Asset: `${String(r.asset_code || "-")} - ${String(r.asset_name || "-")}`,
+                Jobs: Number(r.service_jobs || 0),
+                Labor: Number(r.labor_cost || 0).toFixed(2),
+                Parts: Number(r.parts_cost || 0).toFixed(2),
+                Lube: Number(r.lube_cost || 0).toFixed(2),
+                Total: Number(r.total_cost || 0).toFixed(2),
+              }))
+            : [{ Asset: "No costs in period", Jobs: "-", Labor: "-", Parts: "-", Lube: "-", Total: "-" }],
+          [0.38, 0.08, 0.13, 0.13, 0.13, 0.15]
+        );
+      }, {
+        title: "IRONLOG",
+        subtitle: "Maintenance Insights",
+        rightText: `${start} to ${end}`,
+        showPageNumbers: true,
+      });
+
+      return reply
+        .header("Content-Type", "application/pdf")
+        .header("Content-Disposition", `${download ? "attachment" : "inline"}; filename="IRONLOG_Maintenance_Insights_${start}_to_${end}.pdf"`)
+        .send(pdf);
+    } catch (e) {
+      req.log.error(e);
+      return reply.code(500).send({ ok: false, error: e.message || String(e) });
+    }
+  });
+
   // =====================================================
   // BACKFILL (ANCIENT) SERVICE HISTORY
   // POST /api/maintenance/history/backfill

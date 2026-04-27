@@ -502,15 +502,31 @@ function renderMaintenanceInsights(data) {
 
   const downtimeDaily = Array.isArray(data?.trends?.downtime_daily) ? data.trends.downtime_daily : [];
   const laborDaily = Array.isArray(data?.trends?.labor_daily) ? data.trends.labor_daily : [];
-  const laborMap = new Map(laborDaily.map((r) => [String(r.day || ""), Number(r.labor_cost || 0)]));
-  trendsEl.innerHTML = insightsRowsTable(
-    ["Day", "Downtime Hrs", "Labor Cost"],
-    downtimeDaily.slice(-30).map((r) => [
-      r.day || "-",
-      Number(r.downtime_hours || 0).toFixed(2),
-      Number(laborMap.get(String(r.day || "")) || 0).toFixed(2),
-    ])
-  );
+  const toMiniBars = (title, rows, valueKey, color) => {
+    const latest = rows.slice(-14);
+    const maxVal = Math.max(1, ...latest.map((r) => Number(r?.[valueKey] || 0)));
+    const bars = latest
+      .map((r) => {
+        const day = String(r?.day || "-").slice(5);
+        const val = Number(r?.[valueKey] || 0);
+        const pct = Math.max(4, Math.min(100, (val / maxVal) * 100));
+        return `<div style="display:grid; grid-template-columns:56px 1fr 60px; align-items:center; gap:8px; margin:4px 0;">
+          <small class="muted">${escBackfill(day)}</small>
+          <div style="background:#e5e7eb; border-radius:6px; height:10px; overflow:hidden;">
+            <div style="width:${pct.toFixed(1)}%; height:100%; background:${color};"></div>
+          </div>
+          <small>${escBackfill(val.toFixed(2))}</small>
+        </div>`;
+      })
+      .join("");
+    return `<div class="card" style="padding:10px;"><div style="font-weight:600; margin-bottom:6px;">${escBackfill(title)}</div>${bars || `<small class="muted">No trend data.</small>`}</div>`;
+  };
+  trendsEl.innerHTML = `
+    <div class="form-grid">
+      ${toMiniBars("Downtime Hours (Last 14 days)", downtimeDaily, "downtime_hours", "#dc2626")}
+      ${toMiniBars("Labor Cost (Last 14 days)", laborDaily, "labor_cost", "#2563eb")}
+    </div>
+  `;
 }
 
 function getInsightsThresholds() {
@@ -560,6 +576,22 @@ function openMaintenanceInsightsXlsx() {
   q.set("checklist_fail_threshold", String(t.checklist_fail_threshold));
   q.set("fuel_variance_threshold", String(t.fuel_variance_threshold));
   window.open(`${API}/maintenance/insights.xlsx?${q.toString()}`, "_blank");
+}
+
+function openMaintenanceInsightsPdf(download = false) {
+  const start = String(document.getElementById("insightsStart")?.value || "").trim();
+  const end = String(document.getElementById("insightsEnd")?.value || "").trim();
+  if (!start || !end) return alert("Select insights start and end dates.");
+  const t = persistInsightsThresholds();
+  const q = new URLSearchParams();
+  q.set("start", start);
+  q.set("end", end);
+  q.set("near_due_hours", String(t.near_due_hours));
+  q.set("predictive_horizon_hours", String(t.predictive_horizon_hours));
+  q.set("checklist_fail_threshold", String(t.checklist_fail_threshold));
+  q.set("fuel_variance_threshold", String(t.fuel_variance_threshold));
+  if (download) q.set("download", "1");
+  window.open(`${API}/maintenance/insights.pdf?${q.toString()}`, "_blank");
 }
 
 async function loadMaintenanceInsights() {
@@ -4148,6 +4180,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("loadWeeklyForumBtn")?.addEventListener("click", loadWeeklyForumSummary);
   document.getElementById("saveRsgProfileBtn")?.addEventListener("click", saveRsgProfile);
   document.getElementById("loadInsightsBtn")?.addEventListener("click", () => loadMaintenanceInsights());
+  document.getElementById("openInsightsPdfBtn")?.addEventListener("click", () => openMaintenanceInsightsPdf(false));
+  document.getElementById("downloadInsightsPdfBtn")?.addEventListener("click", () => openMaintenanceInsightsPdf(true));
   document.getElementById("downloadInsightsXlsxBtn")?.addEventListener("click", () => openMaintenanceInsightsXlsx());
   document.getElementById("loadRsgProfilesBtn")?.addEventListener("click", loadRsgProfiles);
   document.getElementById("downloadRsgCsvTemplateBtn")?.addEventListener("click", downloadRsgCsvTemplate);
