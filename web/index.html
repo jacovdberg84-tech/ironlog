@@ -4285,9 +4285,18 @@
                 <input id="smtpTestTo" class="w-full" placeholder="manager@company.com" />
               </div>
             </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Subscription (for end-to-end send)</label>
+                <select id="smtpSubscriptionId" class="w-full">
+                  <option value="">Select subscription...</option>
+                </select>
+              </div>
+            </div>
             <div class="action-buttons">
               <button id="saveSmtpSettingsBtn" class="btn btn-primary">Save SMTP</button>
               <button id="testSmtpSettingsBtn" class="btn btn-secondary">Send Test Email</button>
+              <button id="sendSubscriptionNowBtn" class="btn btn-secondary">Send Subscription Now</button>
             </div>
             <pre class="output" id="smtpSettingsResult"></pre>
           </div>

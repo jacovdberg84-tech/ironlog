@@ -1366,11 +1366,32 @@ async function loadSmtpSettings() {
     if (out) {
       out.textContent = `Loaded SMTP settings.\nPassword set: ${s.has_password ? "yes" : "no"}\nUpdated by: ${s.updated_by || "-"}\nUpdated at: ${s.updated_at || "-"}`;
     }
+    await loadSmtpSubscriptionOptions();
     setStatus("SMTP settings loaded.");
   } catch (e) {
     if (out) out.textContent = String(e.message || e);
     setStatus("SMTP settings load failed.");
   }
+}
+
+async function loadSmtpSubscriptionOptions() {
+  const sel = qs("smtpSubscriptionId");
+  if (!sel) return;
+  const current = String(sel.value || "");
+  const data = await fetchJson(`${API}/api/reports/subscriptions`);
+  const rows = Array.isArray(data?.subscriptions) ? data.subscriptions : [];
+  sel.innerHTML = '<option value="">Select subscription...</option>';
+  rows.forEach((r) => {
+    const id = Number(r.id || 0);
+    if (!id) return;
+    const opt = document.createElement("option");
+    opt.value = String(id);
+    const channel = String(r.channel || "").toLowerCase();
+    const active = Number(r.active || 0) === 1 ? "active" : "paused";
+    opt.textContent = `${r.name || "Subscription"} (#${id}) - ${channel} - ${active}`;
+    sel.appendChild(opt);
+  });
+  if (current && Array.from(sel.options).some((o) => o.value === current)) sel.value = current;
 }
 
 async function saveSmtpSettings() {
@@ -1419,6 +1440,24 @@ async function testSmtpSettings() {
   } catch (e) {
     if (out) out.textContent = String(e.message || e);
     setStatus("SMTP test failed.");
+  }
+}
+
+async function sendSubscriptionNowFromAdmin() {
+  const out = qs("smtpSettingsResult");
+  const id = Number(qs("smtpSubscriptionId")?.value || 0);
+  if (!id) return alert("Select a subscription first.");
+  setStatus("Sending subscription now...");
+  try {
+    const data = await fetchJson(`${API}/api/reports/subscriptions/${id}/send-now`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (out) out.textContent = JSON.stringify(data, null, 2);
+    setStatus("Subscription sent.");
+  } catch (e) {
+    if (out) out.textContent = String(e.message || e);
+    setStatus("Subscription send failed.");
   }
 }
 
@@ -9815,6 +9854,9 @@ async function init() {
   );
   qs("testSmtpSettingsBtn")?.addEventListener("click", () =>
     testSmtpSettings().catch((e) => setStatus("SMTP test error: " + e.message))
+  );
+  qs("sendSubscriptionNowBtn")?.addEventListener("click", () =>
+    sendSubscriptionNowFromAdmin().catch((e) => setStatus("Subscription send error: " + e.message))
   );
   qs("loadApprovals")?.addEventListener("click", () =>
     loadApprovalRequests().catch((e) => setStatus("Approvals error: " + e.message))
