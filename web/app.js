@@ -2028,6 +2028,7 @@ async function loadDashboard() {
   setSkeleton("woList", 2);
   setSkeleton("riskBoardList", 2);
   setSkeleton("slaList", 2);
+  setSkeleton("syncDiagList", 2);
   setSkeleton("costTrendList", 2);
   setSkeleton("costList", 2);
   setSkeleton("lubeList", 2);
@@ -2254,6 +2255,60 @@ async function loadDashboard() {
       } catch (e) {
         setStatus(`SLA action failed: ${e.message || e}`);
       }
+    });
+  }
+
+  const syncDiagList = qs("syncDiagList");
+  if (syncDiagList) {
+    syncDiagList.innerHTML = "";
+    try {
+      const sd = await fetchJson(`${API}/api/sync/diagnostics`);
+      const tableRows = Array.isArray(sd?.outbox_unsynced_by_table) ? sd.outbox_unsynced_by_table : [];
+      const errRows = Array.isArray(sd?.outbox_error_breakdown) ? sd.outbox_error_breakdown : [];
+      const peers = Array.isArray(sd?.checkpoints) ? sd.checkpoints : [];
+      const unsyncedTotal = tableRows.reduce((sum, r) => sum + Number(r?.count || 0), 0);
+      const outboxErrors = errRows
+        .filter((r) => String(r?.error_text || "").trim() !== "" && String(r?.error_text || "") !== "(none)")
+        .reduce((sum, r) => sum + Number(r?.count || 0), 0);
+      const peerCount = new Set(peers.map((r) => String(r?.peer_name || "").trim()).filter(Boolean)).size;
+      setText("sdOutboxUnsynced", String(unsyncedTotal));
+      setText("sdOutboxErrors", String(outboxErrors));
+      setText("sdPeers", String(peerCount));
+
+      tableRows.slice(0, 5).forEach((r) => {
+        syncDiagList.appendChild(
+          item(`<b>${escapeHtml(r.table_name || "-")}</b> — ${Number(r.count || 0)} pending`)
+        );
+      });
+      errRows
+        .filter((r) => String(r?.error_text || "").trim() !== "" && String(r?.error_text || "") !== "(none)")
+        .slice(0, 3)
+        .forEach((r) => {
+          syncDiagList.appendChild(
+            item(`<small>Error: ${escapeHtml(String(r.error_text || "-"))} (${Number(r.count || 0)})</small>`)
+          );
+        });
+      if (!tableRows.length) {
+        syncDiagList.appendChild(item("<small>No outbox backlog detected.</small>"));
+      }
+    } catch (e) {
+      setText("sdOutboxUnsynced", "0");
+      setText("sdOutboxErrors", "0");
+      setText("sdPeers", "0");
+      const msg = String(e?.message || "");
+      if (msg.toLowerCase().includes("403")) {
+        syncDiagList.appendChild(item("<small>Sync diagnostics available to admin/supervisor roles.</small>"));
+      } else {
+        syncDiagList.appendChild(item(`<small>Sync diagnostics unavailable: ${escapeHtml(msg || "unknown error")}</small>`));
+      }
+    }
+  }
+
+  const refreshSyncBtn = qs("refreshSyncDiagnostics");
+  if (refreshSyncBtn && !refreshSyncBtn.dataset.bound) {
+    refreshSyncBtn.dataset.bound = "1";
+    refreshSyncBtn.addEventListener("click", () => {
+      loadDashboard().catch((e) => setStatus(`Dashboard reload failed: ${e.message || e}`));
     });
   }
 

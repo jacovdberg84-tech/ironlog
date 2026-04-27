@@ -425,6 +425,20 @@
 
           <div class="dash-card">
             <div class="dash-card-header">
+              <h3>Sync Diagnostics</h3>
+              <button id="refreshSyncDiagnostics" class="btn-secondary">Refresh</button>
+            </div>
+            <div class="stock-stats">
+              <span class="stock-stat">Outbox Unsynced: <strong id="sdOutboxUnsynced">0</strong></span>
+              <span class="stock-stat stock-stat-warning">With Errors: <strong id="sdOutboxErrors">0</strong></span>
+              <span class="stock-stat">Peers: <strong id="sdPeers">0</strong></span>
+            </div>
+            <div class="list" id="syncDiagList"></div>
+            <p class="muted small">Central sync health for mobile/peer replication.</p>
+          </div>
+
+          <div class="dash-card">
+            <div class="dash-card-header">
               <h3>Reliability (MTBF / LTTR)</h3>
             </div>
             <div class="row">
