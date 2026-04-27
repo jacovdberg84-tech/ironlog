@@ -3178,6 +3178,7 @@ export default async function reportsRoutes(app) {
 
     const hasMiMh = hasColumn("manager_inspections", "machine_hours");
     const hasMiWo = hasColumn("manager_inspections", "work_order_id");
+    const hasMiChecklist = hasColumn("manager_inspections", "checklist_json");
     const rows = db.prepare(`
       SELECT
         mi.id,
@@ -3186,6 +3187,7 @@ export default async function reportsRoutes(app) {
         mi.${miInspectorCol} AS inspector_name,
         mi.notes,
         ${hasMiMh ? "mi.machine_hours" : "NULL"} AS machine_hours,
+        ${hasMiChecklist ? "mi.checklist_json" : `''`} AS checklist_json,
         ${hasMiWo ? "mi.work_order_id" : "NULL"} AS work_order_id,
         a.asset_code,
         a.asset_name
@@ -3279,6 +3281,20 @@ export default async function reportsRoutes(app) {
           } else {
             for (const r of rows) {
               const photos = photosByInspection.get(Number(r.id)) || [];
+              let checklist = [];
+              try {
+                const cj = JSON.parse(String(r.checklist_json || "[]"));
+                if (Array.isArray(cj)) checklist = cj;
+              } catch {}
+              const failedChecklist = checklist.filter((c) => c && c.ok === false);
+              const checklistNotes = failedChecklist
+                .map((c) => {
+                  const label = String(c.label || c.key || "Item").trim();
+                  const note = String(c.note || "").trim();
+                  return note ? `${label}: ${note}` : label;
+                })
+                .filter(Boolean);
+              const description = String(r.notes || "").trim();
               ensurePageSpace(doc, 60);
               doc.font("Helvetica-Bold").fontSize(10).fillColor("#111111");
               doc.text(
@@ -3286,6 +3302,23 @@ export default async function reportsRoutes(app) {
                 { width: doc.page.width - doc.page.margins.left - doc.page.margins.right }
               );
               doc.moveDown(0.2);
+              doc.font("Helvetica").fontSize(9).fillColor("#111111");
+              doc.text(`Description: ${compactCell(description || "-", 700)}`, {
+                width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+              });
+              if (failedChecklist.length) {
+                doc.moveDown(0.1);
+                doc.text(`Checklist failures: ${failedChecklist.map((c) => String(c.label || c.key || "Item")).join("; ")}`, {
+                  width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+                });
+              }
+              if (checklistNotes.length) {
+                doc.moveDown(0.1);
+                doc.text(`Failure notes: ${compactCell(checklistNotes.join(" | "), 700)}`, {
+                  width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+                });
+              }
+              doc.moveDown(0.15);
               if (!photos.length) {
                 doc.font("Helvetica").fontSize(9).fillColor("#666666").text("No photos attached.");
                 doc.moveDown(0.3);
