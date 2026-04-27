@@ -96,6 +96,13 @@
       : "No active maintenance plan");
     setText("fuel30d", `${Number(fuel?.liters_last_30_days || 0).toFixed(1)} L`);
     setText("inspectionDate", String(payload?.inspections?.last_inspection_date || "No inspection date"));
+
+    const openInspectionsBtn = qs("openInspectionsBtn");
+    if (openInspectionsBtn) openInspectionsBtn.href = `./maintenance.html?section=manager-inspections&asset_code=${encodeURIComponent(assetCode)}`;
+    const openHistoryBtn = qs("openHistoryBtn");
+    if (openHistoryBtn) openHistoryBtn.href = `./maintenance.html?section=service-history&asset_code=${encodeURIComponent(assetCode)}`;
+    const openWoBtn = qs("openWoBtn");
+    if (openWoBtn) openWoBtn.href = `./workorders.html?search=${encodeURIComponent(assetCode)}`;
   }
 
   qs("refreshBtn")?.addEventListener("click", () => {

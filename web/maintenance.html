@@ -524,6 +524,16 @@
         <input id="miDate" type="date" />
         <input id="miInspector" class="w-200" placeholder="Inspector name" />
       </div>
+      <div class="card" style="padding:10px; margin-top:10px;">
+        <div style="font-weight:600; margin-bottom:6px;">Scan / Tap Asset (QR/NFC)</div>
+        <div class="row stack-10" style="align-items:center; flex-wrap:wrap;">
+          <input id="scanAssetCode" class="w-200" placeholder="Scan asset code (e.g. F500AM)" />
+          <button type="button" id="scanOpenAssetQrBtn">Open Asset QR</button>
+          <button type="button" id="scanOpenMaintenanceBtn">Open Maintenance View</button>
+          <button type="button" id="scanOpenWorkOrdersBtn">Open Work Orders</button>
+        </div>
+        <small class="muted">Works with camera scanners and NFC readers that paste asset code text.</small>
+      </div>
       <div class="row stack-10" style="align-items:flex-end; flex-wrap:wrap;">
         <div>
           <small class="muted">Machine hours (recorded)</small><br />
@@ -557,8 +567,40 @@
           Always create work order (follow-up) on save
         </label>
       </div>
+      <div class="row stack-10" style="margin-top:10px; align-items:flex-end; flex-wrap:wrap;">
+        <label>
+          Defect Severity
+          <select id="miDefectSeverity" class="w-200">
+            <option value="">Not set</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
+          </select>
+        </label>
+        <label>
+          Component
+          <input id="miDefectComponent" class="w-200" placeholder="Component or system" />
+        </label>
+        <label>
+          Risk
+          <input id="miDefectRisk" class="w-200" placeholder="Risk summary" />
+        </label>
+      </div>
+      <textarea id="miRecommendedAction" rows="2" placeholder="Recommended action..." style="width:100%;"></textarea>
+      <div class="row stack-10" style="align-items:flex-end; flex-wrap:wrap;">
+        <label style="display:flex; align-items:center; gap:6px;">
+          <input id="miRequireEvidence" type="checkbox" checked />
+          Mandatory evidence on failed checklist items
+        </label>
+        <label>
+          Evidence photos
+          <input id="miEvidencePhotos" type="file" accept="image/*" multiple />
+        </label>
+      </div>
       <textarea id="miNotes" rows="3" placeholder="Additional notes..." style="width:100%;"></textarea>
       <div class="row stack-10">
+        <button id="miDictateBtn" type="button">Voice to Note</button>
         <button id="saveMiBtn">Save Inspection</button>
       </div>
       <div id="miMsg" class="muted"></div>
@@ -674,6 +716,7 @@
       </div>
       <textarea id="aiNotes" rows="3" placeholder="Additional notes..." style="width:100%;"></textarea>
       <div class="row stack-10">
+        <button id="aiDictateBtn" type="button">Voice to Note</button>
         <button id="openAiBlankPdfBtn">Open Blank Form PDF</button>
         <button id="downloadAiBlankPdfBtn">Download Blank Form PDF</button>
         <button id="saveAiBtn">Save Artisan Inspection</button>

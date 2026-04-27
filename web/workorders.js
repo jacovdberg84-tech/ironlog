@@ -1264,6 +1264,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const kpiStrip = document.getElementById("woKpiStrip");
   const detailEl = document.getElementById("woDetail");
   const role = getSessionRole();
+  try {
+    const q = new URLSearchParams(window.location.search);
+    const initialSearch = String(q.get("search") || "").trim();
+    if (initialSearch && searchEl) {
+      searchEl.value = initialSearch;
+      if (statusEl) statusEl.value = "";
+    }
+  } catch {}
   const boardRefreshBtn = document.getElementById("woBoardRefreshBtn");
   const autoAssignBtn = document.getElementById("woAutoAssignBtn");
   const escalationsBtn = document.getElementById("woEscalationsBtn");

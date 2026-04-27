@@ -7469,4 +7469,136 @@ export default async function reportsRoutes(app) {
       .header("Content-Disposition", `attachment; filename="IRONLOG_Executive_Pack_${start}_to_${end}.xlsx"`)
       .send(Buffer.from(buffer));
   });
+
+  // GET /api/reports/executive-kpi-pack.xlsx?period_type=weekly|monthly&start=YYYY-MM-DD&end=YYYY-MM-DD&month=YYYY-MM&site_codes=main,site-b
+  app.get("/executive-kpi-pack.xlsx", async (req, reply) => {
+    const periodType = String(req.query?.period_type || "weekly").trim().toLowerCase();
+    const rawSites = String(req.query?.site_codes || "main").trim();
+    const siteCodes = Array.from(new Set(rawSites.split(",").map((s) => String(s || "").trim().toLowerCase()).filter(Boolean))).slice(0, 20);
+    if (!["weekly", "monthly"].includes(periodType)) {
+      return reply.code(400).send({ error: "period_type must be weekly or monthly" });
+    }
+    if (!siteCodes.length) {
+      return reply.code(400).send({ error: "site_codes is required" });
+    }
+    let start = "";
+    let end = "";
+    if (periodType === "monthly") {
+      const month = String(req.query?.month || "").trim();
+      const m = isMonth(month) ? month : todayYmd().slice(0, 7);
+      start = `${m}-01`;
+      const d = new Date(`${start}T00:00:00Z`);
+      d.setUTCMonth(d.getUTCMonth() + 1);
+      d.setUTCDate(0);
+      end = d.toISOString().slice(0, 10);
+    } else {
+      end = String(req.query?.end || "").trim() || todayYmd();
+      start = String(req.query?.start || "").trim() || monthStartIso(end);
+      if (!isYmd(start) || !isYmd(end) || start > end) {
+        return reply.code(400).send({ error: "weekly range requires valid start/end YYYY-MM-DD and start <= end" });
+      }
+    }
+    const scheduled = Math.max(0.5, Number(req.query?.scheduled || 10));
+    const nearDue = Math.max(1, Number(req.query?.near_due_hours || 50));
+
+    async function injectJson(url, siteCode) {
+      const headers = {
+        "x-site-code": siteCode,
+        "x-user-role": String(req.headers["x-user-role"] || "admin"),
+      };
+      if (req.headers.authorization) headers.authorization = String(req.headers.authorization);
+      const res = await app.inject({ method: "GET", url, headers });
+      if (res.statusCode >= 400) return {};
+      try { return JSON.parse(res.payload || "{}"); } catch { return {}; }
+    }
+    const asArray = (v) => (Array.isArray(v) ? v : []);
+    const safeNum = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const qCommon = `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+    const bySite = [];
+    for (const siteCode of siteCodes) {
+      const [kpi, wfSummary, mgrIns, artIns, fuel] = await Promise.all([
+        injectJson(`/api/dashboard/asset-kpi/weekly?${qCommon}&scheduled=${encodeURIComponent(String(scheduled))}`, siteCode),
+        injectJson(`/api/maintenance/weekly-forum/summary?${qCommon}&near_due_hours=${encodeURIComponent(String(nearDue))}`, siteCode),
+        injectJson(`/api/maintenance/inspections?${qCommon}`, siteCode),
+        injectJson(`/api/maintenance/artisan-inspections?${qCommon}`, siteCode),
+        injectJson(`/api/dashboard/fuel?${qCommon}&tolerance=0.15`, siteCode),
+      ]);
+      const assets = asArray(kpi.by_asset);
+      const availabilityAvg = assets.length
+        ? assets.reduce((acc, r) => acc + safeNum(r.availability_pct), 0) / assets.length
+        : 0;
+      const utilizationAvg = assets.length
+        ? assets.reduce((acc, r) => acc + safeNum(r.utilization_pct), 0) / assets.length
+        : 0;
+      const upcoming = asArray(wfSummary.upcoming_services);
+      const fuelRows = asArray(fuel.rows);
+      const fuelAnomalies = fuelRows.filter((r) => Number(r.is_excessive || 0) === 1).length;
+      bySite.push({
+        site_code: siteCode,
+        assets_tracked: assets.length,
+        avg_availability_pct: Number(availabilityAvg.toFixed(2)),
+        avg_utilization_pct: Number(utilizationAvg.toFixed(2)),
+        upcoming_services: upcoming.length,
+        manager_inspections: asArray(mgrIns.rows).length,
+        artisan_inspections: asArray(artIns.rows).length,
+        fuel_anomalies: fuelAnomalies,
+        est_service_cost: Number(
+          upcoming.reduce((acc, r) => acc + safeNum(r?.forecast?.est_service_kit_cost), 0).toFixed(2)
+        ),
+      });
+    }
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "IRONLOG";
+    wb.created = new Date();
+    const ws = wb.addWorksheet("Site Comparison");
+    ws.addRow([
+      "site_code",
+      "period_type",
+      "start_date",
+      "end_date",
+      "assets_tracked",
+      "avg_availability_pct",
+      "avg_utilization_pct",
+      "upcoming_services",
+      "manager_inspections",
+      "artisan_inspections",
+      "fuel_anomalies",
+      "est_service_cost",
+    ]);
+    ws.getRow(1).font = { bold: true };
+    for (const row of bySite) {
+      ws.addRow([
+        row.site_code,
+        periodType,
+        start,
+        end,
+        row.assets_tracked,
+        row.avg_availability_pct,
+        row.avg_utilization_pct,
+        row.upcoming_services,
+        row.manager_inspections,
+        row.artisan_inspections,
+        row.fuel_anomalies,
+        row.est_service_cost,
+      ]);
+    }
+    ws.views = [{ state: "frozen", ySplit: 1 }];
+    ws.columns.forEach((col) => {
+      let width = 14;
+      col.eachCell({ includeEmpty: true }, (cell) => {
+        width = Math.max(width, Math.min(48, String(cell.value ?? "").length + 2));
+      });
+      col.width = width;
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    return reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header("Content-Disposition", `attachment; filename="IRONLOG_Executive_KPI_Pack_${periodType}_${start}_to_${end}.xlsx"`)
+      .send(Buffer.from(buf));
+  });
 }

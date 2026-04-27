@@ -285,6 +285,12 @@ export default async function maintenanceRoutes(app) {
   ensureColumn("manager_inspections", "checklist_json TEXT", "checklist_json");
   ensureColumn("manager_inspections", "required_parts_json TEXT", "required_parts_json");
   ensureColumn("manager_inspections", "work_order_id INTEGER", "work_order_id");
+  ensureColumn("manager_inspections", "defect_severity TEXT", "defect_severity");
+  ensureColumn("manager_inspections", "defect_component TEXT", "defect_component");
+  ensureColumn("manager_inspections", "defect_risk TEXT", "defect_risk");
+  ensureColumn("manager_inspections", "recommended_action TEXT", "recommended_action");
+  ensureColumn("manager_inspections", "evidence_required INTEGER DEFAULT 1", "evidence_required");
+  ensureColumn("manager_inspections", "evidence_photo_count INTEGER DEFAULT 0", "evidence_photo_count");
   ensureColumn("artisan_inspections", "uuid TEXT", "uuid");
   ensureColumn("artisan_inspections", "site_code TEXT DEFAULT 'main'", "site_code");
   ensureColumn("artisan_inspections", "updated_at TEXT", "updated_at");
@@ -3131,6 +3137,12 @@ export default async function maintenanceRoutes(app) {
           mi.live_hours_source,
           mi.checklist_json,
           mi.required_parts_json,
+          mi.defect_severity,
+          mi.defect_component,
+          mi.defect_risk,
+          mi.recommended_action,
+          mi.evidence_required,
+          mi.evidence_photo_count,
           mi.work_order_id,
           mi.created_at,
           a.asset_code,
@@ -3330,8 +3342,24 @@ export default async function maintenanceRoutes(app) {
       const checklist_json = JSON.stringify(checklist);
       const required_parts = normalizeInspectionParts(req.body?.required_parts);
       const required_parts_json = JSON.stringify(required_parts);
+      const defect_severity = String(req.body?.defect_severity || "").trim().toLowerCase() || null;
+      const defect_component = String(req.body?.defect_component || "").trim() || null;
+      const defect_risk = String(req.body?.defect_risk || "").trim() || null;
+      const recommended_action = String(req.body?.recommended_action || "").trim() || null;
+      const evidence_required = Number(req.body?.evidence_required ?? 1) ? 1 : 0;
+      const evidence_photo_count = Math.max(0, Number(req.body?.evidence_photo_count || 0));
 
       const anyChecklistFail = checklist.some((c) => c.ok === false);
+      const enforceEvidenceRules = Number(req.body?.enforce_evidence_rules || 0) === 1;
+      if (enforceEvidenceRules && evidence_required && anyChecklistFail) {
+        const missingFailComment = checklist.find((c) => c.ok === false && !String(c.note || "").trim());
+        if (missingFailComment) {
+          return reply.code(400).send({ ok: false, error: `Comment required for failed checklist item: ${missingFailComment.label}` });
+        }
+        if (evidence_photo_count < 1) {
+          return reply.code(400).send({ ok: false, error: "At least one evidence photo is required for failed checklist items" });
+        }
+      }
       const hasParts = required_parts.length > 0;
       const createExplicit = Boolean(req.body?.create_work_order);
       const createOnIssues = req.body?.create_work_order_on_issues !== false;
@@ -3342,9 +3370,12 @@ export default async function maintenanceRoutes(app) {
         INSERT INTO manager_inspections (
           asset_id, uuid, site_code, inspection_date, inspector_name, notes,
           machine_hours, live_hours_snapshot, live_hours_source,
-          checklist_json, required_parts_json, updated_at
+          checklist_json, required_parts_json,
+          defect_severity, defect_component, defect_risk, recommended_action,
+          evidence_required, evidence_photo_count,
+          updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `).run(
         asset_id,
         crypto.randomUUID(),
@@ -3356,7 +3387,13 @@ export default async function maintenanceRoutes(app) {
         liveSnap,
         liveSource,
         checklist_json,
-        required_parts_json
+        required_parts_json,
+        defect_severity,
+        defect_component,
+        defect_risk,
+        recommended_action,
+        evidence_required,
+        evidence_photo_count
       );
 
       const inspectionId = Number(ins.lastInsertRowid);

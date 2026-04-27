@@ -1836,11 +1836,23 @@ async function saveManagerInspection() {
   }
   const checklist = collectManagerInspectionChecklist();
   const required_parts = collectManagerInspectionParts();
+  const failedRows = getFailedChecklistRows(checklist);
+  const requireEvidence = document.getElementById("miRequireEvidence")?.checked !== false;
+  const evidenceFiles = Array.from(document.getElementById("miEvidencePhotos")?.files || []);
+  const defect_component = String(document.getElementById("miDefectComponent")?.value || "").trim();
+  const defect_severity = String(document.getElementById("miDefectSeverity")?.value || "").trim().toLowerCase();
+  const defect_risk = String(document.getElementById("miDefectRisk")?.value || "").trim();
+  const recommended_action = String(document.getElementById("miRecommendedAction")?.value || "").trim();
   const create_work_order = document.getElementById("miCreateWoAlways")?.checked === true;
   const create_work_order_on_issues = document.getElementById("miAutoWoOnIssues")?.checked !== false;
 
   if (!asset_id) return alert("Select an asset.");
   if (!inspection_date) return alert("Select inspection date.");
+  if (requireEvidence && failedRows.length) {
+    const missingNote = failedRows.find((r) => !String(r?.note || "").trim());
+    if (missingNote) return alert(`Add a comment for failed item: ${missingNote.label}`);
+    if (!evidenceFiles.length) return alert("Upload at least one evidence photo for failed checklist items.");
+  }
   if (msg) msg.textContent = "Saving inspection...";
   try {
     const res = await fetch(`${API}/maintenance/inspections`, {
@@ -1854,12 +1866,31 @@ async function saveManagerInspection() {
         machine_hours,
         checklist,
         required_parts,
+        defect_component,
+        defect_severity,
+        defect_risk,
+        recommended_action,
+        evidence_required: requireEvidence ? 1 : 0,
+        evidence_photo_count: evidenceFiles.length,
+        enforce_evidence_rules: requireEvidence ? 1 : 0,
         create_work_order,
         create_work_order_on_issues,
       }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to save inspection");
+    if (Number(data.id || 0) > 0 && evidenceFiles.length) {
+      for (const file of evidenceFiles) {
+        const fd = new FormData();
+        fd.append("file", file);
+        const up = await fetch(`${API}/maintenance/inspections/${Number(data.id)}/photo?caption=${encodeURIComponent("Failure evidence")}`, {
+          method: "POST",
+          body: fd,
+        });
+        const upData = await up.json().catch(() => ({}));
+        if (!up.ok) throw new Error(upData.error || "Evidence photo upload failed");
+      }
+    }
     const wo = data.work_order_id ? ` Work order #${data.work_order_id} created.` : "";
     if (msg) msg.textContent = `Inspection saved.${wo}`;
     resetManagerInspectionForm();
@@ -2327,6 +2358,51 @@ function collectManagerInspectionChecklist() {
   });
 }
 
+function getFailedChecklistRows(checklist) {
+  return (Array.isArray(checklist) ? checklist : []).filter((c) => c && c.ok === false);
+}
+
+function appendVoiceToField(fieldId) {
+  const out = document.getElementById(fieldId);
+  if (!out) return;
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    alert("Voice dictation is not supported in this browser.");
+    return;
+  }
+  const rec = new SpeechRecognition();
+  rec.lang = "en-US";
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  rec.onresult = (evt) => {
+    const text = String(evt?.results?.[0]?.[0]?.transcript || "").trim();
+    if (!text) return;
+    const existing = String(out.value || "").trim();
+    out.value = existing ? `${existing} ${text}` : text;
+    out.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  rec.onerror = () => {
+    alert("Voice dictation failed. Please try again.");
+  };
+  rec.start();
+}
+
+function getSelectedAssetCode(selectId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return "";
+  const opt = sel.options?.[sel.selectedIndex];
+  if (!opt) return "";
+  const label = String(opt.textContent || "").trim();
+  const code = label.split("-")[0]?.trim();
+  return String(code || "").toUpperCase();
+}
+
+function resolveScanAssetCode() {
+  const scan = String(document.getElementById("scanAssetCode")?.value || "").trim().toUpperCase();
+  if (scan) return scan;
+  return getSelectedAssetCode("miAsset");
+}
+
 function addManagerInspectionPartRow(partCode = "", qty = "", note = "") {
   const body = document.getElementById("miPartsBody");
   if (!body) return;
@@ -2409,6 +2485,18 @@ async function pullManagerInspectionLiveHours() {
 
 function resetManagerInspectionForm() {
   document.getElementById("miNotes").value = "";
+  const miDefectComponent = document.getElementById("miDefectComponent");
+  if (miDefectComponent) miDefectComponent.value = "";
+  const miDefectSeverity = document.getElementById("miDefectSeverity");
+  if (miDefectSeverity) miDefectSeverity.value = "";
+  const miDefectRisk = document.getElementById("miDefectRisk");
+  if (miDefectRisk) miDefectRisk.value = "";
+  const miRecommendedAction = document.getElementById("miRecommendedAction");
+  if (miRecommendedAction) miRecommendedAction.value = "";
+  const miRequireEvidence = document.getElementById("miRequireEvidence");
+  if (miRequireEvidence) miRequireEvidence.checked = true;
+  const miEvidencePhotos = document.getElementById("miEvidencePhotos");
+  if (miEvidencePhotos) miEvidencePhotos.value = "";
   MANAGER_INSPECTION_CHECKLIST.forEach((row) => {
     document.querySelectorAll(`input[name="miChk-${row.key}"]`).forEach((r) => {
       r.checked = false;
@@ -4062,8 +4150,30 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("aiDate")?.addEventListener("change", aiReloadHours);
   document.getElementById("openAiBlankPdfBtn")?.addEventListener("click", () => openArtisanBlankFormPdf(false));
   document.getElementById("downloadAiBlankPdfBtn")?.addEventListener("click", () => openArtisanBlankFormPdf(true));
+  document.getElementById("miDictateBtn")?.addEventListener("click", () => appendVoiceToField("miNotes"));
+  document.getElementById("aiDictateBtn")?.addEventListener("click", () => appendVoiceToField("aiNotes"));
   document.getElementById("saveMiBtn")?.addEventListener("click", saveManagerInspection);
   document.getElementById("saveAiBtn")?.addEventListener("click", saveArtisanInspection);
+  document.getElementById("scanOpenAssetQrBtn")?.addEventListener("click", () => {
+    const code = resolveScanAssetCode();
+    if (!code) return alert("Scan or select an asset first.");
+    window.open(`asset-qr.html?asset_code=${encodeURIComponent(code)}`, "_blank");
+  });
+  document.getElementById("scanOpenMaintenanceBtn")?.addEventListener("click", () => {
+    const code = resolveScanAssetCode();
+    if (!code) return alert("Scan or select an asset first.");
+    const sel = document.getElementById("miFilterAsset");
+    if (sel) {
+      const hit = Array.from(sel.options || []).find((o) => String(o.textContent || "").toUpperCase().startsWith(`${code} -`));
+      if (hit) sel.value = String(hit.value || "");
+    }
+    loadManagerInspections().catch(() => {});
+  });
+  document.getElementById("scanOpenWorkOrdersBtn")?.addEventListener("click", () => {
+    const code = resolveScanAssetCode();
+    if (!code) return alert("Scan or select an asset first.");
+    window.open(`workorders.html?search=${encodeURIComponent(code)}`, "_blank");
+  });
   document.getElementById("saveDrBtn")?.addEventListener("click", saveDamageReport);
   document.getElementById("loadMiBtn")?.addEventListener("click", loadManagerInspections);
   document.getElementById("loadAiBtn")?.addEventListener("click", loadArtisanInspections);
@@ -4128,7 +4238,25 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!id) return;
     uploadDamagePhoto(id).catch((e) => alert(`Damage photo upload failed: ${e.message || e}`));
   });
-  loadAssetsForInspection().catch(() => {});
+  const applyDeepLink = () => {
+    try {
+      const q = new URLSearchParams(window.location.search);
+      const section = String(q.get("section") || "").trim();
+      const assetCode = String(q.get("asset_code") || "").trim().toUpperCase();
+      if (section) scrollToSection(section);
+      if (assetCode) {
+        const scan = document.getElementById("scanAssetCode");
+        if (scan) scan.value = assetCode;
+        const sel = document.getElementById("miFilterAsset");
+        if (sel) {
+          const hit = Array.from(sel.options || []).find((o) => String(o.textContent || "").toUpperCase().startsWith(`${assetCode} -`));
+          if (hit) sel.value = String(hit.value || "");
+        }
+        loadManagerInspections().catch(() => {});
+      }
+    } catch {}
+  };
+  loadAssetsForInspection().then(applyDeepLink).catch(() => {});
   loadManagerInspections().catch(() => {});
   loadArtisanInspections().catch(() => {});
   loadDamageReports().catch(() => {});
