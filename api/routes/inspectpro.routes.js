@@ -68,6 +68,28 @@ function requireInspectproKey(req, reply) {
   return true;
 }
 
+function classifyIngestError(err) {
+  const msg = String(err?.message || err || "").trim();
+  const lower = msg.toLowerCase();
+  if (!msg) return { code: "INGEST_ERROR", retryable: false, httpStatus: 400 };
+  if (lower.includes("database is locked") || lower.includes("database busy") || lower.includes("sql_busy")) {
+    return { code: "DB_BUSY", retryable: true, httpStatus: 503, retryAfterSeconds: 30 };
+  }
+  if (lower.includes("asset not found")) {
+    return { code: "ASSET_NOT_FOUND", retryable: false, httpStatus: 404 };
+  }
+  if (
+    lower.includes("required") ||
+    lower.includes("must be") ||
+    lower.includes("invalid") ||
+    lower.includes("uuid is required") ||
+    lower.includes("event_type must be")
+  ) {
+    return { code: "VALIDATION_ERROR", retryable: false, httpStatus: 422 };
+  }
+  return { code: "INGEST_ERROR", retryable: false, httpStatus: 400 };
+}
+
 export default async function inspectproRoutes(app) {
   db.prepare(`
     CREATE TABLE IF NOT EXISTS inspectpro_ingest_events (
@@ -250,6 +272,10 @@ export default async function inspectproRoutes(app) {
     let targetId = null;
     let assetCode = null;
     let errorMessage = null;
+    let errorCode = null;
+    let retryable = false;
+    let httpStatus = 400;
+    let retryAfterSeconds = null;
     try {
       const tx = db.transaction(() => {
         const asset = resolveAsset(body);
@@ -342,6 +368,11 @@ export default async function inspectproRoutes(app) {
     } catch (err) {
       status = "error";
       errorMessage = String(err?.message || err);
+      const c = classifyIngestError(err);
+      errorCode = c.code;
+      retryable = Boolean(c.retryable);
+      httpStatus = Number(c.httpStatus || 400);
+      retryAfterSeconds = Number(c.retryAfterSeconds || 0) || null;
     }
 
     upsertEvent.run(
@@ -354,15 +385,25 @@ export default async function inspectproRoutes(app) {
       errorMessage,
       compactPayloadJson(body || {})
     );
-    return { status, errorMessage, eventUuid, eventType, targetId, assetCode };
+    return { status, errorMessage, errorCode, retryable, httpStatus, retryAfterSeconds, eventUuid, eventType, targetId, assetCode };
   };
 
   app.post("/events", async (req, reply) => {
     if (!requireInspectproKey(req, reply)) return;
     const body = req.body || {};
-    const { status, errorMessage, eventUuid, eventType, targetId, assetCode } = ingestEvent(body);
+    const { status, errorMessage, errorCode, retryable, httpStatus, retryAfterSeconds, eventUuid, eventType, targetId, assetCode } = ingestEvent(body);
     if (status !== "ok") {
-      return reply.code(400).send({ ok: false, status, error: errorMessage, uuid: eventUuid, event_type: eventType });
+      if (retryAfterSeconds) reply.header("Retry-After", String(retryAfterSeconds));
+      return reply.code(httpStatus || 400).send({
+        ok: false,
+        status,
+        error: errorMessage,
+        code: errorCode || "INGEST_ERROR",
+        retryable: Boolean(retryable),
+        retry_after_seconds: retryAfterSeconds,
+        uuid: eventUuid,
+        event_type: eventType,
+      });
     }
     return reply.send({ ok: true, status, uuid: eventUuid, event_type: eventType, target_id: targetId, asset_code: assetCode });
   });
@@ -371,9 +412,19 @@ export default async function inspectproRoutes(app) {
   async function replyInspectionPayload(req, reply) {
     if (!requireInspectproKey(req, reply)) return;
     const body = { ...(req.body || {}), event_type: "inspection" };
-    const { status, errorMessage, eventUuid, eventType, targetId, assetCode } = ingestEvent(body);
+    const { status, errorMessage, errorCode, retryable, httpStatus, retryAfterSeconds, eventUuid, eventType, targetId, assetCode } = ingestEvent(body);
     if (status !== "ok") {
-      return reply.code(400).send({ ok: false, status, error: errorMessage, uuid: eventUuid, event_type: eventType });
+      if (retryAfterSeconds) reply.header("Retry-After", String(retryAfterSeconds));
+      return reply.code(httpStatus || 400).send({
+        ok: false,
+        status,
+        error: errorMessage,
+        code: errorCode || "INGEST_ERROR",
+        retryable: Boolean(retryable),
+        retry_after_seconds: retryAfterSeconds,
+        uuid: eventUuid,
+        event_type: eventType,
+      });
     }
     return reply.send({ ok: true, status, uuid: eventUuid, event_type: eventType, target_id: targetId, asset_code: assetCode });
   }
@@ -385,9 +436,19 @@ export default async function inspectproRoutes(app) {
   app.post("/damage-report", async (req, reply) => {
     if (!requireInspectproKey(req, reply)) return;
     const body = { ...(req.body || {}), event_type: "damage_report" };
-    const { status, errorMessage, eventUuid, eventType, targetId, assetCode } = ingestEvent(body);
+    const { status, errorMessage, errorCode, retryable, httpStatus, retryAfterSeconds, eventUuid, eventType, targetId, assetCode } = ingestEvent(body);
     if (status !== "ok") {
-      return reply.code(400).send({ ok: false, status, error: errorMessage, uuid: eventUuid, event_type: eventType });
+      if (retryAfterSeconds) reply.header("Retry-After", String(retryAfterSeconds));
+      return reply.code(httpStatus || 400).send({
+        ok: false,
+        status,
+        error: errorMessage,
+        code: errorCode || "INGEST_ERROR",
+        retryable: Boolean(retryable),
+        retry_after_seconds: retryAfterSeconds,
+        uuid: eventUuid,
+        event_type: eventType,
+      });
     }
     return reply.send({ ok: true, status, uuid: eventUuid, event_type: eventType, target_id: targetId, asset_code: assetCode });
   });

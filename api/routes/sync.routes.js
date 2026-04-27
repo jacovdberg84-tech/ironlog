@@ -242,6 +242,18 @@ export default async function syncRoutes(app) {
         LIMIT 20
       `)
       .all();
+    const stuck = db
+      .prepare(`
+        SELECT
+          id, table_name, row_uuid, attempts, changed_at, last_attempt_at, error_text,
+          CAST((julianday('now') - julianday(changed_at)) * 24.0 AS REAL) AS age_hours
+        FROM sync_outbox
+        WHERE synced_at IS NULL
+          AND COALESCE(attempts, 0) >= 3
+        ORDER BY attempts DESC, changed_at ASC
+        LIMIT 50
+      `)
+      .all();
     const checkpoints = db
       .prepare(`
         SELECT peer_name, table_name, last_outbox_id, updated_at
@@ -275,6 +287,16 @@ export default async function syncRoutes(app) {
       schema_version: SYNC_SCHEMA_VERSION,
       outbox_unsynced_by_table: outboxByTable.map((r) => ({ table_name: r.table_name, count: Number(r.c || 0) })),
       outbox_error_breakdown: outboxErrors.map((r) => ({ error_text: r.error_text, count: Number(r.c || 0) })),
+      outbox_stuck_items: stuck.map((r) => ({
+        id: Number(r.id || 0),
+        table_name: r.table_name,
+        row_uuid: r.row_uuid,
+        attempts: Number(r.attempts || 0),
+        changed_at: r.changed_at,
+        last_attempt_at: r.last_attempt_at,
+        error_text: r.error_text,
+        age_hours: Number(Number(r.age_hours || 0).toFixed(2)),
+      })),
       checkpoints,
       inbound_recent: inboundRecent,
       inspectpro_ingest_status: ingestEvents.map((r) => ({
