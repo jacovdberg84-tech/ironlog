@@ -6,6 +6,7 @@ let stockCatalogCache = [];
 const ROLE_KEY = "ironlog_session_role";
 const USER_KEY = "ironlog_session_user";
 let boardState = [];
+let escPollTimer = null;
 
 function getSessionRole() {
   return String(localStorage.getItem(ROLE_KEY) || "admin").trim().toLowerCase() || "admin";
@@ -157,6 +158,13 @@ function boardPriorityClass(priority) {
   if (p === "P1") return "pri-p1";
   if (p === "P2") return "pri-p2";
   return "pri-p3";
+}
+
+function escLevelPill(level, role) {
+  const lvl = Math.max(1, Number(level || 1));
+  const r = String(role || "").trim() || `level-${lvl}`;
+  const cls = lvl === 1 ? "pri-p3" : lvl === 2 ? "pri-p2" : "pri-p1";
+  return `<span class="pill ${cls}">L${lvl} - ${esc(r)}</span>`;
 }
 
 function boardCard(wo) {
@@ -493,6 +501,8 @@ async function loadEscalationInbox() {
   const role = getSessionRole();
   const msg = document.getElementById("woEscInboxMsg");
   const box = document.getElementById("woEscInbox");
+  const ackEl = document.getElementById("woEscAckHistory");
+  const bellBtn = document.getElementById("woEscBellBtn");
   if (!box) return;
   try {
     const [escData, cfgData] = await Promise.all([
@@ -510,11 +520,15 @@ async function loadEscalationInbox() {
       const lvl = Math.max(1, Number(r.chain_level || 1));
       return String(roleByLevel[lvl] || "").toLowerCase() === String(role || "").toLowerCase() && String(r.status || "").toLowerCase() === "open";
     });
+    const mineAck = rows.filter((r) => {
+      const lvl = Math.max(1, Number(r.chain_level || 1));
+      return String(roleByLevel[lvl] || "").toLowerCase() === String(role || "").toLowerCase() && String(r.status || "").toLowerCase() === "acknowledged";
+    });
     box.innerHTML = mine.length
       ? mine.map((r) => `
         <div class="item row" style="justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px;">
           <div>
-            <strong>Esc #${Number(r.id)}</strong> | WO #${Number(r.work_order_id)} (${esc(r.asset_code || "-")}) | Level ${Number(r.chain_level || 1)} | Threshold ${Number(r.threshold_hours || 0)}h
+            <strong>Esc #${Number(r.id)}</strong> | WO #${Number(r.work_order_id)} (${esc(r.asset_code || "-")}) | ${escLevelPill(Number(r.chain_level || 1), roleByLevel[Math.max(1, Number(r.chain_level || 1))])} | Threshold ${Number(r.threshold_hours || 0)}h
           </div>
           <div class="row" style="gap:6px;">
             <button type="button" data-esc-ack="${Number(r.id)}">Acknowledge</button>
@@ -523,6 +537,19 @@ async function loadEscalationInbox() {
         </div>
       `).join("")
       : `<small class="muted">No open escalation notifications for your role (${esc(role)}).</small>`;
+    if (ackEl) {
+      ackEl.innerHTML = mineAck.length
+        ? mineAck.slice(0, 8).map((r) => `
+          <div class="item" style="margin-bottom:6px;">
+            Esc #${Number(r.id)} | WO #${Number(r.work_order_id)} (${esc(r.asset_code || "-")}) | ${escLevelPill(Number(r.chain_level || 1), roleByLevel[Math.max(1, Number(r.chain_level || 1))])}
+          </div>
+        `).join("")
+        : `<small class="muted">No acknowledged escalations for ${esc(role)}.</small>`;
+    }
+    if (bellBtn) {
+      bellBtn.textContent = `Escalations: ${mine.length}`;
+      bellBtn.className = mine.length > 0 ? "pill red" : "pill blue";
+    }
     if (msg) {
       msg.className = "muted";
       msg.textContent = `${mine.length} open escalation(s) for ${role}.`;
@@ -533,7 +560,15 @@ async function loadEscalationInbox() {
       msg.textContent = err.message;
     }
     box.innerHTML = "";
+    if (ackEl) ackEl.innerHTML = "";
   }
+}
+
+function startEscalationPolling() {
+  if (escPollTimer) clearInterval(escPollTimer);
+  escPollTimer = setInterval(() => {
+    loadEscalationInbox();
+  }, 30000);
 }
 
 async function loadInspectionQuality() {
@@ -1154,6 +1189,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const rulesList = document.getElementById("woRulesList");
   const escSaveBtn = document.getElementById("woEscSaveBtn");
   const escInbox = document.getElementById("woEscInbox");
+  const escBellBtn = document.getElementById("woEscBellBtn");
 
   const roleBadge = document.getElementById("woRoleBadge");
   if (roleBadge) roleBadge.textContent = `Role: ${role}`;
@@ -1191,6 +1227,13 @@ document.addEventListener("DOMContentLoaded", () => {
       if (nextId) {
         escalateToNextLevel(nextId);
       }
+    });
+  }
+  if (escBellBtn) {
+    escBellBtn.addEventListener("click", () => {
+      loadEscalationInbox();
+      const section = document.getElementById("woEscInbox");
+      if (section) section.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   }
   if (awaitingApprovalBtn && statusEl) {
@@ -1340,4 +1383,5 @@ document.addEventListener("DOMContentLoaded", () => {
   loadEscalationConfig();
   loadEscalations();
   loadEscalationInbox();
+  startEscalationPolling();
 });

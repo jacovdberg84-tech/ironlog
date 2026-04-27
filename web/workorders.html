@@ -137,8 +137,13 @@
 
     <div class="card">
       <h3 style="margin-top:0;">Escalation Inbox</h3>
-      <div id="woEscInboxMsg" class="muted">Open escalation notifications for your role.</div>
+      <div class="row" style="justify-content:space-between; align-items:center; gap:10px;">
+        <div id="woEscInboxMsg" class="muted">Open escalation notifications for your role.</div>
+        <button id="woEscBellBtn" type="button" class="pill blue">Escalations: 0</button>
+      </div>
       <div id="woEscInbox" style="margin-top:8px;"></div>
+      <h4 style="margin:12px 0 6px 0;">My Acknowledged</h4>
+      <div id="woEscAckHistory" class="muted">No acknowledged escalations yet.</div>
     </div>
 
     <div class="card">
