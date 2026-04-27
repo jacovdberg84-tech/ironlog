@@ -1071,8 +1071,9 @@ export default async function maintenanceRoutes(app) {
         .sort((a, b) => Number(a.remaining_hours || 0) - Number(b.remaining_hours || 0))
         .slice(0, 30);
 
+      const hasChecklistDetailJson = hasColumn("manager_inspections", "checklist_detail_json");
       const managerInspections = db.prepare(`
-        SELECT asset_id, checklist_json, checklist_detail_json
+        SELECT asset_id, checklist_json, ${hasChecklistDetailJson ? "checklist_detail_json" : "NULL AS checklist_detail_json"}
         FROM manager_inspections
         WHERE inspection_date BETWEEN ? AND ?
       `).all(startDate, endDate);
