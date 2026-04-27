@@ -2953,6 +2953,7 @@ export default async function reportsRoutes(app) {
 
     const miInspectorCol = pickExistingColumn("manager_inspections", ["inspector_name", "inspector"], "inspector_name");
     const miNotesCol = pickExistingColumn("manager_inspections", ["notes", "note", "remarks", "description"], "notes");
+    const hasMiChecklistDetail = hasColumn("manager_inspections", "checklist_detail_json");
     const photoInspectionCol = pickExistingColumn("manager_inspection_photos", ["inspection_id", "manager_inspection_id"], "inspection_id");
     const photoPathCol = pickExistingColumn("manager_inspection_photos", ["file_path", "photo_path", "path", "image_path", "url"], "file_path");
     const photoCaptionCol = pickExistingColumn("manager_inspection_photos", ["caption", "note", "notes", "description"], "caption");
@@ -2986,6 +2987,7 @@ export default async function reportsRoutes(app) {
         mi.inspection_date,
         mi.${miInspectorCol} AS inspector_name,
         mi.${miNotesCol} AS notes,
+        ${hasMiChecklistDetail ? "mi.checklist_detail_json" : `''`} AS checklist_detail_json,
         mi.created_at,
         ${machineHoursSelect} AS machine_hours,
         ${liveSnapSelect} AS live_hours_snapshot,
@@ -3023,6 +3025,34 @@ export default async function reportsRoutes(app) {
           }
           return { component: "General", note: line };
         });
+    };
+    const extractChecklistDetailNotes = (raw) => {
+      const text = String(raw || "").trim();
+      if (!text) return [];
+      try {
+        const parsed = JSON.parse(text);
+        const out = [];
+        const walk = (node, label = "") => {
+          if (node == null) return;
+          if (Array.isArray(node)) {
+            for (const item of node) walk(item, label);
+            return;
+          }
+          if (typeof node === "object") {
+            const comp = String(node.component || node.label || node.key || label || "General").trim();
+            const note = String(node.note || node.notes || node.description || node.comment || "").trim();
+            if (note) out.push({ component: comp, note });
+            for (const [k, v] of Object.entries(node)) {
+              if (["component", "label", "key", "note", "notes", "description", "comment"].includes(k)) continue;
+              walk(v, comp || k);
+            }
+          }
+        };
+        walk(parsed);
+        return out;
+      } catch {
+        return [];
+      }
     };
 
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
@@ -3084,7 +3114,10 @@ export default async function reportsRoutes(app) {
           }
         }
 
-        const noteRows = parseComponentNotes(inspection.notes);
+        let noteRows = parseComponentNotes(inspection.notes);
+        if (!noteRows.length) {
+          noteRows = extractChecklistDetailNotes(inspection.checklist_detail_json);
+        }
         sectionTitle(doc, "Notes");
         if (noteRows.length) {
           table(
@@ -3166,6 +3199,7 @@ export default async function reportsRoutes(app) {
 
     const miInspectorCol = pickExistingColumn("manager_inspections", ["inspector_name", "inspector"], "inspector_name");
     const miNotesCol = pickExistingColumn("manager_inspections", ["notes", "note", "remarks", "description"], "notes");
+    const hasMiChecklistDetail = hasColumn("manager_inspections", "checklist_detail_json");
     const photoInspectionCol = pickExistingColumn("manager_inspection_photos", ["inspection_id", "manager_inspection_id"], "inspection_id");
     const photoPathCol = pickExistingColumn("manager_inspection_photos", ["file_path", "photo_path", "path", "image_path", "url"], "file_path");
     const photoCaptionCol = pickExistingColumn("manager_inspection_photos", ["caption", "note", "notes", "description"], "caption");
@@ -3188,6 +3222,7 @@ export default async function reportsRoutes(app) {
         mi.inspection_date,
         mi.${miInspectorCol} AS inspector_name,
         mi.${miNotesCol} AS notes,
+        ${hasMiChecklistDetail ? "mi.checklist_detail_json" : `''`} AS checklist_detail_json,
         ${hasMiMh ? "mi.machine_hours" : "NULL"} AS machine_hours,
         ${hasMiChecklist ? "mi.checklist_json" : `''`} AS checklist_json,
         ${hasMiWo ? "mi.work_order_id" : "NULL"} AS work_order_id,
@@ -3296,7 +3331,35 @@ export default async function reportsRoutes(app) {
                   return note ? `${label}: ${note}` : label;
                 })
                 .filter(Boolean);
-              const description = String(r.notes || "").trim();
+              const extractChecklistDetailText = (raw) => {
+                const text = String(raw || "").trim();
+                if (!text) return "";
+                try {
+                  const parsed = JSON.parse(text);
+                  const snippets = [];
+                  const walk = (node) => {
+                    if (node == null) return;
+                    if (Array.isArray(node)) {
+                      for (const item of node) walk(item);
+                      return;
+                    }
+                    if (typeof node === "object") {
+                      const label = String(node.component || node.label || node.key || "").trim();
+                      const note = String(node.note || node.notes || node.description || node.comment || "").trim();
+                      if (note) snippets.push(label ? `${label}: ${note}` : note);
+                      for (const [k, v] of Object.entries(node)) {
+                        if (["component", "label", "key", "note", "notes", "description", "comment"].includes(k)) continue;
+                        walk(v);
+                      }
+                    }
+                  };
+                  walk(parsed);
+                  return snippets.join(" | ");
+                } catch {
+                  return "";
+                }
+              };
+              const description = String(r.notes || "").trim() || extractChecklistDetailText(r.checklist_detail_json);
               ensurePageSpace(doc, 60);
               doc.font("Helvetica-Bold").fontSize(10).fillColor("#111111");
               doc.text(
