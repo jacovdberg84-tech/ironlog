@@ -534,6 +534,43 @@ function renderMaintenanceInsights(data) {
   `;
 }
 
+function renderGovernanceSignals(data) {
+  const msgEl = document.getElementById("governanceSignalsMsg");
+  const qualityEl = document.getElementById("governanceQuality");
+  const anomaliesEl = document.getElementById("governanceAnomalies");
+  if (!msgEl || !qualityEl || !anomaliesEl) return;
+  const q = data?.quality || {};
+  const a = data?.anomalies || {};
+  const missing = Array.isArray(q.missing_meter_readings) ? q.missing_meter_readings : [];
+  const inconsistent = Array.isArray(q.inconsistent_statuses) ? q.inconsistent_statuses : [];
+  const stale = Array.isArray(q.stale_plans) ? q.stale_plans : [];
+  const spikes = Array.isArray(a.fuel_spikes) ? a.fuel_spikes : [];
+  const duplicates = Array.isArray(a.fuel_duplicates) ? a.fuel_duplicates : [];
+  const jumps = Array.isArray(a.suspicious_meter_jumps) ? a.suspicious_meter_jumps : [];
+  qualityEl.innerHTML = `
+    <div class="muted">Missing meter: ${missing.length} | Inconsistent WO status: ${inconsistent.length} | Stale plans: ${stale.length}</div>
+    ${insightsRowsTable(
+      ["Asset", "Issue", "Detail"],
+      [
+        ...missing.slice(0, 10).map((r) => [`${r.asset_code || "-"} - ${r.asset_name || "-"}`, "Missing meter", `Current ${Number(r.current_hours || 0).toFixed(1)} (${r.source || "-"})`]),
+        ...inconsistent.slice(0, 10).map((r) => [`WO #${Number(r.work_order_id || 0)} (${r.asset_code || "-"})`, "Inconsistent status", `${r.status || "-"} | completed_at=${r.completed_at || "-"} | closed_at=${r.closed_at || "-"}`]),
+        ...stale.slice(0, 10).map((r) => [`${r.asset_code || "-"} - ${r.asset_name || "-"}`, "Stale plan", `${r.service_name || "-"} | remaining ${Number(r.remaining_hours || 0).toFixed(1)}h`]),
+      ]
+    )}
+  `;
+  anomaliesEl.innerHTML = `
+    <div class="muted">Fuel spikes: ${spikes.length} | Fuel duplicates: ${duplicates.length} | Meter jumps: ${jumps.length}</div>
+    ${insightsRowsTable(
+      ["Signal", "Asset", "Detail"],
+      [
+        ...spikes.slice(0, 10).map((r) => ["Fuel spike", `${r.asset_code || "-"} - ${r.asset_name || "-"}`, `${r.log_date || "-"} | ${Number(r.liters || 0).toFixed(1)}L vs avg ${Number(r.avg_liters || 0).toFixed(1)}L (${Number(r.spike_ratio || 0).toFixed(2)}x)`]),
+        ...duplicates.slice(0, 10).map((r) => ["Duplicate fuel", `${r.asset_code || "-"} - ${r.asset_name || "-"}`, `${r.log_date || "-"} | ${Number(r.liters || 0).toFixed(1)}L | count ${Number(r.duplicate_count || 0)}`]),
+        ...jumps.slice(0, 10).map((r) => ["Meter jump", `${r.asset_code || "-"} - ${r.asset_name || "-"}`, `${r.input_date || "-"} | ${Number(r.previous_meter || 0).toFixed(1)} -> ${Number(r.current_meter || 0).toFixed(1)} (jump ${Number(r.jump || 0).toFixed(1)})`]),
+      ]
+    )}
+  `;
+}
+
 function getInsightsThresholds() {
   try {
     const raw = JSON.parse(String(localStorage.getItem(INSIGHTS_THRESHOLDS_KEY) || "{}"));
@@ -639,6 +676,34 @@ async function loadMaintenanceInsights() {
   } catch (e) {
     msgEl.className = "message-error";
     msgEl.textContent = `Insights error: ${e.message || e}`;
+  }
+}
+
+async function loadGovernanceSignals() {
+  const msgEl = document.getElementById("governanceSignalsMsg");
+  const start = String(document.getElementById("insightsStart")?.value || "").trim();
+  const end = String(document.getElementById("insightsEnd")?.value || "").trim();
+  if (!msgEl) return;
+  if (!start || !end) {
+    msgEl.className = "message-error";
+    msgEl.textContent = "Select insights start and end dates.";
+    return;
+  }
+  msgEl.className = "muted";
+  msgEl.textContent = "Loading governance signals...";
+  try {
+    const q = new URLSearchParams();
+    q.set("start", start);
+    q.set("end", end);
+    const res = await fetch(`${API}/maintenance/governance/signals?${q.toString()}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load governance signals");
+    renderGovernanceSignals(data);
+    msgEl.className = "message-success";
+    msgEl.textContent = `Governance signals loaded for ${data?.range?.start || start} to ${data?.range?.end || end}.`;
+  } catch (e) {
+    msgEl.className = "message-error";
+    msgEl.textContent = `Governance error: ${e.message || e}`;
   }
 }
 
@@ -3404,6 +3469,67 @@ async function exportExecutivePackFromAssetKpi() {
   }
 }
 
+async function exportExecutiveKpiPackBySite() {
+  const periodType = String(document.getElementById("kpiPackPeriodType")?.value || "weekly").trim().toLowerCase();
+  const month = String(document.getElementById("kpiPackMonth")?.value || "").trim();
+  const start = String(document.getElementById("akpStart")?.value || "").trim();
+  const end = String(document.getElementById("akpEnd")?.value || "").trim();
+  const scheduled = Math.max(0.5, Number(document.getElementById("akpScheduled")?.value || 10));
+  const siteCodesRaw = String(document.getElementById("kpiPackSiteCodes")?.value || "main").trim();
+  const msg = document.getElementById("akpMsg");
+  if (periodType === "weekly" && (!start || !end)) {
+    alert("Weekly KPI pack needs start and end dates.");
+    return;
+  }
+  if (periodType === "monthly" && !month) {
+    alert("Monthly KPI pack needs a month.");
+    return;
+  }
+  const siteCodes = siteCodesRaw || "main";
+  const q = new URLSearchParams();
+  q.set("period_type", periodType);
+  q.set("site_codes", siteCodes);
+  q.set("scheduled", String(scheduled));
+  q.set("near_due_hours", "50");
+  if (periodType === "weekly") {
+    q.set("start", start);
+    q.set("end", end);
+  } else {
+    q.set("month", month);
+  }
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = "Generating executive KPI pack by site...";
+  }
+  try {
+    const res = await fetch(`${API}/reports/executive-kpi-pack.xlsx?${q.toString()}`, { headers: authHeaders() });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(txt || `Executive KPI pack request failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const dateTag = new Date().toISOString().slice(0, 10);
+    a.href = blobUrl;
+    a.download = `IRONLOG_Executive_KPI_Pack_${periodType}_${dateTag}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = `Executive KPI pack downloaded (${periodType}, sites: ${siteCodes}).`;
+    }
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = `Executive KPI pack error: ${e.message || e}`;
+    }
+    alert(`Executive KPI pack error: ${e.message || e}`);
+  }
+}
+
 async function openWeeklyForumPdf(download = false) {
   const q = weeklyForumQueryString();
   const url = `${API}/maintenance/weekly-forum.pdf?${q}${download ? "&download=1" : ""}`;
@@ -4085,6 +4211,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const mpWeekStart = document.getElementById("mpWeekStart");
   const mpWeekEnd = document.getElementById("mpWeekEnd");
   const mpMonth = document.getElementById("mpMonth");
+  const kpiPackMonth = document.getElementById("kpiPackMonth");
+  const kpiPackSiteCodes = document.getElementById("kpiPackSiteCodes");
   const insightsStart = document.getElementById("insightsStart");
   const insightsEnd = document.getElementById("insightsEnd");
   const insightsNear = document.getElementById("insightsNearDueHours");
@@ -4100,6 +4228,8 @@ document.addEventListener("DOMContentLoaded", () => {
     mpWeekEnd.value = w.end;
   }
   if (mpMonth && !mpMonth.value) mpMonth.value = mpMonthLabel();
+  if (kpiPackMonth && !kpiPackMonth.value) kpiPackMonth.value = mpMonthLabel();
+  if (kpiPackSiteCodes && !kpiPackSiteCodes.value) kpiPackSiteCodes.value = "main";
   if (insightsStart && !insightsStart.value) {
     const d = new Date();
     d.setDate(d.getDate() - 29);
@@ -4309,6 +4439,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("loadAssetKpiBtn")?.addEventListener("click", () => loadAssetKpiWeekly());
   document.getElementById("exportAssetKpiBtn")?.addEventListener("click", () => exportAssetKpiToExcel());
   document.getElementById("exportExecutivePackBtn")?.addEventListener("click", () => exportExecutivePackFromAssetKpi());
+  document.getElementById("exportExecutiveKpiPackBtn")?.addEventListener("click", () => exportExecutiveKpiPackBySite());
   document.getElementById("mpRefreshStatusBtn")?.addEventListener("click", () => loadMaintenancePackStatus());
   document.getElementById("mpStatusBody")?.addEventListener("click", (evt) => {
     const gen = evt.target?.closest?.("button[data-mp-gen]");
@@ -4335,6 +4466,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("openInsightsPdfBtn")?.addEventListener("click", () => openMaintenanceInsightsPdf(false));
   document.getElementById("downloadInsightsPdfBtn")?.addEventListener("click", () => openMaintenanceInsightsPdf(true));
   document.getElementById("downloadInsightsXlsxBtn")?.addEventListener("click", () => openMaintenanceInsightsXlsx());
+  document.getElementById("loadGovernanceSignalsBtn")?.addEventListener("click", () => loadGovernanceSignals());
   document.getElementById("loadRsgProfilesBtn")?.addEventListener("click", loadRsgProfiles);
   document.getElementById("downloadRsgCsvTemplateBtn")?.addEventListener("click", downloadRsgCsvTemplate);
   document.getElementById("importRsgCsvBtn")?.addEventListener("click", importRsgProfilesCsv);
@@ -4385,6 +4517,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadManagerInspections().catch(() => {});
   });
   loadMaintenanceInsights().catch(() => {});
+  loadGovernanceSignals().catch(() => {});
   setTopView("main");
   loadHistogramEvents().catch(() => {});
 });

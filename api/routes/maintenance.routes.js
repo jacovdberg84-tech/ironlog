@@ -1474,6 +1474,201 @@ export default async function maintenanceRoutes(app) {
     }
   });
 
+  // =====================================================
+  // GOVERNANCE SIGNALS (Data quality + anomaly detection)
+  // GET /api/maintenance/governance/signals?start=YYYY-MM-DD&end=YYYY-MM-DD&meter_jump_threshold=500
+  // =====================================================
+  app.get("/governance/signals", async (req, reply) => {
+    try {
+      const endDate = String(req.query?.end || "").trim() || new Date().toISOString().slice(0, 10);
+      if (!isDate(endDate)) return reply.code(400).send({ ok: false, error: "end must be YYYY-MM-DD" });
+      const startDate = String(req.query?.start || "").trim() || (() => {
+        const d = new Date(`${endDate}T00:00:00`);
+        d.setDate(d.getDate() - 29);
+        return d.toISOString().slice(0, 10);
+      })();
+      if (!isDate(startDate)) return reply.code(400).send({ ok: false, error: "start must be YYYY-MM-DD" });
+      const meterJumpThreshold = Math.max(50, Number(req.query?.meter_jump_threshold || 500));
+
+      const activeAssets = db.prepare(`
+        SELECT id, asset_code, asset_name
+        FROM assets
+        WHERE COALESCE(active, 1) = 1
+      `).all();
+
+      const missingMeterReadings = activeAssets
+        .map((a) => {
+          const info = getAssetCurrentHoursInfo(Number(a.id || 0));
+          return {
+            asset_id: Number(a.id || 0),
+            asset_code: String(a.asset_code || ""),
+            asset_name: String(a.asset_name || ""),
+            current_hours: Number(info.hours || 0),
+            source: String(info.source || ""),
+          };
+        })
+        .filter((r) => Number(r.current_hours || 0) <= 0)
+        .slice(0, 50);
+
+      const inconsistentStatuses = hasTable("work_orders")
+        ? db.prepare(`
+            SELECT
+              w.id AS work_order_id,
+              a.asset_code,
+              a.asset_name,
+              w.status,
+              w.opened_at,
+              w.completed_at,
+              w.closed_at
+            FROM work_orders w
+            LEFT JOIN assets a ON a.id = w.asset_id
+            WHERE
+              (LOWER(COALESCE(w.status, '')) IN ('completed','approved','closed') AND w.completed_at IS NULL)
+              OR (LOWER(COALESCE(w.status, '')) = 'closed' AND w.closed_at IS NULL)
+            ORDER BY w.id DESC
+            LIMIT 100
+          `).all()
+        : [];
+
+      const stalePlans = hasTable("maintenance_plans")
+        ? db.prepare(`
+            SELECT
+              mp.id AS plan_id,
+              mp.asset_id,
+              a.asset_code,
+              a.asset_name,
+              mp.service_name,
+              mp.last_service_hours,
+              mp.interval_hours
+            FROM maintenance_plans mp
+            JOIN assets a ON a.id = mp.asset_id
+            WHERE COALESCE(mp.active, 1) = 1
+          `).all()
+            .map((p) => {
+              const current = Number(getAssetCurrentHoursInfo(Number(p.asset_id || 0)).hours || 0);
+              const nextDue = Number(p.last_service_hours || 0) + Number(p.interval_hours || 0);
+              const remaining = Number((nextDue - current).toFixed(2));
+              return { ...p, remaining_hours: remaining };
+            })
+            .filter((r) => Number(r.remaining_hours || 0) <= -500)
+            .sort((a, b) => Number(a.remaining_hours || 0) - Number(b.remaining_hours || 0))
+            .slice(0, 50)
+        : [];
+
+      const fuelDuplicates = hasTable("fuel_logs")
+        ? db.prepare(`
+            SELECT
+              fl.asset_id,
+              a.asset_code,
+              a.asset_name,
+              fl.log_date,
+              ROUND(COALESCE(fl.liters, 0), 2) AS liters,
+              COUNT(*) AS duplicate_count
+            FROM fuel_logs fl
+            LEFT JOIN assets a ON a.id = fl.asset_id
+            WHERE fl.log_date BETWEEN ? AND ?
+            GROUP BY fl.asset_id, fl.log_date, ROUND(COALESCE(fl.liters, 0), 2)
+            HAVING COUNT(*) >= 2
+            ORDER BY duplicate_count DESC, fl.log_date DESC
+            LIMIT 100
+          `).all(startDate, endDate)
+        : [];
+
+      const fuelSpikes = hasTable("fuel_logs")
+        ? db.prepare(`
+            SELECT
+              fl.asset_id,
+              a.asset_code,
+              a.asset_name,
+              fl.log_date,
+              COALESCE(fl.liters, 0) AS liters,
+              (
+                SELECT AVG(COALESCE(f2.liters, 0))
+                FROM fuel_logs f2
+                WHERE f2.asset_id = fl.asset_id
+                  AND f2.log_date BETWEEN ? AND ?
+              ) AS avg_liters
+            FROM fuel_logs fl
+            LEFT JOIN assets a ON a.id = fl.asset_id
+            WHERE fl.log_date BETWEEN ? AND ?
+            ORDER BY fl.log_date DESC
+          `).all(startDate, endDate, startDate, endDate)
+            .map((r) => {
+              const liters = Number(r.liters || 0);
+              const avg = Number(r.avg_liters || 0);
+              const ratio = avg > 0 ? liters / avg : 0;
+              return {
+                asset_id: Number(r.asset_id || 0),
+                asset_code: String(r.asset_code || ""),
+                asset_name: String(r.asset_name || ""),
+                log_date: String(r.log_date || ""),
+                liters: Number(liters.toFixed(2)),
+                avg_liters: Number(avg.toFixed(2)),
+                spike_ratio: Number(ratio.toFixed(2)),
+              };
+            })
+            .filter((r) => Number(r.avg_liters || 0) > 0 && Number(r.spike_ratio || 0) >= 1.8)
+            .sort((a, b) => Number(b.spike_ratio || 0) - Number(a.spike_ratio || 0))
+            .slice(0, 50)
+        : [];
+
+      const meterJumps = hasTable("daily_inputs")
+        ? db.prepare(`
+            SELECT
+              di.asset_id,
+              a.asset_code,
+              a.asset_name,
+              di.input_date,
+              COALESCE(di.hour_meter_closing, 0) AS hour_meter_closing
+            FROM daily_inputs di
+            LEFT JOIN assets a ON a.id = di.asset_id
+            WHERE di.input_date BETWEEN ? AND ?
+            ORDER BY di.asset_id, di.input_date
+          `).all(startDate, endDate)
+            .reduce((acc, r) => {
+              const aid = Number(r.asset_id || 0);
+              if (!aid) return acc;
+              const prev = acc._lastByAsset.get(aid);
+              const cur = Number(r.hour_meter_closing || 0);
+              if (prev && Number.isFinite(prev.value) && Number.isFinite(cur)) {
+                const jump = cur - prev.value;
+                if (Math.abs(jump) >= meterJumpThreshold) {
+                  acc.rows.push({
+                    asset_id: aid,
+                    asset_code: String(r.asset_code || ""),
+                    asset_name: String(r.asset_name || ""),
+                    input_date: String(r.input_date || ""),
+                    previous_meter: Number(prev.value.toFixed(1)),
+                    current_meter: Number(cur.toFixed(1)),
+                    jump: Number(jump.toFixed(1)),
+                  });
+                }
+              }
+              acc._lastByAsset.set(aid, { value: cur, date: String(r.input_date || "") });
+              return acc;
+            }, { rows: [], _lastByAsset: new Map() }).rows.slice(0, 100)
+        : [];
+
+      return reply.send({
+        ok: true,
+        range: { start: startDate, end: endDate, meter_jump_threshold: meterJumpThreshold },
+        quality: {
+          missing_meter_readings: missingMeterReadings,
+          inconsistent_statuses: inconsistentStatuses,
+          stale_plans: stalePlans,
+        },
+        anomalies: {
+          fuel_spikes: fuelSpikes,
+          fuel_duplicates: fuelDuplicates,
+          suspicious_meter_jumps: meterJumps,
+        },
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
   // GET /api/maintenance/insights.xlsx?start=YYYY-MM-DD&end=YYYY-MM-DD&near_due_hours=50
   app.get("/insights.xlsx", async (req, reply) => {
     try {

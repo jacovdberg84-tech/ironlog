@@ -119,6 +119,22 @@
   <div class="main-content" id="mainContent">
 
   <section class="panel show page-section">
+  <div class="card stack-12" style="margin-bottom:12px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+      <h3 style="margin:0;">What&apos;s New + Release Checklist</h3>
+      <small class="muted">Field + web upgrade quick reference</small>
+    </div>
+    <div class="muted">
+      New: voice-to-note, scan-to-asset workflows, structured defect capture, mandatory failed-item evidence, and executive KPI pack by site exports.
+    </div>
+    <div class="row stack-10" style="flex-wrap:wrap;">
+      <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" disabled /> Web: save manager inspection with failed-item evidence</label>
+      <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" disabled /> Mobile: QR scan selects correct asset and loads hours</label>
+      <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" disabled /> Mobile: voice note capture appends text correctly</label>
+      <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" disabled /> Reports: executive KPI pack downloads for selected sites</label>
+      <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" disabled /> Queue health: sync/dead-letter clear and retry flows verified</label>
+    </div>
+  </div>
   <div class="panel-header">
     <h3>Create Maintenance Plan</h3>
   </div>
@@ -367,6 +383,15 @@
       <div class="card">
         <h4 style="margin-top:0;">Trends (Daily)</h4>
         <div id="insightsTrends"></div>
+      </div>
+      <div class="card">
+        <h4 style="margin-top:0;">Data Quality + Anomaly Detection</h4>
+        <div class="row stack-10" style="margin-bottom:10px;">
+          <button id="loadGovernanceSignalsBtn" type="button">Refresh Signals</button>
+        </div>
+        <div id="governanceSignalsMsg" class="muted">Loading governance signals...</div>
+        <div id="governanceQuality" style="margin-top:10px;"></div>
+        <div id="governanceAnomalies" style="margin-top:10px;"></div>
       </div>
     </div>
 
@@ -967,6 +992,24 @@
         <button id="loadAssetKpiBtn" type="button">Load</button>
         <button id="exportAssetKpiBtn" type="button">Export to Excel</button>
         <button id="exportExecutivePackBtn" type="button">Generate Executive Pack</button>
+      </div>
+      <div class="row stack-10">
+        <label>
+          KPI Pack Type
+          <select id="kpiPackPeriodType" class="w-200">
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </label>
+        <label>
+          KPI Pack Month
+          <input id="kpiPackMonth" type="month" />
+        </label>
+        <label>
+          Site Codes (comma-separated)
+          <input id="kpiPackSiteCodes" class="w-200" placeholder="main,site-b,site-c" />
+        </label>
+        <button id="exportExecutiveKpiPackBtn" type="button">Generate Executive KPI Pack (Sites)</button>
       </div>
       <div id="akpMsg" class="muted">Pick a week (or any range) and load.</div>
       <div id="akpFleetSummary" style="margin-top:12px;" class="muted"></div>
