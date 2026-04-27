@@ -5,6 +5,7 @@ let currentDetailWorkOrderId = null;
 let stockCatalogCache = [];
 const ROLE_KEY = "ironlog_session_role";
 const USER_KEY = "ironlog_session_user";
+let boardState = [];
 
 function getSessionRole() {
   return String(localStorage.getItem(ROLE_KEY) || "admin").trim().toLowerCase() || "admin";
@@ -149,6 +150,153 @@ function workOrderCard(wo) {
       ${canClose ? `<button data-close-id="${wo.id}" data-close-source="${String(wo.source || "").toLowerCase()}" style="margin-top:8px;">Close Work Order</button>` : ""}
     </div>
   `;
+}
+
+function boardPriorityClass(priority) {
+  const p = String(priority || "").toUpperCase();
+  if (p === "P1") return "pri-p1";
+  if (p === "P2") return "pri-p2";
+  return "pri-p3";
+}
+
+function boardCard(wo) {
+  return `
+    <div draggable="true" class="card" style="padding:8px; margin-bottom:8px;" data-board-wo-id="${Number(wo.id)}">
+      <div><strong>WO #${Number(wo.id)}</strong> <span class="pill ${boardPriorityClass(wo.priority)}">${String(wo.priority || "P3").toUpperCase()}</span></div>
+      <div><small>${wo.asset_code || "-"} - ${wo.asset_name || "-"}</small></div>
+      <div><small>Due: ${wo.due_date || "-"}</small></div>
+      <div><small>Shift: ${wo.shift || "-"}</small></div>
+      <div><small>Skill: ${wo.required_skill || "-"}</small></div>
+    </div>
+  `;
+}
+
+function renderScheduleBoard(rows) {
+  const boardEl = document.getElementById("woBoard");
+  if (!boardEl) return;
+  const list = Array.isArray(rows) ? rows : [];
+  const artisans = [...new Set(list.map((r) => String(r.assigned_artisan_name || "").trim() || "Unassigned"))];
+  const ordered = ["Unassigned", ...artisans.filter((a) => a !== "Unassigned").sort((a, b) => a.localeCompare(b))];
+  if (!ordered.length) ordered.push("Unassigned");
+  boardEl.innerHTML = ordered
+    .map((artisan) => {
+      const items = list.filter((r) => (String(r.assigned_artisan_name || "").trim() || "Unassigned") === artisan);
+      return `
+        <div class="card" style="min-width:260px; max-width:260px;" data-board-column="${artisan.replace(/"/g, "&quot;")}">
+          <div style="font-weight:700; margin-bottom:8px;">${artisan}</div>
+          <div class="muted" style="margin-bottom:8px;">${items.length} WO(s)</div>
+          <div data-board-dropzone="${artisan.replace(/"/g, "&quot;")}" style="min-height:120px;">
+            ${items.map(boardCard).join("") || `<small class="muted">Drop work orders here.</small>`}
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+async function loadScheduleBoard() {
+  const msgEl = document.getElementById("woBoardMsg");
+  const artisan = String(document.getElementById("woBoardArtisan")?.value || "").trim();
+  const shift = String(document.getElementById("woBoardShift")?.value || "").trim();
+  const priority = String(document.getElementById("woBoardPriority")?.value || "").trim();
+  const due_date = String(document.getElementById("woBoardDueDate")?.value || "").trim();
+  const q = new URLSearchParams();
+  if (artisan) q.set("artisan", artisan);
+  if (shift) q.set("shift", shift);
+  if (priority) q.set("priority", priority);
+  if (due_date) q.set("due_date", due_date);
+  try {
+    if (msgEl) {
+      msgEl.className = "";
+      msgEl.textContent = "Loading scheduling board...";
+    }
+    const data = await fetchJson(`${API}/workorders/schedule/board?${q.toString()}`, { headers: authHeaders() });
+    boardState = Array.isArray(data?.rows) ? data.rows : [];
+    renderScheduleBoard(boardState);
+    if (msgEl) {
+      msgEl.className = "message-success";
+      msgEl.textContent = `Board loaded (${boardState.length} work orders).`;
+    }
+  } catch (err) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = err.message;
+    }
+  }
+}
+
+async function autoAssignWorkOrders() {
+  const msgEl = document.getElementById("woBoardMsg");
+  try {
+    if (msgEl) {
+      msgEl.className = "";
+      msgEl.textContent = "Auto-assigning...";
+    }
+    const data = await fetchJson(`${API}/workorders/schedule/auto-assign`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({}),
+    });
+    await loadScheduleBoard();
+    await fetchWorkOrders();
+    if (msgEl) {
+      msgEl.className = "message-success";
+      msgEl.textContent = `Auto-assigned ${Number(data?.assigned_count || 0)} work orders.`;
+    }
+  } catch (err) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = err.message;
+    }
+  }
+}
+
+async function runEscalationCheck() {
+  const msgEl = document.getElementById("woBoardMsg");
+  try {
+    if (msgEl) {
+      msgEl.className = "";
+      msgEl.textContent = "Checking escalations...";
+    }
+    const data = await fetchJson(`${API}/workorders/schedule/escalations/check`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ overdue_hours: 8 }),
+    });
+    if (msgEl) {
+      msgEl.className = "message-success";
+      msgEl.textContent = `Escalations triggered: ${Number(data?.escalated_count || 0)} (threshold ${Number(data?.threshold_hours || 0)}h).`;
+    }
+  } catch (err) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = err.message;
+    }
+  }
+}
+
+async function loadInspectionQuality() {
+  const el = document.getElementById("woInspectionQuality");
+  if (!el) return;
+  try {
+    el.className = "muted";
+    el.textContent = "Loading quality score...";
+    const data = await fetchJson(`${API}/workorders/inspection-quality`, { headers: authHeaders() });
+    const s = data?.score || {};
+    el.className = "";
+    el.innerHTML = `
+      <div class="row" style="gap:10px; flex-wrap:wrap;">
+        <span class="pill blue">Overall: ${Number(s.overall || 0).toFixed(1)} / 100</span>
+        <span class="pill">Completeness: ${Number(s.completeness || 0).toFixed(1)}</span>
+        <span class="pill">Photo Evidence: ${Number(s.photo_evidence || 0).toFixed(1)}</span>
+        <span class="pill">Comment Quality: ${Number(s.comment_quality || 0).toFixed(1)}</span>
+        <span class="pill">Repeat Issue Rate: ${Number(s.repeat_issue_rate || 0).toFixed(1)}%</span>
+      </div>
+    `;
+  } catch (err) {
+    el.className = "message-error";
+    el.textContent = err.message;
+  }
 }
 
 async function getWoQrData(woId) {
@@ -738,6 +886,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const kpiStrip = document.getElementById("woKpiStrip");
   const detailEl = document.getElementById("woDetail");
   const role = getSessionRole();
+  const boardRefreshBtn = document.getElementById("woBoardRefreshBtn");
+  const autoAssignBtn = document.getElementById("woAutoAssignBtn");
+  const escalationsBtn = document.getElementById("woEscalationsBtn");
 
   const roleBadge = document.getElementById("woRoleBadge");
   if (roleBadge) roleBadge.textContent = `Role: ${role}`;
@@ -749,6 +900,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   if (refreshBtn) refreshBtn.addEventListener("click", fetchWorkOrders);
+  if (boardRefreshBtn) boardRefreshBtn.addEventListener("click", loadScheduleBoard);
+  if (autoAssignBtn) autoAssignBtn.addEventListener("click", autoAssignWorkOrders);
+  if (escalationsBtn) escalationsBtn.addEventListener("click", runEscalationCheck);
   if (awaitingApprovalBtn && statusEl) {
     awaitingApprovalBtn.addEventListener("click", () => {
       statusEl.value = "completed";
@@ -834,6 +988,42 @@ document.addEventListener("DOMContentLoaded", () => {
       if (id) openCloseModalForRow(id, rowSource);
     });
   }
+  const boardEl = document.getElementById("woBoard");
+  if (boardEl) {
+    boardEl.addEventListener("dragstart", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const id = target.getAttribute("data-board-wo-id");
+      if (!id) return;
+      evt.dataTransfer?.setData("text/plain", id);
+    });
+    boardEl.addEventListener("dragover", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.closest("[data-board-dropzone]")) evt.preventDefault();
+    });
+    boardEl.addEventListener("drop", async (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const zone = target.closest("[data-board-dropzone]");
+      if (!(zone instanceof HTMLElement)) return;
+      evt.preventDefault();
+      const woId = Number(evt.dataTransfer?.getData("text/plain") || 0);
+      const artisan = String(zone.getAttribute("data-board-dropzone") || "").trim();
+      if (!woId || !artisan) return;
+      try {
+        await fetchJson(`${API}/workorders/${woId}/schedule`, {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ assigned_artisan_name: artisan === "Unassigned" ? null : artisan }),
+        });
+        await loadScheduleBoard();
+        await fetchWorkOrders();
+      } catch (e) {
+        alert(`Reassign failed: ${e.message}`);
+      }
+    });
+  }
   if (detailEl) {
     detailEl.addEventListener("click", (evt) => {
       const target = evt.target;
@@ -854,4 +1044,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   fetchWorkOrders();
+  loadScheduleBoard();
+  loadInspectionQuality();
 });

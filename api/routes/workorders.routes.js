@@ -88,6 +88,13 @@ export default async function workOrderRoutes(app) {
   ensureColumn("work_orders", "supervisor_name", "supervisor_name TEXT");
   ensureColumn("work_orders", "supervisor_signed_at", "supervisor_signed_at TEXT");
   ensureColumn("work_orders", "completed_at", "completed_at TEXT");
+  ensureColumn("work_orders", "assigned_artisan_name", "assigned_artisan_name TEXT");
+  ensureColumn("work_orders", "shift", "shift TEXT");
+  ensureColumn("work_orders", "priority", "priority TEXT");
+  ensureColumn("work_orders", "due_date", "due_date TEXT");
+  ensureColumn("work_orders", "required_skill", "required_skill TEXT");
+  ensureColumn("work_orders", "location_code", "location_code TEXT");
+  ensureColumn("work_orders", "escalated_at", "escalated_at TEXT");
   db.prepare(`
     CREATE TABLE IF NOT EXISTS approval_requests (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,6 +113,29 @@ export default async function workOrderRoutes(app) {
       rejected_role TEXT,
       rejected_at TEXT,
       decision_note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS wo_assignment_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      artisan_name TEXT NOT NULL,
+      skill TEXT,
+      location_code TEXT,
+      shift TEXT,
+      max_open_wos INTEGER NOT NULL DEFAULT 8,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS work_order_escalations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      work_order_id INTEGER NOT NULL,
+      threshold_hours INTEGER NOT NULL,
+      chain_level INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'open',
+      detail_json TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `).run();
@@ -143,6 +173,48 @@ export default async function workOrderRoutes(app) {
     `).get(assetId);
 
     return Number(fromDailyHours?.total_hours || 0);
+  }
+
+  function normalizeShift(value) {
+    const v = String(value || "").trim().toLowerCase();
+    if (v === "day" || v === "night") return v;
+    return null;
+  }
+
+  function normalizePriority(value, fallback = "P3") {
+    const v = String(value || fallback).trim().toUpperCase();
+    if (["P1", "P2", "P3"].includes(v)) return v;
+    return fallback;
+  }
+
+  function inferPriorityForRow(row) {
+    if (String(row?.priority || "").trim()) return normalizePriority(row.priority);
+    const s = String(row?.status || "").toLowerCase();
+    const opened = Date.parse(String(row?.opened_at || ""));
+    const ageHours = Number.isFinite(opened) ? Math.max(0, Math.floor((Date.now() - opened) / 3600000)) : 0;
+    if ((s === "open" || s === "assigned") && ageHours > 72) return "P1";
+    if ((s === "open" || s === "assigned") && ageHours > 48) return "P2";
+    return "P3";
+  }
+
+  function suggestRuleForWorkOrder(wo, rules, workloads) {
+    const filtered = (Array.isArray(rules) ? rules : []).filter((r) => {
+      if (!Number(r.active || 0)) return false;
+      const skillOk = !String(r.skill || "").trim() || String(r.skill).trim().toLowerCase() === String(wo.required_skill || "").trim().toLowerCase();
+      const locOk = !String(r.location_code || "").trim() || String(r.location_code).trim().toLowerCase() === String(wo.location_code || "").trim().toLowerCase();
+      const shiftOk = !String(r.shift || "").trim() || String(r.shift).trim().toLowerCase() === String(wo.shift || "").trim().toLowerCase();
+      if (!skillOk || !locOk || !shiftOk) return false;
+      const load = Number(workloads.get(String(r.artisan_name)) || 0);
+      const maxOpen = Math.max(1, Number(r.max_open_wos || 8));
+      return load < maxOpen;
+    });
+    filtered.sort((a, b) => {
+      const loadA = Number(workloads.get(String(a.artisan_name)) || 0);
+      const loadB = Number(workloads.get(String(b.artisan_name)) || 0);
+      if (loadA !== loadB) return loadA - loadB;
+      return String(a.artisan_name).localeCompare(String(b.artisan_name));
+    });
+    return filtered[0] || null;
   }
 
   const getStoredWoQr = db.prepare(`
@@ -256,6 +328,247 @@ export default async function workOrderRoutes(app) {
       : db.prepare(baseSql + ` ORDER BY w.id DESC LIMIT 200`).all();
 
     return rows;
+  });
+
+  app.get("/schedule/board", async (req) => {
+    const artisan = String(req.query?.artisan || "").trim().toLowerCase();
+    const shift = normalizeShift(req.query?.shift || "");
+    const priority = normalizePriority(req.query?.priority || "P3", "");
+    const dueDate = String(req.query?.due_date || "").trim();
+
+    const rows = db.prepare(`
+      SELECT
+        w.id, w.status, w.opened_at, w.closed_at, w.assigned_artisan_name, w.shift, w.priority, w.due_date, w.required_skill, w.location_code,
+        a.asset_code, a.asset_name
+      FROM work_orders w
+      JOIN assets a ON a.id = w.asset_id
+      WHERE w.status IN ('open','assigned','in_progress','completed','approved')
+      ORDER BY w.id DESC
+      LIMIT 300
+    `).all().map((r) => ({ ...r, priority: inferPriorityForRow(r) }));
+
+    const filtered = rows.filter((r) => {
+      if (artisan && String(r.assigned_artisan_name || "").toLowerCase() !== artisan) return false;
+      if (shift && String(r.shift || "").toLowerCase() !== shift) return false;
+      if (priority && String(r.priority || "").toUpperCase() !== priority) return false;
+      if (dueDate && String(r.due_date || "") !== dueDate) return false;
+      return true;
+    });
+    return { ok: true, rows: filtered };
+  });
+
+  app.post("/:id/schedule", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+    const wo = db.prepare(`SELECT id FROM work_orders WHERE id = ?`).get(id);
+    if (!wo) return reply.code(404).send({ error: "work order not found" });
+    const assigned = req.body?.assigned_artisan_name == null ? null : String(req.body.assigned_artisan_name).trim() || null;
+    const shift = normalizeShift(req.body?.shift);
+    const priority = normalizePriority(req.body?.priority || "P3");
+    const dueDate = req.body?.due_date ? String(req.body.due_date).slice(0, 10) : null;
+    const requiredSkill = req.body?.required_skill != null ? String(req.body.required_skill).trim() || null : null;
+    const locationCode = req.body?.location_code != null ? String(req.body.location_code).trim() || null : null;
+
+    db.prepare(`
+      UPDATE work_orders
+      SET
+        assigned_artisan_name = COALESCE(?, assigned_artisan_name),
+        shift = COALESCE(?, shift),
+        priority = COALESCE(?, priority),
+        due_date = COALESCE(?, due_date),
+        required_skill = COALESCE(?, required_skill),
+        location_code = COALESCE(?, location_code),
+        status = CASE
+          WHEN ? IS NOT NULL AND status = 'open' THEN 'assigned'
+          WHEN ? IS NULL AND status = 'assigned' THEN 'open'
+          ELSE status
+        END
+      WHERE id = ?
+    `).run(assigned, shift, priority, dueDate, requiredSkill, locationCode, assigned, assigned, id);
+
+    writeAudit(db, req, {
+      module: "workorders",
+      action: "schedule_update",
+      entity_type: "work_order",
+      entity_id: id,
+      payload: { assigned_artisan_name: assigned, shift, priority, due_date: dueDate, required_skill: requiredSkill, location_code: locationCode },
+    });
+    return { ok: true, id };
+  });
+
+  app.post("/schedule/auto-assign", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    const rules = db.prepare(`
+      SELECT artisan_name, skill, location_code, shift, max_open_wos, active
+      FROM wo_assignment_rules
+      WHERE active = 1
+      ORDER BY id ASC
+    `).all();
+    if (!rules.length) return { ok: true, assigned_count: 0, note: "No active assignment rules configured" };
+
+    const workloads = new Map();
+    const loadRows = db.prepare(`
+      SELECT assigned_artisan_name, COUNT(*) AS c
+      FROM work_orders
+      WHERE status IN ('open','assigned','in_progress')
+        AND assigned_artisan_name IS NOT NULL
+        AND TRIM(assigned_artisan_name) <> ''
+      GROUP BY assigned_artisan_name
+    `).all();
+    for (const r of loadRows) workloads.set(String(r.assigned_artisan_name), Number(r.c || 0));
+
+    const candidates = db.prepare(`
+      SELECT id, required_skill, location_code, shift, assigned_artisan_name
+      FROM work_orders
+      WHERE status IN ('open','assigned')
+      ORDER BY id ASC
+      LIMIT 300
+    `).all();
+
+    let assignedCount = 0;
+    const upd = db.prepare(`
+      UPDATE work_orders
+      SET assigned_artisan_name = ?, status = CASE WHEN status = 'open' THEN 'assigned' ELSE status END
+      WHERE id = ?
+    `);
+    for (const wo of candidates) {
+      if (String(wo.assigned_artisan_name || "").trim()) continue;
+      const choice = suggestRuleForWorkOrder(wo, rules, workloads);
+      if (!choice) continue;
+      upd.run(String(choice.artisan_name), Number(wo.id));
+      workloads.set(String(choice.artisan_name), Number(workloads.get(String(choice.artisan_name)) || 0) + 1);
+      assignedCount += 1;
+    }
+    writeAudit(db, req, {
+      module: "workorders",
+      action: "auto_assign",
+      entity_type: "work_order",
+      entity_id: null,
+      payload: { assigned_count: assignedCount },
+    });
+    return { ok: true, assigned_count: assignedCount };
+  });
+
+  app.post("/schedule/escalations/check", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    const threshold = Math.max(1, Number(req.body?.overdue_hours || 8));
+    const nowMs = Date.now();
+    const rows = db.prepare(`
+      SELECT id, status, opened_at, due_date, assigned_artisan_name, priority
+      FROM work_orders
+      WHERE status IN ('open','assigned','in_progress','completed','approved')
+      ORDER BY id DESC
+      LIMIT 500
+    `).all();
+    let escalated = 0;
+    for (const r of rows) {
+      const opened = Date.parse(String(r.opened_at || ""));
+      const age = Number.isFinite(opened) ? Math.max(0, Math.floor((nowMs - opened) / 3600000)) : 0;
+      const dueAt = Date.parse(String(r.due_date || ""));
+      const dueHours = Number.isFinite(dueAt) ? Math.max(0, Math.floor((nowMs - dueAt) / 3600000)) : 0;
+      const overdue = Math.max(age, dueHours);
+      if (overdue <= threshold) continue;
+      const dup = db.prepare(`
+        SELECT id FROM work_order_escalations
+        WHERE work_order_id = ? AND status = 'open' AND threshold_hours = ?
+        ORDER BY id DESC LIMIT 1
+      `).get(Number(r.id), Number(threshold));
+      if (dup) continue;
+      db.prepare(`
+        INSERT INTO work_order_escalations (work_order_id, threshold_hours, chain_level, status, detail_json)
+        VALUES (?, ?, 1, 'open', ?)
+      `).run(Number(r.id), Number(threshold), JSON.stringify({
+        work_order_id: Number(r.id),
+        status: String(r.status || ""),
+        assigned_artisan_name: String(r.assigned_artisan_name || ""),
+        priority: normalizePriority(r.priority || "P3"),
+        overdue_hours: overdue,
+      }));
+      db.prepare(`UPDATE work_orders SET escalated_at = datetime('now') WHERE id = ?`).run(Number(r.id));
+      escalated += 1;
+    }
+    writeAudit(db, req, {
+      module: "workorders",
+      action: "escalation_scan",
+      entity_type: "work_order",
+      entity_id: null,
+      payload: { threshold_hours: threshold, escalated_count: escalated },
+    });
+    return { ok: true, threshold_hours: threshold, escalated_count: escalated };
+  });
+
+  app.get("/inspection-quality", async () => {
+    const hasMi = hasTable("manager_inspections");
+    if (!hasMi) {
+      return {
+        ok: true,
+        score: { completeness: 0, photo_evidence: 0, comment_quality: 0, repeat_issue_rate: 0, overall: 0 },
+        sample_size: 0,
+      };
+    }
+    const notesCol = firstExistingColumn("manager_inspections", ["notes", "note", "remarks", "description"]);
+    const checklistCol = hasColumn("manager_inspections", "checklist_json") ? "checklist_json" : null;
+    const createdCol = firstExistingColumn("manager_inspections", ["created_at", "inspection_date", "date"]);
+    const rows = db.prepare(`
+      SELECT
+        id,
+        ${notesCol ? `${notesCol} AS notes` : "NULL AS notes"},
+        ${checklistCol ? `${checklistCol} AS checklist_json` : "NULL AS checklist_json"},
+        ${createdCol ? `${createdCol} AS created_at` : "NULL AS created_at"}
+      FROM manager_inspections
+      ORDER BY id DESC
+      LIMIT 250
+    `).all();
+    const sample = Array.isArray(rows) ? rows : [];
+    const total = sample.length || 1;
+    let completeCount = 0;
+    let withPhoto = 0;
+    let goodComments = 0;
+    const issueCounter = new Map();
+    for (const row of sample) {
+      const notes = String(row?.notes || "").trim();
+      const checklistRaw = String(row?.checklist_json || "").trim();
+      let items = [];
+      if (checklistRaw) {
+        try { items = JSON.parse(checklistRaw); } catch { items = []; }
+      }
+      const arr = Array.isArray(items) ? items : [];
+      const allAnswered = arr.length > 0 ? arr.every((it) => String(it?.value || it?.answer || "").trim() !== "") : false;
+      const hasComment = notes.length >= 12;
+      if (allAnswered && hasComment) completeCount += 1;
+      if (hasComment) goodComments += 1;
+      const hasInlinePhoto = arr.some((it) => {
+        const v = String(it?.photo_url || it?.image || "").trim();
+        return v.length > 0;
+      });
+      if (hasInlinePhoto) withPhoto += 1;
+      for (const it of arr) {
+        const label = String(it?.label || it?.item || "").trim().toLowerCase();
+        const val = String(it?.value || it?.answer || "").trim().toLowerCase();
+        if (!label) continue;
+        if (val === "fail" || val === "no" || val === "not_ok") {
+          issueCounter.set(label, Number(issueCounter.get(label) || 0) + 1);
+        }
+      }
+    }
+    const repeated = [...issueCounter.values()].filter((c) => c > 1).length;
+    const repeatIssueRate = Number(((repeated / Math.max(1, issueCounter.size)) * 100).toFixed(2));
+    const completeness = Number(((completeCount / total) * 100).toFixed(2));
+    const photoEvidence = Number(((withPhoto / total) * 100).toFixed(2));
+    const commentQuality = Number(((goodComments / total) * 100).toFixed(2));
+    const overall = Number((completeness * 0.35 + photoEvidence * 0.25 + commentQuality * 0.25 + (100 - repeatIssueRate) * 0.15).toFixed(2));
+    return {
+      ok: true,
+      sample_size: sample.length,
+      score: {
+        completeness,
+        photo_evidence: photoEvidence,
+        comment_quality: commentQuality,
+        repeat_issue_rate: repeatIssueRate,
+        overall,
+      },
+    };
   });
 
   // Work order status transitions
@@ -569,6 +882,55 @@ export default async function workOrderRoutes(app) {
       payload: { request_id, source: wo.source },
     });
 
+    return reply.send({ ok: true, pending_approval: true, request_id });
+  });
+
+  app.post("/:id/reopen", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+    const note = String(req.body?.note || "").trim() || "Reopened by supervisor flow";
+    const wo = db.prepare(`SELECT id, status FROM work_orders WHERE id = ?`).get(id);
+    if (!wo) return reply.code(404).send({ error: "work order not found" });
+    const status = String(wo.status || "").toLowerCase();
+    if (!["closed", "approved", "completed"].includes(status)) {
+      return reply.code(409).send({ error: "only closed/approved/completed work orders can be reopened" });
+    }
+    db.prepare(`UPDATE work_orders SET status = 'in_progress', closed_at = NULL WHERE id = ?`).run(id);
+    writeAudit(db, req, {
+      module: "workorders",
+      action: "reopen",
+      entity_type: "work_order",
+      entity_id: id,
+      payload: { from_status: status, to_status: "in_progress", note },
+    });
+    return reply.send({ ok: true, id, status: "in_progress" });
+  });
+
+  app.post("/:id/delete-request", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+    const wo = db.prepare(`SELECT id FROM work_orders WHERE id = ?`).get(id);
+    if (!wo) return reply.code(404).send({ error: "work order not found" });
+    const reason = String(req.body?.reason || "").trim();
+    if (!reason) return reply.code(400).send({ error: "reason is required" });
+    const requestedBy = String(req.headers["x-user-name"] || "session-user").trim() || "session-user";
+    const requestedRole = getRole(req);
+    const payload_json = JSON.stringify({ work_order_id: id, reason, requested_by: requestedBy });
+    const ins = db.prepare(`
+      INSERT INTO approval_requests (
+        module, action, entity_type, entity_id, status, payload_json, requested_by, requested_role
+      ) VALUES ('workorders', 'delete_work_order', 'work_order', ?, 'pending', ?, ?, ?)
+    `).run(String(id), payload_json, requestedBy, requestedRole);
+    const request_id = Number(ins.lastInsertRowid);
+    writeAudit(db, req, {
+      module: "workorders",
+      action: "delete_request",
+      entity_type: "work_order",
+      entity_id: id,
+      payload: { request_id, reason },
+    });
     return reply.send({ ok: true, pending_approval: true, request_id });
   });
 

@@ -66,6 +66,47 @@
       <div id="woMessage" style="margin-top:10px;"></div>
     </div>
 
+    <div class="card">
+      <h3 style="margin-top:0;">Scheduling Board</h3>
+      <div class="row" style="gap:10px; align-items:flex-end; flex-wrap:wrap;">
+        <label>
+          Artisan
+          <input id="woBoardArtisan" type="text" placeholder="All artisans" />
+        </label>
+        <label>
+          Shift
+          <select id="woBoardShift">
+            <option value="">All</option>
+            <option value="day">Day</option>
+            <option value="night">Night</option>
+          </select>
+        </label>
+        <label>
+          Priority
+          <select id="woBoardPriority">
+            <option value="">All</option>
+            <option value="P1">P1</option>
+            <option value="P2">P2</option>
+            <option value="P3">P3</option>
+          </select>
+        </label>
+        <label>
+          Due Date
+          <input id="woBoardDueDate" type="date" />
+        </label>
+        <button id="woBoardRefreshBtn" type="button">Refresh Board</button>
+        <button id="woAutoAssignBtn" type="button">Auto-Assign</button>
+        <button id="woEscalationsBtn" type="button">Check Escalations</button>
+      </div>
+      <div id="woBoardMsg" style="margin-top:10px;" class="muted">Drag cards between artisan columns to reassign.</div>
+      <div id="woBoard" class="row" style="gap:10px; margin-top:10px; align-items:stretch; overflow:auto;"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">Inspection Quality Score</h3>
+      <div id="woInspectionQuality" class="muted">Loading quality score...</div>
+    </div>
+
     <div class="stack-12">
       <div id="woList" class="card-grid"></div>
     </div>

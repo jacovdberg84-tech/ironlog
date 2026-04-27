@@ -149,6 +149,27 @@ function closeWorkOrderWithPayload(approvalId, payload, req) {
   return { woId, already_closed: false };
 }
 
+function deleteWorkOrderWithPayload(approvalId, payload, req) {
+  const woId = Number(payload?.work_order_id || 0);
+  if (!Number.isFinite(woId) || woId <= 0) {
+    throw new Error(`approval ${approvalId}: invalid work_order_id`);
+  }
+  const wo = db.prepare(`SELECT id, status FROM work_orders WHERE id = ?`).get(woId);
+  if (!wo) throw new Error(`approval ${approvalId}: work order not found`);
+  if (String(wo.status || "").toLowerCase() !== "closed") {
+    throw new Error(`approval ${approvalId}: only closed work orders can be deleted`);
+  }
+  db.prepare(`DELETE FROM work_orders WHERE id = ?`).run(woId);
+  writeAudit(db, req, {
+    module: "workorders",
+    action: "delete_approved",
+    entity_type: "work_order",
+    entity_id: woId,
+    payload: { approval_id: approvalId },
+  });
+  return { woId, deleted: true };
+}
+
 function applyStockAdjustWithPayload(approvalId, payload, req) {
   const partCode = String(payload?.part_code || "").trim();
   const quantity = Number(payload?.quantity ?? 0);
@@ -369,6 +390,8 @@ export default async function approvalsRoutes(app) {
       execution = applyStockAdjustWithPayload(id, payload, req);
     } else if (row.module === "workorders" && row.action === "close_work_order") {
       execution = closeWorkOrderWithPayload(id, payload, req);
+    } else if (row.module === "workorders" && row.action === "delete_work_order") {
+      execution = deleteWorkOrderWithPayload(id, payload, req);
     } else if (row.module === "procurement" && row.action === "approve_requisition") {
       execution = approveProcurementRequisitionWithPayload(id, payload, req);
     } else if (row.module === "procurement" && row.action === "receive_requisition") {
