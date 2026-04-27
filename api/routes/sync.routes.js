@@ -60,6 +60,13 @@ function requireSyncAdmin(req, reply) {
   return true;
 }
 
+function hasTable(tableName) {
+  const row = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1`)
+    .get(String(tableName || "").trim());
+  return Boolean(row);
+}
+
 function loadRowPayload(tableName, rowId) {
   if (!SYNC_TABLES.has(tableName)) return null;
   const sql = `SELECT * FROM ${tableName} WHERE id = ? LIMIT 1`;
@@ -209,6 +216,72 @@ export default async function syncRoutes(app) {
       unsynced: Number(unsynced?.c || 0),
       failed: Number(failed?.c || 0),
       latest_outbox_id: Number(latest?.max_id || 0),
+    };
+  });
+
+  // GET /api/sync/diagnostics
+  app.get("/diagnostics", async (req, reply) => {
+    if (!requireSyncAdmin(req, reply)) return;
+    const outboxByTable = db
+      .prepare(`
+        SELECT table_name, COUNT(*) AS c
+        FROM sync_outbox
+        WHERE synced_at IS NULL
+        GROUP BY table_name
+        ORDER BY c DESC
+        LIMIT 50
+      `)
+      .all();
+    const outboxErrors = db
+      .prepare(`
+        SELECT COALESCE(NULLIF(TRIM(error_text), ''), '(none)') AS error_text, COUNT(*) AS c
+        FROM sync_outbox
+        WHERE synced_at IS NULL
+        GROUP BY COALESCE(NULLIF(TRIM(error_text), ''), '(none)')
+        ORDER BY c DESC
+        LIMIT 20
+      `)
+      .all();
+    const checkpoints = db
+      .prepare(`
+        SELECT peer_name, table_name, last_outbox_id, updated_at
+        FROM sync_checkpoints
+        ORDER BY updated_at DESC
+        LIMIT 100
+      `)
+      .all();
+    const inboundRecent = db
+      .prepare(`
+        SELECT peer_name, table_name, op, result_json, applied_at
+        FROM sync_applied_events
+        ORDER BY id DESC
+        LIMIT 100
+      `)
+      .all();
+    let ingestEvents = [];
+    if (hasTable("inspectpro_ingest_events")) {
+      ingestEvents = db
+        .prepare(`
+          SELECT event_type, status, COUNT(*) AS c
+          FROM inspectpro_ingest_events
+          GROUP BY event_type, status
+          ORDER BY c DESC
+          LIMIT 20
+        `)
+        .all();
+    }
+    return {
+      ok: true,
+      schema_version: SYNC_SCHEMA_VERSION,
+      outbox_unsynced_by_table: outboxByTable.map((r) => ({ table_name: r.table_name, count: Number(r.c || 0) })),
+      outbox_error_breakdown: outboxErrors.map((r) => ({ error_text: r.error_text, count: Number(r.c || 0) })),
+      checkpoints,
+      inbound_recent: inboundRecent,
+      inspectpro_ingest_status: ingestEvents.map((r) => ({
+        event_type: r.event_type,
+        status: r.status,
+        count: Number(r.c || 0),
+      })),
     };
   });
 
