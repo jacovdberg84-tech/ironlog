@@ -302,6 +302,52 @@
     </div>
 
     <div class="card stack-24">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:10px; flex-wrap:wrap;">
+        <h3 style="margin:0;">Maintenance Insights (High-Impact)</h3>
+        <div class="row stack-10">
+          <label>
+            Start
+            <input id="insightsStart" type="date" />
+          </label>
+          <label>
+            End
+            <input id="insightsEnd" type="date" />
+          </label>
+          <label>
+            Near-Due Hours
+            <input id="insightsNearDueHours" type="number" min="1" step="1" value="50" />
+          </label>
+          <button id="loadInsightsBtn" type="button">Refresh Insights</button>
+        </div>
+      </div>
+      <div id="insightsMsg" class="muted">Loading maintenance insights...</div>
+      <div class="form-grid">
+        <div class="card">
+          <h4 style="margin-top:0;">Predictive Maintenance Alerts</h4>
+          <div id="insightsPredictive"></div>
+        </div>
+        <div class="card">
+          <h4 style="margin-top:0;">Parts Demand Planning</h4>
+          <div id="insightsParts"></div>
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="card">
+          <h4 style="margin-top:0;">Downtime Root-Cause Analytics</h4>
+          <div id="insightsDowntime"></div>
+        </div>
+        <div class="card">
+          <h4 style="margin-top:0;">Service SLA Tracking</h4>
+          <div id="insightsSla"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h4 style="margin-top:0;">Maintenance Cost per Machine</h4>
+        <div id="insightsCost"></div>
+      </div>
+    </div>
+
+    <div class="card stack-24">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <h3 style="margin:0;">InspectPro Live Status</h3>
         <div class="row" style="gap:8px;">

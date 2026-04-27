@@ -404,6 +404,129 @@ async function loadHistory() {
   }
 }
 
+function insightsRowsTable(headers, rows) {
+  if (!Array.isArray(rows) || !rows.length) return `<div class="muted">No data in selected range.</div>`;
+  const head = `<tr>${headers.map((h) => `<th>${escBackfill(h)}</th>`).join("")}</tr>`;
+  const body = rows
+    .map((r) => `<tr>${r.map((v) => `<td>${escBackfill(v == null ? "-" : String(v))}</td>`).join("")}</tr>`)
+    .join("");
+  return `<div style="overflow:auto;"><table class="gridTable" style="min-width:640px;"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+}
+
+function renderMaintenanceInsights(data) {
+  const predictiveEl = document.getElementById("insightsPredictive");
+  const partsEl = document.getElementById("insightsParts");
+  const downtimeEl = document.getElementById("insightsDowntime");
+  const slaEl = document.getElementById("insightsSla");
+  const costEl = document.getElementById("insightsCost");
+  if (!predictiveEl || !partsEl || !downtimeEl || !slaEl || !costEl) return;
+
+  const riskRows = Array.isArray(data?.predictive?.at_risk_plans) ? data.predictive.at_risk_plans : [];
+  const failRows = Array.isArray(data?.predictive?.repeated_checklist_failures) ? data.predictive.repeated_checklist_failures : [];
+  const fuelRows = Array.isArray(data?.predictive?.fuel_anomalies) ? data.predictive.fuel_anomalies : [];
+  predictiveEl.innerHTML = `
+    <div class="muted">At-risk plans: ${riskRows.length} | Repeat checklist failures: ${failRows.length} | Fuel anomalies: ${fuelRows.length}</div>
+    ${insightsRowsTable(
+      ["Asset", "Service", "Remaining Hrs", "Risk"],
+      riskRows.slice(0, 10).map((r) => [
+        `${r.asset_code || "-"} - ${r.asset_name || "-"}`,
+        r.service_name || "-",
+        Number(r.remaining_hours || 0).toFixed(1),
+        r.risk || "-",
+      ])
+    )}
+  `;
+
+  const partRows = Array.isArray(data?.parts_planning?.suggestions) ? data.parts_planning.suggestions : [];
+  partsEl.innerHTML = `
+    <div class="muted">Upcoming service count: ${Number(data?.parts_planning?.upcoming_service_count || 0)}</div>
+    ${insightsRowsTable(
+      ["Part", "Suggested Qty", "On Hand", "Gap", "Linked Services"],
+      partRows.slice(0, 12).map((r) => [
+        r.part_name || "-",
+        Number(r.suggested_qty || 0).toFixed(1),
+        Number(r.on_hand || 0).toFixed(1),
+        Number(r.gap_qty || 0).toFixed(1),
+        Array.isArray(r.linked_services) ? r.linked_services.join(", ") : "-",
+      ])
+    )}
+  `;
+
+  const compRows = Array.isArray(data?.downtime?.by_component) ? data.downtime.by_component : [];
+  const teamRows = Array.isArray(data?.downtime?.by_team) ? data.downtime.by_team : [];
+  downtimeEl.innerHTML = `
+    <div class="muted">Top components and teams by downtime impact.</div>
+    ${insightsRowsTable(
+      ["Component", "Incidents", "Downtime Hrs"],
+      compRows.slice(0, 8).map((r) => [r.component || "-", Number(r.incidents || 0), Number(r.downtime_hours || 0).toFixed(2)])
+    )}
+    <div style="margin-top:10px;"></div>
+    ${insightsRowsTable(
+      ["Team", "Incidents", "Downtime Hrs"],
+      teamRows.slice(0, 8).map((r) => [r.team || "-", Number(r.incidents || 0), Number(r.downtime_hours || 0).toFixed(2)])
+    )}
+  `;
+
+  const s = data?.sla || {};
+  slaEl.innerHTML = insightsRowsTable(
+    ["Metric", "Hours"],
+    [
+      ["Open -> Assign", s.avg_open_to_assign_hours == null ? "-" : Number(s.avg_open_to_assign_hours).toFixed(2)],
+      ["Open -> Complete", s.avg_open_to_complete_hours == null ? "-" : Number(s.avg_open_to_complete_hours).toFixed(2)],
+      ["Complete -> Approve", s.avg_complete_to_approve_hours == null ? "-" : Number(s.avg_complete_to_approve_hours).toFixed(2)],
+      ["Open -> Close", s.avg_open_to_close_hours == null ? "-" : Number(s.avg_open_to_close_hours).toFixed(2)],
+      ["Service Work Orders", Number(s.work_orders || 0)],
+    ]
+  );
+
+  const costRows = Array.isArray(data?.maintenance_cost) ? data.maintenance_cost : [];
+  costEl.innerHTML = insightsRowsTable(
+    ["Asset", "Jobs", "Labor", "Parts", "Lube", "Outsourced", "Total"],
+    costRows.slice(0, 15).map((r) => [
+      `${r.asset_code || "-"} - ${r.asset_name || "-"}`,
+      Number(r.service_jobs || 0),
+      Number(r.labor_cost || 0).toFixed(2),
+      Number(r.parts_cost || 0).toFixed(2),
+      Number(r.lube_cost || 0).toFixed(2),
+      Number(r.outsourced_cost || 0).toFixed(2),
+      Number(r.total_cost || 0).toFixed(2),
+    ])
+  );
+}
+
+async function loadMaintenanceInsights() {
+  const msgEl = document.getElementById("insightsMsg");
+  const startEl = document.getElementById("insightsStart");
+  const endEl = document.getElementById("insightsEnd");
+  const nearEl = document.getElementById("insightsNearDueHours");
+  if (!msgEl || !startEl || !endEl || !nearEl) return;
+  const start = String(startEl.value || "").trim();
+  const end = String(endEl.value || "").trim();
+  const near_due_hours = Math.max(1, Number(nearEl.value || 50));
+  if (!start || !end) {
+    msgEl.className = "message-error";
+    msgEl.textContent = "Select insights start and end dates.";
+    return;
+  }
+  msgEl.className = "muted";
+  msgEl.textContent = "Loading maintenance insights...";
+  try {
+    const q = new URLSearchParams();
+    q.set("start", start);
+    q.set("end", end);
+    q.set("near_due_hours", String(near_due_hours));
+    const res = await fetch(`${API}/maintenance/insights?${q.toString()}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load maintenance insights");
+    renderMaintenanceInsights(data);
+    msgEl.className = "message-success";
+    msgEl.textContent = `Insights loaded for ${data?.range?.start || start} to ${data?.range?.end || end}.`;
+  } catch (e) {
+    msgEl.className = "message-error";
+    msgEl.textContent = `Insights error: ${e.message || e}`;
+  }
+}
+
 async function deleteHistoryDuplicate(id) {
   const iid = Number(id || 0);
   if (!iid) throw new Error("Invalid history id");
@@ -3740,6 +3863,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const mpWeekStart = document.getElementById("mpWeekStart");
   const mpWeekEnd = document.getElementById("mpWeekEnd");
   const mpMonth = document.getElementById("mpMonth");
+  const insightsStart = document.getElementById("insightsStart");
+  const insightsEnd = document.getElementById("insightsEnd");
   if (mpWeekStart && !mpWeekStart.value) {
     const w = mpWeekRangeLabel();
     mpWeekStart.value = w.start;
@@ -3749,6 +3874,12 @@ document.addEventListener("DOMContentLoaded", () => {
     mpWeekEnd.value = w.end;
   }
   if (mpMonth && !mpMonth.value) mpMonth.value = mpMonthLabel();
+  if (insightsStart && !insightsStart.value) {
+    const d = new Date();
+    d.setDate(d.getDate() - 29);
+    insightsStart.value = d.toISOString().slice(0, 10);
+  }
+  if (insightsEnd && !insightsEnd.value) insightsEnd.value = new Date().toISOString().slice(0, 10);
   renderManagerInspectionChecklist();
   renderArtisanInspectionChecklist();
   const miPartsBody = document.getElementById("miPartsBody");
@@ -3929,6 +4060,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("loadWeeklyForumBtn")?.addEventListener("click", loadWeeklyForumSummary);
   document.getElementById("saveRsgProfileBtn")?.addEventListener("click", saveRsgProfile);
+  document.getElementById("loadInsightsBtn")?.addEventListener("click", () => loadMaintenanceInsights());
   document.getElementById("loadRsgProfilesBtn")?.addEventListener("click", loadRsgProfiles);
   document.getElementById("downloadRsgCsvTemplateBtn")?.addEventListener("click", downloadRsgCsvTemplate);
   document.getElementById("importRsgCsvBtn")?.addEventListener("click", importRsgProfilesCsv);
@@ -3965,6 +4097,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!btn) return;
     fillRsgProfileForm(btn.getAttribute("data-rsg-edit") || "");
   });
+  loadMaintenanceInsights().catch(() => {});
   setTopView("main");
   loadHistogramEvents().catch(() => {});
 });

@@ -1016,6 +1016,377 @@ export default async function maintenanceRoutes(app) {
   });
 
   // =====================================================
+  // MAINTENANCE INSIGHTS (High-Impact analytics starter)
+  // GET /api/maintenance/insights?start=YYYY-MM-DD&end=YYYY-MM-DD&near_due_hours=50
+  // =====================================================
+  app.get("/insights", async (req, reply) => {
+    try {
+      const endDate = String(req.query?.end || "").trim() || new Date().toISOString().slice(0, 10);
+      if (!isDate(endDate)) return reply.code(400).send({ ok: false, error: "end must be YYYY-MM-DD" });
+      const startDate = String(req.query?.start || "").trim() || (() => {
+        const d = new Date(`${endDate}T00:00:00`);
+        d.setDate(d.getDate() - 29);
+        return d.toISOString().slice(0, 10);
+      })();
+      if (!isDate(startDate)) return reply.code(400).send({ ok: false, error: "start must be YYYY-MM-DD" });
+      const nearDueHours = Math.max(1, Number(req.query?.near_due_hours || 50));
+      const predictiveHorizonHours = Math.max(nearDueHours, Number(req.query?.predictive_horizon_hours || 100));
+
+      const plans = db.prepare(`
+        SELECT
+          mp.id AS plan_id,
+          mp.asset_id,
+          mp.service_name,
+          mp.interval_hours,
+          mp.last_service_hours,
+          a.asset_code,
+          a.asset_name
+        FROM maintenance_plans mp
+        JOIN assets a ON a.id = mp.asset_id
+        WHERE mp.active = 1
+          AND a.active = 1
+      `).all();
+      const atRiskPlans = plans
+        .map((p) => {
+          const currentInfo = getAssetCurrentHoursInfo(Number(p.asset_id || 0));
+          const current = Number(currentInfo.hours || 0);
+          const nextDue = Number(p.last_service_hours || 0) + Number(p.interval_hours || 0);
+          const remaining = Number((nextDue - current).toFixed(2));
+          return {
+            plan_id: Number(p.plan_id || 0),
+            asset_id: Number(p.asset_id || 0),
+            asset_code: p.asset_code,
+            asset_name: p.asset_name,
+            service_name: p.service_name,
+            current_hours: Number(current.toFixed(2)),
+            next_due_hours: Number(nextDue.toFixed(2)),
+            remaining_hours: remaining,
+            risk: remaining <= 0 ? "OVERDUE" : remaining <= nearDueHours ? "NEAR_DUE" : remaining <= predictiveHorizonHours ? "WATCH" : "OK",
+          };
+        })
+        .filter((r) => r.risk !== "OK")
+        .sort((a, b) => Number(a.remaining_hours || 0) - Number(b.remaining_hours || 0))
+        .slice(0, 30);
+
+      const managerInspections = db.prepare(`
+        SELECT asset_id, checklist_json, checklist_detail_json
+        FROM manager_inspections
+        WHERE inspection_date BETWEEN ? AND ?
+      `).all(startDate, endDate);
+      const failByAsset = new Map();
+      const parseChecklistFailCount = (rawChecklist) => {
+        try {
+          const parsed = JSON.parse(String(rawChecklist || "null"));
+          if (!parsed) return 0;
+          if (Array.isArray(parsed)) return parsed.filter((x) => x?.ok === false).length;
+          if (typeof parsed === "object") {
+            if (parsed.checklist && typeof parsed.checklist === "object") {
+              return Object.values(parsed.checklist).filter((v) => {
+                const s = String(v || "").trim().toLowerCase();
+                return s === "attention" || s === "unsafe" || s === "fail" || s === "failed";
+              }).length;
+            }
+            return Object.values(parsed).filter((v) => {
+              const s = String(v || "").trim().toLowerCase();
+              return s === "attention" || s === "unsafe" || s === "fail" || s === "failed";
+            }).length;
+          }
+          return 0;
+        } catch {
+          return 0;
+        }
+      };
+      for (const r of managerInspections) {
+        const aid = Number(r.asset_id || 0);
+        if (!aid) continue;
+        const fails = parseChecklistFailCount(r.checklist_json);
+        if (!fails) continue;
+        failByAsset.set(aid, Number(failByAsset.get(aid) || 0) + fails);
+      }
+      const repeatedChecklistFailures = [...failByAsset.entries()]
+        .filter(([, failCount]) => failCount >= 2)
+        .map(([asset_id, fail_count]) => {
+          const a = db.prepare(`SELECT asset_code, asset_name FROM assets WHERE id = ? LIMIT 1`).get(asset_id) || {};
+          return {
+            asset_id: Number(asset_id),
+            asset_code: String(a.asset_code || ""),
+            asset_name: String(a.asset_name || ""),
+            fail_count: Number(fail_count || 0),
+          };
+        })
+        .sort((a, b) => Number(b.fail_count || 0) - Number(a.fail_count || 0))
+        .slice(0, 20);
+
+      const fuelAnomalies = hasColumn("assets", "baseline_fuel_l_per_hour")
+        ? db.prepare(`
+            SELECT
+              a.id AS asset_id,
+              a.asset_code,
+              a.asset_name,
+              COALESCE(a.baseline_fuel_l_per_hour, 0) AS baseline_lph,
+              COALESCE(SUM(fl.liters), 0) AS fuel_liters,
+              COALESCE(SUM(CASE WHEN COALESCE(fl.hours_run, 0) > 0 THEN fl.hours_run ELSE 0 END), 0) AS hours_run,
+              COUNT(fl.id) AS fills
+            FROM assets a
+            JOIN fuel_logs fl ON fl.asset_id = a.id
+            WHERE fl.log_date BETWEEN ? AND ?
+              AND a.active = 1
+            GROUP BY a.id
+            HAVING fills >= 2 AND hours_run > 0 AND baseline_lph > 0
+          `).all(startDate, endDate)
+            .map((r) => {
+              const actual = Number(r.fuel_liters || 0) / Number(r.hours_run || 1);
+              const baseline = Number(r.baseline_lph || 0);
+              const ratio = baseline > 0 ? actual / baseline : 0;
+              return {
+                asset_id: Number(r.asset_id || 0),
+                asset_code: r.asset_code,
+                asset_name: r.asset_name,
+                baseline_lph: Number(baseline.toFixed(3)),
+                actual_lph: Number(actual.toFixed(3)),
+                variance_pct: Number(((ratio - 1) * 100).toFixed(1)),
+              };
+            })
+            .filter((r) => Number(r.variance_pct || 0) >= 15)
+            .sort((a, b) => Number(b.variance_pct || 0) - Number(a.variance_pct || 0))
+            .slice(0, 20)
+        : [];
+
+      const predictive = {
+        at_risk_plans: atRiskPlans,
+        repeated_checklist_failures: repeatedChecklistFailures,
+        fuel_anomalies: fuelAnomalies,
+      };
+
+      const upcomingPlans = plans
+        .map((p) => {
+          const current = Number(getAssetCurrentHoursInfo(Number(p.asset_id || 0)).hours || 0);
+          const nextDue = Number(p.last_service_hours || 0) + Number(p.interval_hours || 0);
+          return {
+            service_name: String(p.service_name || "").trim(),
+            remaining_hours: Number((nextDue - current).toFixed(2)),
+          };
+        })
+        .filter((r) => r.service_name && Number(r.remaining_hours || 0) <= predictiveHorizonHours);
+      const upcomingByService = upcomingPlans.reduce((m, r) => {
+        const key = String(r.service_name || "").trim().toLowerCase();
+        if (!key) return m;
+        const cur = m.get(key) || { service_name: r.service_name, due_count: 0 };
+        cur.due_count += 1;
+        m.set(key, cur);
+        return m;
+      }, new Map());
+
+      const historicalParts = db.prepare(`
+        SELECT
+          LOWER(TRIM(COALESCE(mr.service_type, ''))) AS service_key,
+          COALESCE(mp.part_name, '') AS part_name,
+          AVG(COALESCE(mp.quantity, 0)) AS avg_qty
+        FROM maintenance_records mr
+        JOIN maintenance_parts mp ON mp.maintenance_record_id = mr.id
+        WHERE DATE(mr.maintenance_date) BETWEEN DATE(?) AND DATE(?)
+          AND TRIM(COALESCE(mr.service_type, '')) <> ''
+          AND TRIM(COALESCE(mp.part_name, '')) <> ''
+        GROUP BY service_key, part_name
+      `).all(startDate, endDate);
+      const partDemandMap = new Map();
+      for (const r of historicalParts) {
+        const serviceKey = String(r.service_key || "");
+        const due = upcomingByService.get(serviceKey);
+        if (!due) continue;
+        const part = String(r.part_name || "").trim();
+        if (!part) continue;
+        const suggested = Number(r.avg_qty || 0) * Number(due.due_count || 0);
+        if (!Number.isFinite(suggested) || suggested <= 0) continue;
+        const cur = partDemandMap.get(part) || { part_name: part, suggested_qty: 0, linked_services: new Set() };
+        cur.suggested_qty += suggested;
+        cur.linked_services.add(due.service_name);
+        partDemandMap.set(part, cur);
+      }
+      const getPartOnHand = db.prepare(`
+        SELECT COALESCE(SUM(
+          CASE
+            WHEN LOWER(COALESCE(movement_type, '')) = 'out' THEN -ABS(COALESCE(quantity, 0))
+            ELSE COALESCE(quantity, 0)
+          END
+        ), 0) AS on_hand
+        FROM stock_movements
+        WHERE LOWER(TRIM(COALESCE(reference, ''))) = LOWER(TRIM(?))
+      `);
+      const partsDemand = [...partDemandMap.values()]
+        .map((x) => {
+          const onHand = Number(getPartOnHand.get(x.part_name)?.on_hand || 0);
+          const suggested = Number(x.suggested_qty || 0);
+          return {
+            part_name: x.part_name,
+            suggested_qty: Number(suggested.toFixed(1)),
+            on_hand: Number(onHand.toFixed(1)),
+            gap_qty: Number(Math.max(0, suggested - onHand).toFixed(1)),
+            linked_services: [...x.linked_services].slice(0, 4),
+          };
+        })
+        .sort((a, b) => Number(b.gap_qty || 0) - Number(a.gap_qty || 0))
+        .slice(0, 30);
+
+      const partsPlanning = {
+        upcoming_service_count: upcomingPlans.length,
+        suggestions: partsDemand,
+      };
+
+      const downtimeByComponent = db.prepare(`
+        SELECT
+          LOWER(TRIM(COALESCE(b.component, 'uncategorized'))) AS component_key,
+          COUNT(DISTINCT b.id) AS incidents,
+          COALESCE(SUM(COALESCE(dl.hours_down, 0)), 0) AS downtime_logged,
+          COALESCE(SUM(COALESCE(b.downtime_hours, 0)), 0) AS downtime_base
+        FROM breakdowns b
+        LEFT JOIN breakdown_downtime_logs dl ON dl.breakdown_id = b.id
+          AND DATE(dl.log_date) BETWEEN DATE(?) AND DATE(?)
+        WHERE DATE(COALESCE(b.breakdown_date, b.created_at)) BETWEEN DATE(?) AND DATE(?)
+        GROUP BY component_key
+      `).all(startDate, endDate, startDate, endDate)
+        .map((r) => {
+          const d = Number(r.downtime_logged || 0) > 0 ? Number(r.downtime_logged || 0) : Number(r.downtime_base || 0);
+          return {
+            component: String(r.component_key || "uncategorized").replace(/\b\w/g, (m) => m.toUpperCase()),
+            incidents: Number(r.incidents || 0),
+            downtime_hours: Number(d.toFixed(2)),
+          };
+        })
+        .sort((a, b) => Number(b.downtime_hours || 0) - Number(a.downtime_hours || 0))
+        .slice(0, 20);
+      const downtimeByTeam = db.prepare(`
+        SELECT
+          COALESCE(NULLIF(TRIM(wo.assigned_artisan_name), ''), NULLIF(TRIM(wo.artisan_name), ''), 'Unassigned') AS team,
+          COUNT(DISTINCT b.id) AS incidents,
+          COALESCE(SUM(COALESCE(b.downtime_hours, 0)), 0) AS downtime_hours
+        FROM breakdowns b
+        LEFT JOIN work_orders wo ON wo.id = b.primary_work_order_id
+        WHERE DATE(COALESCE(b.breakdown_date, b.created_at)) BETWEEN DATE(?) AND DATE(?)
+        GROUP BY team
+      `).all(startDate, endDate)
+        .map((r) => ({
+          team: String(r.team || "Unassigned"),
+          incidents: Number(r.incidents || 0),
+          downtime_hours: Number(Number(r.downtime_hours || 0).toFixed(2)),
+        }))
+        .sort((a, b) => Number(b.downtime_hours || 0) - Number(a.downtime_hours || 0))
+        .slice(0, 20);
+      const downtime = {
+        by_component: downtimeByComponent,
+        by_team: downtimeByTeam,
+      };
+
+      const serviceWos = db.prepare(`
+        SELECT
+          id,
+          opened_at,
+          assigned_at,
+          completed_at,
+          closed_at,
+          supervisor_decision_at
+        FROM work_orders
+        WHERE source = 'service'
+          AND DATE(COALESCE(opened_at, updated_at)) BETWEEN DATE(?) AND DATE(?)
+      `).all(startDate, endDate);
+      const hoursBetween = (a, b) => {
+        if (!a || !b) return null;
+        const start = new Date(String(a));
+        const end = new Date(String(b));
+        const ms = Number(end - start);
+        if (!Number.isFinite(ms) || ms <= 0) return null;
+        return ms / 36e5;
+      };
+      const collectAvg = (vals) => {
+        const clean = vals.filter((n) => Number.isFinite(n) && n >= 0);
+        if (!clean.length) return null;
+        return Number((clean.reduce((a, b) => a + b, 0) / clean.length).toFixed(2));
+      };
+      const sla = {
+        work_orders: serviceWos.length,
+        avg_open_to_assign_hours: collectAvg(serviceWos.map((r) => hoursBetween(r.opened_at, r.assigned_at))),
+        avg_open_to_complete_hours: collectAvg(serviceWos.map((r) => hoursBetween(r.opened_at, r.completed_at))),
+        avg_complete_to_approve_hours: collectAvg(serviceWos.map((r) => hoursBetween(r.completed_at, r.supervisor_decision_at))),
+        avg_open_to_close_hours: collectAvg(serviceWos.map((r) => hoursBetween(r.opened_at, r.closed_at))),
+      };
+
+      const serviceCostRows = db.prepare(`
+        SELECT
+          a.id AS asset_id,
+          a.asset_code,
+          a.asset_name,
+          COUNT(DISTINCT wo.id) AS service_jobs,
+          COALESCE(SUM(COALESCE(wo.labor_hours, 0) * COALESCE(wo.labor_rate_per_hour, 0)), 0) AS labor_cost
+        FROM assets a
+        LEFT JOIN work_orders wo
+          ON wo.asset_id = a.id
+         AND wo.source = 'service'
+         AND DATE(COALESCE(wo.opened_at, wo.updated_at)) BETWEEN DATE(?) AND DATE(?)
+        WHERE a.active = 1
+        GROUP BY a.id
+      `).all(startDate, endDate);
+      const partsByAsset = db.prepare(`
+        SELECT
+          mr.asset_id,
+          COALESCE(SUM(COALESCE(mp.quantity, 0) * COALESCE(p.unit_cost, 0)), 0) AS parts_cost
+        FROM maintenance_records mr
+        JOIN maintenance_parts mp ON mp.maintenance_record_id = mr.id
+        LEFT JOIN parts p ON LOWER(TRIM(p.part_name)) = LOWER(TRIM(mp.part_name))
+        WHERE DATE(mr.maintenance_date) BETWEEN DATE(?) AND DATE(?)
+        GROUP BY mr.asset_id
+      `).all(startDate, endDate)
+        .reduce((m, r) => m.set(Number(r.asset_id || 0), Number(r.parts_cost || 0)), new Map());
+      const lubeByAsset = db.prepare(`
+        SELECT
+          mr.asset_id,
+          COALESCE(SUM(COALESCE(ml.quantity, 0) * COALESCE(p.unit_cost, 0)), 0) AS lube_cost
+        FROM maintenance_records mr
+        JOIN maintenance_lubes ml ON ml.maintenance_record_id = mr.id
+        LEFT JOIN parts p ON LOWER(TRIM(p.part_name)) LIKE '%' || LOWER(TRIM(ml.lube_type)) || '%'
+        WHERE DATE(mr.maintenance_date) BETWEEN DATE(?) AND DATE(?)
+        GROUP BY mr.asset_id
+      `).all(startDate, endDate)
+        .reduce((m, r) => m.set(Number(r.asset_id || 0), Number(r.lube_cost || 0)), new Map());
+      const maintenanceCost = serviceCostRows
+        .map((r) => {
+          const aid = Number(r.asset_id || 0);
+          const labor = Number(r.labor_cost || 0);
+          const parts = Number(partsByAsset.get(aid) || 0);
+          const lube = Number(lubeByAsset.get(aid) || 0);
+          const outsourced = 0;
+          const total = labor + parts + lube + outsourced;
+          return {
+            asset_id: aid,
+            asset_code: String(r.asset_code || ""),
+            asset_name: String(r.asset_name || ""),
+            service_jobs: Number(r.service_jobs || 0),
+            labor_cost: Number(labor.toFixed(2)),
+            parts_cost: Number(parts.toFixed(2)),
+            lube_cost: Number(lube.toFixed(2)),
+            outsourced_cost: Number(outsourced.toFixed(2)),
+            total_cost: Number(total.toFixed(2)),
+          };
+        })
+        .filter((r) => Number(r.total_cost || 0) > 0 || Number(r.service_jobs || 0) > 0)
+        .sort((a, b) => Number(b.total_cost || 0) - Number(a.total_cost || 0))
+        .slice(0, 30);
+
+      return reply.send({
+        ok: true,
+        range: { start: startDate, end: endDate, near_due_hours: nearDueHours },
+        predictive,
+        parts_planning: partsPlanning,
+        downtime,
+        sla,
+        maintenance_cost: maintenanceCost,
+      });
+    } catch (e) {
+      req.log.error(e);
+      return reply.code(500).send({ ok: false, error: e.message || String(e) });
+    }
+  });
+
+  // =====================================================
   // BACKFILL (ANCIENT) SERVICE HISTORY
   // POST /api/maintenance/history/backfill
   // Body: { asset_id, service_name, service_date, service_hours?, notes?, update_plan_last_hours?, plan_id? }
