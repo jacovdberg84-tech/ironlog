@@ -1244,45 +1244,58 @@ export default async function maintenanceRoutes(app) {
         suggestions: partsDemand,
       };
 
-      const downtimeByComponent = db.prepare(`
-        SELECT
-          LOWER(TRIM(COALESCE(b.component, 'uncategorized'))) AS component_key,
-          COUNT(DISTINCT b.id) AS incidents,
-          COALESCE(SUM(COALESCE(dl.hours_down, 0)), 0) AS downtime_logged,
-          COALESCE(SUM(COALESCE(b.downtime_hours, 0)), 0) AS downtime_base
-        FROM breakdowns b
-        LEFT JOIN breakdown_downtime_logs dl ON dl.breakdown_id = b.id
-          AND DATE(dl.log_date) BETWEEN DATE(?) AND DATE(?)
-        WHERE DATE(COALESCE(b.breakdown_date, b.created_at)) BETWEEN DATE(?) AND DATE(?)
-        GROUP BY component_key
-      `).all(startDate, endDate, startDate, endDate)
-        .map((r) => {
-          const d = Number(r.downtime_logged || 0) > 0 ? Number(r.downtime_logged || 0) : Number(r.downtime_base || 0);
-          return {
-            component: String(r.component_key || "uncategorized").replace(/\b\w/g, (m) => m.toUpperCase()),
-            incidents: Number(r.incidents || 0),
-            downtime_hours: Number(d.toFixed(2)),
-          };
-        })
-        .sort((a, b) => Number(b.downtime_hours || 0) - Number(a.downtime_hours || 0))
-        .slice(0, 20);
-      const downtimeByTeam = db.prepare(`
-        SELECT
-          COALESCE(NULLIF(TRIM(wo.assigned_artisan_name), ''), NULLIF(TRIM(wo.artisan_name), ''), 'Unassigned') AS team,
-          COUNT(DISTINCT b.id) AS incidents,
-          COALESCE(SUM(COALESCE(b.downtime_hours, 0)), 0) AS downtime_hours
-        FROM breakdowns b
-        LEFT JOIN work_orders wo ON wo.id = b.primary_work_order_id
-        WHERE DATE(COALESCE(b.breakdown_date, b.created_at)) BETWEEN DATE(?) AND DATE(?)
-        GROUP BY team
-      `).all(startDate, endDate)
-        .map((r) => ({
-          team: String(r.team || "Unassigned"),
-          incidents: Number(r.incidents || 0),
-          downtime_hours: Number(Number(r.downtime_hours || 0).toFixed(2)),
-        }))
-        .sort((a, b) => Number(b.downtime_hours || 0) - Number(a.downtime_hours || 0))
-        .slice(0, 20);
+      const canReadBreakdowns = hasTable("breakdowns");
+      const canReadDowntimeLogs = hasTable("breakdown_downtime_logs");
+      const breakdownDateExpr = hasColumn("breakdowns", "breakdown_date") ? "b.breakdown_date" : "b.created_at";
+      const breakdownDowntimeCol = hasColumn("breakdowns", "downtime_hours")
+        ? "downtime_hours"
+        : (hasColumn("breakdowns", "downtime_total_hours") ? "downtime_total_hours" : "");
+      const breakdownDowntimeExpr = breakdownDowntimeCol ? `COALESCE(b.${breakdownDowntimeCol}, 0)` : "0";
+      const downtimeByComponent = canReadBreakdowns
+        ? db.prepare(`
+            SELECT
+              LOWER(TRIM(COALESCE(b.component, 'uncategorized'))) AS component_key,
+              COUNT(DISTINCT b.id) AS incidents,
+              ${canReadDowntimeLogs ? "COALESCE(SUM(COALESCE(dl.hours_down, 0)), 0)" : "0"} AS downtime_logged,
+              COALESCE(SUM(${breakdownDowntimeExpr}), 0) AS downtime_base
+            FROM breakdowns b
+            ${canReadDowntimeLogs
+              ? `LEFT JOIN breakdown_downtime_logs dl ON dl.breakdown_id = b.id
+          AND DATE(dl.log_date) BETWEEN DATE(?) AND DATE(?)`
+              : ""}
+            WHERE DATE(COALESCE(${breakdownDateExpr}, b.created_at)) BETWEEN DATE(?) AND DATE(?)
+            GROUP BY component_key
+          `).all(...(canReadDowntimeLogs ? [startDate, endDate, startDate, endDate] : [startDate, endDate]))
+            .map((r) => {
+              const d = Number(r.downtime_logged || 0) > 0 ? Number(r.downtime_logged || 0) : Number(r.downtime_base || 0);
+              return {
+                component: String(r.component_key || "uncategorized").replace(/\b\w/g, (m) => m.toUpperCase()),
+                incidents: Number(r.incidents || 0),
+                downtime_hours: Number(d.toFixed(2)),
+              };
+            })
+            .sort((a, b) => Number(b.downtime_hours || 0) - Number(a.downtime_hours || 0))
+            .slice(0, 20)
+        : [];
+      const downtimeByTeam = canReadBreakdowns
+        ? db.prepare(`
+            SELECT
+              COALESCE(NULLIF(TRIM(wo.assigned_artisan_name), ''), NULLIF(TRIM(wo.artisan_name), ''), 'Unassigned') AS team,
+              COUNT(DISTINCT b.id) AS incidents,
+              COALESCE(SUM(${breakdownDowntimeExpr}), 0) AS downtime_hours
+            FROM breakdowns b
+            LEFT JOIN work_orders wo ON wo.id = b.primary_work_order_id
+            WHERE DATE(COALESCE(${breakdownDateExpr}, b.created_at)) BETWEEN DATE(?) AND DATE(?)
+            GROUP BY team
+          `).all(startDate, endDate)
+            .map((r) => ({
+              team: String(r.team || "Unassigned"),
+              incidents: Number(r.incidents || 0),
+              downtime_hours: Number(Number(r.downtime_hours || 0).toFixed(2)),
+            }))
+            .sort((a, b) => Number(b.downtime_hours || 0) - Number(a.downtime_hours || 0))
+            .slice(0, 20)
+        : [];
       const downtime = {
         by_component: downtimeByComponent,
         by_team: downtimeByTeam,
@@ -1387,18 +1400,20 @@ export default async function maintenanceRoutes(app) {
         .sort((a, b) => Number(b.total_cost || 0) - Number(a.total_cost || 0))
         .slice(0, 30);
 
-      const downtimeTrend = db.prepare(`
-        SELECT
-          DATE(COALESCE(b.breakdown_date, b.created_at)) AS day,
-          COALESCE(SUM(COALESCE(b.downtime_hours, 0)), 0) AS downtime_hours
-        FROM breakdowns b
-        WHERE DATE(COALESCE(b.breakdown_date, b.created_at)) BETWEEN DATE(?) AND DATE(?)
-        GROUP BY day
-        ORDER BY day ASC
-      `).all(startDate, endDate).map((r) => ({
-        day: String(r.day || ""),
-        downtime_hours: Number(Number(r.downtime_hours || 0).toFixed(2)),
-      }));
+      const downtimeTrend = canReadBreakdowns
+        ? db.prepare(`
+            SELECT
+              DATE(COALESCE(${breakdownDateExpr}, b.created_at)) AS day,
+              COALESCE(SUM(${breakdownDowntimeExpr}), 0) AS downtime_hours
+            FROM breakdowns b
+            WHERE DATE(COALESCE(${breakdownDateExpr}, b.created_at)) BETWEEN DATE(?) AND DATE(?)
+            GROUP BY day
+            ORDER BY day ASC
+          `).all(startDate, endDate).map((r) => ({
+            day: String(r.day || ""),
+            downtime_hours: Number(Number(r.downtime_hours || 0).toFixed(2)),
+          }))
+        : [];
       const costTrend = db.prepare(`
         SELECT
           DATE(COALESCE(wo.opened_at, wo.updated_at)) AS day,
