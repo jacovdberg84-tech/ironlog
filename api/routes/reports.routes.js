@@ -2952,6 +2952,7 @@ export default async function reportsRoutes(app) {
     }
 
     const miInspectorCol = pickExistingColumn("manager_inspections", ["inspector_name", "inspector"], "inspector_name");
+    const miNotesCol = pickExistingColumn("manager_inspections", ["notes", "note", "remarks", "description"], "notes");
     const photoInspectionCol = pickExistingColumn("manager_inspection_photos", ["inspection_id", "manager_inspection_id"], "inspection_id");
     const photoPathCol = pickExistingColumn("manager_inspection_photos", ["file_path", "photo_path", "path", "image_path", "url"], "file_path");
     const photoCaptionCol = pickExistingColumn("manager_inspection_photos", ["caption", "note", "notes", "description"], "caption");
@@ -2984,7 +2985,7 @@ export default async function reportsRoutes(app) {
         mi.id,
         mi.inspection_date,
         mi.${miInspectorCol} AS inspector_name,
-        mi.notes,
+        mi.${miNotesCol} AS notes,
         mi.created_at,
         ${machineHoursSelect} AS machine_hours,
         ${liveSnapSelect} AS live_hours_snapshot,
@@ -3164,6 +3165,7 @@ export default async function reportsRoutes(app) {
     }
 
     const miInspectorCol = pickExistingColumn("manager_inspections", ["inspector_name", "inspector"], "inspector_name");
+    const miNotesCol = pickExistingColumn("manager_inspections", ["notes", "note", "remarks", "description"], "notes");
     const photoInspectionCol = pickExistingColumn("manager_inspection_photos", ["inspection_id", "manager_inspection_id"], "inspection_id");
     const photoPathCol = pickExistingColumn("manager_inspection_photos", ["file_path", "photo_path", "path", "image_path", "url"], "file_path");
     const photoCaptionCol = pickExistingColumn("manager_inspection_photos", ["caption", "note", "notes", "description"], "caption");
@@ -3185,7 +3187,7 @@ export default async function reportsRoutes(app) {
         mi.asset_id,
         mi.inspection_date,
         mi.${miInspectorCol} AS inspector_name,
-        mi.notes,
+        mi.${miNotesCol} AS notes,
         ${hasMiMh ? "mi.machine_hours" : "NULL"} AS machine_hours,
         ${hasMiChecklist ? "mi.checklist_json" : `''`} AS checklist_json,
         ${hasMiWo ? "mi.work_order_id" : "NULL"} AS work_order_id,
