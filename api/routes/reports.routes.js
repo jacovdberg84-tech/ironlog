@@ -2357,8 +2357,6 @@ export default async function reportsRoutes(app) {
     });
     const rows = benchmarkRows
       .filter((r) => r.fuel_liters > 0)
-      .filter((r) => r.metric_mode !== "km")
-      .filter((r) => !isLdvFleetCode(r.asset_code))
       .filter((r) => (assetFilter ? String(r.asset_code || "").trim().toLowerCase() === assetFilter : true))
       .filter((r) => (modeFilter === "km" ? r.metric_mode === "km" : modeFilter === "hours" ? r.metric_mode === "hours" : true))
       .sort((a, b) => {
@@ -2376,8 +2374,6 @@ export default async function reportsRoutes(app) {
       .map((r) => {
         let reason = "Excluded by report filters";
         if (Number(r.fuel_liters || 0) <= 0) reason = "No fuel logs in selected period";
-        else if (String(r.metric_mode || "").toLowerCase() === "km") reason = "KM-mode asset excluded by current benchmark sheet";
-        else if (isLdvFleetCode(r.asset_code)) reason = "LDV fleet code excluded";
         return {
           asset_code: r.asset_code,
           asset_name: r.asset_name,
