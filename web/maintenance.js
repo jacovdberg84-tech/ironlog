@@ -7,6 +7,7 @@ const USER_KEY = "ironlog_session_user";
 const SITE_KEY = "ironlog_session_site";
 const TOKEN_KEY = "ironlog_auth_token";
 const MAINT_DUE_THRESHOLD_KEY = "ironlog_maintenance_due_threshold_hours";
+const INSIGHTS_THRESHOLDS_KEY = "ironlog_maintenance_insights_thresholds";
 const MAINT_LOCK_KEY = "ironlog_maintenance_access_ok";
 const MAINT_LOCK_USER = "BJ van den Berg";
 const MAINT_LOCK_PASSWORD = "0mhliac789";
@@ -408,7 +409,10 @@ function insightsRowsTable(headers, rows) {
   if (!Array.isArray(rows) || !rows.length) return `<div class="muted">No data in selected range.</div>`;
   const head = `<tr>${headers.map((h) => `<th>${escBackfill(h)}</th>`).join("")}</tr>`;
   const body = rows
-    .map((r) => `<tr>${r.map((v) => `<td>${escBackfill(v == null ? "-" : String(v))}</td>`).join("")}</tr>`)
+    .map((r) => `<tr>${r.map((v) => {
+      if (v && typeof v === "object" && typeof v.__html === "string") return `<td>${v.__html}</td>`;
+      return `<td>${escBackfill(v == null ? "-" : String(v))}</td>`;
+    }).join("")}</tr>`)
     .join("");
   return `<div style="overflow:auto;"><table class="gridTable" style="min-width:640px;"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
@@ -419,7 +423,8 @@ function renderMaintenanceInsights(data) {
   const downtimeEl = document.getElementById("insightsDowntime");
   const slaEl = document.getElementById("insightsSla");
   const costEl = document.getElementById("insightsCost");
-  if (!predictiveEl || !partsEl || !downtimeEl || !slaEl || !costEl) return;
+  const trendsEl = document.getElementById("insightsTrends");
+  if (!predictiveEl || !partsEl || !downtimeEl || !slaEl || !costEl || !trendsEl) return;
 
   const riskRows = Array.isArray(data?.predictive?.at_risk_plans) ? data.predictive.at_risk_plans : [];
   const failRows = Array.isArray(data?.predictive?.repeated_checklist_failures) ? data.predictive.repeated_checklist_failures : [];
@@ -429,7 +434,9 @@ function renderMaintenanceInsights(data) {
     ${insightsRowsTable(
       ["Asset", "Service", "Remaining Hrs", "Risk"],
       riskRows.slice(0, 10).map((r) => [
-        `${r.asset_code || "-"} - ${r.asset_name || "-"}`,
+        {
+          __html: `${r.asset_code ? `<button type="button" data-insights-asset-code="${escBackfill(r.asset_code)}">${escBackfill(r.asset_code)}</button>` : "-"}${r.asset_name ? ` - ${escBackfill(r.asset_name)}` : ""}`,
+        },
         r.service_name || "-",
         Number(r.remaining_hours || 0).toFixed(1),
         r.risk || "-",
@@ -492,6 +499,67 @@ function renderMaintenanceInsights(data) {
       Number(r.total_cost || 0).toFixed(2),
     ])
   );
+
+  const downtimeDaily = Array.isArray(data?.trends?.downtime_daily) ? data.trends.downtime_daily : [];
+  const laborDaily = Array.isArray(data?.trends?.labor_daily) ? data.trends.labor_daily : [];
+  const laborMap = new Map(laborDaily.map((r) => [String(r.day || ""), Number(r.labor_cost || 0)]));
+  trendsEl.innerHTML = insightsRowsTable(
+    ["Day", "Downtime Hrs", "Labor Cost"],
+    downtimeDaily.slice(-30).map((r) => [
+      r.day || "-",
+      Number(r.downtime_hours || 0).toFixed(2),
+      Number(laborMap.get(String(r.day || "")) || 0).toFixed(2),
+    ])
+  );
+}
+
+function getInsightsThresholds() {
+  try {
+    const raw = JSON.parse(String(localStorage.getItem(INSIGHTS_THRESHOLDS_KEY) || "{}"));
+    return {
+      near_due_hours: Math.max(1, Number(raw.near_due_hours || 50)),
+      predictive_horizon_hours: Math.max(1, Number(raw.predictive_horizon_hours || 100)),
+      checklist_fail_threshold: Math.max(1, Number(raw.checklist_fail_threshold || 2)),
+      fuel_variance_threshold: Math.max(0, Number(raw.fuel_variance_threshold || 15)),
+    };
+  } catch {
+    return {
+      near_due_hours: 50,
+      predictive_horizon_hours: 100,
+      checklist_fail_threshold: 2,
+      fuel_variance_threshold: 15,
+    };
+  }
+}
+
+function persistInsightsThresholds() {
+  const nearEl = document.getElementById("insightsNearDueHours");
+  const horizonEl = document.getElementById("insightsPredictiveHorizonHours");
+  const failEl = document.getElementById("insightsChecklistFailThreshold");
+  const fuelEl = document.getElementById("insightsFuelVarianceThreshold");
+  const payload = {
+    near_due_hours: Math.max(1, Number(nearEl?.value || 50)),
+    predictive_horizon_hours: Math.max(1, Number(horizonEl?.value || 100)),
+    checklist_fail_threshold: Math.max(1, Number(failEl?.value || 2)),
+    fuel_variance_threshold: Math.max(0, Number(fuelEl?.value || 15)),
+  };
+  localStorage.setItem(INSIGHTS_THRESHOLDS_KEY, JSON.stringify(payload));
+  return payload;
+}
+
+function openMaintenanceInsightsXlsx() {
+  const start = String(document.getElementById("insightsStart")?.value || "").trim();
+  const end = String(document.getElementById("insightsEnd")?.value || "").trim();
+  if (!start || !end) return alert("Select insights start and end dates.");
+  const t = persistInsightsThresholds();
+  const q = new URLSearchParams();
+  q.set("start", start);
+  q.set("end", end);
+  q.set("near_due_hours", String(t.near_due_hours));
+  q.set("predictive_horizon_hours", String(t.predictive_horizon_hours));
+  q.set("checklist_fail_threshold", String(t.checklist_fail_threshold));
+  q.set("fuel_variance_threshold", String(t.fuel_variance_threshold));
+  window.open(`${API}/maintenance/insights.xlsx?${q.toString()}`, "_blank");
 }
 
 async function loadMaintenanceInsights() {
@@ -499,10 +567,17 @@ async function loadMaintenanceInsights() {
   const startEl = document.getElementById("insightsStart");
   const endEl = document.getElementById("insightsEnd");
   const nearEl = document.getElementById("insightsNearDueHours");
-  if (!msgEl || !startEl || !endEl || !nearEl) return;
+  const horizonEl = document.getElementById("insightsPredictiveHorizonHours");
+  const failEl = document.getElementById("insightsChecklistFailThreshold");
+  const fuelEl = document.getElementById("insightsFuelVarianceThreshold");
+  if (!msgEl || !startEl || !endEl || !nearEl || !horizonEl || !failEl || !fuelEl) return;
   const start = String(startEl.value || "").trim();
   const end = String(endEl.value || "").trim();
-  const near_due_hours = Math.max(1, Number(nearEl.value || 50));
+  const thresholds = persistInsightsThresholds();
+  const near_due_hours = Math.max(1, Number(thresholds.near_due_hours || 50));
+  const predictive_horizon_hours = Math.max(near_due_hours, Number(thresholds.predictive_horizon_hours || 100));
+  const checklist_fail_threshold = Math.max(1, Number(thresholds.checklist_fail_threshold || 2));
+  const fuel_variance_threshold = Math.max(0, Number(thresholds.fuel_variance_threshold || 15));
   if (!start || !end) {
     msgEl.className = "message-error";
     msgEl.textContent = "Select insights start and end dates.";
@@ -515,6 +590,9 @@ async function loadMaintenanceInsights() {
     q.set("start", start);
     q.set("end", end);
     q.set("near_due_hours", String(near_due_hours));
+    q.set("predictive_horizon_hours", String(predictive_horizon_hours));
+    q.set("checklist_fail_threshold", String(checklist_fail_threshold));
+    q.set("fuel_variance_threshold", String(fuel_variance_threshold));
     const res = await fetch(`${API}/maintenance/insights?${q.toString()}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to load maintenance insights");
@@ -3865,6 +3943,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const mpMonth = document.getElementById("mpMonth");
   const insightsStart = document.getElementById("insightsStart");
   const insightsEnd = document.getElementById("insightsEnd");
+  const insightsNear = document.getElementById("insightsNearDueHours");
+  const insightsHorizon = document.getElementById("insightsPredictiveHorizonHours");
+  const insightsFail = document.getElementById("insightsChecklistFailThreshold");
+  const insightsFuel = document.getElementById("insightsFuelVarianceThreshold");
   if (mpWeekStart && !mpWeekStart.value) {
     const w = mpWeekRangeLabel();
     mpWeekStart.value = w.start;
@@ -3880,6 +3962,11 @@ document.addEventListener("DOMContentLoaded", () => {
     insightsStart.value = d.toISOString().slice(0, 10);
   }
   if (insightsEnd && !insightsEnd.value) insightsEnd.value = new Date().toISOString().slice(0, 10);
+  const savedThresholds = getInsightsThresholds();
+  if (insightsNear) insightsNear.value = String(savedThresholds.near_due_hours);
+  if (insightsHorizon) insightsHorizon.value = String(savedThresholds.predictive_horizon_hours);
+  if (insightsFail) insightsFail.value = String(savedThresholds.checklist_fail_threshold);
+  if (insightsFuel) insightsFuel.value = String(savedThresholds.fuel_variance_threshold);
   renderManagerInspectionChecklist();
   renderArtisanInspectionChecklist();
   const miPartsBody = document.getElementById("miPartsBody");
@@ -4061,6 +4148,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("loadWeeklyForumBtn")?.addEventListener("click", loadWeeklyForumSummary);
   document.getElementById("saveRsgProfileBtn")?.addEventListener("click", saveRsgProfile);
   document.getElementById("loadInsightsBtn")?.addEventListener("click", () => loadMaintenanceInsights());
+  document.getElementById("downloadInsightsXlsxBtn")?.addEventListener("click", () => openMaintenanceInsightsXlsx());
   document.getElementById("loadRsgProfilesBtn")?.addEventListener("click", loadRsgProfiles);
   document.getElementById("downloadRsgCsvTemplateBtn")?.addEventListener("click", downloadRsgCsvTemplate);
   document.getElementById("importRsgCsvBtn")?.addEventListener("click", importRsgProfilesCsv);
@@ -4096,6 +4184,19 @@ document.addEventListener("DOMContentLoaded", () => {
     const btn = evt.target?.closest?.("button[data-rsg-edit]");
     if (!btn) return;
     fillRsgProfileForm(btn.getAttribute("data-rsg-edit") || "");
+  });
+  document.getElementById("insightsPredictive")?.addEventListener("click", (evt) => {
+    const btn = evt.target?.closest?.("button[data-insights-asset-code]");
+    if (!btn) return;
+    const code = String(btn.getAttribute("data-insights-asset-code") || "").trim().toUpperCase();
+    if (!code) return;
+    const sel = document.getElementById("miFilterAsset");
+    if (sel) {
+      const opt = Array.from(sel.options || []).find((o) => String(o.text || "").toUpperCase().includes(code));
+      if (opt) sel.value = String(opt.value || "");
+    }
+    setTopView("mi");
+    loadManagerInspections().catch(() => {});
   });
   loadMaintenanceInsights().catch(() => {});
   setTopView("main");

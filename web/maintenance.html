@@ -317,7 +317,20 @@
             Near-Due Hours
             <input id="insightsNearDueHours" type="number" min="1" step="1" value="50" />
           </label>
+          <label>
+            Predictive Horizon
+            <input id="insightsPredictiveHorizonHours" type="number" min="1" step="1" value="100" />
+          </label>
+          <label>
+            Checklist Fail Threshold
+            <input id="insightsChecklistFailThreshold" type="number" min="1" step="1" value="2" />
+          </label>
+          <label>
+            Fuel Variance % Threshold
+            <input id="insightsFuelVarianceThreshold" type="number" min="0" step="1" value="15" />
+          </label>
           <button id="loadInsightsBtn" type="button">Refresh Insights</button>
+          <button id="downloadInsightsXlsxBtn" type="button">Download XLSX</button>
         </div>
       </div>
       <div id="insightsMsg" class="muted">Loading maintenance insights...</div>
@@ -344,6 +357,10 @@
       <div class="card">
         <h4 style="margin-top:0;">Maintenance Cost per Machine</h4>
         <div id="insightsCost"></div>
+      </div>
+      <div class="card">
+        <h4 style="margin-top:0;">Trends (Daily)</h4>
+        <div id="insightsTrends"></div>
       </div>
     </div>
 

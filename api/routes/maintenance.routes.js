@@ -4,6 +4,7 @@ import multipart from "@fastify/multipart";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import ExcelJS from "exceljs";
 import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
 
 function isDate(s) {
@@ -1031,6 +1032,8 @@ export default async function maintenanceRoutes(app) {
       if (!isDate(startDate)) return reply.code(400).send({ ok: false, error: "start must be YYYY-MM-DD" });
       const nearDueHours = Math.max(1, Number(req.query?.near_due_hours || 50));
       const predictiveHorizonHours = Math.max(nearDueHours, Number(req.query?.predictive_horizon_hours || 100));
+      const checklistFailThreshold = Math.max(1, Number(req.query?.checklist_fail_threshold || 2));
+      const fuelVarianceThreshold = Math.max(0, Number(req.query?.fuel_variance_threshold || 15));
 
       const plans = db.prepare(`
         SELECT
@@ -1104,7 +1107,7 @@ export default async function maintenanceRoutes(app) {
         failByAsset.set(aid, Number(failByAsset.get(aid) || 0) + fails);
       }
       const repeatedChecklistFailures = [...failByAsset.entries()]
-        .filter(([, failCount]) => failCount >= 2)
+        .filter(([, failCount]) => failCount >= checklistFailThreshold)
         .map(([asset_id, fail_count]) => {
           const a = db.prepare(`SELECT asset_code, asset_name FROM assets WHERE id = ? LIMIT 1`).get(asset_id) || {};
           return {
@@ -1147,7 +1150,7 @@ export default async function maintenanceRoutes(app) {
                 variance_pct: Number(((ratio - 1) * 100).toFixed(1)),
               };
             })
-            .filter((r) => Number(r.variance_pct || 0) >= 15)
+            .filter((r) => Number(r.variance_pct || 0) >= fuelVarianceThreshold)
             .sort((a, b) => Number(b.variance_pct || 0) - Number(a.variance_pct || 0))
             .slice(0, 20)
         : [];
@@ -1371,15 +1374,188 @@ export default async function maintenanceRoutes(app) {
         .sort((a, b) => Number(b.total_cost || 0) - Number(a.total_cost || 0))
         .slice(0, 30);
 
+      const downtimeTrend = db.prepare(`
+        SELECT
+          DATE(COALESCE(b.breakdown_date, b.created_at)) AS day,
+          COALESCE(SUM(COALESCE(b.downtime_hours, 0)), 0) AS downtime_hours
+        FROM breakdowns b
+        WHERE DATE(COALESCE(b.breakdown_date, b.created_at)) BETWEEN DATE(?) AND DATE(?)
+        GROUP BY day
+        ORDER BY day ASC
+      `).all(startDate, endDate).map((r) => ({
+        day: String(r.day || ""),
+        downtime_hours: Number(Number(r.downtime_hours || 0).toFixed(2)),
+      }));
+      const costTrend = db.prepare(`
+        SELECT
+          DATE(COALESCE(wo.opened_at, wo.updated_at)) AS day,
+          COALESCE(SUM(COALESCE(wo.labor_hours, 0) * COALESCE(wo.labor_rate_per_hour, 0)), 0) AS labor_cost
+        FROM work_orders wo
+        WHERE wo.source = 'service'
+          AND DATE(COALESCE(wo.opened_at, wo.updated_at)) BETWEEN DATE(?) AND DATE(?)
+        GROUP BY day
+        ORDER BY day ASC
+      `).all(startDate, endDate).map((r) => ({
+        day: String(r.day || ""),
+        labor_cost: Number(Number(r.labor_cost || 0).toFixed(2)),
+      }));
+
       return reply.send({
         ok: true,
-        range: { start: startDate, end: endDate, near_due_hours: nearDueHours },
+        range: {
+          start: startDate,
+          end: endDate,
+          near_due_hours: nearDueHours,
+          predictive_horizon_hours: predictiveHorizonHours,
+          checklist_fail_threshold: checklistFailThreshold,
+          fuel_variance_threshold: fuelVarianceThreshold,
+        },
         predictive,
         parts_planning: partsPlanning,
         downtime,
         sla,
         maintenance_cost: maintenanceCost,
+        trends: {
+          downtime_daily: downtimeTrend,
+          labor_daily: costTrend,
+        },
       });
+    } catch (e) {
+      req.log.error(e);
+      return reply.code(500).send({ ok: false, error: e.message || String(e) });
+    }
+  });
+
+  // GET /api/maintenance/insights.xlsx?start=YYYY-MM-DD&end=YYYY-MM-DD&near_due_hours=50
+  app.get("/insights.xlsx", async (req, reply) => {
+    try {
+      const q = new URLSearchParams();
+      const copy = (name, fallback = "") => {
+        const v = String(req.query?.[name] ?? fallback).trim();
+        if (v !== "") q.set(name, v);
+      };
+      copy("start");
+      copy("end");
+      copy("near_due_hours", "50");
+      copy("predictive_horizon_hours", "100");
+      copy("checklist_fail_threshold", "2");
+      copy("fuel_variance_threshold", "15");
+
+      const injected = await app.inject({
+        method: "GET",
+        url: `/api/maintenance/insights?${q.toString()}`,
+        headers: {
+          "x-user-name": String(req.headers?.["x-user-name"] || "system"),
+          "x-user-role": String(req.headers?.["x-user-role"] || "admin"),
+          "x-user-roles": String(req.headers?.["x-user-roles"] || "admin"),
+          "x-site-code": String(req.headers?.["x-site-code"] || "main"),
+        },
+      });
+      if (injected.statusCode >= 400) {
+        let payload = {};
+        try { payload = JSON.parse(String(injected.payload || "{}")); } catch {}
+        return reply.code(injected.statusCode).send(payload?.error ? payload : { ok: false, error: "Failed to build insights export" });
+      }
+
+      const data = JSON.parse(String(injected.payload || "{}"));
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "IRONLOG";
+      wb.created = new Date();
+
+      const wsSummary = wb.addWorksheet("Summary");
+      wsSummary.columns = [{ header: "Field", key: "field", width: 34 }, { header: "Value", key: "value", width: 30 }];
+      wsSummary.addRows([
+        { field: "Start", value: data?.range?.start || "" },
+        { field: "End", value: data?.range?.end || "" },
+        { field: "Near Due Hours", value: Number(data?.range?.near_due_hours || 0) },
+        { field: "Predictive Horizon Hours", value: Number(data?.range?.predictive_horizon_hours || 0) },
+        { field: "Checklist Fail Threshold", value: Number(data?.range?.checklist_fail_threshold || 0) },
+        { field: "Fuel Variance Threshold (%)", value: Number(data?.range?.fuel_variance_threshold || 0) },
+      ]);
+
+      const wsPredictive = wb.addWorksheet("Predictive Alerts");
+      wsPredictive.columns = [
+        { header: "Asset Code", key: "asset_code", width: 14 },
+        { header: "Asset Name", key: "asset_name", width: 28 },
+        { header: "Service", key: "service_name", width: 24 },
+        { header: "Remaining Hrs", key: "remaining_hours", width: 14 },
+        { header: "Risk", key: "risk", width: 12 },
+      ];
+      wsPredictive.addRows(Array.isArray(data?.predictive?.at_risk_plans) ? data.predictive.at_risk_plans : []);
+
+      const wsParts = wb.addWorksheet("Parts Demand");
+      wsParts.columns = [
+        { header: "Part", key: "part_name", width: 30 },
+        { header: "Suggested Qty", key: "suggested_qty", width: 14 },
+        { header: "On Hand", key: "on_hand", width: 12 },
+        { header: "Gap Qty", key: "gap_qty", width: 12 },
+        { header: "Linked Services", key: "linked_services", width: 36 },
+      ];
+      wsParts.addRows((Array.isArray(data?.parts_planning?.suggestions) ? data.parts_planning.suggestions : []).map((r) => ({
+        ...r,
+        linked_services: Array.isArray(r?.linked_services) ? r.linked_services.join(", ") : "",
+      })));
+
+      const wsDowntimeComp = wb.addWorksheet("Downtime Components");
+      wsDowntimeComp.columns = [
+        { header: "Component", key: "component", width: 24 },
+        { header: "Incidents", key: "incidents", width: 12 },
+        { header: "Downtime Hrs", key: "downtime_hours", width: 14 },
+      ];
+      wsDowntimeComp.addRows(Array.isArray(data?.downtime?.by_component) ? data.downtime.by_component : []);
+
+      const wsDowntimeTeam = wb.addWorksheet("Downtime Teams");
+      wsDowntimeTeam.columns = [
+        { header: "Team", key: "team", width: 24 },
+        { header: "Incidents", key: "incidents", width: 12 },
+        { header: "Downtime Hrs", key: "downtime_hours", width: 14 },
+      ];
+      wsDowntimeTeam.addRows(Array.isArray(data?.downtime?.by_team) ? data.downtime.by_team : []);
+
+      const wsSla = wb.addWorksheet("SLA");
+      wsSla.columns = [{ header: "Metric", key: "metric", width: 36 }, { header: "Hours", key: "hours", width: 14 }];
+      wsSla.addRows([
+        { metric: "Open -> Assign", hours: data?.sla?.avg_open_to_assign_hours ?? "" },
+        { metric: "Open -> Complete", hours: data?.sla?.avg_open_to_complete_hours ?? "" },
+        { metric: "Complete -> Approve", hours: data?.sla?.avg_complete_to_approve_hours ?? "" },
+        { metric: "Open -> Close", hours: data?.sla?.avg_open_to_close_hours ?? "" },
+        { metric: "Service Work Orders", hours: Number(data?.sla?.work_orders || 0) },
+      ]);
+
+      const wsCost = wb.addWorksheet("Cost Per Machine");
+      wsCost.columns = [
+        { header: "Asset Code", key: "asset_code", width: 14 },
+        { header: "Asset Name", key: "asset_name", width: 28 },
+        { header: "Service Jobs", key: "service_jobs", width: 12 },
+        { header: "Labor Cost", key: "labor_cost", width: 12 },
+        { header: "Parts Cost", key: "parts_cost", width: 12 },
+        { header: "Lube Cost", key: "lube_cost", width: 12 },
+        { header: "Outsourced Cost", key: "outsourced_cost", width: 14 },
+        { header: "Total Cost", key: "total_cost", width: 12 },
+      ];
+      wsCost.addRows(Array.isArray(data?.maintenance_cost) ? data.maintenance_cost : []);
+
+      const wsTrends = wb.addWorksheet("Trends");
+      wsTrends.columns = [
+        { header: "Day", key: "day", width: 14 },
+        { header: "Downtime Hrs", key: "downtime_hours", width: 14 },
+        { header: "Labor Cost", key: "labor_cost", width: 14 },
+      ];
+      const downtimeDaily = new Map((Array.isArray(data?.trends?.downtime_daily) ? data.trends.downtime_daily : []).map((r) => [String(r.day || ""), Number(r.downtime_hours || 0)]));
+      const laborDaily = new Map((Array.isArray(data?.trends?.labor_daily) ? data.trends.labor_daily : []).map((r) => [String(r.day || ""), Number(r.labor_cost || 0)]));
+      const daySet = new Set([...downtimeDaily.keys(), ...laborDaily.keys()]);
+      const days = [...daySet].filter(Boolean).sort();
+      wsTrends.addRows(days.map((day) => ({
+        day,
+        downtime_hours: Number((downtimeDaily.get(day) || 0).toFixed(2)),
+        labor_cost: Number((laborDaily.get(day) || 0).toFixed(2)),
+      })));
+
+      const buffer = await wb.xlsx.writeBuffer();
+      return reply
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header("Content-Disposition", `attachment; filename="IRONLOG_Maintenance_Insights_${data?.range?.start || "start"}_to_${data?.range?.end || "end"}.xlsx"`)
+        .send(buffer);
     } catch (e) {
       req.log.error(e);
       return reply.code(500).send({ ok: false, error: e.message || String(e) });
