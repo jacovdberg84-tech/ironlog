@@ -6,6 +6,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import ExcelJS from "exceljs";
 import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
+import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -133,6 +134,7 @@ function sqlOilPartPredicate(alias = "p") {
 }
 
 export default async function maintenanceRoutes(app) {
+  ensureAuditTable(db);
   const dataRoot = process.env.IRONLOG_DATA_DIR || process.cwd();
   await app.register(multipart, {
     limits: { fileSize: 20 * 1024 * 1024 },
@@ -506,6 +508,13 @@ export default async function maintenanceRoutes(app) {
         last_service_hours,
         active
       );
+      writeAudit(db, req, {
+        module: "maintenance",
+        action: "plan.create",
+        entity_type: "maintenance_plan",
+        entity_id: String(Number(result.lastInsertRowid || 0)),
+        after: { asset_id, service_name, interval_hours, last_service_hours, active },
+      });
 
       return reply.send({
         ok: true,
@@ -607,6 +616,14 @@ export default async function maintenanceRoutes(app) {
         active,
         id
       );
+      writeAudit(db, req, {
+        module: "maintenance",
+        action: "plan.update",
+        entity_type: "maintenance_plan",
+        entity_id: String(id),
+        before: existing,
+        after: { asset_id, service_name, interval_hours, last_service_hours, active },
+      });
 
       return reply.send({ ok: true });
     } catch (err) {
@@ -630,7 +647,7 @@ export default async function maintenanceRoutes(app) {
       }
 
       const existing = db.prepare(`
-        SELECT id
+        SELECT *
         FROM maintenance_plans
         WHERE id = ?
       `).get(id);
@@ -642,6 +659,13 @@ export default async function maintenanceRoutes(app) {
       db.prepare(`
         DELETE FROM maintenance_plans WHERE id = ?
       `).run(id);
+      writeAudit(db, req, {
+        module: "maintenance",
+        action: "plan.delete",
+        entity_type: "maintenance_plan",
+        entity_id: String(id),
+        before: existing,
+      });
 
       return reply.send({ ok: true });
     } catch (err) {
@@ -1995,6 +2019,19 @@ export default async function maintenanceRoutes(app) {
       });
 
       const id = tx();
+      writeAudit(db, req, {
+        module: "maintenance",
+        action: "service_history.create",
+        entity_type: "maintenance_service_history",
+        entity_id: String(id),
+        after: {
+          asset_id: assetId,
+          plan_id: planId || null,
+          service_name: serviceName,
+          service_date: serviceDate,
+          service_hours: serviceHours,
+        },
+      });
       return reply.send({
         ok: true,
         id,
@@ -2062,13 +2099,21 @@ export default async function maintenanceRoutes(app) {
       if (serviceHours != null && (!Number.isFinite(serviceHours) || serviceHours < 0)) {
         return reply.code(400).send({ ok: false, error: "service_hours must be a valid number >= 0" });
       }
-      const cur = db.prepare(`SELECT id FROM maintenance_service_history WHERE id = ?`).get(id);
+      const cur = db.prepare(`SELECT * FROM maintenance_service_history WHERE id = ?`).get(id);
       if (!cur) return reply.code(404).send({ ok: false, error: "backfill entry not found" });
       db.prepare(`
         UPDATE maintenance_service_history
         SET service_name = ?, service_date = ?, service_hours = ?, notes = ?
         WHERE id = ?
       `).run(serviceName, serviceDate, serviceHours, notes, id);
+      writeAudit(db, req, {
+        module: "maintenance",
+        action: "service_history.update",
+        entity_type: "maintenance_service_history",
+        entity_id: String(id),
+        before: cur,
+        after: { ...cur, service_name: serviceName, service_date: serviceDate, service_hours: serviceHours, notes },
+      });
       return reply.send({ ok: true, id });
     } catch (e) {
       req.log.error(e);
@@ -2081,9 +2126,16 @@ export default async function maintenanceRoutes(app) {
     try {
       const id = Number(req.params?.id || 0);
       if (!id) return reply.code(400).send({ ok: false, error: "invalid id" });
-      const cur = db.prepare(`SELECT id FROM maintenance_service_history WHERE id = ?`).get(id);
+      const cur = db.prepare(`SELECT * FROM maintenance_service_history WHERE id = ?`).get(id);
       if (!cur) return reply.code(404).send({ ok: false, error: "backfill entry not found" });
       db.prepare(`DELETE FROM maintenance_service_history WHERE id = ?`).run(id);
+      writeAudit(db, req, {
+        module: "maintenance",
+        action: "service_history.delete",
+        entity_type: "maintenance_service_history",
+        entity_id: String(id),
+        before: cur,
+      });
       return reply.send({ ok: true, id });
     } catch (e) {
       req.log.error(e);

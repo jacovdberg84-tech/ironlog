@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { db } from "../db/client.js";
+import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 
 export const VALID_ROLES = ["admin", "supervisor", "stores", "artisan", "operator"];
 
@@ -111,6 +112,7 @@ function pickPrimaryRole(roles) {
 }
 
 export default async function authRoutes(app) {
+  ensureAuditTable(db);
   db.prepare(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -416,6 +418,7 @@ export default async function authRoutes(app) {
       tabsStored = ex ? ex.allowed_tabs : null;
     }
 
+    const existingUser = getByUsername.get(username);
     db.prepare(
       `
       INSERT INTO users (username, full_name, role, active, department, allowed_tabs, roles_json, allowed_locations)
@@ -448,6 +451,14 @@ export default async function authRoutes(app) {
     }
 
     const user = getByUsername.get(username);
+    writeAudit(db, req, {
+      module: "auth",
+      action: existingUser ? "user.update" : "user.create",
+      entity_type: "user",
+      entity_id: username,
+      before: existingUser ? userPayload(existingUser) : null,
+      after: userPayload(user),
+    });
     return {
       ok: true,
       user: userPayload(user),
@@ -492,6 +503,13 @@ export default async function authRoutes(app) {
       SET password_hash = ?, setup_code_hash = NULL, setup_code_expires_at = NULL
       WHERE username = ?
     `).run(hashPassword(newPassword), username);
+    writeAudit(db, req, {
+      module: "auth",
+      action: "password.setup",
+      entity_type: "user",
+      entity_id: username,
+      payload: { via_setup_code: true },
+    });
 
     return { ok: true };
   });
@@ -514,6 +532,13 @@ export default async function authRoutes(app) {
       }
     }
     db.prepare(`UPDATE users SET password_hash = ? WHERE username = ?`).run(hashPassword(newPassword), username);
+    writeAudit(db, req, {
+      module: "auth",
+      action: "password.change",
+      entity_type: "user",
+      entity_id: username,
+      payload: { self_service: true },
+    });
     return { ok: true };
   });
 }

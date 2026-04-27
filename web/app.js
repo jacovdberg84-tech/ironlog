@@ -4093,10 +4093,17 @@ async function loadAuditLogs() {
   const module = (qs("auditModule")?.value || "").trim();
   const action = (qs("auditAction")?.value || "").trim();
   const entity_type = (qs("auditEntityType")?.value || "").trim();
+  const entity_id = (qs("auditEntityId")?.value || "").trim();
   const username = (qs("auditUsername")?.value || "").trim();
+  const site_code = (qs("auditSiteCode")?.value || "").trim();
+  const source_app = (qs("auditSourceApp")?.value || "").trim();
+  const start = (qs("auditStart")?.value || "").trim();
+  const end = (qs("auditEnd")?.value || "").trim();
   const limit = Number(qs("auditLimit")?.value || 200);
   const list = qs("auditList");
+  const detail = qs("auditDetail");
   if (!list) return;
+  if (detail) detail.textContent = "";
 
   setStatus("Loading audit trail...");
   setSkeleton("auditList", 2);
@@ -4105,27 +4112,42 @@ async function loadAuditLogs() {
   if (module) q.set("module", module);
   if (action) q.set("action", action);
   if (entity_type) q.set("entity_type", entity_type);
+  if (entity_id) q.set("entity_id", entity_id);
   if (username) q.set("username", username);
+  if (site_code) q.set("site_code", site_code);
+  if (source_app) q.set("source_app", source_app);
+  if (start) q.set("start", start);
+  if (end) q.set("end", end);
   if (Number.isFinite(limit) && limit > 0) q.set("limit", String(Math.trunc(limit)));
 
-  const url = `${API}/api/audit${q.toString() ? `?${q.toString()}` : ""}`;
+  const url = `${API}/api/audit/timeline${q.toString() ? `?${q.toString()}` : ""}`;
   const data = await fetchJson(url);
   const rows = Array.isArray(data.rows) ? data.rows : [];
 
   list.innerHTML = "";
   rows.forEach((r) => {
-    list.appendChild(
-      item(
-        `<b>${r.created_at || "-"}</b> — ${r.module}.${r.action} ` +
-        `<span class="pill blue">${r.role || "-"}</span>` +
-        `<br><small>${r.username || "-"} | ${r.entity_type || "-"}:${r.entity_id || "-"}</small>` +
-        (r.payload ? `<br><small>${JSON.stringify(r.payload)}</small>` : "")
-      )
+    const row = item(
+      `<b>${r.created_at || "-"}</b> — ${r.module}.${r.action} ` +
+      `<span class="pill blue">${r.role || "-"}</span> <span class="pill">${r.source_app || "-"}</span>` +
+      `<br><small>${r.username || "-"} | site=${r.site_code || "-"} | ${r.entity_type || "-"}:${r.entity_id || "-"}</small>`
     );
+    row.style.cursor = "pointer";
+    row.addEventListener("click", async () => {
+      if (!detail) return;
+      detail.textContent = "Loading detail...";
+      try {
+        const d = await fetchJson(`${API}/api/audit/timeline/${Number(r.id || 0)}`);
+        detail.textContent = JSON.stringify(d?.row || {}, null, 2);
+      } catch (e) {
+        detail.textContent = String(e.message || e);
+      }
+    });
+    list.appendChild(row);
   });
   if (!rows.length) list.appendChild(item("<small>No audit records found.</small>"));
 
-  setStatus("Audit trail ready.");
+  const page = data?.pagination || {};
+  setStatus(`Audit trail ready${page?.has_more ? " (more available)" : ""}.`);
 }
 
 function canManageLegalDocs() {

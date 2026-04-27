@@ -3664,8 +3664,28 @@
                 <input id="auditEntityType" class="w-full" placeholder="Entity type" />
               </div>
               <div class="form-field">
+                <label>Entity ID</label>
+                <input id="auditEntityId" class="w-full" placeholder="Entity id" />
+              </div>
+              <div class="form-field">
                 <label>Username</label>
                 <input id="auditUsername" class="w-full" placeholder="Username" />
+              </div>
+              <div class="form-field">
+                <label>Site Code</label>
+                <input id="auditSiteCode" class="w-full" placeholder="site code" />
+              </div>
+              <div class="form-field">
+                <label>Source App</label>
+                <input id="auditSourceApp" class="w-full" placeholder="web / mobile-manager / integration" />
+              </div>
+              <div class="form-field">
+                <label>Start</label>
+                <input id="auditStart" class="w-full" type="datetime-local" />
+              </div>
+              <div class="form-field">
+                <label>End</label>
+                <input id="auditEnd" class="w-full" type="datetime-local" />
               </div>
               <div class="form-field">
                 <label>Limit</label>
@@ -3699,6 +3719,7 @@
           </div>
           <div class="report-card-body">
             <div class="list" id="auditList"></div>
+            <pre class="output" id="auditDetail"></pre>
           </div>
         </div>
       </div>
