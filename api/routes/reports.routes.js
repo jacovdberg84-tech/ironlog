@@ -15,6 +15,7 @@ import {
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
 
 let maintenanceMasterSchedulerStarted = false;
+let reportSubscriptionsSchedulerStarted = false;
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -972,6 +973,153 @@ export default async function reportsRoutes(app) {
     )
   `).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_report_templates_dataset ON report_templates(dataset)`).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS report_subscriptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      report_type TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      recipients TEXT NOT NULL,
+      schedule_frequency TEXT NOT NULL DEFAULT 'weekly',
+      send_time TEXT NOT NULL DEFAULT '07:00',
+      day_of_week INTEGER,
+      day_of_month INTEGER,
+      active INTEGER NOT NULL DEFAULT 1,
+      filters_json TEXT,
+      last_sent_at TEXT,
+      next_run_at TEXT,
+      created_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS report_delivery_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      subscription_id INTEGER,
+      report_type TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      recipients TEXT,
+      status TEXT NOT NULL,
+      detail TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_report_subscriptions_next ON report_subscriptions(active, next_run_at)`).run();
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_report_delivery_logs_sub ON report_delivery_logs(subscription_id, created_at DESC)`).run();
+
+  const allowedReportTypes = new Set(["fuel_benchmark_xlsx", "executive_kpi_pack_xlsx", "maintenance_insights_xlsx"]);
+  const allowedChannels = new Set(["email", "whatsapp"]);
+  const allowedFrequencies = new Set(["daily", "weekly", "monthly"]);
+  function parseRecipients(raw) {
+    return Array.from(new Set(
+      String(raw || "")
+        .split(",")
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+    )).slice(0, 50);
+  }
+  function parseTimeHhMm(raw) {
+    const s = String(raw || "").trim();
+    return /^\d{2}:\d{2}$/.test(s) ? s : "07:00";
+  }
+  function toIsoNoMs(d) {
+    return new Date(d).toISOString().slice(0, 19) + "Z";
+  }
+  function nextRunForSchedule(schedule, now = new Date()) {
+    const freq = String(schedule.schedule_frequency || "weekly").trim().toLowerCase();
+    const time = parseTimeHhMm(schedule.send_time);
+    const [hh, mm] = time.split(":").map((n) => Number(n));
+    const next = new Date(now);
+    next.setSeconds(0, 0);
+    next.setHours(hh, mm, 0, 0);
+    if (freq === "daily") {
+      if (next <= now) next.setDate(next.getDate() + 1);
+      return toIsoNoMs(next);
+    }
+    if (freq === "weekly") {
+      const dow = Math.max(0, Math.min(6, Number(schedule.day_of_week ?? 1)));
+      const curDow = next.getDay();
+      let delta = dow - curDow;
+      if (delta < 0 || (delta === 0 && next <= now)) delta += 7;
+      next.setDate(next.getDate() + delta);
+      return toIsoNoMs(next);
+    }
+    const dom = Math.max(1, Math.min(28, Number(schedule.day_of_month ?? 1)));
+    next.setDate(dom);
+    if (next <= now) {
+      next.setMonth(next.getMonth() + 1);
+      next.setDate(dom);
+    }
+    return toIsoNoMs(next);
+  }
+  function reportLinkForType(reportType, filters = {}) {
+    const f = filters && typeof filters === "object" ? filters : {};
+    if (reportType === "fuel_benchmark_xlsx") {
+      const start = isDate(f.start) ? String(f.start) : todayYmd().slice(0, 8) + "01";
+      const end = isDate(f.end) ? String(f.end) : todayYmd();
+      return `/api/reports/fuel-benchmark.xlsx?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+    }
+    if (reportType === "executive_kpi_pack_xlsx") {
+      const period = String(f.period_type || "weekly").trim().toLowerCase();
+      const start = isDate(f.start) ? String(f.start) : todayYmd().slice(0, 8) + "01";
+      const end = isDate(f.end) ? String(f.end) : todayYmd();
+      const siteCodes = String(f.site_codes || "main").trim();
+      return `/api/reports/executive-kpi-pack.xlsx?period_type=${encodeURIComponent(period)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&site_codes=${encodeURIComponent(siteCodes)}`;
+    }
+    const start = isDate(f.start) ? String(f.start) : todayYmd().slice(0, 8) + "01";
+    const end = isDate(f.end) ? String(f.end) : todayYmd();
+    return `/api/maintenance/insights.xlsx?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+  }
+  async function deliverSubscription(subRow, manual = false) {
+    const id = Number(subRow.id || 0);
+    const reportType = String(subRow.report_type || "");
+    const channel = String(subRow.channel || "");
+    const recipients = parseRecipients(subRow.recipients || "");
+    let filters = {};
+    try { filters = JSON.parse(String(subRow.filters_json || "{}")); } catch {}
+    const link = reportLinkForType(reportType, filters);
+    const payload = {
+      subscription_id: id,
+      name: String(subRow.name || ""),
+      report_type: reportType,
+      channel,
+      recipients,
+      report_link: link,
+      manual: Boolean(manual),
+      generated_at: new Date().toISOString(),
+    };
+    const emailWebhook = String(process.env.REPORT_EMAIL_WEBHOOK_URL || "").trim();
+    const whatsappWebhook = String(process.env.REPORT_WHATSAPP_WEBHOOK_URL || "").trim();
+    const target = channel === "email" ? emailWebhook : whatsappWebhook;
+    let status = "simulated";
+    let detail = "Logged only (no webhook configured)";
+    if (target) {
+      const resp = await fetch(target, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        status = "failed";
+        detail = `Webhook failed: HTTP ${resp.status}`;
+      } else {
+        status = "sent";
+        detail = "Webhook accepted";
+      }
+    }
+    db.prepare(`
+      INSERT INTO report_delivery_logs (subscription_id, report_type, channel, recipients, status, detail, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    `).run(id, reportType, channel, recipients.join(","), status, detail);
+    const nextRun = nextRunForSchedule(subRow, new Date());
+    db.prepare(`
+      UPDATE report_subscriptions
+      SET last_sent_at = datetime('now'), next_run_at = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(nextRun, id);
+    return { status, detail, report_link: link };
+  }
 
   const reportDatasets = {
     work_orders: {
@@ -1206,6 +1354,130 @@ export default async function reportsRoutes(app) {
     } catch (err) {
       return reply.code(400).send({ ok: false, error: err.message || String(err) });
     }
+  });
+
+  app.get("/subscriptions", async (_req, reply) => {
+    const rows = db.prepare(`
+      SELECT
+        id, name, report_type, channel, recipients, schedule_frequency, send_time,
+        day_of_week, day_of_month, active, filters_json, last_sent_at, next_run_at,
+        created_by, created_at, updated_at
+      FROM report_subscriptions
+      ORDER BY active DESC, next_run_at ASC, id DESC
+      LIMIT 300
+    `).all();
+    const subscriptions = rows.map((r) => {
+      let filters = {};
+      try { filters = JSON.parse(String(r.filters_json || "{}")); } catch {}
+      return {
+        id: Number(r.id || 0),
+        name: String(r.name || ""),
+        report_type: String(r.report_type || ""),
+        channel: String(r.channel || ""),
+        recipients: parseRecipients(r.recipients || ""),
+        schedule_frequency: String(r.schedule_frequency || "weekly"),
+        send_time: parseTimeHhMm(r.send_time),
+        day_of_week: r.day_of_week == null ? null : Number(r.day_of_week),
+        day_of_month: r.day_of_month == null ? null : Number(r.day_of_month),
+        active: Number(r.active || 0) === 1 ? 1 : 0,
+        filters: filters && typeof filters === "object" ? filters : {},
+        last_sent_at: r.last_sent_at,
+        next_run_at: r.next_run_at,
+        created_by: String(r.created_by || ""),
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+      };
+    });
+    return reply.send({ ok: true, subscriptions });
+  });
+
+  app.post("/subscriptions", async (req, reply) => {
+    const body = req.body || {};
+    const id = Number(body.id || 0);
+    const name = String(body.name || "").trim();
+    const reportType = String(body.report_type || "").trim().toLowerCase();
+    const channel = String(body.channel || "").trim().toLowerCase();
+    const freq = String(body.schedule_frequency || "weekly").trim().toLowerCase();
+    const sendTime = parseTimeHhMm(body.send_time);
+    const dayOfWeek = body.day_of_week == null ? null : Math.max(0, Math.min(6, Number(body.day_of_week)));
+    const dayOfMonth = body.day_of_month == null ? null : Math.max(1, Math.min(28, Number(body.day_of_month)));
+    const active = Number(body.active ?? 1) === 1 ? 1 : 0;
+    const recipients = parseRecipients(body.recipients || "");
+    const filters = body.filters && typeof body.filters === "object" ? body.filters : {};
+    if (!name) return reply.code(400).send({ ok: false, error: "Name is required" });
+    if (!allowedReportTypes.has(reportType)) return reply.code(400).send({ ok: false, error: "Invalid report_type" });
+    if (!allowedChannels.has(channel)) return reply.code(400).send({ ok: false, error: "Invalid channel" });
+    if (!allowedFrequencies.has(freq)) return reply.code(400).send({ ok: false, error: "Invalid schedule_frequency" });
+    if (!recipients.length) return reply.code(400).send({ ok: false, error: "At least one recipient is required" });
+    const who = String(req.headers["x-user-name"] || "system");
+    const nextRun = active ? nextRunForSchedule({
+      schedule_frequency: freq,
+      send_time: sendTime,
+      day_of_week: dayOfWeek,
+      day_of_month: dayOfMonth,
+    }, new Date()) : null;
+    if (id > 0) {
+      const ex = db.prepare(`SELECT id FROM report_subscriptions WHERE id = ? LIMIT 1`).get(id);
+      if (!ex) return reply.code(404).send({ ok: false, error: "Subscription not found" });
+      db.prepare(`
+        UPDATE report_subscriptions
+        SET
+          name = ?, report_type = ?, channel = ?, recipients = ?, schedule_frequency = ?, send_time = ?,
+          day_of_week = ?, day_of_month = ?, active = ?, filters_json = ?, next_run_at = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        name, reportType, channel, recipients.join(","), freq, sendTime, dayOfWeek, dayOfMonth, active,
+        JSON.stringify(filters), nextRun, id
+      );
+      return reply.send({ ok: true, id });
+    }
+    const out = db.prepare(`
+      INSERT INTO report_subscriptions (
+        name, report_type, channel, recipients, schedule_frequency, send_time, day_of_week, day_of_month,
+        active, filters_json, next_run_at, created_by, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `).run(
+      name, reportType, channel, recipients.join(","), freq, sendTime, dayOfWeek, dayOfMonth,
+      active, JSON.stringify(filters), nextRun, who
+    );
+    return reply.send({ ok: true, id: Number(out.lastInsertRowid || 0) });
+  });
+
+  app.delete("/subscriptions/:id", async (req, reply) => {
+    const id = Number(req.params?.id || 0);
+    if (!id) return reply.code(400).send({ ok: false, error: "Invalid id" });
+    const out = db.prepare(`DELETE FROM report_subscriptions WHERE id = ?`).run(id);
+    if (!Number(out.changes || 0)) return reply.code(404).send({ ok: false, error: "Subscription not found" });
+    return reply.send({ ok: true });
+  });
+
+  app.post("/subscriptions/:id/send-now", async (req, reply) => {
+    const id = Number(req.params?.id || 0);
+    if (!id) return reply.code(400).send({ ok: false, error: "Invalid id" });
+    const row = db.prepare(`SELECT * FROM report_subscriptions WHERE id = ? LIMIT 1`).get(id);
+    if (!row) return reply.code(404).send({ ok: false, error: "Subscription not found" });
+    try {
+      const out = await deliverSubscription(row, true);
+      return reply.send({ ok: true, ...out });
+    } catch (err) {
+      db.prepare(`
+        INSERT INTO report_delivery_logs (subscription_id, report_type, channel, recipients, status, detail, created_at)
+        VALUES (?, ?, ?, ?, 'failed', ?, datetime('now'))
+      `).run(id, row.report_type, row.channel, row.recipients, String(err.message || err));
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.get("/subscriptions/logs", async (req, reply) => {
+    const limit = Math.max(1, Math.min(200, Number(req.query?.limit || 50)));
+    const rows = db.prepare(`
+      SELECT id, subscription_id, report_type, channel, recipients, status, detail, created_at
+      FROM report_delivery_logs
+      ORDER BY created_at DESC, id DESC
+      LIMIT ?
+    `).all(limit);
+    return reply.send({ ok: true, rows });
   });
 
   function costDefaults() {
@@ -6395,6 +6667,43 @@ export default async function reportsRoutes(app) {
     };
     tick().catch(() => {});
     setInterval(() => tick().catch(() => {}), 60 * 60 * 1000);
+  }
+
+  if (!reportSubscriptionsSchedulerStarted) {
+    reportSubscriptionsSchedulerStarted = true;
+    const tickSubscriptions = async () => {
+      const nowIso = new Date().toISOString();
+      const due = db.prepare(`
+        SELECT *
+        FROM report_subscriptions
+        WHERE active = 1
+          AND next_run_at IS NOT NULL
+          AND next_run_at <= ?
+        ORDER BY next_run_at ASC
+        LIMIT 20
+      `).all(nowIso);
+      for (const sub of due) {
+        try {
+          await deliverSubscription(sub, false);
+        } catch (err) {
+          db.prepare(`
+            INSERT INTO report_delivery_logs (subscription_id, report_type, channel, recipients, status, detail, created_at)
+            VALUES (?, ?, ?, ?, 'failed', ?, datetime('now'))
+          `).run(
+            Number(sub.id || 0),
+            String(sub.report_type || ""),
+            String(sub.channel || ""),
+            String(sub.recipients || ""),
+            String(err.message || err)
+          );
+          const nextRun = nextRunForSchedule(sub, new Date());
+          db.prepare(`UPDATE report_subscriptions SET next_run_at = ?, updated_at = datetime('now') WHERE id = ?`)
+            .run(nextRun, Number(sub.id || 0));
+        }
+      }
+    };
+    tickSubscriptions().catch(() => {});
+    setInterval(() => tickSubscriptions().catch(() => {}), 5 * 60 * 1000);
   }
 
   // =========================

@@ -442,6 +442,96 @@
         <div id="reportBuilderMsg" class="muted" style="margin-top:10px;">Loading report builder...</div>
         <div id="reportBuilderPreview" style="margin-top:10px;"></div>
       </div>
+      <div class="card">
+        <h4 style="margin-top:0;">Email/WhatsApp Report Subscriptions</h4>
+        <div class="form-grid">
+          <label>
+            Name
+            <input id="subName" placeholder="Weekly Fuel Report" />
+          </label>
+          <label>
+            Report Type
+            <select id="subReportType" class="w-200">
+              <option value="fuel_benchmark_xlsx">Fuel Benchmark XLSX</option>
+              <option value="executive_kpi_pack_xlsx">Executive KPI Pack XLSX</option>
+              <option value="maintenance_insights_xlsx">Maintenance Insights XLSX</option>
+            </select>
+          </label>
+          <label>
+            Channel
+            <select id="subChannel" class="w-200">
+              <option value="email">Email</option>
+              <option value="whatsapp">WhatsApp</option>
+            </select>
+          </label>
+          <label>
+            Recipients (comma separated)
+            <input id="subRecipients" placeholder="ops@company.com,+27123456789" />
+          </label>
+          <label>
+            Frequency
+            <select id="subFrequency" class="w-200">
+              <option value="daily">Daily</option>
+              <option value="weekly" selected>Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </label>
+          <label>
+            Send Time (HH:mm)
+            <input id="subSendTime" type="time" value="07:00" />
+          </label>
+          <label>
+            Day of Week (0-6)
+            <input id="subDayOfWeek" type="number" min="0" max="6" step="1" value="1" />
+          </label>
+          <label>
+            Day of Month (1-28)
+            <input id="subDayOfMonth" type="number" min="1" max="28" step="1" value="1" />
+          </label>
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; margin-top:8px;">
+          <input id="subActive" type="checkbox" checked />
+          Active
+        </label>
+        <div class="row stack-10" style="margin-top:8px;">
+          <button id="subSaveBtn" type="button">Save Subscription</button>
+          <button id="subReloadBtn" type="button">Reload Subscriptions</button>
+        </div>
+        <div id="subMsg" class="muted" style="margin-top:10px;">Loading subscriptions...</div>
+        <div style="overflow:auto; margin-top:10px;">
+          <table class="gridTable" style="min-width:1080px;">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Report</th>
+                <th>Channel</th>
+                <th>Recipients</th>
+                <th>Schedule</th>
+                <th>Next Run</th>
+                <th>Last Sent</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="subBody"></tbody>
+          </table>
+        </div>
+        <h5 style="margin:12px 0 8px 0;">Delivery Logs</h5>
+        <div style="overflow:auto;">
+          <table class="gridTable" style="min-width:980px;">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Subscription</th>
+                <th>Report</th>
+                <th>Channel</th>
+                <th>Status</th>
+                <th>Detail</th>
+              </tr>
+            </thead>
+            <tbody id="subLogBody"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <div class="card stack-24">

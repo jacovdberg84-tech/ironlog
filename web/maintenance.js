@@ -10,6 +10,8 @@ const MAINT_DUE_THRESHOLD_KEY = "ironlog_maintenance_due_threshold_hours";
 const INSIGHTS_THRESHOLDS_KEY = "ironlog_maintenance_insights_thresholds";
 let reportBuilderMeta = [];
 let reportBuilderTemplates = [];
+let reportSubscriptionEditId = 0;
+let reportSubscriptionsCache = [];
 const MAINT_LOCK_KEY = "ironlog_maintenance_access_ok";
 const MAINT_LOCK_USER = "BJ van den Berg";
 const MAINT_LOCK_PASSWORD = "0mhliac789";
@@ -955,6 +957,181 @@ async function deleteReportBuilderTemplate() {
   } catch (e) {
     msg.className = "message-error";
     msg.textContent = `Delete error: ${e.message || e}`;
+  }
+}
+
+function subscriptionScheduleLabel(s) {
+  const f = String(s.schedule_frequency || "weekly");
+  const t = String(s.send_time || "07:00");
+  if (f === "daily") return `daily @ ${t}`;
+  if (f === "monthly") return `monthly day ${Number(s.day_of_month || 1)} @ ${t}`;
+  return `weekly day ${Number(s.day_of_week || 1)} @ ${t}`;
+}
+
+function fillSubscriptionForm(s) {
+  reportSubscriptionEditId = Number(s?.id || 0);
+  const set = (id, v) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.type === "checkbox") el.checked = Boolean(v);
+    else el.value = v == null ? "" : String(v);
+  };
+  set("subName", s?.name || "");
+  set("subReportType", s?.report_type || "fuel_benchmark_xlsx");
+  set("subChannel", s?.channel || "email");
+  set("subRecipients", Array.isArray(s?.recipients) ? s.recipients.join(",") : "");
+  set("subFrequency", s?.schedule_frequency || "weekly");
+  set("subSendTime", s?.send_time || "07:00");
+  set("subDayOfWeek", Number(s?.day_of_week ?? 1));
+  set("subDayOfMonth", Number(s?.day_of_month ?? 1));
+  set("subActive", Number(s?.active ?? 1) === 1);
+}
+
+async function loadReportSubscriptionLogs() {
+  const body = document.getElementById("subLogBody");
+  if (!body) return;
+  try {
+    const res = await fetch(`${API}/reports/subscriptions/logs?limit=40`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load logs");
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    body.innerHTML = rows.length
+      ? rows.map((r) => `
+        <tr>
+          <td>${escBackfill(String(r.created_at || "-"))}</td>
+          <td>${Number(r.subscription_id || 0)}</td>
+          <td>${escBackfill(String(r.report_type || "-"))}</td>
+          <td>${escBackfill(String(r.channel || "-"))}</td>
+          <td>${escBackfill(String(r.status || "-"))}</td>
+          <td>${escBackfill(String(r.detail || ""))}</td>
+        </tr>
+      `).join("")
+      : `<tr><td colspan="6" class="muted">No delivery logs yet.</td></tr>`;
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="6" class="message-error">${escBackfill(e.message || e)}</td></tr>`;
+  }
+}
+
+async function loadReportSubscriptions() {
+  const body = document.getElementById("subBody");
+  const msg = document.getElementById("subMsg");
+  if (!body || !msg) return;
+  body.innerHTML = `<tr><td colspan="8" class="muted">Loading...</td></tr>`;
+  try {
+    const res = await fetch(`${API}/reports/subscriptions`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load subscriptions");
+    const rows = Array.isArray(data?.subscriptions) ? data.subscriptions : [];
+    reportSubscriptionsCache = rows.slice();
+    body.innerHTML = rows.length
+      ? rows.map((s) => `
+        <tr>
+          <td>${escBackfill(String(s.name || ""))}${Number(s.active || 0) ? "" : ` <small class="muted">(paused)</small>`}</td>
+          <td>${escBackfill(String(s.report_type || ""))}</td>
+          <td>${escBackfill(String(s.channel || ""))}</td>
+          <td>${escBackfill((Array.isArray(s.recipients) ? s.recipients : []).join(", "))}</td>
+          <td>${escBackfill(subscriptionScheduleLabel(s))}</td>
+          <td>${escBackfill(String(s.next_run_at || "-"))}</td>
+          <td>${escBackfill(String(s.last_sent_at || "-"))}</td>
+          <td>
+            <button type="button" data-sub-edit="${Number(s.id || 0)}">Edit</button>
+            <button type="button" data-sub-send="${Number(s.id || 0)}">Send Now</button>
+            <button type="button" data-sub-del="${Number(s.id || 0)}">Delete</button>
+          </td>
+        </tr>
+      `).join("")
+      : `<tr><td colspan="8" class="muted">No subscriptions saved.</td></tr>`;
+    msg.className = "message-success";
+    msg.textContent = `Subscriptions loaded: ${rows.length}`;
+    await loadReportSubscriptionLogs();
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="8" class="message-error">${escBackfill(e.message || e)}</td></tr>`;
+    msg.className = "message-error";
+    msg.textContent = `Subscriptions error: ${e.message || e}`;
+  }
+}
+
+function subscriptionPayloadFromForm() {
+  const isChecked = (id) => Boolean(document.getElementById(id)?.checked);
+  const value = (id) => String(document.getElementById(id)?.value || "").trim();
+  return {
+    id: reportSubscriptionEditId || undefined,
+    name: value("subName"),
+    report_type: value("subReportType"),
+    channel: value("subChannel"),
+    recipients: value("subRecipients"),
+    schedule_frequency: value("subFrequency"),
+    send_time: value("subSendTime") || "07:00",
+    day_of_week: Number(value("subDayOfWeek") || 1),
+    day_of_month: Number(value("subDayOfMonth") || 1),
+    active: isChecked("subActive") ? 1 : 0,
+    filters: {
+      start: String(document.getElementById("insightsStart")?.value || "").trim(),
+      end: String(document.getElementById("insightsEnd")?.value || "").trim(),
+      site_codes: String(document.getElementById("kpiPackSiteCodes")?.value || "main").trim() || "main",
+      period_type: String(document.getElementById("kpiPackPeriodType")?.value || "weekly").trim().toLowerCase(),
+    },
+  };
+}
+
+async function saveReportSubscription() {
+  const msg = document.getElementById("subMsg");
+  if (!msg) return;
+  msg.className = "muted";
+  msg.textContent = "Saving subscription...";
+  try {
+    const payload = subscriptionPayloadFromForm();
+    const res = await fetch(`${API}/reports/subscriptions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save subscription");
+    reportSubscriptionEditId = Number(data?.id || 0);
+    msg.className = "message-success";
+    msg.textContent = "Subscription saved.";
+    await loadReportSubscriptions();
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = `Save failed: ${e.message || e}`;
+  }
+}
+
+async function sendSubscriptionNow(id) {
+  const msg = document.getElementById("subMsg");
+  if (!msg) return;
+  msg.className = "muted";
+  msg.textContent = "Sending subscription...";
+  try {
+    const res = await fetch(`${API}/reports/subscriptions/${Number(id || 0)}/send-now`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Send failed");
+    msg.className = "message-success";
+    msg.textContent = `Sent: ${data.status || "ok"}`;
+    await loadReportSubscriptions();
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = `Send failed: ${e.message || e}`;
+  }
+}
+
+async function deleteSubscription(id) {
+  const msg = document.getElementById("subMsg");
+  if (!msg) return;
+  if (!confirm("Delete this subscription?")) return;
+  msg.className = "muted";
+  msg.textContent = "Deleting subscription...";
+  try {
+    const res = await fetch(`${API}/reports/subscriptions/${Number(id || 0)}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Delete failed");
+    msg.className = "message-success";
+    msg.textContent = "Subscription deleted.";
+    await loadReportSubscriptions();
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = `Delete failed: ${e.message || e}`;
   }
 }
 
@@ -4731,6 +4908,24 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("reportBuilderTemplate")?.addEventListener("change", (evt) => {
     applyReportBuilderTemplate(Number(evt.target?.value || 0));
   });
+  document.getElementById("subSaveBtn")?.addEventListener("click", () => saveReportSubscription());
+  document.getElementById("subReloadBtn")?.addEventListener("click", () => loadReportSubscriptions());
+  document.getElementById("subBody")?.addEventListener("click", (evt) => {
+    const editBtn = evt.target?.closest?.("button[data-sub-edit]");
+    if (editBtn) {
+      const id = Number(editBtn.getAttribute("data-sub-edit") || 0);
+      const row = reportSubscriptionsCache.find((x) => Number(x.id || 0) === id);
+      if (row) fillSubscriptionForm(row);
+      return;
+    }
+    const sendBtn = evt.target?.closest?.("button[data-sub-send]");
+    if (sendBtn) {
+      sendSubscriptionNow(Number(sendBtn.getAttribute("data-sub-send") || 0));
+      return;
+    }
+    const delBtn = evt.target?.closest?.("button[data-sub-del]");
+    if (delBtn) deleteSubscription(Number(delBtn.getAttribute("data-sub-del") || 0));
+  });
   document.getElementById("loadRsgProfilesBtn")?.addEventListener("click", loadRsgProfiles);
   document.getElementById("downloadRsgCsvTemplateBtn")?.addEventListener("click", downloadRsgCsvTemplate);
   document.getElementById("importRsgCsvBtn")?.addEventListener("click", importRsgProfilesCsv);
@@ -4783,6 +4978,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadMaintenanceInsights().catch(() => {});
   loadGovernanceSignals().catch(() => {});
   loadReportBuilderMeta().then(() => loadReportBuilderTemplates()).catch(() => {});
+  loadReportSubscriptions().catch(() => {});
   setTopView("main");
   loadHistogramEvents().catch(() => {});
 });
