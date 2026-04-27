@@ -851,6 +851,51 @@ async function runReportBuilderPreview() {
   }
 }
 
+async function exportReportBuilderXlsx() {
+  const msg = document.getElementById("reportBuilderMsg");
+  if (!msg) return;
+  const cfg = reportBuilderCurrentConfig();
+  if (!cfg.dataset) {
+    msg.className = "message-error";
+    msg.textContent = "Select dataset.";
+    return;
+  }
+  if (!cfg.columns.length) {
+    msg.className = "message-error";
+    msg.textContent = "Select at least one column.";
+    return;
+  }
+  msg.className = "muted";
+  msg.textContent = "Generating XLSX...";
+  try {
+    const res = await fetch(`${API}/reports/custom-builder/export.xlsx`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cfg),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || "XLSX export failed");
+    }
+    const blob = await res.blob();
+    const now = new Date().toISOString().slice(0, 10);
+    const safeDataset = String(cfg.dataset || "report").replace(/[^a-z0-9_-]/gi, "_");
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `IRONLOG_Custom_${safeDataset}_${now}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    msg.className = "message-success";
+    msg.textContent = "XLSX export downloaded.";
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = `XLSX export error: ${e.message || e}`;
+  }
+}
+
 async function saveReportBuilderTemplate() {
   const msg = document.getElementById("reportBuilderMsg");
   const tplId = Number(document.getElementById("reportBuilderTemplate")?.value || 0);
@@ -4674,6 +4719,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("downloadInsightsXlsxBtn")?.addEventListener("click", () => openMaintenanceInsightsXlsx());
   document.getElementById("loadGovernanceSignalsBtn")?.addEventListener("click", () => loadGovernanceSignals());
   document.getElementById("reportBuilderRunBtn")?.addEventListener("click", () => runReportBuilderPreview());
+  document.getElementById("reportBuilderExportXlsxBtn")?.addEventListener("click", () => exportReportBuilderXlsx());
   document.getElementById("reportBuilderSaveBtn")?.addEventListener("click", () => saveReportBuilderTemplate());
   document.getElementById("reportBuilderDeleteBtn")?.addEventListener("click", () => deleteReportBuilderTemplate());
   document.getElementById("reportBuilderReloadBtn")?.addEventListener("click", () => loadReportBuilderTemplates());

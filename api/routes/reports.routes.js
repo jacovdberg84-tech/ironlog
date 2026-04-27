@@ -1128,18 +1128,18 @@ export default async function reportsRoutes(app) {
     return reply.send({ ok: true });
   });
 
-  app.post("/custom-builder/preview", async (req, reply) => {
-    const body = req.body || {};
-    const dataset = String(body.dataset || "").trim();
+  function runCustomBuilderQuery(body) {
+    const payload = body || {};
+    const dataset = String(payload.dataset || "").trim();
     const ds = datasetWithAvailableColumns(dataset);
-    if (!ds) return reply.code(400).send({ ok: false, error: "Invalid dataset" });
+    if (!ds) throw new Error("Invalid dataset");
     const validCols = new Set(ds.availableColumns.map((c) => c.id));
-    const picked = Array.from(new Set((Array.isArray(body.columns) ? body.columns : []).map((c) => String(c || "").trim())))
+    const picked = Array.from(new Set((Array.isArray(payload.columns) ? payload.columns : []).map((c) => String(c || "").trim())))
       .filter((c) => validCols.has(c))
       .slice(0, 25);
-    if (!picked.length) return reply.code(400).send({ ok: false, error: "Select at least one valid column" });
-    const filters = body.filters && typeof body.filters === "object" ? body.filters : {};
-    const limitNum = Math.max(1, Math.min(500, Number(filters.limit || body.limit || 100)));
+    if (!picked.length) throw new Error("Select at least one valid column");
+    const filters = payload.filters && typeof payload.filters === "object" ? payload.filters : {};
+    const limitNum = Math.max(1, Math.min(500, Number(filters.limit || payload.limit || 100)));
 
     const where = [];
     const params = [];
@@ -1166,7 +1166,46 @@ export default async function reportsRoutes(app) {
       LIMIT ${limitNum}
     `;
     const rows = db.prepare(sql).all(...params);
-    return reply.send({ ok: true, dataset: ds.key, columns: picked, rows, count: rows.length, limit: limitNum });
+    return { dataset: ds.key, columns: picked, rows, count: rows.length, limit: limitNum };
+  }
+
+  app.post("/custom-builder/preview", async (req, reply) => {
+    try {
+      const result = runCustomBuilderQuery(req.body || {});
+      return reply.send({ ok: true, ...result });
+    } catch (err) {
+      return reply.code(400).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.post("/custom-builder/export.xlsx", async (req, reply) => {
+    try {
+      const result = runCustomBuilderQuery(req.body || {});
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet("Custom Report");
+      const headers = result.columns.map((c) => String(c || ""));
+      ws.addRow(headers);
+      for (const r of result.rows) {
+        ws.addRow(headers.map((h) => r?.[h] ?? ""));
+      }
+      ws.views = [{ state: "frozen", ySplit: 1 }];
+      ws.columns.forEach((col) => {
+        let width = 12;
+        col.eachCell({ includeEmpty: true }, (cell) => {
+          width = Math.max(width, Math.min(48, String(cell.value ?? "").length + 2));
+        });
+        col.width = width;
+      });
+      const safeDataset = String(result.dataset || "report").replace(/[^a-z0-9_-]/gi, "_");
+      const stamp = new Date().toISOString().slice(0, 10);
+      const buf = await wb.xlsx.writeBuffer();
+      return reply
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header("Content-Disposition", `attachment; filename="IRONLOG_Custom_${safeDataset}_${stamp}.xlsx"`)
+        .send(Buffer.from(buf));
+    } catch (err) {
+      return reply.code(400).send({ ok: false, error: err.message || String(err) });
+    }
   });
 
   function costDefaults() {
