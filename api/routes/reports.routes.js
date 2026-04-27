@@ -3011,6 +3011,52 @@ export default async function reportsRoutes(app) {
       ORDER BY id ASC
     `).all(id);
 
+    const toChecklistLabel = (key) =>
+      String(key || "")
+        .replaceAll("_", " ")
+        .replace(/\b\w/g, (m) => m.toUpperCase())
+        .trim();
+    const parseManagerChecklist = (rawChecklist, rawDetails) => {
+      let checklistParsed = null;
+      let detailsParsed = null;
+      try {
+        checklistParsed = JSON.parse(String(rawChecklist || "null"));
+      } catch {}
+      try {
+        detailsParsed = JSON.parse(String(rawDetails || "null"));
+      } catch {}
+
+      // Legacy/mobile ingest bundle shape: { checklist, checklist_details, ... }.
+      if (checklistParsed && !Array.isArray(checklistParsed) && typeof checklistParsed === "object") {
+        if (checklistParsed.checklist_details && (detailsParsed == null || typeof detailsParsed !== "object")) {
+          detailsParsed = checklistParsed.checklist_details;
+        }
+        if (checklistParsed.checklist && typeof checklistParsed.checklist === "object") {
+          checklistParsed = checklistParsed.checklist;
+        }
+      }
+
+      if (Array.isArray(checklistParsed)) {
+        return checklistParsed.map((c) => ({
+          key: String(c?.key || "").trim(),
+          label: String(c?.label || c?.key || "").trim(),
+          ok: c?.ok === true ? true : c?.ok === false ? false : null,
+          note: String(c?.note || "").trim() || null,
+        }));
+      }
+
+      if (checklistParsed && typeof checklistParsed === "object") {
+        return Object.entries(checklistParsed).map(([key, status]) => {
+          const st = String(status || "").trim().toLowerCase();
+          const ok = st === "ok" ? true : (st === "attention" || st === "unsafe" || st === "fail" || st === "failed") ? false : null;
+          const detail = detailsParsed && typeof detailsParsed === "object" ? detailsParsed[key] : null;
+          const note = String(detail?.comment || detail?.note || detail?.notes || "").trim() || null;
+          return { key, label: toChecklistLabel(key), ok, note };
+        });
+      }
+      return [];
+    };
+
     const parseComponentNotes = (raw) => {
       const text = String(raw || "").trim();
       if (!text) return [];
@@ -3078,11 +3124,7 @@ export default async function reportsRoutes(app) {
           { k: "Category", v: inspection.category || "" },
         ], 2);
 
-        let checklist = [];
-        try {
-          const cj = JSON.parse(String(inspection.checklist_json || "[]"));
-          if (Array.isArray(cj)) checklist = cj;
-        } catch {}
+        const checklist = parseManagerChecklist(inspection.checklist_json, inspection.checklist_detail_json);
         if (checklist.length) {
           sectionTitle(doc, "Checklist");
           table(
@@ -3226,6 +3268,47 @@ export default async function reportsRoutes(app) {
     const hasMiMh = hasColumn("manager_inspections", "machine_hours");
     const hasMiWo = hasColumn("manager_inspections", "work_order_id");
     const hasMiChecklist = hasColumn("manager_inspections", "checklist_json");
+    const toChecklistLabel = (key) =>
+      String(key || "")
+        .replaceAll("_", " ")
+        .replace(/\b\w/g, (m) => m.toUpperCase())
+        .trim();
+    const parseManagerChecklist = (rawChecklist, rawDetails) => {
+      let checklistParsed = null;
+      let detailsParsed = null;
+      try {
+        checklistParsed = JSON.parse(String(rawChecklist || "null"));
+      } catch {}
+      try {
+        detailsParsed = JSON.parse(String(rawDetails || "null"));
+      } catch {}
+      if (checklistParsed && !Array.isArray(checklistParsed) && typeof checklistParsed === "object") {
+        if (checklistParsed.checklist_details && (detailsParsed == null || typeof detailsParsed !== "object")) {
+          detailsParsed = checklistParsed.checklist_details;
+        }
+        if (checklistParsed.checklist && typeof checklistParsed.checklist === "object") {
+          checklistParsed = checklistParsed.checklist;
+        }
+      }
+      if (Array.isArray(checklistParsed)) {
+        return checklistParsed.map((c) => ({
+          key: String(c?.key || "").trim(),
+          label: String(c?.label || c?.key || "").trim(),
+          ok: c?.ok === true ? true : c?.ok === false ? false : null,
+          note: String(c?.note || "").trim() || null,
+        }));
+      }
+      if (checklistParsed && typeof checklistParsed === "object") {
+        return Object.entries(checklistParsed).map(([key, status]) => {
+          const st = String(status || "").trim().toLowerCase();
+          const ok = st === "ok" ? true : (st === "attention" || st === "unsafe" || st === "fail" || st === "failed") ? false : null;
+          const detail = detailsParsed && typeof detailsParsed === "object" ? detailsParsed[key] : null;
+          const note = String(detail?.comment || detail?.note || detail?.notes || "").trim() || null;
+          return { key, label: toChecklistLabel(key), ok, note };
+        });
+      }
+      return [];
+    };
     const rows = db.prepare(`
       SELECT
         mi.id,
@@ -3329,11 +3412,7 @@ export default async function reportsRoutes(app) {
           } else {
             for (const r of rows) {
               const photos = photosByInspection.get(Number(r.id)) || [];
-              let checklist = [];
-              try {
-                const cj = JSON.parse(String(r.checklist_json || "[]"));
-                if (Array.isArray(cj)) checklist = cj;
-              } catch {}
+              const checklist = parseManagerChecklist(r.checklist_json, r.checklist_detail_json);
               const failedChecklist = checklist.filter((c) => c && c.ok === false);
               const checklistNotes = failedChecklist
                 .map((c) => {

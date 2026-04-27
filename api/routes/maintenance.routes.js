@@ -2464,11 +2464,38 @@ export default async function maintenanceRoutes(app) {
       return reply.send({
         ok: true,
         rows: rows.map((r) => {
+          const toChecklistLabel = (key) =>
+            String(key || "")
+              .replaceAll("_", " ")
+              .replace(/\b\w/g, (m) => m.toUpperCase())
+              .trim();
           let checklist = [];
           let required_parts = [];
           try {
-            const cj = JSON.parse(String(r.checklist_json || "[]"));
-            if (Array.isArray(cj)) checklist = cj;
+            let parsed = JSON.parse(String(r.checklist_json || "null"));
+            // mobile ingest bundle shape: { checklist, checklist_details, ... }.
+            if (parsed && !Array.isArray(parsed) && typeof parsed === "object" && parsed.checklist && typeof parsed.checklist === "object") {
+              parsed = parsed.checklist;
+            }
+            if (Array.isArray(parsed)) {
+              checklist = parsed;
+            } else if (parsed && typeof parsed === "object") {
+              let details = null;
+              if (parsed.checklist_details && typeof parsed.checklist_details === "object") {
+                details = parsed.checklist_details;
+              } else {
+                try {
+                  const d = JSON.parse(String(r.checklist_detail_json || "null"));
+                  if (d && typeof d === "object") details = d;
+                } catch {}
+              }
+              checklist = Object.entries(parsed).map(([key, status]) => {
+                const st = String(status || "").trim().toLowerCase();
+                const ok = st === "ok" ? true : (st === "attention" || st === "unsafe" || st === "fail" || st === "failed") ? false : null;
+                const note = String(details?.[key]?.comment || details?.[key]?.note || details?.[key]?.notes || "").trim() || null;
+                return { key, label: toChecklistLabel(key), ok, note };
+              });
+            }
           } catch {}
           try {
             const pj = JSON.parse(String(r.required_parts_json || "[]"));
