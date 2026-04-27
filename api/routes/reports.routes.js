@@ -1,8 +1,10 @@
 // IRONLOG/api/routes/reports.routes.js
 import path from "node:path";
 import fs from "node:fs";
+import crypto from "node:crypto";
 import ExcelJS from "exceljs";
 import PptxGenJS from "pptxgenjs";
+import nodemailer from "nodemailer";
 import { db } from "../db/client.js";
 import {
   buildPdfBuffer,
@@ -1007,6 +1009,111 @@ export default async function reportsRoutes(app) {
   `).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_report_subscriptions_next ON report_subscriptions(active, next_run_at)`).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_report_delivery_logs_sub ON report_delivery_logs(subscription_id, created_at DESC)`).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS smtp_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      host TEXT,
+      port INTEGER,
+      secure INTEGER NOT NULL DEFAULT 0,
+      username TEXT,
+      password_enc TEXT,
+      from_email TEXT,
+      from_name TEXT,
+      updated_by TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  db.prepare(`INSERT INTO smtp_settings (id) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM smtp_settings WHERE id = 1)`).run();
+
+  function requestRoles(req) {
+    const fromMany = String(req.headers["x-user-roles"] || "")
+      .split(",")
+      .map((x) => String(x || "").trim().toLowerCase())
+      .filter(Boolean);
+    const fromSingle = String(req.headers["x-user-role"] || "")
+      .split(",")
+      .map((x) => String(x || "").trim().toLowerCase())
+      .filter(Boolean);
+    const merged = Array.from(new Set([...fromMany, ...fromSingle]));
+    return merged.length ? merged : ["admin"];
+  }
+  function requireAdmin(req, reply) {
+    const roles = requestRoles(req);
+    if (!roles.includes("admin") && !roles.includes("supervisor")) {
+      reply.code(403).send({ ok: false, error: "admin or supervisor role required" });
+      return false;
+    }
+    return true;
+  }
+  function smtpSecret() {
+    const raw = String(process.env.IRONLOG_SMTP_SECRET || process.env.IRONLOG_AUTH_SECRET || "").trim();
+    if (!raw) return "IRONLOG_SMTP_DEFAULT_SECRET_CHANGE_ME";
+    return raw;
+  }
+  function encryptSecret(plain) {
+    const iv = crypto.randomBytes(12);
+    const key = crypto.createHash("sha256").update(smtpSecret()).digest();
+    const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+    const encrypted = Buffer.concat([cipher.update(String(plain || ""), "utf8"), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return `${iv.toString("base64")}.${tag.toString("base64")}.${encrypted.toString("base64")}`;
+  }
+  function decryptSecret(cipherText) {
+    const raw = String(cipherText || "").trim();
+    if (!raw) return "";
+    const [ivB64, tagB64, encB64] = raw.split(".");
+    if (!ivB64 || !tagB64 || !encB64) return "";
+    const iv = Buffer.from(ivB64, "base64");
+    const tag = Buffer.from(tagB64, "base64");
+    const enc = Buffer.from(encB64, "base64");
+    const key = crypto.createHash("sha256").update(smtpSecret()).digest();
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(tag);
+    const out = Buffer.concat([decipher.update(enc), decipher.final()]);
+    return out.toString("utf8");
+  }
+  function getSmtpSettingsRow() {
+    return db.prepare(`
+      SELECT id, host, port, secure, username, password_enc, from_email, from_name, updated_by, updated_at
+      FROM smtp_settings
+      WHERE id = 1
+    `).get() || null;
+  }
+  function smtpPublicPayload(row) {
+    const r = row || {};
+    return {
+      host: String(r.host || ""),
+      port: Number(r.port || 587),
+      secure: Number(r.secure || 0) === 1 ? 1 : 0,
+      username: String(r.username || ""),
+      from_email: String(r.from_email || ""),
+      from_name: String(r.from_name || ""),
+      has_password: Boolean(String(r.password_enc || "").trim()),
+      updated_by: String(r.updated_by || ""),
+      updated_at: r.updated_at || null,
+    };
+  }
+  function buildSmtpTransport() {
+    const row = getSmtpSettingsRow();
+    if (!row) return null;
+    const host = String(row.host || "").trim();
+    const username = String(row.username || "").trim();
+    const fromEmail = String(row.from_email || "").trim();
+    const password = decryptSecret(row.password_enc || "");
+    if (!host || !username || !fromEmail || !password) return null;
+    const port = Math.max(1, Number(row.port || 587));
+    const secure = Number(row.secure || 0) === 1;
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: { user: username, pass: password },
+    });
+    return {
+      transporter,
+      from: row.from_name ? `"${String(row.from_name).replace(/"/g, "")}" <${fromEmail}>` : fromEmail,
+    };
+  }
 
   const allowedReportTypes = new Set(["fuel_benchmark_xlsx", "executive_kpi_pack_xlsx", "maintenance_insights_xlsx"]);
   const allowedChannels = new Set(["email", "whatsapp"]);
@@ -1089,23 +1196,55 @@ export default async function reportsRoutes(app) {
       manual: Boolean(manual),
       generated_at: new Date().toISOString(),
     };
-    const emailWebhook = String(process.env.REPORT_EMAIL_WEBHOOK_URL || "").trim();
-    const whatsappWebhook = String(process.env.REPORT_WHATSAPP_WEBHOOK_URL || "").trim();
-    const target = channel === "email" ? emailWebhook : whatsappWebhook;
     let status = "simulated";
-    let detail = "Logged only (no webhook configured)";
-    if (target) {
-      const resp = await fetch(target, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!resp.ok) {
-        status = "failed";
-        detail = `Webhook failed: HTTP ${resp.status}`;
-      } else {
+    let detail = "Logged only";
+    if (channel === "email") {
+      const smtp = buildSmtpTransport();
+      if (smtp) {
+        await smtp.transporter.sendMail({
+          from: smtp.from,
+          to: recipients.join(", "),
+          subject: `IRONLOG Report: ${String(subRow.name || reportType)}`,
+          text: `Your IRONLOG report is ready.\n\nReport: ${reportType}\nLink: ${link}\nGenerated: ${new Date().toISOString()}`,
+        });
         status = "sent";
-        detail = "Webhook accepted";
+        detail = "SMTP email sent";
+      } else {
+        const emailWebhook = String(process.env.REPORT_EMAIL_WEBHOOK_URL || "").trim();
+        if (emailWebhook) {
+          const resp = await fetch(emailWebhook, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!resp.ok) {
+            status = "failed";
+            detail = `Email webhook failed: HTTP ${resp.status}`;
+          } else {
+            status = "sent";
+            detail = "Email webhook accepted";
+          }
+        } else {
+          detail = "No SMTP or email webhook configured";
+        }
+      }
+    } else {
+      const whatsappWebhook = String(process.env.REPORT_WHATSAPP_WEBHOOK_URL || "").trim();
+      if (whatsappWebhook) {
+        const resp = await fetch(whatsappWebhook, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!resp.ok) {
+          status = "failed";
+          detail = `WhatsApp webhook failed: HTTP ${resp.status}`;
+        } else {
+          status = "sent";
+          detail = "WhatsApp webhook accepted";
+        }
+      } else {
+        detail = "No WhatsApp webhook configured";
       }
     }
     db.prepare(`
@@ -1353,6 +1492,56 @@ export default async function reportsRoutes(app) {
         .send(Buffer.from(buf));
     } catch (err) {
       return reply.code(400).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.get("/smtp-settings", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    return reply.send({ ok: true, settings: smtpPublicPayload(getSmtpSettingsRow()) });
+  });
+
+  app.post("/smtp-settings", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const body = req.body || {};
+    const host = String(body.host || "").trim();
+    const port = Math.max(1, Number(body.port || 587));
+    const secure = Number(body.secure || 0) === 1 ? 1 : 0;
+    const username = String(body.username || "").trim();
+    const fromEmail = String(body.from_email || "").trim();
+    const fromName = String(body.from_name || "").trim();
+    const password = String(body.password || "");
+    if (!host) return reply.code(400).send({ ok: false, error: "SMTP host is required" });
+    if (!username) return reply.code(400).send({ ok: false, error: "SMTP username is required" });
+    if (!fromEmail) return reply.code(400).send({ ok: false, error: "From email is required" });
+    const who = String(req.headers["x-user-name"] || "system");
+    const existing = getSmtpSettingsRow() || {};
+    const passwordEnc = password ? encryptSecret(password) : String(existing.password_enc || "");
+    db.prepare(`
+      UPDATE smtp_settings
+      SET host = ?, port = ?, secure = ?, username = ?, password_enc = ?, from_email = ?, from_name = ?, updated_by = ?, updated_at = datetime('now')
+      WHERE id = 1
+    `).run(host, port, secure, username, passwordEnc, fromEmail, fromName || null, who);
+    return reply.send({ ok: true, settings: smtpPublicPayload(getSmtpSettingsRow()) });
+  });
+
+  app.post("/smtp-settings/test", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const toRaw = String(req.body?.to || "").trim();
+    if (!toRaw) return reply.code(400).send({ ok: false, error: "Recipient email is required" });
+    const recipients = parseRecipients(toRaw);
+    if (!recipients.length) return reply.code(400).send({ ok: false, error: "Invalid recipient list" });
+    try {
+      const smtp = buildSmtpTransport();
+      if (!smtp) return reply.code(400).send({ ok: false, error: "SMTP settings incomplete. Save host/username/password/from first." });
+      await smtp.transporter.sendMail({
+        from: smtp.from,
+        to: recipients.join(", "),
+        subject: "IRONLOG SMTP test email",
+        text: `SMTP test successful at ${new Date().toISOString()}`,
+      });
+      return reply.send({ ok: true, message: "Test email sent" });
+    } catch (err) {
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
     }
   });
 

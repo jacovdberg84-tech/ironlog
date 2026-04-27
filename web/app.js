@@ -1351,6 +1351,77 @@ async function submitChangePassword() {
   }
 }
 
+async function loadSmtpSettings() {
+  const out = qs("smtpSettingsResult");
+  try {
+    const data = await fetchJson(`${API}/api/reports/smtp-settings`);
+    const s = data?.settings || {};
+    if (qs("smtpHost")) qs("smtpHost").value = String(s.host || "");
+    if (qs("smtpPort")) qs("smtpPort").value = String(Number(s.port || 587));
+    if (qs("smtpSecure")) qs("smtpSecure").value = Number(s.secure || 0) === 1 ? "1" : "0";
+    if (qs("smtpUsername")) qs("smtpUsername").value = String(s.username || "");
+    if (qs("smtpPassword")) qs("smtpPassword").value = "";
+    if (qs("smtpFromEmail")) qs("smtpFromEmail").value = String(s.from_email || "");
+    if (qs("smtpFromName")) qs("smtpFromName").value = String(s.from_name || "");
+    if (out) {
+      out.textContent = `Loaded SMTP settings.\nPassword set: ${s.has_password ? "yes" : "no"}\nUpdated by: ${s.updated_by || "-"}\nUpdated at: ${s.updated_at || "-"}`;
+    }
+    setStatus("SMTP settings loaded.");
+  } catch (e) {
+    if (out) out.textContent = String(e.message || e);
+    setStatus("SMTP settings load failed.");
+  }
+}
+
+async function saveSmtpSettings() {
+  const out = qs("smtpSettingsResult");
+  const body = {
+    host: String(qs("smtpHost")?.value || "").trim(),
+    port: Number(qs("smtpPort")?.value || 587),
+    secure: Number(qs("smtpSecure")?.value || 0) === 1 ? 1 : 0,
+    username: String(qs("smtpUsername")?.value || "").trim(),
+    password: String(qs("smtpPassword")?.value || ""),
+    from_email: String(qs("smtpFromEmail")?.value || "").trim(),
+    from_name: String(qs("smtpFromName")?.value || "").trim(),
+  };
+  if (!body.host) return alert("SMTP host is required.");
+  if (!body.username) return alert("SMTP username is required.");
+  if (!body.from_email) return alert("From email is required.");
+  setStatus("Saving SMTP settings…");
+  try {
+    const data = await fetchJson(`${API}/api/reports/smtp-settings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (qs("smtpPassword")) qs("smtpPassword").value = "";
+    if (out) out.textContent = JSON.stringify({ ok: true, settings: data?.settings || {} }, null, 2);
+    setStatus("SMTP settings saved.");
+  } catch (e) {
+    if (out) out.textContent = String(e.message || e);
+    setStatus("SMTP save failed.");
+  }
+}
+
+async function testSmtpSettings() {
+  const out = qs("smtpSettingsResult");
+  const to = String(qs("smtpTestTo")?.value || "").trim();
+  if (!to) return alert("Enter a test recipient email.");
+  setStatus("Sending SMTP test email…");
+  try {
+    const data = await fetchJson(`${API}/api/reports/smtp-settings/test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to }),
+    });
+    if (out) out.textContent = JSON.stringify(data, null, 2);
+    setStatus("SMTP test email sent.");
+  } catch (e) {
+    if (out) out.textContent = String(e.message || e);
+    setStatus("SMTP test failed.");
+  }
+}
+
 /** LDV vehicle check — photos + fractional damage pins */
 const vcMarkerDrafts = new Map();
 let vcActiveCheckId = null;
@@ -9736,6 +9807,15 @@ async function init() {
   qs("chPwdSubmit")?.addEventListener("click", () =>
     submitChangePassword().catch((e) => setStatus("Password error: " + e.message))
   );
+  qs("loadSmtpSettingsBtn")?.addEventListener("click", () =>
+    loadSmtpSettings().catch((e) => setStatus("SMTP load error: " + e.message))
+  );
+  qs("saveSmtpSettingsBtn")?.addEventListener("click", () =>
+    saveSmtpSettings().catch((e) => setStatus("SMTP save error: " + e.message))
+  );
+  qs("testSmtpSettingsBtn")?.addEventListener("click", () =>
+    testSmtpSettings().catch((e) => setStatus("SMTP test error: " + e.message))
+  );
   qs("loadApprovals")?.addEventListener("click", () =>
     loadApprovalRequests().catch((e) => setStatus("Approvals error: " + e.message))
   );
@@ -10116,6 +10196,7 @@ async function init() {
   if (getSessionRoles().some((r) => ["admin", "supervisor"].includes(r))) {
     loadAuditLogs().catch(() => {});
     loadApprovalRequests().catch(() => {});
+    loadSmtpSettings().catch(() => {});
   }
   loadCodePickers().catch(() => {});
   populateThresholdInputs();

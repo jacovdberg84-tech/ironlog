@@ -4223,6 +4223,75 @@
             <pre class="output" id="chPwdResult"></pre>
           </div>
         </div>
+
+        <!-- SMTP Mail Service Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #ecfeff; color: #0891b2;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"></path><path d="m22 6-10 7L2 6"></path></svg>
+              </div>
+              <div>
+                <h3>SMTP Mail Service</h3>
+                <p class="muted small">Configure outgoing email for report subscriptions and alerts</p>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="loadSmtpSettingsBtn" class="btn btn-secondary btn-sm">Refresh</button>
+              <button class="report-card-toggle" aria-label="Toggle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+              </button>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>SMTP Host</label>
+                <input id="smtpHost" class="w-full" placeholder="smtp.office365.com" />
+              </div>
+              <div class="form-field">
+                <label>Port</label>
+                <input id="smtpPort" class="w-full" type="number" min="1" step="1" value="587" />
+              </div>
+              <div class="form-field">
+                <label>Secure (SSL/TLS)</label>
+                <select id="smtpSecure" class="w-full">
+                  <option value="0" selected>No (STARTTLS/587)</option>
+                  <option value="1">Yes (SMTPS/465)</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Username</label>
+                <input id="smtpUsername" class="w-full" placeholder="noreply@company.com" />
+              </div>
+              <div class="form-field">
+                <label>Password</label>
+                <input id="smtpPassword" class="w-full" type="password" placeholder="Leave blank to keep existing password" autocomplete="new-password" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>From Email</label>
+                <input id="smtpFromEmail" class="w-full" placeholder="noreply@company.com" />
+              </div>
+              <div class="form-field">
+                <label>From Name</label>
+                <input id="smtpFromName" class="w-full" placeholder="IRONLOG Reports" />
+              </div>
+              <div class="form-field">
+                <label>Test Recipient</label>
+                <input id="smtpTestTo" class="w-full" placeholder="manager@company.com" />
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="saveSmtpSettingsBtn" class="btn btn-primary">Save SMTP</button>
+              <button id="testSmtpSettingsBtn" class="btn btn-secondary">Send Test Email</button>
+            </div>
+            <pre class="output" id="smtpSettingsResult"></pre>
+          </div>
+        </div>
       </div>
     </section>
 
