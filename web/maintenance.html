@@ -393,6 +393,54 @@
         <div id="governanceQuality" style="margin-top:10px;"></div>
         <div id="governanceAnomalies" style="margin-top:10px;"></div>
       </div>
+      <div class="card">
+        <h4 style="margin-top:0;">Custom Report Builder</h4>
+        <div class="row stack-10">
+          <label>
+            Dataset
+            <select id="reportBuilderDataset" class="w-200"></select>
+          </label>
+          <label>
+            Template
+            <select id="reportBuilderTemplate" class="w-200">
+              <option value="">(None)</option>
+            </select>
+          </label>
+          <label>
+            Template Name
+            <input id="reportBuilderName" class="w-200" placeholder="e.g. Open WO by status" />
+          </label>
+          <label>
+            Start
+            <input id="reportBuilderStart" type="date" />
+          </label>
+          <label>
+            End
+            <input id="reportBuilderEnd" type="date" />
+          </label>
+          <label>
+            Asset ID
+            <input id="reportBuilderAssetId" type="number" min="0" step="1" placeholder="Optional" />
+          </label>
+          <label>
+            Status
+            <input id="reportBuilderStatus" placeholder="Optional status" />
+          </label>
+          <label>
+            Limit
+            <input id="reportBuilderLimit" type="number" min="1" max="500" step="1" value="100" />
+          </label>
+        </div>
+        <div class="row stack-10" style="margin-top:8px;">
+          <button id="reportBuilderRunBtn" type="button">Preview Report</button>
+          <button id="reportBuilderSaveBtn" type="button">Save Template</button>
+          <button id="reportBuilderDeleteBtn" type="button">Delete Template</button>
+          <button id="reportBuilderReloadBtn" type="button">Reload Templates</button>
+        </div>
+        <div id="reportBuilderColumns" class="row stack-10" style="margin-top:10px; flex-wrap:wrap;"></div>
+        <div id="reportBuilderMsg" class="muted" style="margin-top:10px;">Loading report builder...</div>
+        <div id="reportBuilderPreview" style="margin-top:10px;"></div>
+      </div>
     </div>
 
     <div class="card stack-24">

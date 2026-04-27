@@ -959,6 +959,215 @@ export default async function reportsRoutes(app) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS report_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      dataset TEXT NOT NULL,
+      columns_json TEXT NOT NULL,
+      filters_json TEXT,
+      created_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_report_templates_dataset ON report_templates(dataset)`).run();
+
+  const reportDatasets = {
+    work_orders: {
+      table: "work_orders",
+      defaultOrder: "id DESC",
+      columns: {
+        id: "id",
+        asset_id: "asset_id",
+        status: "status",
+        source: "source",
+        title: "title",
+        description: "description",
+        priority: "priority",
+        opened_at: "opened_at",
+        due_at: "due_at",
+        assigned_at: "assigned_at",
+        completed_at: "completed_at",
+        closed_at: "closed_at",
+        artisan_name: "artisan_name",
+      },
+      dateColumn: "opened_at",
+      assetColumn: "asset_id",
+      statusColumn: "status",
+    },
+    fuel_logs: {
+      table: "fuel_logs",
+      defaultOrder: "log_date DESC, id DESC",
+      columns: {
+        id: "id",
+        asset_id: "asset_id",
+        log_date: "log_date",
+        liters: "liters",
+        cost_total: "cost_total",
+        meter_unit: "meter_unit",
+        meter_run_value: "meter_run_value",
+        hours_run: "hours_run",
+        notes: "notes",
+      },
+      dateColumn: "log_date",
+      assetColumn: "asset_id",
+    },
+    manager_inspections: {
+      table: "manager_inspections",
+      defaultOrder: "id DESC",
+      columns: {
+        id: "id",
+        asset_id: "asset_id",
+        inspection_date: "inspection_date",
+        status: "status",
+        comments: "comments",
+        notes: "notes",
+        defect_severity: "defect_severity",
+        defect_component: "defect_component",
+        defect_risk: "defect_risk",
+        recommended_action: "recommended_action",
+      },
+      dateColumn: "inspection_date",
+      assetColumn: "asset_id",
+      statusColumn: "status",
+    },
+  };
+  function hasTable(tableName) {
+    return Boolean(
+      db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?").get(String(tableName || "").trim())
+    );
+  }
+  function datasetWithAvailableColumns(datasetKey) {
+    const key = String(datasetKey || "").trim();
+    const ds = reportDatasets[key];
+    if (!ds || !hasTable(ds.table)) return null;
+    const tableCols = new Set(db.prepare(`PRAGMA table_info(${ds.table})`).all().map((r) => String(r.name || "")));
+    const availableColumns = Object.entries(ds.columns)
+      .filter(([, sqlCol]) => tableCols.has(String(sqlCol)))
+      .map(([id, sqlCol]) => ({ id, sql: sqlCol }));
+    if (!availableColumns.length) return null;
+    return { ...ds, key, availableColumns };
+  }
+
+  app.get("/custom-builder/meta", async (_req, reply) => {
+    const datasets = Object.keys(reportDatasets)
+      .map((k) => datasetWithAvailableColumns(k))
+      .filter(Boolean)
+      .map((d) => ({
+        key: d.key,
+        table: d.table,
+        columns: d.availableColumns.map((c) => c.id),
+      }));
+    return reply.send({ ok: true, datasets });
+  });
+
+  app.get("/custom-builder/templates", async (_req, reply) => {
+    const rows = db.prepare(`
+      SELECT id, name, dataset, columns_json, filters_json, created_by, created_at, updated_at
+      FROM report_templates
+      ORDER BY updated_at DESC, id DESC
+      LIMIT 200
+    `).all();
+    const templates = rows.map((r) => {
+      let columns = [];
+      let filters = {};
+      try { columns = JSON.parse(String(r.columns_json || "[]")); } catch {}
+      try { filters = JSON.parse(String(r.filters_json || "{}")); } catch {}
+      return {
+        id: Number(r.id || 0),
+        name: String(r.name || ""),
+        dataset: String(r.dataset || ""),
+        columns: Array.isArray(columns) ? columns : [],
+        filters: filters && typeof filters === "object" ? filters : {},
+        created_by: String(r.created_by || ""),
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+      };
+    });
+    return reply.send({ ok: true, templates });
+  });
+
+  app.post("/custom-builder/templates", async (req, reply) => {
+    const body = req.body || {};
+    const name = String(body.name || "").trim();
+    const dataset = String(body.dataset || "").trim();
+    const ds = datasetWithAvailableColumns(dataset);
+    if (!name) return reply.code(400).send({ ok: false, error: "Template name is required" });
+    if (!ds) return reply.code(400).send({ ok: false, error: "Invalid dataset" });
+    const validCols = new Set(ds.availableColumns.map((c) => c.id));
+    const columns = Array.from(new Set((Array.isArray(body.columns) ? body.columns : []).map((c) => String(c || "").trim())))
+      .filter((c) => validCols.has(c))
+      .slice(0, 25);
+    if (!columns.length) return reply.code(400).send({ ok: false, error: "Select at least one valid column" });
+    const filters = body.filters && typeof body.filters === "object" ? body.filters : {};
+    const who = String(req.headers["x-user-name"] || "system");
+    const id = Number(body.id || 0);
+    if (id > 0) {
+      const existing = db.prepare("SELECT id FROM report_templates WHERE id = ? LIMIT 1").get(id);
+      if (!existing) return reply.code(404).send({ ok: false, error: "Template not found" });
+      db.prepare(`
+        UPDATE report_templates
+        SET name = ?, dataset = ?, columns_json = ?, filters_json = ?, created_by = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(name, ds.key, JSON.stringify(columns), JSON.stringify(filters), who, id);
+      return reply.send({ ok: true, id });
+    }
+    const out = db.prepare(`
+      INSERT INTO report_templates (name, dataset, columns_json, filters_json, created_by, updated_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now'))
+    `).run(name, ds.key, JSON.stringify(columns), JSON.stringify(filters), who);
+    return reply.send({ ok: true, id: Number(out.lastInsertRowid || 0) });
+  });
+
+  app.delete("/custom-builder/templates/:id", async (req, reply) => {
+    const id = Number(req.params?.id || 0);
+    if (!id) return reply.code(400).send({ ok: false, error: "Invalid template id" });
+    const out = db.prepare("DELETE FROM report_templates WHERE id = ?").run(id);
+    if (!Number(out.changes || 0)) return reply.code(404).send({ ok: false, error: "Template not found" });
+    return reply.send({ ok: true });
+  });
+
+  app.post("/custom-builder/preview", async (req, reply) => {
+    const body = req.body || {};
+    const dataset = String(body.dataset || "").trim();
+    const ds = datasetWithAvailableColumns(dataset);
+    if (!ds) return reply.code(400).send({ ok: false, error: "Invalid dataset" });
+    const validCols = new Set(ds.availableColumns.map((c) => c.id));
+    const picked = Array.from(new Set((Array.isArray(body.columns) ? body.columns : []).map((c) => String(c || "").trim())))
+      .filter((c) => validCols.has(c))
+      .slice(0, 25);
+    if (!picked.length) return reply.code(400).send({ ok: false, error: "Select at least one valid column" });
+    const filters = body.filters && typeof body.filters === "object" ? body.filters : {};
+    const limitNum = Math.max(1, Math.min(500, Number(filters.limit || body.limit || 100)));
+
+    const where = [];
+    const params = [];
+    if (ds.dateColumn) {
+      const start = String(filters.start || "").trim();
+      const end = String(filters.end || "").trim();
+      if (isDate(start)) { where.push(`date(${ds.dateColumn}) >= date(?)`); params.push(start); }
+      if (isDate(end)) { where.push(`date(${ds.dateColumn}) <= date(?)`); params.push(end); }
+    }
+    if (ds.assetColumn) {
+      const assetId = Number(filters.asset_id || 0);
+      if (assetId > 0) { where.push(`${ds.assetColumn} = ?`); params.push(assetId); }
+    }
+    if (ds.statusColumn) {
+      const status = String(filters.status || "").trim();
+      if (status) { where.push(`LOWER(COALESCE(${ds.statusColumn},'')) = LOWER(?)`); params.push(status); }
+    }
+    const selectSql = picked.map((k) => ds.columns[k]).join(", ");
+    const sql = `
+      SELECT ${selectSql}
+      FROM ${ds.table}
+      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY ${ds.defaultOrder}
+      LIMIT ${limitNum}
+    `;
+    const rows = db.prepare(sql).all(...params);
+    return reply.send({ ok: true, dataset: ds.key, columns: picked, rows, count: rows.length, limit: limitNum });
+  });
 
   function costDefaults() {
     const rows = db.prepare(`

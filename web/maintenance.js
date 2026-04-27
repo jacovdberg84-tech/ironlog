@@ -8,6 +8,8 @@ const SITE_KEY = "ironlog_session_site";
 const TOKEN_KEY = "ironlog_auth_token";
 const MAINT_DUE_THRESHOLD_KEY = "ironlog_maintenance_due_threshold_hours";
 const INSIGHTS_THRESHOLDS_KEY = "ironlog_maintenance_insights_thresholds";
+let reportBuilderMeta = [];
+let reportBuilderTemplates = [];
 const MAINT_LOCK_KEY = "ironlog_maintenance_access_ok";
 const MAINT_LOCK_USER = "BJ van den Berg";
 const MAINT_LOCK_PASSWORD = "0mhliac789";
@@ -704,6 +706,210 @@ async function loadGovernanceSignals() {
   } catch (e) {
     msgEl.className = "message-error";
     msgEl.textContent = `Governance error: ${e.message || e}`;
+  }
+}
+
+function reportBuilderSelectedColumns() {
+  return Array.from(document.querySelectorAll("input[data-report-builder-col]:checked"))
+    .map((el) => String(el.getAttribute("data-report-builder-col") || "").trim())
+    .filter(Boolean);
+}
+
+function renderReportBuilderColumns(columns, selected = []) {
+  const wrap = document.getElementById("reportBuilderColumns");
+  if (!wrap) return;
+  const selectedSet = new Set((Array.isArray(selected) ? selected : []).map((x) => String(x || "").trim()));
+  const list = Array.isArray(columns) ? columns : [];
+  wrap.innerHTML = list.length
+    ? list.map((col) => `
+      <label style="display:flex; align-items:center; gap:6px; border:1px solid #e5e7eb; border-radius:8px; padding:6px 8px;">
+        <input type="checkbox" data-report-builder-col="${escBackfill(col)}" ${selectedSet.has(col) ? "checked" : ""} />
+        <span>${escBackfill(col)}</span>
+      </label>
+    `).join("")
+    : `<small class="muted">No columns available for this dataset.</small>`;
+}
+
+function renderReportBuilderPreview(data) {
+  const out = document.getElementById("reportBuilderPreview");
+  if (!out) return;
+  const cols = Array.isArray(data?.columns) ? data.columns : [];
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  out.innerHTML = `
+    <div class="muted">Rows: ${Number(data?.count || rows.length || 0)} (limit ${Number(data?.limit || 0)})</div>
+    ${insightsRowsTable(cols, rows.map((r) => cols.map((c) => r?.[c] ?? "-")))}
+  `;
+}
+
+function reportBuilderCurrentConfig() {
+  const dataset = String(document.getElementById("reportBuilderDataset")?.value || "").trim();
+  const name = String(document.getElementById("reportBuilderName")?.value || "").trim();
+  const columns = reportBuilderSelectedColumns();
+  const filters = {
+    start: String(document.getElementById("reportBuilderStart")?.value || "").trim(),
+    end: String(document.getElementById("reportBuilderEnd")?.value || "").trim(),
+    asset_id: Number(document.getElementById("reportBuilderAssetId")?.value || 0) || 0,
+    status: String(document.getElementById("reportBuilderStatus")?.value || "").trim(),
+    limit: Number(document.getElementById("reportBuilderLimit")?.value || 100) || 100,
+  };
+  return { dataset, name, columns, filters };
+}
+
+async function loadReportBuilderMeta() {
+  const datasetEl = document.getElementById("reportBuilderDataset");
+  const msg = document.getElementById("reportBuilderMsg");
+  if (!datasetEl || !msg) return;
+  try {
+    const res = await fetch(`${API}/reports/custom-builder/meta`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load report builder metadata");
+    reportBuilderMeta = Array.isArray(data?.datasets) ? data.datasets : [];
+    datasetEl.innerHTML = reportBuilderMeta.length
+      ? reportBuilderMeta.map((d) => `<option value="${escBackfill(d.key)}">${escBackfill(d.key)}</option>`).join("")
+      : `<option value="">No datasets</option>`;
+    const first = reportBuilderMeta[0];
+    renderReportBuilderColumns(first?.columns || [], first?.columns?.slice(0, 4) || []);
+    msg.className = "muted";
+    msg.textContent = "Builder ready.";
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = `Builder meta error: ${e.message || e}`;
+  }
+}
+
+async function loadReportBuilderTemplates() {
+  const tplEl = document.getElementById("reportBuilderTemplate");
+  const msg = document.getElementById("reportBuilderMsg");
+  if (!tplEl || !msg) return;
+  try {
+    const res = await fetch(`${API}/reports/custom-builder/templates`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load templates");
+    reportBuilderTemplates = Array.isArray(data?.templates) ? data.templates : [];
+    tplEl.innerHTML = `<option value="">(None)</option>${reportBuilderTemplates
+      .map((t) => `<option value="${Number(t.id || 0)}">${escBackfill(t.name || "Template")} - ${escBackfill(t.dataset || "")}</option>`)
+      .join("")}`;
+    msg.className = "muted";
+    msg.textContent = `Templates loaded: ${reportBuilderTemplates.length}`;
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = `Template load error: ${e.message || e}`;
+  }
+}
+
+function applyReportBuilderTemplate(id) {
+  const tpl = reportBuilderTemplates.find((t) => Number(t.id || 0) === Number(id || 0));
+  if (!tpl) return;
+  const dsEl = document.getElementById("reportBuilderDataset");
+  const nameEl = document.getElementById("reportBuilderName");
+  const startEl = document.getElementById("reportBuilderStart");
+  const endEl = document.getElementById("reportBuilderEnd");
+  const assetEl = document.getElementById("reportBuilderAssetId");
+  const statusEl = document.getElementById("reportBuilderStatus");
+  const limitEl = document.getElementById("reportBuilderLimit");
+  if (dsEl) dsEl.value = String(tpl.dataset || "");
+  if (nameEl) nameEl.value = String(tpl.name || "");
+  if (startEl) startEl.value = String(tpl?.filters?.start || "");
+  if (endEl) endEl.value = String(tpl?.filters?.end || "");
+  if (assetEl) assetEl.value = String(Number(tpl?.filters?.asset_id || 0) || "");
+  if (statusEl) statusEl.value = String(tpl?.filters?.status || "");
+  if (limitEl) limitEl.value = String(Number(tpl?.filters?.limit || 100) || 100);
+  const ds = reportBuilderMeta.find((d) => String(d.key || "") === String(tpl.dataset || ""));
+  renderReportBuilderColumns(ds?.columns || [], Array.isArray(tpl.columns) ? tpl.columns : []);
+}
+
+async function runReportBuilderPreview() {
+  const msg = document.getElementById("reportBuilderMsg");
+  if (!msg) return;
+  const cfg = reportBuilderCurrentConfig();
+  if (!cfg.dataset) {
+    msg.className = "message-error";
+    msg.textContent = "Select dataset.";
+    return;
+  }
+  if (!cfg.columns.length) {
+    msg.className = "message-error";
+    msg.textContent = "Select at least one column.";
+    return;
+  }
+  msg.className = "muted";
+  msg.textContent = "Running preview...";
+  try {
+    const res = await fetch(`${API}/reports/custom-builder/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cfg),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Preview failed");
+    renderReportBuilderPreview(data);
+    msg.className = "message-success";
+    msg.textContent = `Preview ready (${Number(data?.count || 0)} rows).`;
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = `Preview error: ${e.message || e}`;
+  }
+}
+
+async function saveReportBuilderTemplate() {
+  const msg = document.getElementById("reportBuilderMsg");
+  const tplId = Number(document.getElementById("reportBuilderTemplate")?.value || 0);
+  if (!msg) return;
+  const cfg = reportBuilderCurrentConfig();
+  if (!cfg.name) {
+    msg.className = "message-error";
+    msg.textContent = "Template name is required.";
+    return;
+  }
+  if (!cfg.dataset || !cfg.columns.length) {
+    msg.className = "message-error";
+    msg.textContent = "Select dataset and at least one column.";
+    return;
+  }
+  msg.className = "muted";
+  msg.textContent = "Saving template...";
+  try {
+    const res = await fetch(`${API}/reports/custom-builder/templates`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: tplId || undefined, ...cfg }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Save failed");
+    await loadReportBuilderTemplates();
+    const sel = document.getElementById("reportBuilderTemplate");
+    if (sel && Number(data?.id || 0) > 0) sel.value = String(Number(data.id));
+    msg.className = "message-success";
+    msg.textContent = "Template saved.";
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = `Save error: ${e.message || e}`;
+  }
+}
+
+async function deleteReportBuilderTemplate() {
+  const msg = document.getElementById("reportBuilderMsg");
+  const sel = document.getElementById("reportBuilderTemplate");
+  const id = Number(sel?.value || 0);
+  if (!msg || !sel) return;
+  if (!id) {
+    msg.className = "message-error";
+    msg.textContent = "Select template to delete.";
+    return;
+  }
+  if (!confirm("Delete selected report template?")) return;
+  msg.className = "muted";
+  msg.textContent = "Deleting template...";
+  try {
+    const res = await fetch(`${API}/reports/custom-builder/templates/${id}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Delete failed");
+    await loadReportBuilderTemplates();
+    msg.className = "message-success";
+    msg.textContent = "Template deleted.";
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = `Delete error: ${e.message || e}`;
   }
 }
 
@@ -4467,6 +4673,18 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("downloadInsightsPdfBtn")?.addEventListener("click", () => openMaintenanceInsightsPdf(true));
   document.getElementById("downloadInsightsXlsxBtn")?.addEventListener("click", () => openMaintenanceInsightsXlsx());
   document.getElementById("loadGovernanceSignalsBtn")?.addEventListener("click", () => loadGovernanceSignals());
+  document.getElementById("reportBuilderRunBtn")?.addEventListener("click", () => runReportBuilderPreview());
+  document.getElementById("reportBuilderSaveBtn")?.addEventListener("click", () => saveReportBuilderTemplate());
+  document.getElementById("reportBuilderDeleteBtn")?.addEventListener("click", () => deleteReportBuilderTemplate());
+  document.getElementById("reportBuilderReloadBtn")?.addEventListener("click", () => loadReportBuilderTemplates());
+  document.getElementById("reportBuilderDataset")?.addEventListener("change", (evt) => {
+    const key = String(evt.target?.value || "");
+    const ds = reportBuilderMeta.find((d) => String(d.key || "") === key);
+    renderReportBuilderColumns(ds?.columns || [], (ds?.columns || []).slice(0, 4));
+  });
+  document.getElementById("reportBuilderTemplate")?.addEventListener("change", (evt) => {
+    applyReportBuilderTemplate(Number(evt.target?.value || 0));
+  });
   document.getElementById("loadRsgProfilesBtn")?.addEventListener("click", loadRsgProfiles);
   document.getElementById("downloadRsgCsvTemplateBtn")?.addEventListener("click", downloadRsgCsvTemplate);
   document.getElementById("importRsgCsvBtn")?.addEventListener("click", importRsgProfilesCsv);
@@ -4518,6 +4736,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   loadMaintenanceInsights().catch(() => {});
   loadGovernanceSignals().catch(() => {});
+  loadReportBuilderMeta().then(() => loadReportBuilderTemplates()).catch(() => {});
   setTopView("main");
   loadHistogramEvents().catch(() => {});
 });
