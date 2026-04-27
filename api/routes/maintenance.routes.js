@@ -1246,6 +1246,9 @@ export default async function maintenanceRoutes(app) {
 
       const canReadBreakdowns = hasTable("breakdowns");
       const canReadDowntimeLogs = hasTable("breakdown_downtime_logs");
+      const woAssignedCol = hasColumn("work_orders", "assigned_artisan_name")
+        ? "assigned_artisan_name"
+        : (hasColumn("work_orders", "artisan_name") ? "artisan_name" : "");
       const breakdownDateExpr = hasColumn("breakdowns", "breakdown_date") ? "b.breakdown_date" : "b.created_at";
       const breakdownDowntimeCol = hasColumn("breakdowns", "downtime_hours")
         ? "downtime_hours"
@@ -1280,7 +1283,9 @@ export default async function maintenanceRoutes(app) {
       const downtimeByTeam = canReadBreakdowns
         ? db.prepare(`
             SELECT
-              COALESCE(NULLIF(TRIM(wo.assigned_artisan_name), ''), NULLIF(TRIM(wo.artisan_name), ''), 'Unassigned') AS team,
+              ${woAssignedCol
+                ? `COALESCE(NULLIF(TRIM(wo.${woAssignedCol}), ''), 'Unassigned')`
+                : `'Unassigned'`} AS team,
               COUNT(DISTINCT b.id) AS incidents,
               COALESCE(SUM(${breakdownDowntimeExpr}), 0) AS downtime_hours
             FROM breakdowns b
