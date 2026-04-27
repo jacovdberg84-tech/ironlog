@@ -1306,17 +1306,26 @@ export default async function maintenanceRoutes(app) {
         by_team: downtimeByTeam,
       };
 
+      const woHasOpenedAt = hasColumn("work_orders", "opened_at");
+      const woHasUpdatedAt = hasColumn("work_orders", "updated_at");
+      const woHasAssignedAt = hasColumn("work_orders", "assigned_at");
+      const woHasCompletedAt = hasColumn("work_orders", "completed_at");
+      const woHasClosedAt = hasColumn("work_orders", "closed_at");
+      const woHasSupervisorDecisionAt = hasColumn("work_orders", "supervisor_decision_at");
+      const woDateBasis = woHasOpenedAt
+        ? "opened_at"
+        : (woHasUpdatedAt ? "updated_at" : (woHasClosedAt ? "closed_at" : "datetime('now')"));
       const serviceWos = db.prepare(`
         SELECT
           id,
-          opened_at,
-          assigned_at,
-          completed_at,
-          closed_at,
-          supervisor_decision_at
+          ${woHasOpenedAt ? "opened_at" : "NULL AS opened_at"},
+          ${woHasAssignedAt ? "assigned_at" : "NULL AS assigned_at"},
+          ${woHasCompletedAt ? "completed_at" : "NULL AS completed_at"},
+          ${woHasClosedAt ? "closed_at" : "NULL AS closed_at"},
+          ${woHasSupervisorDecisionAt ? "supervisor_decision_at" : "NULL AS supervisor_decision_at"}
         FROM work_orders
         WHERE source = 'service'
-          AND DATE(COALESCE(opened_at, updated_at)) BETWEEN DATE(?) AND DATE(?)
+          AND DATE(COALESCE(${woDateBasis}, '1970-01-01')) BETWEEN DATE(?) AND DATE(?)
       `).all(startDate, endDate);
       const hoursBetween = (a, b) => {
         if (!a || !b) return null;
