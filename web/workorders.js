@@ -7,6 +7,8 @@ const ROLE_KEY = "ironlog_session_role";
 const USER_KEY = "ironlog_session_user";
 let boardState = [];
 let escPollTimer = null;
+let lastEscalationSignature = "";
+const ESC_ALERT_SETTINGS_KEY = "ironlog_wo_escalation_alert_settings";
 
 function getSessionRole() {
   return String(localStorage.getItem(ROLE_KEY) || "admin").trim().toLowerCase() || "admin";
@@ -14,6 +16,31 @@ function getSessionRole() {
 
 function getSessionUser() {
   return String(localStorage.getItem(USER_KEY) || "admin").trim() || "admin";
+}
+
+function getEscAlertSettings() {
+  try {
+    const raw = localStorage.getItem(ESC_ALERT_SETTINGS_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return {
+      sound: parsed?.sound !== false,
+      vibrate: parsed?.vibrate !== false,
+      desktop: parsed?.desktop === true,
+    };
+  } catch {
+    return { sound: true, vibrate: true, desktop: false };
+  }
+}
+
+function setEscAlertSettings(next) {
+  const current = getEscAlertSettings();
+  const merged = {
+    sound: next?.sound != null ? Boolean(next.sound) : current.sound,
+    vibrate: next?.vibrate != null ? Boolean(next.vibrate) : current.vibrate,
+    desktop: next?.desktop != null ? Boolean(next.desktop) : current.desktop,
+  };
+  localStorage.setItem(ESC_ALERT_SETTINGS_KEY, JSON.stringify(merged));
+  return merged;
 }
 
 function authHeaders(extra = {}) {
@@ -550,6 +577,15 @@ async function loadEscalationInbox() {
       bellBtn.textContent = `Escalations: ${mine.length}`;
       bellBtn.className = mine.length > 0 ? "pill red" : "pill blue";
     }
+    const signature = mine.map((r) => `${Number(r.id)}:${Number(r.chain_level || 1)}:${String(r.status || "")}`).join("|");
+    const isChanged = signature !== lastEscalationSignature;
+    const settings = getEscAlertSettings();
+    if (isChanged && mine.length > 0 && lastEscalationSignature) {
+      if (settings.sound) playEscalationSound();
+      if (settings.vibrate) vibrateEscalation();
+      if (settings.desktop) pushDesktopEscalationNotice(mine);
+    }
+    lastEscalationSignature = signature;
     if (msg) {
       msg.className = "muted";
       msg.textContent = `${mine.length} open escalation(s) for ${role}.`;
@@ -569,6 +605,52 @@ function startEscalationPolling() {
   escPollTimer = setInterval(() => {
     loadEscalationInbox();
   }, 30000);
+}
+
+function playEscalationSound() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const ctx = new AC();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = "sine";
+    osc.frequency.value = 880;
+    gain.gain.value = 0.05;
+    osc.start();
+    setTimeout(() => osc.stop(), 180);
+  } catch {}
+}
+
+function vibrateEscalation() {
+  try {
+    if (navigator?.vibrate) navigator.vibrate([120, 70, 120]);
+  } catch {}
+}
+
+async function ensureNotificationPermission() {
+  if (!("Notification" in window)) return false;
+  if (Notification.permission === "granted") return true;
+  if (Notification.permission === "denied") return false;
+  const p = await Notification.requestPermission();
+  return p === "granted";
+}
+
+function pushDesktopEscalationNotice(openItems) {
+  if (!("Notification" in window)) return;
+  if (Notification.permission !== "granted") return;
+  const count = Array.isArray(openItems) ? openItems.length : 0;
+  if (count <= 0) return;
+  const top = openItems[0] || {};
+  const wo = Number(top.work_order_id || 0);
+  const txt = count === 1
+    ? `WO #${wo} has an open escalation for your role.`
+    : `${count} open escalations for your role. Top WO #${wo}.`;
+  try {
+    new Notification("IRONLOG Escalation Alert", { body: txt });
+  } catch {}
 }
 
 async function loadInspectionQuality() {
@@ -1190,6 +1272,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const escSaveBtn = document.getElementById("woEscSaveBtn");
   const escInbox = document.getElementById("woEscInbox");
   const escBellBtn = document.getElementById("woEscBellBtn");
+  const soundToggle = document.getElementById("woAlertSoundToggle");
+  const vibrateToggle = document.getElementById("woAlertVibrateToggle");
+  const desktopToggle = document.getElementById("woAlertDesktopToggle");
+  const notifBtn = document.getElementById("woAlertPermissionBtn");
 
   const roleBadge = document.getElementById("woRoleBadge");
   if (roleBadge) roleBadge.textContent = `Role: ${role}`;
@@ -1234,6 +1320,40 @@ document.addEventListener("DOMContentLoaded", () => {
       loadEscalationInbox();
       const section = document.getElementById("woEscInbox");
       if (section) section.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
+  const alertSettings = getEscAlertSettings();
+  if (soundToggle) soundToggle.checked = Boolean(alertSettings.sound);
+  if (vibrateToggle) vibrateToggle.checked = Boolean(alertSettings.vibrate);
+  if (desktopToggle) desktopToggle.checked = Boolean(alertSettings.desktop);
+  if (soundToggle) {
+    soundToggle.addEventListener("change", () => {
+      setEscAlertSettings({ sound: soundToggle.checked });
+    });
+  }
+  if (vibrateToggle) {
+    vibrateToggle.addEventListener("change", () => {
+      setEscAlertSettings({ vibrate: vibrateToggle.checked });
+    });
+  }
+  if (desktopToggle) {
+    desktopToggle.addEventListener("change", async () => {
+      if (desktopToggle.checked) {
+        const ok = await ensureNotificationPermission();
+        setEscAlertSettings({ desktop: ok });
+        desktopToggle.checked = ok;
+        if (!ok) alert("Desktop notification permission was not granted.");
+      } else {
+        setEscAlertSettings({ desktop: false });
+      }
+    });
+  }
+  if (notifBtn) {
+    notifBtn.addEventListener("click", async () => {
+      const ok = await ensureNotificationPermission();
+      setEscAlertSettings({ desktop: ok });
+      if (desktopToggle) desktopToggle.checked = ok;
+      alert(ok ? "Desktop notifications enabled." : "Desktop notifications not enabled.");
     });
   }
   if (awaitingApprovalBtn && statusEl) {
