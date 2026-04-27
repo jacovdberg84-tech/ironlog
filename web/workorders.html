@@ -103,6 +103,39 @@
     </div>
 
     <div class="card">
+      <h3 style="margin-top:0;">Auto-Assignment Rules</h3>
+      <div class="row" style="gap:10px; align-items:flex-end; flex-wrap:wrap;">
+        <label><input id="woRuleArtisan" type="text" placeholder="Artisan name" /></label>
+        <label><input id="woRuleSkill" type="text" placeholder="Skill (optional)" /></label>
+        <label><input id="woRuleLocation" type="text" placeholder="Location (optional)" /></label>
+        <label>
+          <select id="woRuleShift">
+            <option value="">Any shift</option>
+            <option value="day">Day</option>
+            <option value="night">Night</option>
+          </select>
+        </label>
+        <label><input id="woRuleMaxLoad" type="number" min="1" step="1" value="8" /></label>
+        <button id="woRuleSaveBtn" type="button">Save Rule</button>
+      </div>
+      <div id="woRulesMsg" class="muted" style="margin-top:8px;"></div>
+      <div id="woRulesList" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">Escalation Chain Settings</h3>
+      <div class="row" style="gap:10px; align-items:flex-end; flex-wrap:wrap;">
+        <label>Overdue Hours <input id="woEscHours" type="number" min="1" step="1" value="8" /></label>
+        <label>Level 1 Role <input id="woEscRole1" type="text" value="supervisor" /></label>
+        <label>Level 2 Role <input id="woEscRole2" type="text" value="manager" /></label>
+        <label>Level 3 Role <input id="woEscRole3" type="text" value="admin" /></label>
+        <button id="woEscSaveBtn" type="button">Save Escalation Config</button>
+      </div>
+      <div id="woEscMsg" class="muted" style="margin-top:8px;"></div>
+      <div id="woEscList" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="card">
       <h3 style="margin-top:0;">Inspection Quality Score</h3>
       <div id="woInspectionQuality" class="muted">Loading quality score...</div>
     </div>

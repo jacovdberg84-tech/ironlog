@@ -139,6 +139,30 @@ export default async function workOrderRoutes(app) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS work_order_escalation_config (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      overdue_hours INTEGER NOT NULL DEFAULT 8,
+      level1_role TEXT NOT NULL DEFAULT 'supervisor',
+      level2_role TEXT NOT NULL DEFAULT 'manager',
+      level3_role TEXT NOT NULL DEFAULT 'admin',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS work_order_escalation_notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      escalation_id INTEGER NOT NULL,
+      role_target TEXT NOT NULL,
+      message TEXT NOT NULL,
+      sent_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  db.prepare(`
+    INSERT INTO work_order_escalation_config (id, overdue_hours, level1_role, level2_role, level3_role)
+    SELECT 1, 8, 'supervisor', 'manager', 'admin'
+    WHERE NOT EXISTS (SELECT 1 FROM work_order_escalation_config WHERE id = 1)
+  `).run();
 
   function getAssetCurrentHours(assetId) {
     const fromAssetHours = db.prepare(`
@@ -357,6 +381,91 @@ export default async function workOrderRoutes(app) {
     return { ok: true, rows: filtered };
   });
 
+  app.get("/schedule/rules", async () => {
+    const rows = db.prepare(`
+      SELECT id, artisan_name, skill, location_code, shift, max_open_wos, active, created_at
+      FROM wo_assignment_rules
+      ORDER BY active DESC, artisan_name ASC, id DESC
+      LIMIT 400
+    `).all();
+    return { ok: true, rows };
+  });
+
+  app.post("/schedule/rules", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    const artisan_name = String(req.body?.artisan_name || "").trim();
+    if (!artisan_name) return reply.code(400).send({ error: "artisan_name is required" });
+    const skill = req.body?.skill != null ? String(req.body.skill).trim() || null : null;
+    const location_code = req.body?.location_code != null ? String(req.body.location_code).trim() || null : null;
+    const shift = normalizeShift(req.body?.shift);
+    const max_open_wos = Math.max(1, Number(req.body?.max_open_wos || 8));
+    const active = Number(req.body?.active ?? 1) ? 1 : 0;
+    const id = Number(req.body?.id || 0);
+    if (id > 0) {
+      db.prepare(`
+        UPDATE wo_assignment_rules
+        SET artisan_name = ?, skill = ?, location_code = ?, shift = ?, max_open_wos = ?, active = ?
+        WHERE id = ?
+      `).run(artisan_name, skill, location_code, shift, max_open_wos, active, id);
+      return { ok: true, id, updated: true };
+    }
+    const ins = db.prepare(`
+      INSERT INTO wo_assignment_rules (artisan_name, skill, location_code, shift, max_open_wos, active)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(artisan_name, skill, location_code, shift, max_open_wos, active);
+    return { ok: true, id: Number(ins.lastInsertRowid), created: true };
+  });
+
+  app.post("/schedule/rules/:id/delete", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+    db.prepare(`DELETE FROM wo_assignment_rules WHERE id = ?`).run(id);
+    return { ok: true, id };
+  });
+
+  app.get("/schedule/escalation-config", async () => {
+    const row = db.prepare(`
+      SELECT overdue_hours, level1_role, level2_role, level3_role, updated_at
+      FROM work_order_escalation_config
+      WHERE id = 1
+    `).get() || { overdue_hours: 8, level1_role: "supervisor", level2_role: "manager", level3_role: "admin" };
+    return { ok: true, config: row };
+  });
+
+  app.post("/schedule/escalation-config", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    const overdue_hours = Math.max(1, Number(req.body?.overdue_hours || 8));
+    const level1_role = String(req.body?.level1_role || "supervisor").trim().toLowerCase() || "supervisor";
+    const level2_role = String(req.body?.level2_role || "manager").trim().toLowerCase() || "manager";
+    const level3_role = String(req.body?.level3_role || "admin").trim().toLowerCase() || "admin";
+    db.prepare(`
+      UPDATE work_order_escalation_config
+      SET overdue_hours = ?, level1_role = ?, level2_role = ?, level3_role = ?, updated_at = datetime('now')
+      WHERE id = 1
+    `).run(overdue_hours, level1_role, level2_role, level3_role);
+    return { ok: true, config: { overdue_hours, level1_role, level2_role, level3_role } };
+  });
+
+  app.get("/schedule/escalations", async () => {
+    const rows = db.prepare(`
+      SELECT
+        e.id, e.work_order_id, e.threshold_hours, e.chain_level, e.status, e.created_at, e.detail_json,
+        w.assigned_artisan_name, w.priority, w.status AS work_order_status,
+        a.asset_code
+      FROM work_order_escalations e
+      LEFT JOIN work_orders w ON w.id = e.work_order_id
+      LEFT JOIN assets a ON a.id = w.asset_id
+      ORDER BY e.id DESC
+      LIMIT 200
+    `).all().map((r) => {
+      let detail = null;
+      try { detail = r.detail_json ? JSON.parse(String(r.detail_json)) : null; } catch { detail = null; }
+      return { ...r, detail };
+    });
+    return { ok: true, rows };
+  });
+
   app.post("/:id/schedule", async (req, reply) => {
     if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
     const id = Number(req.params.id);
@@ -452,7 +561,16 @@ export default async function workOrderRoutes(app) {
 
   app.post("/schedule/escalations/check", async (req, reply) => {
     if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
-    const threshold = Math.max(1, Number(req.body?.overdue_hours || 8));
+    const cfg = db.prepare(`
+      SELECT overdue_hours, level1_role, level2_role, level3_role
+      FROM work_order_escalation_config WHERE id = 1
+    `).get() || { overdue_hours: 8, level1_role: "supervisor", level2_role: "manager", level3_role: "admin" };
+    const threshold = Math.max(1, Number(req.body?.overdue_hours || cfg.overdue_hours || 8));
+    const levelRole = {
+      1: String(cfg.level1_role || "supervisor"),
+      2: String(cfg.level2_role || "manager"),
+      3: String(cfg.level3_role || "admin"),
+    };
     const nowMs = Date.now();
     const rows = db.prepare(`
       SELECT id, status, opened_at, due_date, assigned_artisan_name, priority
@@ -462,6 +580,7 @@ export default async function workOrderRoutes(app) {
       LIMIT 500
     `).all();
     let escalated = 0;
+    let notifications = 0;
     for (const r of rows) {
       const opened = Date.parse(String(r.opened_at || ""));
       const age = Number.isFinite(opened) ? Math.max(0, Math.floor((nowMs - opened) / 3600000)) : 0;
@@ -469,13 +588,14 @@ export default async function workOrderRoutes(app) {
       const dueHours = Number.isFinite(dueAt) ? Math.max(0, Math.floor((nowMs - dueAt) / 3600000)) : 0;
       const overdue = Math.max(age, dueHours);
       if (overdue <= threshold) continue;
+      const level = overdue > threshold * 3 ? 3 : overdue > threshold * 2 ? 2 : 1;
       const dup = db.prepare(`
         SELECT id FROM work_order_escalations
-        WHERE work_order_id = ? AND status = 'open' AND threshold_hours = ?
+        WHERE work_order_id = ? AND status = 'open' AND threshold_hours = ? AND chain_level = ?
         ORDER BY id DESC LIMIT 1
-      `).get(Number(r.id), Number(threshold));
+      `).get(Number(r.id), Number(threshold), Number(level));
       if (dup) continue;
-      db.prepare(`
+      const ins = db.prepare(`
         INSERT INTO work_order_escalations (work_order_id, threshold_hours, chain_level, status, detail_json)
         VALUES (?, ?, 1, 'open', ?)
       `).run(Number(r.id), Number(threshold), JSON.stringify({
@@ -484,7 +604,22 @@ export default async function workOrderRoutes(app) {
         assigned_artisan_name: String(r.assigned_artisan_name || ""),
         priority: normalizePriority(r.priority || "P3"),
         overdue_hours: overdue,
+        chain_level: level,
+        escalation_role: levelRole[level] || "supervisor",
       }));
+      const escalationId = Number(ins.lastInsertRowid || 0);
+      if (escalationId) {
+        db.prepare(`
+          UPDATE work_order_escalations
+          SET chain_level = ?
+          WHERE id = ?
+        `).run(level, escalationId);
+        db.prepare(`
+          INSERT INTO work_order_escalation_notifications (escalation_id, role_target, message)
+          VALUES (?, ?, ?)
+        `).run(escalationId, String(levelRole[level] || "supervisor"), `WO #${Number(r.id)} overdue by ${overdue}h`);
+        notifications += 1;
+      }
       db.prepare(`UPDATE work_orders SET escalated_at = datetime('now') WHERE id = ?`).run(Number(r.id));
       escalated += 1;
     }
@@ -495,7 +630,7 @@ export default async function workOrderRoutes(app) {
       entity_id: null,
       payload: { threshold_hours: threshold, escalated_count: escalated },
     });
-    return { ok: true, threshold_hours: threshold, escalated_count: escalated };
+    return { ok: true, threshold_hours: threshold, escalated_count: escalated, notification_count: notifications };
   });
 
   app.get("/inspection-quality", async () => {

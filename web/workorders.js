@@ -175,22 +175,41 @@ function renderScheduleBoard(rows) {
   const boardEl = document.getElementById("woBoard");
   if (!boardEl) return;
   const list = Array.isArray(rows) ? rows : [];
-  const artisans = [...new Set(list.map((r) => String(r.assigned_artisan_name || "").trim() || "Unassigned"))];
-  const ordered = ["Unassigned", ...artisans.filter((a) => a !== "Unassigned").sort((a, b) => a.localeCompare(b))];
-  if (!ordered.length) ordered.push("Unassigned");
-  boardEl.innerHTML = ordered
-    .map((artisan) => {
-      const items = list.filter((r) => (String(r.assigned_artisan_name || "").trim() || "Unassigned") === artisan);
-      return `
-        <div class="card" style="min-width:260px; max-width:260px;" data-board-column="${artisan.replace(/"/g, "&quot;")}">
-          <div style="font-weight:700; margin-bottom:8px;">${artisan}</div>
-          <div class="muted" style="margin-bottom:8px;">${items.length} WO(s)</div>
-          <div data-board-dropzone="${artisan.replace(/"/g, "&quot;")}" style="min-height:120px;">
-            ${items.map(boardCard).join("") || `<small class="muted">Drop work orders here.</small>`}
+  const shiftOrder = ["day", "night", "unplanned"];
+  const shiftLabel = { day: "Day Shift", night: "Night Shift", unplanned: "Unplanned Shift" };
+  const grouped = new Map();
+  for (const s of shiftOrder) grouped.set(s, []);
+  for (const row of list) {
+    const sh = String(row.shift || "").trim().toLowerCase();
+    grouped.get(sh === "day" || sh === "night" ? sh : "unplanned").push(row);
+  }
+  const renderLane = (laneRows) => {
+    const artisans = [...new Set(laneRows.map((r) => String(r.assigned_artisan_name || "").trim() || "Unassigned"))];
+    const ordered = ["Unassigned", ...artisans.filter((a) => a !== "Unassigned").sort((a, b) => a.localeCompare(b))];
+    return ordered
+      .map((artisan) => {
+        const items = laneRows.filter((r) => (String(r.assigned_artisan_name || "").trim() || "Unassigned") === artisan);
+        return `
+          <div class="card" style="min-width:260px; max-width:260px;" data-board-column="${artisan.replace(/"/g, "&quot;")}">
+            <div style="font-weight:700; margin-bottom:8px;">${artisan}</div>
+            <div class="muted" style="margin-bottom:8px;">${items.length} WO(s)</div>
+            <div data-board-dropzone="${artisan.replace(/"/g, "&quot;")}" style="min-height:120px;">
+              ${items.map(boardCard).join("") || `<small class="muted">Drop work orders here.</small>`}
+            </div>
           </div>
+        `;
+      })
+      .join("");
+  };
+  boardEl.innerHTML = shiftOrder
+    .map((s) => `
+      <div style="width:100%;">
+        <div style="font-weight:700; margin:6px 0;">${shiftLabel[s]}</div>
+        <div class="row" style="gap:10px; align-items:stretch; overflow:auto;">
+          ${renderLane(grouped.get(s) || [])}
         </div>
-      `;
-    })
+      </div>
+    `)
     .join("");
 }
 
@@ -258,20 +277,171 @@ async function runEscalationCheck() {
       msgEl.className = "";
       msgEl.textContent = "Checking escalations...";
     }
+    const overdueHours = Math.max(1, Number(document.getElementById("woEscHours")?.value || 8));
     const data = await fetchJson(`${API}/workorders/schedule/escalations/check`, {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ overdue_hours: 8 }),
+      body: JSON.stringify({ overdue_hours: overdueHours }),
     });
     if (msgEl) {
       msgEl.className = "message-success";
-      msgEl.textContent = `Escalations triggered: ${Number(data?.escalated_count || 0)} (threshold ${Number(data?.threshold_hours || 0)}h).`;
+      msgEl.textContent = `Escalations triggered: ${Number(data?.escalated_count || 0)} (alerts ${Number(data?.notification_count || 0)}, threshold ${Number(data?.threshold_hours || 0)}h).`;
     }
+    await loadEscalations();
   } catch (err) {
     if (msgEl) {
       msgEl.className = "message-error";
       msgEl.textContent = err.message;
     }
+  }
+}
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[m]));
+}
+
+async function loadAssignmentRules() {
+  const listEl = document.getElementById("woRulesList");
+  const msgEl = document.getElementById("woRulesMsg");
+  if (!listEl) return;
+  try {
+    const data = await fetchJson(`${API}/workorders/schedule/rules`, { headers: authHeaders() });
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    listEl.innerHTML = rows.length
+      ? rows.map((r) => `
+        <div class="item row" style="justify-content:space-between; gap:8px; margin-bottom:6px;">
+          <div>
+            <strong>${esc(r.artisan_name)}</strong> | skill: ${esc(r.skill || "any")} | loc: ${esc(r.location_code || "any")} | shift: ${esc(r.shift || "any")} | max: ${Number(r.max_open_wos || 0)}
+          </div>
+          <button data-rule-del="${Number(r.id)}" type="button">Delete</button>
+        </div>
+      `).join("")
+      : `<small class="muted">No assignment rules configured.</small>`;
+    if (msgEl) msgEl.textContent = `${rows.length} rule(s) loaded.`;
+  } catch (err) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = err.message;
+    }
+  }
+}
+
+async function saveAssignmentRule() {
+  const msgEl = document.getElementById("woRulesMsg");
+  const artisan_name = String(document.getElementById("woRuleArtisan")?.value || "").trim();
+  const skill = String(document.getElementById("woRuleSkill")?.value || "").trim();
+  const location_code = String(document.getElementById("woRuleLocation")?.value || "").trim();
+  const shift = String(document.getElementById("woRuleShift")?.value || "").trim();
+  const max_open_wos = Math.max(1, Number(document.getElementById("woRuleMaxLoad")?.value || 8));
+  if (!artisan_name) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = "Artisan name is required.";
+    }
+    return;
+  }
+  try {
+    await fetchJson(`${API}/workorders/schedule/rules`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ artisan_name, skill, location_code, shift, max_open_wos }),
+    });
+    if (msgEl) {
+      msgEl.className = "message-success";
+      msgEl.textContent = "Rule saved.";
+    }
+    await loadAssignmentRules();
+  } catch (err) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = err.message;
+    }
+  }
+}
+
+async function deleteAssignmentRule(id) {
+  const msgEl = document.getElementById("woRulesMsg");
+  try {
+    await fetchJson(`${API}/workorders/schedule/rules/${Number(id)}/delete`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({}),
+    });
+    await loadAssignmentRules();
+  } catch (err) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = err.message;
+    }
+  }
+}
+
+async function loadEscalationConfig() {
+  const msg = document.getElementById("woEscMsg");
+  try {
+    const data = await fetchJson(`${API}/workorders/schedule/escalation-config`, { headers: authHeaders() });
+    const c = data?.config || {};
+    const set = (id, v) => {
+      const el = document.getElementById(id);
+      if (el) el.value = String(v ?? "");
+    };
+    set("woEscHours", c.overdue_hours || 8);
+    set("woEscRole1", c.level1_role || "supervisor");
+    set("woEscRole2", c.level2_role || "manager");
+    set("woEscRole3", c.level3_role || "admin");
+    if (msg) {
+      msg.className = "muted";
+      msg.textContent = "Escalation config loaded.";
+    }
+  } catch (err) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = err.message;
+    }
+  }
+}
+
+async function saveEscalationConfig() {
+  const msg = document.getElementById("woEscMsg");
+  const payload = {
+    overdue_hours: Math.max(1, Number(document.getElementById("woEscHours")?.value || 8)),
+    level1_role: String(document.getElementById("woEscRole1")?.value || "supervisor").trim(),
+    level2_role: String(document.getElementById("woEscRole2")?.value || "manager").trim(),
+    level3_role: String(document.getElementById("woEscRole3")?.value || "admin").trim(),
+  };
+  try {
+    await fetchJson(`${API}/workorders/schedule/escalation-config`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+    });
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = "Escalation chain saved.";
+    }
+  } catch (err) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = err.message;
+    }
+  }
+}
+
+async function loadEscalations() {
+  const el = document.getElementById("woEscList");
+  if (!el) return;
+  try {
+    const data = await fetchJson(`${API}/workorders/schedule/escalations`, { headers: authHeaders() });
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    el.innerHTML = rows.length
+      ? rows.slice(0, 12).map((r) => `
+        <div class="item" style="margin-bottom:6px;">
+          WO #${Number(r.work_order_id)} (${esc(r.asset_code || "-")}) | L${Number(r.chain_level || 1)} | overdue>${Number(r.threshold_hours || 0)}h | status: ${esc(r.status || "-")}
+        </div>
+      `).join("")
+      : `<small class="muted">No escalation events yet.</small>`;
+  } catch (err) {
+    el.innerHTML = `<div class="message-error">${esc(err.message)}</div>`;
   }
 }
 
@@ -889,6 +1059,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const boardRefreshBtn = document.getElementById("woBoardRefreshBtn");
   const autoAssignBtn = document.getElementById("woAutoAssignBtn");
   const escalationsBtn = document.getElementById("woEscalationsBtn");
+  const ruleSaveBtn = document.getElementById("woRuleSaveBtn");
+  const rulesList = document.getElementById("woRulesList");
+  const escSaveBtn = document.getElementById("woEscSaveBtn");
 
   const roleBadge = document.getElementById("woRoleBadge");
   if (roleBadge) roleBadge.textContent = `Role: ${role}`;
@@ -903,6 +1076,16 @@ document.addEventListener("DOMContentLoaded", () => {
   if (boardRefreshBtn) boardRefreshBtn.addEventListener("click", loadScheduleBoard);
   if (autoAssignBtn) autoAssignBtn.addEventListener("click", autoAssignWorkOrders);
   if (escalationsBtn) escalationsBtn.addEventListener("click", runEscalationCheck);
+  if (ruleSaveBtn) ruleSaveBtn.addEventListener("click", saveAssignmentRule);
+  if (escSaveBtn) escSaveBtn.addEventListener("click", saveEscalationConfig);
+  if (rulesList) {
+    rulesList.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const delId = target.getAttribute("data-rule-del");
+      if (delId) deleteAssignmentRule(delId);
+    });
+  }
   if (awaitingApprovalBtn && statusEl) {
     awaitingApprovalBtn.addEventListener("click", () => {
       statusEl.value = "completed";
@@ -1046,4 +1229,7 @@ document.addEventListener("DOMContentLoaded", () => {
   fetchWorkOrders();
   loadScheduleBoard();
   loadInspectionQuality();
+  loadAssignmentRules();
+  loadEscalationConfig();
+  loadEscalations();
 });
