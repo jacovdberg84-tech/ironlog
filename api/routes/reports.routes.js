@@ -3114,11 +3114,22 @@ export default async function reportsRoutes(app) {
           }
         }
 
-        let noteRows = parseComponentNotes(inspection.notes);
+        const rawNotes = String(inspection.notes || "").trim();
+        let noteRows = parseComponentNotes(rawNotes);
         if (!noteRows.length) {
           noteRows = extractChecklistDetailNotes(inspection.checklist_detail_json);
         }
         sectionTitle(doc, "Notes");
+        if (rawNotes) {
+          doc
+            .font("Helvetica")
+            .fontSize(10)
+            .fillColor("#111111")
+            .text(rawNotes, {
+              width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+            });
+          doc.moveDown(0.2);
+        }
         if (noteRows.length) {
           table(
             doc,
