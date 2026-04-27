@@ -3450,6 +3450,20 @@ function openFuelBenchmarkPdf(download = false) {
   window.open(url, "_blank");
 }
 
+function openFuelBenchmarkXlsx() {
+  const start = (qs("fuelStart")?.value || "").trim();
+  const end = (qs("fuelEnd")?.value || "").trim();
+  const tolerance = Number(qs("fuelTolerance")?.value || 0.15);
+  const modeFilter = String(qs("fuelModeFilter")?.value || "").trim();
+  const assetCode = String(qs("fuelAssetFilter")?.value || "").trim();
+  if (!start || !end) return alert("Select start and end dates.");
+
+  const url =
+    `${API}/api/reports/fuel-benchmark.xlsx?start=${encodeURIComponent(start)}` +
+    `&end=${encodeURIComponent(end)}&tolerance=${encodeURIComponent(tolerance)}&mode=${encodeURIComponent(modeFilter)}&asset_code=${encodeURIComponent(assetCode)}`;
+  window.open(url, "_blank");
+}
+
 async function downloadExecutivePackExcel() {
   const start = (qs("fuelStart")?.value || "").trim();
   const end = (qs("fuelEnd")?.value || "").trim();
@@ -9580,6 +9594,7 @@ async function init() {
   });
   qs("openFuelBenchmarkPdf")?.addEventListener("click", () => openFuelBenchmarkPdf(false));
   qs("downloadFuelBenchmarkPdf")?.addEventListener("click", () => openFuelBenchmarkPdf(true));
+  qs("downloadFuelBenchmarkXlsx")?.addEventListener("click", () => openFuelBenchmarkXlsx());
   qs("downloadExecutivePackXlsx")?.addEventListener("click", () => {
     downloadExecutivePackExcel().catch((e) => setStatus("Executive pack error: " + e.message));
   });
