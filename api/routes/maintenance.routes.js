@@ -3626,7 +3626,7 @@ export default async function maintenanceRoutes(app) {
           evidence_required, evidence_photo_count,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `).run(
         asset_id,
         crypto.randomUUID(),
