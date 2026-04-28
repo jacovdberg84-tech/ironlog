@@ -1461,6 +1461,74 @@ async function sendSubscriptionNowFromAdmin() {
   }
 }
 
+function backupOptionLabel(f) {
+  const mb = Number(f?.bytes || 0) / (1024 * 1024);
+  const size = Number.isFinite(mb) ? `${mb.toFixed(1)} MB` : "-";
+  return `${String(f?.name || "-")} (${size})`;
+}
+
+async function loadBackupFiles() {
+  const out = qs("backupRestoreResult");
+  const sel = qs("backupFileSelect");
+  if (!sel) return;
+  const current = String(sel.value || "");
+  const data = await fetchJson(`${API}/api/admin/backups/list`);
+  const files = Array.isArray(data?.files) ? data.files : [];
+  sel.innerHTML = files.length
+    ? `<option value="">Select backup file...</option>${files
+        .map((f) => `<option value="${esc(String(f.name || ""))}">${esc(backupOptionLabel(f))}</option>`)
+        .join("")}`
+    : `<option value="">No backups found</option>`;
+  if (current && Array.from(sel.options).some((o) => o.value === current)) sel.value = current;
+  if (out) {
+    out.textContent = `Backup dir: ${data?.backup_dir || "-"}\nDB path: ${data?.db_path || "-"}\nBackups found: ${files.length}`;
+  }
+}
+
+async function createBackupNow() {
+  const out = qs("backupRestoreResult");
+  setStatus("Creating manual backup...");
+  const data = await fetchJson(`${API}/api/admin/backups/create`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  if (out) out.textContent = JSON.stringify(data, null, 2);
+  await loadBackupFiles();
+  setStatus("Backup created.");
+}
+
+async function previewBackupRestore() {
+  const out = qs("backupRestoreResult");
+  const backup_name = String(qs("backupFileSelect")?.value || "").trim();
+  if (!backup_name) return alert("Select a backup file first.");
+  setStatus("Loading restore preview...");
+  const data = await fetchJson(`${API}/api/admin/backups/restore/preview`, {
+    method: "POST",
+    body: JSON.stringify({ backup_name }),
+  });
+  if (out) out.textContent = JSON.stringify(data, null, 2);
+  setStatus("Restore preview ready.");
+}
+
+async function stageBackupRestore() {
+  const out = qs("backupRestoreResult");
+  const backup_name = String(qs("backupFileSelect")?.value || "").trim();
+  const notes = String(qs("backupRestoreNotes")?.value || "").trim();
+  if (!backup_name) return alert("Select a backup file first.");
+  const confirmed = window.confirm(
+    `Stage restore plan for ${backup_name}?\n\nThis does not auto-copy yet; it prepares safe restore steps.`
+  );
+  if (!confirmed) return;
+  setStatus("Staging restore plan...");
+  const data = await fetchJson(`${API}/api/admin/backups/restore/apply`, {
+    method: "POST",
+    body: JSON.stringify({ backup_name, confirm_text: "RESTORE", notes }),
+  });
+  if (out) out.textContent = JSON.stringify(data, null, 2);
+  await loadBackupFiles();
+  setStatus("Restore plan staged.");
+}
+
 /** LDV vehicle check — photos + fractional damage pins */
 const vcMarkerDrafts = new Map();
 let vcActiveCheckId = null;
@@ -9880,6 +9948,18 @@ async function init() {
   qs("sendSubscriptionNowBtn")?.addEventListener("click", () =>
     sendSubscriptionNowFromAdmin().catch((e) => setStatus("Subscription send error: " + e.message))
   );
+  qs("refreshBackupsBtn")?.addEventListener("click", () =>
+    loadBackupFiles().catch((e) => setStatus("Backups load error: " + e.message))
+  );
+  qs("createBackupNowBtn")?.addEventListener("click", () =>
+    createBackupNow().catch((e) => setStatus("Backup create error: " + e.message))
+  );
+  qs("previewBackupRestoreBtn")?.addEventListener("click", () =>
+    previewBackupRestore().catch((e) => setStatus("Backup preview error: " + e.message))
+  );
+  qs("stageBackupRestoreBtn")?.addEventListener("click", () =>
+    stageBackupRestore().catch((e) => setStatus("Restore stage error: " + e.message))
+  );
   qs("loadApprovals")?.addEventListener("click", () =>
     loadApprovalRequests().catch((e) => setStatus("Approvals error: " + e.message))
   );
@@ -10261,6 +10341,7 @@ async function init() {
     loadAuditLogs().catch(() => {});
     loadApprovalRequests().catch(() => {});
     loadSmtpSettings().catch(() => {});
+    loadBackupFiles().catch(() => {});
   }
   loadCodePickers().catch(() => {});
   populateThresholdInputs();

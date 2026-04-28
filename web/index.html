@@ -4322,6 +4322,51 @@
             <pre class="output" id="smtpSettingsResult"></pre>
           </div>
         </div>
+
+        <!-- Backup + Restore Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #1d4ed8;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+              </div>
+              <div>
+                <h3>Backups + Restore</h3>
+                <p class="muted small">Create manual snapshots and stage safe restore plans</p>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="refreshBackupsBtn" class="btn btn-secondary btn-sm">Refresh</button>
+              <button class="report-card-toggle" aria-label="Toggle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+              </button>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Available backups</label>
+                <select id="backupFileSelect" class="w-full">
+                  <option value="">Loading backups...</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Restore Notes (optional)</label>
+                <input id="backupRestoreNotes" class="w-full" placeholder="Reason / ticket reference" />
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="createBackupNowBtn" class="btn btn-primary">Create Backup Now</button>
+              <button id="previewBackupRestoreBtn" class="btn btn-secondary">Preview Restore</button>
+              <button id="stageBackupRestoreBtn" class="btn btn-secondary">Stage Restore Plan</button>
+            </div>
+            <pre class="output" id="backupRestoreResult"></pre>
+          </div>
+        </div>
       </div>
     </section>
 

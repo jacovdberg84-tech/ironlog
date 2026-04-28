@@ -26,6 +26,7 @@ import ironmindRoutes from "./routes/ironmind.routes.js";
 import inspectproRoutes from "./routes/inspectpro.routes.js";
 import breakdownOpsRoutes from "./routes/breakdownOps.routes.js";
 import tasksRoutes from "./routes/tasks.routes.js";
+import backupsRoutes from "./routes/backups.routes.js";
 import { ironlogAuthHook } from "./auth/hook.js";
 
 export function buildServer() {
@@ -75,6 +76,7 @@ app.register(inspectproRoutes, { prefix: "/api/integrations/inspectpro" });
   // Same InspectPro ingest + pull routes under /api/manager/* for clients using that base path.
   app.register(inspectproRoutes, { prefix: "/api/manager" });
   app.register(tasksRoutes, { prefix: "/api" });
+app.register(backupsRoutes, { prefix: "/api/admin/backups" });
   // Backward compatibility for stale cached frontend bundles still calling /tasks, /projects, /comments.
   app.register(tasksRoutes);
   return app;
