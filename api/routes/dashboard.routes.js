@@ -459,7 +459,9 @@ export default async function dashboardRoutes(app) {
       const kmPerHour = Math.max(0.1, Number(r.km_per_hour_factor || 10));
       const run = mode === "km" ? (runRaw / kmPerHour) : runRaw;
       const loggedDownRaw = Math.max(0, Number(downtimeByAsset.get(assetId) || 0));
-      const allowOpenBreakdownImpute = scheduled > 0 && (hasDailyUsageSignal || hasReportedRunSignal);
+      // If run is reported, do not auto-impute full-day downtime from OPEN breakdown.
+      // Imputation is only for days marked used with zero reported run and no logged downtime rows.
+      const allowOpenBreakdownImpute = scheduled > 0 && hasDailyUsageSignal && !hasReportedRunSignal;
       const loggedDown = loggedDownRaw > 0
         ? loggedDownRaw
         : (allowOpenBreakdownImpute && openBreakdownAssets.has(assetId) ? scheduled : 0);
