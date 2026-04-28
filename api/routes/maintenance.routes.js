@@ -3652,7 +3652,7 @@ export default async function maintenanceRoutes(app) {
       let work_order_id = null;
 
       if (shouldCreateWo) {
-        ensureColumn("work_orders", "completion_notes", "completion_notes TEXT");
+        ensureColumn("work_orders", "completion_notes TEXT", "completion_notes");
         const woNotes = buildInspectionWorkOrderNotes({
           inspectionId,
           inspection_date,
