@@ -98,11 +98,11 @@
     setText("inspectionDate", String(payload?.inspections?.last_inspection_date || "No inspection date"));
 
     const openInspectionsBtn = qs("openInspectionsBtn");
-    if (openInspectionsBtn) openInspectionsBtn.href = `./maintenance.html?section=manager-inspections&asset_code=${encodeURIComponent(assetCode)}`;
+    if (openInspectionsBtn) openInspectionsBtn.href = `./asset-qr-detail.html?view=inspections&asset_code=${encodeURIComponent(assetCode)}`;
     const openHistoryBtn = qs("openHistoryBtn");
-    if (openHistoryBtn) openHistoryBtn.href = `./maintenance.html?section=service-history&asset_code=${encodeURIComponent(assetCode)}`;
+    if (openHistoryBtn) openHistoryBtn.href = `./asset-qr-detail.html?view=history&asset_code=${encodeURIComponent(assetCode)}`;
     const openWoBtn = qs("openWoBtn");
-    if (openWoBtn) openWoBtn.href = `./workorders.html?search=${encodeURIComponent(assetCode)}`;
+    if (openWoBtn) openWoBtn.href = `./asset-qr-detail.html?view=workorders&asset_code=${encodeURIComponent(assetCode)}`;
   }
 
   qs("refreshBtn")?.addEventListener("click", () => {
