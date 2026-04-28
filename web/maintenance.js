@@ -2689,6 +2689,7 @@ function inspectionCard(r) {
       <div class="row stack-10" style="margin-top:8px;">
         <button data-mi-open-pdf="${Number(r.id)}">Open PDF</button>
         <button data-mi-download-pdf="${Number(r.id)}">Download PDF</button>
+        <button data-mi-delete="${Number(r.id)}">Delete</button>
         <input id="miPhotoFile-${Number(r.id)}" type="file" accept="image/*" />
         <input id="miPhotoCaption-${Number(r.id)}" class="w-200" placeholder="Photo caption (optional)" />
         <button data-mi-upload="${Number(r.id)}">Upload Photo</button>
@@ -2721,6 +2722,20 @@ async function loadManagerInspections() {
   } catch (e) {
     list.innerHTML = `<div class="message-error">Inspection load error: ${esc(e.message || e)}</div>`;
   }
+}
+
+async function deleteManagerInspection(inspectionId) {
+  const id = Number(inspectionId || 0);
+  if (!id) return;
+  const ok = window.confirm(`Delete manager inspection #${id}? This cannot be undone.`);
+  if (!ok) return;
+  const res = await fetch(`${API}/maintenance/inspections/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Failed to delete inspection");
+  await loadManagerInspections();
 }
 
 function fmtMoney(v) {
@@ -4801,6 +4816,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (dlPdf) {
       const id = Number(dlPdf.getAttribute("data-mi-download-pdf") || 0);
       if (id) openManagerInspectionPdf(id, true);
+      return;
+    }
+    const delBtn = evt.target?.closest?.("button[data-mi-delete]");
+    if (delBtn) {
+      const id = Number(delBtn.getAttribute("data-mi-delete") || 0);
+      if (id) deleteManagerInspection(id).catch((e) => alert(`Delete failed: ${e.message || e}`));
       return;
     }
     const btn = evt.target?.closest?.("button[data-mi-upload]");

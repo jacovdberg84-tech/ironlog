@@ -3743,6 +3743,40 @@ export default async function maintenanceRoutes(app) {
     }
   });
 
+  app.delete("/inspections/:id", async (req, reply) => {
+    try {
+      const inspectionId = Number(req.params?.id || 0);
+      if (!inspectionId) return reply.code(400).send({ ok: false, error: "Invalid inspection id" });
+      const current = db.prepare(`
+        SELECT id, work_order_id
+        FROM manager_inspections
+        WHERE id = ?
+        LIMIT 1
+      `).get(inspectionId);
+      if (!current) return reply.code(404).send({ ok: false, error: "Inspection not found" });
+
+      const photos = db.prepare(`
+        SELECT ${photoPathCol} AS file_path
+        FROM manager_inspection_photos
+        WHERE ${photoInspectionCol} = ?
+      `).all(inspectionId);
+      for (const p of photos) {
+        const rel = String(p.file_path || "").replace(/\\/g, "/").replace(/^\/+/, "");
+        if (!rel) continue;
+        const abs = resolveStorageAbs(rel);
+        if (!abs || !fs.existsSync(abs)) continue;
+        try { fs.unlinkSync(abs); } catch {}
+      }
+
+      db.prepare(`DELETE FROM manager_inspection_photos WHERE ${photoInspectionCol} = ?`).run(inspectionId);
+      db.prepare(`DELETE FROM manager_inspections WHERE id = ?`).run(inspectionId);
+      return reply.send({ ok: true, id: inspectionId, work_order_id: current.work_order_id || null });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
   // =====================================================
   // ARTISAN INSPECTIONS (daily general checklist)
   // =====================================================
