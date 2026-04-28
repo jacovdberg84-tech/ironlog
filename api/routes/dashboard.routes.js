@@ -475,6 +475,9 @@ export default async function dashboardRoutes(app) {
       const downN = Number(cappedDown.toFixed(2));
       if (s > 0 || runN > 0 || downN > 0) contributingAssetIds.add(assetId);
       if (includePerAsset) {
+        const downtime_source = loggedDownRaw > 0
+          ? "logged"
+          : (allowOpenBreakdownImpute && openBreakdownAssets.has(assetId) ? "open_breakdown_imputed" : "none");
         per_asset_kpi.push({
           asset_id: assetId,
           asset_code: String(r.asset_code || ""),
@@ -488,6 +491,12 @@ export default async function dashboardRoutes(app) {
           run_hours: runN,
           downtime_hours: downN,
           available_hours: Number(Math.max(0, scheduled - cappedDown).toFixed(2)),
+          debug: {
+            has_daily_row: true,
+            is_used: rowIsUsed === 1,
+            used_schedule_fallback: !(Number.isFinite(rowScheduled) && rowScheduled > 0) && scheduled > 0,
+            downtime_source,
+          },
         });
       }
     });
@@ -541,6 +550,7 @@ export default async function dashboardRoutes(app) {
         const downN = Number(cappedDown.toFixed(2));
         if (s > 0 || runN > 0 || downN > 0) contributingAssetIds.add(assetId);
         if (includePerAsset) {
+          const downtime_source = loggedDownRaw > 0 ? "logged" : "none";
           per_asset_kpi.push({
             asset_id: assetId,
             asset_code: String(a.asset_code || ""),
@@ -554,6 +564,12 @@ export default async function dashboardRoutes(app) {
             run_hours: runN,
             downtime_hours: downN,
             available_hours: Number(Math.max(0, scheduled - cappedDown).toFixed(2)),
+            debug: {
+              has_daily_row: false,
+              is_used: false,
+              used_schedule_fallback: scheduled > 0,
+              downtime_source,
+            },
           });
         }
       }
@@ -603,6 +619,15 @@ export default async function dashboardRoutes(app) {
             available_hours: 0,
             days_with_data: 0,
             daily_points: [],
+            debug_counts: {
+              reported_days: 0,
+              no_daily_row_days: 0,
+              used_flag_days: 0,
+              standby_flag_days: 0,
+              fallback_schedule_days: 0,
+              logged_downtime_days: 0,
+              imputed_open_breakdown_days: 0,
+            },
           });
         }
         const a = assetMap.get(id);
@@ -621,6 +646,14 @@ export default async function dashboardRoutes(app) {
           run_hours: Number(r.toFixed(2)),
           downtime_hours: Number(d.toFixed(2)),
         });
+        const dbg = row.debug || {};
+        if (dbg.has_daily_row) a.debug_counts.reported_days += 1;
+        else a.debug_counts.no_daily_row_days += 1;
+        if (dbg.is_used === true) a.debug_counts.used_flag_days += 1;
+        if (dbg.has_daily_row && dbg.is_used === false) a.debug_counts.standby_flag_days += 1;
+        if (dbg.used_schedule_fallback) a.debug_counts.fallback_schedule_days += 1;
+        if (dbg.downtime_source === "logged") a.debug_counts.logged_downtime_days += 1;
+        if (dbg.downtime_source === "open_breakdown_imputed") a.debug_counts.imputed_open_breakdown_days += 1;
         if (s > 0 || r > 0 || d > 0) a.days_with_data += 1;
       }
     });
@@ -647,6 +680,15 @@ export default async function dashboardRoutes(app) {
         availability_pct: pct(avail, sched),
         utilization_pct: pct(run, sched),
         daily_points: a.daily_points,
+        debug: {
+          reported_days: Number(a.debug_counts.reported_days || 0),
+          no_daily_row_days: Number(a.debug_counts.no_daily_row_days || 0),
+          used_flag_days: Number(a.debug_counts.used_flag_days || 0),
+          standby_flag_days: Number(a.debug_counts.standby_flag_days || 0),
+          fallback_schedule_days: Number(a.debug_counts.fallback_schedule_days || 0),
+          logged_downtime_days: Number(a.debug_counts.logged_downtime_days || 0),
+          imputed_open_breakdown_days: Number(a.debug_counts.imputed_open_breakdown_days || 0),
+        },
       };
     });
 
