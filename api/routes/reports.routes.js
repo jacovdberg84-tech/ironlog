@@ -4398,19 +4398,34 @@ export default async function reportsRoutes(app) {
             { key: "notes", label: "Notes", width: 0.24 },
           ],
           rows.length
-            ? rows.map((r) => ({
-                id: String(r.id),
-                date: r.inspection_date || "",
-                asset: r.asset_code || "",
-                name: r.asset_name || "",
-                hrs:
-                  r.machine_hours != null && Number.isFinite(Number(r.machine_hours))
-                    ? Number(r.machine_hours).toFixed(1)
-                    : "—",
-                wo: r.work_order_id ? String(r.work_order_id) : "—",
-                inspector: r.inspector_name || "-",
-                notes: compactCell(r.notes || "", 100),
-              }))
+            ? rows.map((r) => {
+                const checklist = parseManagerChecklist(r.checklist_json, r.checklist_detail_json);
+                const failedChecklist = checklist.filter((c) => c && c.ok === false);
+                const checklistFindings = failedChecklist
+                  .map((c) => {
+                    const label = String(c.label || c.key || "Item").trim();
+                    const note = String(c.note || "").trim();
+                    return note ? `${label}: ${note}` : label;
+                  })
+                  .filter(Boolean)
+                  .join(" | ");
+                const summaryNotes = [String(r.notes || "").trim(), checklistFindings]
+                  .filter(Boolean)
+                  .join(" | ");
+                return {
+                  id: String(r.id),
+                  date: r.inspection_date || "",
+                  asset: r.asset_code || "",
+                  name: r.asset_name || "",
+                  hrs:
+                    r.machine_hours != null && Number.isFinite(Number(r.machine_hours))
+                      ? Number(r.machine_hours).toFixed(1)
+                      : "—",
+                  wo: r.work_order_id ? String(r.work_order_id) : "—",
+                  inspector: r.inspector_name || "-",
+                  notes: compactCell(summaryNotes || "-", 100),
+                };
+              })
             : [{
                 id: "-",
                 date: "-",
