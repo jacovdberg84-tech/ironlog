@@ -165,6 +165,7 @@ export default async function dashboardRoutes(app) {
       a.asset_code,
       a.asset_name,
       a.category,
+      COALESCE(dh.is_used, 1) AS is_used,
       COALESCE(NULLIF(TRIM(dh.input_unit), ''), '') AS input_unit,
       CASE
         WHEN (
@@ -188,6 +189,7 @@ export default async function dashboardRoutes(app) {
       a.asset_code,
       a.asset_name,
       a.category,
+      COALESCE(dh.is_used, 1) AS is_used,
       COALESCE(NULLIF(TRIM(dh.input_unit), ''), '') AS input_unit,
       CASE
         WHEN (
@@ -443,20 +445,24 @@ export default async function dashboardRoutes(app) {
     eligibleAssetRows.forEach((r) => {
       const assetId = Number(r.asset_id || 0);
       const rowScheduled = Number(r.scheduled_hours);
+      const rowIsUsed = Number(r.is_used ?? 1);
+      const hasDailyUsageSignal = rowIsUsed === 1;
+      const hasReportedRunSignal = Math.max(0, Number(r.run_hours || 0)) > 0;
       const scheduled = Math.max(
         0,
         Number.isFinite(rowScheduled) && rowScheduled > 0
           ? rowScheduled
-          : Number(scheduledFallback || 0)
+          : (hasDailyUsageSignal || hasReportedRunSignal ? Number(scheduledFallback || 0) : 0)
       );
       const runRaw = Math.max(0, Number(r.run_hours || 0));
       const mode = isToyotaHiluxAsset(r) ? "km" : "hours";
       const kmPerHour = Math.max(0.1, Number(r.km_per_hour_factor || 10));
       const run = mode === "km" ? (runRaw / kmPerHour) : runRaw;
       const loggedDownRaw = Math.max(0, Number(downtimeByAsset.get(assetId) || 0));
+      const allowOpenBreakdownImpute = scheduled > 0 && (hasDailyUsageSignal || hasReportedRunSignal);
       const loggedDown = loggedDownRaw > 0
         ? loggedDownRaw
-        : (openBreakdownAssets.has(assetId) ? scheduled : 0);
+        : (allowOpenBreakdownImpute && openBreakdownAssets.has(assetId) ? scheduled : 0);
       const cappedDown = Math.min(loggedDown, scheduled);
       const contributes_to_kpi = true;
       const runEff = Math.min(run, scheduled);
@@ -486,9 +492,9 @@ export default async function dashboardRoutes(app) {
       }
     });
 
-    const missingFleetIds = dailyHoursHasSite
-      ? []
-      : Array.from(activeFleetIds).filter((id) => id > 0 && !assetIdsInHours.has(id) && !dailyStandbyIds.has(id));
+    // Do not force-add all active assets without daily rows.
+    // KPI should primarily reflect reported data for the selected period/site.
+    const missingFleetIds = [];
     const downtimeOnlyIds = downtimeRows
       .map((r) => Number(r.asset_id || 0))
       .filter((id) => id > 0 && !assetIdsInHours.has(id) && !dailyStandbyIds.has(id));
@@ -516,7 +522,7 @@ export default async function dashboardRoutes(app) {
         const loggedDownRaw = Math.max(0, Number(downtimeByAsset.get(assetId) || 0));
         const loggedDown = loggedDownRaw > 0
           ? loggedDownRaw
-          : (openBreakdownAssets.has(assetId) ? scheduled : 0);
+          : 0;
         const cappedDown = Math.min(loggedDown, scheduled);
         const cat = String(a.category || "");
         const mode = isToyotaHiluxAsset(a) ? "km" : "hours";
