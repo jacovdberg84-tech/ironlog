@@ -267,10 +267,14 @@ export default async function dashboardRoutes(app) {
     SELECT DISTINCT b.asset_id
     FROM breakdowns b
     JOIN assets a ON a.id = b.asset_id
-    WHERE b.status = 'OPEN'
+    WHERE (
+        UPPER(TRIM(COALESCE(b.status, ''))) = 'OPEN'
+        OR (
+          (b.status IS NULL OR UPPER(TRIM(COALESCE(b.status, ''))) <> 'CLOSED')
+          AND b.end_at IS NULL
+        )
+      )
       AND b.breakdown_date <= ?
-      AND LENGTH(TRIM(COALESCE(b.breakdown_date, ''))) >= 7
-      AND substr(TRIM(b.breakdown_date), 1, 7) = substr(?, 1, 7)
       ${andAssetFleetHoursOnly("a")}
   `);
   const getOpenBreakdownAssetIdsByDayWithSite = bdOnlySiteSql
@@ -278,10 +282,14 @@ export default async function dashboardRoutes(app) {
     SELECT DISTINCT b.asset_id
     FROM breakdowns b
     JOIN assets a ON a.id = b.asset_id
-    WHERE b.status = 'OPEN'
+    WHERE (
+        UPPER(TRIM(COALESCE(b.status, ''))) = 'OPEN'
+        OR (
+          (b.status IS NULL OR UPPER(TRIM(COALESCE(b.status, ''))) <> 'CLOSED')
+          AND b.end_at IS NULL
+        )
+      )
       AND b.breakdown_date <= ?
-      AND LENGTH(TRIM(COALESCE(b.breakdown_date, ''))) >= 7
-      AND substr(TRIM(b.breakdown_date), 1, 7) = substr(?, 1, 7)
       ${andAssetFleetHoursOnly("a")}
       ${bdOnlySiteSql}
   `)
@@ -423,8 +431,8 @@ export default async function dashboardRoutes(app) {
     );
     const openBreakdownAssets = new Set(
       (getOpenBreakdownAssetIdsByDayWithSite && bdOnlySiteSql
-        ? getOpenBreakdownAssetIdsByDayWithSite.all(dayStr, dayStr, siteCode)
-        : getOpenBreakdownAssetIdsByDayNoSite.all(dayStr, dayStr)
+        ? getOpenBreakdownAssetIdsByDayWithSite.all(dayStr, siteCode)
+        : getOpenBreakdownAssetIdsByDayNoSite.all(dayStr)
       )
         .map((r) => Number(r.asset_id || 0))
         .filter((assetId) => activeFleetIds.has(assetId) && !dailyStandbyIds.has(assetId))
