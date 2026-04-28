@@ -2324,6 +2324,7 @@ async function saveManagerInspection() {
   const msg = document.getElementById("miMsg");
   const mhRaw = String(document.getElementById("miMachineHours")?.value || "").trim();
   const machine_hours = mhRaw === "" ? null : Number(mhRaw);
+  const inspection_type = getManagerInspectionType();
   if (machine_hours != null && !Number.isFinite(machine_hours)) {
     return alert("Machine hours must be a number.");
   }
@@ -2356,6 +2357,7 @@ async function saveManagerInspection() {
         inspection_date,
         inspector_name,
         notes,
+        inspection_type,
         machine_hours,
         checklist,
         required_parts,
@@ -2678,6 +2680,7 @@ function inspectionCard(r) {
     <div class="card">
       <div><b>${esc(r.asset_code)}</b> - ${esc(r.asset_name || "")}</div>
       <div><small>Date: ${esc(r.inspection_date)} | Inspector: ${esc(r.inspector_name || "-")}</small></div>
+      <div><small>Type: <b>${esc(String(r.inspection_type || "machine_general").replaceAll("_", " "))}</b></small></div>
       <div><small>Machine hrs: ${esc(hrs)} | Live snapshot: ${live} | ${wo}</small></div>
       ${failLine}
       ${partsLine}
@@ -2810,21 +2813,58 @@ function getMiPartByCode(codeIn) {
   return getWfPartByCode(codeIn);
 }
 
-const MANAGER_INSPECTION_CHECKLIST = [
-  { key: "structure", label: "Structure / visible damage" },
-  { key: "fluids", label: "Fluids / leaks" },
-  { key: "tyres", label: "Tyres / undercarriage" },
-  { key: "safety", label: "Safety & access (rails, steps, extinguisher)" },
-  { key: "cabin", label: "Cabin / visibility / instruments" },
-  { key: "attachments", label: "GET / tools / attachments" },
-  { key: "housekeeping", label: "Housekeeping" },
-  { key: "noise", label: "Operation / unusual noise" },
-];
+const MANAGER_INSPECTION_CHECKLISTS = {
+  machine_general: [
+    { key: "structure", label: "Structure / visible damage" },
+    { key: "fluids", label: "Fluids / leaks" },
+    { key: "tyres", label: "Tyres / undercarriage" },
+    { key: "safety", label: "Safety & access (rails, steps, extinguisher)" },
+    { key: "cabin", label: "Cabin / visibility / instruments" },
+    { key: "attachments", label: "GET / tools / attachments" },
+    { key: "housekeeping", label: "Housekeeping" },
+    { key: "noise", label: "Operation / unusual noise" },
+  ],
+  environmental: [
+    { key: "spill_control", label: "Spill control and containment in place" },
+    { key: "waste_segregation", label: "Waste segregation and disposal compliant" },
+    { key: "oil_storage", label: "Fuel/oil/chemical storage condition acceptable" },
+    { key: "drainage", label: "Drainage channels and runoff protection clear" },
+    { key: "housekeeping_env", label: "Work area free from environmental hazards" },
+  ],
+  fire_extinguishers: [
+    { key: "ext_present", label: "Extinguisher present and accessible" },
+    { key: "ext_seal_pin", label: "Safety pin and tamper seal intact" },
+    { key: "ext_pressure", label: "Pressure gauge in serviceable range" },
+    { key: "ext_label", label: "Inspection tag and expiry date valid" },
+    { key: "ext_mounting", label: "Mounting bracket/signage condition acceptable" },
+  ],
+  hand_tools: [
+    { key: "tool_condition", label: "No cracked, bent, or damaged hand tools" },
+    { key: "tool_storage", label: "Correct storage and housekeeping for tools" },
+    { key: "tool_tracking", label: "Tool control / inventory status updated" },
+    { key: "tool_safety", label: "Safe use practices observed on site" },
+  ],
+  electrical_tools_equipment: [
+    { key: "cable_plug", label: "Cables/plugs free from damage" },
+    { key: "isolation_switch", label: "Isolation switch/lockout available and used" },
+    { key: "earth_leakage", label: "Earth leakage / test status compliant" },
+    { key: "guarding", label: "Machine/tool guards fitted and functional" },
+    { key: "electrical_ppe", label: "Electrical PPE and safe operation followed" },
+  ],
+};
+function getManagerInspectionType() {
+  return String(document.getElementById("miInspectionType")?.value || "machine_general").trim();
+}
+function getManagerInspectionChecklistTemplate() {
+  const type = getManagerInspectionType();
+  return MANAGER_INSPECTION_CHECKLISTS[type] || MANAGER_INSPECTION_CHECKLISTS.machine_general;
+}
 
 function renderManagerInspectionChecklist() {
   const host = document.getElementById("miChecklist");
   if (!host) return;
-  host.innerHTML = MANAGER_INSPECTION_CHECKLIST.map(
+  const template = getManagerInspectionChecklistTemplate();
+  host.innerHTML = template.map(
     (row) => `
     <div class="row stack-10" style="align-items:center; flex-wrap:wrap; gap:8px;">
       <span style="min-width:240px; font-size:13px;">${esc(row.label)}</span>
@@ -2839,7 +2879,8 @@ function renderManagerInspectionChecklist() {
 }
 
 function collectManagerInspectionChecklist() {
-  return MANAGER_INSPECTION_CHECKLIST.map((row) => {
+  const template = getManagerInspectionChecklistTemplate();
+  return template.map((row) => {
     const sel = document.querySelector(`input[name="miChk-${row.key}"]:checked`);
     const val = sel ? String(sel.value || "") : "";
     let ok = null;
@@ -2990,7 +3031,8 @@ function resetManagerInspectionForm() {
   if (miRequireEvidence) miRequireEvidence.checked = true;
   const miEvidencePhotos = document.getElementById("miEvidencePhotos");
   if (miEvidencePhotos) miEvidencePhotos.value = "";
-  MANAGER_INSPECTION_CHECKLIST.forEach((row) => {
+  const template = getManagerInspectionChecklistTemplate();
+  template.forEach((row) => {
     document.querySelectorAll(`input[name="miChk-${row.key}"]`).forEach((r) => {
       r.checked = false;
     });
@@ -4690,6 +4732,9 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   document.getElementById("miAsset")?.addEventListener("change", miReloadHours);
   document.getElementById("miDate")?.addEventListener("change", miReloadHours);
+  document.getElementById("miInspectionType")?.addEventListener("change", () => {
+    renderManagerInspectionChecklist();
+  });
   const aiReloadHours = () => {
     const id = Number(document.getElementById("aiAsset")?.value || 0);
     if (!id) {

@@ -291,6 +291,7 @@ export default async function maintenanceRoutes(app) {
   ensureColumn("manager_inspections", "defect_component TEXT", "defect_component");
   ensureColumn("manager_inspections", "defect_risk TEXT", "defect_risk");
   ensureColumn("manager_inspections", "recommended_action TEXT", "recommended_action");
+  ensureColumn("manager_inspections", "inspection_type TEXT DEFAULT 'machine_general'", "inspection_type");
   ensureColumn("manager_inspections", "evidence_required INTEGER DEFAULT 1", "evidence_required");
   ensureColumn("manager_inspections", "evidence_photo_count INTEGER DEFAULT 0", "evidence_photo_count");
   ensureColumn("artisan_inspections", "uuid TEXT", "uuid");
@@ -3388,6 +3389,7 @@ export default async function maintenanceRoutes(app) {
           mi.defect_component,
           mi.defect_risk,
           mi.recommended_action,
+          mi.inspection_type,
           mi.evidence_required,
           mi.evidence_photo_count,
           mi.work_order_id,
@@ -3589,6 +3591,7 @@ export default async function maintenanceRoutes(app) {
       const checklist_json = JSON.stringify(checklist);
       const required_parts = normalizeInspectionParts(req.body?.required_parts);
       const required_parts_json = JSON.stringify(required_parts);
+      const inspection_type = String(req.body?.inspection_type || "machine_general").trim().toLowerCase() || "machine_general";
       const defect_severity = String(req.body?.defect_severity || "").trim().toLowerCase() || null;
       const defect_component = String(req.body?.defect_component || "").trim() || null;
       const defect_risk = String(req.body?.defect_risk || "").trim() || null;
@@ -3618,6 +3621,7 @@ export default async function maintenanceRoutes(app) {
           asset_id, uuid, site_code, inspection_date, inspector_name, notes,
           machine_hours, live_hours_snapshot, live_hours_source,
           checklist_json, required_parts_json,
+          inspection_type,
           defect_severity, defect_component, defect_risk, recommended_action,
           evidence_required, evidence_photo_count,
           updated_at
@@ -3635,6 +3639,7 @@ export default async function maintenanceRoutes(app) {
         liveSource,
         checklist_json,
         required_parts_json,
+        inspection_type,
         defect_severity,
         defect_component,
         defect_risk,
