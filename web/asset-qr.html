@@ -105,6 +105,21 @@
     </div>
   </div>
 
-  <script src="/web/asset-qr.js?v=3"></script>
+  <script src="/web/asset-qr.js?v=4"></script>
+  <script>
+    (function () {
+      try {
+        var u = new URL(window.location.href);
+        var code = String(u.searchParams.get("asset_code") || "").trim();
+        if (!code) return;
+        var ins = document.getElementById("openInspectionsBtn");
+        var his = document.getElementById("openHistoryBtn");
+        var wo = document.getElementById("openWoBtn");
+        if (ins) ins.href = "./asset-qr-detail.html?view=inspections&asset_code=" + encodeURIComponent(code);
+        if (his) his.href = "./asset-qr-detail.html?view=history&asset_code=" + encodeURIComponent(code);
+        if (wo) wo.href = "./asset-qr-detail.html?view=workorders&asset_code=" + encodeURIComponent(code);
+      } catch {}
+    })();
+  </script>
 </body>
 </html>
