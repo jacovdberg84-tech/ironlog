@@ -267,13 +267,7 @@ export default async function dashboardRoutes(app) {
     SELECT DISTINCT b.asset_id
     FROM breakdowns b
     JOIN assets a ON a.id = b.asset_id
-    WHERE (
-        UPPER(TRIM(COALESCE(b.status, ''))) = 'OPEN'
-        OR (
-          (b.status IS NULL OR UPPER(TRIM(COALESCE(b.status, ''))) <> 'CLOSED')
-          AND b.end_at IS NULL
-        )
-      )
+    WHERE UPPER(TRIM(COALESCE(b.status, ''))) = 'OPEN'
       AND b.breakdown_date <= ?
       ${andAssetFleetHoursOnly("a")}
   `);
@@ -282,13 +276,7 @@ export default async function dashboardRoutes(app) {
     SELECT DISTINCT b.asset_id
     FROM breakdowns b
     JOIN assets a ON a.id = b.asset_id
-    WHERE (
-        UPPER(TRIM(COALESCE(b.status, ''))) = 'OPEN'
-        OR (
-          (b.status IS NULL OR UPPER(TRIM(COALESCE(b.status, ''))) <> 'CLOSED')
-          AND b.end_at IS NULL
-        )
-      )
+    WHERE UPPER(TRIM(COALESCE(b.status, ''))) = 'OPEN'
       AND b.breakdown_date <= ?
       ${andAssetFleetHoursOnly("a")}
       ${bdOnlySiteSql}
