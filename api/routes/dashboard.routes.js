@@ -517,7 +517,10 @@ export default async function dashboardRoutes(app) {
     const downtimeOnlyIds = downtimeRows
       .map((r) => Number(r.asset_id || 0))
       .filter((id) => id > 0 && !assetIdsInHours.has(id) && !dailyStandbyIds.has(id));
-    const includeIds = Array.from(new Set([...downtimeOnlyIds, ...missingFleetIds]));
+    const openBreakdownOnlyIds = Array.from(openBreakdownAssets).filter(
+      (id) => id > 0 && !assetIdsInHours.has(id) && !dailyStandbyIds.has(id)
+    );
+    const includeIds = Array.from(new Set([...downtimeOnlyIds, ...openBreakdownOnlyIds, ...missingFleetIds]));
     if (includeIds.length) {
       const uniq = includeIds.slice(0, 500);
       const placeholders = uniq.map(() => "?").join(",");
@@ -541,7 +544,7 @@ export default async function dashboardRoutes(app) {
         const loggedDownRaw = Math.max(0, Number(downtimeByAsset.get(assetId) || 0));
         const loggedDown = loggedDownRaw > 0
           ? loggedDownRaw
-          : 0;
+          : (openBreakdownAssets.has(assetId) ? scheduled : 0);
         const cappedDown = Math.min(loggedDown, scheduled);
         const cat = String(a.category || "");
         const mode = isToyotaHiluxAsset(a) ? "km" : "hours";
@@ -560,7 +563,9 @@ export default async function dashboardRoutes(app) {
         const downN = Number(cappedDown.toFixed(2));
         if (s > 0 || runN > 0 || downN > 0) contributingAssetIds.add(assetId);
         if (includePerAsset) {
-          const downtime_source = loggedDownRaw > 0 ? "logged" : "none";
+          const downtime_source = loggedDownRaw > 0
+            ? "logged"
+            : (openBreakdownAssets.has(assetId) ? "open_breakdown_imputed" : "none");
           per_asset_kpi.push({
             asset_id: assetId,
             asset_code: String(a.asset_code || ""),
