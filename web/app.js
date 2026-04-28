@@ -1474,6 +1474,8 @@ async function loadBackupFiles() {
   const current = String(sel.value || "");
   const data = await fetchJson(`${API}/api/admin/backups/list`);
   const files = Array.isArray(data?.files) ? data.files : [];
+  const executeEnabled = Boolean(data?.execute_restore_enabled);
+  const restartCmdSet = Boolean(data?.restart_command_set);
   sel.innerHTML = files.length
     ? `<option value="">Select backup file...</option>${files
         .map((f) => `<option value="${esc(String(f.name || ""))}">${esc(backupOptionLabel(f))}</option>`)
@@ -1481,8 +1483,15 @@ async function loadBackupFiles() {
     : `<option value="">No backups found</option>`;
   if (current && Array.from(sel.options).some((o) => o.value === current)) sel.value = current;
   if (out) {
-    out.textContent = `Backup dir: ${data?.backup_dir || "-"}\nDB path: ${data?.db_path || "-"}\nBackups found: ${files.length}`;
+    out.textContent =
+      `Backup dir: ${data?.backup_dir || "-"}\n` +
+      `DB path: ${data?.db_path || "-"}\n` +
+      `Backups found: ${files.length}\n` +
+      `Execute restore enabled: ${executeEnabled ? "yes" : "no"}\n` +
+      `Restart command set: ${restartCmdSet ? "yes" : "no"}`;
   }
+  const execBtn = qs("executeBackupRestoreBtn");
+  if (execBtn) execBtn.disabled = !(executeEnabled && restartCmdSet);
 }
 
 async function createBackupNow() {
@@ -1527,6 +1536,24 @@ async function stageBackupRestore() {
   if (out) out.textContent = JSON.stringify(data, null, 2);
   await loadBackupFiles();
   setStatus("Restore plan staged.");
+}
+
+async function executeBackupRestoreNow() {
+  const out = qs("backupRestoreResult");
+  const backup_name = String(qs("backupFileSelect")?.value || "").trim();
+  const notes = String(qs("backupRestoreNotes")?.value || "").trim();
+  if (!backup_name) return alert("Select a backup file first.");
+  const confirmed = window.confirm(
+    `Execute restore now for ${backup_name}?\n\nThis will restart the API process immediately.`
+  );
+  if (!confirmed) return;
+  setStatus("Executing restore + restart...");
+  const data = await fetchJson(`${API}/api/admin/backups/restore/execute`, {
+    method: "POST",
+    body: JSON.stringify({ backup_name, confirm_text: "RESTORE_NOW", notes }),
+  });
+  if (out) out.textContent = JSON.stringify(data, null, 2);
+  setStatus("Restore execute requested. Reconnect after restart.");
 }
 
 /** LDV vehicle check — photos + fractional damage pins */
@@ -9959,6 +9986,9 @@ async function init() {
   );
   qs("stageBackupRestoreBtn")?.addEventListener("click", () =>
     stageBackupRestore().catch((e) => setStatus("Restore stage error: " + e.message))
+  );
+  qs("executeBackupRestoreBtn")?.addEventListener("click", () =>
+    executeBackupRestoreNow().catch((e) => setStatus("Restore execute error: " + e.message))
   );
   qs("loadApprovals")?.addEventListener("click", () =>
     loadApprovalRequests().catch((e) => setStatus("Approvals error: " + e.message))

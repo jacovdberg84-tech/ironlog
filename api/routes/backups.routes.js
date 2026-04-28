@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { exec } from "node:child_process";
 import { db, dbPathResolved } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 
@@ -81,6 +82,14 @@ function formatPowerShellRestoreCommand(filePath) {
   ].join("\n");
 }
 
+function executeRestoreEnabled() {
+  return String(process.env.IRONLOG_ENABLE_RESTORE_EXECUTE || "0").trim() === "1";
+}
+
+function restartCommand() {
+  return String(process.env.IRONLOG_RESTART_COMMAND || "").trim();
+}
+
 export default async function backupsRoutes(app) {
   ensureAuditTable(db);
   db.prepare(`
@@ -104,6 +113,8 @@ export default async function backupsRoutes(app) {
         ok: true,
         db_path: dbPathResolved,
         backup_dir: backupDirPath(),
+        execute_restore_enabled: executeRestoreEnabled(),
+        restart_command_set: Boolean(restartCommand()),
         count: files.length,
         files,
       });
@@ -239,6 +250,77 @@ export default async function backupsRoutes(app) {
           powershell: formatPowerShellRestoreCommand(backupPath),
         },
       });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: e.message || String(e) });
+    }
+  });
+
+  app.post("/restore/execute", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    if (!executeRestoreEnabled()) {
+      return reply.code(400).send({
+        ok: false,
+        error: "execute restore is disabled (set IRONLOG_ENABLE_RESTORE_EXECUTE=1)",
+      });
+    }
+    const restartCmd = restartCommand();
+    if (!restartCmd) {
+      return reply.code(400).send({
+        ok: false,
+        error: "IRONLOG_RESTART_COMMAND is not set",
+      });
+    }
+    try {
+      const backupName = String(req.body?.backup_name || "").trim();
+      const confirmText = String(req.body?.confirm_text || "").trim().toUpperCase();
+      const notes = String(req.body?.notes || "").trim();
+      if (!backupName) return reply.code(400).send({ ok: false, error: "backup_name is required" });
+      if (confirmText !== "RESTORE_NOW") {
+        return reply.code(400).send({ ok: false, error: "confirm_text must be RESTORE_NOW" });
+      }
+      const backupPath = path.join(backupDirPath(), backupName);
+      if (!fs.existsSync(backupPath)) return reply.code(404).send({ ok: false, error: "Backup file not found" });
+
+      const dir = backupDirPath();
+      await fsp.mkdir(dir, { recursive: true });
+      const preStamp = nowStamp();
+      const preTmp = path.join(dir, `ironlog_pre_execute_${preStamp}.tmp.db`);
+      const preFinal = path.join(dir, `ironlog_pre_execute_${preStamp}.db`);
+      await db.backup(preTmp);
+      await fsp.rename(preTmp, preFinal);
+
+      writeAudit(db, req, {
+        module: "backups",
+        action: "restore_execute_requested",
+        entity_type: "backup_file",
+        entity_id: backupName,
+        after: { pre_restore_backup: preFinal, notes: notes || null },
+      });
+
+      try {
+        db.pragma("wal_checkpoint(TRUNCATE)");
+      } catch {}
+      try {
+        db.close();
+      } catch {}
+
+      await fsp.copyFile(backupPath, dbPathResolved);
+      await Promise.allSettled([
+        fsp.unlink(`${dbPathResolved}-wal`),
+        fsp.unlink(`${dbPathResolved}-shm`),
+      ]);
+
+      exec(restartCmd, { windowsHide: true }, () => {});
+
+      reply.send({
+        ok: true,
+        message: "Restore executed. Restart command has been triggered.",
+        backup_name: backupName,
+        pre_restore_backup: preFinal,
+      });
+      setTimeout(() => {
+        process.exit(0);
+      }, 250);
     } catch (e) {
       return reply.code(500).send({ ok: false, error: e.message || String(e) });
     }
