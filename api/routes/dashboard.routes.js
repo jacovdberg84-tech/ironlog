@@ -262,22 +262,34 @@ export default async function dashboardRoutes(app) {
   `)
     : null;
 
-  /** OPEN breakdowns used to impute downtime when no log rows exist for that day — only same calendar month as the KPI day (no March-started carry into April MTD). */
+  /** Breakdown WOs open on a KPI day (interval overlap with day) used for downtime imputation when no logs exist. */
   const getOpenBreakdownAssetIdsByDayNoSite = db.prepare(`
-    SELECT DISTINCT b.asset_id
-    FROM breakdowns b
-    JOIN assets a ON a.id = b.asset_id
-    WHERE UPPER(TRIM(COALESCE(b.status, ''))) = 'OPEN'
-      AND b.breakdown_date <= ?
+    SELECT DISTINCT w.asset_id
+    FROM work_orders w
+    JOIN assets a ON a.id = w.asset_id
+    LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
+    WHERE w.source = 'breakdown'
+      AND DATE(COALESCE(NULLIF(TRIM(w.opened_at), ''), datetime('now'))) <= ?
+      AND (
+        w.closed_at IS NULL
+        OR TRIM(COALESCE(w.closed_at, '')) = ''
+        OR DATE(w.closed_at) >= ?
+      )
       ${andAssetFleetHoursOnly("a")}
   `);
   const getOpenBreakdownAssetIdsByDayWithSite = bdOnlySiteSql
     ? db.prepare(`
-    SELECT DISTINCT b.asset_id
-    FROM breakdowns b
-    JOIN assets a ON a.id = b.asset_id
-    WHERE UPPER(TRIM(COALESCE(b.status, ''))) = 'OPEN'
-      AND b.breakdown_date <= ?
+    SELECT DISTINCT w.asset_id
+    FROM work_orders w
+    JOIN assets a ON a.id = w.asset_id
+    LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
+    WHERE w.source = 'breakdown'
+      AND DATE(COALESCE(NULLIF(TRIM(w.opened_at), ''), datetime('now'))) <= ?
+      AND (
+        w.closed_at IS NULL
+        OR TRIM(COALESCE(w.closed_at, '')) = ''
+        OR DATE(w.closed_at) >= ?
+      )
       ${andAssetFleetHoursOnly("a")}
       ${bdOnlySiteSql}
   `)
@@ -419,8 +431,8 @@ export default async function dashboardRoutes(app) {
     );
     const openBreakdownAssets = new Set(
       (getOpenBreakdownAssetIdsByDayWithSite && bdOnlySiteSql
-        ? getOpenBreakdownAssetIdsByDayWithSite.all(dayStr, siteCode)
-        : getOpenBreakdownAssetIdsByDayNoSite.all(dayStr)
+        ? getOpenBreakdownAssetIdsByDayWithSite.all(dayStr, dayStr, siteCode)
+        : getOpenBreakdownAssetIdsByDayNoSite.all(dayStr, dayStr)
       )
         .map((r) => Number(r.asset_id || 0))
         .filter((assetId) => activeFleetIds.has(assetId) && !dailyStandbyIds.has(assetId))
