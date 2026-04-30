@@ -6813,11 +6813,14 @@ export default async function reportsRoutes(app) {
         ORDER BY (${mpNextDueExpr} - ${mpCurrentExpr}) ASC, a.asset_code ASC
         LIMIT 10
       `).all();
+    const breakdownRootCauseExpr = hasColumn("breakdowns", "root_cause")
+      ? "COALESCE(b.root_cause, '-')"
+      : "COALESCE(b.description, '-')";
     const partsTrackingRows = db.prepare(`
       SELECT
         a.asset_code,
         COALESCE(b.description, 'Breakdown') AS fault,
-        COALESCE(b.root_cause, '-') AS root_cause,
+        ${breakdownRootCauseExpr} AS root_cause,
         COALESCE(w.completion_notes, '-') AS action_taken,
         COALESCE(date(COALESCE(w.completed_at, w.closed_at, w.opened_at)), '-') AS eta_on_parts,
         CASE WHEN LOWER(COALESCE(w.status, '')) IN ('done','closed','completed') THEN 'No' ELSE 'Yes' END AS parts_outstanding,
