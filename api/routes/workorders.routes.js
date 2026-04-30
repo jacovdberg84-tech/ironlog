@@ -46,6 +46,9 @@ export default async function workOrderRoutes(app) {
   function getRole(req) {
     return String(req.headers["x-user-role"] || "admin").trim().toLowerCase();
   }
+  function getSiteCode(req) {
+    return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
+  }
 
   function requireRoles(req, reply, roles) {
     const role = getRole(req);
@@ -121,6 +124,7 @@ export default async function workOrderRoutes(app) {
   ensureColumn("work_orders", "required_skill", "required_skill TEXT");
   ensureColumn("work_orders", "location_code", "location_code TEXT");
   ensureColumn("work_orders", "escalated_at", "escalated_at TEXT");
+  ensureColumn("work_orders", "site_code", "site_code TEXT DEFAULT 'main'");
   db.prepare(`
     CREATE TABLE IF NOT EXISTS approval_requests (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -353,6 +357,7 @@ export default async function workOrderRoutes(app) {
   // List work orders (filter by status optional)
   app.get("/", async (req) => {
     const status = (req.query?.status ? String(req.query.status) : "").trim();
+    const siteCode = getSiteCode(req);
 
     const baseSql = `
       SELECT
@@ -371,11 +376,12 @@ export default async function workOrderRoutes(app) {
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
       LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
+      WHERE LOWER(TRIM(COALESCE(w.site_code, 'main'))) = ?
     `;
 
     const rows = status
-      ? db.prepare(baseSql + ` WHERE w.status = ? ORDER BY w.id DESC LIMIT 200`).all(status)
-      : db.prepare(baseSql + ` ORDER BY w.id DESC LIMIT 200`).all();
+      ? db.prepare(baseSql + ` AND w.status = ? ORDER BY w.id DESC LIMIT 200`).all(siteCode, status)
+      : db.prepare(baseSql + ` ORDER BY w.id DESC LIMIT 200`).all(siteCode);
 
     return rows;
   });
@@ -393,9 +399,10 @@ export default async function workOrderRoutes(app) {
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
       WHERE w.status IN ('open','assigned','in_progress','completed','approved')
+        AND LOWER(TRIM(COALESCE(w.site_code, 'main'))) = ?
       ORDER BY w.id DESC
       LIMIT 300
-    `).all().map((r) => ({ ...r, priority: inferPriorityForRow(r) }));
+    `).all(getSiteCode(req)).map((r) => ({ ...r, priority: inferPriorityForRow(r) }));
 
     const filtered = rows.filter((r) => {
       if (artisan && String(r.assigned_artisan_name || "").toLowerCase() !== artisan) return false;
@@ -874,6 +881,7 @@ export default async function workOrderRoutes(app) {
   app.get("/:id", async (req, reply) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return reply.code(400).send({ error: "invalid id" });
+    const siteCode = getSiteCode(req);
 
     const wo = db.prepare(`
       SELECT
@@ -884,7 +892,8 @@ export default async function workOrderRoutes(app) {
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
       WHERE w.id = ?
-    `).get(id);
+        AND LOWER(TRIM(COALESCE(w.site_code, 'main'))) = ?
+    `).get(id, siteCode);
 
     if (!wo) return reply.code(404).send({ error: "work order not found" });
 
@@ -931,6 +940,7 @@ export default async function workOrderRoutes(app) {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return reply.code(400).send({ error: "invalid id" });
 
+    const siteCode = getSiteCode(req);
     const wo = db.prepare(`
       SELECT
         w.id, w.asset_id, w.source, w.status, w.opened_at, w.closed_at,
@@ -938,7 +948,8 @@ export default async function workOrderRoutes(app) {
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
       WHERE w.id = ?
-    `).get(id);
+        AND LOWER(TRIM(COALESCE(w.site_code, 'main'))) = ?
+    `).get(id, siteCode);
     if (!wo) return reply.code(404).send({ error: "work order not found" });
 
     const built = buildWorkOrderQrProfile(wo, req);
@@ -966,6 +977,7 @@ export default async function workOrderRoutes(app) {
   app.post("/:id/qr-profile/refresh", async (req, reply) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return reply.code(400).send({ error: "invalid id" });
+    const siteCode = getSiteCode(req);
 
     const wo = db.prepare(`
       SELECT
@@ -974,7 +986,8 @@ export default async function workOrderRoutes(app) {
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
       WHERE w.id = ?
-    `).get(id);
+        AND LOWER(TRIM(COALESCE(w.site_code, 'main'))) = ?
+    `).get(id, siteCode);
     if (!wo) return reply.code(404).send({ error: "work order not found" });
 
     const built = buildWorkOrderQrProfile(wo, req);

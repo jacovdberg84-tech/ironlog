@@ -3382,11 +3382,13 @@ export default async function maintenanceRoutes(app) {
   // =====================================================
   app.get("/inspections", async (req, reply) => {
     try {
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
       const assetId = Number(req.query?.asset_id || 0);
       const start = String(req.query?.start || "").trim();
       const end = String(req.query?.end || "").trim();
       const params = [];
-      const where = [];
+      const where = ["LOWER(TRIM(COALESCE(mi.site_code, 'main'))) = ?"];
+      params.push(site_code);
       if (assetId > 0) {
         where.push("mi.asset_id = ?");
         params.push(assetId);
@@ -3950,11 +3952,13 @@ export default async function maintenanceRoutes(app) {
   // =====================================================
   app.get("/artisan-inspections", async (req, reply) => {
     try {
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
       const assetId = Number(req.query?.asset_id || 0);
       const start = String(req.query?.start || "").trim();
       const end = String(req.query?.end || "").trim();
       const params = [];
-      const where = [];
+      const where = ["LOWER(TRIM(COALESCE(ai.site_code, 'main'))) = ?"];
+      params.push(site_code);
       if (assetId > 0) {
         where.push("ai.asset_id = ?");
         params.push(assetId);

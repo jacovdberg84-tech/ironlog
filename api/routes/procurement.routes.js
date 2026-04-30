@@ -8,6 +8,28 @@ function getRole(req) {
 function getUser(req) {
   return String(req.headers["x-user-name"] || "session-user").trim() || "session-user";
 }
+function getSiteCode(req) {
+  return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
+}
+function getDepartment(req) {
+  return String(req.headers["x-user-department"] || "").trim().toLowerCase() || null;
+}
+function getRoles(req) {
+  const fromMany = String(req.headers["x-user-roles"] || "")
+    .split(",")
+    .map((x) => String(x || "").trim().toLowerCase())
+    .filter(Boolean);
+  const fromSingle = String(req.headers["x-user-role"] || "")
+    .split(",")
+    .map((x) => String(x || "").trim().toLowerCase())
+    .filter(Boolean);
+  const merged = Array.from(new Set([...fromMany, ...fromSingle]));
+  return merged.length ? merged : ["operator"];
+}
+function isManagerScopeRole(req) {
+  const roles = getRoles(req);
+  return roles.some((r) => ["admin", "supervisor", "plant_manager", "site_manager", "executive"].includes(r));
+}
 
 function requireRoles(req, reply, roles) {
   const role = getRole(req);
@@ -106,6 +128,12 @@ export default async function procurementRoutes(app) {
   }
   if (!hasCol("estimated_value")) {
     db.prepare(`ALTER TABLE procurement_requisitions ADD COLUMN estimated_value REAL`).run();
+  }
+  if (!hasCol("site_code")) {
+    db.prepare(`ALTER TABLE procurement_requisitions ADD COLUMN site_code TEXT DEFAULT 'main'`).run();
+  }
+  if (!hasCol("department")) {
+    db.prepare(`ALTER TABLE procurement_requisitions ADD COLUMN department TEXT`).run();
   }
 
   db.prepare(`
@@ -228,11 +256,13 @@ export default async function procurementRoutes(app) {
     if (!part) return reply.code(404).send({ error: `part_code not found: ${part_code}` });
 
     const requester = getUser(req);
+    const siteCode = getSiteCode(req);
+    const department = getDepartment(req);
     const ins = db.prepare(`
       INSERT INTO procurement_requisitions (
-        part_id, qty_requested, qty_received, needed_by_date, supplier_name, po_number, bill_to, request_type, requester, notes, estimated_value, status, created_at, updated_at
-      ) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', datetime('now'), datetime('now'))
-    `).run(part.id, qty_requested, needed_by_date, supplier_name, po_number, bill_to, request_type, requester, notes, estimated_value);
+        part_id, qty_requested, qty_received, needed_by_date, supplier_name, po_number, bill_to, request_type, requester, notes, estimated_value, site_code, department, status, created_at, updated_at
+      ) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', datetime('now'), datetime('now'))
+    `).run(part.id, qty_requested, needed_by_date, supplier_name, po_number, bill_to, request_type, requester, notes, estimated_value, siteCode, department);
     const id = Number(ins.lastInsertRowid);
 
     db.prepare(`
@@ -254,8 +284,16 @@ export default async function procurementRoutes(app) {
 
   app.get("/requisitions", async (req) => {
     const status = String(req.query?.status || "").trim().toLowerCase();
+    const siteCode = getSiteCode(req);
+    const reqDepartment = getDepartment(req);
     const where = [];
     const params = [];
+    where.push("LOWER(TRIM(COALESCE(pr.site_code, 'main'))) = ?");
+    params.push(siteCode);
+    if (!isManagerScopeRole(req) && reqDepartment) {
+      where.push("LOWER(TRIM(COALESCE(pr.department, ''))) = ?");
+      params.push(reqDepartment);
+    }
     if (status) {
       where.push("LOWER(pr.status) = ?");
       params.push(status);
@@ -317,13 +355,18 @@ export default async function procurementRoutes(app) {
   app.get("/requisitions/:id/detail", async (req, reply) => {
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+    const siteCode = getSiteCode(req);
+    const reqDepartment = getDepartment(req);
+    const enforceDept = !isManagerScopeRole(req) && reqDepartment;
 
     const header = db.prepare(`
       SELECT pr.*, p.part_code, p.part_name
       FROM procurement_requisitions pr
       LEFT JOIN parts p ON p.id = pr.part_id
       WHERE pr.id = ?
-    `).get(id);
+        AND LOWER(TRIM(COALESCE(pr.site_code, 'main'))) = ?
+        ${enforceDept ? "AND LOWER(TRIM(COALESCE(pr.department, ''))) = ?" : ""}
+    `).get(...(enforceDept ? [id, siteCode, reqDepartment] : [id, siteCode]));
     if (!header) return reply.code(404).send({ error: "requisition not found" });
 
     const lines = db.prepare(`
@@ -352,7 +395,7 @@ export default async function procurementRoutes(app) {
     if (!requireRoles(req, reply, STORE_EXECUTION_ROLES)) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
-    const reqn = db.prepare(`SELECT id, status FROM procurement_requisitions WHERE id = ?`).get(id);
+    const reqn = db.prepare(`SELECT id, status FROM procurement_requisitions WHERE id = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?`).get(id, getSiteCode(req));
     if (!reqn) return reply.code(404).send({ error: "requisition not found" });
     if (["finalized", "posted", "approval_in_progress", "approved_all", "po_ready", "received"].includes(String(reqn.status || ""))) {
       return reply.code(409).send({ error: `cannot add line when status is ${reqn.status}` });
@@ -399,7 +442,7 @@ export default async function procurementRoutes(app) {
     if (!requireRoles(req, reply, STORE_EXECUTION_ROLES)) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
-    const reqn = db.prepare(`SELECT id FROM procurement_requisitions WHERE id = ?`).get(id);
+    const reqn = db.prepare(`SELECT id FROM procurement_requisitions WHERE id = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?`).get(id, getSiteCode(req));
     if (!reqn) return reply.code(404).send({ error: "requisition not found" });
     const file_name = String(req.body?.file_name || "").trim();
     if (!file_name) return reply.code(400).send({ error: "file_name is required" });
@@ -420,7 +463,7 @@ export default async function procurementRoutes(app) {
     if (!requireRoles(req, reply, STORE_EXECUTION_ROLES)) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
-    const reqn = db.prepare(`SELECT id, status, site_request_no FROM procurement_requisitions WHERE id = ?`).get(id);
+    const reqn = db.prepare(`SELECT id, status, site_request_no FROM procurement_requisitions WHERE id = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?`).get(id, getSiteCode(req));
     if (!reqn) return reply.code(404).send({ error: "requisition not found" });
     const cnt = db.prepare(`SELECT COUNT(*) AS c FROM procurement_requisition_lines WHERE requisition_id = ?`).get(id);
     if (Number(cnt?.c || 0) <= 0) return reply.code(409).send({ error: "cannot finalize without lines" });
@@ -445,7 +488,7 @@ export default async function procurementRoutes(app) {
     if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
-    const reqn = db.prepare(`SELECT id, status FROM procurement_requisitions WHERE id = ?`).get(id);
+    const reqn = db.prepare(`SELECT id, status FROM procurement_requisitions WHERE id = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?`).get(id, getSiteCode(req));
     if (!reqn) return reply.code(404).send({ error: "requisition not found" });
     if (!["finalized", "posted"].includes(String(reqn.status || ""))) {
       return reply.code(409).send({ error: "only finalized requisitions can be posted" });
@@ -462,7 +505,7 @@ export default async function procurementRoutes(app) {
     if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
-    const reqn = db.prepare(`SELECT id FROM procurement_requisitions WHERE id = ?`).get(id);
+    const reqn = db.prepare(`SELECT id FROM procurement_requisitions WHERE id = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?`).get(id, getSiteCode(req));
     if (!reqn) return reply.code(404).send({ error: "requisition not found" });
     const list = Array.isArray(req.body?.approvers) ? req.body.approvers : [];
     if (!list.length) return reply.code(400).send({ error: "approvers array is required" });
@@ -488,7 +531,7 @@ export default async function procurementRoutes(app) {
     if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
-    const reqn = db.prepare(`SELECT id, status FROM procurement_requisitions WHERE id = ?`).get(id);
+    const reqn = db.prepare(`SELECT id, status FROM procurement_requisitions WHERE id = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?`).get(id, getSiteCode(req));
     if (!reqn) return reply.code(404).send({ error: "requisition not found" });
     if (!["posted", "approval_in_progress"].includes(String(reqn.status || ""))) {
       return reply.code(409).send({ error: "requisition must be posted before approval routing" });
@@ -527,7 +570,7 @@ export default async function procurementRoutes(app) {
         ? String(req.body.comment).trim()
         : null;
 
-    const reqn = db.prepare(`SELECT id, status FROM procurement_requisitions WHERE id = ?`).get(id);
+    const reqn = db.prepare(`SELECT id, status FROM procurement_requisitions WHERE id = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?`).get(id, getSiteCode(req));
     if (!reqn) return reply.code(404).send({ error: "requisition not found" });
     if (!["approval_in_progress"].includes(String(reqn.status || ""))) {
       return reply.code(409).send({ error: "requisition is not in approval flow" });
@@ -583,7 +626,8 @@ export default async function procurementRoutes(app) {
       FROM procurement_requisitions pr
       JOIN parts p ON p.id = pr.part_id
       WHERE pr.id = ?
-    `).get(id);
+        AND LOWER(TRIM(COALESCE(pr.site_code, 'main'))) = ?
+    `).get(id, getSiteCode(req));
     if (!row) return reply.code(404).send({ error: "requisition not found" });
 
     const pending = db.prepare(`
@@ -625,7 +669,8 @@ export default async function procurementRoutes(app) {
       FROM procurement_requisitions pr
       JOIN parts p ON p.id = pr.part_id
       WHERE pr.id = ?
-    `).get(id);
+        AND LOWER(TRIM(COALESCE(pr.site_code, 'main'))) = ?
+    `).get(id, getSiteCode(req));
     if (!row) return reply.code(404).send({ error: "requisition not found" });
 
     const outstanding = Number(row.qty_requested || 0) - Number(row.qty_received || 0);

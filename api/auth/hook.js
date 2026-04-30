@@ -10,7 +10,7 @@ function resolveSession(token) {
   try {
     return db
       .prepare(`
-        SELECT u.username, u.role, u.roles_json, u.active, u.allowed_locations
+        SELECT u.username, u.role, u.roles_json, u.active, u.allowed_locations, u.department
         FROM auth_sessions s
         JOIN users u ON u.id = s.user_id
         WHERE s.token = ?
@@ -136,6 +136,7 @@ export async function ironlogAuthHook(req, reply) {
       req.headers["x-user-name"] = row.username;
       req.headers["x-user-role"] = roles[0];
       req.headers["x-user-roles"] = roles.join(",");
+      req.headers["x-user-department"] = String(row.department || "").trim().toLowerCase();
       const perms = getPermissionsForRoles(roles);
       if (perms.length) req.headers["x-user-permissions"] = perms.join(",");
       return;
