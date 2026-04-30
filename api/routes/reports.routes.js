@@ -6816,22 +6816,43 @@ export default async function reportsRoutes(app) {
     const breakdownRootCauseExpr = hasColumn("breakdowns", "root_cause")
       ? "COALESCE(b.root_cause, '-')"
       : "COALESCE(b.description, '-')";
+    const woCompletionNotesExpr = hasColumn("work_orders", "completion_notes")
+      ? "COALESCE(w.completion_notes, '-')"
+      : "'-'";
+    const woCompletedAtExpr = hasColumn("work_orders", "completed_at")
+      ? "w.completed_at"
+      : "NULL";
+    const woOpenedAtExpr = hasColumn("work_orders", "opened_at")
+      ? "COALESCE(w.opened_at, '')"
+      : "''";
+    const woSourceExpr = hasColumn("work_orders", "source")
+      ? "LOWER(COALESCE(w.source, ''))"
+      : "''";
+    const woReferenceIdExpr = hasColumn("work_orders", "reference_id")
+      ? "w.reference_id"
+      : "NULL";
+    const woStatusExpr = hasColumn("work_orders", "status")
+      ? "LOWER(COALESCE(w.status, ''))"
+      : "''";
+    const drResponsibleExpr = hasColumn("manager_damage_reports", "responsible_person")
+      ? "COALESCE(dr.responsible_person, '-')"
+      : "'-'";
     const partsTrackingRows = db.prepare(`
       SELECT
         a.asset_code,
         COALESCE(b.description, 'Breakdown') AS fault,
         ${breakdownRootCauseExpr} AS root_cause,
-        COALESCE(w.completion_notes, '-') AS action_taken,
-        COALESCE(date(COALESCE(w.completed_at, w.closed_at, w.opened_at)), '-') AS eta_on_parts,
-        CASE WHEN LOWER(COALESCE(w.status, '')) IN ('done','closed','completed') THEN 'No' ELSE 'Yes' END AS parts_outstanding,
-        COALESCE(dr.responsible_person, '-') AS responsible_person,
-        CASE WHEN LOWER(COALESCE(w.status, '')) IN ('done','closed','completed') THEN 'Returned / Closed' ELSE 'Pending closure' END AS expected_return_service
+        ${woCompletionNotesExpr} AS action_taken,
+        COALESCE(date(COALESCE(${woCompletedAtExpr}, w.closed_at, ${woOpenedAtExpr})), '-') AS eta_on_parts,
+        CASE WHEN ${woStatusExpr} IN ('done','closed','completed') THEN 'No' ELSE 'Yes' END AS parts_outstanding,
+        ${drResponsibleExpr} AS responsible_person,
+        CASE WHEN ${woStatusExpr} IN ('done','closed','completed') THEN 'Returned / Closed' ELSE 'Pending closure' END AS expected_return_service
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
-      LEFT JOIN breakdowns b ON b.id = w.reference_id AND LOWER(COALESCE(w.source, '')) = 'breakdown'
+      LEFT JOIN breakdowns b ON b.id = ${woReferenceIdExpr} AND ${woSourceExpr} = 'breakdown'
       LEFT JOIN manager_damage_reports dr ON dr.asset_id = w.asset_id AND dr.report_date BETWEEN ? AND ?
-      WHERE LOWER(COALESCE(w.source, '')) = 'breakdown'
-        AND COALESCE(w.opened_at, '') BETWEEN ? AND ?
+      WHERE ${woSourceExpr} = 'breakdown'
+        AND ${woOpenedAtExpr} BETWEEN ? AND ?
       ORDER BY w.id DESC
       LIMIT 14
     `).all(period.start, period.end, periodStartTs, periodEndTs);
