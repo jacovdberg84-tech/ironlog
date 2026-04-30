@@ -18,6 +18,44 @@ function requireRoles(req, reply, roles) {
   return true;
 }
 
+const REQUISITION_APPROVER_ROLES = [
+  "admin",
+  "supervisor",
+  "plant_manager",
+  "site_manager",
+  "quality_manager",
+  "hr_manager",
+];
+const STORE_EXECUTION_ROLES = ["admin", "supervisor", "storeman", "stores"];
+const ROLE_PERMISSION_FALLBACK = {
+  admin: ["*"],
+  supervisor: ["procurement.requisition.create", "procurement.requisition.request_approval", "procurement.requisition.approve", "procurement.requisition.receive"],
+  plant_manager: ["procurement.requisition.approve"],
+  site_manager: ["procurement.requisition.approve"],
+  quality_manager: ["procurement.requisition.approve"],
+  hr_manager: ["procurement.requisition.approve"],
+  procurement: ["procurement.requisition.create", "procurement.requisition.request_approval", "procurement.requisition.receive"],
+  storeman: ["procurement.requisition.create", "procurement.requisition.request_approval", "procurement.requisition.receive"],
+  stores: ["procurement.requisition.create", "procurement.requisition.request_approval", "procurement.requisition.receive"],
+};
+
+function getPermissions(req) {
+  const fromHeader = String(req.headers["x-user-permissions"] || "")
+    .split(",")
+    .map((x) => String(x || "").trim())
+    .filter(Boolean);
+  if (fromHeader.length) return Array.from(new Set(fromHeader));
+  const role = getRole(req);
+  return ROLE_PERMISSION_FALLBACK[role] || [];
+}
+
+function requirePermission(req, reply, permissionKey) {
+  const perms = getPermissions(req);
+  if (perms.includes("*") || perms.includes(permissionKey)) return true;
+  reply.code(403).send({ error: `permission '${permissionKey}' required` });
+  return false;
+}
+
 export default async function procurementRoutes(app) {
   ensureAuditTable(db);
 
@@ -146,7 +184,8 @@ export default async function procurementRoutes(app) {
   `).run();
 
   app.post("/requisitions", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
+    if (!requirePermission(req, reply, "procurement.requisition.create")) return;
+    if (!requireRoles(req, reply, STORE_EXECUTION_ROLES)) return;
     const part_code = String(req.body?.part_code || "").trim();
     const qty_requested = Number(req.body?.qty_requested ?? 0);
     const needed_by_date =
@@ -310,7 +349,7 @@ export default async function procurementRoutes(app) {
   });
 
   app.post("/requisitions/:id/lines", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
+    if (!requireRoles(req, reply, STORE_EXECUTION_ROLES)) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
     const reqn = db.prepare(`SELECT id, status FROM procurement_requisitions WHERE id = ?`).get(id);
@@ -357,7 +396,7 @@ export default async function procurementRoutes(app) {
   });
 
   app.post("/requisitions/:id/attachments", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
+    if (!requireRoles(req, reply, STORE_EXECUTION_ROLES)) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
     const reqn = db.prepare(`SELECT id FROM procurement_requisitions WHERE id = ?`).get(id);
@@ -378,7 +417,7 @@ export default async function procurementRoutes(app) {
   });
 
   app.post("/requisitions/:id/finalize", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
+    if (!requireRoles(req, reply, STORE_EXECUTION_ROLES)) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
     const reqn = db.prepare(`SELECT id, status, site_request_no FROM procurement_requisitions WHERE id = ?`).get(id);
@@ -477,7 +516,8 @@ export default async function procurementRoutes(app) {
   });
 
   app.post("/requisitions/:id/approve", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    if (!requirePermission(req, reply, "procurement.requisition.approve")) return;
+    if (!requireRoles(req, reply, REQUISITION_APPROVER_ROLES)) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
     const approver_name = String(req.body?.approver_name || getUser(req)).trim();
@@ -533,7 +573,8 @@ export default async function procurementRoutes(app) {
   });
 
   app.post("/requisitions/:id/request-approval", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
+    if (!requirePermission(req, reply, "procurement.requisition.request_approval")) return;
+    if (!requireRoles(req, reply, STORE_EXECUTION_ROLES)) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
 
@@ -571,7 +612,8 @@ export default async function procurementRoutes(app) {
   });
 
   app.post("/requisitions/:id/request-receive", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
+    if (!requirePermission(req, reply, "procurement.requisition.receive")) return;
+    if (!requireRoles(req, reply, STORE_EXECUTION_ROLES)) return;
     const id = Number(req.params?.id || 0);
     const qty_receive = Number(req.body?.qty_receive ?? 0);
     const reference = String(req.body?.reference || `requisition:${id}`).trim() || `requisition:${id}`;
