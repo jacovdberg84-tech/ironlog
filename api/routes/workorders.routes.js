@@ -56,6 +56,32 @@ export default async function workOrderRoutes(app) {
     return true;
   }
 
+  const ROLE_PERMISSION_FALLBACK = {
+    admin: ["*"],
+    supervisor: ["workorders.close.request", "workorders.reopen", "workorders.delete.request", "workorders.close.approve"],
+    plant_manager: ["workorders.close.approve", "workorders.reopen"],
+    site_manager: ["workorders.close.approve", "workorders.reopen"],
+    quality_manager: ["workorders.close.approve"],
+    hr_manager: ["workorders.close.approve"],
+    artisan: ["workorders.close.request"],
+  };
+
+  function getPermissions(req) {
+    const fromHeader = String(req.headers["x-user-permissions"] || "")
+      .split(",")
+      .map((x) => String(x || "").trim())
+      .filter(Boolean);
+    if (fromHeader.length) return Array.from(new Set(fromHeader));
+    return ROLE_PERMISSION_FALLBACK[getRole(req)] || [];
+  }
+
+  function requirePermission(req, reply, permissionKey) {
+    const perms = getPermissions(req);
+    if (perms.includes("*") || perms.includes(permissionKey)) return true;
+    reply.code(403).send({ error: `permission '${permissionKey}' required` });
+    return false;
+  }
+
   function canRoleTransition(role, currentStatus, nextStatus) {
     const r = String(role || "").toLowerCase();
     if (r === "admin" || r === "supervisor") return true;
@@ -1019,6 +1045,7 @@ export default async function workOrderRoutes(app) {
 
   // Request close approval for a work order
   app.post("/:id/request-close", async (req, reply) => {
+    if (!requirePermission(req, reply, "workorders.close.request")) return;
     if (!requireRoles(req, reply, ["admin", "supervisor", "artisan"])) return;
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return reply.code(400).send({ error: "invalid id" });
@@ -1093,6 +1120,7 @@ export default async function workOrderRoutes(app) {
   });
 
   app.post("/:id/reopen", async (req, reply) => {
+    if (!requirePermission(req, reply, "workorders.reopen")) return;
     if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
     const id = Number(req.params.id);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
@@ -1115,6 +1143,7 @@ export default async function workOrderRoutes(app) {
   });
 
   app.post("/:id/delete-request", async (req, reply) => {
+    if (!requirePermission(req, reply, "workorders.delete.request")) return;
     if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
     const id = Number(req.params.id);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
@@ -1143,6 +1172,7 @@ export default async function workOrderRoutes(app) {
 
   // Close a work order
   app.post("/:id/close", async (req, reply) => {
+    if (!requirePermission(req, reply, "workorders.close.approve")) return;
     if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return reply.code(400).send({ error: "invalid id" });

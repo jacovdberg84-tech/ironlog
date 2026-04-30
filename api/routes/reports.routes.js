@@ -1045,6 +1045,36 @@ export default async function reportsRoutes(app) {
     }
     return true;
   }
+  const ROLE_PERMISSION_FALLBACK = {
+    admin: ["*"],
+    supervisor: ["reports.export.read", "reports.executive.read", "reports.maintenance_master.manage"],
+    plant_manager: ["reports.export.read", "reports.executive.read", "reports.maintenance_master.manage"],
+    site_manager: ["reports.export.read", "reports.executive.read", "reports.maintenance_master.manage"],
+    quality_manager: ["reports.export.read"],
+    hr_manager: ["reports.export.read"],
+    procurement: ["reports.export.read"],
+    storeman: ["reports.export.read"],
+    stores: ["reports.export.read"],
+    finance: ["reports.export.read", "reports.executive.read"],
+    executive: ["reports.executive.read", "reports.export.read"],
+    artisan: ["reports.export.read"],
+    operator: ["reports.export.read"],
+  };
+  function requestPermissions(req) {
+    const fromHeader = String(req.headers["x-user-permissions"] || "")
+      .split(",")
+      .map((x) => String(x || "").trim())
+      .filter(Boolean);
+    if (fromHeader.length) return Array.from(new Set(fromHeader));
+    const roles = requestRoles(req);
+    return Array.from(new Set(roles.flatMap((r) => ROLE_PERMISSION_FALLBACK[r] || [])));
+  }
+  function requirePermission(req, reply, permissionKey) {
+    const perms = requestPermissions(req);
+    if (perms.includes("*") || perms.includes(permissionKey)) return true;
+    reply.code(403).send({ ok: false, error: `permission '${permissionKey}' required` });
+    return false;
+  }
   function smtpSecret() {
     const raw = String(process.env.IRONLOG_SMTP_SECRET || process.env.IRONLOG_AUTH_SECRET || "").trim();
     if (!raw) return "IRONLOG_SMTP_DEFAULT_SECRET_CHANGE_ME";
@@ -5250,6 +5280,7 @@ export default async function reportsRoutes(app) {
   // DAILY XLSX
   // =========================
   app.get("/daily.xlsx", async (req, reply) => {
+    if (!requirePermission(req, reply, "reports.export.read")) return;
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -5610,6 +5641,7 @@ export default async function reportsRoutes(app) {
   // GET /api/reports/gm-weekly.xlsx?end=YYYY-MM-DD&scheduled=10
   // GM pack: MTD availability/utilization; downtime from daily logs when present; MTBF/MTTR; PM; spares; forecast.
   app.get("/gm-weekly.xlsx", async (req, reply) => {
+    if (!requirePermission(req, reply, "reports.export.read")) return;
     const end = String(req.query?.end || "").trim();
     const scheduled = Number(req.query?.scheduled ?? 10);
     const forecastHorizon = Math.max(1, Math.min(90, Number(req.query?.forecast_days ?? 30)));
@@ -5770,6 +5802,7 @@ export default async function reportsRoutes(app) {
   // =========================
   // GET /api/reports/cost-monthly.xlsx?month=YYYY-MM
   app.get("/cost-monthly.xlsx", async (req, reply) => {
+    if (!requirePermission(req, reply, "reports.export.read")) return;
     const month = String(req.query?.month || "").trim();
     if (!isMonth(month)) {
       return reply.code(400).send({ error: "month (YYYY-MM) required" });
@@ -7015,6 +7048,7 @@ export default async function reportsRoutes(app) {
   });
 
   app.get("/maintenance-master/latest.pptx", async (req, reply) => {
+    if (!requirePermission(req, reply, "reports.maintenance_master.manage")) return;
     const site_code = String(req.query?.site_code || getSiteCode(req)).trim().toLowerCase() || "default";
     const report_type = String(req.query?.period_type || "weekly").trim().toLowerCase();
     const download = String(req.query?.download || "").trim() === "1";
@@ -7052,6 +7086,7 @@ export default async function reportsRoutes(app) {
   });
 
   app.get("/maintenance-exec.pptx", async (req, reply) => {
+    if (!requirePermission(req, reply, "reports.executive.read")) return;
     const resolved = resolveMaintenancePeriod(req);
     if (!resolved) {
       return reply.code(400).send({ error: "Provide month=YYYY-MM or start/end=YYYY-MM-DD" });
@@ -7126,6 +7161,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
+    if (!requirePermission(req, reply, "reports.export.read")) return;
     const reportRevision = "daily-pdf-no-cost-r2026-04-04b";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
@@ -7519,6 +7555,7 @@ export default async function reportsRoutes(app) {
   // WEEKLY PDF
   // =========================
   app.get("/weekly.pdf", async (req, reply) => {
+    if (!requirePermission(req, reply, "reports.export.read")) return;
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -7818,6 +7855,7 @@ export default async function reportsRoutes(app) {
 
   // GET /api/reports/operations.pdf?start=YYYY-MM-DD&end=YYYY-MM-DD&download=1
   app.get("/operations.pdf", async (req, reply) => {
+    if (!requirePermission(req, reply, "reports.export.read")) return;
     const reportRevision = "ops-pdf-r2026-04-04b";
     const start = String(req.query?.start || "").trim();
     const end = String(req.query?.end || "").trim();
@@ -8073,6 +8111,7 @@ export default async function reportsRoutes(app) {
 
   // GET /api/reports/operations.xlsx?start=YYYY-MM-DD&end=YYYY-MM-DD
   app.get("/operations.xlsx", async (req, reply) => {
+    if (!requirePermission(req, reply, "reports.export.read")) return;
     const start = String(req.query?.start || "").trim();
     const end = String(req.query?.end || "").trim();
     if (!isDate(start) || !isDate(end)) {
@@ -8233,6 +8272,7 @@ export default async function reportsRoutes(app) {
 
   // GET /api/reports/executive-pack.xlsx?start=YYYY-MM-DD&end=YYYY-MM-DD&scheduled=10&near_due_hours=50
   app.get("/executive-pack.xlsx", async (req, reply) => {
+    if (!requirePermission(req, reply, "reports.executive.read")) return;
     const end = String(req.query?.end || "").trim() || todayYmd();
     const start = String(req.query?.start || "").trim() || monthStartIso(end);
     const scheduled = Math.max(0.5, Number(req.query?.scheduled || 10));
@@ -8445,6 +8485,7 @@ export default async function reportsRoutes(app) {
 
   // GET /api/reports/executive-kpi-pack.xlsx?period_type=weekly|monthly&start=YYYY-MM-DD&end=YYYY-MM-DD&month=YYYY-MM&site_codes=main,site-b
   app.get("/executive-kpi-pack.xlsx", async (req, reply) => {
+    if (!requirePermission(req, reply, "reports.executive.read")) return;
     const periodType = String(req.query?.period_type || "weekly").trim().toLowerCase();
     const rawSites = String(req.query?.site_codes || "main").trim();
     const siteCodes = Array.from(new Set(rawSites.split(",").map((s) => String(s || "").trim().toLowerCase()).filter(Boolean))).slice(0, 20);
