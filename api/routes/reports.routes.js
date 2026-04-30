@@ -6767,33 +6767,49 @@ export default async function reportsRoutes(app) {
     const bottomAssets = assetPerfSorted.slice(-2).reverse();
     const midStart = Math.max(0, Math.floor((assetPerfSorted.length - 2) / 2));
     const midAssets = assetPerfSorted.slice(midStart, midStart + 2);
-    const plannedUpcomingCosts = db.prepare(`
-      SELECT
-        a.asset_code,
-        a.asset_name,
-        m.service_name,
-        COALESCE(m.current_hours, 0) AS current_hours,
-        COALESCE(m.next_due_hours, 0) AS next_due_hours,
-        COALESCE(SUM(CASE WHEN LOWER(IFNULL(p.consumable_kind, '')) IN ('oil','lube','lubricant','hydraulic','hydraulic_oil','coolant','grease','hyd fluid','hydraulic fluid') THEN wi.quantity * COALESCE(wi.unit_cost, p.unit_cost, 0) ELSE 0 END), 0) AS planned_lube_cost,
-        COALESCE(SUM(CASE WHEN LOWER(IFNULL(p.consumable_kind, '')) IN ('oil','lube','lubricant','hydraulic','hydraulic_oil','coolant','grease','hyd fluid','hydraulic fluid') THEN 0 ELSE wi.quantity * COALESCE(wi.unit_cost, p.unit_cost, 0) END), 0) AS planned_parts_cost
-      FROM maintenance_plans m
-      JOIN assets a ON a.id = m.asset_id
-      LEFT JOIN work_order_items wi ON wi.work_order_id = (
-        SELECT w.id
-        FROM work_orders w
-        WHERE w.asset_id = m.asset_id
-          AND LOWER(COALESCE(w.source, '')) = 'maintenance_plan'
-          AND w.reference_id = m.id
-          AND COALESCE(w.status, '') = 'open'
-        ORDER BY w.id DESC
-        LIMIT 1
-      )
-      LEFT JOIN parts p ON p.id = wi.part_id
-      WHERE m.active = 1
-      GROUP BY m.id
-      ORDER BY (COALESCE(m.next_due_hours, 0) - COALESCE(m.current_hours, 0)) ASC, a.asset_code ASC
-      LIMIT 10
-    `).all();
+    const plannedUpcomingCosts = hasTable("work_order_items")
+      ? db.prepare(`
+        SELECT
+          a.asset_code,
+          a.asset_name,
+          m.service_name,
+          COALESCE(m.current_hours, 0) AS current_hours,
+          COALESCE(m.next_due_hours, 0) AS next_due_hours,
+          COALESCE(SUM(CASE WHEN LOWER(IFNULL(p.consumable_kind, '')) IN ('oil','lube','lubricant','hydraulic','hydraulic_oil','coolant','grease','hyd fluid','hydraulic fluid') THEN wi.quantity * COALESCE(wi.unit_cost, p.unit_cost, 0) ELSE 0 END), 0) AS planned_lube_cost,
+          COALESCE(SUM(CASE WHEN LOWER(IFNULL(p.consumable_kind, '')) IN ('oil','lube','lubricant','hydraulic','hydraulic_oil','coolant','grease','hyd fluid','hydraulic fluid') THEN 0 ELSE wi.quantity * COALESCE(wi.unit_cost, p.unit_cost, 0) END), 0) AS planned_parts_cost
+        FROM maintenance_plans m
+        JOIN assets a ON a.id = m.asset_id
+        LEFT JOIN work_order_items wi ON wi.work_order_id = (
+          SELECT w.id
+          FROM work_orders w
+          WHERE w.asset_id = m.asset_id
+            AND LOWER(COALESCE(w.source, '')) = 'maintenance_plan'
+            AND w.reference_id = m.id
+            AND COALESCE(w.status, '') = 'open'
+          ORDER BY w.id DESC
+          LIMIT 1
+        )
+        LEFT JOIN parts p ON p.id = wi.part_id
+        WHERE m.active = 1
+        GROUP BY m.id
+        ORDER BY (COALESCE(m.next_due_hours, 0) - COALESCE(m.current_hours, 0)) ASC, a.asset_code ASC
+        LIMIT 10
+      `).all()
+      : db.prepare(`
+        SELECT
+          a.asset_code,
+          a.asset_name,
+          m.service_name,
+          COALESCE(m.current_hours, 0) AS current_hours,
+          COALESCE(m.next_due_hours, 0) AS next_due_hours,
+          0 AS planned_lube_cost,
+          0 AS planned_parts_cost
+        FROM maintenance_plans m
+        JOIN assets a ON a.id = m.asset_id
+        WHERE m.active = 1
+        ORDER BY (COALESCE(m.next_due_hours, 0) - COALESCE(m.current_hours, 0)) ASC, a.asset_code ASC
+        LIMIT 10
+      `).all();
     const partsTrackingRows = db.prepare(`
       SELECT
         a.asset_code,
