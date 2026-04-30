@@ -419,16 +419,34 @@ export default async function dashboardRoutes(app) {
       getDayAssetDowntimeWithSite && bdLogSiteSql
         ? getDayAssetDowntimeWithSite.all(dayStr, siteCode)
         : getDayAssetDowntimeNoSite.all(dayStr);
-    const downtimeRows = logDowntimeRows.length
-      ? logDowntimeRows
-      : getDayAssetDowntimeFallbackWithSite && bdOnlySiteSql
+    const fallbackDowntimeRows =
+      getDayAssetDowntimeFallbackWithSite && bdOnlySiteSql
         ? getDayAssetDowntimeFallbackWithSite.all(dayStr, siteCode)
         : getDayAssetDowntimeFallbackNoSite.all(dayStr);
-    const downtimeByAsset = new Map(
-      downtimeRows
+
+    // Merge per asset: prefer explicit downtime logs for that asset/day,
+    // otherwise use fallback downtime from breakdown header rows.
+    // Previous global-switch behavior dropped fallback rows whenever any log existed.
+    const logDowntimeByAsset = new Map(
+      (logDowntimeRows || [])
         .map((r) => [Number(r.asset_id || 0), Number(r.downtime_hours || 0)])
         .filter(([assetId]) => activeFleetIds.has(assetId) && !dailyStandbyIds.has(assetId))
     );
+    const fallbackDowntimeByAsset = new Map(
+      (fallbackDowntimeRows || [])
+        .map((r) => [Number(r.asset_id || 0), Number(r.downtime_hours || 0)])
+        .filter(([assetId]) => activeFleetIds.has(assetId) && !dailyStandbyIds.has(assetId))
+    );
+    const downtimeByAsset = new Map();
+    const downtimeAssetIds = new Set([
+      ...Array.from(logDowntimeByAsset.keys()),
+      ...Array.from(fallbackDowntimeByAsset.keys()),
+    ]);
+    for (const assetId of downtimeAssetIds) {
+      const logged = Number(logDowntimeByAsset.get(assetId) || 0);
+      const fallback = Number(fallbackDowntimeByAsset.get(assetId) || 0);
+      downtimeByAsset.set(assetId, logged > 0 ? logged : fallback);
+    }
     const openBreakdownAssets = new Set(
       (getOpenBreakdownAssetIdsByDayWithSite && bdOnlySiteSql
         ? getOpenBreakdownAssetIdsByDayWithSite.all(dayStr, dayStr, siteCode)
@@ -514,8 +532,8 @@ export default async function dashboardRoutes(app) {
     // Do not force-add all active assets without daily rows.
     // KPI should primarily reflect reported data for the selected period/site.
     const missingFleetIds = [];
-    const downtimeOnlyIds = downtimeRows
-      .map((r) => Number(r.asset_id || 0))
+    const downtimeOnlyIds = Array.from(downtimeByAsset.keys())
+      .map((id) => Number(id || 0))
       .filter((id) => id > 0 && !assetIdsInHours.has(id) && !dailyStandbyIds.has(id));
     const openBreakdownOnlyIds = Array.from(openBreakdownAssets).filter(
       (id) => id > 0 && !assetIdsInHours.has(id) && !dailyStandbyIds.has(id)
