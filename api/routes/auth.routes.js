@@ -2,7 +2,22 @@ import crypto from "node:crypto";
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 
-export const VALID_ROLES = ["admin", "supervisor", "stores", "artisan", "operator"];
+export const VALID_ROLES = [
+  "admin",
+  "executive",
+  "finance",
+  "storeman",
+  "procurement",
+  "hr_manager",
+  "quality_manager",
+  "site_manager",
+  "plant_manager",
+  "supervisor",
+  "artisan",
+  "operator",
+  // Legacy role retained for backward compatibility.
+  "stores",
+];
 
 /** Tab keys that can be assigned per user (UI sections). Admin-only "admin" tab is not listed here. */
 export const ASSIGNABLE_TAB_KEYS = [
@@ -26,6 +41,32 @@ export const ASSIGNABLE_TAB_KEYS = [
   "Breakdowns",
   "vehicle",
 ];
+
+const PERMISSION_KEYS = [
+  "procurement.requisition.create",
+  "procurement.requisition.request_approval",
+  "procurement.requisition.approve",
+  "procurement.requisition.receive",
+  "reports.executive.read",
+  "maintenance.read",
+  "admin.users.manage",
+];
+
+const ROLE_PERMISSION_MAP = {
+  admin: [...PERMISSION_KEYS],
+  executive: ["reports.executive.read", "maintenance.read"],
+  finance: ["reports.executive.read", "maintenance.read"],
+  procurement: ["procurement.requisition.create", "procurement.requisition.request_approval", "procurement.requisition.receive", "maintenance.read"],
+  storeman: ["procurement.requisition.create", "procurement.requisition.request_approval", "procurement.requisition.receive", "maintenance.read"],
+  stores: ["procurement.requisition.create", "procurement.requisition.request_approval", "procurement.requisition.receive", "maintenance.read"],
+  hr_manager: ["procurement.requisition.approve", "maintenance.read"],
+  quality_manager: ["procurement.requisition.approve", "maintenance.read"],
+  site_manager: ["procurement.requisition.approve", "maintenance.read"],
+  plant_manager: ["procurement.requisition.approve", "maintenance.read"],
+  supervisor: ["procurement.requisition.approve", "maintenance.read"],
+  artisan: ["maintenance.read"],
+  operator: ["maintenance.read"],
+};
 
 const SESSION_DAYS = Math.min(
   365,
@@ -99,7 +140,8 @@ function parseRoles(raw, fallbackRole = "operator") {
     } catch {}
   }
   if (!arr.length && fallbackRole) arr = [String(fallbackRole || "").trim().toLowerCase()];
-  const out = Array.from(new Set(arr.filter((r) => VALID_ROLES.includes(r))));
+  const normalized = arr.map((r) => (r === "stores" ? "storeman" : r));
+  const out = Array.from(new Set(normalized.filter((r) => VALID_ROLES.includes(r))));
   return out.length ? out : ["operator"];
 }
 
@@ -164,6 +206,37 @@ export default async function authRoutes(app) {
 
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_auth_sessions_token ON auth_sessions(token)`).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id)`).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS permissions (
+      key TEXT PRIMARY KEY,
+      description TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS role_permissions (
+      role_key TEXT NOT NULL,
+      permission_key TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (role_key, permission_key),
+      FOREIGN KEY (permission_key) REFERENCES permissions(key) ON DELETE CASCADE
+    )
+  `).run();
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_role_permissions_role ON role_permissions(role_key)`).run();
+
+  const upsertPermission = db.prepare(`
+    INSERT INTO permissions (key, description)
+    VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET description = excluded.description
+  `);
+  const upsertRolePermission = db.prepare(`
+    INSERT OR IGNORE INTO role_permissions (role_key, permission_key)
+    VALUES (?, ?)
+  `);
+  PERMISSION_KEYS.forEach((k) => upsertPermission.run(k, k));
+  Object.entries(ROLE_PERMISSION_MAP).forEach(([roleKey, perms]) => {
+    perms.forEach((perm) => upsertRolePermission.run(roleKey, perm));
+  });
 
   const ensureAdmin = db.prepare(`
     INSERT INTO users (username, full_name, role, active)
@@ -203,6 +276,25 @@ export default async function authRoutes(app) {
     return pickPrimaryRole(getRequestRoles(req));
   }
 
+  function getPermissionsForRoles(rolesIn) {
+    const roles = Array.from(
+      new Set(
+        (Array.isArray(rolesIn) ? rolesIn : [])
+          .map((r) => String(r || "").trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+    if (!roles.length) return [];
+    const marks = roles.map(() => "?").join(",");
+    const rows = db.prepare(`
+      SELECT DISTINCT permission_key
+      FROM role_permissions
+      WHERE role_key IN (${marks})
+      ORDER BY permission_key ASC
+    `).all(...roles);
+    return rows.map((r) => String(r.permission_key || "").trim()).filter(Boolean);
+  }
+
   function getRequestUsername(req) {
     return String(req.headers["x-user-name"] || "").trim();
   }
@@ -238,6 +330,7 @@ export default async function authRoutes(app) {
     ok: true,
     keys: [...ASSIGNABLE_TAB_KEYS],
     roles: [...VALID_ROLES],
+    permissions: [...PERMISSION_KEYS],
   }));
 
   // POST /api/auth/login
@@ -268,10 +361,12 @@ export default async function authRoutes(app) {
     const dayMod = `+${SESSION_DAYS} days`;
     insertSession.run(token, row.id, dayMod);
 
+    const user = userPayload(row);
+    user.permissions = getPermissionsForRoles(user.roles);
     return {
       ok: true,
       token,
-      user: userPayload(row),
+      user,
     };
   });
 
@@ -293,8 +388,12 @@ export default async function authRoutes(app) {
       if (user && Number(user.active) === 1) {
         return {
           ok: true,
-          user: userPayload(user),
+          user: {
+            ...userPayload(user),
+            permissions: getPermissionsForRoles(parseRoles(user.roles_json, user.role)),
+          },
           roles: VALID_ROLES,
+          permissions: [...PERMISSION_KEYS],
           auth_required: process.env.IRONLOG_AUTH_REQUIRED === "1" || String(process.env.IRONLOG_AUTH_REQUIRED).toLowerCase() === "true",
         };
       }
@@ -308,12 +407,14 @@ export default async function authRoutes(app) {
         full_name: null,
         role: roleFromHeader,
         roles: [roleFromHeader],
+        permissions: getPermissionsForRoles([roleFromHeader]),
         active: 1,
         department: null,
         allowed_tabs: null,
         has_password: false,
       },
       roles: VALID_ROLES,
+      permissions: [...PERMISSION_KEYS],
       auth_required: process.env.IRONLOG_AUTH_REQUIRED === "1" || String(process.env.IRONLOG_AUTH_REQUIRED).toLowerCase() === "true",
     };
   });
