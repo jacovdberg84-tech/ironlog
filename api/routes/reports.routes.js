@@ -1037,6 +1037,55 @@ export default async function reportsRoutes(app) {
     const merged = Array.from(new Set([...fromMany, ...fromSingle]));
     return merged.length ? merged : ["admin"];
   }
+  function parseAllowedLocations(raw) {
+    if (raw == null || raw === "") return null;
+    if (Array.isArray(raw)) {
+      const out = raw
+        .map((x) => String(x || "").trim().toLowerCase())
+        .filter(Boolean);
+      return out.length ? Array.from(new Set(out)) : null;
+    }
+    const txt = String(raw || "").trim();
+    if (!txt) return null;
+    try {
+      const parsed = JSON.parse(txt);
+      if (Array.isArray(parsed)) {
+        const out = parsed
+          .map((x) => String(x || "").trim().toLowerCase())
+          .filter(Boolean);
+        return out.length ? Array.from(new Set(out)) : null;
+      }
+    } catch {}
+    const out = txt
+      .split(",")
+      .map((x) => String(x || "").trim().toLowerCase())
+      .filter(Boolean);
+    return out.length ? Array.from(new Set(out)) : null;
+  }
+  function requestAllowedLocations(req) {
+    const username = String(req.headers["x-user-name"] || "").trim();
+    if (!username) return null;
+    const row = db.prepare(`SELECT allowed_locations FROM users WHERE username = ? LIMIT 1`).get(username);
+    return parseAllowedLocations(row?.allowed_locations);
+  }
+  function enforceSiteScope(req, reply, requestedSites) {
+    const roles = requestRoles(req);
+    const isExecutive = roles.includes("executive");
+    if (!isExecutive) return true;
+    const allowed = requestAllowedLocations(req);
+    if (!Array.isArray(allowed) || !allowed.length) return true;
+    const requested = Array.from(new Set((requestedSites || []).map((x) => String(x || "").trim().toLowerCase()).filter(Boolean)));
+    if (!requested.length) return true;
+    const outside = requested.filter((s) => !allowed.includes(s));
+    if (!outside.length) return true;
+    reply.code(403).send({
+      ok: false,
+      error: "site access denied",
+      requested_sites: requested,
+      allowed_locations: allowed,
+    });
+    return false;
+  }
   function requireAdmin(req, reply) {
     const roles = requestRoles(req);
     if (!roles.includes("admin") && !roles.includes("supervisor")) {
@@ -7050,6 +7099,7 @@ export default async function reportsRoutes(app) {
   app.get("/maintenance-master/latest.pptx", async (req, reply) => {
     if (!requirePermission(req, reply, "reports.maintenance_master.manage")) return;
     const site_code = String(req.query?.site_code || getSiteCode(req)).trim().toLowerCase() || "default";
+    if (!enforceSiteScope(req, reply, [site_code])) return;
     const report_type = String(req.query?.period_type || "weekly").trim().toLowerCase();
     const download = String(req.query?.download || "").trim() === "1";
     const month = String(req.query?.month || "").trim();
@@ -8285,6 +8335,7 @@ export default async function reportsRoutes(app) {
     }
 
     const siteCode = String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
+    if (!enforceSiteScope(req, reply, [siteCode])) return;
     const sharedHeaders = {
       "x-site-code": siteCode,
       "x-user-role": String(req.headers["x-user-role"] || "admin"),
@@ -8489,6 +8540,7 @@ export default async function reportsRoutes(app) {
     const periodType = String(req.query?.period_type || "weekly").trim().toLowerCase();
     const rawSites = String(req.query?.site_codes || "main").trim();
     const siteCodes = Array.from(new Set(rawSites.split(",").map((s) => String(s || "").trim().toLowerCase()).filter(Boolean))).slice(0, 20);
+    if (!enforceSiteScope(req, reply, siteCodes)) return;
     if (!["weekly", "monthly"].includes(periodType)) {
       return reply.code(400).send({ error: "period_type must be weekly or monthly" });
     }

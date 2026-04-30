@@ -4175,17 +4175,15 @@
               </div>
               <div class="form-field">
                 <label>Allowed Locations</label>
-                <input id="adminAllowedLocations" class="w-full" placeholder="e.g. main,workshop" />
+                <input id="adminAllowedLocations" class="w-full" list="adminAllowedLocationsList" placeholder="e.g. main,workshop" />
+                <datalist id="adminAllowedLocationsList"></datalist>
+                <p class="muted small" style="margin-top:6px">Comma-separated site codes. Executive access is restricted to these sites.</p>
               </div>
             </div>
             <div class="form-row">
               <div class="form-field">
                 <label>Roles</label>
-                <select id="adminRoles" class="w-full" multiple size="5">
-                  <option value="admin">admin</option>
-                  <option value="supervisor">supervisor</option>
-                  <option value="stores">stores</option>
-                  <option value="artisan">artisan</option>
+                <select id="adminRoles" class="w-full" multiple size="8">
                   <option value="operator" selected>operator</option>
                 </select>
               </div>

@@ -1206,17 +1206,32 @@ let __adminTabKeysLoaded = false;
 async function ensureAdminTabOptions() {
   if (__adminTabKeysLoaded) return;
   const sel = qs("adminUserTabs");
-  if (!sel) return;
+  const rolesSel = qs("adminRoles");
+  if (!sel && !rolesSel) return;
   try {
     const data = await fetchJson(`${API}/api/auth/tabs`);
     const keys = Array.isArray(data.keys) ? data.keys : [];
-    sel.innerHTML = "";
-    keys.forEach((k) => {
-      const opt = document.createElement("option");
-      opt.value = k;
-      opt.textContent = k;
-      sel.appendChild(opt);
-    });
+    if (sel) {
+      sel.innerHTML = "";
+      keys.forEach((k) => {
+        const opt = document.createElement("option");
+        opt.value = k;
+        opt.textContent = k;
+        sel.appendChild(opt);
+      });
+    }
+    const roles = Array.isArray(data.roles) ? data.roles : [];
+    if (rolesSel && roles.length) {
+      const selectedBefore = Array.from(rolesSel.selectedOptions || []).map((o) => o.value);
+      rolesSel.innerHTML = "";
+      roles.forEach((r) => {
+        const opt = document.createElement("option");
+        opt.value = String(r || "").trim().toLowerCase();
+        opt.textContent = String(r || "").trim().toLowerCase();
+        if (selectedBefore.includes(opt.value) || opt.value === "operator") opt.selected = true;
+        rolesSel.appendChild(opt);
+      });
+    }
     __adminTabKeysLoaded = true;
   } catch {}
 }
@@ -1230,6 +1245,24 @@ async function loadAdminUsers() {
     await ensureAdminTabOptions();
     const data = await fetchJson(`${API}/api/auth/users`);
     const rows = Array.isArray(data.rows) ? data.rows : [];
+    const knownLocations = new Set(["main"]);
+    rows.forEach((r) => {
+      if (Array.isArray(r.allowed_locations)) {
+        r.allowed_locations.forEach((loc) => {
+          const v = String(loc || "").trim().toLowerCase();
+          if (v) knownLocations.add(v);
+        });
+      }
+    });
+    const locList = qs("adminAllowedLocationsList");
+    if (locList) {
+      locList.innerHTML = "";
+      Array.from(knownLocations).sort().forEach((loc) => {
+        const opt = document.createElement("option");
+        opt.value = loc;
+        locList.appendChild(opt);
+      });
+    }
     tbody.innerHTML = "";
     rows.forEach((r) => {
       const tr = document.createElement("tr");
