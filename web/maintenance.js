@@ -15,6 +15,15 @@ let reportSubscriptionsCache = [];
 const MAINT_LOCK_KEY = "ironlog_maintenance_access_ok";
 const MAINT_LOCK_USER = "BJ van den Berg";
 const MAINT_LOCK_PASSWORD = "0mhliac789";
+const TYRE_INSPECTIONS_STORAGE_KEY = "ironlog_tyre_inspections_v1";
+const TYRE_POSITIONS = [
+  { key: "front_left", label: "Front Left" },
+  { key: "front_right", label: "Front Right" },
+  { key: "rear_left_outer", label: "Rear Left Outer" },
+  { key: "rear_left_inner", label: "Rear Left Inner" },
+  { key: "rear_right_inner", label: "Rear Right Inner" },
+  { key: "rear_right_outer", label: "Rear Right Outer" },
+];
 
 function ensureMaintenanceAccess() {
   if (sessionStorage.getItem(MAINT_LOCK_KEY) === "1") return true;
@@ -122,6 +131,7 @@ function viewForSection(section) {
     "manager-inspections": "mi",
     "artisan-inspections": "ai",
     "weekly-forum": "wf",
+    "tyre-inspections": "tyre",
     "asset-kpi": "kpi",
     "histogram": "hist",
     "sync-admin": "sync",
@@ -145,6 +155,7 @@ function scrollToSection(section) {
           "mi": "managerInspectionsSection",
           "ai": "artisanInspectionsSection",
           "wf": "weeklyForumSection",
+          "tyre": "tyreInspectionsSection",
           "kpi": "assetKpiSection",
           "hist": "histogramSection",
           "sync": "syncAdminSection",
@@ -177,6 +188,9 @@ function refreshTopViewData(view) {
       loadWeeklyForumSummary().catch(() => {});
       loadWeeklyForumActions().catch(() => {});
       loadWeeklyForumInputs().catch(() => {});
+      break;
+    case "tyre":
+      loadTyreInspections();
       break;
     case "kpi":
       loadAssetKpiWeekly().catch(() => {});
@@ -1805,6 +1819,7 @@ function setTopView(view) {
   const mi = document.getElementById("managerInspectionsSection");
   const ai = document.getElementById("artisanInspectionsSection");
   const wf = document.getElementById("weeklyForumSection");
+  const tyre = document.getElementById("tyreInspectionsSection");
   const kpi = document.getElementById("assetKpiSection");
   const hist = document.getElementById("histogramSection");
   const sync = document.getElementById("syncAdminSection");
@@ -1815,6 +1830,7 @@ function setTopView(view) {
   if (mi) mi.style.display = "none";
   if (ai) ai.style.display = "none";
   if (wf) wf.style.display = "none";
+  if (tyre) tyre.style.display = "none";
   if (kpi) kpi.style.display = "none";
   if (hist) hist.style.display = "none";
   if (sync) sync.style.display = "none";
@@ -1844,6 +1860,9 @@ function setTopView(view) {
       break;
     case "wf":
       if (wf) wf.style.display = "block";
+      break;
+    case "tyre":
+      if (tyre) tyre.style.display = "block";
       break;
     case "kpi":
       if (kpi) kpi.style.display = "block";
@@ -1882,6 +1901,9 @@ function setTopView(view) {
           break;
         case "wf":
           isActive = section === "weekly-forum";
+          break;
+        case "tyre":
+          isActive = section === "tyre-inspections";
           break;
         case "kpi":
           isActive = section === "asset-kpi";
@@ -2290,6 +2312,8 @@ async function loadAssetsForInspection() {
   const aiF = document.getElementById("aiFilterAsset");
   const drA = document.getElementById("drAsset");
   const drF = document.getElementById("drFilterAsset");
+  const tyreA = document.getElementById("tyreAsset");
+  const tyreF = document.getElementById("tyreFilterAsset");
   if (!selA || !selF) return;
   try {
     const res = await fetch(`${API}/assets?include_archived=0`);
@@ -2306,6 +2330,8 @@ async function loadAssetsForInspection() {
     if (aiF) aiF.innerHTML = `<option value="">All assets</option>${opts}`;
     if (drA) drA.innerHTML = `<option value="">Select asset</option>${opts}`;
     if (drF) drF.innerHTML = `<option value="">All assets</option>${opts}`;
+    if (tyreA) tyreA.innerHTML = `<option value="">Select asset</option>${opts}`;
+    if (tyreF) tyreF.innerHTML = `<option value="">All assets</option>${opts}`;
   } catch (e) {
     selA.innerHTML = `<option value="">Assets load failed</option>`;
     selF.innerHTML = `<option value="">Assets load failed</option>`;
@@ -2313,6 +2339,205 @@ async function loadAssetsForInspection() {
     if (aiF) aiF.innerHTML = `<option value="">Assets load failed</option>`;
     if (drA) drA.innerHTML = `<option value="">Assets load failed</option>`;
     if (drF) drF.innerHTML = `<option value="">Assets load failed</option>`;
+    if (tyreA) tyreA.innerHTML = `<option value="">Assets load failed</option>`;
+    if (tyreF) tyreF.innerHTML = `<option value="">Assets load failed</option>`;
+  }
+}
+
+function tyreInputId(positionKey, field) {
+  return `tyre_${positionKey}_${field}`;
+}
+
+function initTyreLayout() {
+  const grid = document.getElementById("tyreGrid");
+  if (!grid) return;
+  grid.innerHTML = TYRE_POSITIONS.map((p) => `
+    <div class="card" style="padding:10px;">
+      <div style="font-weight:600; margin-bottom:8px;">${esc(p.label)}</div>
+      <label>
+        Pressure
+        <input id="${tyreInputId(p.key, "pressure")}" type="number" min="0" step="0.1" placeholder="kPa / PSI" />
+      </label>
+      <label>
+        Tread depth
+        <input id="${tyreInputId(p.key, "tread")}" type="number" min="0" step="0.1" placeholder="mm" />
+      </label>
+      <label>
+        Serial number
+        <input id="${tyreInputId(p.key, "serial")}" type="text" placeholder="Serial" />
+      </label>
+      <label>
+        Date last changed
+        <input id="${tyreInputId(p.key, "changed")}" type="date" />
+      </label>
+      <label>
+        Tyre cost
+        <input id="${tyreInputId(p.key, "cost")}" type="number" min="0" step="0.01" placeholder="Cost" />
+      </label>
+    </div>
+  `).join("");
+}
+
+function getTyreInspections() {
+  try {
+    const raw = localStorage.getItem(TYRE_INSPECTIONS_STORAGE_KEY);
+    const rows = JSON.parse(String(raw || "[]"));
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function setTyreInspections(rows) {
+  localStorage.setItem(TYRE_INSPECTIONS_STORAGE_KEY, JSON.stringify(Array.isArray(rows) ? rows : []));
+}
+
+function collectTyrePositionRows() {
+  return TYRE_POSITIONS.map((p) => {
+    const pressureRaw = String(document.getElementById(tyreInputId(p.key, "pressure"))?.value || "").trim();
+    const treadRaw = String(document.getElementById(tyreInputId(p.key, "tread"))?.value || "").trim();
+    const costRaw = String(document.getElementById(tyreInputId(p.key, "cost"))?.value || "").trim();
+    const pressure = pressureRaw === "" ? null : Number(pressureRaw);
+    const tread_depth = treadRaw === "" ? null : Number(treadRaw);
+    const tyre_cost = costRaw === "" ? 0 : Number(costRaw);
+    return {
+      position_key: p.key,
+      position_label: p.label,
+      pressure,
+      tread_depth,
+      serial_number: String(document.getElementById(tyreInputId(p.key, "serial"))?.value || "").trim(),
+      last_changed_date: String(document.getElementById(tyreInputId(p.key, "changed"))?.value || "").trim(),
+      tyre_cost,
+    };
+  });
+}
+
+function clearTyreForm() {
+  TYRE_POSITIONS.forEach((p) => {
+    ["pressure", "tread", "serial", "changed", "cost"].forEach((field) => {
+      const el = document.getElementById(tyreInputId(p.key, field));
+      if (el) el.value = "";
+    });
+  });
+}
+
+function renderTyreList(rows) {
+  const list = document.getElementById("tyreList");
+  if (!list) return;
+  if (!rows.length) {
+    list.innerHTML = `<div class="empty">No tyre inspections saved for this filter.</div>`;
+    return;
+  }
+  list.innerHTML = rows.map((r) => `
+    <div class="item">
+      <div class="title">${esc(r.asset_label || "-")}</div>
+      <div class="meta">
+        Inspection ${esc(r.inspection_date || "-")} | Running hours ${Number(r.running_hours || 0).toFixed(1)} |
+        Tyre cost ${Number(r.total_tyre_cost || 0).toFixed(2)} | Cost per running hour <b>${Number(r.cost_per_running_hour || 0).toFixed(2)}</b>
+      </div>
+      <div style="overflow:auto; margin-top:8px;">
+        <table class="gridTable" style="min-width:840px;">
+          <thead>
+            <tr>
+              <th>Position</th><th>Pressure</th><th>Tread depth</th><th>Serial</th><th>Last changed</th><th>Tyre cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(Array.isArray(r.tyres) ? r.tyres : []).map((t) => `
+              <tr>
+                <td>${esc(t.position_label || "-")}</td>
+                <td>${t.pressure == null ? "-" : Number(t.pressure).toFixed(1)}</td>
+                <td>${t.tread_depth == null ? "-" : Number(t.tread_depth).toFixed(1)}</td>
+                <td>${esc(t.serial_number || "-")}</td>
+                <td>${esc(t.last_changed_date || "-")}</td>
+                <td>${Number(t.tyre_cost || 0).toFixed(2)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `).join("");
+}
+
+function loadTyreInspections() {
+  const filter = String(document.getElementById("tyreFilterAsset")?.value || "").trim();
+  const rows = getTyreInspections()
+    .filter((r) => !filter || String(r.asset_id) === filter)
+    .sort((a, b) => String(b.inspection_date || "").localeCompare(String(a.inspection_date || "")));
+  renderTyreList(rows);
+}
+
+async function pullTyreLiveHours() {
+  const assetId = Number(document.getElementById("tyreAsset")?.value || 0);
+  const out = document.getElementById("tyreLiveHoursMeta");
+  if (!assetId) {
+    if (out) out.textContent = "Select an asset first.";
+    return;
+  }
+  if (out) out.textContent = "Loading live hours...";
+  try {
+    const res = await fetch(`${API}/maintenance/asset/${assetId}/live-hours`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load live hours");
+    const current = Number(data?.current_hours ?? 0);
+    const inp = document.getElementById("tyreRunningHours");
+    if (inp) inp.value = Number.isFinite(current) ? current.toFixed(1) : "";
+    if (out) out.textContent = `Live hours: ${Number.isFinite(current) ? current.toFixed(1) : "0.0"} (${data?.source || "-"})`;
+  } catch (e) {
+    if (out) out.textContent = `Live hours error: ${e.message || e}`;
+  }
+}
+
+function saveTyreInspection() {
+  const msg = document.getElementById("tyreMsg");
+  const assetSel = document.getElementById("tyreAsset");
+  const asset_id = Number(assetSel?.value || 0);
+  const inspection_date = String(document.getElementById("tyreInspectionDate")?.value || "").trim();
+  const runningRaw = String(document.getElementById("tyreRunningHours")?.value || "").trim();
+  const running_hours = runningRaw === "" ? 0 : Number(runningRaw);
+  if (!asset_id) {
+    if (msg) msg.textContent = "Select an asset.";
+    return;
+  }
+  if (!inspection_date) {
+    if (msg) msg.textContent = "Select inspection date.";
+    return;
+  }
+  if (!Number.isFinite(running_hours) || running_hours < 0) {
+    if (msg) msg.textContent = "Running hours must be a valid positive number.";
+    return;
+  }
+  const tyres = collectTyrePositionRows();
+  const badNumber = tyres.some((t) => (t.pressure != null && !Number.isFinite(t.pressure))
+    || (t.tread_depth != null && !Number.isFinite(t.tread_depth))
+    || !Number.isFinite(Number(t.tyre_cost || 0)));
+  if (badNumber) {
+    if (msg) msg.textContent = "Please correct tyre pressure, tread, and cost values.";
+    return;
+  }
+  const total_tyre_cost = Number(tyres.reduce((sum, t) => sum + Number(t.tyre_cost || 0), 0).toFixed(2));
+  const divisor = running_hours > 0 ? running_hours : 1;
+  const cost_per_running_hour = Number((total_tyre_cost / divisor).toFixed(4));
+  const opt = assetSel?.selectedOptions?.[0];
+  const record = {
+    id: Date.now(),
+    asset_id,
+    asset_label: String(opt?.textContent || "").trim(),
+    inspection_date,
+    running_hours: Number(running_hours.toFixed(1)),
+    total_tyre_cost,
+    cost_per_running_hour,
+    tyres,
+    created_at: new Date().toISOString(),
+  };
+  const rows = getTyreInspections();
+  rows.unshift(record);
+  setTyreInspections(rows.slice(0, 500));
+  loadTyreInspections();
+  if (msg) {
+    msg.className = "message-success";
+    msg.textContent = `Saved. Total tyre cost ${total_tyre_cost.toFixed(2)} | Cost per running hour ${cost_per_running_hour.toFixed(4)}.`;
   }
 }
 
@@ -3716,6 +3941,23 @@ function akpMiniBars(series) {
   });
 }
 
+function akpDebugStrip(r) {
+  const d = r?.debug || {};
+  const reported = Number(d.reported_days || 0);
+  const noRow = Number(d.no_daily_row_days || 0);
+  const used = Number(d.used_flag_days || 0);
+  const standby = Number(d.standby_flag_days || 0);
+  const fallback = Number(d.fallback_schedule_days || 0);
+  const logged = Number(d.logged_downtime_days || 0);
+  const imputed = Number(d.imputed_open_breakdown_days || 0);
+  return `
+    <div class="muted" style="margin:8px 0 6px 0;">
+      KPI debug: reported <b>${reported}</b>, no daily row <b>${noRow}</b>, used-flag days <b>${used}</b>, standby-flag days <b>${standby}</b>,
+      fallback schedule days <b>${fallback}</b>, logged downtime days <b>${logged}</b>, open-breakdown imputed days <b>${imputed}</b>.
+    </div>
+  `;
+}
+
 function renderAssetKpiVisuals(data) {
   const hoursEl = document.getElementById("akpHoursChart");
   const availEl = document.getElementById("akpAvailabilityTrend");
@@ -3823,6 +4065,7 @@ function renderAssetKpiTables(data) {
           </tr>
           <tr>
             <td colspan="10" style="background:#fafafa;padding:12px;">
+              ${akpDebugStrip(r)}
               <div class="form-grid">
                 <div>
                   <div class="muted" style="margin-bottom:6px;">Asset hours bar view</div>
@@ -4903,6 +5146,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("showManagerInspectionsBtn")?.addEventListener("click", () => setTopView("mi"));
   document.getElementById("showArtisanInspectionsBtn")?.addEventListener("click", () => setTopView("ai"));
   document.getElementById("showWeeklyForumBtn")?.addEventListener("click", () => setTopView("wf"));
+  document.getElementById("showTyreInspectionsBtn")?.addEventListener("click", () => setTopView("tyre"));
   document.getElementById("showAssetKpiBtn")?.addEventListener("click", () => setTopView("kpi"));
   document.getElementById("showHistogramBtn")?.addEventListener("click", () => setTopView("hist"));
   document.getElementById("showSyncAdminBtn")?.addEventListener("click", () => setTopView("sync"));
@@ -5014,6 +5258,15 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("openWeeklyForumPdfBtn")?.addEventListener("click", () => openWeeklyForumPdf(false));
   document.getElementById("downloadWeeklyForumPdfBtn")?.addEventListener("click", () => openWeeklyForumPdf(true));
+  document.getElementById("tyrePullLiveHoursBtn")?.addEventListener("click", () => pullTyreLiveHours());
+  document.getElementById("saveTyreInspectionBtn")?.addEventListener("click", () => saveTyreInspection());
+  document.getElementById("loadTyreInspectionsBtn")?.addEventListener("click", () => loadTyreInspections());
+  document.getElementById("tyreFilterAsset")?.addEventListener("change", () => loadTyreInspections());
+  document.getElementById("tyreClearFormBtn")?.addEventListener("click", () => clearTyreForm());
+  initTyreLayout();
+  const tyreDate = document.getElementById("tyreInspectionDate");
+  if (tyreDate && !tyreDate.value) tyreDate.value = new Date().toISOString().slice(0, 10);
+  loadTyreInspections();
   document.getElementById("wfActionBody")?.addEventListener("change", (evt) => {
     const sel = evt.target?.closest?.("select[data-wf-action-status]");
     if (!sel) return;
