@@ -260,6 +260,24 @@ export default async function maintenanceRoutes(app) {
       FOREIGN KEY (damage_report_id) REFERENCES manager_damage_reports(id) ON DELETE CASCADE
     )
   `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS tyre_inspections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      asset_id INTEGER NOT NULL,
+      uuid TEXT UNIQUE,
+      site_code TEXT DEFAULT 'main',
+      inspection_date TEXT NOT NULL,
+      inspector_name TEXT,
+      running_hours REAL,
+      total_tyre_cost REAL NOT NULL DEFAULT 0,
+      cost_per_running_hour REAL NOT NULL DEFAULT 0,
+      tyres_json TEXT NOT NULL DEFAULT '[]',
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE RESTRICT
+    )
+  `).run();
 
   function hasColumn(table, col) {
     const rows = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -330,6 +348,15 @@ export default async function maintenanceRoutes(app) {
   ensureColumn("manager_damage_report_photos", "image_data TEXT", "image_data");
   ensureColumn("manager_damage_report_photos", "caption TEXT", "caption");
   ensureColumn("manager_damage_report_photos", "created_at TEXT", "created_at");
+  ensureColumn("tyre_inspections", "uuid TEXT", "uuid");
+  ensureColumn("tyre_inspections", "site_code TEXT DEFAULT 'main'", "site_code");
+  ensureColumn("tyre_inspections", "inspector_name TEXT", "inspector_name");
+  ensureColumn("tyre_inspections", "running_hours REAL", "running_hours");
+  ensureColumn("tyre_inspections", "total_tyre_cost REAL NOT NULL DEFAULT 0", "total_tyre_cost");
+  ensureColumn("tyre_inspections", "cost_per_running_hour REAL NOT NULL DEFAULT 0", "cost_per_running_hour");
+  ensureColumn("tyre_inspections", "tyres_json TEXT NOT NULL DEFAULT '[]'", "tyres_json");
+  ensureColumn("tyre_inspections", "notes TEXT", "notes");
+  ensureColumn("tyre_inspections", "updated_at TEXT", "updated_at");
   ensureColumn("maintenance_histogram_events", "site_code TEXT DEFAULT 'main'", "site_code");
   ensureColumn("maintenance_histogram_events", "event_date TEXT", "event_date");
   ensureColumn("maintenance_histogram_events", "asset_number TEXT", "asset_number");
@@ -3771,6 +3798,147 @@ export default async function maintenanceRoutes(app) {
       db.prepare(`DELETE FROM manager_inspection_photos WHERE ${photoInspectionCol} = ?`).run(inspectionId);
       db.prepare(`DELETE FROM manager_inspections WHERE id = ?`).run(inspectionId);
       return reply.send({ ok: true, id: inspectionId, work_order_id: current.work_order_id || null });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // =====================================================
+  // TYRE INSPECTIONS
+  // =====================================================
+  function normalizeTyreRows(raw) {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((x) => {
+        const position_key = String(x?.position_key || "").trim().toLowerCase();
+        const position_label = String(x?.position_label || "").trim();
+        const pressureRaw = x?.pressure;
+        const treadRaw = x?.tread_depth;
+        const costRaw = x?.tyre_cost;
+        const pressure = pressureRaw === "" || pressureRaw == null ? null : Number(pressureRaw);
+        const tread_depth = treadRaw === "" || treadRaw == null ? null : Number(treadRaw);
+        const tyre_cost = costRaw === "" || costRaw == null ? 0 : Number(costRaw);
+        return {
+          position_key,
+          position_label: position_label || position_key,
+          pressure: Number.isFinite(pressure) ? pressure : null,
+          tread_depth: Number.isFinite(tread_depth) ? tread_depth : null,
+          serial_number: String(x?.serial_number || "").trim() || null,
+          last_changed_date: isDate(String(x?.last_changed_date || "").trim()) ? String(x.last_changed_date).trim() : null,
+          tyre_cost: Number.isFinite(tyre_cost) && tyre_cost > 0 ? tyre_cost : 0,
+        };
+      })
+      .filter((x) => x.position_key);
+  }
+
+  app.get("/tyre-inspections", async (req, reply) => {
+    try {
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const assetId = Number(req.query?.asset_id || 0);
+      const start = String(req.query?.start || "").trim();
+      const end = String(req.query?.end || "").trim();
+      const params = [site_code];
+      const where = ["ti.site_code = ?"];
+      if (assetId > 0) {
+        where.push("ti.asset_id = ?");
+        params.push(assetId);
+      }
+      if (isDate(start)) {
+        where.push("ti.inspection_date >= ?");
+        params.push(start);
+      }
+      if (isDate(end)) {
+        where.push("ti.inspection_date <= ?");
+        params.push(end);
+      }
+      const rows = db.prepare(`
+        SELECT
+          ti.id,
+          ti.asset_id,
+          ti.inspection_date,
+          ti.inspector_name,
+          ti.running_hours,
+          ti.total_tyre_cost,
+          ti.cost_per_running_hour,
+          ti.tyres_json,
+          ti.notes,
+          ti.created_at,
+          a.asset_code,
+          a.asset_name
+        FROM tyre_inspections ti
+        JOIN assets a ON a.id = ti.asset_id
+        WHERE ${where.join(" AND ")}
+        ORDER BY ti.inspection_date DESC, ti.id DESC
+      `).all(...params);
+      return reply.send({
+        ok: true,
+        rows: rows.map((r) => {
+          let tyres = [];
+          try {
+            const parsed = JSON.parse(String(r.tyres_json || "[]"));
+            tyres = normalizeTyreRows(parsed);
+          } catch {}
+          return { ...r, tyres };
+        }),
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.post("/tyre-inspections", async (req, reply) => {
+    try {
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const asset_id = Number(req.body?.asset_id || 0);
+      const inspection_date = String(req.body?.inspection_date || "").trim() || new Date().toISOString().slice(0, 10);
+      const inspector_name = String(req.body?.inspector_name || "").trim() || null;
+      const notes = String(req.body?.notes || "").trim() || null;
+      if (!asset_id) return reply.code(400).send({ ok: false, error: "asset_id is required" });
+      if (!isDate(inspection_date)) return reply.code(400).send({ ok: false, error: "inspection_date must be YYYY-MM-DD" });
+      const asset = db.prepare(`SELECT id FROM assets WHERE id = ?`).get(asset_id);
+      if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
+
+      const tyres = normalizeTyreRows(req.body?.tyres);
+      const runningRaw = req.body?.running_hours;
+      const running_hours = runningRaw == null || runningRaw === ""
+        ? 0
+        : Number(runningRaw);
+      if (!Number.isFinite(running_hours) || running_hours < 0) {
+        return reply.code(400).send({ ok: false, error: "running_hours must be a positive number" });
+      }
+      const total_tyre_cost = Number(
+        tyres.reduce((sum, t) => sum + Number(t.tyre_cost || 0), 0).toFixed(2)
+      );
+      const cost_per_running_hour = Number(
+        (total_tyre_cost / (running_hours > 0 ? running_hours : 1)).toFixed(4)
+      );
+
+      const ins = db.prepare(`
+        INSERT INTO tyre_inspections (
+          asset_id, uuid, site_code, inspection_date, inspector_name,
+          running_hours, total_tyre_cost, cost_per_running_hour, tyres_json, notes, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `).run(
+        asset_id,
+        crypto.randomUUID(),
+        site_code,
+        inspection_date,
+        inspector_name,
+        running_hours,
+        total_tyre_cost,
+        cost_per_running_hour,
+        JSON.stringify(tyres),
+        notes
+      );
+
+      return reply.send({
+        ok: true,
+        id: Number(ins.lastInsertRowid),
+        total_tyre_cost,
+        cost_per_running_hour,
+      });
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message || String(err) });

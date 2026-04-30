@@ -15,7 +15,6 @@ let reportSubscriptionsCache = [];
 const MAINT_LOCK_KEY = "ironlog_maintenance_access_ok";
 const MAINT_LOCK_USER = "BJ van den Berg";
 const MAINT_LOCK_PASSWORD = "0mhliac789";
-const TYRE_INSPECTIONS_STORAGE_KEY = "ironlog_tyre_inspections_v1";
 const TYRE_POSITIONS = [
   { key: "front_left", label: "Front Left" },
   { key: "front_right", label: "Front Right" },
@@ -2378,20 +2377,6 @@ function initTyreLayout() {
   `).join("");
 }
 
-function getTyreInspections() {
-  try {
-    const raw = localStorage.getItem(TYRE_INSPECTIONS_STORAGE_KEY);
-    const rows = JSON.parse(String(raw || "[]"));
-    return Array.isArray(rows) ? rows : [];
-  } catch {
-    return [];
-  }
-}
-
-function setTyreInspections(rows) {
-  localStorage.setItem(TYRE_INSPECTIONS_STORAGE_KEY, JSON.stringify(Array.isArray(rows) ? rows : []));
-}
-
 function collectTyrePositionRows() {
   return TYRE_POSITIONS.map((p) => {
     const pressureRaw = String(document.getElementById(tyreInputId(p.key, "pressure"))?.value || "").trim();
@@ -2430,7 +2415,7 @@ function renderTyreList(rows) {
   }
   list.innerHTML = rows.map((r) => `
     <div class="item">
-      <div class="title">${esc(r.asset_label || "-")}</div>
+      <div class="title">${esc(r.asset_code || "-")} - ${esc(r.asset_name || "")}</div>
       <div class="meta">
         Inspection ${esc(r.inspection_date || "-")} | Running hours ${Number(r.running_hours || 0).toFixed(1)} |
         Tyre cost ${Number(r.total_tyre_cost || 0).toFixed(2)} | Cost per running hour <b>${Number(r.cost_per_running_hour || 0).toFixed(2)}</b>
@@ -2460,12 +2445,21 @@ function renderTyreList(rows) {
   `).join("");
 }
 
-function loadTyreInspections() {
+async function loadTyreInspections() {
+  const list = document.getElementById("tyreList");
+  if (list) list.innerHTML = `<div class="empty">Loading tyre inspections...</div>`;
   const filter = String(document.getElementById("tyreFilterAsset")?.value || "").trim();
-  const rows = getTyreInspections()
-    .filter((r) => !filter || String(r.asset_id) === filter)
-    .sort((a, b) => String(b.inspection_date || "").localeCompare(String(a.inspection_date || "")));
-  renderTyreList(rows);
+  const q = new URLSearchParams();
+  if (filter) q.set("asset_id", filter);
+  try {
+    const res = await fetch(`${API}/maintenance/tyre-inspections?${q.toString()}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load tyre inspections");
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    renderTyreList(rows);
+  } catch (e) {
+    if (list) list.innerHTML = `<div class="empty">Load failed: ${esc(e.message || String(e))}</div>`;
+  }
 }
 
 async function pullTyreLiveHours() {
@@ -2489,7 +2483,7 @@ async function pullTyreLiveHours() {
   }
 }
 
-function saveTyreInspection() {
+async function saveTyreInspection() {
   const msg = document.getElementById("tyreMsg");
   const assetSel = document.getElementById("tyreAsset");
   const asset_id = Number(assetSel?.value || 0);
@@ -2519,25 +2513,33 @@ function saveTyreInspection() {
   const total_tyre_cost = Number(tyres.reduce((sum, t) => sum + Number(t.tyre_cost || 0), 0).toFixed(2));
   const divisor = running_hours > 0 ? running_hours : 1;
   const cost_per_running_hour = Number((total_tyre_cost / divisor).toFixed(4));
-  const opt = assetSel?.selectedOptions?.[0];
-  const record = {
-    id: Date.now(),
-    asset_id,
-    asset_label: String(opt?.textContent || "").trim(),
-    inspection_date,
-    running_hours: Number(running_hours.toFixed(1)),
-    total_tyre_cost,
-    cost_per_running_hour,
-    tyres,
-    created_at: new Date().toISOString(),
-  };
-  const rows = getTyreInspections();
-  rows.unshift(record);
-  setTyreInspections(rows.slice(0, 500));
-  loadTyreInspections();
   if (msg) {
-    msg.className = "message-success";
-    msg.textContent = `Saved. Total tyre cost ${total_tyre_cost.toFixed(2)} | Cost per running hour ${cost_per_running_hour.toFixed(4)}.`;
+    msg.className = "muted";
+    msg.textContent = "Saving...";
+  }
+  try {
+    const res = await fetch(`${API}/maintenance/tyre-inspections`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        asset_id,
+        inspection_date,
+        running_hours: Number(running_hours.toFixed(1)),
+        tyres,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save tyre inspection");
+    await loadTyreInspections();
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = `Saved. Total tyre cost ${Number(data.total_tyre_cost || total_tyre_cost).toFixed(2)} | Cost per running hour ${Number(data.cost_per_running_hour || cost_per_running_hour).toFixed(4)}.`;
+    }
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = `Save failed: ${e.message || e}`;
+    }
   }
 }
 
