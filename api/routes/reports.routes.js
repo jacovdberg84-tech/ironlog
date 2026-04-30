@@ -6554,6 +6554,35 @@ export default async function reportsRoutes(app) {
       FROM manager_damage_reports
       WHERE report_date BETWEEN ? AND ?
     `).get(period.start, period.end);
+    const hseRows = db.prepare(`
+      SELECT
+        dr.id,
+        dr.report_date,
+        a.asset_code,
+        a.asset_name,
+        COALESCE(dr.severity, '') AS severity,
+        COALESCE(dr.damage_location, '') AS damage_location,
+        COALESCE(dr.damage_description, '') AS damage_description,
+        COALESCE(dr.immediate_action, '') AS immediate_action
+      FROM manager_damage_reports dr
+      JOIN assets a ON a.id = dr.asset_id
+      WHERE dr.report_date BETWEEN ? AND ?
+      ORDER BY dr.report_date DESC, dr.id DESC
+      LIMIT 8
+    `).all(period.start, period.end);
+    const drPhotoReportCol = pickExistingColumn("manager_damage_report_photos", ["damage_report_id", "manager_damage_report_id", "report_id"], "damage_report_id");
+    const drPhotoPathCol = pickExistingColumn("manager_damage_report_photos", ["file_path", "photo_path", "path", "image_path", "url", "image_data"], "file_path");
+    const hsePhotoRows = db.prepare(`
+      SELECT ${drPhotoPathCol} AS file_path
+      FROM manager_damage_report_photos
+      WHERE ${drPhotoReportCol} IN (
+        SELECT id
+        FROM manager_damage_reports
+        WHERE report_date BETWEEN ? AND ?
+      )
+      ORDER BY id DESC
+      LIMIT 4
+    `).all(period.start, period.end);
     const inspectionsSummary = db.prepare(`
       SELECT
         COUNT(*) AS inspections_done,
@@ -6561,6 +6590,18 @@ export default async function reportsRoutes(app) {
       FROM manager_inspections
       WHERE inspection_date BETWEEN ? AND ?
     `).get(period.start, period.end);
+    const inspectionsFaultRows = db.prepare(`
+      SELECT
+        mi.inspection_date,
+        a.asset_code,
+        a.asset_name,
+        COALESCE(mi.checklist_json, '[]') AS checklist_json
+      FROM manager_inspections mi
+      JOIN assets a ON a.id = mi.asset_id
+      WHERE mi.inspection_date BETWEEN ? AND ?
+      ORDER BY mi.inspection_date DESC, mi.id DESC
+      LIMIT 30
+    `).all(period.start, period.end);
     const lubeByMachine = db.prepare(`
       SELECT
         a.asset_code,
@@ -6630,100 +6671,228 @@ export default async function reportsRoutes(app) {
         AND COALESCE(opened_at, '') BETWEEN ? AND ?
     `).get(periodStartTs, periodEndTs)?.c || 0);
     const totalFuelAnomalyDays = fuelAnomalyRows.reduce((s, r) => s + Number(r.anomaly_days || 0), 0);
+    const dailyKpiRows = db.prepare(`
+      WITH run_rows AS (
+        SELECT
+          dh.work_date AS day_key,
+          COALESCE(SUM(dh.scheduled_hours), 0) AS scheduled_hours,
+          COALESCE(SUM(dh.hours_run), 0) AS run_hours
+        FROM daily_hours dh
+        JOIN assets a ON a.id = dh.asset_id
+        WHERE dh.work_date BETWEEN ? AND ?
+          ${andDailyHoursFleetHoursOnly("dh", "a")}
+        GROUP BY dh.work_date
+      ),
+      down_rows AS (
+        SELECT
+          l.log_date AS day_key,
+          COALESCE(SUM(l.hours_down), 0) AS downtime_hours
+        FROM breakdown_downtime_logs l
+        JOIN breakdowns b ON b.id = l.breakdown_id
+        JOIN assets a ON a.id = b.asset_id
+        WHERE l.log_date BETWEEN ? AND ?
+          ${andAssetFleetHoursOnly("a")}
+        GROUP BY l.log_date
+      )
+      SELECT
+        r.day_key,
+        COALESCE(r.scheduled_hours, 0) AS scheduled_hours,
+        COALESCE(r.run_hours, 0) AS run_hours,
+        COALESCE(d.downtime_hours, 0) AS downtime_hours
+      FROM run_rows r
+      LEFT JOIN down_rows d ON d.day_key = r.day_key
+      ORDER BY r.day_key ASC
+    `).all(period.start, period.end, period.start, period.end);
+    const availabilityTrend = dailyKpiRows.map((r) => {
+      const s = Number(r.scheduled_hours || 0);
+      const d = Math.max(0, Math.min(Number(r.downtime_hours || 0), s));
+      const avail = s > 0 ? ((Math.max(0, s - d) / s) * 100) : 0;
+      return { label: String(r.day_key || "").slice(5), value: Number(avail.toFixed(2)) };
+    });
+    const utilizationTrend = dailyKpiRows.map((r) => {
+      const s = Number(r.scheduled_hours || 0);
+      const run = Math.max(0, Math.min(Number(r.run_hours || 0), s));
+      const util = s > 0 ? ((run / s) * 100) : 0;
+      return { label: String(r.day_key || "").slice(5), value: Number(util.toFixed(2)) };
+    });
+    const assetPerfRows = db.prepare(`
+      WITH run_rows AS (
+        SELECT
+          a.id AS asset_id,
+          a.asset_code,
+          a.asset_name,
+          COALESCE(a.category, 'Uncategorized') AS category,
+          COALESCE(SUM(dh.scheduled_hours), 0) AS scheduled_hours,
+          COALESCE(SUM(dh.hours_run), 0) AS run_hours
+        FROM assets a
+        LEFT JOIN daily_hours dh ON dh.asset_id = a.id AND dh.work_date BETWEEN ? AND ?
+        GROUP BY a.id
+      ),
+      down_rows AS (
+        SELECT
+          b.asset_id,
+          COALESCE(SUM(l.hours_down), 0) AS downtime_hours
+        FROM breakdown_downtime_logs l
+        JOIN breakdowns b ON b.id = l.breakdown_id
+        WHERE l.log_date BETWEEN ? AND ?
+        GROUP BY b.asset_id
+      )
+      SELECT
+        r.asset_id,
+        r.asset_code,
+        r.asset_name,
+        r.category,
+        r.scheduled_hours,
+        r.run_hours,
+        COALESCE(d.downtime_hours, 0) AS downtime_hours
+      FROM run_rows r
+      LEFT JOIN down_rows d ON d.asset_id = r.asset_id
+      WHERE r.scheduled_hours > 0
+    `).all(period.start, period.end, period.start, period.end).map((r) => {
+      const s = Number(r.scheduled_hours || 0);
+      const run = Math.max(0, Math.min(Number(r.run_hours || 0), s));
+      const down = Math.max(0, Math.min(Number(r.downtime_hours || 0), s));
+      const availPct = s > 0 ? ((Math.max(0, s - down) / s) * 100) : 0;
+      const utilPct = s > 0 ? ((run / s) * 100) : 0;
+      return {
+        asset_code: String(r.asset_code || ""),
+        asset_name: String(r.asset_name || ""),
+        category: String(r.category || "Uncategorized"),
+        utilization_pct: Number(utilPct.toFixed(2)),
+        availability_pct: Number(availPct.toFixed(2)),
+      };
+    });
+    const assetPerfSorted = [...assetPerfRows].sort((a, b) => b.utilization_pct - a.utilization_pct);
+    const topAssets = assetPerfSorted.slice(0, 2);
+    const bottomAssets = assetPerfSorted.slice(-2).reverse();
+    const midStart = Math.max(0, Math.floor((assetPerfSorted.length - 2) / 2));
+    const midAssets = assetPerfSorted.slice(midStart, midStart + 2);
+    const plannedUpcomingCosts = db.prepare(`
+      SELECT
+        a.asset_code,
+        a.asset_name,
+        m.service_name,
+        COALESCE(m.current_hours, 0) AS current_hours,
+        COALESCE(m.next_due_hours, 0) AS next_due_hours,
+        COALESCE(SUM(CASE WHEN LOWER(IFNULL(p.consumable_kind, '')) IN ('oil','lube','lubricant','hydraulic','hydraulic_oil','coolant','grease','hyd fluid','hydraulic fluid') THEN wi.quantity * COALESCE(wi.unit_cost, p.unit_cost, 0) ELSE 0 END), 0) AS planned_lube_cost,
+        COALESCE(SUM(CASE WHEN LOWER(IFNULL(p.consumable_kind, '')) IN ('oil','lube','lubricant','hydraulic','hydraulic_oil','coolant','grease','hyd fluid','hydraulic fluid') THEN 0 ELSE wi.quantity * COALESCE(wi.unit_cost, p.unit_cost, 0) END), 0) AS planned_parts_cost
+      FROM maintenance_plans m
+      JOIN assets a ON a.id = m.asset_id
+      LEFT JOIN work_order_items wi ON wi.work_order_id = (
+        SELECT w.id
+        FROM work_orders w
+        WHERE w.asset_id = m.asset_id
+          AND LOWER(COALESCE(w.source, '')) = 'maintenance_plan'
+          AND w.reference_id = m.id
+          AND COALESCE(w.status, '') = 'open'
+        ORDER BY w.id DESC
+        LIMIT 1
+      )
+      LEFT JOIN parts p ON p.id = wi.part_id
+      WHERE m.active = 1
+      GROUP BY m.id
+      ORDER BY (COALESCE(m.next_due_hours, 0) - COALESCE(m.current_hours, 0)) ASC, a.asset_code ASC
+      LIMIT 10
+    `).all();
+    const partsTrackingRows = db.prepare(`
+      SELECT
+        a.asset_code,
+        COALESCE(b.description, 'Breakdown') AS fault,
+        COALESCE(b.root_cause, '-') AS root_cause,
+        COALESCE(w.completion_notes, '-') AS action_taken,
+        COALESCE(date(COALESCE(w.completed_at, w.closed_at, w.opened_at)), '-') AS eta_on_parts,
+        CASE WHEN LOWER(COALESCE(w.status, '')) IN ('done','closed','completed') THEN 'No' ELSE 'Yes' END AS parts_outstanding,
+        COALESCE(dr.responsible_person, '-') AS responsible_person,
+        CASE WHEN LOWER(COALESCE(w.status, '')) IN ('done','closed','completed') THEN 'Returned / Closed' ELSE 'Pending closure' END AS expected_return_service
+      FROM work_orders w
+      JOIN assets a ON a.id = w.asset_id
+      LEFT JOIN breakdowns b ON b.id = w.reference_id AND LOWER(COALESCE(w.source, '')) = 'breakdown'
+      LEFT JOIN manager_damage_reports dr ON dr.asset_id = w.asset_id AND dr.report_date BETWEEN ? AND ?
+      WHERE LOWER(COALESCE(w.source, '')) = 'breakdown'
+        AND COALESCE(w.opened_at, '') BETWEEN ? AND ?
+      ORDER BY w.id DESC
+      LIMIT 14
+    `).all(period.start, period.end, periodStartTs, periodEndTs);
+    const fuelAnomalyExpanded = db.prepare(`
+      WITH daily AS (
+        SELECT
+          fl.asset_id,
+          a.asset_code,
+          COALESCE(SUM(fl.liters), 0) AS liters,
+          COALESCE(MAX(dh.hours_run), 0) AS hours_run,
+          fl.log_date
+        FROM fuel_logs fl
+        JOIN assets a ON a.id = fl.asset_id
+        LEFT JOIN daily_hours dh ON dh.asset_id = fl.asset_id AND dh.work_date = fl.log_date
+        WHERE fl.log_date BETWEEN ? AND ?
+        GROUP BY fl.asset_id, a.asset_code, fl.log_date
+      ),
+      stats AS (
+        SELECT asset_id, AVG(CASE WHEN hours_run > 0 THEN liters / hours_run ELSE NULL END) AS avg_lph
+        FROM daily
+        GROUP BY asset_id
+      )
+      SELECT
+        d.asset_code,
+        COUNT(*) AS anomaly_days,
+        COALESCE(SUM(d.liters), 0) AS total_usage_liters,
+        COALESCE(MAX((d.liters / d.hours_run) - s.avg_lph), 0) AS peak_variance_lph
+      FROM daily d
+      JOIN stats s ON s.asset_id = d.asset_id
+      WHERE d.hours_run > 0
+        AND s.avg_lph IS NOT NULL
+        AND (d.liters / d.hours_run) > (s.avg_lph * 1.35)
+      GROUP BY d.asset_code
+      ORDER BY anomaly_days DESC, d.asset_code ASC
+      LIMIT 12
+    `).all(period.start, period.end);
     const pptx = new PptxGenJS();
     pptx.layout = "LAYOUT_WIDE";
     pptx.author = "IRONLOG";
     pptx.subject = "Maintenance executive report";
     pptx.title = `Maintenance Executive - ${label}`;
     const s1 = pptx.addSlide();
-    s1.addText("IRONLOG Maintenance Executive Report", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 24, bold: true });
-    s1.addText(`Period: ${period.start} to ${period.end} | Site: ${site_code}`, { x: 0.4, y: 0.9, w: 12.4, h: 0.4, fontSize: 12 });
-    s1.addText(
-      [
-        { text: `Total TRUE downtime (breakdown WOs): ${totalTrueDowntimeWo.toFixed(1)} h\n`, options: { bold: true } },
-        { text: `Rain days recorded: ${rainCount}\n` },
-        { text: `Scheduled hours: ${scheduledHours.toFixed(1)}\n` },
-        { text: `Rain-adjusted scheduled hours: ${adjustedScheduled.toFixed(1)}\n` },
-        { text: `Run hours: ${runHours.toFixed(1)}\n` },
-        { text: `Utilisation (raw): ${utilRaw == null ? "N/A" : `${utilRaw.toFixed(2)}%`}\n` },
-        { text: `Utilisation (rain-adjusted): ${utilAdj == null ? "N/A" : `${utilAdj.toFixed(2)}%`}\n` },
-        { text: `Downtime cost (period): ${totals.downtime_cost.toFixed(2)}` },
-      ],
-      { x: 0.6, y: 1.6, w: 6.5, h: 3.2, fontSize: 14 }
-    );
-    s1.addText(
-      "Index\n1) Safety (HSE)\n2) Plant Performance\n3) Breakdowns & Maintenance\n4) Production Support\n5) Lubrication\n6) Parts & Stores\n7) Inspections Done\n8) Security (Fuel Anomalies)\n9) Challenges & Risks",
-      { x: 7.3, y: 1.6, w: 5.4, h: 3.6, fontSize: 13, bold: true }
-    );
+    s1.addText("Workshop Maintenance Executive Report", { x: 0.4, y: 0.35, w: 12.4, h: 0.55, fontSize: 24, bold: true });
+    s1.addText(`Period: ${period.start} to ${period.end} | Site: ${site_code}`, { x: 0.4, y: 0.95, w: 12.4, h: 0.35, fontSize: 11 });
+    s1.addText("Index\n1) Safety (HSE)\n2) Plant Performance\n3) Breakdown and Maintenance (Cost per Machine)\n4) Parts Tracking\n5) Production Support Actions\n6) Lubrication Cost per Machine\n7) Inspections Done\n8) Fuel Anomalies", { x: 0.7, y: 1.6, w: 11.8, h: 3.8, fontSize: 16, bold: true });
     const s2 = pptx.addSlide();
-    s2.addText("1) Safety (HSE)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
-    s2.addText(`Damage reports: ${Number(hseSummary?.reports || 0)}\nHSE reports available: ${Number(hseSummary?.hse_reports || 0)}\nPending investigation: ${Number(hseSummary?.pending_investigation || 0)}\nOut of service: ${Number(hseSummary?.out_of_service || 0)}`, { x: 0.6, y: 1.3, w: 6.3, h: 2.5, fontSize: 16 });
+    s2.addText("1) Safety (HSE)", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontSize: 22, bold: true });
+    s2.addText(`Damage reports: ${Number(hseSummary?.reports || 0)} | HSE reports: ${Number(hseSummary?.hse_reports || 0)} | Pending: ${Number(hseSummary?.pending_investigation || 0)} | Out of service: ${Number(hseSummary?.out_of_service || 0)}`, { x: 0.5, y: 0.8, w: 12.2, h: 0.3, fontSize: 11, bold: true });
+    s2.addTable([[{ text: "Date", options: { bold: true } }, { text: "Asset", options: { bold: true } }, { text: "Severity", options: { bold: true } }, { text: "Fault", options: { bold: true } }, { text: "Action", options: { bold: true } }], ...(hseRows.length ? hseRows.slice(0, 5).map((r) => [String(r.report_date || "-"), String(r.asset_code || "-"), String(r.severity || "-"), compactCell(String(r.damage_description || r.damage_location || "-"), 44), compactCell(String(r.immediate_action || "-"), 40)]) : [["-", "-", "-", "No HSE damage reports in selected period", "-"]])], { x: 0.45, y: 1.2, w: 12.35, h: 2.2, fontSize: 9.5, border: { pt: 1, color: "D0D0D0" } });
+    const hsePhotoAbs = hsePhotoRows.map((p) => resolveStorageAbs(String(p.file_path || "").replace(/\\/g, "/").replace(/^\/+/, ""))).filter((p) => p && fs.existsSync(p));
+    const photoSlots = [{ x: 0.5, y: 3.7, w: 2.95, h: 2.2 }, { x: 3.65, y: 3.7, w: 2.95, h: 2.2 }, { x: 6.8, y: 3.7, w: 2.95, h: 2.2 }, { x: 9.95, y: 3.7, w: 2.95, h: 2.2 }];
+    hsePhotoAbs.slice(0, 4).forEach((abs, idx) => s2.addImage({ path: abs, ...photoSlots[idx] }));
     const s3 = pptx.addSlide();
     s3.addText("2) Plant Performance", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
-    s3.addTable(
-      [
-        [{ text: "Type", options: { bold: true } }, { text: "Scheduled Hrs", options: { bold: true } }, { text: "Run Hrs", options: { bold: true } }, { text: "Downtime Hrs", options: { bold: true } }, { text: "Availability %", options: { bold: true } }, { text: "Utilization %", options: { bold: true } }],
-        ...availabilityByType.slice(0, 16).map((r) => [r.equipment_type, r.scheduled_hours.toFixed(1), r.run_hours.toFixed(1), r.downtime_hours.toFixed(1), r.availability_pct == null ? "N/A" : `${r.availability_pct.toFixed(2)}%`, r.utilization_pct == null ? "N/A" : `${r.utilization_pct.toFixed(2)}%`]),
-      ],
-      { x: 0.5, y: 1.1, w: 12.3, h: 5.6, fontSize: 12, border: { pt: 1, color: "C8C8C8" } }
-    );
+    s3.addChart(pptx.ChartType.bar, [{ name: "Scheduled", labels: dailyKpiRows.map((r) => String(r.day_key || "").slice(5)), values: dailyKpiRows.map((r) => Number(r.scheduled_hours || 0)) }, { name: "Run", labels: dailyKpiRows.map((r) => String(r.day_key || "").slice(5)), values: dailyKpiRows.map((r) => Number(r.run_hours || 0)) }], { x: 0.45, y: 0.95, w: 6.0, h: 2.1, catAxisLabelRotate: -45, showLegend: true, legendPos: "b" });
+    s3.addChart(pptx.ChartType.line, [{ name: "Availability %", labels: availabilityTrend.map((r) => r.label), values: availabilityTrend.map((r) => r.value) }, { name: "Utilization %", labels: utilizationTrend.map((r) => r.label), values: utilizationTrend.map((r) => r.value) }], { x: 6.75, y: 0.95, w: 6.0, h: 2.1, catAxisLabelRotate: -45, showLegend: true, legendPos: "b", valAxisMinVal: 0, valAxisMaxVal: 100 });
+    s3.addTable([[{ text: "Highest performing equipment by type", options: { bold: true } }, { text: "Avail %", options: { bold: true } }, { text: "Util %", options: { bold: true } }], ...availabilityByType.slice().sort((a, b) => Number(b.utilization_pct || 0) - Number(a.utilization_pct || 0)).slice(0, 6).map((r) => [String(r.equipment_type || "-"), `${Number(r.availability_pct || 0).toFixed(2)}%`, `${Number(r.utilization_pct || 0).toFixed(2)}%`])], { x: 0.45, y: 3.25, w: 4.05, h: 3.2, fontSize: 9.5, border: { pt: 1, color: "D0D0D0" } });
+    const perfCompact = (r) => `${String(r.asset_code || "-")} (${Number(r.utilization_pct || 0).toFixed(1)}%)`;
+    s3.addTable([[{ text: "Top 2 Assets", options: { bold: true } }], ...(topAssets.length ? topAssets.map((r) => [perfCompact(r)]) : [["-"]]), [{ text: "Mid 2 Assets", options: { bold: true } }], ...(midAssets.length ? midAssets.map((r) => [perfCompact(r)]) : [["-"]]), [{ text: "Lowest 2 Assets", options: { bold: true } }], ...(bottomAssets.length ? bottomAssets.map((r) => [perfCompact(r)]) : [["-"]])], { x: 4.7, y: 3.25, w: 2.85, h: 3.2, fontSize: 10, border: { pt: 1, color: "D0D0D0" } });
+    s3.addChart(pptx.ChartType.bar, [{ name: "Top 2", labels: topAssets.map((r) => String(r.asset_code || "")), values: topAssets.map((r) => Number(r.utilization_pct || 0)) }, { name: "Mid 2", labels: midAssets.map((r) => String(r.asset_code || "")), values: midAssets.map((r) => Number(r.utilization_pct || 0)) }, { name: "Low 2", labels: bottomAssets.map((r) => String(r.asset_code || "")), values: bottomAssets.map((r) => Number(r.utilization_pct || 0)) }], { x: 7.75, y: 3.25, w: 5.0, h: 3.2, showLegend: true, legendPos: "b", valAxisMinVal: 0, valAxisMaxVal: 100 });
     const s4 = pptx.addSlide();
-    s4.addText("3) Breakdowns and Maintenance (Cost per Machine)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 20, bold: true });
-    s4.addTable(
-      [
-        [{ text: "Asset", options: { bold: true } }, { text: "Type", options: { bold: true } }, { text: "WO True Down (h)", options: { bold: true } }, { text: "Parts", options: { bold: true } }, { text: "Labor", options: { bold: true } }, { text: "Total", options: { bold: true } }],
-        ...rows.slice(0, 12).map((r) => [`${r.asset_code} ${compactCell(r.asset_name, 18)}`, r.category || "", Number(woDownMap.get(String(r.asset_code || "")) || 0).toFixed(1), r.parts_cost.toFixed(2), r.labor_cost.toFixed(2), r.maintenance_total_cost.toFixed(2)]),
-      ],
-      { x: 0.4, y: 1.1, w: 12.5, h: 5.8, fontSize: 10.5, border: { pt: 1, color: "C8C8C8" } }
-    );
+    s4.addText("3) Breakdown and Maintenance (Cost per Machine)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 20, bold: true });
+    s4.addTable([[{ text: "Asset", options: { bold: true } }, { text: "Type", options: { bold: true } }, { text: "WO True Down (h)", options: { bold: true } }, { text: "Parts", options: { bold: true } }, { text: "Labor", options: { bold: true } }, { text: "Total", options: { bold: true } }], ...rows.slice(0, 8).map((r) => [`${r.asset_code} ${compactCell(r.asset_name, 18)}`, r.category || "", Number(woDownMap.get(String(r.asset_code || "")) || 0).toFixed(1), r.parts_cost.toFixed(2), r.labor_cost.toFixed(2), r.maintenance_total_cost.toFixed(2)])], { x: 0.4, y: 1.05, w: 12.5, h: 3.0, fontSize: 10, border: { pt: 1, color: "C8C8C8" } });
+    s4.addText("Planned Upcoming Costs", { x: 0.45, y: 4.2, w: 12.0, h: 0.35, fontSize: 13, bold: true });
+    s4.addTable([[{ text: "Asset", options: { bold: true } }, { text: "Service", options: { bold: true } }, { text: "Current Hrs", options: { bold: true } }, { text: "Next Due", options: { bold: true } }, { text: "Planned Lube", options: { bold: true } }, { text: "Planned Parts", options: { bold: true } }, { text: "Planned Total", options: { bold: true } }], ...(plannedUpcomingCosts.length ? plannedUpcomingCosts.map((r) => [`${String(r.asset_code || "-")} ${compactCell(String(r.asset_name || ""), 16)}`, compactCell(String(r.service_name || "-"), 20), Number(r.current_hours || 0).toFixed(1), Number(r.next_due_hours || 0).toFixed(1), Number(r.planned_lube_cost || 0).toFixed(2), Number(r.planned_parts_cost || 0).toFixed(2), Number((Number(r.planned_lube_cost || 0) + Number(r.planned_parts_cost || 0)).toFixed(2)).toFixed(2)]) : [["-", "No planned upcoming costs", "-", "-", "-", "-", "-"]])], { x: 0.4, y: 4.55, w: 12.5, h: 2.15, fontSize: 9.2, border: { pt: 1, color: "C8C8C8" } });
     const s5 = pptx.addSlide();
-    s5.addText("4) Production Support", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
-    s5.addText("Placeholder slide requested. Data wiring will be added from Operations metrics in next phase.", { x: 0.6, y: 1.5, w: 11.8, h: 1.2, fontSize: 16 });
+    s5.addText("4) Parts Tracking", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
+    s5.addTable([[{ text: "Asset", options: { bold: true } }, { text: "Fault", options: { bold: true } }, { text: "Root cause", options: { bold: true } }, { text: "Action taken", options: { bold: true } }, { text: "ETA on parts", options: { bold: true } }, { text: "Parts outstanding", options: { bold: true } }, { text: "Responsible person", options: { bold: true } }, { text: "Expected return to service", options: { bold: true } }], ...(partsTrackingRows.length ? partsTrackingRows.map((r) => [String(r.asset_code || "-"), compactCell(String(r.fault || "-"), 20), compactCell(String(r.root_cause || "-"), 18), compactCell(String(r.action_taken || "-"), 24), String(r.eta_on_parts || "-"), String(r.parts_outstanding || "-"), compactCell(String(r.responsible_person || "-"), 16), compactCell(String(r.expected_return_service || "-"), 18)]) : [["-", "No open parts tracking rows", "-", "-", "-", "-", "-", "-"]])], { x: 0.35, y: 1.0, w: 12.6, h: 5.9, fontSize: 8.5, border: { pt: 1, color: "C8C8C8" } });
     const s6 = pptx.addSlide();
-    s6.addText("5) Lubrication (Cost per Machine)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
-    s6.addTable(
-      [
-        [{ text: "Asset Code", options: { bold: true } }, { text: "Asset Name", options: { bold: true } }, { text: "Qty", options: { bold: true } }, { text: "Lube Cost", options: { bold: true } }],
-        ...lubeByMachine.slice(0, 16).map((r) => [String(r.asset_code || ""), compactCell(r.asset_name || "", 26), Number(r.qty_total || 0).toFixed(1), Number(r.lube_cost || 0).toFixed(2)]),
-      ],
-      { x: 0.6, y: 1.1, w: 11.8, h: 5.6, fontSize: 12, border: { pt: 1, color: "C8C8C8" } }
-    );
+    s6.addText("5) Production Support", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
+    s6.addText("Production Support Actions:\n\n1. Scheduled Maintenance Execution:\nEnsure all identified repairs are formally communicated to the maintenance team and incorporated into the maintenance schedule. Prioritization must be aligned with equipment risk ratings, focusing on high-risk assets that may impact production continuity or safety. Progress on these repairs should be tracked daily to ensure timely completion.\n\n2. Work Order Review and Close-Out:\nConduct a comprehensive review of all open work orders, with specific focus on aged and overdue items. Identify bottlenecks preventing closure, verify accuracy of recorded information, and enforce accountability for timely completion. Where required, escalate long-standing work orders to ensure resolution and prevent backlog accumulation.\n\n3. Fuel Efficiency Analysis:\nAssign a responsible team to analyse fuel consumption data for selected assets showing abnormal usage patterns. The objective is to identify inefficiencies, potential mechanical issues, or operator-related factors contributing to increased fuel consumption. Findings should be documented, with corrective actions implemented and monitored for effectiveness.", { x: 0.6, y: 0.95, w: 12.0, h: 5.8, fontSize: 12.5 });
     const s7 = pptx.addSlide();
-    s7.addText("6) Parts and Stores (Critical Low Stock)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
-    s7.addTable(
-      [
-        [{ text: "Part Code", options: { bold: true } }, { text: "Part Name", options: { bold: true } }, { text: "Min", options: { bold: true } }, { text: "On Hand", options: { bold: true } }],
-        ...(criticalLowParts.length ? criticalLowParts.slice(0, 18).map((r) => [String(r.part_code || ""), compactCell(r.part_name || "", 28), Number(r.min_stock || 0).toFixed(1), Number(r.on_hand || 0).toFixed(1)]) : [["-", "No critical low stock items", "-", "-"]]),
-      ],
-      { x: 0.7, y: 1.1, w: 11.5, h: 5.8, fontSize: 12, border: { pt: 1, color: "C8C8C8" } }
-    );
+    s7.addText("6) Lubrication (Cost per Machine)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
+    s7.addTable([[{ text: "Asset Code", options: { bold: true } }, { text: "Asset Name", options: { bold: true } }, { text: "Qty", options: { bold: true } }, { text: "Lube Cost", options: { bold: true } }], ...lubeByMachine.slice(0, 16).map((r) => [String(r.asset_code || ""), compactCell(r.asset_name || "", 26), Number(r.qty_total || 0).toFixed(1), Number(r.lube_cost || 0).toFixed(2)])], { x: 0.6, y: 1.1, w: 11.8, h: 5.6, fontSize: 12, border: { pt: 1, color: "C8C8C8" } });
     const s8 = pptx.addSlide();
     s8.addText("7) Inspections Done", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
-    s8.addText(`Inspections completed: ${Number(inspectionsSummary?.inspections_done || 0)}\nAssets covered: ${Number(inspectionsSummary?.assets_covered || 0)}`, { x: 0.8, y: 1.6, w: 5.8, h: 1.8, fontSize: 18 });
+    const faultsFoundRows = inspectionsFaultRows.map((r) => { let faults = 0; try { const parsed = JSON.parse(String(r.checklist_json || "[]")); if (Array.isArray(parsed)) faults = parsed.filter((x) => x?.ok === false).length; } catch {} return { ...r, faults }; }).filter((r) => Number(r.faults || 0) > 0).slice(0, 12);
+    s8.addText(`Inspections completed: ${Number(inspectionsSummary?.inspections_done || 0)} | Assets covered: ${Number(inspectionsSummary?.assets_covered || 0)}`, { x: 0.7, y: 0.95, w: 12.0, h: 0.35, fontSize: 12, bold: true });
+    s8.addTable([[{ text: "Date", options: { bold: true } }, { text: "Asset", options: { bold: true } }, { text: "Faults found", options: { bold: true } }], ...(faultsFoundRows.length ? faultsFoundRows.map((r) => [String(r.inspection_date || "-"), `${String(r.asset_code || "-")} ${compactCell(String(r.asset_name || ""), 20)}`, String(Number(r.faults || 0))]) : [["-", "No faults found in recorded inspections", "0"]])], { x: 0.75, y: 1.45, w: 11.4, h: 4.8, fontSize: 11, border: { pt: 1, color: "C8C8C8" } });
     const s9 = pptx.addSlide();
-    s9.addText("8) Security (Fuel Anomalies)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
-    s9.addText(`Total fuel anomaly days: ${Number(totalFuelAnomalyDays || 0)}`, { x: 1.2, y: 0.9, w: 6.2, h: 0.4, fontSize: 14, bold: true });
-    s9.addTable(
-      [
-        [{ text: "Asset Code", options: { bold: true } }, { text: "Anomaly Days", options: { bold: true } }],
-        ...(fuelAnomalyRows.length ? fuelAnomalyRows.map((r) => [String(r.asset_code || ""), String(Number(r.anomaly_days || 0))]) : [["-", "No anomalies in selected period"]]),
-      ],
-      { x: 1.2, y: 1.3, w: 6.2, h: 4.8, fontSize: 13, border: { pt: 1, color: "C8C8C8" } }
-    );
-    const s10 = pptx.addSlide();
-    s10.addText("9) Challenges and Risks", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
-    s10.addText(`Weather / Rain days: ${rainCount}\nBreakdowns in period: ${breakdownCount}\nUnplanned maintenance (breakdown WOs opened): ${unplannedMaintCount}\nTrue WO downtime (breakdown): ${totalTrueDowntimeWo.toFixed(1)} h`, { x: 0.8, y: 1.5, w: 8.0, h: 2.8, fontSize: 16 });
-    s10.addText("Fuel anomaly benchmark (LPH): daily LPH > asset avg LPH x 1.35", { x: 0.8, y: 4.2, w: 11.5, h: 0.35, fontSize: 11, bold: true });
-    s10.addTable(
-      [
-        [{ text: "Asset", options: { bold: true } }, { text: "Anomaly Days", options: { bold: true } }, { text: "Avg LPH", options: { bold: true } }, { text: "Threshold LPH", options: { bold: true } }, { text: "Peak Anomaly LPH", options: { bold: true } }],
-        ...(fuelAnomalyRows.length
-          ? fuelAnomalyRows.slice(0, 8).map((r) => [String(r.asset_code || ""), String(Number(r.anomaly_days || 0)), Number(r.avg_lph_benchmark || 0).toFixed(2), Number(r.anomaly_threshold_lph || 0).toFixed(2), Number(r.peak_anomaly_lph || 0).toFixed(2)])
-          : [["-", "0", "-", "-", "-"]]),
-      ],
-      { x: 0.8, y: 4.6, w: 11.4, h: 1.6, fontSize: 10.5, border: { pt: 1, color: "C8C8C8" } }
-    );
-    s10.addText(`Rain dates: ${rainDates.length ? rainDates.join(", ") : "None recorded in selected period"}\nSource: Reports rain-days widget / site_rain_days`, { x: 0.8, y: 6.35, w: 11.5, h: 0.5, fontSize: 10, color: "666666" });
+    s9.addText("8) Fuel Anomalies", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
+    s9.addText(`Total fuel anomaly days: ${Number(totalFuelAnomalyDays || 0)}`, { x: 0.75, y: 0.9, w: 6.2, h: 0.4, fontSize: 13, bold: true });
+    s9.addTable([[{ text: "Asset", options: { bold: true } }, { text: "Anomaly days", options: { bold: true } }, { text: "Variance (LPH)", options: { bold: true } }, { text: "Total usage (L)", options: { bold: true } }], ...(fuelAnomalyExpanded.length ? fuelAnomalyExpanded.map((r) => [String(r.asset_code || ""), String(Number(r.anomaly_days || 0)), Number(r.peak_variance_lph || 0).toFixed(2), Number(r.total_usage_liters || 0).toFixed(1)]) : [["-", "0", "-", "-"]])], { x: 0.75, y: 1.35, w: 11.4, h: 5.0, fontSize: 11, border: { pt: 1, color: "C8C8C8" } });
     const buffer = await pptx.write({ outputType: "nodebuffer" });
     return Buffer.from(buffer);
   }
