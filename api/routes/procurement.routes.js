@@ -689,4 +689,922 @@ export default async function procurementRoutes(app) {
     `).run(String(id), payload_json, getUser(req), getRole(req));
     return { ok: true, pending_approval: true, request_id: Number(ins.lastInsertRowid) };
   });
+
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      supplier_code TEXT NOT NULL UNIQUE,
+      supplier_name TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      lead_time_days INTEGER NOT NULL DEFAULT 7,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS supplier_part_catalog (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      supplier_id INTEGER NOT NULL,
+      part_id INTEGER NOT NULL,
+      supplier_part_code TEXT,
+      lead_time_days INTEGER,
+      last_price REAL,
+      currency TEXT,
+      effective_date TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (supplier_id, part_id),
+      FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE,
+      FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
+    )
+  `).run();
+
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS procurement_purchase_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      po_number TEXT NOT NULL UNIQUE,
+      requisition_id INTEGER,
+      supplier_id INTEGER,
+      site_code TEXT DEFAULT 'main',
+      currency TEXT DEFAULT 'USD',
+      status TEXT NOT NULL DEFAULT 'draft',
+      approved_at TEXT,
+      sent_at TEXT,
+      notes TEXT,
+      subtotal REAL NOT NULL DEFAULT 0,
+      created_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (requisition_id) REFERENCES procurement_requisitions(id) ON DELETE SET NULL,
+      FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL
+    )
+  `).run();
+
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS procurement_purchase_order_lines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      po_id INTEGER NOT NULL,
+      line_no INTEGER NOT NULL,
+      requisition_line_id INTEGER,
+      part_id INTEGER,
+      description TEXT,
+      quantity_ordered REAL NOT NULL DEFAULT 0,
+      quantity_received REAL NOT NULL DEFAULT 0,
+      unit_price REAL NOT NULL DEFAULT 0,
+      line_total REAL NOT NULL DEFAULT 0,
+      needed_by_date TEXT,
+      cost_center_code TEXT,
+      labor_tag TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (po_id, line_no),
+      FOREIGN KEY (po_id) REFERENCES procurement_purchase_orders(id) ON DELETE CASCADE,
+      FOREIGN KEY (requisition_line_id) REFERENCES procurement_requisition_lines(id) ON DELETE SET NULL,
+      FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE SET NULL
+    )
+  `).run();
+
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS procurement_goods_receipts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      po_id INTEGER NOT NULL,
+      receipt_number TEXT NOT NULL UNIQUE,
+      receipt_date TEXT NOT NULL,
+      received_by TEXT,
+      location_code TEXT,
+      status TEXT NOT NULL DEFAULT 'posted',
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (po_id) REFERENCES procurement_purchase_orders(id) ON DELETE CASCADE
+    )
+  `).run();
+
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS procurement_goods_receipt_lines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      receipt_id INTEGER NOT NULL,
+      po_line_id INTEGER NOT NULL,
+      part_id INTEGER,
+      quantity_received REAL NOT NULL DEFAULT 0,
+      unit_price REAL NOT NULL DEFAULT 0,
+      line_total REAL NOT NULL DEFAULT 0,
+      cost_center_code TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (receipt_id) REFERENCES procurement_goods_receipts(id) ON DELETE CASCADE,
+      FOREIGN KEY (po_line_id) REFERENCES procurement_purchase_order_lines(id) ON DELETE CASCADE,
+      FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE SET NULL
+    )
+  `).run();
+
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS procurement_invoices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      po_id INTEGER NOT NULL,
+      invoice_number TEXT NOT NULL UNIQUE,
+      supplier_id INTEGER,
+      invoice_date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'captured',
+      currency TEXT DEFAULT 'USD',
+      subtotal REAL NOT NULL DEFAULT 0,
+      tax REAL NOT NULL DEFAULT 0,
+      total REAL NOT NULL DEFAULT 0,
+      captured_by TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (po_id) REFERENCES procurement_purchase_orders(id) ON DELETE CASCADE,
+      FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL
+    )
+  `).run();
+
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS procurement_invoice_lines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      invoice_id INTEGER NOT NULL,
+      po_line_id INTEGER,
+      part_id INTEGER,
+      description TEXT,
+      quantity_invoiced REAL NOT NULL DEFAULT 0,
+      unit_price REAL NOT NULL DEFAULT 0,
+      line_total REAL NOT NULL DEFAULT 0,
+      cost_center_code TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (invoice_id) REFERENCES procurement_invoices(id) ON DELETE CASCADE,
+      FOREIGN KEY (po_line_id) REFERENCES procurement_purchase_order_lines(id) ON DELETE SET NULL,
+      FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE SET NULL
+    )
+  `).run();
+
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS procurement_match_exceptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      po_id INTEGER NOT NULL,
+      po_line_id INTEGER,
+      invoice_id INTEGER,
+      invoice_line_id INTEGER,
+      receipt_id INTEGER,
+      receipt_line_id INTEGER,
+      exception_type TEXT NOT NULL,
+      severity TEXT NOT NULL DEFAULT 'warn',
+      status TEXT NOT NULL DEFAULT 'open',
+      details_json TEXT,
+      assigned_to TEXT,
+      resolved_by TEXT,
+      resolved_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS finance_journal_staging (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id TEXT NOT NULL,
+      tx_date TEXT NOT NULL,
+      source_module TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      account_code TEXT NOT NULL,
+      cost_center_code TEXT,
+      description TEXT,
+      debit REAL NOT NULL DEFAULT 0,
+      credit REAL NOT NULL DEFAULT 0,
+      currency TEXT DEFAULT 'USD',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+
+  const bySiteReq = `
+    LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+  `;
+  const getPartByCode = db.prepare(`SELECT id, part_code, part_name FROM parts WHERE part_code = ?`);
+  const getLocationByCode = db.prepare(`SELECT id, location_code FROM stock_locations WHERE location_code = ?`);
+
+  function nextPONumber() {
+    const row = db.prepare(`SELECT IFNULL(MAX(id), 0) + 1 AS n FROM procurement_purchase_orders`).get();
+    const n = Number(row?.n || 1);
+    const year = new Date().getFullYear();
+    return `PO-${year}-${String(n).padStart(5, "0")}`;
+  }
+  function nextReceiptNumber() {
+    const row = db.prepare(`SELECT IFNULL(MAX(id), 0) + 1 AS n FROM procurement_goods_receipts`).get();
+    const n = Number(row?.n || 1);
+    const year = new Date().getFullYear();
+    return `GRN-${year}-${String(n).padStart(5, "0")}`;
+  }
+
+  function derivePoStatus(poId) {
+    const lines = db.prepare(`
+      SELECT quantity_ordered, quantity_received
+      FROM procurement_purchase_order_lines
+      WHERE po_id = ?
+    `).all(poId);
+    if (!lines.length) return "draft";
+    const totalOrdered = lines.reduce((s, l) => s + Number(l.quantity_ordered || 0), 0);
+    const totalReceived = lines.reduce((s, l) => s + Number(l.quantity_received || 0), 0);
+    if (totalReceived <= 0) return "approved";
+    if (totalReceived + 1e-9 >= totalOrdered) return "received";
+    return "partially_received";
+  }
+
+  app.post("/suppliers", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "stores", "procurement"])) return;
+    const supplier_code = String(req.body?.supplier_code || "").trim().toUpperCase();
+    const supplier_name = String(req.body?.supplier_name || "").trim();
+    if (!supplier_code || !supplier_name) return reply.code(400).send({ error: "supplier_code and supplier_name are required" });
+    const lead_time_days = Math.max(0, Number(req.body?.lead_time_days || 7));
+    const currency = String(req.body?.currency || "USD").trim().toUpperCase() || "USD";
+    db.prepare(`
+      INSERT INTO suppliers (supplier_code, supplier_name, lead_time_days, currency, active, updated_at)
+      VALUES (?, ?, ?, ?, 1, datetime('now'))
+      ON CONFLICT(supplier_code) DO UPDATE SET
+        supplier_name = excluded.supplier_name,
+        lead_time_days = excluded.lead_time_days,
+        currency = excluded.currency,
+        active = 1,
+        updated_at = datetime('now')
+    `).run(supplier_code, supplier_name, lead_time_days, currency);
+    return { ok: true, supplier_code, supplier_name, lead_time_days, currency };
+  });
+
+  app.get("/suppliers", async () => {
+    const rows = db.prepare(`
+      SELECT id, supplier_code, supplier_name, active, lead_time_days, currency, created_at, updated_at
+      FROM suppliers
+      ORDER BY supplier_name ASC
+      LIMIT 300
+    `).all();
+    return { ok: true, rows };
+  });
+
+  app.post("/supplier-catalog", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "stores", "procurement"])) return;
+    const supplier_code = String(req.body?.supplier_code || "").trim().toUpperCase();
+    const part_code = String(req.body?.part_code || "").trim();
+    if (!supplier_code || !part_code) return reply.code(400).send({ error: "supplier_code and part_code are required" });
+    const supplier = db.prepare(`SELECT id FROM suppliers WHERE supplier_code = ?`).get(supplier_code);
+    if (!supplier) return reply.code(404).send({ error: "supplier not found" });
+    const part = getPartByCode.get(part_code);
+    if (!part) return reply.code(404).send({ error: "part not found" });
+    const supplier_part_code = req.body?.supplier_part_code != null ? String(req.body.supplier_part_code).trim() : null;
+    const lead_time_days = req.body?.lead_time_days != null ? Math.max(0, Number(req.body.lead_time_days || 0)) : null;
+    const last_price = req.body?.last_price != null ? Number(req.body.last_price) : null;
+    const currency = req.body?.currency != null ? String(req.body.currency).trim().toUpperCase() : null;
+    const effective_date = req.body?.effective_date != null ? String(req.body.effective_date).trim() : null;
+    db.prepare(`
+      INSERT INTO supplier_part_catalog (
+        supplier_id, part_id, supplier_part_code, lead_time_days, last_price, currency, effective_date, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(supplier_id, part_id) DO UPDATE SET
+        supplier_part_code = excluded.supplier_part_code,
+        lead_time_days = excluded.lead_time_days,
+        last_price = excluded.last_price,
+        currency = excluded.currency,
+        effective_date = excluded.effective_date,
+        updated_at = datetime('now')
+    `).run(Number(supplier.id), Number(part.id), supplier_part_code, lead_time_days, last_price, currency, effective_date);
+    return { ok: true, supplier_code, part_code };
+  });
+
+  app.get("/supplier-catalog", async (req, reply) => {
+    const part_code = String(req.query?.part_code || "").trim();
+    const supplier_code = String(req.query?.supplier_code || "").trim().toUpperCase();
+    const where = [];
+    const params = [];
+    if (part_code) {
+      where.push("p.part_code = ?");
+      params.push(part_code);
+    }
+    if (supplier_code) {
+      where.push("s.supplier_code = ?");
+      params.push(supplier_code);
+    }
+    const rows = db.prepare(`
+      SELECT
+        c.id,
+        s.supplier_code,
+        s.supplier_name,
+        p.part_code,
+        p.part_name,
+        c.supplier_part_code,
+        c.lead_time_days,
+        c.last_price,
+        c.currency,
+        c.effective_date,
+        c.updated_at
+      FROM supplier_part_catalog c
+      JOIN suppliers s ON s.id = c.supplier_id
+      JOIN parts p ON p.id = c.part_id
+      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY s.supplier_name ASC, p.part_code ASC
+      LIMIT 500
+    `).all(...params);
+    return reply.send({ ok: true, rows });
+  });
+
+  app.post("/requisitions/:id/create-po", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "procurement", "stores"])) return;
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+    const siteCode = getSiteCode(req);
+    const reqn = db.prepare(`
+      SELECT *
+      FROM procurement_requisitions
+      WHERE id = ? AND ${bySiteReq}
+    `).get(id, siteCode);
+    if (!reqn) return reply.code(404).send({ error: "requisition not found" });
+    if (!["approved", "approved_all", "po_ready", "received", "partially_received"].includes(String(reqn.status || "").toLowerCase())) {
+      return reply.code(409).send({ error: "requisition must be approved before PO creation" });
+    }
+    const existing = db.prepare(`SELECT id, po_number, status FROM procurement_purchase_orders WHERE requisition_id = ? ORDER BY id DESC LIMIT 1`).get(id);
+    if (existing && String(existing.status || "").toLowerCase() !== "cancelled") {
+      return reply.send({ ok: true, duplicate: true, po_id: Number(existing.id), po_number: String(existing.po_number || "") });
+    }
+    const lines = db.prepare(`
+      SELECT *
+      FROM procurement_requisition_lines
+      WHERE requisition_id = ?
+      ORDER BY line_no ASC
+    `).all(id);
+    if (!lines.length) return reply.code(409).send({ error: "cannot create PO without requisition lines" });
+    const supplier = reqn.supplier_name
+      ? db.prepare(`SELECT id, supplier_code, supplier_name, currency FROM suppliers WHERE LOWER(supplier_name) = LOWER(?) OR UPPER(supplier_code) = UPPER(?) LIMIT 1`).get(String(reqn.supplier_name), String(reqn.supplier_name))
+      : null;
+    const po_number = nextPONumber();
+    const currency = supplier?.currency ? String(supplier.currency).toUpperCase() : "USD";
+    const tx = db.transaction(() => {
+      const head = db.prepare(`
+        INSERT INTO procurement_purchase_orders (
+          po_number, requisition_id, supplier_id, site_code, currency, status, notes, created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, datetime('now'), datetime('now'))
+      `).run(po_number, id, supplier ? Number(supplier.id) : null, siteCode, currency, reqn.notes || null, getUser(req));
+      const po_id = Number(head.lastInsertRowid);
+      const insLine = db.prepare(`
+        INSERT INTO procurement_purchase_order_lines (
+          po_id, line_no, requisition_line_id, part_id, description, quantity_ordered, unit_price, line_total, needed_by_date, cost_center_code, labor_tag
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      let subtotal = 0;
+      for (const l of lines) {
+        const qty = Number(l.quantity || 0);
+        const unit = Number(l.net_price ?? l.gross_price ?? 0);
+        const line_total = Number((qty * unit).toFixed(2));
+        subtotal += line_total;
+        insLine.run(
+          po_id,
+          Number(l.line_no || 0),
+          Number(l.id || 0),
+          l.part_id ? Number(l.part_id) : null,
+          l.description || null,
+          qty,
+          unit,
+          line_total,
+          l.needed_by_date || null,
+          req.body?.cost_center_code ? String(req.body.cost_center_code).trim() : null,
+          req.body?.labor_tag ? String(req.body.labor_tag).trim() : null
+        );
+      }
+      db.prepare(`UPDATE procurement_purchase_orders SET subtotal = ?, updated_at = datetime('now') WHERE id = ?`).run(Number(subtotal.toFixed(2)), po_id);
+      db.prepare(`
+        UPDATE procurement_requisitions
+        SET status = 'po_ready', po_number = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(po_number, id);
+      return po_id;
+    });
+    const po_id = tx();
+    return { ok: true, po_id, po_number };
+  });
+
+  app.get("/purchase-orders", async (req, reply) => {
+    const status = String(req.query?.status || "").trim().toLowerCase();
+    const siteCode = getSiteCode(req);
+    const where = [`LOWER(TRIM(COALESCE(po.site_code, 'main'))) = ?`];
+    const params = [siteCode];
+    if (status) {
+      where.push("LOWER(po.status) = ?");
+      params.push(status);
+    }
+    const rows = db.prepare(`
+      SELECT
+        po.id,
+        po.po_number,
+        po.requisition_id,
+        po.currency,
+        po.status,
+        po.subtotal,
+        po.created_at,
+        po.updated_at,
+        s.supplier_code,
+        s.supplier_name
+      FROM procurement_purchase_orders po
+      LEFT JOIN suppliers s ON s.id = po.supplier_id
+      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY po.id DESC
+      LIMIT 300
+    `).all(...params).map((r) => ({ ...r, subtotal: Number(r.subtotal || 0) }));
+    return reply.send({ ok: true, rows });
+  });
+
+  app.get("/purchase-orders/:id/detail", async (req, reply) => {
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+    const siteCode = getSiteCode(req);
+    const po = db.prepare(`
+      SELECT po.*, s.supplier_code, s.supplier_name
+      FROM procurement_purchase_orders po
+      LEFT JOIN suppliers s ON s.id = po.supplier_id
+      WHERE po.id = ? AND LOWER(TRIM(COALESCE(po.site_code, 'main'))) = ?
+    `).get(id, siteCode);
+    if (!po) return reply.code(404).send({ error: "PO not found" });
+    const lines = db.prepare(`
+      SELECT pol.*, p.part_code, p.part_name
+      FROM procurement_purchase_order_lines pol
+      LEFT JOIN parts p ON p.id = pol.part_id
+      WHERE pol.po_id = ?
+      ORDER BY pol.line_no ASC
+    `).all(id);
+    const receipts = db.prepare(`
+      SELECT id, receipt_number, receipt_date, status, location_code, received_by, created_at
+      FROM procurement_goods_receipts
+      WHERE po_id = ?
+      ORDER BY id DESC
+    `).all(id);
+    return reply.send({ ok: true, po, lines, receipts });
+  });
+
+  app.post("/purchase-orders/:id/approve", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "procurement"])) return;
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+    const po = db.prepare(`SELECT id, status FROM procurement_purchase_orders WHERE id = ?`).get(id);
+    if (!po) return reply.code(404).send({ error: "PO not found" });
+    if (!["draft", "approved", "sent", "partially_received", "received"].includes(String(po.status || "").toLowerCase())) {
+      return reply.code(409).send({ error: `cannot approve from status ${po.status}` });
+    }
+    db.prepare(`
+      UPDATE procurement_purchase_orders
+      SET status = 'approved', approved_at = datetime('now'), updated_at = datetime('now')
+      WHERE id = ?
+    `).run(id);
+    return { ok: true, id, status: "approved" };
+  });
+
+  app.post("/purchase-orders/:id/send", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "procurement"])) return;
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+    const po = db.prepare(`SELECT id, status FROM procurement_purchase_orders WHERE id = ?`).get(id);
+    if (!po) return reply.code(404).send({ error: "PO not found" });
+    if (!["approved", "sent", "partially_received", "received"].includes(String(po.status || "").toLowerCase())) {
+      return reply.code(409).send({ error: `cannot send from status ${po.status}` });
+    }
+    db.prepare(`
+      UPDATE procurement_purchase_orders
+      SET status = CASE WHEN status = 'approved' THEN 'sent' ELSE status END,
+          sent_at = COALESCE(sent_at, datetime('now')),
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(id);
+    return { ok: true, id };
+  });
+
+  app.post("/purchase-orders/:id/receive", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "stores", "procurement"])) return;
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+    const po = db.prepare(`
+      SELECT id, po_number, requisition_id, status
+      FROM procurement_purchase_orders
+      WHERE id = ?
+    `).get(id);
+    if (!po) return reply.code(404).send({ error: "PO not found" });
+    if (!["approved", "sent", "partially_received", "received"].includes(String(po.status || "").toLowerCase())) {
+      return reply.code(409).send({ error: `cannot receive from status ${po.status}` });
+    }
+    const lines = Array.isArray(req.body?.lines) ? req.body.lines : [];
+    if (!lines.length) return reply.code(400).send({ error: "lines array is required" });
+    const location_code = String(req.body?.location_code || "MAIN").trim().toUpperCase();
+    const location = getLocationByCode.get(location_code);
+    if (!location) return reply.code(404).send({ error: `location_code not found: ${location_code}` });
+    const receipt_date = req.body?.receipt_date ? String(req.body.receipt_date).trim() : new Date().toISOString().slice(0, 10);
+    const receipt_number = String(req.body?.receipt_number || "").trim() || nextReceiptNumber();
+
+    const tx = db.transaction(() => {
+      const insReceipt = db.prepare(`
+        INSERT INTO procurement_goods_receipts (
+          po_id, receipt_number, receipt_date, received_by, location_code, status, notes
+        ) VALUES (?, ?, ?, ?, ?, 'posted', ?)
+      `).run(id, receipt_number, receipt_date, getUser(req), location_code, req.body?.notes ? String(req.body.notes).trim() : null);
+      const receipt_id = Number(insReceipt.lastInsertRowid);
+      const getPoLine = db.prepare(`
+        SELECT id, line_no, part_id, quantity_ordered, quantity_received, unit_price
+        FROM procurement_purchase_order_lines
+        WHERE id = ? AND po_id = ?
+      `);
+      const insReceiptLine = db.prepare(`
+        INSERT INTO procurement_goods_receipt_lines (
+          receipt_id, po_line_id, part_id, quantity_received, unit_price, line_total, cost_center_code
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      const updPoLine = db.prepare(`
+        UPDATE procurement_purchase_order_lines
+        SET quantity_received = quantity_received + ?
+        WHERE id = ?
+      `);
+      const insMove = db.prepare(`
+        INSERT INTO stock_movements (
+          part_id, quantity, movement_type, reference, location_id
+        ) VALUES (?, ?, 'in', ?, ?)
+      `);
+
+      for (const row of lines) {
+        const po_line_id = Number(row?.po_line_id || 0);
+        const qty = Number(row?.quantity_received || 0);
+        if (!Number.isFinite(po_line_id) || po_line_id <= 0 || !Number.isFinite(qty) || qty <= 0) {
+          throw new Error("each line requires po_line_id and quantity_received > 0");
+        }
+        const poLine = getPoLine.get(po_line_id, id);
+        if (!poLine) throw new Error(`po_line_id ${po_line_id} not found for PO`);
+        const outstanding = Number(poLine.quantity_ordered || 0) - Number(poLine.quantity_received || 0);
+        if (qty > outstanding + 1e-9) {
+          throw new Error(`line ${poLine.line_no}: received qty exceeds outstanding (${outstanding})`);
+        }
+        const unit_price = row?.unit_price != null && row.unit_price !== "" ? Number(row.unit_price) : Number(poLine.unit_price || 0);
+        const line_total = Number((qty * unit_price).toFixed(2));
+        insReceiptLine.run(
+          receipt_id,
+          po_line_id,
+          poLine.part_id ? Number(poLine.part_id) : null,
+          qty,
+          unit_price,
+          line_total,
+          row?.cost_center_code ? String(row.cost_center_code).trim() : null
+        );
+        updPoLine.run(qty, po_line_id);
+        if (poLine.part_id) {
+          insMove.run(Number(poLine.part_id), qty, `po:${id}:receipt:${receipt_id}:line:${po_line_id}`, Number(location.id));
+        }
+      }
+
+      const poStatus = derivePoStatus(id);
+      db.prepare(`UPDATE procurement_purchase_orders SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(poStatus, id);
+      if (Number(po.requisition_id || 0) > 0) {
+        const reqStatus = poStatus === "received" ? "received" : "partially_received";
+        db.prepare(`UPDATE procurement_requisitions SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(reqStatus, Number(po.requisition_id));
+      }
+      return { receipt_id, receipt_number, po_status: poStatus };
+    });
+    const result = tx();
+    return { ok: true, ...result };
+  });
+
+  app.post("/purchase-orders/:id/invoices", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "procurement", "stores"])) return;
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+    const po = db.prepare(`SELECT id, supplier_id, currency FROM procurement_purchase_orders WHERE id = ?`).get(id);
+    if (!po) return reply.code(404).send({ error: "PO not found" });
+    const invoice_number = String(req.body?.invoice_number || "").trim();
+    const invoice_date = String(req.body?.invoice_date || "").trim() || new Date().toISOString().slice(0, 10);
+    if (!invoice_number) return reply.code(400).send({ error: "invoice_number is required" });
+    const lines = Array.isArray(req.body?.lines) ? req.body.lines : [];
+    if (!lines.length) return reply.code(400).send({ error: "lines array is required" });
+    const tx = db.transaction(() => {
+      const head = db.prepare(`
+        INSERT INTO procurement_invoices (
+          po_id, invoice_number, supplier_id, invoice_date, status, currency, subtotal, tax, total, captured_by, notes
+        ) VALUES (?, ?, ?, ?, 'captured', ?, 0, ?, 0, ?, ?)
+      `).run(
+        id,
+        invoice_number,
+        po.supplier_id ? Number(po.supplier_id) : null,
+        invoice_date,
+        String(req.body?.currency || po.currency || "USD").trim().toUpperCase(),
+        Number(req.body?.tax || 0),
+        getUser(req),
+        req.body?.notes ? String(req.body.notes).trim() : null
+      );
+      const invoice_id = Number(head.lastInsertRowid);
+      const insLine = db.prepare(`
+        INSERT INTO procurement_invoice_lines (
+          invoice_id, po_line_id, part_id, description, quantity_invoiced, unit_price, line_total, cost_center_code
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      let subtotal = 0;
+      for (const l of lines) {
+        const po_line_id = Number(l?.po_line_id || 0);
+        const qty = Number(l?.quantity_invoiced || 0);
+        const unit_price = Number(l?.unit_price || 0);
+        if (!Number.isFinite(po_line_id) || po_line_id <= 0 || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(unit_price) || unit_price < 0) {
+          throw new Error("invoice lines require po_line_id, quantity_invoiced > 0, unit_price >= 0");
+        }
+        const poLine = db.prepare(`SELECT id, part_id, description FROM procurement_purchase_order_lines WHERE id = ? AND po_id = ?`).get(po_line_id, id);
+        if (!poLine) throw new Error(`po_line_id ${po_line_id} not found for PO`);
+        const line_total = Number((qty * unit_price).toFixed(2));
+        subtotal += line_total;
+        insLine.run(
+          invoice_id,
+          po_line_id,
+          poLine.part_id ? Number(poLine.part_id) : null,
+          l?.description ? String(l.description).trim() : (poLine.description || null),
+          qty,
+          unit_price,
+          line_total,
+          l?.cost_center_code ? String(l.cost_center_code).trim() : null
+        );
+      }
+      const tax = Number(req.body?.tax || 0);
+      const total = Number((subtotal + tax).toFixed(2));
+      db.prepare(`UPDATE procurement_invoices SET subtotal = ?, total = ? WHERE id = ?`).run(Number(subtotal.toFixed(2)), total, invoice_id);
+      return { invoice_id, invoice_number, subtotal: Number(subtotal.toFixed(2)), tax, total };
+    });
+    const result = tx();
+    return { ok: true, ...result };
+  });
+
+  app.post("/purchase-orders/:id/three-way-match", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "procurement", "stores"])) return;
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+    const po = db.prepare(`SELECT id FROM procurement_purchase_orders WHERE id = ?`).get(id);
+    if (!po) return reply.code(404).send({ error: "PO not found" });
+    const qtyTol = Math.max(0, Number(req.body?.quantity_tolerance || 0));
+    const priceTolPct = Math.max(0, Number(req.body?.price_tolerance_pct || 0));
+    const totalTol = Math.max(0, Number(req.body?.total_tolerance || 0));
+
+    db.prepare(`DELETE FROM procurement_match_exceptions WHERE po_id = ? AND status = 'open'`).run(id);
+
+    const poLines = db.prepare(`
+      SELECT id, line_no, quantity_ordered, quantity_received, unit_price, line_total
+      FROM procurement_purchase_order_lines
+      WHERE po_id = ?
+      ORDER BY line_no ASC
+    `).all(id);
+    const invoiceLines = db.prepare(`
+      SELECT il.id, il.invoice_id, il.po_line_id, il.quantity_invoiced, il.unit_price, il.line_total
+      FROM procurement_invoice_lines il
+      JOIN procurement_invoices i ON i.id = il.invoice_id
+      WHERE i.po_id = ?
+    `).all(id);
+    const receiptLines = db.prepare(`
+      SELECT rl.id, rl.receipt_id, rl.po_line_id, rl.quantity_received, rl.unit_price, rl.line_total
+      FROM procurement_goods_receipt_lines rl
+      JOIN procurement_goods_receipts r ON r.id = rl.receipt_id
+      WHERE r.po_id = ?
+    `).all(id);
+    const invByPoLine = invoiceLines.reduce((m, r) => {
+      const k = Number(r.po_line_id || 0);
+      const cur = m.get(k) || { qty: 0, total: 0, last_unit: 0, lines: [] };
+      cur.qty += Number(r.quantity_invoiced || 0);
+      cur.total += Number(r.line_total || 0);
+      cur.last_unit = Number(r.unit_price || 0);
+      cur.lines.push(r);
+      m.set(k, cur);
+      return m;
+    }, new Map());
+    const recByPoLine = receiptLines.reduce((m, r) => {
+      const k = Number(r.po_line_id || 0);
+      const cur = m.get(k) || { qty: 0, total: 0, lines: [] };
+      cur.qty += Number(r.quantity_received || 0);
+      cur.total += Number(r.line_total || 0);
+      cur.lines.push(r);
+      m.set(k, cur);
+      return m;
+    }, new Map());
+
+    const insEx = db.prepare(`
+      INSERT INTO procurement_match_exceptions (
+        po_id, po_line_id, invoice_id, invoice_line_id, receipt_id, receipt_line_id,
+        exception_type, severity, status, details_json, assigned_to
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
+    `);
+
+    let exception_count = 0;
+    for (const line of poLines) {
+      const po_line_id = Number(line.id || 0);
+      const poQty = Number(line.quantity_ordered || 0);
+      const poUnit = Number(line.unit_price || 0);
+      const poTotal = Number(line.line_total || 0);
+      const inv = invByPoLine.get(po_line_id) || { qty: 0, total: 0, last_unit: 0, lines: [] };
+      const rec = recByPoLine.get(po_line_id) || { qty: 0, total: 0, lines: [] };
+
+      const qtyVsRec = Math.abs(poQty - rec.qty);
+      const qtyVsInv = Math.abs(rec.qty - inv.qty);
+      const priceVarPct = poUnit > 0 ? (Math.abs(inv.last_unit - poUnit) / poUnit) * 100 : 0;
+      const totalVar = Math.abs(rec.total - inv.total);
+
+      if (qtyVsRec > qtyTol) {
+        insEx.run(id, po_line_id, null, null, rec.lines[0]?.receipt_id || null, rec.lines[0]?.id || null, "PO_vs_Receipt_qty", "high", JSON.stringify({ po_qty: poQty, receipt_qty: rec.qty, tolerance: qtyTol }), null);
+        exception_count += 1;
+      }
+      if (qtyVsInv > qtyTol) {
+        insEx.run(id, po_line_id, inv.lines[0]?.invoice_id || null, inv.lines[0]?.id || null, rec.lines[0]?.receipt_id || null, rec.lines[0]?.id || null, "Receipt_vs_Invoice_qty", "high", JSON.stringify({ receipt_qty: rec.qty, invoice_qty: inv.qty, tolerance: qtyTol }), null);
+        exception_count += 1;
+      }
+      if (priceVarPct > priceTolPct) {
+        insEx.run(id, po_line_id, inv.lines[0]?.invoice_id || null, inv.lines[0]?.id || null, null, null, "PO_vs_Invoice_unit_price", "warn", JSON.stringify({ po_unit_price: poUnit, invoice_unit_price: inv.last_unit, variance_pct: Number(priceVarPct.toFixed(2)), tolerance_pct: priceTolPct }), null);
+        exception_count += 1;
+      }
+      if (totalVar > totalTol) {
+        insEx.run(id, po_line_id, inv.lines[0]?.invoice_id || null, inv.lines[0]?.id || null, rec.lines[0]?.receipt_id || null, rec.lines[0]?.id || null, "Receipt_vs_Invoice_total", "warn", JSON.stringify({ receipt_total: Number(rec.total.toFixed(2)), invoice_total: Number(inv.total.toFixed(2)), variance_total: Number(totalVar.toFixed(2)), tolerance_total: totalTol, po_total: poTotal }), null);
+        exception_count += 1;
+      }
+    }
+    return { ok: true, po_id: id, exception_count };
+  });
+
+  app.get("/exceptions", async (req, reply) => {
+    const status = String(req.query?.status || "open").trim().toLowerCase();
+    const rows = db.prepare(`
+      SELECT
+        e.*,
+        po.po_number
+      FROM procurement_match_exceptions e
+      LEFT JOIN procurement_purchase_orders po ON po.id = e.po_id
+      WHERE LOWER(e.status) = ?
+      ORDER BY e.id DESC
+      LIMIT 500
+    `).all(status).map((r) => ({
+      ...r,
+      details: (() => {
+        try { return JSON.parse(String(r.details_json || "{}")); } catch { return {}; }
+      })(),
+    }));
+    return reply.send({ ok: true, rows });
+  });
+
+  app.post("/exceptions/:id/resolve", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "procurement"])) return;
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+    const ex = db.prepare(`SELECT id, status FROM procurement_match_exceptions WHERE id = ?`).get(id);
+    if (!ex) return reply.code(404).send({ error: "exception not found" });
+    if (String(ex.status || "").toLowerCase() === "resolved") return { ok: true, duplicate: true, id };
+    db.prepare(`
+      UPDATE procurement_match_exceptions
+      SET status = 'resolved', resolved_by = ?, resolved_at = datetime('now')
+      WHERE id = ?
+    `).run(getUser(req), id);
+    return { ok: true, id, status: "resolved" };
+  });
+
+  app.post("/journals/build", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "procurement", "stores"])) return;
+    const start = String(req.body?.start || "").trim();
+    const end = String(req.body?.end || "").trim();
+    if (!start || !end) return reply.code(400).send({ error: "start and end are required" });
+    const batch_id = String(req.body?.batch_id || "").trim() || `JRN-${new Date().toISOString().slice(0, 10)}-${Date.now()}`;
+    const defaultCostCenter = req.body?.default_cost_center_code ? String(req.body.default_cost_center_code).trim() : null;
+    const tx = db.transaction(() => {
+      db.prepare(`DELETE FROM finance_journal_staging WHERE batch_id = ?`).run(batch_id);
+      const ins = db.prepare(`
+        INSERT INTO finance_journal_staging (
+          batch_id, tx_date, source_module, source_type, source_id,
+          account_code, cost_center_code, description, debit, credit, currency
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const receiptRows = db.prepare(`
+        SELECT
+          r.receipt_date AS tx_date,
+          rl.id AS receipt_line_id,
+          rl.line_total,
+          COALESCE(NULLIF(TRIM(rl.cost_center_code), ''), NULLIF(TRIM(pol.cost_center_code), ''), ?) AS cost_center_code,
+          po.currency
+        FROM procurement_goods_receipt_lines rl
+        JOIN procurement_goods_receipts r ON r.id = rl.receipt_id
+        JOIN procurement_purchase_orders po ON po.id = r.po_id
+        LEFT JOIN procurement_purchase_order_lines pol ON pol.id = rl.po_line_id
+        WHERE DATE(r.receipt_date) BETWEEN DATE(?) AND DATE(?)
+      `).all(defaultCostCenter, start, end);
+      for (const row of receiptRows) {
+        const amount = Number(row.line_total || 0);
+        if (amount <= 0) continue;
+        const tx_date = String(row.tx_date || start);
+        const cc = row.cost_center_code ? String(row.cost_center_code) : null;
+        const cur = String(row.currency || "USD");
+        ins.run(batch_id, tx_date, "procurement", "goods_receipt", String(row.receipt_line_id), "1400-INVENTORY", cc, `GRN line ${row.receipt_line_id}`, amount, 0, cur);
+        ins.run(batch_id, tx_date, "procurement", "goods_receipt", String(row.receipt_line_id), "2100-GRNI", cc, `GRN accrual ${row.receipt_line_id}`, 0, amount, cur);
+      }
+
+      const invoiceRows = db.prepare(`
+        SELECT
+          i.invoice_date AS tx_date,
+          il.id AS invoice_line_id,
+          il.line_total,
+          COALESCE(NULLIF(TRIM(il.cost_center_code), ''), NULLIF(TRIM(pol.cost_center_code), ''), ?) AS cost_center_code,
+          i.currency
+        FROM procurement_invoice_lines il
+        JOIN procurement_invoices i ON i.id = il.invoice_id
+        LEFT JOIN procurement_purchase_order_lines pol ON pol.id = il.po_line_id
+        WHERE DATE(i.invoice_date) BETWEEN DATE(?) AND DATE(?)
+      `).all(defaultCostCenter, start, end);
+      for (const row of invoiceRows) {
+        const amount = Number(row.line_total || 0);
+        if (amount <= 0) continue;
+        const tx_date = String(row.tx_date || start);
+        const cc = row.cost_center_code ? String(row.cost_center_code) : null;
+        const cur = String(row.currency || "USD");
+        ins.run(batch_id, tx_date, "procurement", "invoice", String(row.invoice_line_id), "2100-GRNI", cc, `Invoice clear GRNI ${row.invoice_line_id}`, amount, 0, cur);
+        ins.run(batch_id, tx_date, "procurement", "invoice", String(row.invoice_line_id), "2200-AP", cc, `AP recognition ${row.invoice_line_id}`, 0, amount, cur);
+      }
+    });
+    tx();
+    const summary = db.prepare(`
+      SELECT
+        COUNT(*) AS lines,
+        COALESCE(SUM(debit), 0) AS debit_total,
+        COALESCE(SUM(credit), 0) AS credit_total
+      FROM finance_journal_staging
+      WHERE batch_id = ?
+    `).get(batch_id);
+    return {
+      ok: true,
+      batch_id,
+      lines: Number(summary?.lines || 0),
+      debit_total: Number(Number(summary?.debit_total || 0).toFixed(2)),
+      credit_total: Number(Number(summary?.credit_total || 0).toFixed(2)),
+      balanced: Number(Number(summary?.debit_total || 0).toFixed(2)) === Number(Number(summary?.credit_total || 0).toFixed(2)),
+    };
+  });
+
+  app.get("/journals/export.csv", async (req, reply) => {
+    const batch_id = String(req.query?.batch_id || "").trim();
+    if (!batch_id) return reply.code(400).send({ error: "batch_id is required" });
+    const rows = db.prepare(`
+      SELECT
+        batch_id, tx_date, source_module, source_type, source_id,
+        account_code, cost_center_code, description, debit, credit, currency
+      FROM finance_journal_staging
+      WHERE batch_id = ?
+      ORDER BY id ASC
+    `).all(batch_id);
+    if (!rows.length) return reply.code(404).send({ error: "no journal lines for batch_id" });
+    const esc = (v) => {
+      const s = String(v ?? "");
+      if (/[",\n]/.test(s)) return `"${s.replace(/"/g, "\"\"")}"`;
+      return s;
+    };
+    const header = ["batch_id", "tx_date", "source_module", "source_type", "source_id", "account_code", "cost_center_code", "description", "debit", "credit", "currency"];
+    const csv = [header.join(",")]
+      .concat(rows.map((r) => [
+        r.batch_id,
+        r.tx_date,
+        r.source_module,
+        r.source_type,
+        r.source_id,
+        r.account_code,
+        r.cost_center_code || "",
+        r.description || "",
+        Number(r.debit || 0).toFixed(2),
+        Number(r.credit || 0).toFixed(2),
+        r.currency || "USD",
+      ].map(esc).join(",")))
+      .join("\n");
+    reply.header("Content-Type", "text/csv; charset=utf-8");
+    reply.header("Content-Disposition", `attachment; filename="journal-${batch_id}.csv"`);
+    return reply.send(csv);
+  });
+
+  app.get("/journals/export.xlsx", async (req, reply) => {
+    const batch_id = String(req.query?.batch_id || "").trim();
+    if (!batch_id) return reply.code(400).send({ error: "batch_id is required" });
+    const rows = db.prepare(`
+      SELECT
+        batch_id, tx_date, source_module, source_type, source_id,
+        account_code, cost_center_code, description, debit, credit, currency
+      FROM finance_journal_staging
+      WHERE batch_id = ?
+      ORDER BY id ASC
+    `).all(batch_id);
+    if (!rows.length) return reply.code(404).send({ error: "no journal lines for batch_id" });
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "IRONLOG";
+    wb.created = new Date();
+    const ws = wb.addWorksheet("Journals");
+    ws.columns = [
+      { header: "Batch ID", key: "batch_id", width: 20 },
+      { header: "Date", key: "tx_date", width: 14 },
+      { header: "Source Module", key: "source_module", width: 18 },
+      { header: "Source Type", key: "source_type", width: 18 },
+      { header: "Source ID", key: "source_id", width: 14 },
+      { header: "Account", key: "account_code", width: 18 },
+      { header: "Cost Center", key: "cost_center_code", width: 16 },
+      { header: "Description", key: "description", width: 40 },
+      { header: "Debit", key: "debit", width: 14 },
+      { header: "Credit", key: "credit", width: 14 },
+      { header: "Currency", key: "currency", width: 10 },
+    ];
+    ws.addRows(rows.map((r) => ({
+      ...r,
+      debit: Number(r.debit || 0),
+      credit: Number(r.credit || 0),
+    })));
+    ws.getRow(1).font = { bold: true };
+    ws.getColumn("debit").numFmt = "#,##0.00";
+    ws.getColumn("credit").numFmt = "#,##0.00";
+    const buffer = await wb.xlsx.writeBuffer();
+    reply.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    reply.header("Content-Disposition", `attachment; filename="journal-${batch_id}.xlsx"`);
+    return reply.send(Buffer.from(buffer));
+  });
 }
