@@ -6569,6 +6569,180 @@ async function saveLocation() {
   }
 }
 
+async function saveStockBin() {
+  const location_code = String(qs("sbLocationCode")?.value || "").trim().toUpperCase();
+  const bin_code = String(qs("sbBinCode")?.value || "").trim().toUpperCase();
+  const bin_name = String(qs("sbBinName")?.value || "").trim() || undefined;
+  if (!location_code || !bin_code) return alert("Location and bin code are required.");
+  setStatus("Saving stock bin...");
+  const res = await fetchJson(`${API}/api/stock/bins`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ location_code, bin_code, bin_name, active: true }),
+  });
+  setText("sbResult", JSON.stringify(res, null, 2));
+  await loadStockBins();
+  setStatus("Stock bin saved.");
+}
+
+async function loadStockBins() {
+  const list = qs("sbBinsList");
+  if (!list) return;
+  const location_code = String(qs("sbLocationCode")?.value || "").trim().toUpperCase();
+  const q = location_code ? `?location_code=${encodeURIComponent(location_code)}&active=1` : "?active=1";
+  const data = await fetchJson(`${API}/api/stock/bins${q}`);
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  list.innerHTML = "";
+  rows.forEach((r) => {
+    list.appendChild(item(`<b>${r.location_code || "-"}/${r.bin_code || "-"}</b><br><small>${r.bin_name || ""}</small>`));
+  });
+  if (!rows.length) list.appendChild(item("<small>No bins found.</small>"));
+}
+
+async function saveStockMinMax() {
+  const part_code = String(qs("sbPartCode")?.value || "").trim();
+  const location_code = String(qs("sbLocationCode")?.value || "").trim().toUpperCase();
+  const bin_code = String(qs("sbBinCode")?.value || "").trim().toUpperCase() || undefined;
+  const min_qty = Number(qs("sbMinQty")?.value || 0);
+  const max_qty = Number(qs("sbMaxQty")?.value || 0);
+  const reorder_qty_raw = String(qs("sbReorderQty")?.value || "").trim();
+  const reorder_qty = reorder_qty_raw === "" ? undefined : Number(reorder_qty_raw);
+  if (!part_code || !location_code) return alert("Part code and location are required.");
+  if (!Number.isFinite(min_qty) || min_qty < 0 || !Number.isFinite(max_qty) || max_qty < 0) return alert("Min and max must be >= 0.");
+  const res = await fetchJson(`${API}/api/stock/min-max`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ part_code, location_code, bin_code, min_qty, max_qty, reorder_qty }),
+  });
+  setText("sbResult", JSON.stringify(res, null, 2));
+  await loadReplenishmentSuggestions();
+  setStatus("Min-max policy saved.");
+}
+
+async function loadStockDepth() {
+  const list = qs("sbDepthList");
+  if (!list) return;
+  const part_code = String(qs("sbPartCode")?.value || "").trim();
+  const location_code = String(qs("sbLocationCode")?.value || "").trim().toUpperCase();
+  const bin_code = String(qs("sbBinCode")?.value || "").trim().toUpperCase();
+  const q = new URLSearchParams();
+  if (part_code) q.set("part_code", part_code);
+  if (location_code) q.set("location_code", location_code);
+  if (bin_code) q.set("bin_code", bin_code);
+  const data = await fetchJson(`${API}/api/stock/depth${q.toString() ? `?${q.toString()}` : ""}`);
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  list.innerHTML = "";
+  rows.slice(0, 120).forEach((r) => {
+    list.appendChild(item(
+      `<b>${r.part_code || "-"}</b> ${r.location_code || "-"}/${r.bin_code || "-"}`
+      + `<br><small>On hand: ${Number(r.on_hand || 0).toFixed(2)} | On order: ${Number(r.on_order || 0).toFixed(2)} | Available: ${Number(r.available || 0).toFixed(2)}</small>`
+    ));
+  });
+  if (!rows.length) list.appendChild(item("<small>No depth rows found.</small>"));
+}
+
+async function loadReplenishmentSuggestions() {
+  const list = qs("sbReplenishmentList");
+  if (!list) return;
+  const location_code = String(qs("sbLocationCode")?.value || "").trim().toUpperCase();
+  const bin_code = String(qs("sbBinCode")?.value || "").trim().toUpperCase();
+  const q = new URLSearchParams();
+  if (location_code) q.set("location_code", location_code);
+  if (bin_code) q.set("bin_code", bin_code);
+  const data = await fetchJson(`${API}/api/stock/replenishment-suggestions${q.toString() ? `?${q.toString()}` : ""}`);
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  list.innerHTML = "";
+  rows.slice(0, 120).forEach((r) => {
+    list.appendChild(item(
+      `<b>${r.part_code || "-"}</b> ${r.location_code || "-"}/${r.bin_code || "-"} <span class="pill red">REPLENISH</span>`
+      + `<br><small>On hand: ${Number(r.on_hand || 0).toFixed(2)} | Min: ${Number(r.min_qty || 0).toFixed(2)} | Suggest: ${Number(r.suggested_order_qty || 0).toFixed(2)}</small>`
+    ));
+  });
+  if (!rows.length) list.appendChild(item("<small>No replenishment suggestions.</small>"));
+}
+
+async function createCycleSession() {
+  const location_code = String(qs("sbLocationCode")?.value || "").trim().toUpperCase();
+  const bin_code = String(qs("sbBinCode")?.value || "").trim().toUpperCase() || undefined;
+  if (!location_code) return alert("Location is required to create a cycle session.");
+  const res = await fetchJson(`${API}/api/stock/cycle-sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      location_code,
+      bin_code,
+      planned_date: new Date().toISOString().slice(0, 10),
+      notes: "Created from stock tab",
+    }),
+  });
+  setText("sbResult", JSON.stringify(res, null, 2));
+  await loadCycleSessions();
+  setStatus("Cycle session created.");
+}
+
+async function loadCycleSessions() {
+  const list = qs("sbCycleSessionsList");
+  if (!list) return;
+  const data = await fetchJson(`${API}/api/stock/cycle-sessions`);
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  list.innerHTML = "";
+  rows.slice(0, 80).forEach((r) => {
+    const id = Number(r.id || 0);
+    list.appendChild(item(
+      `<b>Session #${id}</b> ${r.location_code || "-"}/${r.bin_code || "-"} <span class="pill blue">${r.status || "-"}</span>`
+      + `<br><small>Lines: ${Number(r.line_count || 0)} | Variance abs: ${Number(r.variance_abs || 0).toFixed(2)} | Planned: ${r.planned_date || "-"}</small>`
+      + `<br><button data-sb-cs-submit="${id}" style="margin-top:8px;">Submit</button>`
+      + ` <button data-sb-cs-approve="${id}" style="margin-top:8px;">Approve</button>`
+      + ` <button data-sb-cs-countone="${id}" style="margin-top:8px;">Add One Part Count</button>`
+    ));
+  });
+  if (!rows.length) list.appendChild(item("<small>No cycle sessions.</small>"));
+}
+
+async function addOnePartCountToSession(sessionId) {
+  const id = Number(sessionId || 0);
+  if (!id) return;
+  const part_code = String(qs("sbPartCode")?.value || "").trim();
+  if (!part_code) return alert("Enter/select part code first.");
+  const countedRaw = prompt("Counted quantity for this part:", "0");
+  if (countedRaw == null) return;
+  const counted_qty = Number(countedRaw);
+  if (!Number.isFinite(counted_qty) || counted_qty < 0) return alert("Counted qty must be >= 0.");
+  const res = await fetchJson(`${API}/api/stock/cycle-sessions/${id}/lines/upsert`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lines: [{ part_code, counted_qty, reason: "session_count" }] }),
+  });
+  setText("sbResult", JSON.stringify(res, null, 2));
+  await loadCycleSessions();
+}
+
+async function submitCycleSession(sessionId) {
+  const id = Number(sessionId || 0);
+  if (!id) return;
+  const res = await fetchJson(`${API}/api/stock/cycle-sessions/${id}/submit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  setText("sbResult", JSON.stringify(res, null, 2));
+  await loadCycleSessions();
+  setStatus(`Cycle session #${id} submitted.`);
+}
+
+async function approveCycleSession(sessionId) {
+  const id = Number(sessionId || 0);
+  if (!id) return;
+  const ok = confirm(`Approve cycle session #${id} and post adjustment movements?`);
+  if (!ok) return;
+  const res = await fetchJson(`${API}/api/stock/cycle-sessions/${id}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  setText("sbResult", JSON.stringify(res, null, 2));
+  await Promise.all([loadCycleSessions().catch(() => {}), loadStockDepth().catch(() => {}), loadStockOnHandPage().catch(() => {})]);
+  setStatus(`Cycle session #${id} approved.`);
+}
+
 let lubeStockMatch = { part_code: null, on_hand: null };
 
 function updateLubeQtyWarning() {
@@ -10629,6 +10803,27 @@ async function init() {
   qs("locSave")?.addEventListener("click", () =>
     saveLocation().catch((e) => setStatus("Location save error: " + e.message))
   );
+  qs("sbSaveBinBtn")?.addEventListener("click", () =>
+    saveStockBin().catch((e) => setStatus("Bin save error: " + e.message))
+  );
+  qs("sbLoadBinsBtn")?.addEventListener("click", () =>
+    loadStockBins().catch((e) => setStatus("Bins load error: " + e.message))
+  );
+  qs("sbSaveMinMaxBtn")?.addEventListener("click", () =>
+    saveStockMinMax().catch((e) => setStatus("Min-max save error: " + e.message))
+  );
+  qs("sbLoadDepthBtn")?.addEventListener("click", () =>
+    loadStockDepth().catch((e) => setStatus("Depth load error: " + e.message))
+  );
+  qs("sbLoadReplenishmentBtn")?.addEventListener("click", () =>
+    loadReplenishmentSuggestions().catch((e) => setStatus("Replenishment load error: " + e.message))
+  );
+  qs("sbCreateCycleSessionBtn")?.addEventListener("click", () =>
+    createCycleSession().catch((e) => setStatus("Cycle session create error: " + e.message))
+  );
+  qs("sbLoadCycleSessionsBtn")?.addEventListener("click", () =>
+    loadCycleSessions().catch((e) => setStatus("Cycle sessions load error: " + e.message))
+  );
   qs("loadLubeStock")?.addEventListener("click", () =>
     loadLubeStockOnHand().catch((e) => setStatus("Lube stock error: " + e.message))
   );
@@ -10801,6 +10996,10 @@ async function init() {
   loadStockOnHandPage().catch(() => {});
   loadInventoryControl().catch(() => {});
   loadLocations().catch(() => {});
+  loadStockBins().catch(() => {});
+  loadStockDepth().catch(() => {});
+  loadReplenishmentSuggestions().catch(() => {});
+  loadCycleSessions().catch(() => {});
   loadLubeStockOnHand().catch(() => {});
   loadLubeReorderAlerts().catch(() => {});
   applyDefaultLocationsToInputs();
@@ -11058,6 +11257,28 @@ async function init() {
       const resolveId = target.getAttribute("data-pr-ex-resolve");
       if (resolveId) {
         resolveProcurementException(resolveId).catch((e) => setStatus(`Exception resolve error: ${e.message || e}`));
+      }
+    });
+  }
+
+  const sbCycleSessionsList = qs("sbCycleSessionsList");
+  if (sbCycleSessionsList) {
+    sbCycleSessionsList.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const submitId = target.getAttribute("data-sb-cs-submit");
+      const approveId = target.getAttribute("data-sb-cs-approve");
+      const countOneId = target.getAttribute("data-sb-cs-countone");
+      if (submitId) {
+        submitCycleSession(submitId).catch((e) => setStatus(`Cycle submit error: ${e.message || e}`));
+        return;
+      }
+      if (approveId) {
+        approveCycleSession(approveId).catch((e) => setStatus(`Cycle approve error: ${e.message || e}`));
+        return;
+      }
+      if (countOneId) {
+        addOnePartCountToSession(countOneId).catch((e) => setStatus(`Cycle line upsert error: ${e.message || e}`));
       }
     });
   }
