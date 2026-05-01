@@ -7185,6 +7185,9 @@ async function loadRequisitions() {
     const approveBtn = s === "approval_in_progress" ? `<button data-pr-approve-id="${r.id}" style="margin-top:8px;">Approve Current Step</button>` : "";
     const submitBtn = s === "draft" ? `<button data-pr-submit-id="${r.id}" style="margin-top:8px;">Fast Track to Approval</button>` : "";
     const receiveBtn = ["approved", "approved_all"].includes(s) ? `<button data-pr-receive-id="${r.id}" style="margin-top:8px;">Request Receive</button>` : "";
+    const createPoBtn = ["approved_all", "approved", "po_ready", "partially_received", "received"].includes(s)
+      ? `<button data-pr-create-po-id="${r.id}" style="margin-top:8px;">Create / Open PO</button>`
+      : "";
     const receiveHalfBtn = ["approved", "approved_all"].includes(s) && Number(r.qty_outstanding || 0) > 0
       ? `<button data-pr-receive-half-id="${r.id}" data-pr-outstanding="${Number(r.qty_outstanding || 0)}" style="margin-top:8px;">Receive 50%</button>`
       : "";
@@ -7212,7 +7215,7 @@ async function loadRequisitions() {
           `<br><small>Requester: ${r.requester || "-"} | ${r.created_at || "-"}</small>` +
           (r.latest_approval_id ? `<br><small>Approval: #${r.latest_approval_id} (${r.latest_approval_status || "-"})</small>` : "") +
           (r.notes ? `<br><small>${r.notes}</small>` : "") +
-          `<br>${advanceBtn} ${finalizeBtn} ${postBtn} ${routeBtn} ${approveBtn} ${submitBtn} ${receiveBtn} ${receiveHalfBtn} ${receiveFullBtn} <button data-pr-duplicate="${dupPayload}" style="margin-top:8px;">Duplicate</button> ${r.latest_approval_id ? `<button data-pr-open-approval-id="${r.latest_approval_id}" style="margin-top:8px;">Open Approval</button>` : ""}`
+          `<br>${advanceBtn} ${finalizeBtn} ${postBtn} ${routeBtn} ${approveBtn} ${submitBtn} ${receiveBtn} ${receiveHalfBtn} ${receiveFullBtn} ${createPoBtn} <button data-pr-duplicate="${dupPayload}" style="margin-top:8px;">Duplicate</button> ${r.latest_approval_id ? `<button data-pr-open-approval-id="${r.latest_approval_id}" style="margin-top:8px;">Open Approval</button>` : ""}`
       )
     );
   });
@@ -7296,6 +7299,225 @@ function renderSupplyFlowBoard(rows) {
   setText("sfCountApprove", String(laneCounts.approve));
   setText("sfCountPoReady", String(laneCounts.po_ready));
   setText("sfCountReceive", String(laneCounts.receive));
+}
+
+let procurementLastJournalBatchId = "";
+
+async function loadPurchaseOrders() {
+  const list = qs("prPoList");
+  if (!list) return;
+  const status = String(qs("prPoStatusFilter")?.value || "").trim();
+  const q = status ? `?status=${encodeURIComponent(status)}` : "";
+  setStatus("Loading purchase orders...");
+  list.innerHTML = "";
+  const data = await fetchJson(`${API}/api/procurement/purchase-orders${q}`);
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  rows.forEach((r) => {
+    const poId = Number(r.id || 0);
+    list.appendChild(item(
+      `<b>PO #${poId}</b> <span class="pill blue">${String(r.status || "-")}</span> - ${r.po_number || "-"}`
+      + `<br><small>Supplier: ${r.supplier_name || r.supplier_code || "-"}</small>`
+      + `<br><small>Subtotal: ${Number(r.subtotal || 0).toFixed(2)} ${r.currency || "USD"} | Req: ${r.requisition_id || "-"}</small>`
+      + `<br><button data-pr-po-open="${poId}" style="margin-top:8px;">Open PO</button>`
+      + ` <button data-pr-po-approve="${poId}" style="margin-top:8px;">Approve</button>`
+      + ` <button data-pr-po-send="${poId}" style="margin-top:8px;">Mark Sent</button>`
+    ));
+  });
+  if (!rows.length) list.appendChild(item("<small>No purchase orders found.</small>"));
+  setStatus("Purchase orders ready.");
+}
+
+async function createPoFromRequisition(reqId) {
+  const id = Number(reqId || 0);
+  if (!id) return;
+  setStatus(`Creating PO from requisition #${id}...`);
+  const res = await fetchJson(`${API}/api/procurement/requisitions/${id}/create-po`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  setText("procurementResult", JSON.stringify(res, null, 2));
+  if (res?.po_id) {
+    const poEl = qs("prActivePoId");
+    if (poEl) poEl.value = String(res.po_id);
+  }
+  await Promise.all([loadRequisitions().catch(() => {}), loadPurchaseOrders().catch(() => {})]);
+  setStatus(`PO created from requisition #${id}.`);
+}
+
+async function openPurchaseOrder(poId) {
+  const id = Number(poId || 0);
+  if (!id) return;
+  const res = await fetchJson(`${API}/api/procurement/purchase-orders/${id}/detail`);
+  const po = res?.po || {};
+  const lines = Array.isArray(res?.lines) ? res.lines : [];
+  const receipts = Array.isArray(res?.receipts) ? res.receipts : [];
+  setText("procurementResult", JSON.stringify(res, null, 2));
+  const poEl = qs("prActivePoId");
+  if (poEl) poEl.value = String(id);
+  const recJson = qs("prReceiveLinesJson");
+  if (recJson) {
+    const sample = lines
+      .filter((l) => Number(l.quantity_ordered || 0) > Number(l.quantity_received || 0))
+      .slice(0, 3)
+      .map((l) => ({ po_line_id: Number(l.id), quantity_received: Number((Number(l.quantity_ordered || 0) - Number(l.quantity_received || 0)).toFixed(2)) }));
+    recJson.value = JSON.stringify(sample.length ? sample : [{ po_line_id: Number(lines[0]?.id || 0), quantity_received: 1 }]);
+  }
+  const invJson = qs("prInvoiceLinesJson");
+  if (invJson) {
+    const sample = lines.slice(0, 3).map((l) => ({
+      po_line_id: Number(l.id || 0),
+      quantity_invoiced: Number((Number(l.quantity_received || l.quantity_ordered || 0)).toFixed(2)),
+      unit_price: Number(l.unit_price || 0),
+    }));
+    invJson.value = JSON.stringify(sample.length ? sample : [{ po_line_id: Number(lines[0]?.id || 0), quantity_invoiced: 1, unit_price: 0 }]);
+  }
+  setStatus(`PO ${po.po_number || id} loaded (${lines.length} lines, ${receipts.length} receipts).`);
+}
+
+async function approvePurchaseOrder(poId) {
+  const id = Number(poId || 0);
+  if (!id) return;
+  const res = await fetchJson(`${API}/api/procurement/purchase-orders/${id}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  setText("procurementResult", JSON.stringify(res, null, 2));
+  await loadPurchaseOrders();
+  setStatus(`PO #${id} approved.`);
+}
+
+async function sendPurchaseOrder(poId) {
+  const id = Number(poId || 0);
+  if (!id) return;
+  const res = await fetchJson(`${API}/api/procurement/purchase-orders/${id}/send`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  setText("procurementResult", JSON.stringify(res, null, 2));
+  await loadPurchaseOrders();
+  setStatus(`PO #${id} marked sent.`);
+}
+
+async function postPoReceipt() {
+  const poId = Number(qs("prActivePoId")?.value || 0);
+  if (!poId) throw new Error("PO ID is required.");
+  const location_code = String(qs("prReceiveLocationCode")?.value || "MAIN").trim().toUpperCase() || "MAIN";
+  const raw = String(qs("prReceiveLinesJson")?.value || "").trim();
+  if (!raw) throw new Error("Receipt lines JSON is required.");
+  let lines = [];
+  try {
+    lines = JSON.parse(raw);
+  } catch {
+    throw new Error("Receipt lines JSON is invalid.");
+  }
+  const payload = { location_code, lines };
+  const res = await fetchJson(`${API}/api/procurement/purchase-orders/${poId}/receive`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  setText("procurementResult", JSON.stringify(res, null, 2));
+  await Promise.all([loadPurchaseOrders().catch(() => {}), loadRequisitions().catch(() => {})]);
+  setStatus(`Receipt posted for PO #${poId}.`);
+}
+
+async function capturePoInvoice() {
+  const poId = Number(qs("prActivePoId")?.value || 0);
+  if (!poId) throw new Error("PO ID is required.");
+  const invoice_number = String(qs("prInvoiceNumber")?.value || "").trim();
+  if (!invoice_number) throw new Error("Invoice number is required.");
+  const raw = String(qs("prInvoiceLinesJson")?.value || "").trim();
+  if (!raw) throw new Error("Invoice lines JSON is required.");
+  let lines = [];
+  try {
+    lines = JSON.parse(raw);
+  } catch {
+    throw new Error("Invoice lines JSON is invalid.");
+  }
+  const res = await fetchJson(`${API}/api/procurement/purchase-orders/${poId}/invoices`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ invoice_number, lines }),
+  });
+  setText("procurementResult", JSON.stringify(res, null, 2));
+  setStatus(`Invoice captured for PO #${poId}.`);
+}
+
+async function runPoThreeWayMatch() {
+  const poId = Number(qs("prActivePoId")?.value || 0);
+  if (!poId) throw new Error("PO ID is required.");
+  const res = await fetchJson(`${API}/api/procurement/purchase-orders/${poId}/three-way-match`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quantity_tolerance: 0, price_tolerance_pct: 5, total_tolerance: 1 }),
+  });
+  setText("procurementResult", JSON.stringify(res, null, 2));
+  await loadProcurementExceptions();
+  setStatus(`3-way match complete for PO #${poId}.`);
+}
+
+async function loadProcurementExceptions() {
+  const list = qs("prExceptionsList");
+  if (!list) return;
+  const status = String(qs("prExceptionStatus")?.value || "open").trim().toLowerCase();
+  list.innerHTML = "";
+  const data = await fetchJson(`${API}/api/procurement/exceptions?status=${encodeURIComponent(status)}`);
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  rows.forEach((r) => {
+    list.appendChild(item(
+      `<b>EX #${Number(r.id || 0)}</b> <span class="pill ${String(r.severity || "").toLowerCase() === "high" ? "red" : "orange"}">${r.severity || "-"}</span> <span class="pill blue">${r.status || "-"}</span>`
+      + `<br><small>PO: ${r.po_number || r.po_id || "-"} | Type: ${r.exception_type || "-"}</small>`
+      + `<br><small>${r.details ? JSON.stringify(r.details) : "-"}</small>`
+      + (String(r.status || "").toLowerCase() === "open" ? `<br><button data-pr-ex-resolve="${Number(r.id || 0)}" style="margin-top:8px;">Resolve</button>` : "")
+    ));
+  });
+  if (!rows.length) list.appendChild(item("<small>No exceptions found.</small>"));
+}
+
+async function resolveProcurementException(exId) {
+  const id = Number(exId || 0);
+  if (!id) return;
+  const res = await fetchJson(`${API}/api/procurement/exceptions/${id}/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  setText("procurementResult", JSON.stringify(res, null, 2));
+  await loadProcurementExceptions();
+  setStatus(`Exception #${id} resolved.`);
+}
+
+async function buildProcurementJournals() {
+  const start = String(qs("prJournalStart")?.value || "").trim();
+  const end = String(qs("prJournalEnd")?.value || "").trim();
+  if (!start || !end) throw new Error("Journal start and end dates are required.");
+  const batch_id = String(qs("prJournalBatchId")?.value || "").trim() || undefined;
+  const default_cost_center_code = String(qs("prJournalCc")?.value || "").trim() || undefined;
+  const res = await fetchJson(`${API}/api/procurement/journals/build`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ start, end, batch_id, default_cost_center_code }),
+  });
+  procurementLastJournalBatchId = String(res?.batch_id || "");
+  setText("prJournalLastBatch", procurementLastJournalBatchId || "-");
+  setText("procurementResult", JSON.stringify(res, null, 2));
+  setStatus(`Journal batch built: ${procurementLastJournalBatchId || "-"}.`);
+}
+
+function currentProcurementJournalBatch() {
+  const typed = String(qs("prJournalBatchId")?.value || "").trim();
+  return typed || procurementLastJournalBatchId;
+}
+
+function exportProcurementJournalsCsv() {
+  const batch = currentProcurementJournalBatch();
+  if (!batch) throw new Error("Build journals first or enter batch ID.");
+  window.open(`${API}/api/procurement/journals/export.csv?batch_id=${encodeURIComponent(batch)}`, "_blank");
+}
+
+function exportProcurementJournalsXlsx() {
+  const batch = currentProcurementJournalBatch();
+  if (!batch) throw new Error("Build journals first or enter batch ID.");
+  window.open(`${API}/api/procurement/journals/export.xlsx?batch_id=${encodeURIComponent(batch)}`, "_blank");
 }
 
 function getSiteOpsFrom() {
@@ -9869,6 +10091,44 @@ async function init() {
   qs("createRequisition")?.addEventListener("click", () =>
     createRequisition().catch((e) => setStatus("Requisition create error: " + e.message))
   );
+  qs("prLoadPoList")?.addEventListener("click", () =>
+    loadPurchaseOrders().catch((e) => setStatus("PO load error: " + e.message))
+  );
+  qs("prPoStatusFilter")?.addEventListener("change", () =>
+    loadPurchaseOrders().catch((e) => setStatus("PO load error: " + e.message))
+  );
+  qs("prPostReceiptBtn")?.addEventListener("click", () =>
+    postPoReceipt().catch((e) => setStatus("PO receipt error: " + e.message))
+  );
+  qs("prCaptureInvoiceBtn")?.addEventListener("click", () =>
+    capturePoInvoice().catch((e) => setStatus("Invoice capture error: " + e.message))
+  );
+  qs("prRunMatchBtn")?.addEventListener("click", () =>
+    runPoThreeWayMatch().catch((e) => setStatus("3-way match error: " + e.message))
+  );
+  qs("prLoadExceptionsBtn")?.addEventListener("click", () =>
+    loadProcurementExceptions().catch((e) => setStatus("Exception load error: " + e.message))
+  );
+  qs("prExceptionStatus")?.addEventListener("change", () =>
+    loadProcurementExceptions().catch((e) => setStatus("Exception load error: " + e.message))
+  );
+  qs("prBuildJournalBtn")?.addEventListener("click", () =>
+    buildProcurementJournals().catch((e) => setStatus("Journal build error: " + e.message))
+  );
+  qs("prExportJournalCsvBtn")?.addEventListener("click", () => {
+    try {
+      exportProcurementJournalsCsv();
+    } catch (e) {
+      setStatus("Journal CSV export error: " + (e.message || e));
+    }
+  });
+  qs("prExportJournalXlsxBtn")?.addEventListener("click", () => {
+    try {
+      exportProcurementJournalsXlsx();
+    } catch (e) {
+      setStatus("Journal XLSX export error: " + (e.message || e));
+    }
+  });
   qs("loadRequisitions")?.addEventListener("click", () =>
     loadRequisitions().catch((e) => setStatus("Requisition load error: " + e.message))
   );
@@ -10554,7 +10814,13 @@ async function init() {
   setProcurementChainInputsFromConfig();
   updateProcurementChainPreview();
   setProcurementKpiFilter("all");
+  const prJournalStart = qs("prJournalStart");
+  const prJournalEnd = qs("prJournalEnd");
+  if (prJournalStart && !prJournalStart.value) prJournalStart.value = new Date(Date.now() - 1000 * 60 * 60 * 24 * 30).toISOString().slice(0, 10);
+  if (prJournalEnd && !prJournalEnd.value) prJournalEnd.value = new Date().toISOString().slice(0, 10);
   loadRequisitions().catch(() => {});
+  loadPurchaseOrders().catch(() => {});
+  loadProcurementExceptions().catch(() => {});
   loadOperations().catch(() => {});
   loadSiteZones().catch(() => {});
   loadSiteDailyEntries().catch(() => {});
@@ -10672,6 +10938,7 @@ async function init() {
       const receiveId = target.getAttribute("data-pr-receive-id");
       const receiveHalfId = target.getAttribute("data-pr-receive-half-id");
       const receiveFullId = target.getAttribute("data-pr-receive-full-id");
+      const createPoId = target.getAttribute("data-pr-create-po-id");
       const outstanding = target.getAttribute("data-pr-outstanding");
       const duplicateJson = target.getAttribute("data-pr-duplicate");
       const openApprovalId = target.getAttribute("data-pr-open-approval-id");
@@ -10739,6 +11006,10 @@ async function init() {
         requestRequisitionReceiveFull(receiveFullId, Number(outstanding || 0));
         return;
       }
+      if (createPoId) {
+        createPoFromRequisition(createPoId).catch((e) => setStatus(`Create PO failed: ${e.message || e}`));
+        return;
+      }
       if (duplicateJson) {
         duplicateRequisitionFromRow(duplicateJson);
         return;
@@ -10753,6 +11024,40 @@ async function init() {
         switchTab("approvals");
         loadApprovalRequests().catch(() => {});
         setStatus(`Showing approvals. Latest request id: #${openApprovalId}`);
+      }
+    });
+  }
+
+  const prPoList = qs("prPoList");
+  if (prPoList) {
+    prPoList.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const openId = target.getAttribute("data-pr-po-open");
+      const approveId = target.getAttribute("data-pr-po-approve");
+      const sendId = target.getAttribute("data-pr-po-send");
+      if (openId) {
+        openPurchaseOrder(openId).catch((e) => setStatus(`PO detail error: ${e.message || e}`));
+        return;
+      }
+      if (approveId) {
+        approvePurchaseOrder(approveId).catch((e) => setStatus(`PO approve error: ${e.message || e}`));
+        return;
+      }
+      if (sendId) {
+        sendPurchaseOrder(sendId).catch((e) => setStatus(`PO send error: ${e.message || e}`));
+      }
+    });
+  }
+
+  const prExList = qs("prExceptionsList");
+  if (prExList) {
+    prExList.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const resolveId = target.getAttribute("data-pr-ex-resolve");
+      if (resolveId) {
+        resolveProcurementException(resolveId).catch((e) => setStatus(`Exception resolve error: ${e.message || e}`));
       }
     });
   }
