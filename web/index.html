@@ -209,6 +209,14 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
           <span>Finance</span>
         </a>
+        <a href="#" class="nav-item" data-tab="enterprise">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></svg>
+          <span>Enterprise</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="exec">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 12 9 6 13 10 21 3"></polyline><polyline points="16 3 21 3 21 8"></polyline></svg>
+          <span>Exec Command</span>
+        </a>
         <a href="#" class="nav-item" data-tab="uploads">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
           <span>CSV Uploads</span>
@@ -5048,6 +5056,190 @@
           <div id="finSsotActuals" style="margin-top:10px;"></div>
           <h5 style="margin-top:14px;">KPI Definitions</h5>
           <div id="finKpiDefs" class="muted">Definitions not loaded.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ENTERPRISE: multi-entity + integrations + governance + evidence packs -->
+    <section class="panel" id="tab-enterprise">
+      <div class="reports-header">
+        <h2>Enterprise</h2>
+        <p class="muted">Multi-entity foundation, integration hub, governance v2, and compliance evidence packs</p>
+      </div>
+      <div class="form-grid">
+        <div class="card">
+          <h4 style="margin-top:0;">Company Profiles</h4>
+          <div class="row stack-10" style="margin-bottom:8px;">
+            <label>Code<br><input id="entCompanyCode" class="w-140" placeholder="CO-A"></label>
+            <label>Name<br><input id="entCompanyName" class="w-200"></label>
+            <label>Base Ccy<br><input id="entCompanyBaseCcy" class="w-80" value="USD"></label>
+            <label>Reporting Ccy<br><input id="entCompanyReportCcy" class="w-80"></label>
+            <label>Tax Region<br><input id="entCompanyTaxRegion" class="w-120"></label>
+          </div>
+          <div class="row stack-10" style="margin-bottom:8px;">
+            <button id="entSaveCompanyBtn" type="button" class="btn btn-primary">Save Company</button>
+            <button id="entLoadCompaniesBtn" type="button">Refresh</button>
+          </div>
+          <div id="entCompanyList" class="muted">No companies loaded.</div>
+        </div>
+
+        <div class="card">
+          <h4 style="margin-top:0;">Site Profiles</h4>
+          <div class="row stack-10" style="margin-bottom:8px;">
+            <label>Site Code<br><input id="entSiteCode" class="w-120" placeholder="PLANT-A"></label>
+            <label>Company<br><input id="entSiteCompany" class="w-120" placeholder="CO-A"></label>
+            <label>Name<br><input id="entSiteName" class="w-200"></label>
+            <label>Local Ccy<br><input id="entSiteLocalCcy" class="w-80"></label>
+            <label>Region<br><input id="entSiteRegion" class="w-120"></label>
+          </div>
+          <div class="row stack-10" style="margin-bottom:8px;">
+            <button id="entSaveSiteBtn" type="button" class="btn btn-primary">Save Site</button>
+            <button id="entLoadSitesBtn" type="button">Refresh</button>
+            <button id="entLoadTreeBtn" type="button">Entity Tree</button>
+          </div>
+          <div id="entSiteList" class="muted">No sites loaded.</div>
+          <div id="entTree" style="margin-top:10px;" class="muted"></div>
+        </div>
+
+        <div class="card">
+          <h4 style="margin-top:0;">Currency Rates + Tax Profiles</h4>
+          <h5 style="margin-top:6px;">Currency rates (JSON rows)</h5>
+          <textarea id="entCcyJson" rows="3" class="w-full" placeholder='[{"from_currency":"EUR","to_currency":"USD","rate":1.07,"effective_date":"2026-04-01"}]'></textarea>
+          <div class="row stack-10" style="margin-top:6px;">
+            <button id="entSaveCcyBtn" type="button" class="btn btn-primary">Save Rates</button>
+            <button id="entLoadCcyBtn" type="button">List Rates</button>
+          </div>
+          <div id="entCcyList" class="muted" style="margin-top:8px;"></div>
+          <h5 style="margin-top:14px;">Tax Profiles</h5>
+          <div class="row stack-10" style="margin-bottom:6px;">
+            <label>Code<br><input id="entTaxCode" class="w-120"></label>
+            <label>Label<br><input id="entTaxLabel" class="w-200"></label>
+            <label>Rate %<br><input id="entTaxRate" class="w-80" type="number" step="0.01"></label>
+            <label>Region<br><input id="entTaxRegion" class="w-120"></label>
+            <button id="entSaveTaxBtn" type="button" class="btn btn-primary">Save Tax</button>
+            <button id="entLoadTaxBtn" type="button">Refresh</button>
+          </div>
+          <div id="entTaxList" class="muted" style="margin-top:8px;"></div>
+        </div>
+
+        <div class="card">
+          <h4 style="margin-top:0;">Integration Hub</h4>
+          <div class="row stack-10" style="margin-bottom:6px;">
+            <label>Connection Code<br><input id="intConnCode" class="w-140" placeholder="ERP-MAIN"></label>
+            <label>Connector
+              <select id="intConnKey" class="w-200">
+                <option value="erp_journal_export">ERP Journal Export</option>
+                <option value="payroll_labor_sync">Payroll Labor Sync</option>
+              </select>
+            </label>
+            <label>Label<br><input id="intConnLabel" class="w-200" placeholder="Main ERP"></label>
+            <button id="intSaveConnBtn" type="button" class="btn btn-primary">Save Connection</button>
+            <button id="intLoadConnBtn" type="button">Refresh</button>
+          </div>
+          <div id="intConnList" class="muted" style="margin-top:8px;"></div>
+          <h5 style="margin-top:14px;">Enqueue Job</h5>
+          <div class="row stack-10" style="margin-bottom:6px;">
+            <label>Connection Code<br><input id="intJobConnCode" class="w-140"></label>
+            <label>Connector
+              <select id="intJobConnector" class="w-200">
+                <option value="erp_journal_export">erp_journal_export</option>
+                <option value="payroll_labor_sync">payroll_labor_sync</option>
+              </select>
+            </label>
+            <label>Payload JSON<br><input id="intJobPayload" class="w-320" placeholder='{"run_id":1}'></label>
+            <label>Idempotency Key<br><input id="intJobIdem" class="w-200"></label>
+            <button id="intEnqueueBtn" type="button" class="btn btn-primary">Enqueue</button>
+          </div>
+          <div class="row stack-10" style="margin-bottom:6px;">
+            <label>Job ID<br><input id="intActiveJobId" class="w-100"></label>
+            <button id="intRunJobBtn" type="button">Run Now</button>
+            <button id="intRetryJobBtn" type="button">Retry</button>
+            <button id="intCancelJobBtn" type="button" class="btn btn-danger">Cancel</button>
+            <label>Filter status
+              <select id="intJobStatusFilter" class="w-140">
+                <option value="">All</option>
+                <option value="queued">Queued</option>
+                <option value="running">Running</option>
+                <option value="retry_wait">Retry wait</option>
+                <option value="succeeded">Succeeded</option>
+                <option value="failed_permanent">Failed permanent</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </label>
+            <button id="intLoadJobsBtn" type="button">Load Jobs</button>
+            <button id="intLoadMonitorBtn" type="button">Monitor</button>
+            <button id="intLoadDeadLetterBtn" type="button">Dead-letter</button>
+          </div>
+          <div id="intJobsTable" class="muted" style="margin-top:8px;"></div>
+          <div id="intMonitorSummary" style="margin-top:10px;"></div>
+          <div id="intDeadLetterTable" style="margin-top:10px;"></div>
+        </div>
+
+        <div class="card">
+          <h4 style="margin-top:0;">Governance v2 (Segregation of Duties)</h4>
+          <div class="row stack-10" style="margin-bottom:6px;">
+            <button id="govLoadPoliciesBtn" type="button">Policies</button>
+            <button id="govLoadViolationsBtn" type="button">Violations</button>
+            <label>Filter
+              <select id="govViolationFilter" class="w-120">
+                <option value="">All</option>
+                <option value="open">Open</option>
+                <option value="ack">Acknowledged</option>
+              </select>
+            </label>
+          </div>
+          <h5 style="margin-top:10px;">Evaluate Action</h5>
+          <div class="row stack-10" style="margin-bottom:6px;">
+            <label>Action<br><input id="govEvalAction" class="w-240" placeholder="finance.journals.reverse"></label>
+            <label>Username<br><input id="govEvalUser" class="w-160"></label>
+            <button id="govEvalBtn" type="button" class="btn btn-primary">Evaluate</button>
+          </div>
+          <div id="govEvalResult" class="muted" style="margin-top:6px;"></div>
+          <div id="govPolicyList" class="muted" style="margin-top:10px;"></div>
+          <div id="govViolationList" class="muted" style="margin-top:10px;"></div>
+        </div>
+
+        <div class="card">
+          <h4 style="margin-top:0;">Compliance Evidence Packs</h4>
+          <div class="row stack-10" style="margin-bottom:6px;">
+            <label>Pack Type
+              <select id="evPackType" class="w-160">
+                <option value="audit">Audit</option>
+                <option value="procurement">Procurement</option>
+                <option value="hse">HSE</option>
+              </select>
+            </label>
+            <label>Period<br><input id="evPackPeriod" class="w-140" placeholder="2026-04"></label>
+            <label>Site Code<br><input id="evPackSite" class="w-140"></label>
+            <button id="evBuildPackBtn" type="button" class="btn btn-primary">Build Pack</button>
+            <button id="evLoadPacksBtn" type="button">Refresh</button>
+            <label>View Pack ID<br><input id="evPackViewId" class="w-100"></label>
+            <button id="evLoadPackDetailBtn" type="button">Open</button>
+          </div>
+          <div id="evPackList" class="muted" style="margin-top:8px;"></div>
+          <div id="evPackDetail" style="margin-top:10px;" class="muted"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- EXECUTIVE COMMAND CENTER -->
+    <section class="panel" id="tab-exec">
+      <div class="reports-header">
+        <h2>Executive Command Center</h2>
+        <p class="muted">Board-level monthly pack: financial + operational narrative, governance, integrations</p>
+      </div>
+      <div class="form-grid">
+        <div class="card">
+          <h4 style="margin-top:0;">Monthly Pack</h4>
+          <div class="row stack-10" style="margin-bottom:6px;">
+            <label>Period<br><input id="execPeriod" class="w-140" placeholder="2026-04"></label>
+            <button id="execLoadCommandBtn" type="button">Load Command Center</button>
+            <button id="execLoadBoardBtn" type="button" class="btn btn-primary">Generate Board Pack</button>
+            <button id="execExportBoardXlsxBtn" type="button">Export XLSX</button>
+          </div>
+          <div id="execNarrative" class="muted" style="margin-top:10px;"></div>
+          <div id="execCommandKpi" class="muted" style="margin-top:10px;"></div>
+          <div id="execBoardBlocks" style="margin-top:12px;"></div>
         </div>
       </div>
     </section>
