@@ -654,12 +654,12 @@ function applyDefaultLocationsToInputs() {
     if (!current) el.value = def;
     el.placeholder = el.placeholder || "Location code";
   });
-  loadBinCodeOptionsForLocation(qs("saLocation")?.value || "").catch(() => {});
-  loadBinCodeOptionsForLocation(qs("msLocation")?.value || "").catch(() => {});
+  loadBinCodeOptionsForLocation(qs("saLocation")?.value || "", "saBinCodeOptions").catch(() => {});
+  loadBinCodeOptionsForLocation(qs("msLocation")?.value || "", "msBinCodeOptions").catch(() => {});
 }
 
-async function loadBinCodeOptionsForLocation(locationCode) {
-  const binList = qs("stockBinCodeOptions");
+async function loadBinCodeOptionsForLocation(locationCode, listId) {
+  const binList = qs(listId);
   if (!binList) return;
   const loc = String(locationCode || "").trim().toUpperCase();
   binList.innerHTML = "";
@@ -10869,12 +10869,12 @@ async function init() {
       if (id === "saLocation") {
         const binInput = qs("saBin");
         if (binInput) binInput.value = "";
-        loadBinCodeOptionsForLocation(v).catch(() => {});
+        loadBinCodeOptionsForLocation(v, "saBinCodeOptions").catch(() => {});
       }
       if (id === "msLocation") {
         const binInput = qs("msBin");
         if (binInput) binInput.value = "";
-        loadBinCodeOptionsForLocation(v).catch(() => {});
+        loadBinCodeOptionsForLocation(v, "msBinCodeOptions").catch(() => {});
       }
     });
   });
@@ -11095,8 +11095,8 @@ async function init() {
   loadLubeStockOnHand().catch(() => {});
   loadLubeReorderAlerts().catch(() => {});
   applyDefaultLocationsToInputs();
-  loadBinCodeOptionsForLocation(qs("saLocation")?.value || "").catch(() => {});
-  loadBinCodeOptionsForLocation(qs("msLocation")?.value || "").catch(() => {});
+  loadBinCodeOptionsForLocation(qs("saLocation")?.value || "", "saBinCodeOptions").catch(() => {});
+  loadBinCodeOptionsForLocation(qs("msLocation")?.value || "", "msBinCodeOptions").catch(() => {});
   updateManualStockCostRowVisibility();
   updateManualStockPartDesc();
   updateManualLubePartDesc();
