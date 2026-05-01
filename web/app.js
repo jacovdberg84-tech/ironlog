@@ -1361,6 +1361,118 @@ async function saveAdminUser() {
   }
 }
 
+async function loadMasterDataGovernance() {
+  const sumEl = qs("mdmSummaryOut");
+  const dBody = qs("mdmDeptTbody");
+  const cBody = qs("mdmCcTbody");
+  const sBody = qs("mdmSupTbody");
+  if (!dBody || !cBody || !sBody) return;
+  setStatus("Loading master data…");
+  try {
+    const [sum, dep, cc, sup] = await Promise.all([
+      fetchJson(`${API}/api/masterdata/summary`),
+      fetchJson(`${API}/api/masterdata/departments`),
+      fetchJson(`${API}/api/masterdata/cost-centers`),
+      fetchJson(`${API}/api/masterdata/suppliers`),
+    ]);
+    if (sumEl) {
+      sumEl.textContent = JSON.stringify(
+        { site: sum?.site_code, counts: sum?.counts },
+        null,
+        2
+      );
+    }
+    const dRows = Array.isArray(dep.rows) ? dep.rows : [];
+    dBody.innerHTML = dRows
+      .map(
+        (r) =>
+          `<tr><td>${escapeHtml(r.code)}</td><td>${escapeHtml(r.name || "")}</td><td>${escapeHtml(r.owner_username || "—")}</td><td>${r.active ? "yes" : "no"}</td></tr>`
+      )
+      .join("");
+    const cRows = Array.isArray(cc.rows) ? cc.rows : [];
+    cBody.innerHTML = cRows
+      .map(
+        (r) =>
+          `<tr><td>${escapeHtml(r.code)}</td><td>${escapeHtml(r.name || "")}</td><td>${escapeHtml(r.department_code || "—")}</td><td>${r.active ? "yes" : "no"}</td></tr>`
+      )
+      .join("");
+    const sRows = Array.isArray(sup.rows) ? sup.rows : [];
+    sBody.innerHTML = sRows
+      .map(
+        (r) =>
+          `<tr><td>${escapeHtml(r.supplier_code)}</td><td>${escapeHtml(r.name || "")}</td><td>${escapeHtml(r.contact_email || "—")}</td><td>${r.active ? "yes" : "no"}</td></tr>`
+      )
+      .join("");
+    setStatus("Master data loaded.");
+  } catch (e) {
+    if (sumEl) sumEl.textContent = String(e.message || e);
+    setStatus("Master data load failed.");
+  }
+}
+
+async function saveMdmDepartment() {
+  const code = String(qs("mdmDeptCode")?.value || "").trim();
+  const name = String(qs("mdmDeptName")?.value || "").trim();
+  const owner_username = String(qs("mdmDeptOwner")?.value || "").trim() || null;
+  if (!code || !name) return alert("Department code and name are required.");
+  setStatus("Saving department…");
+  try {
+    await fetchJson(`${API}/api/masterdata/departments`, {
+      method: "POST",
+      body: JSON.stringify({ code, name, owner_username }),
+    });
+    if (qs("mdmDeptCode")) qs("mdmDeptCode").value = "";
+    if (qs("mdmDeptName")) qs("mdmDeptName").value = "";
+    if (qs("mdmDeptOwner")) qs("mdmDeptOwner").value = "";
+    await loadMasterDataGovernance();
+    setStatus("Department saved.");
+  } catch (e) {
+    setStatus("Department save failed: " + (e.message || e));
+  }
+}
+
+async function saveMdmCostCenter() {
+  const code = String(qs("mdmCcCode")?.value || "").trim();
+  const name = String(qs("mdmCcName")?.value || "").trim();
+  const department_code = String(qs("mdmCcDept")?.value || "").trim() || null;
+  if (!code || !name) return alert("Cost center code and name are required.");
+  setStatus("Saving cost center…");
+  try {
+    await fetchJson(`${API}/api/masterdata/cost-centers`, {
+      method: "POST",
+      body: JSON.stringify({ code, name, department_code }),
+    });
+    if (qs("mdmCcCode")) qs("mdmCcCode").value = "";
+    if (qs("mdmCcName")) qs("mdmCcName").value = "";
+    if (qs("mdmCcDept")) qs("mdmCcDept").value = "";
+    await loadMasterDataGovernance();
+    setStatus("Cost center saved.");
+  } catch (e) {
+    setStatus("Cost center save failed: " + (e.message || e));
+  }
+}
+
+async function saveMdmSupplier() {
+  const supplier_code = String(qs("mdmSupCode")?.value || "").trim();
+  const name = String(qs("mdmSupName")?.value || "").trim();
+  const contact_email = String(qs("mdmSupEmail")?.value || "").trim() || null;
+  if (!supplier_code || !name) return alert("Supplier code and name are required.");
+  setStatus("Saving supplier…");
+  try {
+    await fetchJson(`${API}/api/masterdata/suppliers`, {
+      method: "POST",
+      body: JSON.stringify({ supplier_code, name, contact_email }),
+    });
+    if (qs("mdmSupCode")) qs("mdmSupCode").value = "";
+    if (qs("mdmSupName")) qs("mdmSupName").value = "";
+    if (qs("mdmSupEmail")) qs("mdmSupEmail").value = "";
+    await loadMasterDataGovernance();
+    setStatus("Supplier saved.");
+  } catch (e) {
+    setStatus("Supplier save failed: " + (e.message || e));
+  }
+}
+
 async function submitChangePassword() {
   const old_password = String(qs("chPwdOld")?.value || "");
   const new_password = String(qs("chPwdNew")?.value || "").trim();
@@ -9989,6 +10101,18 @@ async function init() {
   });
   qs("loadAdminUsersBtn")?.addEventListener("click", () =>
     loadAdminUsers().catch((e) => setStatus("Admin users error: " + e.message))
+  );
+  qs("mdmLoadBtn")?.addEventListener("click", () =>
+    loadMasterDataGovernance().catch((e) => setStatus("Master data error: " + e.message))
+  );
+  qs("mdmDeptSaveBtn")?.addEventListener("click", () =>
+    saveMdmDepartment().catch((e) => setStatus("Department error: " + e.message))
+  );
+  qs("mdmCcSaveBtn")?.addEventListener("click", () =>
+    saveMdmCostCenter().catch((e) => setStatus("Cost center error: " + e.message))
+  );
+  qs("mdmSupSaveBtn")?.addEventListener("click", () =>
+    saveMdmSupplier().catch((e) => setStatus("Supplier error: " + e.message))
   );
   qs("saveAdminUserBtn")?.addEventListener("click", () =>
     saveAdminUser().catch((e) => setStatus("Save user error: " + e.message))

@@ -4094,6 +4094,105 @@
           </div>
         </div>
 
+        <!-- Master data governance -->
+        <div class="dash-card collapsible full-width" data-collapsed="true">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #faf5ff; color: #7c3aed;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+              </div>
+              <div>
+                <h3>Master data governance</h3>
+                <p class="muted small">Departments, cost centers, suppliers (site-scoped). Duplicate-safe codes. Non-admins can submit changes via <b>Approvals</b>.</p>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button type="button" id="mdmLoadBtn" class="btn btn-secondary btn-sm">Load masters</button>
+              <button type="button" class="report-card-toggle" aria-label="Toggle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+              </button>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <pre class="output" id="mdmSummaryOut" style="max-height:72px;overflow:auto"></pre>
+            <div class="form-row" style="margin-top:8px">
+              <div class="form-field">
+                <label>Department — code</label>
+                <input id="mdmDeptCode" class="w-full" placeholder="e.g. MECH" />
+              </div>
+              <div class="form-field">
+                <label>Name</label>
+                <input id="mdmDeptName" class="w-full" placeholder="Display name" />
+              </div>
+              <div class="form-field">
+                <label>Data owner (username)</label>
+                <input id="mdmDeptOwner" class="w-full" placeholder="optional" />
+              </div>
+              <div class="form-field form-field-action">
+                <label>&nbsp;</label>
+                <button type="button" id="mdmDeptSaveBtn" class="btn btn-primary btn-sm">Add department</button>
+              </div>
+            </div>
+            <div class="table-wrap" style="overflow:auto;max-height:140px;margin-top:8px">
+              <table class="data-table" style="width:100%;border-collapse:collapse;font-size:12px">
+                <thead><tr><th>Code</th><th>Name</th><th>Owner</th><th>Active</th></tr></thead>
+                <tbody id="mdmDeptTbody"></tbody>
+              </table>
+            </div>
+            <hr style="margin:12px 0;border:none;border-top:1px solid #e5e7eb" />
+            <div class="form-row">
+              <div class="form-field">
+                <label>Cost center — code</label>
+                <input id="mdmCcCode" class="w-full" placeholder="e.g. CC-100" />
+              </div>
+              <div class="form-field">
+                <label>Name</label>
+                <input id="mdmCcName" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Department code</label>
+                <input id="mdmCcDept" class="w-full" placeholder="must exist" />
+              </div>
+              <div class="form-field form-field-action">
+                <label>&nbsp;</label>
+                <button type="button" id="mdmCcSaveBtn" class="btn btn-primary btn-sm">Add cost center</button>
+              </div>
+            </div>
+            <div class="table-wrap" style="overflow:auto;max-height:140px;margin-top:8px">
+              <table class="data-table" style="width:100%;border-collapse:collapse;font-size:12px">
+                <thead><tr><th>Code</th><th>Name</th><th>Dept</th><th>Active</th></tr></thead>
+                <tbody id="mdmCcTbody"></tbody>
+              </table>
+            </div>
+            <hr style="margin:12px 0;border:none;border-top:1px solid #e5e7eb" />
+            <div class="form-row">
+              <div class="form-field">
+                <label>Supplier — code</label>
+                <input id="mdmSupCode" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Name</label>
+                <input id="mdmSupName" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Email</label>
+                <input id="mdmSupEmail" class="w-full" placeholder="optional" />
+              </div>
+              <div class="form-field form-field-action">
+                <label>&nbsp;</label>
+                <button type="button" id="mdmSupSaveBtn" class="btn btn-primary btn-sm">Add supplier</button>
+              </div>
+            </div>
+            <div class="table-wrap" style="overflow:auto;max-height:140px;margin-top:8px">
+              <table class="data-table" style="width:100%;border-collapse:collapse;font-size:12px">
+                <thead><tr><th>Code</th><th>Name</th><th>Email</th><th>Active</th></tr></thead>
+                <tbody id="mdmSupTbody"></tbody>
+              </table>
+            </div>
+            <p class="muted small" style="margin-top:8px">Uses current <code>x-site-code</code> (site selector). Approvers: open <b>Approvals</b> and filter module <code>masterdata</code> for pending workflow.</p>
+          </div>
+        </div>
+
         <!-- User List Card -->
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">

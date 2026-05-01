@@ -1,5 +1,6 @@
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
+import { applyMasterDataApproval } from "../utils/masterdataGovernance.js";
 
 function hasColumn(table, col) {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -373,8 +374,17 @@ export default async function approvalsRoutes(app) {
     return { ok: true, rows };
   });
 
+  const APPROVER_MASTERDATA = [
+    "admin",
+    "supervisor",
+    "plant_manager",
+    "site_manager",
+    "quality_manager",
+    "hr_manager",
+  ];
+  const APPROVER_DEFAULT = ["admin", "supervisor"];
+
   app.post("/:id/approve", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
     const note = String(req.body?.note || "").trim() || null;
@@ -382,6 +392,13 @@ export default async function approvalsRoutes(app) {
     if (!row) return reply.code(404).send({ error: "approval request not found" });
     if (String(row.status || "").toLowerCase() !== "pending") {
       return reply.code(409).send({ error: `approval request already ${row.status}` });
+    }
+
+    const role = getRole(req);
+    const approvers =
+      String(row.module || "").toLowerCase() === "masterdata" ? APPROVER_MASTERDATA : APPROVER_DEFAULT;
+    if (!approvers.includes(role)) {
+      return reply.code(403).send({ error: "role not allowed to approve this request" });
     }
 
     const payload = parsePayload(row.payload_json) || {};
@@ -396,6 +413,12 @@ export default async function approvalsRoutes(app) {
       execution = approveProcurementRequisitionWithPayload(id, payload, req);
     } else if (row.module === "procurement" && row.action === "receive_requisition") {
       execution = receiveProcurementRequisitionWithPayload(id, payload, req);
+    } else if (row.module === "masterdata" && row.action === "apply_change") {
+      try {
+        execution = applyMasterDataApproval(payload);
+      } catch (err) {
+        return reply.code(400).send({ error: err.message || String(err) });
+      }
     }
 
     db.prepare(`
@@ -415,7 +438,6 @@ export default async function approvalsRoutes(app) {
   });
 
   app.post("/:id/reject", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
     const note = String(req.body?.note || "").trim() || null;
@@ -423,6 +445,12 @@ export default async function approvalsRoutes(app) {
     if (!row) return reply.code(404).send({ error: "approval request not found" });
     if (String(row.status || "").toLowerCase() !== "pending") {
       return reply.code(409).send({ error: `approval request already ${row.status}` });
+    }
+    const role = getRole(req);
+    const approvers =
+      String(row.module || "").toLowerCase() === "masterdata" ? APPROVER_MASTERDATA : APPROVER_DEFAULT;
+    if (!approvers.includes(role)) {
+      return reply.code(403).send({ error: "role not allowed to reject this request" });
     }
     db.prepare(`
       UPDATE approval_requests

@@ -27,6 +27,7 @@ import inspectproRoutes from "./routes/inspectpro.routes.js";
 import breakdownOpsRoutes from "./routes/breakdownOps.routes.js";
 import tasksRoutes from "./routes/tasks.routes.js";
 import backupsRoutes from "./routes/backups.routes.js";
+import masterdataRoutes from "./routes/masterdata.routes.js";
 import { ironlogAuthHook } from "./auth/hook.js";
 
 export function buildServer() {
@@ -65,6 +66,7 @@ app.register(authRoutes, { prefix: "/api/auth" });
 app.register(auditRoutes, { prefix: "/api/audit" });
 app.register(legalRoutes, { prefix: "/api/legal" });
 app.register(approvalsRoutes, { prefix: "/api/approvals" });
+app.register(masterdataRoutes, { prefix: "/api/masterdata" });
 app.register(procurementRoutes, { prefix: "/api/procurement" });
 app.register(operationsRoutes, { prefix: "/api/operations" });
 app.register(dispatchRoutes, { prefix: "/api/dispatch" });

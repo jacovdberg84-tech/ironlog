@@ -1,12 +1,17 @@
 // IRONLOG/api/routes/assets.routes.js
 import { db } from "../db/client.js";
 import { getAssetCurrentHoursInfo } from "../utils/assetMeterHours.js";
+import {
+  ensureMasterDataSchema,
+  validateAssetGovernanceOptional,
+} from "../utils/masterdataGovernance.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
 }
 
 export default async function assetRoutes(app) {
+  ensureMasterDataSchema();
   db.prepare(`
     CREATE TABLE IF NOT EXISTS asset_qr_profiles (
       asset_id INTEGER PRIMARY KEY,
@@ -78,9 +83,10 @@ export default async function assetRoutes(app) {
     INSERT INTO assets (
       asset_code, asset_name, category,
       active, is_standby,
-      archived, archive_reason, archived_at
+      archived, archive_reason, archived_at,
+      department_code, cost_center_code, data_owner_username
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const updateActive = db.prepare(`UPDATE assets SET active = ? WHERE asset_code = ?`);
@@ -99,6 +105,7 @@ export default async function assetRoutes(app) {
         id, asset_code, asset_name, category,
         active, is_standby,
         archived, archive_reason, archived_at,
+        department_code, cost_center_code, data_owner_username,
         created_at
       FROM assets
       WHERE (? = 1 OR archived = 0)
@@ -112,6 +119,10 @@ export default async function assetRoutes(app) {
       archived: Number(r.archived),
     }));
   });
+
+  function siteCodeFromReq(req) {
+    return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
+  }
 
   // POST /api/assets
   app.post("/", async (req, reply) => {
@@ -128,9 +139,28 @@ export default async function assetRoutes(app) {
     const archive_reason = archived ? (String(body.archive_reason || "").trim() || null) : null;
     const archived_at = archived ? (String(body.archived_at || "").trim() || null) : null;
 
+    const department_code =
+      body.department_code != null && String(body.department_code).trim() !== ""
+        ? String(body.department_code).trim().toUpperCase()
+        : null;
+    const cost_center_code =
+      body.cost_center_code != null && String(body.cost_center_code).trim() !== ""
+        ? String(body.cost_center_code).trim().toUpperCase()
+        : null;
+    const data_owner_username =
+      body.data_owner_username != null && String(body.data_owner_username).trim() !== ""
+        ? String(body.data_owner_username).trim()
+        : null;
+
     if (!asset_code || !asset_name) {
       return reply.code(400).send({ error: "asset_code and asset_name are required" });
     }
+
+    const gov = validateAssetGovernanceOptional(siteCodeFromReq(req), {
+      department_code,
+      cost_center_code,
+    });
+    if (!gov.ok) return reply.code(400).send({ error: gov.error });
 
     try {
       const r = insertAsset.run(
@@ -141,7 +171,10 @@ export default async function assetRoutes(app) {
         is_standby,
         archived,
         archive_reason,
-        archived_at
+        archived_at,
+        department_code,
+        cost_center_code,
+        data_owner_username
       );
       return reply.code(201).send({ ok: true, id: Number(r.lastInsertRowid) });
     } catch (e) {
