@@ -205,6 +205,10 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
           <span>Reports</span>
         </a>
+        <a href="#" class="nav-item" data-tab="finance">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+          <span>Finance</span>
+        </a>
         <a href="#" class="nav-item" data-tab="uploads">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
           <span>CSV Uploads</span>
@@ -4910,6 +4914,140 @@
             <div id="rainDaysWidget" class="muted small"></div>
             <pre class="output" id="rainDaysResult"></pre>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FINANCE -->
+    <section class="panel" id="tab-finance">
+      <div class="reports-header">
+        <h2>Finance Integration</h2>
+        <p class="muted">Summarized journal posting, month-end lock, budgets, forecast, and canonical KPI definitions</p>
+      </div>
+
+      <div class="form-grid">
+        <!-- SUMMARIZED JOURNAL POSTING -->
+        <div class="card">
+          <h4 style="margin-top:0;">Summarized Journal Runs</h4>
+          <div class="row stack-10" style="margin-bottom:8px;">
+            <label>Start<br><input id="finRunStart" type="date" class="w-150"></label>
+            <label>End<br><input id="finRunEnd" type="date" class="w-150"></label>
+            <label>Default Cost Center<br><input id="finRunDefaultCC" class="w-160" placeholder="e.g. PLANT-A"></label>
+            <label>Currency<br><input id="finRunCurrency" class="w-100" value="USD"></label>
+          </div>
+          <div class="row stack-10" style="margin-bottom:8px;">
+            <label><input type="checkbox" id="finCatParts" checked> Parts</label>
+            <label><input type="checkbox" id="finCatLabor" checked> Labor</label>
+            <label><input type="checkbox" id="finCatDowntime" checked> Downtime</label>
+            <label><input type="checkbox" id="finCatFuel" checked> Fuel</label>
+            <label><input type="checkbox" id="finCatLube" checked> Lube</label>
+            <label><input type="checkbox" id="finCatGrn"> Procurement GRN</label>
+            <label><input type="checkbox" id="finCatAp"> Procurement AP</label>
+          </div>
+          <div class="row stack-10" style="margin-bottom:10px;">
+            <button id="finBuildRunBtn" type="button" class="btn btn-primary">Build Summarized Run</button>
+            <button id="finLoadRunsBtn" type="button">Refresh Runs</button>
+            <label>Status Filter
+              <select id="finRunStatusFilter" class="w-140">
+                <option value="">All</option>
+                <option value="draft">Draft</option>
+                <option value="exported">Exported</option>
+                <option value="posted">Posted</option>
+                <option value="reversed">Reversed</option>
+              </select>
+            </label>
+          </div>
+          <div id="finRunMsg" class="muted">No runs loaded yet.</div>
+          <div id="finRunList" style="margin-top:10px;"></div>
+
+          <h5 style="margin-top:16px;">Active Run</h5>
+          <div class="row stack-10" style="margin-bottom:6px;">
+            <label>Run ID<br><input id="finActiveRunId" class="w-100"></label>
+            <button id="finLoadRunDetailBtn" type="button">Load Detail</button>
+            <button id="finExportRunCsvBtn" type="button">Export CSV</button>
+            <button id="finExportRunXlsxBtn" type="button">Export XLSX</button>
+            <button id="finMarkExportedBtn" type="button">Mark Exported</button>
+            <button id="finMarkPostedBtn" type="button" class="btn btn-primary">Mark Posted</button>
+            <button id="finReverseRunBtn" type="button" class="btn btn-danger">Reverse</button>
+          </div>
+          <div class="row stack-10" style="margin-bottom:6px;">
+            <label>Posted Reference<br><input id="finPostedRef" class="w-240" placeholder="Finance system ref"></label>
+            <label>Reverse Reason<br><input id="finReverseReason" class="w-240" placeholder="Reason"></label>
+          </div>
+          <div id="finRunDetail" class="muted">No run selected.</div>
+        </div>
+
+        <!-- MONTH-END LOCK + CHECKLIST -->
+        <div class="card">
+          <h4 style="margin-top:0;">Month-End Lock + Checklist</h4>
+          <div class="row stack-10" style="margin-bottom:8px;">
+            <label>Period (YYYY-MM)<br><input id="finPeriodInput" class="w-140" placeholder="2026-04"></label>
+            <button id="finLoadChecklistBtn" type="button">Load Checklist</button>
+            <button id="finClosePeriodBtn" type="button" class="btn btn-primary">Close Period</button>
+            <label><input type="checkbox" id="finClosePeriodForce"> Force (skip checklist)</label>
+            <button id="finReopenPeriodBtn" type="button" class="btn btn-danger">Reopen</button>
+            <label>Reopen Reason<br><input id="finReopenReason" class="w-240"></label>
+          </div>
+          <div id="finChecklistMsg" class="muted">No checklist loaded.</div>
+          <div id="finChecklistTable" style="margin-top:10px;"></div>
+        </div>
+
+        <!-- BUDGET vs ACTUAL -->
+        <div class="card">
+          <h4 style="margin-top:0;">Budget vs Actual</h4>
+          <div class="row stack-10" style="margin-bottom:8px;">
+            <label>Period<br><input id="finBvaPeriod" class="w-140" placeholder="2026-04"></label>
+            <label>Dimension
+              <select id="finBvaDimension" class="w-160">
+                <option value="cost_center_code">Cost Center</option>
+                <option value="site_code">Site</option>
+                <option value="equipment_type">Equipment Type</option>
+                <option value="category">Category</option>
+                <option value="combined">Combined</option>
+              </select>
+            </label>
+            <button id="finLoadBvaBtn" type="button">Load</button>
+          </div>
+          <div id="finBvaTotals" class="muted"></div>
+          <div id="finBvaTable" style="margin-top:10px;"></div>
+
+          <h5 style="margin-top:14px;">Upsert Budget Rows (JSON)</h5>
+          <textarea id="finBudgetJson" rows="4" class="w-full" placeholder='[{"period":"2026-04","site_code":"","cost_center_code":"PLANT-A","equipment_type":"","category":"parts","budget_amount":12000}]'></textarea>
+          <div class="row stack-10" style="margin-top:6px;">
+            <button id="finSaveBudgetBtn" type="button" class="btn btn-primary">Save Budgets</button>
+            <button id="finLoadBudgetListBtn" type="button">List Budgets</button>
+          </div>
+          <div id="finBudgetList" class="muted" style="margin-top:8px;"></div>
+        </div>
+
+        <!-- FORECAST -->
+        <div class="card">
+          <h4 style="margin-top:0;">Rolling 3-Month Forecast</h4>
+          <div class="row stack-10" style="margin-bottom:8px;">
+            <label>Start Period<br><input id="finForecastStart" class="w-140" placeholder="2026-05"></label>
+            <label>Months Ahead<br><input id="finForecastMonths" type="number" min="1" max="6" value="3" class="w-100"></label>
+            <button id="finRebuildForecastBtn" type="button" class="btn btn-primary">Rebuild Forecast</button>
+            <button id="finLoadForecastBtn" type="button">Load Forecast</button>
+          </div>
+          <div id="finForecastMsg" class="muted">No forecast loaded.</div>
+          <div id="finForecastTotals" style="margin-top:8px;"></div>
+          <div id="finForecastTable" style="margin-top:8px;"></div>
+        </div>
+
+        <!-- SSOT + KPI DEFINITIONS -->
+        <div class="card">
+          <h4 style="margin-top:0;">SSOT Report + Canonical KPI Definitions</h4>
+          <div class="row stack-10" style="margin-bottom:8px;">
+            <label>Period<br><input id="finSsotPeriod" class="w-140" placeholder="2026-04"></label>
+            <button id="finLoadSsotBtn" type="button" class="btn btn-primary">Load SSOT</button>
+            <button id="finExportSsotCsvBtn" type="button">Export CSV</button>
+            <button id="finExportSsotXlsxBtn" type="button">Export XLSX</button>
+            <button id="finLoadKpiDefsBtn" type="button">Reload KPI Definitions</button>
+          </div>
+          <div id="finSsotKpi" class="muted" style="margin-top:8px;"></div>
+          <div id="finSsotActuals" style="margin-top:10px;"></div>
+          <h5 style="margin-top:14px;">KPI Definitions</h5>
+          <div id="finKpiDefs" class="muted">Definitions not loaded.</div>
         </div>
       </div>
     </section>
