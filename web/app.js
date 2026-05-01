@@ -654,6 +654,30 @@ function applyDefaultLocationsToInputs() {
     if (!current) el.value = def;
     el.placeholder = el.placeholder || "Location code";
   });
+  loadBinCodeOptionsForLocation(qs("saLocation")?.value || "").catch(() => {});
+  loadBinCodeOptionsForLocation(qs("msLocation")?.value || "").catch(() => {});
+}
+
+async function loadBinCodeOptionsForLocation(locationCode) {
+  const binList = qs("stockBinCodeOptions");
+  if (!binList) return;
+  const loc = String(locationCode || "").trim().toUpperCase();
+  binList.innerHTML = "";
+  if (!loc) return;
+  try {
+    const data = await fetchJson(`${API}/api/stock/bins?location_code=${encodeURIComponent(loc)}&active=1`);
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    rows.forEach((b) => {
+      const code = String(b.bin_code || "").trim();
+      if (!code) return;
+      const opt = document.createElement("option");
+      opt.value = code;
+      opt.textContent = `${code}${b.bin_name ? ` - ${b.bin_name}` : ""}`;
+      binList.appendChild(opt);
+    });
+  } catch {
+    // Optional enhancer: bin list is best-effort
+  }
 }
 
 function getSlaOpenSameTab() {
@@ -10842,6 +10866,16 @@ async function init() {
       if (!v) return;
       setRoleDefaultLocation(getSessionRole(), v);
       applyDefaultLocationsToInputs();
+      if (id === "saLocation") {
+        const binInput = qs("saBin");
+        if (binInput) binInput.value = "";
+        loadBinCodeOptionsForLocation(v).catch(() => {});
+      }
+      if (id === "msLocation") {
+        const binInput = qs("msBin");
+        if (binInput) binInput.value = "";
+        loadBinCodeOptionsForLocation(v).catch(() => {});
+      }
     });
   });
   qs("locLoad")?.addEventListener("click", () =>
@@ -11061,6 +11095,8 @@ async function init() {
   loadLubeStockOnHand().catch(() => {});
   loadLubeReorderAlerts().catch(() => {});
   applyDefaultLocationsToInputs();
+  loadBinCodeOptionsForLocation(qs("saLocation")?.value || "").catch(() => {});
+  loadBinCodeOptionsForLocation(qs("msLocation")?.value || "").catch(() => {});
   updateManualStockCostRowVisibility();
   updateManualStockPartDesc();
   updateManualLubePartDesc();
