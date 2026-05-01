@@ -439,6 +439,78 @@ function insightsRowsTable(headers, rows) {
   return `<div style="overflow:auto;"><table class="gridTable" style="min-width:640px;"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 
+function renderStandardizedInsightDashboards(data) {
+  const host = document.getElementById("insightsStandardDashboards");
+  if (!host) return;
+
+  const costRows = Array.isArray(data?.maintenance_cost) ? data.maintenance_cost : [];
+  const downtimeRows = Array.isArray(data?.downtime?.by_component) ? data.downtime.by_component : [];
+  const partRows = Array.isArray(data?.parts_planning?.suggestions) ? data.parts_planning.suggestions : [];
+
+  const totalMaintenanceCost = costRows.reduce((sum, r) => sum + Number(r?.total_cost || 0), 0);
+  const totalPartsCost = costRows.reduce((sum, r) => sum + Number(r?.parts_cost || 0), 0);
+  const totalDowntimeHours = downtimeRows.reduce((sum, r) => sum + Number(r?.downtime_hours || 0), 0);
+  const totalDowntimeIncidents = downtimeRows.reduce((sum, r) => sum + Number(r?.incidents || 0), 0);
+  const totalSuggestedPartsQty = partRows.reduce((sum, r) => sum + Number(r?.suggested_qty || 0), 0);
+  const totalPartsGapQty = partRows.reduce((sum, r) => sum + Number(r?.gap_qty || 0), 0);
+
+  const topCostAsset = costRows[0];
+  const topDowntimeComponent = downtimeRows[0];
+  const topPartsDemand = partRows[0];
+
+  const gapSeverityClass = totalSuggestedPartsQty <= 0
+    ? "kpi-good"
+    : ((totalPartsGapQty / totalSuggestedPartsQty) > 0.25 ? "kpi-bad" : "kpi-warn");
+  const gapPct = totalSuggestedPartsQty > 0
+    ? Math.min(100, Math.max(0, (totalPartsGapQty / totalSuggestedPartsQty) * 100))
+    : 0;
+
+  host.innerHTML = `
+    <div class="kpi-card kpi-util">
+      <div class="kpi-card-header">
+        <div class="kpi-icon">R</div>
+        <div class="kpi-title">Maintenance Cost Dashboard</div>
+      </div>
+      <div class="kpi-big-value">${fmtMoney(totalMaintenanceCost)}</div>
+      <div class="kpi-meta">Total maintenance spend (${Number(costRows.length || 0)} assets)</div>
+      <div class="kpi-meta" style="margin-top:6px;">Parts consumption cost: ${fmtMoney(totalPartsCost)}</div>
+      <div class="kpi-meta" style="margin-top:6px;">
+        Top cost asset:
+        ${topCostAsset ? `${escBackfill(topCostAsset.asset_code || "-")} (${fmtMoney(topCostAsset.total_cost)})` : "N/A"}
+      </div>
+    </div>
+    <div class="kpi-card kpi-alerts">
+      <div class="kpi-card-header">
+        <div class="kpi-icon">H</div>
+        <div class="kpi-title">Downtime Dashboard</div>
+      </div>
+      <div class="kpi-big-value">${fmt1(totalDowntimeHours)}</div>
+      <div class="kpi-meta">Total downtime hours (${Number(totalDowntimeIncidents || 0)} incidents)</div>
+      <div class="kpi-meta" style="margin-top:6px;">
+        Top component:
+        ${topDowntimeComponent ? `${escBackfill(topDowntimeComponent.component || "-")} (${fmt1(topDowntimeComponent.downtime_hours)}h)` : "N/A"}
+      </div>
+      <div class="kpi-meta" style="margin-top:6px;">Standardized view: hours, incidents, and top contributor</div>
+    </div>
+    <div class="kpi-card kpi-avail">
+      <div class="kpi-card-header">
+        <div class="kpi-icon">P</div>
+        <div class="kpi-title">Parts Consumption Dashboard</div>
+      </div>
+      <div class="kpi-big-value">${fmt1(totalSuggestedPartsQty)}</div>
+      <div class="kpi-meta">Suggested parts quantity (${Number(partRows.length || 0)} SKU suggestions)</div>
+      <div class="kpi-progress">
+        <div class="kpi-progress-bar ${gapSeverityClass}" style="width:${gapPct.toFixed(1)}%;"></div>
+      </div>
+      <div class="kpi-meta">Stock gap: ${fmt1(totalPartsGapQty)} (${gapPct.toFixed(1)}%)</div>
+      <div class="kpi-meta" style="margin-top:6px;">
+        Top suggested part:
+        ${topPartsDemand ? `${escBackfill(topPartsDemand.part_name || "-")} (${fmt1(topPartsDemand.suggested_qty)})` : "N/A"}
+      </div>
+    </div>
+  `;
+}
+
 function renderMaintenanceInsights(data) {
   const predictiveEl = document.getElementById("insightsPredictive");
   const partsEl = document.getElementById("insightsParts");
@@ -447,6 +519,7 @@ function renderMaintenanceInsights(data) {
   const costEl = document.getElementById("insightsCost");
   const trendsEl = document.getElementById("insightsTrends");
   if (!predictiveEl || !partsEl || !downtimeEl || !slaEl || !costEl || !trendsEl) return;
+  renderStandardizedInsightDashboards(data);
 
   const riskRows = Array.isArray(data?.predictive?.at_risk_plans) ? data.predictive.at_risk_plans : [];
   const failRows = Array.isArray(data?.predictive?.repeated_checklist_failures) ? data.predictive.repeated_checklist_failures : [];
@@ -553,6 +626,7 @@ function renderMaintenanceInsights(data) {
 
 function renderGovernanceSignals(data) {
   const msgEl = document.getElementById("governanceSignalsMsg");
+  const scoreEl = document.getElementById("insightsDataQualityScore");
   const qualityEl = document.getElementById("governanceQuality");
   const anomaliesEl = document.getElementById("governanceAnomalies");
   if (!msgEl || !qualityEl || !anomaliesEl) return;
@@ -564,6 +638,33 @@ function renderGovernanceSignals(data) {
   const spikes = Array.isArray(a.fuel_spikes) ? a.fuel_spikes : [];
   const duplicates = Array.isArray(a.fuel_duplicates) ? a.fuel_duplicates : [];
   const jumps = Array.isArray(a.suspicious_meter_jumps) ? a.suspicious_meter_jumps : [];
+  const issueScore = (
+    (missing.length * 3)
+    + (inconsistent.length * 2)
+    + (stale.length * 2)
+    + (spikes.length * 1.5)
+    + (duplicates.length * 1.5)
+    + (jumps.length * 2)
+  );
+  const score = Math.max(0, Math.min(100, Math.round(100 - issueScore)));
+  const scoreClass = score >= 85 ? "kpi-good" : (score >= 65 ? "kpi-warn" : "kpi-bad");
+  if (scoreEl) {
+    scoreEl.innerHTML = `
+      <div class="kpi-card" style="padding:14px; border-radius:12px;">
+        <div class="kpi-card-header" style="margin-bottom:8px;">
+          <div class="kpi-icon">Q</div>
+          <div class="kpi-title">Data Quality Score</div>
+        </div>
+        <div class="kpi-big-value" style="font-size:34px;">${score}</div>
+        <div class="kpi-progress">
+          <div class="kpi-progress-bar ${scoreClass}" style="width:${score}%;"></div>
+        </div>
+        <div class="kpi-meta">
+          Calculated from missing meter readings, stale plans, inconsistent statuses, and anomaly signals.
+        </div>
+      </div>
+    `;
+  }
   qualityEl.innerHTML = `
     <div class="muted">Missing meter: ${missing.length} | Inconsistent WO status: ${inconsistent.length} | Stale plans: ${stale.length}</div>
     ${insightsRowsTable(
