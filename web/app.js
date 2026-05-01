@@ -1361,6 +1361,46 @@ async function saveAdminUser() {
   }
 }
 
+function applyMdmPolicyCheckboxes(policies) {
+  const p = policies && typeof policies === "object" ? policies : {};
+  const asset = Array.isArray(p.asset) ? p.asset : [];
+  const part = Array.isArray(p.part_stock_intake) ? p.part_stock_intake : [];
+  const setChk = (id, key, list) => {
+    const el = qs(id);
+    if (el) el.checked = list.includes(key);
+  };
+  setChk("mdmPolAssetDept", "department_code", asset);
+  setChk("mdmPolAssetCc", "cost_center_code", asset);
+  setChk("mdmPolAssetOwner", "data_owner_username", asset);
+  setChk("mdmPolPartDept", "department_code", part);
+  setChk("mdmPolPartSup", "default_supplier_code", part);
+  setChk("mdmPolPartOwner", "data_owner_username", part);
+}
+
+async function saveMdmPolicies() {
+  setStatus("Saving policies…");
+  try {
+    const policies = {
+      asset: [],
+      part_stock_intake: [],
+    };
+    if (qs("mdmPolAssetDept")?.checked) policies.asset.push("department_code");
+    if (qs("mdmPolAssetCc")?.checked) policies.asset.push("cost_center_code");
+    if (qs("mdmPolAssetOwner")?.checked) policies.asset.push("data_owner_username");
+    if (qs("mdmPolPartDept")?.checked) policies.part_stock_intake.push("department_code");
+    if (qs("mdmPolPartSup")?.checked) policies.part_stock_intake.push("default_supplier_code");
+    if (qs("mdmPolPartOwner")?.checked) policies.part_stock_intake.push("data_owner_username");
+    const res = await fetchJson(`${API}/api/masterdata/policies`, {
+      method: "PUT",
+      body: JSON.stringify({ policies }),
+    });
+    applyMdmPolicyCheckboxes(res.policies);
+    setStatus("Policies saved.");
+  } catch (e) {
+    setStatus("Policy save failed: " + (e.message || e));
+  }
+}
+
 async function loadMasterDataGovernance() {
   const sumEl = qs("mdmSummaryOut");
   const dBody = qs("mdmDeptTbody");
@@ -1369,12 +1409,14 @@ async function loadMasterDataGovernance() {
   if (!dBody || !cBody || !sBody) return;
   setStatus("Loading master data…");
   try {
-    const [sum, dep, cc, sup] = await Promise.all([
+    const [sum, dep, cc, sup, pol] = await Promise.all([
       fetchJson(`${API}/api/masterdata/summary`),
       fetchJson(`${API}/api/masterdata/departments`),
       fetchJson(`${API}/api/masterdata/cost-centers`),
       fetchJson(`${API}/api/masterdata/suppliers`),
+      fetchJson(`${API}/api/masterdata/policies`),
     ]);
+    applyMdmPolicyCheckboxes(pol.policies);
     if (sumEl) {
       sumEl.textContent = JSON.stringify(
         { site: sum?.site_code, counts: sum?.counts },
@@ -10113,6 +10155,9 @@ async function init() {
   );
   qs("mdmSupSaveBtn")?.addEventListener("click", () =>
     saveMdmSupplier().catch((e) => setStatus("Supplier error: " + e.message))
+  );
+  qs("mdmPolicySaveBtn")?.addEventListener("click", () =>
+    saveMdmPolicies().catch((e) => setStatus("Policy error: " + e.message))
   );
   qs("saveAdminUserBtn")?.addEventListener("click", () =>
     saveAdminUser().catch((e) => setStatus("Save user error: " + e.message))

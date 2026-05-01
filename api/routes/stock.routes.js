@@ -1,9 +1,16 @@
 // IRONLOG/api/routes/stock.routes.js
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
+import {
+  ensureMasterDataSchema,
+  normalizeMdmCode,
+  validateAgainstMdmPolicy,
+  validatePartGovernanceOptional,
+} from "../utils/masterdataGovernance.js";
 
 export default async function stockRoutes(app) {
   ensureAuditTable(db);
+  ensureMasterDataSchema();
 
   function hasColumn(table, col) {
     const rows = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -21,6 +28,10 @@ export default async function stockRoutes(app) {
       return false;
     }
     return true;
+  }
+
+  function getSiteCode(req) {
+    return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
   }
 
   db.prepare(`
@@ -175,8 +186,11 @@ export default async function stockRoutes(app) {
   `);
 
   const insertPart = db.prepare(`
-    INSERT INTO parts (part_code, part_name, critical, min_stock, unit_cost)
-    VALUES (?, ?, 0, 0, COALESCE(?, 0))
+    INSERT INTO parts (
+      part_code, part_name, critical, min_stock, unit_cost,
+      department_code, default_supplier_code, data_owner_username
+    )
+    VALUES (?, ?, 0, 0, COALESCE(?, 0), ?, ?, ?)
   `);
   const getWoById = db.prepare(`
     SELECT id, asset_id, status
@@ -216,13 +230,19 @@ export default async function stockRoutes(app) {
 
   // Stock on hand summary
   app.get("/onhand", async () => {
+    const govCols = [];
+    if (hasColumn("parts", "department_code")) govCols.push("p.department_code");
+    if (hasColumn("parts", "default_supplier_code")) govCols.push("p.default_supplier_code");
+    if (hasColumn("parts", "data_owner_username")) govCols.push("p.data_owner_username");
+    const govSql = govCols.length ? `, ${govCols.join(", ")}` : "";
     const rows = db.prepare(`
       SELECT
         p.part_code,
         p.part_name,
         p.critical,
         p.min_stock,
-        p.unit_cost,
+        p.unit_cost
+        ${govSql},
         IFNULL(SUM(sm.quantity), 0) AS on_hand
       FROM parts p
       LEFT JOIN stock_movements sm ON sm.part_id = p.id
@@ -727,6 +747,7 @@ export default async function stockRoutes(app) {
   //         part_name?, create_if_missing?, unit_cost?, cost_currency? (USD|ZAR|MZN) }
   app.post("/movement", async (req, reply) => {
     if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
+    const site = getSiteCode(req);
     const body = req.body || {};
     const part_code = String(body.part_code || "").trim();
     const movement_type = String(body.movement_type || "").trim().toLowerCase();
@@ -735,6 +756,19 @@ export default async function stockRoutes(app) {
     const location_code = String(body.location_code || "").trim().toUpperCase();
     const part_name = body.part_name != null ? String(body.part_name || "").trim() : "";
     const create_if_missing = body.create_if_missing === true || body.create_if_missing === 1;
+
+    const department_code =
+      body.department_code != null && String(body.department_code).trim() !== ""
+        ? normalizeMdmCode(body.department_code)
+        : null;
+    const default_supplier_code =
+      body.default_supplier_code != null && String(body.default_supplier_code).trim() !== ""
+        ? normalizeMdmCode(body.default_supplier_code)
+        : null;
+    const data_owner_username =
+      body.data_owner_username != null && String(body.data_owner_username).trim() !== ""
+        ? String(body.data_owner_username).trim()
+        : null;
 
     const rawCost = body.unit_cost != null && body.unit_cost !== "" ? Number(body.unit_cost) : null;
     const cost_currency = String(body.cost_currency || "USD").trim().toUpperCase();
@@ -767,9 +801,16 @@ export default async function stockRoutes(app) {
       // Allow receiving stock IN for brand-new stock numbers
       if (movement_type === "in" && create_if_missing) {
         if (!part_name) return reply.code(400).send({ error: "part_name is required when creating a new stock item" });
+        const intakeObj = { department_code, default_supplier_code, data_owner_username };
+        const polP = validateAgainstMdmPolicy(site, "part_stock_intake", intakeObj);
+        if (!polP.ok) {
+          return reply.code(400).send({ error: `missing required fields: ${polP.missing.join(", ")}` });
+        }
+        const pv = validatePartGovernanceOptional(site, intakeObj);
+        if (!pv.ok) return reply.code(400).send({ error: pv.error });
         try {
           const uc = unit_cost_usd != null ? Number(unit_cost_usd.toFixed(6)) : 0;
-          insertPart.run(part_code, part_name, uc);
+          insertPart.run(part_code, part_name, uc, department_code, default_supplier_code, data_owner_username);
         } catch (e) {
           // In case of race, re-read
         }

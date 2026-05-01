@@ -79,6 +79,91 @@ export function ensureMasterDataSchema() {
   ensureColumn("parts", "department_code TEXT");
   ensureColumn("parts", "default_supplier_code TEXT");
   ensureColumn("parts", "data_owner_username TEXT");
+
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS mdm_entity_policies (
+      site_code TEXT NOT NULL DEFAULT 'main',
+      entity_type TEXT NOT NULL,
+      required_fields_json TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (site_code, entity_type)
+    )
+  `).run();
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_mdm_policy_site ON mdm_entity_policies(site_code)`
+  ).run();
+}
+
+/** Known policy entity keys (stored per site). */
+export const MDM_POLICY_ENTITY_TYPES = [
+  "asset",
+  "part_stock_intake",
+  "mdm_department",
+  "mdm_cost_center",
+  "mdm_supplier",
+];
+
+export function getMdmPolicyRequiredFields(siteCode, entityType) {
+  const site = String(siteCode || "main").trim().toLowerCase() || "main";
+  const et = String(entityType || "").trim();
+  const row = db
+    .prepare(
+      `SELECT required_fields_json FROM mdm_entity_policies WHERE site_code = ? AND entity_type = ?`
+    )
+    .get(site, et);
+  if (!row) return [];
+  try {
+    const parsed = JSON.parse(String(row.required_fields_json || "[]"));
+    return Array.isArray(parsed) ? parsed.map((x) => String(x).trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function getAllMdmPoliciesForSite(siteCode) {
+  const site = String(siteCode || "main").trim().toLowerCase() || "main";
+  const policies = {};
+  for (const t of MDM_POLICY_ENTITY_TYPES) policies[t] = [];
+  const rows = db
+    .prepare(`SELECT entity_type, required_fields_json FROM mdm_entity_policies WHERE site_code = ?`)
+    .all(site);
+  for (const r of rows) {
+    const et = String(r.entity_type || "").trim();
+    if (!MDM_POLICY_ENTITY_TYPES.includes(et)) continue;
+    try {
+      const parsed = JSON.parse(String(r.required_fields_json || "[]"));
+      policies[et] = Array.isArray(parsed) ? parsed.map((x) => String(x).trim()).filter(Boolean) : [];
+    } catch {
+      policies[et] = [];
+    }
+  }
+  return policies;
+}
+
+export function setMdmPoliciesForSite(siteCode, policiesObj) {
+  const site = String(siteCode || "main").trim().toLowerCase() || "main";
+  const upsert = db.prepare(`
+    INSERT INTO mdm_entity_policies (site_code, entity_type, required_fields_json, updated_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT(site_code, entity_type) DO UPDATE SET
+      required_fields_json = excluded.required_fields_json,
+      updated_at = datetime('now')
+  `);
+  for (const [entityType, fields] of Object.entries(policiesObj || {})) {
+    if (!MDM_POLICY_ENTITY_TYPES.includes(String(entityType).trim())) continue;
+    const arr = Array.isArray(fields) ? fields.map((x) => String(x).trim()).filter(Boolean) : [];
+    upsert.run(site, String(entityType).trim(), JSON.stringify(arr));
+  }
+}
+
+export function validateAgainstMdmPolicy(siteCode, entityType, obj) {
+  const fields = getMdmPolicyRequiredFields(siteCode, entityType);
+  const missing = [];
+  for (const k of fields) {
+    const v = obj != null ? obj[k] : undefined;
+    if (v == null || (typeof v === "string" && !String(v).trim())) missing.push(k);
+  }
+  return { ok: missing.length === 0, missing };
 }
 
 export function departmentExists(siteCode, code) {
@@ -128,6 +213,12 @@ export function applyMasterDataApproval(payload) {
       const owner_username = rec.owner_username != null ? String(rec.owner_username).trim() || null : null;
       const active = rec.active === 0 || rec.active === false ? 0 : 1;
       if (!code || !name) throw new Error("department code and name are required");
+      const polDept = validateAgainstMdmPolicy(site, "mdm_department", {
+        code,
+        name,
+        owner_username,
+      });
+      if (!polDept.ok) throw new Error(`missing required fields: ${polDept.missing.join(", ")}`);
       try {
         db.prepare(
           `
@@ -151,6 +242,13 @@ export function applyMasterDataApproval(payload) {
       if (department_code && !departmentExists(site, department_code)) {
         throw new Error(`department '${department_code}' does not exist for this site`);
       }
+      const polCc = validateAgainstMdmPolicy(site, "mdm_cost_center", {
+        code,
+        name,
+        department_code,
+        owner_username,
+      });
+      if (!polCc.ok) throw new Error(`missing required fields: ${polCc.missing.join(", ")}`);
       try {
         db.prepare(
           `
@@ -171,6 +269,13 @@ export function applyMasterDataApproval(payload) {
       const owner_username = rec.owner_username != null ? String(rec.owner_username).trim() || null : null;
       const active = rec.active === 0 || rec.active === false ? 0 : 1;
       if (!supplier_code || !name) throw new Error("supplier code and name are required");
+      const polSup = validateAgainstMdmPolicy(site, "mdm_supplier", {
+        supplier_code,
+        name,
+        contact_email,
+        owner_username,
+      });
+      if (!polSup.ok) throw new Error(`missing required fields: ${polSup.missing.join(", ")}`);
       try {
         db.prepare(
           `
@@ -357,6 +462,23 @@ export function validateAssetGovernanceOptional(siteCode, body) {
     const c = normalizeMdmCode(body.cost_center_code);
     if (!costCenterExists(site, c)) {
       return { ok: false, error: `cost center '${c}' is not in the master list for this site` };
+    }
+  }
+  return { ok: true };
+}
+
+export function validatePartGovernanceOptional(siteCode, body) {
+  const site = String(siteCode || "main").toLowerCase();
+  if (body.department_code != null && String(body.department_code).trim()) {
+    const d = normalizeMdmCode(body.department_code);
+    if (!departmentExists(site, d)) {
+      return { ok: false, error: `department '${d}' is not in the master list for this site` };
+    }
+  }
+  if (body.default_supplier_code != null && String(body.default_supplier_code).trim()) {
+    const s = normalizeMdmCode(body.default_supplier_code);
+    if (!supplierExists(site, s)) {
+      return { ok: false, error: `supplier '${s}' is not in the master list for this site` };
     }
   }
   return { ok: true };

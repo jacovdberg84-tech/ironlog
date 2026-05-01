@@ -734,6 +734,30 @@ export default async function dashboardRoutes(app) {
       return y.utilization_pct - x.utilization_pct;
     });
 
+    const govSelect = [];
+    if (hasColumn("assets", "department_code")) govSelect.push("department_code");
+    if (hasColumn("assets", "cost_center_code")) govSelect.push("cost_center_code");
+    if (hasColumn("assets", "data_owner_username")) govSelect.push("data_owner_username");
+    if (govSelect.length) {
+      const ids = by_asset.map((a) => Number(a.asset_id || 0)).filter((id) => id > 0);
+      if (ids.length) {
+        const ph = ids.map(() => "?").join(",");
+        const rows = db
+          .prepare(
+            `SELECT id AS asset_id, ${govSelect.join(", ")} FROM assets WHERE id IN (${ph})`
+          )
+          .all(...ids);
+        const gmap = new Map(rows.map((r) => [Number(r.asset_id), r]));
+        for (const a of by_asset) {
+          const g = gmap.get(Number(a.asset_id));
+          if (!g) continue;
+          if (govSelect.includes("department_code")) a.department_code = g.department_code ?? null;
+          if (govSelect.includes("cost_center_code")) a.cost_center_code = g.cost_center_code ?? null;
+          if (govSelect.includes("data_owner_username")) a.data_owner_username = g.data_owner_username ?? null;
+        }
+      }
+    }
+
     const catMap = new Map();
     for (const a of by_asset) {
       const catKey = String(a.category || "").trim() || "Uncategorized";
@@ -867,8 +891,40 @@ export default async function dashboardRoutes(app) {
     data.by_category.forEach((r) => cat.addRow([r.category, r.asset_count, r.scheduled_hours, r.available_hours, r.run_hours, r.downtime_hours, r.availability_pct, r.utilization_pct]));
 
     const assets = wb.addWorksheet("By Asset");
-    assets.addRow(["Asset", "Name", "Category", "Mode", "Days with data", "Scheduled h", "Available h", "Run h", "Downtime h", "Availability %", "Utilization %"]);
-    data.by_asset.forEach((r) => assets.addRow([r.asset_code, r.asset_name, r.category, r.utilization_mode, r.days_with_data, r.scheduled_hours, r.available_hours, r.run_hours, r.downtime_hours, r.availability_pct, r.utilization_pct]));
+    assets.addRow([
+      "Asset",
+      "Name",
+      "Category",
+      "Department",
+      "Cost center",
+      "Data owner",
+      "Mode",
+      "Days with data",
+      "Scheduled h",
+      "Available h",
+      "Run h",
+      "Downtime h",
+      "Availability %",
+      "Utilization %",
+    ]);
+    data.by_asset.forEach((r) =>
+      assets.addRow([
+        r.asset_code,
+        r.asset_name,
+        r.category,
+        r.department_code ?? "",
+        r.cost_center_code ?? "",
+        r.data_owner_username ?? "",
+        r.utilization_mode,
+        r.days_with_data,
+        r.scheduled_hours,
+        r.available_hours,
+        r.run_hours,
+        r.downtime_hours,
+        r.availability_pct,
+        r.utilization_pct,
+      ])
+    );
 
     const daily = wb.addWorksheet("Daily Trend");
     daily.addRow(["Date", "Scheduled h", "Available h", "Run h", "Downtime h", "Availability %", "Utilization %"]);

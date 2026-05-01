@@ -4115,6 +4115,31 @@
           </div>
           <div class="report-card-body">
             <pre class="output" id="mdmSummaryOut" style="max-height:72px;overflow:auto"></pre>
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb">
+              <p class="muted small" style="margin:0 0 8px">Required fields (policy) — applies to this site. Checked fields must be present on <b>new assets</b> and on <b>new parts</b> created via stock intake (<code>create_if_missing</code>).</p>
+              <div class="form-row" style="align-items:flex-end">
+                <div class="form-field" style="flex:1;min-width:220px">
+                  <label>New asset</label>
+                  <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:13px;margin-top:4px">
+                    <label><input type="checkbox" id="mdmPolAssetDept" /> department_code</label>
+                    <label><input type="checkbox" id="mdmPolAssetCc" /> cost_center_code</label>
+                    <label><input type="checkbox" id="mdmPolAssetOwner" /> data_owner_username</label>
+                  </div>
+                </div>
+                <div class="form-field" style="flex:1;min-width:220px">
+                  <label>New part (stock intake)</label>
+                  <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:13px;margin-top:4px">
+                    <label><input type="checkbox" id="mdmPolPartDept" /> department_code</label>
+                    <label><input type="checkbox" id="mdmPolPartSup" /> default_supplier_code</label>
+                    <label><input type="checkbox" id="mdmPolPartOwner" /> data_owner_username</label>
+                  </div>
+                </div>
+                <div class="form-field form-field-action">
+                  <label>&nbsp;</label>
+                  <button type="button" id="mdmPolicySaveBtn" class="btn btn-secondary btn-sm">Save policies</button>
+                </div>
+              </div>
+            </div>
             <div class="form-row" style="margin-top:8px">
               <div class="form-field">
                 <label>Department — code</label>

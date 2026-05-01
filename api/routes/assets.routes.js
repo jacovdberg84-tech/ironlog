@@ -3,6 +3,7 @@ import { db } from "../db/client.js";
 import { getAssetCurrentHoursInfo } from "../utils/assetMeterHours.js";
 import {
   ensureMasterDataSchema,
+  validateAgainstMdmPolicy,
   validateAssetGovernanceOptional,
 } from "../utils/masterdataGovernance.js";
 
@@ -154,6 +155,16 @@ export default async function assetRoutes(app) {
 
     if (!asset_code || !asset_name) {
       return reply.code(400).send({ error: "asset_code and asset_name are required" });
+    }
+
+    const policyBody = {
+      department_code,
+      cost_center_code,
+      data_owner_username,
+    };
+    const pol = validateAgainstMdmPolicy(siteCodeFromReq(req), "asset", policyBody);
+    if (!pol.ok) {
+      return reply.code(400).send({ error: `missing required fields: ${pol.missing.join(", ")}` });
     }
 
     const gov = validateAssetGovernanceOptional(siteCodeFromReq(req), {

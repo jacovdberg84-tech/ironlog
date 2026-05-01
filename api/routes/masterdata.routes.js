@@ -4,7 +4,9 @@ import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import {
   applyMasterDataApproval,
   ensureMasterDataSchema,
+  getAllMdmPoliciesForSite,
   normalizeMdmCode,
+  setMdmPoliciesForSite,
 } from "../utils/masterdataGovernance.js";
 
 function getSiteCode(req) {
@@ -104,6 +106,37 @@ export default async function masterdataRoutes(app) {
         suppliers: Number(sup?.c || 0),
         pending_masterdata_approvals: Number(pending?.c || 0),
       },
+    };
+  });
+
+  // ---------- Field policies (required keys per entity, site-scoped) ----------
+  app.get("/policies", async (req, reply) => {
+    if (!requireRoles(req, reply, MDM_READ_ROLES)) return;
+    const site = getSiteCode(req);
+    return {
+      ok: true,
+      site_code: site,
+      policies: getAllMdmPoliciesForSite(site),
+    };
+  });
+
+  app.put("/policies", async (req, reply) => {
+    if (!requireRoles(req, reply, MDM_WRITE_ROLES)) return;
+    const site = getSiteCode(req);
+    const body = req.body || {};
+    const policies = body.policies && typeof body.policies === "object" ? body.policies : body;
+    setMdmPoliciesForSite(site, policies);
+    writeAudit(db, req, {
+      module: "masterdata",
+      action: "policies_update",
+      entity_type: "mdm_entity_policies",
+      entity_id: site,
+      payload: policies,
+    });
+    return {
+      ok: true,
+      site_code: site,
+      policies: getAllMdmPoliciesForSite(site),
     };
   });
 
