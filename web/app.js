@@ -771,7 +771,11 @@ function getRoleAllowedTabs(role) {
   const r = String(role || "").toLowerCase();
   if (r === "operator") return ["dash", "daily", "fuel", "lube", "legal", "operations", "ironmind", "docs", "vehicle", "tasks"];
   if (r === "artisan") return ["dash", "maintenance", "Breakdowns", "reports", "fuel", "lube", "legal", "operations", "dispatch", "ironmind", "docs", "vehicle", "tasks"];
-  if (r === "stores") return ["dash", "maintenance", "stock", "uploads", "reports", "legal", "procurement", "operations", "dispatch", "quality", "ironmind", "docs", "vehicle", "tasks"];
+  if (r === "stores") return ["dash", "maintenance", "stock", "uploads", "reports", "finance", "legal", "procurement", "operations", "dispatch", "quality", "ironmind", "docs", "vehicle", "tasks"];
+  if (r === "procurement") return ["dash", "stock", "reports", "finance", "procurement", "operations", "quality", "docs", "tasks"];
+  if (r === "plant_manager") return ["dash", "daily", "assets", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
+  if (r === "site_manager") return ["dash", "daily", "assets", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
+  if (r === "executive") return ["dash", "reports", "finance", "operations", "quality", "audit", "docs", "tasks"];
   if (r === "supervisor") return ["dash", "daily", "assets", "maintenance", "fuel", "lube", "stock", "legal", "uploads", "reports", "finance", "Breakdowns", "approvals", "procurement", "operations", "dispatch", "quality", "audit", "ironmind", "docs", "vehicle", "tasks"];
   return [
     "dash",
@@ -816,6 +820,10 @@ function getEffectiveAllowedTabs() {
   }
   // Keep task workspace reachable even when older saved tab overrides exist.
   if (!list.includes("tasks")) list = [...list, "tasks"];
+  // Backward compatibility for older saved tab overrides created before Finance tab existed.
+  if (roles.some((r) => ["admin", "supervisor", "stores", "procurement", "plant_manager", "site_manager", "executive"].includes(r)) && !list.includes("finance")) {
+    list = [...list, "finance"];
+  }
   // "admin" is not an assignable section in the multiselect; always allow the User admin tab for these roles
   if (roles.some((r) => ["admin", "supervisor"].includes(r)) && !list.includes("admin")) list = [...list, "admin"];
   return list;
