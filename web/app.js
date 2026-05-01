@@ -6043,10 +6043,12 @@ async function allocateStore() {
     part_code: (qs("saPart")?.value || "").trim(),
     quantity: Number(qs("saQty")?.value || 0),
     location_code: (qs("saLocation")?.value || "").trim() || undefined,
+    bin_code: (qs("saBin")?.value || "").trim() || undefined,
     asset_code: (qs("saAsset")?.value || "").trim() || undefined,
     work_order_id: (qs("saWo")?.value || "").trim() ? Number((qs("saWo")?.value || "").trim()) : undefined,
     allocation_date: (qs("saDate")?.value || "").trim() || undefined,
     issued_by: (qs("saIssuedBy")?.value || "").trim() || undefined,
+    cost_center_code: (qs("saCostCenter")?.value || "").trim() || undefined,
     notes: (qs("saNotes")?.value || "").trim() || undefined,
   };
 
@@ -6087,7 +6089,7 @@ async function loadStoreAllocations() {
     list.appendChild(
       item(
         `<b>${r.allocation_date}</b> — ${r.part_code} x ${Number(r.quantity || 0).toFixed(1)}<br>` +
-        `<small>${ref} | ${r.location_code || "NO-LOC"} | Unit: $${unitCost.toFixed(2)} | Value: $${lineValue.toFixed(2)} | ${r.issued_by || "No issuer"}${r.notes ? ` | ${r.notes}` : ""}</small>`
+        `<small>${ref} | ${r.location_code || "NO-LOC"}${r.bin_code ? `/${r.bin_code}` : ""} | CC: ${r.cost_center_code || "-"} | Unit: $${unitCost.toFixed(2)} | Value: $${lineValue.toFixed(2)} | ${r.issued_by || "No issuer"}${r.notes ? ` | ${r.notes}` : ""}</small>`
       )
     );
   });
@@ -6336,9 +6338,11 @@ async function saveManualStock() {
   const payload = {
     part_code,
     location_code: (qs("msLocation")?.value || "").trim() || undefined,
+    bin_code: (qs("msBin")?.value || "").trim() || undefined,
     movement_type,
     quantity: Number(qs("msQty")?.value || 0),
     reference: (qs("msRef")?.value || "").trim() || undefined,
+    cost_center_code: (qs("msCostCenter")?.value || "").trim() || undefined,
     ...(movement_type === "in"
       ? { create_if_missing: true, ...(part_name ? { part_name } : {}) }
       : {}),
@@ -6366,6 +6370,8 @@ async function saveManualStock() {
     if (qs("msPartDesc")) qs("msPartDesc").value = "";
     if (qs("msQty")) qs("msQty").value = "1";
     if (qs("msRef")) qs("msRef").value = "";
+    if (qs("msBin")) qs("msBin").value = "";
+    if (qs("msCostCenter")) qs("msCostCenter").value = "";
     if (qs("msUnitCost")) qs("msUnitCost").value = "";
     if (qs("msType")) qs("msType").value = "in";
     if (qs("msCostCurrency")) qs("msCostCurrency").value = "USD";
@@ -6641,6 +6647,8 @@ async function loadStockDepth() {
   if (!rows.length) list.appendChild(item("<small>No depth rows found.</small>"));
 }
 
+let stockReplenishmentRowsCache = [];
+
 async function loadReplenishmentSuggestions() {
   const list = qs("sbReplenishmentList");
   if (!list) return;
@@ -6651,6 +6659,7 @@ async function loadReplenishmentSuggestions() {
   if (bin_code) q.set("bin_code", bin_code);
   const data = await fetchJson(`${API}/api/stock/replenishment-suggestions${q.toString() ? `?${q.toString()}` : ""}`);
   const rows = Array.isArray(data?.rows) ? data.rows : [];
+  stockReplenishmentRowsCache = rows;
   list.innerHTML = "";
   rows.slice(0, 120).forEach((r) => {
     list.appendChild(item(
@@ -6659,6 +6668,47 @@ async function loadReplenishmentSuggestions() {
     ));
   });
   if (!rows.length) list.appendChild(item("<small>No replenishment suggestions.</small>"));
+}
+
+function exportReplenishmentSuggestionsCsv() {
+  const rows = Array.isArray(stockReplenishmentRowsCache) ? stockReplenishmentRowsCache : [];
+  if (!rows.length) throw new Error("Load replenishment suggestions first.");
+  const header = [
+    "part_code",
+    "part_name",
+    "location_code",
+    "bin_code",
+    "on_hand",
+    "min_qty",
+    "max_qty",
+    "shortage_qty",
+    "suggested_order_qty",
+  ];
+  const esc = (v) => {
+    const s = String(v ?? "");
+    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, "\"\"")}"`;
+    return s;
+  };
+  const csv = [header.join(",")].concat(rows.map((r) => [
+    r.part_code || "",
+    r.part_name || "",
+    r.location_code || "",
+    r.bin_code || "",
+    Number(r.on_hand || 0).toFixed(2),
+    Number(r.min_qty || 0).toFixed(2),
+    Number(r.max_qty || 0).toFixed(2),
+    Number(r.shortage_qty || 0).toFixed(2),
+    Number(r.suggested_order_qty || 0).toFixed(2),
+  ].map(esc).join(","))).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "replenishment_suggestions.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 async function createCycleSession() {
@@ -10818,6 +10868,14 @@ async function init() {
   qs("sbLoadReplenishmentBtn")?.addEventListener("click", () =>
     loadReplenishmentSuggestions().catch((e) => setStatus("Replenishment load error: " + e.message))
   );
+  qs("sbExportReplenishmentCsvBtn")?.addEventListener("click", () => {
+    try {
+      exportReplenishmentSuggestionsCsv();
+      setStatus("Replenishment CSV exported.");
+    } catch (e) {
+      setStatus("Replenishment export error: " + (e.message || e));
+    }
+  });
   qs("sbCreateCycleSessionBtn")?.addEventListener("click", () =>
     createCycleSession().catch((e) => setStatus("Cycle session create error: " + e.message))
   );

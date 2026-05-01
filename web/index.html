@@ -1674,6 +1674,10 @@
                 <input id="saLocation" list="locationCodeOptions" class="w-full" placeholder="Location code" />
               </div>
               <div class="form-field">
+                <label>Bin (optional)</label>
+                <input id="saBin" class="w-full" placeholder="Bin code" />
+              </div>
+              <div class="form-field">
                 <label>Asset (optional)</label>
                 <input id="saAsset" list="assetCodeOptions" class="w-full" placeholder="Asset code" />
               </div>
@@ -1690,6 +1694,10 @@
               <div class="form-field">
                 <label>Issued By</label>
                 <input id="saIssuedBy" class="w-full" placeholder="Your name" />
+              </div>
+              <div class="form-field">
+                <label>Cost Center (optional)</label>
+                <input id="saCostCenter" class="w-full" placeholder="Cost center" />
               </div>
               <div class="form-field form-field-action">
                 <button id="allocateStore" class="btn btn-primary">
@@ -1745,6 +1753,10 @@
                 <input id="msLocation" list="locationCodeOptions" class="w-full" placeholder="Location code" />
               </div>
               <div class="form-field">
+                <label>Bin (optional)</label>
+                <input id="msBin" class="w-full" placeholder="Bin code" />
+              </div>
+              <div class="form-field">
                 <label>Type</label>
                 <select id="msType" class="w-full">
                   <option value="in">in</option>
@@ -1761,6 +1773,10 @@
               <div class="form-field form-field-full">
                 <label>Reference</label>
                 <input id="msRef" class="w-full" placeholder="Optional reference" />
+              </div>
+              <div class="form-field">
+                <label>Cost Center (optional)</label>
+                <input id="msCostCenter" class="w-full" placeholder="Cost center" />
               </div>
               <div class="form-field form-field-action">
                 <button id="saveManualStock" class="btn btn-primary">
@@ -1970,6 +1986,7 @@
             <div class="action-buttons">
               <button id="sbLoadDepthBtn" class="btn btn-secondary btn-sm">Load Depth</button>
               <button id="sbLoadReplenishmentBtn" class="btn btn-secondary btn-sm">Load Replenishment</button>
+              <button id="sbExportReplenishmentCsvBtn" class="btn btn-secondary btn-sm">Export Replenishment CSV</button>
               <button id="sbCreateCycleSessionBtn" class="btn btn-secondary btn-sm">Create Cycle Session</button>
               <button id="sbLoadCycleSessionsBtn" class="btn btn-secondary btn-sm">Load Cycle Sessions</button>
             </div>
