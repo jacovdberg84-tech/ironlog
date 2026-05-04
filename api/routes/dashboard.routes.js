@@ -2549,6 +2549,15 @@ export default async function dashboardRoutes(app) {
       ORDER BY log_date DESC, id DESC
       LIMIT 1
     `);
+    const getDailyHoursRunInRange = db.prepare(`
+      SELECT COALESCE(SUM(COALESCE(dh.hours_run, 0)), 0) AS v
+      FROM daily_hours dh
+      WHERE dh.asset_id = ?
+        AND dh.log_date BETWEEN ? AND ?
+        AND COALESCE(dh.is_used, 1) = 1
+        AND LOWER(COALESCE(NULLIF(TRIM(dh.input_unit), ''), 'hours')) <> 'km'
+        AND COALESCE(dh.hours_run, 0) > 0
+    `);
 
     function getRunFromFuel(assetId, startDate, endDate) {
       const rows = getFuelLogsInRange.all(assetId, startDate, endDate);
@@ -2611,8 +2620,13 @@ export default async function dashboardRoutes(app) {
       const fuelRun = getRunFromFuel(r.asset_id, start, end) || {};
       const fuelKm = Number(fuelRun.km_run || 0);
       const fuelHours = Number(fuelRun.hours_run || 0);
+      const dailyHoursRun = mode === "hours"
+        ? Number(getDailyHoursRunInRange.get(r.asset_id, start, end)?.v || 0)
+        : 0;
       const km = fuelKm > 0 ? fuelKm : 0;
-      const hours = fuelHours > 0 ? fuelHours : 0;
+      const hours = mode === "hours"
+        ? (dailyHoursRun > 0 ? dailyHoursRun : (fuelHours > 0 ? fuelHours : 0))
+        : (fuelHours > 0 ? fuelHours : 0);
       const fuel = Number(r.fuel_liters || 0);
       const oem = Number(r.oem_lph || 5);
       const oemK = Number(r.oem_kmpl || 2);

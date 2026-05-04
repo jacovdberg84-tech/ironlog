@@ -1037,55 +1037,6 @@ export default async function reportsRoutes(app) {
     const merged = Array.from(new Set([...fromMany, ...fromSingle]));
     return merged.length ? merged : ["admin"];
   }
-  function parseAllowedLocations(raw) {
-    if (raw == null || raw === "") return null;
-    if (Array.isArray(raw)) {
-      const out = raw
-        .map((x) => String(x || "").trim().toLowerCase())
-        .filter(Boolean);
-      return out.length ? Array.from(new Set(out)) : null;
-    }
-    const txt = String(raw || "").trim();
-    if (!txt) return null;
-    try {
-      const parsed = JSON.parse(txt);
-      if (Array.isArray(parsed)) {
-        const out = parsed
-          .map((x) => String(x || "").trim().toLowerCase())
-          .filter(Boolean);
-        return out.length ? Array.from(new Set(out)) : null;
-      }
-    } catch {}
-    const out = txt
-      .split(",")
-      .map((x) => String(x || "").trim().toLowerCase())
-      .filter(Boolean);
-    return out.length ? Array.from(new Set(out)) : null;
-  }
-  function requestAllowedLocations(req) {
-    const username = String(req.headers["x-user-name"] || "").trim();
-    if (!username) return null;
-    const row = db.prepare(`SELECT allowed_locations FROM users WHERE username = ? LIMIT 1`).get(username);
-    return parseAllowedLocations(row?.allowed_locations);
-  }
-  function enforceSiteScope(req, reply, requestedSites) {
-    const roles = requestRoles(req);
-    const isExecutive = roles.includes("executive");
-    if (!isExecutive) return true;
-    const allowed = requestAllowedLocations(req);
-    if (!Array.isArray(allowed) || !allowed.length) return true;
-    const requested = Array.from(new Set((requestedSites || []).map((x) => String(x || "").trim().toLowerCase()).filter(Boolean)));
-    if (!requested.length) return true;
-    const outside = requested.filter((s) => !allowed.includes(s));
-    if (!outside.length) return true;
-    reply.code(403).send({
-      ok: false,
-      error: "site access denied",
-      requested_sites: requested,
-      allowed_locations: allowed,
-    });
-    return false;
-  }
   function requireAdmin(req, reply) {
     const roles = requestRoles(req);
     if (!roles.includes("admin") && !roles.includes("supervisor")) {
@@ -1093,36 +1044,6 @@ export default async function reportsRoutes(app) {
       return false;
     }
     return true;
-  }
-  const ROLE_PERMISSION_FALLBACK = {
-    admin: ["*"],
-    supervisor: ["reports.export.read", "reports.executive.read", "reports.maintenance_master.manage"],
-    plant_manager: ["reports.export.read", "reports.executive.read", "reports.maintenance_master.manage"],
-    site_manager: ["reports.export.read", "reports.executive.read", "reports.maintenance_master.manage"],
-    quality_manager: ["reports.export.read"],
-    hr_manager: ["reports.export.read"],
-    procurement: ["reports.export.read"],
-    storeman: ["reports.export.read"],
-    stores: ["reports.export.read"],
-    finance: ["reports.export.read", "reports.executive.read"],
-    executive: ["reports.executive.read", "reports.export.read"],
-    artisan: ["reports.export.read"],
-    operator: ["reports.export.read"],
-  };
-  function requestPermissions(req) {
-    const fromHeader = String(req.headers["x-user-permissions"] || "")
-      .split(",")
-      .map((x) => String(x || "").trim())
-      .filter(Boolean);
-    if (fromHeader.length) return Array.from(new Set(fromHeader));
-    const roles = requestRoles(req);
-    return Array.from(new Set(roles.flatMap((r) => ROLE_PERMISSION_FALLBACK[r] || [])));
-  }
-  function requirePermission(req, reply, permissionKey) {
-    const perms = requestPermissions(req);
-    if (perms.includes("*") || perms.includes(permissionKey)) return true;
-    reply.code(403).send({ ok: false, error: `permission '${permissionKey}' required` });
-    return false;
   }
   function smtpSecret() {
     const raw = String(process.env.IRONLOG_SMTP_SECRET || process.env.IRONLOG_AUTH_SECRET || "").trim();
@@ -2781,6 +2702,15 @@ export default async function reportsRoutes(app) {
       ORDER BY log_date DESC, id DESC
       LIMIT 1
     `);
+    const getDailyHoursRunInRange = db.prepare(`
+      SELECT COALESCE(SUM(COALESCE(dh.hours_run, 0)), 0) AS v
+      FROM daily_hours dh
+      WHERE dh.asset_id = ?
+        AND dh.log_date BETWEEN ? AND ?
+        AND COALESCE(dh.is_used, 1) = 1
+        AND LOWER(COALESCE(NULLIF(TRIM(dh.input_unit), ''), 'hours')) <> 'km'
+        AND COALESCE(dh.hours_run, 0) > 0
+    `);
 
     function getRunFromFuel(assetId, startDate, endDate) {
       const logs = getFuelLogsInRange.all(assetId, startDate, endDate);
@@ -2830,8 +2760,13 @@ export default async function reportsRoutes(app) {
       const fuelRun = getRunFromFuel(r.asset_id, start, end) || {};
       const fuelKm = Number(fuelRun.km_run || 0);
       const fuelHours = Number(fuelRun.hours_run || 0);
+      const dailyHoursRun = mode === "hours"
+        ? Number(getDailyHoursRunInRange.get(r.asset_id, start, end)?.v || 0)
+        : 0;
       const km = fuelKm > 0 ? fuelKm : 0;
-      const hours = fuelHours > 0 ? fuelHours : 0;
+      const hours = mode === "hours"
+        ? (dailyHoursRun > 0 ? dailyHoursRun : (fuelHours > 0 ? fuelHours : 0))
+        : (fuelHours > 0 ? fuelHours : 0);
       const fuel = Number(r.fuel_liters || 0);
       const oem = Number(r.oem_lph || 5);
       const oemK = Number(r.oem_kmpl || 2);
@@ -3064,6 +2999,15 @@ export default async function reportsRoutes(app) {
       ORDER BY log_date DESC, id DESC
       LIMIT 1
     `);
+    const getDailyHoursRunInRange = db.prepare(`
+      SELECT COALESCE(SUM(COALESCE(dh.hours_run, 0)), 0) AS v
+      FROM daily_hours dh
+      WHERE dh.asset_id = ?
+        AND dh.log_date BETWEEN ? AND ?
+        AND COALESCE(dh.is_used, 1) = 1
+        AND LOWER(COALESCE(NULLIF(TRIM(dh.input_unit), ''), 'hours')) <> 'km'
+        AND COALESCE(dh.hours_run, 0) > 0
+    `);
     function getRunFromFuel(assetId, startDate, endDate) {
       const logs = getFuelLogsInRange.all(assetId, startDate, endDate);
       if (!logs.length) return { km_run: 0, hours_run: 0 };
@@ -3109,8 +3053,13 @@ export default async function reportsRoutes(app) {
       const fuelRun = getRunFromFuel(r.asset_id, start, end) || {};
       const fuelKm = Number(fuelRun.km_run || 0);
       const fuelHours = Number(fuelRun.hours_run || 0);
+      const dailyHoursRun = mode === "hours"
+        ? Number(getDailyHoursRunInRange.get(r.asset_id, start, end)?.v || 0)
+        : 0;
       const km = fuelKm > 0 ? fuelKm : 0;
-      const hours = fuelHours > 0 ? fuelHours : 0;
+      const hours = mode === "hours"
+        ? (dailyHoursRun > 0 ? dailyHoursRun : (fuelHours > 0 ? fuelHours : 0))
+        : (fuelHours > 0 ? fuelHours : 0);
       const fuel = Number(r.fuel_liters || 0);
       const oem = Number(r.oem_lph || 5);
       const oemK = Number(r.oem_kmpl || 2);
@@ -5329,7 +5278,6 @@ export default async function reportsRoutes(app) {
   // DAILY XLSX
   // =========================
   app.get("/daily.xlsx", async (req, reply) => {
-    if (!requirePermission(req, reply, "reports.export.read")) return;
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -5690,7 +5638,6 @@ export default async function reportsRoutes(app) {
   // GET /api/reports/gm-weekly.xlsx?end=YYYY-MM-DD&scheduled=10
   // GM pack: MTD availability/utilization; downtime from daily logs when present; MTBF/MTTR; PM; spares; forecast.
   app.get("/gm-weekly.xlsx", async (req, reply) => {
-    if (!requirePermission(req, reply, "reports.export.read")) return;
     const end = String(req.query?.end || "").trim();
     const scheduled = Number(req.query?.scheduled ?? 10);
     const forecastHorizon = Math.max(1, Math.min(90, Number(req.query?.forecast_days ?? 30)));
@@ -5851,7 +5798,6 @@ export default async function reportsRoutes(app) {
   // =========================
   // GET /api/reports/cost-monthly.xlsx?month=YYYY-MM
   app.get("/cost-monthly.xlsx", async (req, reply) => {
-    if (!requirePermission(req, reply, "reports.export.read")) return;
     const month = String(req.query?.month || "").trim();
     if (!isMonth(month)) {
       return reply.code(400).send({ error: "month (YYYY-MM) required" });
@@ -6840,8 +6786,11 @@ export default async function reportsRoutes(app) {
         asset_code: String(r.asset_code || ""),
         asset_name: String(r.asset_name || ""),
         category: String(r.category || "Uncategorized"),
-        utilization_pct: Number(utilPct.toFixed(2)),
+        scheduled_hours: s,
+        run_hours: run,
+        downtime_hours: down,
         availability_pct: Number(availPct.toFixed(2)),
+        utilization_pct: Number(utilPct.toFixed(2)),
       };
     });
     const assetPerfSorted = [...assetPerfRows].sort((a, b) => b.utilization_pct - a.utilization_pct);
@@ -6849,92 +6798,49 @@ export default async function reportsRoutes(app) {
     const bottomAssets = assetPerfSorted.slice(-2).reverse();
     const midStart = Math.max(0, Math.floor((assetPerfSorted.length - 2) / 2));
     const midAssets = assetPerfSorted.slice(midStart, midStart + 2);
-    const mpCurrentExpr = hasColumn("maintenance_plans", "current_hours") ? "COALESCE(m.current_hours, 0)" : "0";
-    const mpNextDueExpr = hasColumn("maintenance_plans", "next_due_hours") ? "COALESCE(m.next_due_hours, 0)" : "0";
-    const mpActiveExpr = hasColumn("maintenance_plans", "active") ? "m.active = 1" : "1=1";
-    const plannedUpcomingCosts = hasTable("work_order_items")
-      ? db.prepare(`
-        SELECT
-          a.asset_code,
-          a.asset_name,
-          m.service_name,
-          ${mpCurrentExpr} AS current_hours,
-          ${mpNextDueExpr} AS next_due_hours,
-          COALESCE(SUM(CASE WHEN LOWER(IFNULL(p.consumable_kind, '')) IN ('oil','lube','lubricant','hydraulic','hydraulic_oil','coolant','grease','hyd fluid','hydraulic fluid') THEN wi.quantity * COALESCE(wi.unit_cost, p.unit_cost, 0) ELSE 0 END), 0) AS planned_lube_cost,
-          COALESCE(SUM(CASE WHEN LOWER(IFNULL(p.consumable_kind, '')) IN ('oil','lube','lubricant','hydraulic','hydraulic_oil','coolant','grease','hyd fluid','hydraulic fluid') THEN 0 ELSE wi.quantity * COALESCE(wi.unit_cost, p.unit_cost, 0) END), 0) AS planned_parts_cost
-        FROM maintenance_plans m
-        JOIN assets a ON a.id = m.asset_id
-        LEFT JOIN work_order_items wi ON wi.work_order_id = (
-          SELECT w.id
-          FROM work_orders w
-          WHERE w.asset_id = m.asset_id
-            AND LOWER(COALESCE(w.source, '')) = 'maintenance_plan'
-            AND w.reference_id = m.id
-            AND COALESCE(w.status, '') = 'open'
-          ORDER BY w.id DESC
-          LIMIT 1
-        )
-        LEFT JOIN parts p ON p.id = wi.part_id
-        WHERE ${mpActiveExpr}
-        GROUP BY m.id
-        ORDER BY (${mpNextDueExpr} - ${mpCurrentExpr}) ASC, a.asset_code ASC
-        LIMIT 10
-      `).all()
-      : db.prepare(`
-        SELECT
-          a.asset_code,
-          a.asset_name,
-          m.service_name,
-          ${mpCurrentExpr} AS current_hours,
-          ${mpNextDueExpr} AS next_due_hours,
-          0 AS planned_lube_cost,
-          0 AS planned_parts_cost
-        FROM maintenance_plans m
-        JOIN assets a ON a.id = m.asset_id
-        WHERE ${mpActiveExpr}
-        ORDER BY (${mpNextDueExpr} - ${mpCurrentExpr}) ASC, a.asset_code ASC
-        LIMIT 10
-      `).all();
-    const breakdownRootCauseExpr = hasColumn("breakdowns", "root_cause")
-      ? "COALESCE(b.root_cause, '-')"
-      : "COALESCE(b.description, '-')";
-    const woCompletionNotesExpr = hasColumn("work_orders", "completion_notes")
-      ? "COALESCE(w.completion_notes, '-')"
-      : "'-'";
-    const woCompletedAtExpr = hasColumn("work_orders", "completed_at")
-      ? "w.completed_at"
-      : "NULL";
-    const woOpenedAtExpr = hasColumn("work_orders", "opened_at")
-      ? "COALESCE(w.opened_at, '')"
-      : "''";
-    const woSourceExpr = hasColumn("work_orders", "source")
-      ? "LOWER(COALESCE(w.source, ''))"
-      : "''";
-    const woReferenceIdExpr = hasColumn("work_orders", "reference_id")
-      ? "w.reference_id"
-      : "NULL";
-    const woStatusExpr = hasColumn("work_orders", "status")
-      ? "LOWER(COALESCE(w.status, ''))"
-      : "''";
-    const drResponsibleExpr = hasColumn("manager_damage_reports", "responsible_person")
-      ? "COALESCE(dr.responsible_person, '-')"
-      : "'-'";
+    const plannedUpcomingCosts = db.prepare(`
+      SELECT
+        a.asset_code,
+        a.asset_name,
+        m.service_name,
+        COALESCE(m.current_hours, 0) AS current_hours,
+        COALESCE(m.next_due_hours, 0) AS next_due_hours,
+        COALESCE(SUM(CASE WHEN LOWER(IFNULL(p.consumable_kind, '')) IN ('oil','lube','lubricant','hydraulic','hydraulic_oil','coolant','grease','hyd fluid','hydraulic fluid') THEN wi.quantity * COALESCE(wi.unit_cost, p.unit_cost, 0) ELSE 0 END), 0) AS planned_lube_cost,
+        COALESCE(SUM(CASE WHEN LOWER(IFNULL(p.consumable_kind, '')) IN ('oil','lube','lubricant','hydraulic','hydraulic_oil','coolant','grease','hyd fluid','hydraulic fluid') THEN 0 ELSE wi.quantity * COALESCE(wi.unit_cost, p.unit_cost, 0) END), 0) AS planned_parts_cost
+      FROM maintenance_plans m
+      JOIN assets a ON a.id = m.asset_id
+      LEFT JOIN work_order_items wi ON wi.work_order_id = (
+        SELECT w.id
+        FROM work_orders w
+        WHERE w.asset_id = m.asset_id
+          AND LOWER(COALESCE(w.source, '')) = 'maintenance_plan'
+          AND w.reference_id = m.id
+          AND COALESCE(w.status, '') = 'open'
+        ORDER BY w.id DESC
+        LIMIT 1
+      )
+      LEFT JOIN parts p ON p.id = wi.part_id
+      WHERE m.active = 1
+      GROUP BY m.id
+      ORDER BY (COALESCE(m.next_due_hours, 0) - COALESCE(m.current_hours, 0)) ASC, a.asset_code ASC
+      LIMIT 10
+    `).all();
     const partsTrackingRows = db.prepare(`
       SELECT
         a.asset_code,
         COALESCE(b.description, 'Breakdown') AS fault,
-        ${breakdownRootCauseExpr} AS root_cause,
-        ${woCompletionNotesExpr} AS action_taken,
-        COALESCE(date(COALESCE(${woCompletedAtExpr}, w.closed_at, ${woOpenedAtExpr})), '-') AS eta_on_parts,
-        CASE WHEN ${woStatusExpr} IN ('done','closed','completed') THEN 'No' ELSE 'Yes' END AS parts_outstanding,
-        ${drResponsibleExpr} AS responsible_person,
-        CASE WHEN ${woStatusExpr} IN ('done','closed','completed') THEN 'Returned / Closed' ELSE 'Pending closure' END AS expected_return_service
+        COALESCE(b.root_cause, '-') AS root_cause,
+        COALESCE(w.completion_notes, '-') AS action_taken,
+        COALESCE(date(COALESCE(w.completed_at, w.closed_at, w.opened_at)), '-') AS eta_on_parts,
+        CASE WHEN LOWER(COALESCE(w.status, '')) IN ('done','closed','completed') THEN 'No' ELSE 'Yes' END AS parts_outstanding,
+        COALESCE(dr.responsible_person, '-') AS responsible_person,
+        CASE WHEN LOWER(COALESCE(w.status, '')) IN ('done','closed','completed') THEN 'Returned / Closed' ELSE 'Pending closure' END AS expected_return_service
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
-      LEFT JOIN breakdowns b ON b.id = ${woReferenceIdExpr} AND ${woSourceExpr} = 'breakdown'
+      LEFT JOIN breakdowns b ON b.id = w.reference_id AND LOWER(COALESCE(w.source, '')) = 'breakdown'
       LEFT JOIN manager_damage_reports dr ON dr.asset_id = w.asset_id AND dr.report_date BETWEEN ? AND ?
-      WHERE ${woSourceExpr} = 'breakdown'
-        AND ${woOpenedAtExpr} BETWEEN ? AND ?
+      WHERE LOWER(COALESCE(w.source, '')) = 'breakdown'
+        AND COALESCE(w.opened_at, '') BETWEEN ? AND ?
       ORDER BY w.id DESC
       LIMIT 14
     `).all(period.start, period.end, periodStartTs, periodEndTs);
@@ -6979,45 +6885,160 @@ export default async function reportsRoutes(app) {
     const s1 = pptx.addSlide();
     s1.addText("Workshop Maintenance Executive Report", { x: 0.4, y: 0.35, w: 12.4, h: 0.55, fontSize: 24, bold: true });
     s1.addText(`Period: ${period.start} to ${period.end} | Site: ${site_code}`, { x: 0.4, y: 0.95, w: 12.4, h: 0.35, fontSize: 11 });
-    s1.addText("Index\n1) Safety (HSE)\n2) Plant Performance\n3) Breakdown and Maintenance (Cost per Machine)\n4) Parts Tracking\n5) Production Support Actions\n6) Lubrication Cost per Machine\n7) Inspections Done\n8) Fuel Anomalies", { x: 0.7, y: 1.6, w: 11.8, h: 3.8, fontSize: 16, bold: true });
+    s1.addText(
+      "Index\n1) Safety (HSE)\n2) Plant Performance\n3) Breakdown and Maintenance (Cost per Machine)\n4) Parts Tracking\n5) Production Support Actions\n6) Lubrication Cost per Machine\n7) Inspections Done\n8) Fuel Anomalies",
+      { x: 0.7, y: 1.6, w: 11.8, h: 3.8, fontSize: 16, bold: true }
+    );
     const s2 = pptx.addSlide();
     s2.addText("1) Safety (HSE)", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontSize: 22, bold: true });
     s2.addText(`Damage reports: ${Number(hseSummary?.reports || 0)} | HSE reports: ${Number(hseSummary?.hse_reports || 0)} | Pending: ${Number(hseSummary?.pending_investigation || 0)} | Out of service: ${Number(hseSummary?.out_of_service || 0)}`, { x: 0.5, y: 0.8, w: 12.2, h: 0.3, fontSize: 11, bold: true });
-    s2.addTable([[{ text: "Date", options: { bold: true } }, { text: "Asset", options: { bold: true } }, { text: "Severity", options: { bold: true } }, { text: "Fault", options: { bold: true } }, { text: "Action", options: { bold: true } }], ...(hseRows.length ? hseRows.slice(0, 5).map((r) => [String(r.report_date || "-"), String(r.asset_code || "-"), String(r.severity || "-"), compactCell(String(r.damage_description || r.damage_location || "-"), 44), compactCell(String(r.immediate_action || "-"), 40)]) : [["-", "-", "-", "No HSE damage reports in selected period", "-"]])], { x: 0.45, y: 1.2, w: 12.35, h: 2.2, fontSize: 9.5, border: { pt: 1, color: "D0D0D0" } });
-    const hsePhotoAbs = hsePhotoRows.map((p) => resolveStorageAbs(String(p.file_path || "").replace(/\\/g, "/").replace(/^\/+/, ""))).filter((p) => p && fs.existsSync(p));
-    const photoSlots = [{ x: 0.5, y: 3.7, w: 2.95, h: 2.2 }, { x: 3.65, y: 3.7, w: 2.95, h: 2.2 }, { x: 6.8, y: 3.7, w: 2.95, h: 2.2 }, { x: 9.95, y: 3.7, w: 2.95, h: 2.2 }];
-    hsePhotoAbs.slice(0, 4).forEach((abs, idx) => s2.addImage({ path: abs, ...photoSlots[idx] }));
+    s2.addTable(
+      [
+        [{ text: "Date", options: { bold: true } }, { text: "Asset", options: { bold: true } }, { text: "Severity", options: { bold: true } }, { text: "Fault", options: { bold: true } }, { text: "Action", options: { bold: true } }],
+        ...(hseRows.length
+          ? hseRows.slice(0, 5).map((r) => [String(r.report_date || "-"), String(r.asset_code || "-"), String(r.severity || "-"), compactCell(String(r.damage_description || r.damage_location || "-"), 44), compactCell(String(r.immediate_action || "-"), 40)])
+          : [["-", "-", "-", "No HSE damage reports in selected period", "-"]]),
+      ],
+      { x: 0.45, y: 1.2, w: 12.35, h: 2.2, fontSize: 9.5, border: { pt: 1, color: "D0D0D0" } }
+    );
+    const hsePhotoAbs = hsePhotoRows
+      .map((p) => resolveStorageAbs(String(p.file_path || "").replace(/\\/g, "/").replace(/^\/+/, "")))
+      .filter((p) => p && fs.existsSync(p));
+    const photoSlots = [
+      { x: 0.5, y: 3.7, w: 2.95, h: 2.2 },
+      { x: 3.65, y: 3.7, w: 2.95, h: 2.2 },
+      { x: 6.8, y: 3.7, w: 2.95, h: 2.2 },
+      { x: 9.95, y: 3.7, w: 2.95, h: 2.2 },
+    ];
+    hsePhotoAbs.slice(0, 4).forEach((abs, idx) => {
+      s2.addImage({ path: abs, ...photoSlots[idx] });
+    });
     const s3 = pptx.addSlide();
     s3.addText("2) Plant Performance", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
-    s3.addChart(pptx.ChartType.bar, [{ name: "Scheduled", labels: dailyKpiRows.map((r) => String(r.day_key || "").slice(5)), values: dailyKpiRows.map((r) => Number(r.scheduled_hours || 0)) }, { name: "Run", labels: dailyKpiRows.map((r) => String(r.day_key || "").slice(5)), values: dailyKpiRows.map((r) => Number(r.run_hours || 0)) }], { x: 0.45, y: 0.95, w: 6.0, h: 2.1, catAxisLabelRotate: -45, showLegend: true, legendPos: "b" });
-    s3.addChart(pptx.ChartType.line, [{ name: "Availability %", labels: availabilityTrend.map((r) => r.label), values: availabilityTrend.map((r) => r.value) }, { name: "Utilization %", labels: utilizationTrend.map((r) => r.label), values: utilizationTrend.map((r) => r.value) }], { x: 6.75, y: 0.95, w: 6.0, h: 2.1, catAxisLabelRotate: -45, showLegend: true, legendPos: "b", valAxisMinVal: 0, valAxisMaxVal: 100 });
-    s3.addTable([[{ text: "Highest performing equipment by type", options: { bold: true } }, { text: "Avail %", options: { bold: true } }, { text: "Util %", options: { bold: true } }], ...availabilityByType.slice().sort((a, b) => Number(b.utilization_pct || 0) - Number(a.utilization_pct || 0)).slice(0, 6).map((r) => [String(r.equipment_type || "-"), `${Number(r.availability_pct || 0).toFixed(2)}%`, `${Number(r.utilization_pct || 0).toFixed(2)}%`])], { x: 0.45, y: 3.25, w: 4.05, h: 3.2, fontSize: 9.5, border: { pt: 1, color: "D0D0D0" } });
+    s3.addChart(pptx.ChartType.bar, [
+      { name: "Scheduled", labels: dailyKpiRows.map((r) => String(r.day_key || "").slice(5)), values: dailyKpiRows.map((r) => Number(r.scheduled_hours || 0)) },
+      { name: "Run", labels: dailyKpiRows.map((r) => String(r.day_key || "").slice(5)), values: dailyKpiRows.map((r) => Number(r.run_hours || 0)) },
+    ], { x: 0.45, y: 0.95, w: 6.0, h: 2.1, catAxisLabelRotate: -45, showLegend: true, legendPos: "b" });
+    s3.addChart(pptx.ChartType.line, [
+      { name: "Availability %", labels: availabilityTrend.map((r) => r.label), values: availabilityTrend.map((r) => r.value) },
+      { name: "Utilization %", labels: utilizationTrend.map((r) => r.label), values: utilizationTrend.map((r) => r.value) },
+    ], { x: 6.75, y: 0.95, w: 6.0, h: 2.1, catAxisLabelRotate: -45, showLegend: true, legendPos: "b", valAxisMinVal: 0, valAxisMaxVal: 100 });
+    s3.addTable(
+      [
+        [{ text: "Highest performing equipment by type", options: { bold: true } }, { text: "Avail %", options: { bold: true } }, { text: "Util %", options: { bold: true } }],
+        ...availabilityByType
+          .slice()
+          .sort((a, b) => Number(b.utilization_pct || 0) - Number(a.utilization_pct || 0))
+          .slice(0, 6)
+          .map((r) => [String(r.equipment_type || "-"), `${Number(r.availability_pct || 0).toFixed(2)}%`, `${Number(r.utilization_pct || 0).toFixed(2)}%`]),
+      ],
+      { x: 0.45, y: 3.25, w: 4.05, h: 3.2, fontSize: 9.5, border: { pt: 1, color: "D0D0D0" } }
+    );
     const perfCompact = (r) => `${String(r.asset_code || "-")} (${Number(r.utilization_pct || 0).toFixed(1)}%)`;
-    s3.addTable([[{ text: "Top 2 Assets", options: { bold: true } }], ...(topAssets.length ? topAssets.map((r) => [perfCompact(r)]) : [["-"]]), [{ text: "Mid 2 Assets", options: { bold: true } }], ...(midAssets.length ? midAssets.map((r) => [perfCompact(r)]) : [["-"]]), [{ text: "Lowest 2 Assets", options: { bold: true } }], ...(bottomAssets.length ? bottomAssets.map((r) => [perfCompact(r)]) : [["-"]])], { x: 4.7, y: 3.25, w: 2.85, h: 3.2, fontSize: 10, border: { pt: 1, color: "D0D0D0" } });
-    s3.addChart(pptx.ChartType.bar, [{ name: "Top 2", labels: topAssets.map((r) => String(r.asset_code || "")), values: topAssets.map((r) => Number(r.utilization_pct || 0)) }, { name: "Mid 2", labels: midAssets.map((r) => String(r.asset_code || "")), values: midAssets.map((r) => Number(r.utilization_pct || 0)) }, { name: "Low 2", labels: bottomAssets.map((r) => String(r.asset_code || "")), values: bottomAssets.map((r) => Number(r.utilization_pct || 0)) }], { x: 7.75, y: 3.25, w: 5.0, h: 3.2, showLegend: true, legendPos: "b", valAxisMinVal: 0, valAxisMaxVal: 100 });
+    s3.addTable(
+      [
+        [{ text: "Top 2 Assets", options: { bold: true } }],
+        ...(topAssets.length ? topAssets.map((r) => [perfCompact(r)]) : [["-"]]),
+        [{ text: "Mid 2 Assets", options: { bold: true } }],
+        ...(midAssets.length ? midAssets.map((r) => [perfCompact(r)]) : [["-"]]),
+        [{ text: "Lowest 2 Assets", options: { bold: true } }],
+        ...(bottomAssets.length ? bottomAssets.map((r) => [perfCompact(r)]) : [["-"]]),
+      ],
+      { x: 4.7, y: 3.25, w: 2.85, h: 3.2, fontSize: 10, border: { pt: 1, color: "D0D0D0" } }
+    );
+    s3.addChart(pptx.ChartType.bar, [
+      { name: "Top 2", labels: topAssets.map((r) => String(r.asset_code || "")), values: topAssets.map((r) => Number(r.utilization_pct || 0)) },
+      { name: "Mid 2", labels: midAssets.map((r) => String(r.asset_code || "")), values: midAssets.map((r) => Number(r.utilization_pct || 0)) },
+      { name: "Low 2", labels: bottomAssets.map((r) => String(r.asset_code || "")), values: bottomAssets.map((r) => Number(r.utilization_pct || 0)) },
+    ], { x: 7.75, y: 3.25, w: 5.0, h: 3.2, showLegend: true, legendPos: "b", valAxisMinVal: 0, valAxisMaxVal: 100 });
     const s4 = pptx.addSlide();
     s4.addText("3) Breakdown and Maintenance (Cost per Machine)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 20, bold: true });
-    s4.addTable([[{ text: "Asset", options: { bold: true } }, { text: "Type", options: { bold: true } }, { text: "WO True Down (h)", options: { bold: true } }, { text: "Parts", options: { bold: true } }, { text: "Labor", options: { bold: true } }, { text: "Total", options: { bold: true } }], ...rows.slice(0, 8).map((r) => [`${r.asset_code} ${compactCell(r.asset_name, 18)}`, r.category || "", Number(woDownMap.get(String(r.asset_code || "")) || 0).toFixed(1), r.parts_cost.toFixed(2), r.labor_cost.toFixed(2), r.maintenance_total_cost.toFixed(2)])], { x: 0.4, y: 1.05, w: 12.5, h: 3.0, fontSize: 10, border: { pt: 1, color: "C8C8C8" } });
+    s4.addTable(
+      [
+        [{ text: "Asset", options: { bold: true } }, { text: "Type", options: { bold: true } }, { text: "WO True Down (h)", options: { bold: true } }, { text: "Parts", options: { bold: true } }, { text: "Labor", options: { bold: true } }, { text: "Total", options: { bold: true } }],
+        ...rows.slice(0, 8).map((r) => [`${r.asset_code} ${compactCell(r.asset_name, 18)}`, r.category || "", Number(woDownMap.get(String(r.asset_code || "")) || 0).toFixed(1), r.parts_cost.toFixed(2), r.labor_cost.toFixed(2), r.maintenance_total_cost.toFixed(2)]),
+      ],
+      { x: 0.4, y: 1.05, w: 12.5, h: 3.0, fontSize: 10, border: { pt: 1, color: "C8C8C8" } }
+    );
     s4.addText("Planned Upcoming Costs", { x: 0.45, y: 4.2, w: 12.0, h: 0.35, fontSize: 13, bold: true });
-    s4.addTable([[{ text: "Asset", options: { bold: true } }, { text: "Service", options: { bold: true } }, { text: "Current Hrs", options: { bold: true } }, { text: "Next Due", options: { bold: true } }, { text: "Planned Lube", options: { bold: true } }, { text: "Planned Parts", options: { bold: true } }, { text: "Planned Total", options: { bold: true } }], ...(plannedUpcomingCosts.length ? plannedUpcomingCosts.map((r) => [`${String(r.asset_code || "-")} ${compactCell(String(r.asset_name || ""), 16)}`, compactCell(String(r.service_name || "-"), 20), Number(r.current_hours || 0).toFixed(1), Number(r.next_due_hours || 0).toFixed(1), Number(r.planned_lube_cost || 0).toFixed(2), Number(r.planned_parts_cost || 0).toFixed(2), Number((Number(r.planned_lube_cost || 0) + Number(r.planned_parts_cost || 0)).toFixed(2)).toFixed(2)]) : [["-", "No planned upcoming costs", "-", "-", "-", "-", "-"]])], { x: 0.4, y: 4.55, w: 12.5, h: 2.15, fontSize: 9.2, border: { pt: 1, color: "C8C8C8" } });
+    s4.addTable(
+      [
+        [{ text: "Asset", options: { bold: true } }, { text: "Service", options: { bold: true } }, { text: "Current Hrs", options: { bold: true } }, { text: "Next Due", options: { bold: true } }, { text: "Planned Lube", options: { bold: true } }, { text: "Planned Parts", options: { bold: true } }, { text: "Planned Total", options: { bold: true } }],
+        ...(plannedUpcomingCosts.length
+          ? plannedUpcomingCosts.map((r) => [
+            `${String(r.asset_code || "-")} ${compactCell(String(r.asset_name || ""), 16)}`,
+            compactCell(String(r.service_name || "-"), 20),
+            Number(r.current_hours || 0).toFixed(1),
+            Number(r.next_due_hours || 0).toFixed(1),
+            Number(r.planned_lube_cost || 0).toFixed(2),
+            Number(r.planned_parts_cost || 0).toFixed(2),
+            Number((Number(r.planned_lube_cost || 0) + Number(r.planned_parts_cost || 0)).toFixed(2)).toFixed(2),
+          ])
+          : [["-", "No planned upcoming costs", "-", "-", "-", "-", "-"]]),
+      ],
+      { x: 0.4, y: 4.55, w: 12.5, h: 2.15, fontSize: 9.2, border: { pt: 1, color: "C8C8C8" } }
+    );
     const s5 = pptx.addSlide();
     s5.addText("4) Parts Tracking", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
-    s5.addTable([[{ text: "Asset", options: { bold: true } }, { text: "Fault", options: { bold: true } }, { text: "Root cause", options: { bold: true } }, { text: "Action taken", options: { bold: true } }, { text: "ETA on parts", options: { bold: true } }, { text: "Parts outstanding", options: { bold: true } }, { text: "Responsible person", options: { bold: true } }, { text: "Expected return to service", options: { bold: true } }], ...(partsTrackingRows.length ? partsTrackingRows.map((r) => [String(r.asset_code || "-"), compactCell(String(r.fault || "-"), 20), compactCell(String(r.root_cause || "-"), 18), compactCell(String(r.action_taken || "-"), 24), String(r.eta_on_parts || "-"), String(r.parts_outstanding || "-"), compactCell(String(r.responsible_person || "-"), 16), compactCell(String(r.expected_return_service || "-"), 18)]) : [["-", "No open parts tracking rows", "-", "-", "-", "-", "-", "-"]])], { x: 0.35, y: 1.0, w: 12.6, h: 5.9, fontSize: 8.5, border: { pt: 1, color: "C8C8C8" } });
+    s5.addTable(
+      [
+        [{ text: "Asset", options: { bold: true } }, { text: "Fault", options: { bold: true } }, { text: "Root cause", options: { bold: true } }, { text: "Action taken", options: { bold: true } }, { text: "ETA on parts", options: { bold: true } }, { text: "Parts outstanding", options: { bold: true } }, { text: "Responsible person", options: { bold: true } }, { text: "Expected return to service", options: { bold: true } }],
+        ...(partsTrackingRows.length
+          ? partsTrackingRows.map((r) => [String(r.asset_code || "-"), compactCell(String(r.fault || "-"), 20), compactCell(String(r.root_cause || "-"), 18), compactCell(String(r.action_taken || "-"), 24), String(r.eta_on_parts || "-"), String(r.parts_outstanding || "-"), compactCell(String(r.responsible_person || "-"), 16), compactCell(String(r.expected_return_service || "-"), 18)])
+          : [["-", "No open parts tracking rows", "-", "-", "-", "-", "-", "-"]]),
+      ],
+      { x: 0.35, y: 1.0, w: 12.6, h: 5.9, fontSize: 8.5, border: { pt: 1, color: "C8C8C8" } }
+    );
     const s6 = pptx.addSlide();
     s6.addText("5) Production Support", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
-    s6.addText("Production Support Actions:\n\n1. Scheduled Maintenance Execution:\nEnsure all identified repairs are formally communicated to the maintenance team and incorporated into the maintenance schedule. Prioritization must be aligned with equipment risk ratings, focusing on high-risk assets that may impact production continuity or safety. Progress on these repairs should be tracked daily to ensure timely completion.\n\n2. Work Order Review and Close-Out:\nConduct a comprehensive review of all open work orders, with specific focus on aged and overdue items. Identify bottlenecks preventing closure, verify accuracy of recorded information, and enforce accountability for timely completion. Where required, escalate long-standing work orders to ensure resolution and prevent backlog accumulation.\n\n3. Fuel Efficiency Analysis:\nAssign a responsible team to analyse fuel consumption data for selected assets showing abnormal usage patterns. The objective is to identify inefficiencies, potential mechanical issues, or operator-related factors contributing to increased fuel consumption. Findings should be documented, with corrective actions implemented and monitored for effectiveness.", { x: 0.6, y: 0.95, w: 12.0, h: 5.8, fontSize: 12.5 });
+    s6.addText(
+      "Production Support Actions:\n\n1. Scheduled Maintenance Execution:\nEnsure all identified repairs are formally communicated to the maintenance team and incorporated into the maintenance schedule. Prioritization must be aligned with equipment risk ratings, focusing on high-risk assets that may impact production continuity or safety. Progress on these repairs should be tracked daily to ensure timely completion.\n\n2. Work Order Review and Close-Out:\nConduct a comprehensive review of all open work orders, with specific focus on aged and overdue items. Identify bottlenecks preventing closure, verify accuracy of recorded information, and enforce accountability for timely completion. Where required, escalate long-standing work orders to ensure resolution and prevent backlog accumulation.\n\n3. Fuel Efficiency Analysis:\nAssign a responsible team to analyse fuel consumption data for selected assets showing abnormal usage patterns. The objective is to identify inefficiencies, potential mechanical issues, or operator-related factors contributing to increased fuel consumption. Findings should be documented, with corrective actions implemented and monitored for effectiveness.",
+      { x: 0.6, y: 0.95, w: 12.0, h: 5.8, fontSize: 12.5 }
+    );
     const s7 = pptx.addSlide();
     s7.addText("6) Lubrication (Cost per Machine)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
-    s7.addTable([[{ text: "Asset Code", options: { bold: true } }, { text: "Asset Name", options: { bold: true } }, { text: "Qty", options: { bold: true } }, { text: "Lube Cost", options: { bold: true } }], ...lubeByMachine.slice(0, 16).map((r) => [String(r.asset_code || ""), compactCell(r.asset_name || "", 26), Number(r.qty_total || 0).toFixed(1), Number(r.lube_cost || 0).toFixed(2)])], { x: 0.6, y: 1.1, w: 11.8, h: 5.6, fontSize: 12, border: { pt: 1, color: "C8C8C8" } });
+    s7.addTable(
+      [
+        [{ text: "Asset Code", options: { bold: true } }, { text: "Asset Name", options: { bold: true } }, { text: "Qty", options: { bold: true } }, { text: "Lube Cost", options: { bold: true } }],
+        ...lubeByMachine.slice(0, 16).map((r) => [String(r.asset_code || ""), compactCell(r.asset_name || "", 26), Number(r.qty_total || 0).toFixed(1), Number(r.lube_cost || 0).toFixed(2)]),
+      ],
+      { x: 0.6, y: 1.1, w: 11.8, h: 5.6, fontSize: 12, border: { pt: 1, color: "C8C8C8" } }
+    );
     const s8 = pptx.addSlide();
     s8.addText("7) Inspections Done", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
-    const faultsFoundRows = inspectionsFaultRows.map((r) => { let faults = 0; try { const parsed = JSON.parse(String(r.checklist_json || "[]")); if (Array.isArray(parsed)) faults = parsed.filter((x) => x?.ok === false).length; } catch {} return { ...r, faults }; }).filter((r) => Number(r.faults || 0) > 0).slice(0, 12);
+    const faultsFoundRows = inspectionsFaultRows
+      .map((r) => {
+        let faults = 0;
+        try {
+          const parsed = JSON.parse(String(r.checklist_json || "[]"));
+          if (Array.isArray(parsed)) faults = parsed.filter((x) => x?.ok === false).length;
+        } catch {}
+        return { ...r, faults };
+      })
+      .filter((r) => Number(r.faults || 0) > 0)
+      .slice(0, 12);
     s8.addText(`Inspections completed: ${Number(inspectionsSummary?.inspections_done || 0)} | Assets covered: ${Number(inspectionsSummary?.assets_covered || 0)}`, { x: 0.7, y: 0.95, w: 12.0, h: 0.35, fontSize: 12, bold: true });
-    s8.addTable([[{ text: "Date", options: { bold: true } }, { text: "Asset", options: { bold: true } }, { text: "Faults found", options: { bold: true } }], ...(faultsFoundRows.length ? faultsFoundRows.map((r) => [String(r.inspection_date || "-"), `${String(r.asset_code || "-")} ${compactCell(String(r.asset_name || ""), 20)}`, String(Number(r.faults || 0))]) : [["-", "No faults found in recorded inspections", "0"]])], { x: 0.75, y: 1.45, w: 11.4, h: 4.8, fontSize: 11, border: { pt: 1, color: "C8C8C8" } });
+    s8.addTable(
+      [
+        [{ text: "Date", options: { bold: true } }, { text: "Asset", options: { bold: true } }, { text: "Faults found", options: { bold: true } }],
+        ...(faultsFoundRows.length
+          ? faultsFoundRows.map((r) => [String(r.inspection_date || "-"), `${String(r.asset_code || "-")} ${compactCell(String(r.asset_name || ""), 20)}`, String(Number(r.faults || 0))])
+          : [["-", "No faults found in recorded inspections", "0"]]),
+      ],
+      { x: 0.75, y: 1.45, w: 11.4, h: 4.8, fontSize: 11, border: { pt: 1, color: "C8C8C8" } }
+    );
     const s9 = pptx.addSlide();
     s9.addText("8) Fuel Anomalies", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
     s9.addText(`Total fuel anomaly days: ${Number(totalFuelAnomalyDays || 0)}`, { x: 0.75, y: 0.9, w: 6.2, h: 0.4, fontSize: 13, bold: true });
-    s9.addTable([[{ text: "Asset", options: { bold: true } }, { text: "Anomaly days", options: { bold: true } }, { text: "Variance (LPH)", options: { bold: true } }, { text: "Total usage (L)", options: { bold: true } }], ...(fuelAnomalyExpanded.length ? fuelAnomalyExpanded.map((r) => [String(r.asset_code || ""), String(Number(r.anomaly_days || 0)), Number(r.peak_variance_lph || 0).toFixed(2), Number(r.total_usage_liters || 0).toFixed(1)]) : [["-", "0", "-", "-"]])], { x: 0.75, y: 1.35, w: 11.4, h: 5.0, fontSize: 11, border: { pt: 1, color: "C8C8C8" } });
+    s6.addTable(
+      [
+        [{ text: "Asset", options: { bold: true } }, { text: "Anomaly days", options: { bold: true } }, { text: "Variance (LPH)", options: { bold: true } }, { text: "Total usage (L)", options: { bold: true } }],
+        ...(fuelAnomalyExpanded.length
+          ? fuelAnomalyExpanded.map((r) => [String(r.asset_code || ""), String(Number(r.anomaly_days || 0)), Number(r.peak_variance_lph || 0).toFixed(2), Number(r.total_usage_liters || 0).toFixed(1)])
+          : [["-", "0", "-", "-"]]),
+      ],
+      { x: 0.75, y: 1.35, w: 11.4, h: 5.0, fontSize: 11, border: { pt: 1, color: "C8C8C8" } }
+    );
     const buffer = await pptx.write({ outputType: "nodebuffer" });
     return Buffer.from(buffer);
   }
@@ -7097,9 +7118,7 @@ export default async function reportsRoutes(app) {
   });
 
   app.get("/maintenance-master/latest.pptx", async (req, reply) => {
-    if (!requirePermission(req, reply, "reports.maintenance_master.manage")) return;
     const site_code = String(req.query?.site_code || getSiteCode(req)).trim().toLowerCase() || "default";
-    if (!enforceSiteScope(req, reply, [site_code])) return;
     const report_type = String(req.query?.period_type || "weekly").trim().toLowerCase();
     const download = String(req.query?.download || "").trim() === "1";
     const month = String(req.query?.month || "").trim();
@@ -7136,7 +7155,6 @@ export default async function reportsRoutes(app) {
   });
 
   app.get("/maintenance-exec.pptx", async (req, reply) => {
-    if (!requirePermission(req, reply, "reports.executive.read")) return;
     const resolved = resolveMaintenancePeriod(req);
     if (!resolved) {
       return reply.code(400).send({ error: "Provide month=YYYY-MM or start/end=YYYY-MM-DD" });
@@ -7211,7 +7229,6 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    if (!requirePermission(req, reply, "reports.export.read")) return;
     const reportRevision = "daily-pdf-no-cost-r2026-04-04b";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
@@ -7605,7 +7622,6 @@ export default async function reportsRoutes(app) {
   // WEEKLY PDF
   // =========================
   app.get("/weekly.pdf", async (req, reply) => {
-    if (!requirePermission(req, reply, "reports.export.read")) return;
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -7905,7 +7921,6 @@ export default async function reportsRoutes(app) {
 
   // GET /api/reports/operations.pdf?start=YYYY-MM-DD&end=YYYY-MM-DD&download=1
   app.get("/operations.pdf", async (req, reply) => {
-    if (!requirePermission(req, reply, "reports.export.read")) return;
     const reportRevision = "ops-pdf-r2026-04-04b";
     const start = String(req.query?.start || "").trim();
     const end = String(req.query?.end || "").trim();
@@ -8161,7 +8176,6 @@ export default async function reportsRoutes(app) {
 
   // GET /api/reports/operations.xlsx?start=YYYY-MM-DD&end=YYYY-MM-DD
   app.get("/operations.xlsx", async (req, reply) => {
-    if (!requirePermission(req, reply, "reports.export.read")) return;
     const start = String(req.query?.start || "").trim();
     const end = String(req.query?.end || "").trim();
     if (!isDate(start) || !isDate(end)) {
@@ -8322,7 +8336,6 @@ export default async function reportsRoutes(app) {
 
   // GET /api/reports/executive-pack.xlsx?start=YYYY-MM-DD&end=YYYY-MM-DD&scheduled=10&near_due_hours=50
   app.get("/executive-pack.xlsx", async (req, reply) => {
-    if (!requirePermission(req, reply, "reports.executive.read")) return;
     const end = String(req.query?.end || "").trim() || todayYmd();
     const start = String(req.query?.start || "").trim() || monthStartIso(end);
     const scheduled = Math.max(0.5, Number(req.query?.scheduled || 10));
@@ -8335,7 +8348,6 @@ export default async function reportsRoutes(app) {
     }
 
     const siteCode = String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
-    if (!enforceSiteScope(req, reply, [siteCode])) return;
     const sharedHeaders = {
       "x-site-code": siteCode,
       "x-user-role": String(req.headers["x-user-role"] || "admin"),
@@ -8536,11 +8548,9 @@ export default async function reportsRoutes(app) {
 
   // GET /api/reports/executive-kpi-pack.xlsx?period_type=weekly|monthly&start=YYYY-MM-DD&end=YYYY-MM-DD&month=YYYY-MM&site_codes=main,site-b
   app.get("/executive-kpi-pack.xlsx", async (req, reply) => {
-    if (!requirePermission(req, reply, "reports.executive.read")) return;
     const periodType = String(req.query?.period_type || "weekly").trim().toLowerCase();
     const rawSites = String(req.query?.site_codes || "main").trim();
     const siteCodes = Array.from(new Set(rawSites.split(",").map((s) => String(s || "").trim().toLowerCase()).filter(Boolean))).slice(0, 20);
-    if (!enforceSiteScope(req, reply, siteCodes)) return;
     if (!["weekly", "monthly"].includes(periodType)) {
       return reply.code(400).send({ error: "period_type must be weekly or monthly" });
     }
