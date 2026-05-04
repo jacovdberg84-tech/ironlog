@@ -2553,7 +2553,7 @@ export default async function dashboardRoutes(app) {
       SELECT COALESCE(SUM(COALESCE(dh.hours_run, 0)), 0) AS v
       FROM daily_hours dh
       WHERE dh.asset_id = ?
-        AND dh.log_date BETWEEN ? AND ?
+        AND dh.work_date BETWEEN ? AND ?
         AND COALESCE(dh.is_used, 1) = 1
         AND LOWER(COALESCE(NULLIF(TRIM(dh.input_unit), ''), 'hours')) <> 'km'
         AND COALESCE(dh.hours_run, 0) > 0
