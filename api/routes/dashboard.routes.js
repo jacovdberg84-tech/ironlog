@@ -2575,7 +2575,7 @@ export default async function dashboardRoutes(app) {
         : 0;
       const km = fuelKm > 0 ? fuelKm : 0;
       const hours = mode === "hours"
-        ? (dailyHoursRun > 0 ? dailyHoursRun : (fuelHours > 0 ? fuelHours : 0))
+        ? (fuelHours > 0 ? fuelHours : (dailyHoursRun > 0 ? dailyHoursRun : 0))
         : (fuelHours > 0 ? fuelHours : 0);
       const fuel = Number(r.fuel_liters || 0);
       const oem = Number(r.oem_lph || 5);
@@ -2842,6 +2842,7 @@ export default async function dashboardRoutes(app) {
         AND (
           fl.hours_run > 0
           OR fl.meter_run_value > 0
+          OR COALESCE(fl.close_meter_value, 0) > 0
         )
       ORDER BY fl.log_date DESC, fl.id DESC
       LIMIT 1
@@ -2855,9 +2856,10 @@ export default async function dashboardRoutes(app) {
     const lowThresholdKmpl = oemK * Math.max(0, 1 - tolerance);
 
     function toModeMeter(row) {
-      const unit = String(row?.meter_unit || "").toLowerCase();
+      let unit = String(row?.meter_unit || "").toLowerCase();
       const closeV = Number(row?.close_meter_value || 0);
       const v = closeV > 0 ? closeV : Number(row?.meter_run_value || 0);
+      if (!unit && v > 0) unit = mode;
       if (unit === "km" && v > 0) return mode === "km" ? v : (v / kmPerHour);
       if (unit === "hours" && v > 0) return mode === "km" ? (v * kmPerHour) : v;
       const h = Number(row?.meter_hours || row?.hours_run || 0);
