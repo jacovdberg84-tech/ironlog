@@ -133,6 +133,28 @@ function sqlOilPartPredicate(alias = "p") {
 )`;
 }
 
+/**
+ * SQL expression for one stock_movements row's monetary cost (optionally joined to parts as `p`).
+ * Aligns with asset maintenance history: line total_cost, sm.unit_cost×qty, parts.unit_cost×qty, then unit_cost_usd/cost_input×qty.
+ */
+function sqlStockMovementLineCostExpr(smAlias = "sm", partsAlias = "p", joinPartsTable, flags) {
+  const sm = smAlias;
+  const p = partsAlias;
+  if (flags.hasSmTotalCost) {
+    return `ABS(COALESCE(${sm}.total_cost, 0))`;
+  }
+  if (flags.hasSmUnitCost) {
+    return `ABS(COALESCE(${sm}.quantity, 0)) * COALESCE(${sm}.unit_cost, 0)`;
+  }
+  if (joinPartsTable && flags.hasPartsUnitCost) {
+    return `ABS(COALESCE(${sm}.quantity, 0)) * COALESCE(${p}.unit_cost, 0)`;
+  }
+  if (flags.hasSmUnitCostUsd || flags.hasSmCostInput) {
+    return `ABS(COALESCE(${sm}.quantity, 0)) * COALESCE(${sm}.unit_cost_usd, ${sm}.cost_input, 0)`;
+  }
+  return `0`;
+}
+
 export default async function maintenanceRoutes(app) {
   ensureAuditTable(db);
   const dataRoot = process.env.IRONLOG_DATA_DIR || process.cwd();
@@ -2497,13 +2519,22 @@ export default async function maintenanceRoutes(app) {
       const woCloseExpr = hasWOCompletedAt ? "COALESCE(w.completed_at, w.closed_at)" : "w.closed_at";
       const smOutSql = sqlStockMovementOutbound("sm");
       const oilPartSql = sqlOilPartPredicate("p");
+      const smLineFlags = {
+        hasSmTotalCost: hasColumn("stock_movements", "total_cost"),
+        hasSmUnitCost: hasColumn("stock_movements", "unit_cost"),
+        hasPartsUnitCost: hasTable("parts") && hasColumn("parts", "unit_cost"),
+        hasSmUnitCostUsd: hasColumn("stock_movements", "unit_cost_usd"),
+        hasSmCostInput: hasColumn("stock_movements", "cost_input"),
+      };
+      const smCostWithParts = sqlStockMovementLineCostExpr("sm", "p", true, smLineFlags);
+      const smCostNoParts = sqlStockMovementLineCostExpr("sm", "p", false, smLineFlags);
 
       const partsCost =
         hasTable("stock_movements") && hasTable("work_orders")
           ? Number(
               hasTable("parts")
                 ? db.prepare(`
-                    SELECT COALESCE(SUM(ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0)), 0) AS v
+                    SELECT COALESCE(SUM((${smCostWithParts})), 0) AS v
                     FROM stock_movements sm
                     JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
                     JOIN parts p ON p.id = sm.part_id
@@ -2513,7 +2544,7 @@ export default async function maintenanceRoutes(app) {
                       AND NOT (${oilPartSql})
                   `).get(start, end)?.v || 0
                 : db.prepare(`
-                    SELECT COALESCE(SUM(ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0)), 0) AS v
+                    SELECT COALESCE(SUM((${smCostNoParts})), 0) AS v
                     FROM stock_movements sm
                     JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
                     WHERE ${woCloseExpr} IS NOT NULL
@@ -2537,7 +2568,7 @@ export default async function maintenanceRoutes(app) {
         hasTable("stock_movements") && hasTable("work_orders") && hasTable("parts")
           ? Number(
               db.prepare(`
-                SELECT COALESCE(SUM(ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0)), 0) AS v
+                SELECT COALESCE(SUM((${smCostWithParts})), 0) AS v
                 FROM stock_movements sm
                 JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
                 JOIN parts p ON p.id = sm.part_id
@@ -2589,7 +2620,7 @@ export default async function maintenanceRoutes(app) {
           const partRows = hasTable("parts")
             ? db.prepare(`
                 SELECT w.asset_id, a.asset_code, a.asset_name,
-                  COALESCE(SUM(ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0)), 0) AS v
+                  COALESCE(SUM((${smCostWithParts})), 0) AS v
                 FROM stock_movements sm
                 JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
                 JOIN assets a ON a.id = w.asset_id
@@ -2602,7 +2633,7 @@ export default async function maintenanceRoutes(app) {
               `).all(start, end)
             : db.prepare(`
                 SELECT w.asset_id, a.asset_code, a.asset_name,
-                  COALESCE(SUM(ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0)), 0) AS v
+                  COALESCE(SUM((${smCostNoParts})), 0) AS v
                 FROM stock_movements sm
                 JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
                 JOIN assets a ON a.id = w.asset_id
@@ -2627,7 +2658,7 @@ export default async function maintenanceRoutes(app) {
         if (hasTable("stock_movements") && hasTable("parts")) {
           const oilWoRows = db.prepare(`
             SELECT w.asset_id, a.asset_code, a.asset_name,
-              COALESCE(SUM(ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0)), 0) AS v
+              COALESCE(SUM((${smCostWithParts})), 0) AS v
             FROM stock_movements sm
             JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
             JOIN assets a ON a.id = w.asset_id
@@ -2702,7 +2733,7 @@ export default async function maintenanceRoutes(app) {
           return { unit_cost: 0, on_hand: 0, part_name: null };
         }
         const part = db.prepare(`
-          SELECT id, part_name
+          SELECT id, part_name, COALESCE(unit_cost, 0) AS part_list_unit_cost
           FROM parts
           WHERE UPPER(TRIM(part_code)) = UPPER(TRIM(?))
           LIMIT 1
@@ -2721,8 +2752,10 @@ export default async function maintenanceRoutes(app) {
           FROM stock_movements
           WHERE part_id = ?
         `).get(part.id);
+        const fromMove = Number(costRow?.unit_cost || 0);
+        const fromList = Number(part?.part_list_unit_cost || 0);
         return {
-          unit_cost: Number(costRow?.unit_cost || 0),
+          unit_cost: fromMove > 0 ? fromMove : fromList,
           on_hand: Number(onHandRow?.on_hand || 0),
           part_name: String(part.part_name || ""),
         };
@@ -2744,11 +2777,11 @@ export default async function maintenanceRoutes(app) {
                       COALESCE(SUM(CASE WHEN sm.id IS NOT NULL AND (${smOutSql}) AND NOT (${oilPartSql})
                         THEN ABS(COALESCE(sm.quantity, 0)) ELSE 0 END), 0) AS parts_qty_total,
                       COALESCE(SUM(CASE WHEN sm.id IS NOT NULL AND (${smOutSql}) AND NOT (${oilPartSql})
-                        THEN ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0) ELSE 0 END), 0) AS parts_cost_total,
+                        THEN (${smCostWithParts}) ELSE 0 END), 0) AS parts_cost_total,
                       COALESCE(SUM(CASE WHEN sm.id IS NOT NULL AND (${smOutSql}) AND (${oilPartSql})
                         THEN ABS(COALESCE(sm.quantity, 0)) ELSE 0 END), 0) AS oil_qty_sm_total,
                       COALESCE(SUM(CASE WHEN sm.id IS NOT NULL AND (${smOutSql}) AND (${oilPartSql})
-                        THEN ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0) ELSE 0 END), 0) AS oil_cost_sm_total
+                        THEN (${smCostWithParts}) ELSE 0 END), 0) AS oil_cost_sm_total
                     FROM work_orders w
                     LEFT JOIN stock_movements sm ON sm.reference = ('work_order:' || w.id)
                     LEFT JOIN parts p ON p.id = sm.part_id
@@ -2762,7 +2795,7 @@ export default async function maintenanceRoutes(app) {
                       COALESCE(SUM(CASE WHEN sm.id IS NOT NULL AND (${smOutSql})
                         THEN ABS(COALESCE(sm.quantity, 0)) ELSE 0 END), 0) AS parts_qty_total,
                       COALESCE(SUM(CASE WHEN sm.id IS NOT NULL AND (${smOutSql})
-                        THEN ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0) ELSE 0 END), 0) AS parts_cost_total,
+                        THEN (${smCostNoParts}) ELSE 0 END), 0) AS parts_cost_total,
                       0 AS oil_qty_sm_total,
                       0 AS oil_cost_sm_total
                     FROM work_orders w
