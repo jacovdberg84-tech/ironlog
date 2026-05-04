@@ -3868,7 +3868,7 @@ async function loadFuelBenchmark() {
   const rawRows = Array.isArray(data.rows) ? data.rows : [];
   const benchmarkRows = duplicatesOnly
     ? rawRows
-    : rawRows.filter((r) => String(r.metric_mode || "hours") !== "km");
+    : rawRows;
 
   const benchmarkSummary = duplicatesOnly
     ? {
@@ -3978,6 +3978,117 @@ async function loadFuelBenchmark() {
   } else {
     setStatus("Fuel benchmark ready.");
   }
+}
+
+function fuelJanToDateRange() {
+  const now = new Date();
+  const year = now.getFullYear();
+  return {
+    start: `${year}-01-01`,
+    end: now.toISOString().slice(0, 10),
+  };
+}
+
+function fuelReconExpectedLiters(row) {
+  const mode = String(row?.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
+  const fuel = Number(row?.fuel_liters || 0);
+  if (mode === "km") {
+    const kmRun = Number(row?.km_run || 0);
+    const baseKmpl = Number(row?.oem_km_per_l || 0);
+    const expected = kmRun > 0 && baseKmpl > 0 ? (kmRun / baseKmpl) : 0;
+    return { mode, fuel, run: kmRun, expected };
+  }
+  const hrsRun = Number(row?.hours_run || 0);
+  const baseLph = Number(row?.oem_lph || 0);
+  const expected = hrsRun > 0 && baseLph > 0 ? (hrsRun * baseLph) : 0;
+  return { mode, fuel, run: hrsRun, expected };
+}
+
+async function runFuelReconciliation(useJanToDate = true) {
+  let start = (qs("fuelStart")?.value || "").trim();
+  let end = (qs("fuelEnd")?.value || "").trim();
+  if (useJanToDate) {
+    const ytd = fuelJanToDateRange();
+    start = ytd.start;
+    end = ytd.end;
+    if (qs("fuelStart")) qs("fuelStart").value = start;
+    if (qs("fuelEnd")) qs("fuelEnd").value = end;
+  }
+  if (!start || !end) return alert("Select start and end dates.");
+  const tolerance = Number(qs("fuelTolerance")?.value || 0.15);
+  const assetCode = String(qs("fuelAssetFilter")?.value || "").trim();
+  const fuelPrice = Math.max(0, Number(qs("fuelReconPrice")?.value || 0));
+  setStatus("Running fuel reconciliation...");
+  setSkeleton("fuelReconList", 2);
+  const data = await fetchJson(
+    `${API}/api/dashboard/fuel?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&tolerance=${encodeURIComponent(tolerance)}&mode=&asset_code=${encodeURIComponent(assetCode)}`
+  );
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  const reconRows = rows
+    .map((r) => {
+      const calc = fuelReconExpectedLiters(r);
+      const variance = calc.fuel - calc.expected;
+      const allowed = calc.expected * Math.max(0, tolerance);
+      const unexplained = Math.max(0, variance - allowed);
+      const variancePct = calc.expected > 0 ? (variance / calc.expected) * 100 : null;
+      const reasons = [];
+      if (calc.run <= 0 && calc.fuel > 0) reasons.push("Fuel captured with no run basis");
+      if (Number(r?.fill_count || 0) < 2) reasons.push("Low sample count (<2 fills)");
+      if (Number(r?.is_excessive || false)) reasons.push("Outside benchmark tolerance");
+      if (variancePct != null && variancePct > 50) reasons.push("Variance above +50%");
+      return {
+        ...r,
+        recon_mode: calc.mode,
+        expected_liters: Number(calc.expected.toFixed(2)),
+        variance_liters: Number(variance.toFixed(2)),
+        variance_pct: variancePct == null ? null : Number(variancePct.toFixed(1)),
+        unexplained_liters: Number(unexplained.toFixed(2)),
+        anomaly_reasons: reasons,
+      };
+    })
+    .filter((r) => r.fuel_liters > 0)
+    .sort((a, b) => Number(b.unexplained_liters || 0) - Number(a.unexplained_liters || 0));
+
+  const totals = reconRows.reduce((acc, r) => {
+    acc.actual += Number(r.fuel_liters || 0);
+    acc.expected += Number(r.expected_liters || 0);
+    acc.unexplained += Number(r.unexplained_liters || 0);
+    if ((r.anomaly_reasons || []).length) acc.anomalies += 1;
+    return acc;
+  }, { actual: 0, expected: 0, unexplained: 0, anomalies: 0 });
+  const missingValue = totals.unexplained * fuelPrice;
+  const summary = qs("fuelReconSummary");
+  if (summary) {
+    summary.className = "muted";
+    summary.innerHTML =
+      `<b>Recon period:</b> ${esc(start)} to ${esc(end)} | ` +
+      `<b>Actual:</b> ${totals.actual.toFixed(2)} L | ` +
+      `<b>Expected:</b> ${totals.expected.toFixed(2)} L | ` +
+      `<b>Estimated missing (unexplained):</b> ${totals.unexplained.toFixed(2)} L | ` +
+      `<b>Estimated value:</b> ${fmtMoney(missingValue)} | ` +
+      `<b>Anomaly assets:</b> ${totals.anomalies}`;
+  }
+  const list = qs("fuelReconList");
+  if (list) {
+    list.innerHTML = "";
+    const top = reconRows.filter((r) => Number(r.unexplained_liters || 0) > 0 || (r.anomaly_reasons || []).length).slice(0, 25);
+    if (!top.length) {
+      list.appendChild(item("<small>No anomalies found for selected scope.</small>"));
+    } else {
+      top.forEach((r) => {
+        const reasons = (r.anomaly_reasons || []).join("; ") || "Review";
+        const modeLabel = r.recon_mode === "km" ? "km/L" : "L/hr";
+        list.appendChild(
+          item(
+            `<div class="fuel-item-head"><b>${esc(r.asset_code || "-")}</b> — ${esc(r.asset_name || "")}</div>` +
+            `<small class="fuel-item-meta">Mode: ${modeLabel} | Actual: ${Number(r.fuel_liters || 0).toFixed(2)}L | Expected: ${Number(r.expected_liters || 0).toFixed(2)}L | Variance: ${Number(r.variance_liters || 0).toFixed(2)}L | Unexplained: ${Number(r.unexplained_liters || 0).toFixed(2)}L</small>` +
+            `<small class="fuel-item-meta">Reasons: ${esc(reasons)}</small>`
+          )
+        );
+      });
+    }
+  }
+  setStatus("Fuel reconciliation ready.");
 }
 
 function openFuelBenchmarkPdf(download = false) {
@@ -10646,6 +10757,12 @@ async function init() {
   qs("openFuelBenchmarkPdf")?.addEventListener("click", () => openFuelBenchmarkPdf(false));
   qs("downloadFuelBenchmarkPdf")?.addEventListener("click", () => openFuelBenchmarkPdf(true));
   qs("downloadFuelBenchmarkXlsx")?.addEventListener("click", () => openFuelBenchmarkXlsx());
+  qs("runFuelReconYtd")?.addEventListener("click", () =>
+    runFuelReconciliation(true).catch((e) => setStatus("Fuel reconciliation error: " + e.message))
+  );
+  qs("runFuelReconRange")?.addEventListener("click", () =>
+    runFuelReconciliation(false).catch((e) => setStatus("Fuel reconciliation error: " + e.message))
+  );
   qs("downloadExecutivePackXlsx")?.addEventListener("click", () => {
     downloadExecutivePackExcel().catch((e) => setStatus("Executive pack error: " + e.message));
   });

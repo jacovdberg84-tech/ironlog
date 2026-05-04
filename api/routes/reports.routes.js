@@ -2668,7 +2668,6 @@ export default async function reportsRoutes(app) {
         ON fl.asset_id = a.id
        AND fl.log_date BETWEEN ? AND ?
       WHERE a.active = 1
-        AND UPPER(COALESCE(a.asset_code, '')) NOT GLOB 'V[0-9][0-9]AM'
       GROUP BY a.id
       ORDER BY a.asset_code ASC
     `).all(start, end);
@@ -2754,7 +2753,6 @@ export default async function reportsRoutes(app) {
       return { km_run, hours_run };
     }
 
-    const isLdvFleetCode = (code) => /^V(0[1-9]|1[0-4])AM$/i.test(String(code || "").trim());
     const benchmarkRows = fuelByAsset.map((r) => {
       const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
       const fuelRun = getRunFromFuel(r.asset_id, start, end) || {};
@@ -2798,10 +2796,6 @@ export default async function reportsRoutes(app) {
         flag: is_excessive ? "EXCESSIVE" : "OK",
       };
     }).filter((r) => r.fuel_liters > 0)
-      // Temporary business rule: exclude LDV/km-mode assets from benchmark report.
-      .filter((r) => r.metric_mode !== "km")
-      // Hard exclusion for LDV fleet codes requested by business.
-      .filter((r) => !isLdvFleetCode(r.asset_code))
       .filter((r) => (assetFilter ? String(r.asset_code || "").trim().toLowerCase() === assetFilter : true))
       .filter((r) => (modeFilter === "km" ? r.metric_mode === "km" : modeFilter === "hours" ? r.metric_mode === "hours" : true))
       .sort((a, b) => {
@@ -2965,7 +2959,6 @@ export default async function reportsRoutes(app) {
         ON fl.asset_id = a.id
        AND fl.log_date BETWEEN ? AND ?
       WHERE a.active = 1
-        AND UPPER(COALESCE(a.asset_code, '')) NOT GLOB 'V[0-9][0-9]AM'
       GROUP BY a.id
       ORDER BY a.asset_code ASC
     `).all(start, end);
@@ -3047,7 +3040,6 @@ export default async function reportsRoutes(app) {
       return { km_run, hours_run };
     }
 
-    const isLdvFleetCode = (code) => /^V(0[1-9]|1[0-4])AM$/i.test(String(code || "").trim());
     const benchmarkRows = fuelByAsset.map((r) => {
       const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
       const fuelRun = getRunFromFuel(r.asset_id, start, end) || {};

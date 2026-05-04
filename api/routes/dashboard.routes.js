@@ -2511,7 +2511,6 @@ export default async function dashboardRoutes(app) {
         ON fl.asset_id = a.id
        AND fl.log_date BETWEEN ? AND ?
       WHERE a.active = 1
-        AND UPPER(COALESCE(a.asset_code, '')) NOT GLOB 'V[0-9][0-9]AM'
       GROUP BY a.id
       ORDER BY a.asset_code ASC
     `).all(start, end);
@@ -2660,8 +2659,6 @@ export default async function dashboardRoutes(app) {
         is_excessive,
       };
     }).filter((r) => r.fuel_liters > 0)
-      // Temporary business rule: exclude LDV/km-mode assets from benchmark list/flags.
-      .filter((r) => r.metric_mode !== "km")
       .filter((r) => (assetFilter ? String(r.asset_code || "").trim().toLowerCase() === assetFilter : true))
       .filter((r) => (modeFilter === "km" ? r.metric_mode === "km" : modeFilter === "hours" ? r.metric_mode === "hours" : true))
       .sort((a, b) => {
