@@ -60,9 +60,33 @@ export default async function uploadRoutes(app) {
   if (!hasColumn("parts", "unit_cost")) {
     db.prepare(`ALTER TABLE parts ADD COLUMN unit_cost REAL DEFAULT 0`).run();
   }
+  if (!hasColumn("assets", "utilization_mode")) {
+    db.prepare(`ALTER TABLE assets ADD COLUMN utilization_mode TEXT DEFAULT 'hours'`).run();
+  }
 
   // Helper prepared statements (after schema checks/column additions).
   const getAssetIdByCode = db.prepare(`SELECT id FROM assets WHERE asset_code = ?`);
+  const getAssetForFuelImport = db.prepare(`
+    SELECT
+      a.id,
+      CASE
+        WHEN UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM' THEN 'km'
+        ELSE COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
+          WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
+            OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
+            OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
+            OR LOWER(COALESCE(a.category, '')) LIKE '%pickup%'
+            OR LOWER(COALESCE(a.category, '')) LIKE '%bakkie%'
+            OR LOWER(COALESCE(a.asset_code, '')) LIKE 'ldv%'
+            OR UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM'
+            OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
+            THEN 'km'
+          ELSE 'hours'
+        END)
+      END AS metric_mode
+    FROM assets a
+    WHERE a.asset_code = ?
+  `);
   const getPartIdByCode = db.prepare(`SELECT id, unit_cost FROM parts WHERE part_code = ?`);
   const getWorkOrderById = db.prepare(`SELECT id, asset_id FROM work_orders WHERE id = ?`);
 
@@ -478,7 +502,7 @@ export default async function uploadRoutes(app) {
 
       for (const r of rows) {
         const assetCode = String(pick(r, ["asset_code", "AssetCode", "ASSET_CODE", "Registration", "registration", "Reg", "reg"]) || "").trim();
-        const asset = getAssetIdByCode.get(assetCode);
+        const asset = getAssetForFuelImport.get(assetCode);
         if (!asset) continue;
 
         const date = asDateYYYYMMDD(toDateOnly(pick(r, ["log_date", "LogDate", "Date", "date"])));
@@ -491,12 +515,15 @@ export default async function uploadRoutes(app) {
         const source = sourceRaw != null && String(sourceRaw).trim() !== ""
           ? String(sourceRaw).trim()
           : [famsStore, famsOperator, famsDriver].filter(Boolean).join(" | ") || null;
-        const meter_unit = normalizeMeterUnit(pick(r, ["meter_unit", "MeterUnit", "Measurement", "measurement", "Type", "type"]));
+        let meter_unit = normalizeMeterUnit(pick(r, ["meter_unit", "MeterUnit", "Measurement", "measurement", "Type", "type"]));
         const meterRunRaw = pick(r, ["meter_run_value", "MeterRunValue", "KMHour", "kmhour", "hours_run"]);
         const meterRunNum = meterRunRaw != null && String(meterRunRaw).trim() !== ""
           ? parseNumberLoose(meterRunRaw, 0)
           : null;
         const meter_run_value = meterRunNum != null && meterRunNum >= 0 ? meterRunNum : null;
+        if (!meter_unit && meter_run_value != null && hasFamsShape) {
+          meter_unit = String(asset.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
+        }
         const openingRaw = pick(r, ["OpnRead", "opnread", "opening_hours", "OpeningHours"]);
         const closingRaw = pick(r, ["ClsRead", "clsread", "closing_hours", "ClosingHours"]);
         const opening_hours = openingRaw != null && String(openingRaw).trim() !== ""
@@ -513,7 +540,7 @@ export default async function uploadRoutes(app) {
         const hoursRunRaw = pick(r, ["hours_run", "HoursRun"]) != null && String(pick(r, ["hours_run", "HoursRun"])).trim() !== ""
           ? parseNumberLoose(pick(r, ["hours_run", "HoursRun"]), 0)
           : null;
-        const hours_run = hoursRunRaw != null && hoursRunRaw >= 0 ? hoursRunRaw : (meter_unit === "hours" ? meter_run_value : null);
+        const hours_run = hoursRunRaw != null && hoursRunRaw >= 0 ? hoursRunRaw : null;
 
         if (liters <= 0) continue;
         const dayKey = `${asset.id}|${date}`;

@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
+import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
 
 function todayYYYYMMDD() {
   return new Date().toISOString().slice(0, 10);
@@ -2558,66 +2559,15 @@ export default async function dashboardRoutes(app) {
         AND COALESCE(dh.hours_run, 0) > 0
     `);
 
-    function getRunFromFuel(assetId, startDate, endDate) {
-      const rows = getFuelLogsInRange.all(assetId, startDate, endDate);
-      if (!rows.length) return { km_run: 0, hours_run: 0 };
-
+    function getRunFromFuel(assetId, startDate, endDate, assetMetricMode) {
+      const logs = getFuelLogsInRange.all(assetId, startDate, endDate);
       const prev = getFuelLogBeforeRange.get(assetId, startDate);
-      let prevKmMeter = null;
-      let prevHoursMeter = null;
-      if (prev) {
-        const prevUnit = String(prev.meter_unit || "").toLowerCase();
-        const prevClose = Number(prev.close_meter_value || 0);
-        const prevMeter = prevClose > 0 ? prevClose : Number(prev.meter_run_value || 0);
-        if (prevUnit === "km" && prevMeter > 0) prevKmMeter = prevMeter;
-        if (prevUnit === "hours" && prevMeter > 0) prevHoursMeter = prevMeter;
-      }
-
-      let km_run = 0;
-      let hours_run = 0;
-
-      for (const row of rows) {
-        const unit = String(row.meter_unit || "").toLowerCase();
-        const meter = Number(row.meter_run_value || 0);
-        const legacyHours = Number(row.hours_run || 0);
-        const openMeter = row.open_meter_value == null ? null : Number(row.open_meter_value);
-        const closeMeter = row.close_meter_value == null ? null : Number(row.close_meter_value);
-
-        if (openMeter != null && closeMeter != null && closeMeter > openMeter) {
-          const delta = closeMeter - openMeter;
-          if (unit === "km") km_run += delta;
-          else hours_run += delta;
-          continue;
-        }
-
-        if (unit === "km" && meter > 0) {
-          if (prevKmMeter != null) {
-            const delta = meter - prevKmMeter;
-            if (Number.isFinite(delta) && delta > 0) km_run += delta;
-          }
-          prevKmMeter = meter;
-          continue;
-        }
-
-        if (unit === "hours" && meter > 0) {
-          if (prevHoursMeter != null) {
-            const delta = meter - prevHoursMeter;
-            if (Number.isFinite(delta) && delta > 0) hours_run += delta;
-          }
-          prevHoursMeter = meter;
-          continue;
-        }
-
-        // Legacy rows where hours_run already stores run-between-fills.
-        if (legacyHours > 0) hours_run += legacyHours;
-      }
-
-      return { km_run, hours_run };
+      return getRunFromFuelRows(logs, prev, assetMetricMode);
     }
 
     const rows = fuelByAsset.map((r) => {
       const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
-      const fuelRun = getRunFromFuel(r.asset_id, start, end) || {};
+      const fuelRun = getRunFromFuel(r.asset_id, start, end, mode) || {};
       const fuelKm = Number(fuelRun.km_run || 0);
       const fuelHours = Number(fuelRun.hours_run || 0);
       const dailyHoursRun = mode === "hours"
