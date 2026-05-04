@@ -4137,6 +4137,22 @@ function openFuelReconciliationPdf(download = false) {
   window.open(url, "_blank");
 }
 
+function openFuelReconciliationXlsx() {
+  const start = (qs("fuelStart")?.value || "").trim();
+  const end = (qs("fuelEnd")?.value || "").trim();
+  const tolerance = Number(qs("fuelTolerance")?.value || 0.15);
+  const modeFilter = String(qs("fuelModeFilter")?.value || "").trim();
+  const assetCode = String(qs("fuelAssetFilter")?.value || "").trim();
+  const fuelPrice = Math.max(0, Number(qs("fuelReconPrice")?.value || 0));
+  if (!start || !end) return alert("Select start and end dates.");
+  const url =
+    `${API}/api/reports/fuel-reconciliation.xlsx?start=${encodeURIComponent(start)}` +
+    `&end=${encodeURIComponent(end)}&tolerance=${encodeURIComponent(tolerance)}` +
+    `&mode=${encodeURIComponent(modeFilter)}&asset_code=${encodeURIComponent(assetCode)}` +
+    `&fuel_price=${encodeURIComponent(fuelPrice)}`;
+  window.open(url, "_blank");
+}
+
 async function downloadExecutivePackExcel() {
   const start = (qs("fuelStart")?.value || "").trim();
   const end = (qs("fuelEnd")?.value || "").trim();
@@ -10776,6 +10792,7 @@ async function init() {
   qs("downloadFuelBenchmarkXlsx")?.addEventListener("click", () => openFuelBenchmarkXlsx());
   qs("openFuelReconPdf")?.addEventListener("click", () => openFuelReconciliationPdf(false));
   qs("downloadFuelReconPdf")?.addEventListener("click", () => openFuelReconciliationPdf(true));
+  qs("downloadFuelReconXlsx")?.addEventListener("click", () => openFuelReconciliationXlsx());
   qs("runFuelReconYtd")?.addEventListener("click", () =>
     runFuelReconciliation(true).catch((e) => setStatus("Fuel reconciliation error: " + e.message))
   );
