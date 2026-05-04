@@ -4061,7 +4061,7 @@ async function runFuelReconciliation(useJanToDate = true) {
   if (summary) {
     summary.className = "muted";
     summary.innerHTML =
-      `<b>Recon period:</b> ${esc(start)} to ${esc(end)} | ` +
+      `<b>Recon period:</b> ${escapeHtml(start)} to ${escapeHtml(end)} | ` +
       `<b>Actual:</b> ${totals.actual.toFixed(2)} L | ` +
       `<b>Expected:</b> ${totals.expected.toFixed(2)} L | ` +
       `<b>Estimated missing (unexplained):</b> ${totals.unexplained.toFixed(2)} L | ` +
@@ -4080,9 +4080,9 @@ async function runFuelReconciliation(useJanToDate = true) {
         const modeLabel = r.recon_mode === "km" ? "km/L" : "L/hr";
         list.appendChild(
           item(
-            `<div class="fuel-item-head"><b>${esc(r.asset_code || "-")}</b> — ${esc(r.asset_name || "")}</div>` +
+            `<div class="fuel-item-head"><b>${escapeHtml(r.asset_code || "-")}</b> — ${escapeHtml(r.asset_name || "")}</div>` +
             `<small class="fuel-item-meta">Mode: ${modeLabel} | Actual: ${Number(r.fuel_liters || 0).toFixed(2)}L | Expected: ${Number(r.expected_liters || 0).toFixed(2)}L | Variance: ${Number(r.variance_liters || 0).toFixed(2)}L | Unexplained: ${Number(r.unexplained_liters || 0).toFixed(2)}L</small>` +
-            `<small class="fuel-item-meta">Reasons: ${esc(reasons)}</small>`
+            `<small class="fuel-item-meta">Reasons: ${escapeHtml(reasons)}</small>`
           )
         );
       });
