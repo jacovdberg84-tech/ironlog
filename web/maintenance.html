@@ -922,6 +922,8 @@
           <input id="wfNearDueHours" type="number" min="1" step="1" value="50" />
         </label>
         <button id="loadWeeklyForumBtn">Load Weekly Forum</button>
+        <button type="button" id="wfPresetThisMonth" class="btn btn-secondary">This month</button>
+        <button type="button" id="wfPresetLastMonth" class="btn btn-secondary">Last month</button>
         <button id="openWeeklyForumPdfBtn">Open Weekly PDF</button>
         <button id="downloadWeeklyForumPdfBtn">Download Weekly PDF</button>
       </div>
@@ -939,7 +941,30 @@
         </table>
       </div>
 
-      <div style="overflow:auto; margin-top:14px;">
+      <h4 style="margin:16px 0 6px;">Period actuals by equipment (historical)</h4>
+      <small class="muted" style="display:block; margin-bottom:8px;">
+        Same date range as above. Stock lines use work order close dates; lube log lines use log date. The table below is actual spend in the range; the next table is near-due / forecast only.
+      </small>
+      <div style="overflow:auto; margin-top:6px;">
+        <table class="gridTable" style="min-width:1100px;">
+          <thead>
+            <tr>
+              <th>Machine</th>
+              <th style="text-align:right;">Parts $</th>
+              <th style="text-align:right;">Lube logs $</th>
+              <th style="text-align:right;">Lube WO $</th>
+              <th style="text-align:right;">Lubes total $</th>
+              <th style="text-align:right;">Labor $</th>
+              <th style="text-align:right;">Total $</th>
+              <th style="text-align:right;">Closed WOs</th>
+            </tr>
+          </thead>
+          <tbody id="wfPeriodActualsBody"></tbody>
+        </table>
+      </div>
+
+      <h4 style="margin:16px 0 6px;">Upcoming services (forecast)</h4>
+      <div style="overflow:auto; margin-top:6px;">
         <table class="gridTable" style="min-width:1120px;">
           <thead>
             <tr>
@@ -959,7 +984,7 @@
           <tbody id="wfUpcomingBody"></tbody>
         </table>
       </div>
-      <small class="muted">Forecast uses historical closed service work orders. Store lines are split into oil vs parts using part <code>consumable_kind</code> (oil, lube, …) when set, otherwise part name/code hints. Lube log entries count toward oil; WO-issued oil/lube SKUs count toward oil, not avg parts.</small>
+      <small class="muted"><strong>Forecast table only:</strong> uses historical closed service work orders for averages. Store lines are split into oil vs parts using part <code>consumable_kind</code> (oil, lube, …) when set, otherwise part name/code hints. Lube log entries count toward oil; WO-issued oil/lube SKUs count toward oil, not avg parts.</small>
       <hr class="hr-soft" />
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <h3 style="margin:0;">Executive Presentation Pack (Hybrid)</h3>

@@ -3087,6 +3087,27 @@ function weeklyForumQueryString() {
   return q.toString();
 }
 
+/** Sets wfStart / wfEnd to a full calendar month (this month or previous). */
+function wfApplyMonthPreset(which) {
+  const sEl = document.getElementById("wfStart");
+  const eEl = document.getElementById("wfEnd");
+  if (!sEl || !eEl) return;
+  const now = new Date();
+  let y = now.getFullYear();
+  let m = now.getMonth();
+  if (which === "last") {
+    m -= 1;
+    if (m < 0) {
+      m = 11;
+      y -= 1;
+    }
+  }
+  const start = new Date(y, m, 1);
+  const end = new Date(y, m + 1, 0);
+  sEl.value = start.toISOString().slice(0, 10);
+  eEl.value = end.toISOString().slice(0, 10);
+}
+
 let wfUpcomingCache = [];
 let wfInputsCache = [];
 let wfPartsCache = [];
@@ -3718,16 +3739,18 @@ async function loadWeeklyForumSummary() {
   const msg = document.getElementById("wfMsg");
   const kpiBody = document.getElementById("wfKpiBody");
   const upcomingBody = document.getElementById("wfUpcomingBody");
+  const periodBody = document.getElementById("wfPeriodActualsBody");
   const startEl = document.getElementById("wfStart");
   const endEl = document.getElementById("wfEnd");
   const nearEl = document.getElementById("wfNearDueHours");
-  if (!msg || !kpiBody || !upcomingBody || !startEl || !endEl || !nearEl) return;
+  if (!msg || !kpiBody || !upcomingBody || !periodBody || !startEl || !endEl || !nearEl) return;
 
   const q = weeklyForumQueryString();
 
   msg.className = "muted";
   msg.textContent = "Loading weekly forum data...";
   kpiBody.innerHTML = `<tr><td colspan="2" class="muted">Loading...</td></tr>`;
+  periodBody.innerHTML = `<tr><td colspan="8" class="muted">Loading...</td></tr>`;
   upcomingBody.innerHTML = `<tr><td colspan="11" class="muted">Loading...</td></tr>`;
   try {
     const res = await fetch(`${API}/maintenance/weekly-forum/summary?${q}`);
@@ -3759,6 +3782,27 @@ async function loadWeeklyForumSummary() {
       planSel.value = String(prevPlan);
     }
     hydrateWfDraftFromSaved(Number(planSel?.value || 0));
+
+    const actuals = Array.isArray(data.period_actuals_by_asset) ? data.period_actuals_by_asset : [];
+    periodBody.innerHTML = actuals.length
+      ? actuals
+          .map(
+            (r) => `
+        <tr>
+          <td>${esc(r.asset_code || "-")} - ${esc(r.asset_name || "-")}</td>
+          <td style="text-align:right;">${fmtMoney(r.parts_cost)}</td>
+          <td style="text-align:right;">${fmtMoney(r.lubes_logs_cost)}</td>
+          <td style="text-align:right;">${fmtMoney(r.lubes_work_order_cost)}</td>
+          <td style="text-align:right;">${fmtMoney(r.lubes_total_cost)}</td>
+          <td style="text-align:right;">${fmtMoney(r.labor_cost)}</td>
+          <td style="text-align:right;">${fmtMoney(r.period_total_cost)}</td>
+          <td style="text-align:right;">${esc(String(r.closed_work_orders ?? 0))}</td>
+        </tr>
+      `
+          )
+          .join("")
+      : `<tr><td colspan="8" class="muted">No equipment consumption in this range.</td></tr>`;
+
     upcomingBody.innerHTML = rows.length
       ? rows.map((r) => `
         <tr>
@@ -3783,6 +3827,7 @@ async function loadWeeklyForumSummary() {
     msg.className = "message-error";
     msg.textContent = `Load error: ${e.message || e}`;
     kpiBody.innerHTML = `<tr><td colspan="2" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+    periodBody.innerHTML = `<tr><td colspan="8" class="message-error">${esc(e.message || String(e))}</td></tr>`;
     upcomingBody.innerHTML = `<tr><td colspan="11" class="message-error">${esc(e.message || String(e))}</td></tr>`;
   }
 }
@@ -5302,6 +5347,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (akpLastResponse) renderAssetKpiTables(akpLastResponse);
   });
   document.getElementById("loadWeeklyForumBtn")?.addEventListener("click", loadWeeklyForumSummary);
+  document.getElementById("wfPresetThisMonth")?.addEventListener("click", () => wfApplyMonthPreset("this"));
+  document.getElementById("wfPresetLastMonth")?.addEventListener("click", () => wfApplyMonthPreset("last"));
   document.getElementById("saveRsgProfileBtn")?.addEventListener("click", saveRsgProfile);
   document.getElementById("loadInsightsBtn")?.addEventListener("click", () => loadMaintenanceInsights());
   document.getElementById("openInsightsPdfBtn")?.addEventListener("click", () => openMaintenanceInsightsPdf(false));

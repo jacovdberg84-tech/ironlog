@@ -2562,6 +2562,126 @@ export default async function maintenanceRoutes(app) {
           )
         : 0;
 
+      /** Per-asset actual consumption costs for the selected date range (historical, not forecast). */
+      const hasLaborHoursCol = hasColumn("work_orders", "labor_hours");
+      const hasLaborRateCol = hasColumn("work_orders", "labor_rate_per_hour");
+      const mergeActual = new Map();
+      const putActual = (assetId, assetCode, assetName, patch) => {
+        const aid = Number(assetId || 0);
+        if (!aid) return;
+        const cur = mergeActual.get(aid) || {
+          asset_id: aid,
+          asset_code: String(assetCode || ""),
+          asset_name: String(assetName || ""),
+          parts_cost: 0,
+          lubes_logs_cost: 0,
+          lubes_work_order_cost: 0,
+          labor_cost: 0,
+          closed_work_orders: 0,
+        };
+        if (assetCode) cur.asset_code = String(assetCode);
+        if (assetName) cur.asset_name = String(assetName);
+        Object.assign(cur, patch);
+        mergeActual.set(aid, cur);
+      };
+      if (hasTable("work_orders") && hasTable("assets")) {
+        if (hasTable("stock_movements")) {
+          const partRows = hasTable("parts")
+            ? db.prepare(`
+                SELECT w.asset_id, a.asset_code, a.asset_name,
+                  COALESCE(SUM(ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0)), 0) AS v
+                FROM stock_movements sm
+                JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
+                JOIN assets a ON a.id = w.asset_id
+                JOIN parts p ON p.id = sm.part_id
+                WHERE ${woCloseExpr} IS NOT NULL
+                  AND DATE(${woCloseExpr}) BETWEEN ? AND ?
+                  AND (${smOutSql})
+                  AND NOT (${oilPartSql})
+                GROUP BY w.asset_id
+              `).all(start, end)
+            : db.prepare(`
+                SELECT w.asset_id, a.asset_code, a.asset_name,
+                  COALESCE(SUM(ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0)), 0) AS v
+                FROM stock_movements sm
+                JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
+                JOIN assets a ON a.id = w.asset_id
+                WHERE ${woCloseExpr} IS NOT NULL
+                  AND DATE(${woCloseExpr}) BETWEEN ? AND ?
+                  AND (${smOutSql})
+                GROUP BY w.asset_id
+              `).all(start, end);
+          for (const r of partRows || []) putActual(r.asset_id, r.asset_code, r.asset_name, { parts_cost: Number(r.v || 0) });
+        }
+        if (hasTable("oil_logs")) {
+          const oilLogRows = db.prepare(`
+            SELECT ol.asset_id, a.asset_code, a.asset_name,
+              COALESCE(SUM(COALESCE(ol.quantity, 0) * COALESCE(ol.unit_cost, 0)), 0) AS v
+            FROM oil_logs ol
+            JOIN assets a ON a.id = ol.asset_id
+            WHERE ol.log_date BETWEEN ? AND ?
+            GROUP BY ol.asset_id
+          `).all(start, end);
+          for (const r of oilLogRows || []) putActual(r.asset_id, r.asset_code, r.asset_name, { lubes_logs_cost: Number(r.v || 0) });
+        }
+        if (hasTable("stock_movements") && hasTable("parts")) {
+          const oilWoRows = db.prepare(`
+            SELECT w.asset_id, a.asset_code, a.asset_name,
+              COALESCE(SUM(ABS(COALESCE(sm.quantity, 0)) * COALESCE(sm.unit_cost_usd, sm.cost_input, 0)), 0) AS v
+            FROM stock_movements sm
+            JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
+            JOIN assets a ON a.id = w.asset_id
+            JOIN parts p ON p.id = sm.part_id
+            WHERE ${woCloseExpr} IS NOT NULL
+              AND DATE(${woCloseExpr}) BETWEEN ? AND ?
+              AND (${smOutSql})
+              AND (${oilPartSql})
+            GROUP BY w.asset_id
+          `).all(start, end);
+          for (const r of oilWoRows || []) putActual(r.asset_id, r.asset_code, r.asset_name, { lubes_work_order_cost: Number(r.v || 0) });
+        }
+        if (hasLaborHoursCol && hasLaborRateCol) {
+          const labRows = db.prepare(`
+            SELECT w.asset_id, a.asset_code, a.asset_name,
+              COALESCE(SUM(COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, 0)), 0) AS v
+            FROM work_orders w
+            JOIN assets a ON a.id = w.asset_id
+            WHERE ${woCloseExpr} IS NOT NULL
+              AND DATE(${woCloseExpr}) BETWEEN ? AND ?
+            GROUP BY w.asset_id
+          `).all(start, end);
+          for (const r of labRows || []) putActual(r.asset_id, r.asset_code, r.asset_name, { labor_cost: Number(r.v || 0) });
+        }
+        const cntRows = db.prepare(`
+          SELECT w.asset_id, a.asset_code, a.asset_name, COUNT(*) AS c
+          FROM work_orders w
+          JOIN assets a ON a.id = w.asset_id
+          WHERE ${woCloseExpr} IS NOT NULL
+            AND DATE(${woCloseExpr}) BETWEEN ? AND ?
+            AND LOWER(COALESCE(w.status, '')) IN (${closedStatuses})
+          GROUP BY w.asset_id
+        `).all(start, end);
+        for (const r of cntRows || []) putActual(r.asset_id, r.asset_code, r.asset_name, { closed_work_orders: Number(r.c || 0) });
+      }
+      const periodActualsByAsset = Array.from(mergeActual.values())
+        .map((r) => {
+          const lubes = Number(r.lubes_logs_cost || 0) + Number(r.lubes_work_order_cost || 0);
+          const total = Number(r.parts_cost || 0) + lubes + Number(r.labor_cost || 0);
+          return {
+            asset_id: r.asset_id,
+            asset_code: r.asset_code,
+            asset_name: r.asset_name,
+            parts_cost: Number(Number(r.parts_cost || 0).toFixed(2)),
+            lubes_logs_cost: Number(Number(r.lubes_logs_cost || 0).toFixed(2)),
+            lubes_work_order_cost: Number(Number(r.lubes_work_order_cost || 0).toFixed(2)),
+            lubes_total_cost: Number(lubes.toFixed(2)),
+            labor_cost: Number(Number(r.labor_cost || 0).toFixed(2)),
+            period_total_cost: Number(total.toFixed(2)),
+            closed_work_orders: Number(r.closed_work_orders || 0),
+          };
+        })
+        .sort((a, b) => Number(b.period_total_cost || 0) - Number(a.period_total_cost || 0));
+
       const getAssetCurrentHoursSafe = (assetId) => {
         try {
           return getAssetCurrentHours(assetId);
@@ -2766,6 +2886,8 @@ export default async function maintenanceRoutes(app) {
           weekly_total_cost: Number((oilCost + partsCost + laborCost).toFixed(2)),
           upcoming_service_forecast_cost: Number(totalForecastCost.toFixed(2)),
         },
+        /** Closed-WO-dated parts/lube stock + oil_logs + labor in [start,end], grouped by equipment. */
+        period_actuals_by_asset: periodActualsByAsset,
         upcoming_services: forecastRows,
       };
   }
@@ -2828,6 +2950,39 @@ export default async function maintenanceRoutes(app) {
               { metric: "Weekly Total Cost", value: Number(data?.costs?.weekly_total_cost || 0).toFixed(2) },
               { metric: "Upcoming Service Forecast Cost", value: Number(data?.costs?.upcoming_service_forecast_cost || 0).toFixed(2) },
             ]
+          );
+
+          const actualRows = Array.isArray(data?.period_actuals_by_asset) ? data.period_actuals_by_asset : [];
+          sectionTitle(doc, "Period actuals by equipment (historical — selected date range)");
+          table(
+            doc,
+            [
+              { key: "machine", label: "Machine", width: 0.34 },
+              { key: "parts", label: "Parts $", width: 0.12, align: "right" },
+              { key: "lubes", label: "Lubes $", width: 0.12, align: "right" },
+              { key: "labor", label: "Labor $", width: 0.12, align: "right" },
+              { key: "total", label: "Total $", width: 0.14, align: "right" },
+              { key: "wos", label: "Closed WOs", width: 0.16, align: "right" },
+            ],
+            actualRows.length
+              ? actualRows.map((r) => ({
+                  machine: `${String(r.asset_code || "-")} - ${String(r.asset_name || "-")}`,
+                  parts: Number(r.parts_cost || 0).toFixed(2),
+                  lubes: Number(r.lubes_total_cost || 0).toFixed(2),
+                  labor: Number(r.labor_cost || 0).toFixed(2),
+                  total: Number(r.period_total_cost || 0).toFixed(2),
+                  wos: String(r.closed_work_orders ?? 0),
+                }))
+              : [
+                  {
+                    machine: "No equipment consumption recorded in range",
+                    parts: "-",
+                    lubes: "-",
+                    labor: "-",
+                    total: "-",
+                    wos: "-",
+                  },
+                ]
           );
 
           sectionTitle(doc, "Upcoming Services Forecast");
