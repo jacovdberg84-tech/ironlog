@@ -2567,7 +2567,8 @@ export default async function dashboardRoutes(app) {
       let prevHoursMeter = null;
       if (prev) {
         const prevUnit = String(prev.meter_unit || "").toLowerCase();
-        const prevMeter = Number(prev.meter_run_value || 0);
+        const prevClose = Number(prev.close_meter_value || 0);
+        const prevMeter = prevClose > 0 ? prevClose : Number(prev.meter_run_value || 0);
         if (prevUnit === "km" && prevMeter > 0) prevKmMeter = prevMeter;
         if (prevUnit === "hours" && prevMeter > 0) prevHoursMeter = prevMeter;
       }
@@ -2882,6 +2883,8 @@ export default async function dashboardRoutes(app) {
         fl.log_date,
         fl.hours_run,
         fl.meter_run_value,
+        fl.open_meter_value,
+        fl.close_meter_value,
         COALESCE(LOWER(fl.meter_unit), '') AS meter_unit
       FROM fuel_logs fl
       WHERE fl.asset_id = ?
@@ -2903,7 +2906,8 @@ export default async function dashboardRoutes(app) {
 
     function toModeMeter(row) {
       const unit = String(row?.meter_unit || "").toLowerCase();
-      const v = Number(row?.meter_run_value || 0);
+      const closeV = Number(row?.close_meter_value || 0);
+      const v = closeV > 0 ? closeV : Number(row?.meter_run_value || 0);
       if (unit === "km" && v > 0) return mode === "km" ? v : (v / kmPerHour);
       if (unit === "hours" && v > 0) return mode === "km" ? (v * kmPerHour) : v;
       const h = Number(row?.meter_hours || row?.hours_run || 0);

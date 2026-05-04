@@ -2692,7 +2692,9 @@ export default async function reportsRoutes(app) {
         log_date,
         COALESCE(LOWER(meter_unit), '') AS meter_unit,
         COALESCE(meter_run_value, 0) AS meter_run_value,
-        COALESCE(hours_run, 0) AS hours_run
+        COALESCE(hours_run, 0) AS hours_run,
+        open_meter_value,
+        close_meter_value
       FROM fuel_logs
       WHERE asset_id = ?
         AND log_date < ?
@@ -2722,7 +2724,8 @@ export default async function reportsRoutes(app) {
       let prevHoursMeter = null;
       if (prev) {
         const prevUnit = String(prev.meter_unit || "").toLowerCase();
-        const prevMeter = Number(prev.meter_run_value || 0);
+        const prevClose = Number(prev.close_meter_value || 0);
+        const prevMeter = prevClose > 0 ? prevClose : Number(prev.meter_run_value || 0);
         if (prevUnit === "km" && prevMeter > 0) prevKmMeter = prevMeter;
         if (prevUnit === "hours" && prevMeter > 0) prevHoursMeter = prevMeter;
       }
@@ -2997,7 +3000,9 @@ export default async function reportsRoutes(app) {
         log_date,
         COALESCE(LOWER(meter_unit), '') AS meter_unit,
         COALESCE(meter_run_value, 0) AS meter_run_value,
-        COALESCE(hours_run, 0) AS hours_run
+        COALESCE(hours_run, 0) AS hours_run,
+        open_meter_value,
+        close_meter_value
       FROM fuel_logs
       WHERE asset_id = ?
         AND log_date < ?
@@ -3026,7 +3031,8 @@ export default async function reportsRoutes(app) {
       let prevHoursMeter = null;
       if (prev) {
         const prevUnit = String(prev.meter_unit || "").toLowerCase();
-        const prevMeter = Number(prev.meter_run_value || 0);
+        const prevClose = Number(prev.close_meter_value || 0);
+        const prevMeter = prevClose > 0 ? prevClose : Number(prev.meter_run_value || 0);
         if (prevUnit === "km" && prevMeter > 0) prevKmMeter = prevMeter;
         if (prevUnit === "hours" && prevMeter > 0) prevHoursMeter = prevMeter;
       }
@@ -3266,7 +3272,9 @@ export default async function reportsRoutes(app) {
         log_date,
         COALESCE(LOWER(meter_unit), '') AS meter_unit,
         COALESCE(meter_run_value, 0) AS meter_run_value,
-        COALESCE(hours_run, 0) AS hours_run
+        COALESCE(hours_run, 0) AS hours_run,
+        open_meter_value,
+        close_meter_value
       FROM fuel_logs
       WHERE asset_id = ?
         AND log_date < ?
@@ -3295,7 +3303,8 @@ export default async function reportsRoutes(app) {
       let prevHoursMeter = null;
       if (prev) {
         const prevUnit = String(prev.meter_unit || "").toLowerCase();
-        const prevMeter = Number(prev.meter_run_value || 0);
+        const prevClose = Number(prev.close_meter_value || 0);
+        const prevMeter = prevClose > 0 ? prevClose : Number(prev.meter_run_value || 0);
         if (prevUnit === "km" && prevMeter > 0) prevKmMeter = prevMeter;
         if (prevUnit === "hours" && prevMeter > 0) prevHoursMeter = prevMeter;
       }
@@ -3504,7 +3513,9 @@ export default async function reportsRoutes(app) {
         log_date,
         COALESCE(LOWER(meter_unit), '') AS meter_unit,
         COALESCE(meter_run_value, 0) AS meter_run_value,
-        COALESCE(hours_run, 0) AS hours_run
+        COALESCE(hours_run, 0) AS hours_run,
+        open_meter_value,
+        close_meter_value
       FROM fuel_logs
       WHERE asset_id = ?
         AND log_date < ?
@@ -3532,7 +3543,8 @@ export default async function reportsRoutes(app) {
       let prevHoursMeter = null;
       if (prev) {
         const prevUnit = String(prev.meter_unit || "").toLowerCase();
-        const prevMeter = Number(prev.meter_run_value || 0);
+        const prevClose = Number(prev.close_meter_value || 0);
+        const prevMeter = prevClose > 0 ? prevClose : Number(prev.meter_run_value || 0);
         if (prevUnit === "km" && prevMeter > 0) prevKmMeter = prevMeter;
         if (prevUnit === "hours" && prevMeter > 0) prevHoursMeter = prevMeter;
       }
