@@ -343,8 +343,9 @@ function kpiDaily(date, scheduled) {
       ${andDailyHoursFleetHoursOnly("dh", "a")}
   `).get(date, date);
   let downtime_hours = Number(dtLogsRow?.downtime_hours || 0);
-  const hasBreakdownStatus = hasColumn("breakdowns", "status");
-  const hasBreakdownEndAt = hasColumn("breakdowns", "end_at");
+  const breakdownCols = db.prepare("PRAGMA table_info(breakdowns)").all();
+  const hasBreakdownStatus = breakdownCols.some((r) => String(r.name || "") === "status");
+  const hasBreakdownEndAt = breakdownCols.some((r) => String(r.name || "") === "end_at");
   const statusExpr = hasBreakdownStatus ? "TRIM(LOWER(COALESCE(b.status, '')))" : "''";
   const openStatePredicate = hasBreakdownStatus
     ? `${statusExpr} IN ('open', 'in_progress')`
