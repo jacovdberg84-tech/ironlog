@@ -343,6 +343,17 @@ function kpiDaily(date, scheduled) {
       ${andDailyHoursFleetHoursOnly("dh", "a")}
   `).get(date, date);
   let downtime_hours = Number(dtLogsRow?.downtime_hours || 0);
+  const hasBreakdownStatus = hasColumn("breakdowns", "status");
+  const hasBreakdownEndAt = hasColumn("breakdowns", "end_at");
+  const statusExpr = hasBreakdownStatus ? "TRIM(LOWER(COALESCE(b.status, '')))" : "''";
+  const openStatePredicate = hasBreakdownStatus
+    ? `${statusExpr} IN ('open', 'in_progress')`
+    : "1 = 1";
+  const endAtPredicate = hasBreakdownEndAt
+    ? "(b.end_at IS NULL OR DATE(b.end_at) >= ?)"
+    : "1 = 1";
+  const openNoLogParams = [Number(scheduled || 0), date, date, date];
+  if (hasBreakdownEndAt) openNoLogParams.push(date);
   const openNoLogRow = db.prepare(`
     SELECT IFNULL(SUM(
       CASE
@@ -353,16 +364,24 @@ function kpiDaily(date, scheduled) {
     FROM breakdowns b
     JOIN assets a ON a.id = b.asset_id
     JOIN daily_hours dh ON dh.asset_id = b.asset_id AND dh.work_date = ?
-    WHERE b.status = 'OPEN'
+    WHERE ${openStatePredicate}
       AND b.breakdown_date <= ?
+      AND ${endAtPredicate}
       AND NOT EXISTS (
         SELECT 1
         FROM breakdown_downtime_logs l
         WHERE l.breakdown_id = b.id
           AND l.log_date = ?
       )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM work_orders wbx
+        WHERE wbx.source = 'breakdown'
+          AND COALESCE(wbx.reference_id, -1) = b.id
+          AND REPLACE(TRIM(LOWER(COALESCE(wbx.status, ''))), ' ', '_') IN ('completed', 'approved', 'closed')
+      )
       ${andDailyHoursFleetHoursOnly("dh", "a")}
-  `).get(Number(scheduled || 0), date, date, date);
+  `).get(...openNoLogParams);
   downtime_hours += Number(openNoLogRow?.assumed_down_hours || 0);
 
   const availability = available_hours > 0 ? ((available_hours - downtime_hours) / available_hours) * 100 : null;
