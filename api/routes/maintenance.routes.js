@@ -4338,6 +4338,101 @@ export default async function maintenanceRoutes(app) {
     return Number.isFinite(n) ? n : null;
   }
 
+  function syncLdvPrestartToDailyHours(assetId, checkDate, odometerKm, inspectorName, previousOdometerKm) {
+    if (!assetId || !isDate(checkDate) || !Number.isFinite(Number(odometerKm))) return;
+    const odometer = Number(odometerKm);
+    const existing = db.prepare(`
+      SELECT id, scheduled_hours, opening_hours, closing_hours, hours_run, is_used, operator, notes
+      FROM daily_hours
+      WHERE asset_id = ?
+        AND work_date = ?
+      LIMIT 1
+    `).get(assetId, checkDate);
+
+    const openingCandidate = existing?.opening_hours != null
+      ? Number(existing.opening_hours)
+      : (previousOdometerKm != null ? Number(previousOdometerKm) : odometer);
+    const opening = Number.isFinite(openingCandidate) ? openingCandidate : odometer;
+    const runDelta = Math.max(0, odometer - opening);
+
+    if (existing?.id) {
+      const nextNotes = (() => {
+        const base = String(existing.notes || "").trim();
+        const tag = "LDV pre-start KM captured via QR";
+        if (!base) return tag;
+        return base.includes(tag) ? base : `${base} | ${tag}`;
+      })();
+      const hasInputUnit = hasColumn("daily_hours", "input_unit");
+      if (hasInputUnit) {
+        db.prepare(`
+          UPDATE daily_hours
+          SET
+            opening_hours = COALESCE(opening_hours, ?),
+            closing_hours = ?,
+            hours_run = CASE
+              WHEN COALESCE(hours_run, 0) > ? THEN hours_run
+              ELSE ?
+            END,
+            input_unit = 'km',
+            operator = COALESCE(NULLIF(operator, ''), ?),
+            notes = ?
+          WHERE id = ?
+        `).run(opening, odometer, runDelta, runDelta, inspectorName || null, nextNotes, Number(existing.id));
+      } else {
+        db.prepare(`
+          UPDATE daily_hours
+          SET
+            opening_hours = COALESCE(opening_hours, ?),
+            closing_hours = ?,
+            hours_run = CASE
+              WHEN COALESCE(hours_run, 0) > ? THEN hours_run
+              ELSE ?
+            END,
+            operator = COALESCE(NULLIF(operator, ''), ?),
+            notes = ?
+          WHERE id = ?
+        `).run(opening, odometer, runDelta, runDelta, inspectorName || null, nextNotes, Number(existing.id));
+      }
+      return;
+    }
+
+    const hasInputUnit = hasColumn("daily_hours", "input_unit");
+    if (hasInputUnit) {
+      db.prepare(`
+        INSERT INTO daily_hours (
+          asset_id, work_date, scheduled_hours, opening_hours, closing_hours,
+          hours_run, input_unit, is_used, operator, notes
+        )
+        VALUES (?, ?, 0, ?, ?, ?, 'km', 1, ?, ?)
+        ON CONFLICT(asset_id, work_date) DO UPDATE SET
+          closing_hours = excluded.closing_hours,
+          hours_run = CASE
+            WHEN COALESCE(daily_hours.hours_run, 0) > excluded.hours_run THEN daily_hours.hours_run
+            ELSE excluded.hours_run
+          END,
+          input_unit = 'km',
+          operator = COALESCE(NULLIF(daily_hours.operator, ''), excluded.operator),
+          notes = COALESCE(NULLIF(daily_hours.notes, ''), excluded.notes)
+      `).run(assetId, checkDate, opening, odometer, runDelta, inspectorName || null, "LDV pre-start KM captured via QR");
+    } else {
+      db.prepare(`
+        INSERT INTO daily_hours (
+          asset_id, work_date, scheduled_hours, opening_hours, closing_hours,
+          hours_run, is_used, operator, notes
+        )
+        VALUES (?, ?, 0, ?, ?, ?, 1, ?, ?)
+        ON CONFLICT(asset_id, work_date) DO UPDATE SET
+          closing_hours = excluded.closing_hours,
+          hours_run = CASE
+            WHEN COALESCE(daily_hours.hours_run, 0) > excluded.hours_run THEN daily_hours.hours_run
+            ELSE excluded.hours_run
+          END,
+          operator = COALESCE(NULLIF(daily_hours.operator, ''), excluded.operator),
+          notes = COALESCE(NULLIF(daily_hours.notes, ''), excluded.notes)
+      `).run(assetId, checkDate, opening, odometer, runDelta, inspectorName || null, "LDV pre-start KM captured via QR");
+    }
+  }
+
   app.get("/vehicle-ldv-checks", async (req, reply) => {
     try {
       const assetId = Number(req.query?.asset_id || 0);
@@ -4579,6 +4674,14 @@ export default async function maintenanceRoutes(app) {
         );
         checkId = Number(ins.lastInsertRowid);
       }
+
+      syncLdvPrestartToDailyHours(
+        Number(asset.id),
+        check_date,
+        odometer_km,
+        inspector_name,
+        previousOdometer
+      );
 
       return reply.send({
         ok: true,
