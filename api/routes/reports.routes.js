@@ -7200,6 +7200,8 @@ export default async function reportsRoutes(app) {
     const bottomAssets = assetPerfSorted.slice(-2).reverse();
     const midStart = Math.max(0, Math.floor((assetPerfSorted.length - 2) / 2));
     const midAssets = assetPerfSorted.slice(midStart, midStart + 2);
+    const hasWorkOrderItems = hasTable("work_order_items");
+    const hasPartsTable = hasTable("parts");
     const plannedUpcomingCosts = db.prepare(`
       SELECT
         a.asset_code,
@@ -7207,11 +7209,16 @@ export default async function reportsRoutes(app) {
         m.service_name,
         COALESCE(m.current_hours, 0) AS current_hours,
         COALESCE(m.next_due_hours, 0) AS next_due_hours,
-        COALESCE(SUM(CASE WHEN LOWER(IFNULL(p.consumable_kind, '')) IN ('oil','lube','lubricant','hydraulic','hydraulic_oil','coolant','grease','hyd fluid','hydraulic fluid') THEN wi.quantity * COALESCE(wi.unit_cost, p.unit_cost, 0) ELSE 0 END), 0) AS planned_lube_cost,
-        COALESCE(SUM(CASE WHEN LOWER(IFNULL(p.consumable_kind, '')) IN ('oil','lube','lubricant','hydraulic','hydraulic_oil','coolant','grease','hyd fluid','hydraulic fluid') THEN 0 ELSE wi.quantity * COALESCE(wi.unit_cost, p.unit_cost, 0) END), 0) AS planned_parts_cost
+        ${hasWorkOrderItems && hasPartsTable
+          ? "COALESCE(SUM(CASE WHEN LOWER(IFNULL(p.consumable_kind, '')) IN ('oil','lube','lubricant','hydraulic','hydraulic_oil','coolant','grease','hyd fluid','hydraulic fluid') THEN wi.quantity * COALESCE(wi.unit_cost, p.unit_cost, 0) ELSE 0 END), 0)"
+          : "0"} AS planned_lube_cost,
+        ${hasWorkOrderItems && hasPartsTable
+          ? "COALESCE(SUM(CASE WHEN LOWER(IFNULL(p.consumable_kind, '')) IN ('oil','lube','lubricant','hydraulic','hydraulic_oil','coolant','grease','hyd fluid','hydraulic fluid') THEN 0 ELSE wi.quantity * COALESCE(wi.unit_cost, p.unit_cost, 0) END), 0)"
+          : "0"} AS planned_parts_cost
       FROM maintenance_plans m
       JOIN assets a ON a.id = m.asset_id
-      LEFT JOIN work_order_items wi ON wi.work_order_id = (
+      ${hasWorkOrderItems && hasPartsTable
+        ? `LEFT JOIN work_order_items wi ON wi.work_order_id = (
         SELECT w.id
         FROM work_orders w
         WHERE w.asset_id = m.asset_id
@@ -7221,7 +7228,8 @@ export default async function reportsRoutes(app) {
         ORDER BY w.id DESC
         LIMIT 1
       )
-      LEFT JOIN parts p ON p.id = wi.part_id
+      LEFT JOIN parts p ON p.id = wi.part_id`
+        : ""}
       WHERE m.active = 1
       GROUP BY m.id
       ORDER BY (COALESCE(m.next_due_hours, 0) - COALESCE(m.current_hours, 0)) ASC, a.asset_code ASC
