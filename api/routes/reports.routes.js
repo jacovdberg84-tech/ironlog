@@ -7245,13 +7245,27 @@ export default async function reportsRoutes(app) {
     const midAssets = assetPerfSorted.slice(midStart, midStart + 2);
     const hasWorkOrderItems = hasTable("work_order_items");
     const hasPartsTable = hasTable("parts");
+    const mpCurrentHoursExpr = hasColumn("maintenance_plans", "current_hours")
+      ? "COALESCE(m.current_hours, 0)"
+      : hasColumn("maintenance_plans", "current_meter")
+        ? "COALESCE(m.current_meter, 0)"
+        : hasColumn("maintenance_plans", "meter_reading")
+          ? "COALESCE(m.meter_reading, 0)"
+          : "0";
+    const mpNextDueHoursExpr = hasColumn("maintenance_plans", "next_due_hours")
+      ? "COALESCE(m.next_due_hours, 0)"
+      : hasColumn("maintenance_plans", "next_due_meter")
+        ? "COALESCE(m.next_due_meter, 0)"
+        : hasColumn("maintenance_plans", "due_at_hours")
+          ? "COALESCE(m.due_at_hours, 0)"
+          : "0";
     const plannedUpcomingCosts = db.prepare(`
       SELECT
         a.asset_code,
         a.asset_name,
         m.service_name,
-        COALESCE(m.current_hours, 0) AS current_hours,
-        COALESCE(m.next_due_hours, 0) AS next_due_hours,
+        ${mpCurrentHoursExpr} AS current_hours,
+        ${mpNextDueHoursExpr} AS next_due_hours,
         ${hasWorkOrderItems && hasPartsTable
           ? "COALESCE(SUM(CASE WHEN LOWER(IFNULL(p.consumable_kind, '')) IN ('oil','lube','lubricant','hydraulic','hydraulic_oil','coolant','grease','hyd fluid','hydraulic fluid') THEN wi.quantity * COALESCE(wi.unit_cost, p.unit_cost, 0) ELSE 0 END), 0)"
           : "0"} AS planned_lube_cost,
@@ -7275,7 +7289,7 @@ export default async function reportsRoutes(app) {
         : ""}
       WHERE m.active = 1
       GROUP BY m.id
-      ORDER BY (COALESCE(m.next_due_hours, 0) - COALESCE(m.current_hours, 0)) ASC, a.asset_code ASC
+      ORDER BY (${mpNextDueHoursExpr} - ${mpCurrentHoursExpr}) ASC, a.asset_code ASC
       LIMIT 10
     `).all();
     const partsTrackingRows = db.prepare(`
