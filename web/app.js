@@ -2258,6 +2258,37 @@ function saveThresholdsFromUI() {
   loadDashboard().catch(() => {});
 }
 
+function getLdvPrestartThresholds() {
+  const safeNum = (k, def) => {
+    const v = Number(localStorage.getItem(k));
+    return Number.isFinite(v) && v >= 0 && v <= 100 ? v : def;
+  };
+  const greenAt = safeNum("th_ldv_green_at", 95);
+  const warnAtRaw = safeNum("th_ldv_warn_at", 80);
+  const warnAt = Math.min(warnAtRaw, greenAt);
+  return { greenAt, warnAt };
+}
+
+function populateLdvPrestartThresholdInputs() {
+  const th = getLdvPrestartThresholds();
+  const set = (id, v) => { const el = qs(id); if (el) el.value = v; };
+  set("ldvGreenAt", th.greenAt);
+  set("ldvWarnAt", th.warnAt);
+}
+
+function saveLdvPrestartThresholdsFromUI() {
+  const getNum = (id, def) => {
+    const v = Number(qs(id)?.value);
+    return Number.isFinite(v) && v >= 0 && v <= 100 ? v : def;
+  };
+  const greenAt = getNum("ldvGreenAt", 95);
+  const warnAt = Math.min(getNum("ldvWarnAt", 80), greenAt);
+  localStorage.setItem("th_ldv_green_at", String(greenAt));
+  localStorage.setItem("th_ldv_warn_at", String(warnAt));
+  setStatus("LDV compliance thresholds saved.");
+  loadDashboard().catch(() => {});
+}
+
 function updateKpiAlertBanner(availPct, utilPct) {
   const banner = qs("kpiAlertBanner");
   if (!banner) return;
@@ -2582,7 +2613,8 @@ async function loadDashboard() {
     const pctPill = qs("ldvPrestartPctPill");
     const setComplianceTone = (pct) => {
       const p = Number(pct || 0);
-      const tone = p >= 95 ? "green" : p >= 80 ? "orange" : "red";
+      const th = getLdvPrestartThresholds();
+      const tone = p >= th.greenAt ? "green" : p >= th.warnAt ? "orange" : "red";
       if (badge) {
         badge.className = `dash-card-badge${tone === "red" ? " dash-card-badge-red" : ""}`;
         badge.textContent = tone === "green" ? "On Track" : tone === "orange" ? "Attention" : "Critical";
@@ -10409,6 +10441,7 @@ async function init() {
   });
   hydrateIronmindAskMemory().catch(() => {});
   qs("saveThresholds")?.addEventListener("click", () => saveThresholdsFromUI());
+  qs("saveLdvThresholds")?.addEventListener("click", () => saveLdvPrestartThresholdsFromUI());
   qs("ironmindSummary")?.addEventListener("click", (e) => {
     const el = e.target instanceof HTMLElement ? e.target : null;
     if (!el) return;
@@ -11376,6 +11409,7 @@ async function init() {
   }
   loadCodePickers().catch(() => {});
   populateThresholdInputs();
+  populateLdvPrestartThresholdInputs();
   loadDashboard().catch((e) => setStatus("Dashboard error: " + e.message));
 
   const legalList = qs("legalList");

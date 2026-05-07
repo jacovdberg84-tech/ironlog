@@ -394,6 +394,14 @@
               <h3>LDV Pre-Start Compliance</h3>
               <span class="dash-card-badge" id="ldvPrestartBadge">Today</span>
             </div>
+            <details class="threshold-pane">
+              <summary>Compliance Thresholds</summary>
+              <div class="threshold-grid">
+                <label>Green At/Above <input id="ldvGreenAt" type="number" min="0" max="100" step="1" value="95" />%</label>
+                <label>Orange At/Above <input id="ldvWarnAt" type="number" min="0" max="100" step="1" value="80" />%</label>
+                <button id="saveLdvThresholds" class="btn-primary" type="button">Save</button>
+              </div>
+            </details>
             <div class="kpi-pills">
               <span class="kpi-pill kpi-pill-blue" id="ldvPrestartCompliantPill">Compliant: <strong id="ldvPrestartCompliant">0</strong></span>
               <span class="kpi-pill kpi-pill-orange" id="ldvPrestartMissingPill">Missing: <strong id="ldvPrestartMissing">0</strong></span>
