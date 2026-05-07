@@ -82,10 +82,25 @@
     textarea { min-height: 78px; resize: vertical; }
     .check {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 8px;
       padding: 8px 0;
       border-bottom: 1px dashed rgba(148, 163, 184, 0.2);
+    }
+    .check input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      margin: 1px 0 0 0;
+      flex: 0 0 18px;
+      accent-color: var(--accent);
+    }
+    .check label {
+      margin: 0;
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.35;
+      display: inline-block;
+      cursor: pointer;
     }
     .check:last-child { border-bottom: 0; }
     .actions {
