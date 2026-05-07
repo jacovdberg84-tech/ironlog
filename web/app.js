@@ -2575,12 +2575,36 @@ async function loadDashboard() {
   const ldvPrestartList = qs("ldvPrestartList");
   if (ldvPrestartList) {
     ldvPrestartList.innerHTML = "";
+    const badge = qs("ldvPrestartBadge");
+    const card = qs("ldvPrestartCard");
+    const compliantPill = qs("ldvPrestartCompliantPill");
+    const missingPill = qs("ldvPrestartMissingPill");
+    const pctPill = qs("ldvPrestartPctPill");
+    const setComplianceTone = (pct) => {
+      const p = Number(pct || 0);
+      const tone = p >= 95 ? "green" : p >= 80 ? "orange" : "red";
+      if (badge) {
+        badge.className = `dash-card-badge${tone === "red" ? " dash-card-badge-red" : ""}`;
+        badge.textContent = tone === "green" ? "On Track" : tone === "orange" ? "Attention" : "Critical";
+      }
+      if (card) {
+        card.style.borderColor = tone === "green"
+          ? "rgba(34,197,94,0.55)"
+          : tone === "orange"
+            ? "rgba(245,158,11,0.55)"
+            : "rgba(239,68,68,0.55)";
+      }
+      if (compliantPill) compliantPill.className = `kpi-pill ${tone === "green" ? "kpi-pill-green" : "kpi-pill-blue"}`;
+      if (missingPill) missingPill.className = `kpi-pill ${tone === "red" ? "kpi-pill-red" : "kpi-pill-orange"}`;
+      if (pctPill) pctPill.className = `kpi-pill ${tone === "green" ? "kpi-pill-green" : tone === "orange" ? "kpi-pill-orange" : "kpi-pill-red"}`;
+    };
     try {
       const ps = await fetchJson(`${API}/api/dashboard/ldv-prestart/compliance?date=${encodeURIComponent(date)}`);
       const summary = ps?.summary || {};
       setText("ldvPrestartCompliant", Number(summary.compliant || 0));
       setText("ldvPrestartMissing", Number(summary.missing || 0));
       setText("ldvPrestartPct", `${Number(summary.pct || 0).toFixed(1)}%`);
+      setComplianceTone(Number(summary.pct || 0));
       const rows = Array.isArray(ps?.rows) ? ps.rows : [];
       const attentionRows = rows.filter((r) => r.status !== "compliant");
       const renderRows = attentionRows.length ? attentionRows : rows.slice(0, 5);
@@ -2602,6 +2626,11 @@ async function loadDashboard() {
       setText("ldvPrestartCompliant", "0");
       setText("ldvPrestartMissing", "0");
       setText("ldvPrestartPct", "-");
+      setComplianceTone(0);
+      if (badge) {
+        badge.className = "dash-card-badge dash-card-badge-red";
+        badge.textContent = "Unavailable";
+      }
       ldvPrestartList.appendChild(
         item(`<small>Pre-start compliance unavailable: ${escapeHtml(String(e.message || e))}</small>`)
       );
