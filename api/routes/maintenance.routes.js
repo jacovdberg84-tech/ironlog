@@ -4299,9 +4299,44 @@ export default async function maintenanceRoutes(app) {
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_vehicle_ldv_checks_asset ON vehicle_ldv_checks(asset_id)`).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_vehicle_ldv_checks_date ON vehicle_ldv_checks(check_date)`).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_vehicle_ldv_photos_check ON vehicle_ldv_check_photos(check_id)`).run();
+  ensureColumn("vehicle_ldv_checks", "check_mode TEXT DEFAULT 'ldv_general'", "check_mode");
+  ensureColumn("vehicle_ldv_checks", "checklist_json TEXT", "checklist_json");
 
   const vehicleLdvcDir = path.join(dataRoot, "uploads", "vehicle-ldv-checks");
   fs.mkdirSync(vehicleLdvcDir, { recursive: true });
+
+  function normalizeLdvPrestartChecklist(input) {
+    const defaults = [
+      { key: "brakes_ok", label: "Brakes" },
+      { key: "lights_ok", label: "Lights" },
+      { key: "tyres_ok", label: "Tyres" },
+      { key: "oil_coolant_ok", label: "Oil/Coolant" },
+      { key: "leaks_damage_ok", label: "Leaks/Damage" },
+      { key: "safety_items_ok", label: "Safety Items" },
+    ];
+    const src = input && typeof input === "object" ? input : {};
+    return defaults.map((d) => ({
+      key: d.key,
+      label: d.label,
+      ok: src[d.key] === true,
+    }));
+  }
+
+  function getLatestLdvOdometerKm(assetId, checkDate) {
+    if (!assetId || !isDate(checkDate)) return null;
+    const row = db.prepare(`
+      SELECT odometer_km
+      FROM vehicle_ldv_checks
+      WHERE asset_id = ?
+        AND odometer_km IS NOT NULL
+        AND check_date <= ?
+      ORDER BY check_date DESC, id DESC
+      LIMIT 1
+    `).get(assetId, checkDate);
+    if (row?.odometer_km == null) return null;
+    const n = Number(row.odometer_km);
+    return Number.isFinite(n) ? n : null;
+  }
 
   app.get("/vehicle-ldv-checks", async (req, reply) => {
     try {
@@ -4379,6 +4414,180 @@ export default async function maintenanceRoutes(app) {
           ...r,
           photos: photosByCheck.get(Number(r.id)) || [],
         })),
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  app.get("/vehicle-ldv-checks/prestart-context", async (req, reply) => {
+    try {
+      const asset_code = String(req.query?.asset_code || "").trim().toUpperCase();
+      const check_date = String(req.query?.check_date || "").trim() || new Date().toISOString().slice(0, 10);
+      if (!asset_code) return reply.code(400).send({ ok: false, error: "asset_code is required" });
+      if (!isDate(check_date)) return reply.code(400).send({ ok: false, error: "check_date must be YYYY-MM-DD" });
+
+      const asset = db.prepare(`
+        SELECT id, asset_code, asset_name, category
+        FROM assets
+        WHERE UPPER(asset_code) = UPPER(?)
+        LIMIT 1
+      `).get(asset_code);
+      if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
+
+      const previous_odometer_km = getLatestLdvOdometerKm(Number(asset.id), check_date);
+      const existing = db.prepare(`
+        SELECT id, check_date, odometer_km, inspector_name, notes, checklist_json
+        FROM vehicle_ldv_checks
+        WHERE asset_id = ?
+          AND check_date = ?
+          AND COALESCE(check_mode, 'ldv_general') = 'prestart'
+        ORDER BY id DESC
+        LIMIT 1
+      `).get(Number(asset.id), check_date);
+
+      let checklist = normalizeLdvPrestartChecklist({});
+      if (existing?.checklist_json) {
+        try {
+          const parsed = JSON.parse(String(existing.checklist_json || "{}"));
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            checklist = normalizeLdvPrestartChecklist(parsed);
+          }
+        } catch {}
+      }
+
+      return reply.send({
+        ok: true,
+        asset: {
+          id: Number(asset.id),
+          asset_code: String(asset.asset_code || ""),
+          asset_name: String(asset.asset_name || ""),
+          category: String(asset.category || ""),
+        },
+        check_date,
+        previous_odometer_km,
+        existing_prestart: existing
+          ? {
+              id: Number(existing.id),
+              odometer_km: existing.odometer_km == null ? null : Number(existing.odometer_km),
+              inspector_name: existing.inspector_name || "",
+              notes: existing.notes || "",
+              checklist,
+            }
+          : null,
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  app.post("/vehicle-ldv-checks/prestart", async (req, reply) => {
+    try {
+      const asset_code = String(req.body?.asset_code || "").trim().toUpperCase();
+      const check_date = String(req.body?.check_date || "").trim() || new Date().toISOString().slice(0, 10);
+      const odometer_km_raw = req.body?.odometer_km;
+      const inspector_name = String(req.body?.inspector_name || "").trim() || null;
+      const notes = String(req.body?.notes || "").trim() || null;
+      const checklistObj = req.body?.checklist || {};
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+
+      if (!asset_code) return reply.code(400).send({ ok: false, error: "asset_code is required" });
+      if (!isDate(check_date)) return reply.code(400).send({ ok: false, error: "check_date must be YYYY-MM-DD" });
+      if (odometer_km_raw == null || String(odometer_km_raw).trim() === "") {
+        return reply.code(400).send({ ok: false, error: "odometer_km is required" });
+      }
+      const odometer_km = Number(odometer_km_raw);
+      if (!Number.isFinite(odometer_km) || odometer_km < 0) {
+        return reply.code(400).send({ ok: false, error: "odometer_km must be a valid number >= 0" });
+      }
+
+      const asset = db.prepare(`
+        SELECT id, asset_code, asset_name
+        FROM assets
+        WHERE UPPER(asset_code) = UPPER(?)
+        LIMIT 1
+      `).get(asset_code);
+      if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
+
+      const previousOdometer = getLatestLdvOdometerKm(Number(asset.id), check_date);
+      if (previousOdometer != null && odometer_km < previousOdometer) {
+        return reply.code(400).send({
+          ok: false,
+          error: `Odometer cannot move backwards (previous ${previousOdometer.toFixed(1)} km).`,
+          previous_odometer_km: Number(previousOdometer.toFixed(1)),
+        });
+      }
+
+      const checklist = normalizeLdvPrestartChecklist(checklistObj);
+      const failed = checklist.filter((c) => !c.ok);
+      if (failed.length) {
+        return reply.code(400).send({
+          ok: false,
+          error: `Complete all pre-start checks before starting (${failed.map((c) => c.label).join(", ")}).`,
+        });
+      }
+
+      const checklistJson = JSON.stringify(
+        checklist.reduce((acc, c) => {
+          acc[c.key] = Boolean(c.ok);
+          return acc;
+        }, {})
+      );
+
+      const existing = db.prepare(`
+        SELECT id
+        FROM vehicle_ldv_checks
+        WHERE asset_id = ?
+          AND check_date = ?
+          AND COALESCE(check_mode, 'ldv_general') = 'prestart'
+        ORDER BY id DESC
+        LIMIT 1
+      `).get(Number(asset.id), check_date);
+
+      let checkId = 0;
+      if (existing?.id) {
+        checkId = Number(existing.id);
+        db.prepare(`
+          UPDATE vehicle_ldv_checks
+          SET
+            odometer_km = ?,
+            inspector_name = ?,
+            notes = ?,
+            check_mode = 'prestart',
+            checklist_json = ?,
+            updated_at = datetime('now')
+          WHERE id = ?
+        `).run(odometer_km, inspector_name, notes, checklistJson, checkId);
+      } else {
+        const ins = db.prepare(`
+          INSERT INTO vehicle_ldv_checks (
+            asset_id, uuid, site_code, check_date, vehicle_registration, odometer_km, inspector_name, notes, check_mode, checklist_json, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'prestart', ?, datetime('now'))
+        `).run(
+          Number(asset.id),
+          crypto.randomUUID(),
+          site_code,
+          check_date,
+          String(asset.asset_code || ""),
+          odometer_km,
+          inspector_name,
+          notes,
+          checklistJson
+        );
+        checkId = Number(ins.lastInsertRowid);
+      }
+
+      return reply.send({
+        ok: true,
+        id: checkId,
+        asset_code: String(asset.asset_code || ""),
+        check_date,
+        odometer_km: Number(odometer_km.toFixed(1)),
+        previous_odometer_km: previousOdometer == null ? null : Number(previousOdometer.toFixed(1)),
+        message: "Pre-start captured. KM reading saved to IRONLOG.",
       });
     } catch (err) {
       req.log.error(err);

@@ -103,6 +103,12 @@
     if (openHistoryBtn) openHistoryBtn.href = `./asset-qr-detail.html?view=history&asset_code=${encodeURIComponent(assetCode)}`;
     const openWoBtn = qs("openWoBtn");
     if (openWoBtn) openWoBtn.href = `./asset-qr-detail.html?view=workorders&asset_code=${encodeURIComponent(assetCode)}`;
+    const openPrestartBtn = qs("openPrestartBtn");
+    if (openPrestartBtn) {
+      const isLdv = /^V(0[1-9]|1[0-5])AM$/i.test(assetCode);
+      openPrestartBtn.style.display = isLdv ? "inline-block" : "none";
+      openPrestartBtn.href = `./ldv-prestart.html?asset_code=${encodeURIComponent(assetCode)}`;
+    }
   }
 
   qs("refreshBtn")?.addEventListener("click", () => {
