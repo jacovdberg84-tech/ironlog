@@ -17,6 +17,23 @@
     box.className = `msg ${type === "ok" ? "ok" : "err"}`;
     box.textContent = text;
   }
+  function showSyncState(sync) {
+    const el = qs("syncState");
+    if (!el) return;
+    if (!sync || sync.synced !== true) {
+      el.style.display = "none";
+      el.textContent = "";
+      return;
+    }
+    const mode = String(sync.mode || "updated");
+    const action = mode === "inserted" ? "created" : "updated";
+    el.textContent =
+      `Synced to Daily Input (${action}) - ${String(sync.work_date || "")}: ` +
+      `open ${Number(sync.opening_km || 0).toFixed(1)} km, ` +
+      `close ${Number(sync.closing_km || 0).toFixed(1)} km, ` +
+      `run ${Number(sync.run_km || 0).toFixed(1)} km.`;
+    el.style.display = "block";
+  }
   async function fetchJson(url, options) {
     const res = await fetch(url, options);
     const t = await res.text();
@@ -72,6 +89,7 @@
     }
     txt("sub", `Loading ${currentAssetCode}...`);
     msg("");
+    showSyncState(null);
     const q = new URLSearchParams();
     q.set("asset_code", currentAssetCode);
     q.set("check_date", currentDate);
@@ -145,6 +163,7 @@
       openPdfBtn.style.display = "inline-block";
       openPdfBtn.href = `/api/reports/vehicle-ldv-check/${encodeURIComponent(String(currentCheckId))}.pdf`;
     }
+    showSyncState(data?.daily_input_sync || null);
     msg("Pre-start submitted successfully. KM saved to IRONLOG.", "ok");
   }
 

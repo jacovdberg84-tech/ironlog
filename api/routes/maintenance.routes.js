@@ -4339,7 +4339,7 @@ export default async function maintenanceRoutes(app) {
   }
 
   function syncLdvPrestartToDailyHours(assetId, checkDate, odometerKm, inspectorName, previousOdometerKm) {
-    if (!assetId || !isDate(checkDate) || !Number.isFinite(Number(odometerKm))) return;
+    if (!assetId || !isDate(checkDate) || !Number.isFinite(Number(odometerKm))) return { synced: false };
     const odometer = Number(odometerKm);
     const existing = db.prepare(`
       SELECT id, scheduled_hours, opening_hours, closing_hours, hours_run, is_used, operator, notes
@@ -4393,7 +4393,14 @@ export default async function maintenanceRoutes(app) {
           WHERE id = ?
         `).run(opening, odometer, runDelta, runDelta, inspectorName || null, nextNotes, Number(existing.id));
       }
-      return;
+      return {
+        synced: true,
+        mode: "updated",
+        work_date: checkDate,
+        opening_km: Number(opening.toFixed(1)),
+        closing_km: Number(odometer.toFixed(1)),
+        run_km: Number(runDelta.toFixed(1)),
+      };
     }
 
     const hasInputUnit = hasColumn("daily_hours", "input_unit");
@@ -4431,6 +4438,14 @@ export default async function maintenanceRoutes(app) {
           notes = COALESCE(NULLIF(daily_hours.notes, ''), excluded.notes)
       `).run(assetId, checkDate, opening, odometer, runDelta, inspectorName || null, "LDV pre-start KM captured via QR");
     }
+    return {
+      synced: true,
+      mode: "inserted",
+      work_date: checkDate,
+      opening_km: Number(opening.toFixed(1)),
+      closing_km: Number(odometer.toFixed(1)),
+      run_km: Number(runDelta.toFixed(1)),
+    };
   }
 
   app.get("/vehicle-ldv-checks", async (req, reply) => {
@@ -4675,7 +4690,7 @@ export default async function maintenanceRoutes(app) {
         checkId = Number(ins.lastInsertRowid);
       }
 
-      syncLdvPrestartToDailyHours(
+      const dailySync = syncLdvPrestartToDailyHours(
         Number(asset.id),
         check_date,
         odometer_km,
@@ -4690,6 +4705,7 @@ export default async function maintenanceRoutes(app) {
         check_date,
         odometer_km: Number(odometer_km.toFixed(1)),
         previous_odometer_km: previousOdometer == null ? null : Number(previousOdometer.toFixed(1)),
+        daily_input_sync: dailySync || { synced: false },
         message: "Pre-start captured. KM reading saved to IRONLOG.",
       });
     } catch (err) {
