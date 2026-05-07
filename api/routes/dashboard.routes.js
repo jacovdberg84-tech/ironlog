@@ -859,6 +859,104 @@ export default async function dashboardRoutes(app) {
     return reply.send(buildAssetKpiRange(start, end, scheduledFallback, siteCode));
   });
 
+  // GET /api/dashboard/ldv-prestart/compliance?date=YYYY-MM-DD
+  app.get("/ldv-prestart/compliance", async (req, reply) => {
+    try {
+      const date = String(req.query?.date || "").trim() || todayYYYYMMDD();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return reply.code(400).send({ ok: false, error: "date must be YYYY-MM-DD" });
+      }
+      const codes = Array.from({ length: 15 }, (_, i) => `V${String(i + 1).padStart(2, "0")}AM`);
+      const marks = codes.map(() => "?").join(",");
+      const assets = db.prepare(`
+        SELECT id AS asset_id, asset_code, asset_name
+        FROM assets
+        WHERE UPPER(asset_code) IN (${marks})
+          AND COALESCE(active, 1) = 1
+      `).all(...codes);
+      const hasVehicleChecks = Boolean(
+        db.prepare(`SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='vehicle_ldv_checks' LIMIT 1`).get()
+      );
+      if (!hasVehicleChecks) {
+        return reply.send({
+          ok: true,
+          date,
+          summary: { total: assets.length, compliant: 0, missing: assets.length, pct: 0 },
+          rows: assets.map((a) => ({
+            asset_id: Number(a.asset_id || 0),
+            asset_code: String(a.asset_code || ""),
+            asset_name: String(a.asset_name || ""),
+            status: "missing",
+            reason: "No pre-start table",
+          })),
+        });
+      }
+      const hasCheckMode = hasColumn("vehicle_ldv_checks", "check_mode");
+      const hasChecklistJson = hasColumn("vehicle_ldv_checks", "checklist_json");
+      const checkRows = db.prepare(`
+        SELECT
+          v.id,
+          v.asset_id,
+          v.odometer_km,
+          ${hasChecklistJson ? "v.checklist_json" : "NULL AS checklist_json"}
+        FROM vehicle_ldv_checks v
+        JOIN (
+          SELECT asset_id, MAX(id) AS max_id
+          FROM vehicle_ldv_checks
+          WHERE check_date = ?
+            ${hasCheckMode ? "AND COALESCE(check_mode, 'ldv_general') = 'prestart'" : ""}
+          GROUP BY asset_id
+        ) m ON m.asset_id = v.asset_id AND m.max_id = v.id
+      `).all(date);
+      const checkMap = new Map(checkRows.map((r) => [Number(r.asset_id || 0), r]));
+      const rows = assets.map((a) => {
+        const aid = Number(a.asset_id || 0);
+        const c = checkMap.get(aid);
+        if (!c) {
+          return {
+            asset_id: aid,
+            asset_code: String(a.asset_code || ""),
+            asset_name: String(a.asset_name || ""),
+            status: "missing",
+            reason: "No pre-start submitted",
+          };
+        }
+        const odometerOk = c.odometer_km != null && Number.isFinite(Number(c.odometer_km));
+        let checklistOk = true;
+        if (hasChecklistJson) {
+          try {
+            const raw = c.checklist_json ? JSON.parse(String(c.checklist_json || "{}")) : {};
+            const requiredKeys = ["brakes_ok", "lights_ok", "tyres_ok", "oil_coolant_ok", "leaks_damage_ok", "safety_items_ok"];
+            checklistOk = requiredKeys.every((k) => raw && typeof raw === "object" && raw[k] === true);
+          } catch {
+            checklistOk = false;
+          }
+        }
+        const compliant = odometerOk && checklistOk;
+        return {
+          asset_id: aid,
+          asset_code: String(a.asset_code || ""),
+          asset_name: String(a.asset_name || ""),
+          status: compliant ? "compliant" : "attention",
+          reason: compliant ? "Pre-start complete" : (!odometerOk ? "Missing odometer" : "Checklist incomplete"),
+        };
+      }).sort((x, y) => String(x.asset_code || "").localeCompare(String(y.asset_code || "")));
+      const compliant = rows.filter((r) => r.status === "compliant").length;
+      const total = rows.length;
+      const missing = Math.max(0, total - compliant);
+      const pct = total > 0 ? Number(((compliant / total) * 100).toFixed(1)) : 0;
+      return reply.send({
+        ok: true,
+        date,
+        summary: { total, compliant, missing, pct },
+        rows,
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
   app.get("/asset-kpi.xlsx", async (req, reply) => {
     const startIn = String(req.query?.start || "").trim();
     const endIn = String(req.query?.end || "").trim();

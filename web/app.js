@@ -2461,6 +2461,7 @@ async function loadDashboard() {
   setStatus("Loading dashboard...");
   setSkeleton("downtimeList", 2);
   setSkeleton("downtimeReasonsList", 2);
+  setSkeleton("ldvPrestartList", 2);
   setSkeleton("stockList", 2);
   setSkeleton("woList", 2);
   setSkeleton("riskBoardList", 2);
@@ -2568,6 +2569,42 @@ async function loadDashboard() {
     });
     if (!data.downtime_reasons?.length) {
       reasonsList.appendChild(item("<small>No downtime reasons logged for this date.</small>"));
+    }
+  }
+
+  const ldvPrestartList = qs("ldvPrestartList");
+  if (ldvPrestartList) {
+    ldvPrestartList.innerHTML = "";
+    try {
+      const ps = await fetchJson(`${API}/api/dashboard/ldv-prestart/compliance?date=${encodeURIComponent(date)}`);
+      const summary = ps?.summary || {};
+      setText("ldvPrestartCompliant", Number(summary.compliant || 0));
+      setText("ldvPrestartMissing", Number(summary.missing || 0));
+      setText("ldvPrestartPct", `${Number(summary.pct || 0).toFixed(1)}%`);
+      const rows = Array.isArray(ps?.rows) ? ps.rows : [];
+      const attentionRows = rows.filter((r) => r.status !== "compliant");
+      const renderRows = attentionRows.length ? attentionRows : rows.slice(0, 5);
+      renderRows.forEach((r) => {
+        const statusPill = r.status === "compliant"
+          ? "<span class='pill green'>OK</span>"
+          : "<span class='pill orange'>PENDING</span>";
+        ldvPrestartList.appendChild(
+          item(
+            `<b>${escapeHtml(String(r.asset_code || "-"))}</b> ${statusPill}` +
+            `<br><small>${escapeHtml(String(r.reason || ""))}</small>`
+          )
+        );
+      });
+      if (!rows.length) {
+        ldvPrestartList.appendChild(item("<small>No LDV assets found for V01AM-V15AM.</small>"));
+      }
+    } catch (e) {
+      setText("ldvPrestartCompliant", "0");
+      setText("ldvPrestartMissing", "0");
+      setText("ldvPrestartPct", "-");
+      ldvPrestartList.appendChild(
+        item(`<small>Pre-start compliance unavailable: ${escapeHtml(String(e.message || e))}</small>`)
+      );
     }
   }
 
