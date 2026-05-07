@@ -431,12 +431,12 @@ export default async function dashboardRoutes(app) {
     const logDowntimeByAsset = new Map(
       (logDowntimeRows || [])
         .map((r) => [Number(r.asset_id || 0), Number(r.downtime_hours || 0)])
-        .filter(([assetId]) => activeFleetIds.has(assetId) && !dailyStandbyIds.has(assetId))
+        .filter(([assetId]) => activeFleetIds.has(assetId))
     );
     const fallbackDowntimeByAsset = new Map(
       (fallbackDowntimeRows || [])
         .map((r) => [Number(r.asset_id || 0), Number(r.downtime_hours || 0)])
-        .filter(([assetId]) => activeFleetIds.has(assetId) && !dailyStandbyIds.has(assetId))
+        .filter(([assetId]) => activeFleetIds.has(assetId))
     );
     const downtimeByAsset = new Map();
     const downtimeAssetIds = new Set([
@@ -454,7 +454,7 @@ export default async function dashboardRoutes(app) {
         : getOpenBreakdownAssetIdsByDayNoSite.all(dayStr, dayStr)
       )
         .map((r) => Number(r.asset_id || 0))
-        .filter((assetId) => activeFleetIds.has(assetId) && !dailyStandbyIds.has(assetId))
+        .filter((assetId) => activeFleetIds.has(assetId))
     );
     const eligibleAssetRows = assetRows.filter((r) => {
       const assetId = Number(r.asset_id || 0);
@@ -535,9 +535,9 @@ export default async function dashboardRoutes(app) {
     const missingFleetIds = [];
     const downtimeOnlyIds = Array.from(downtimeByAsset.keys())
       .map((id) => Number(id || 0))
-      .filter((id) => id > 0 && !assetIdsInHours.has(id) && !dailyStandbyIds.has(id));
+      .filter((id) => id > 0 && !assetIdsInHours.has(id));
     const openBreakdownOnlyIds = Array.from(openBreakdownAssets).filter(
-      (id) => id > 0 && !assetIdsInHours.has(id) && !dailyStandbyIds.has(id)
+      (id) => id > 0 && !assetIdsInHours.has(id)
     );
     const includeIds = Array.from(new Set([...downtimeOnlyIds, ...openBreakdownOnlyIds, ...missingFleetIds]));
     if (includeIds.length) {
@@ -551,7 +551,6 @@ export default async function dashboardRoutes(app) {
 
       for (const a of extraAssets) {
         const assetId = Number(a.asset_id || 0);
-        if (dailyStandbyIds.has(assetId)) continue;
         const modeExtra = isToyotaHiluxAsset(a)
           ? "km"
           : String(a.utilization_mode || "").trim().toLowerCase() === "km"
