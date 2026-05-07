@@ -6830,13 +6830,20 @@ export default async function reportsRoutes(app) {
   async function buildMaintenanceExecutiveDeck({ period, label, site_code }) {
     const defaults = costDefaults();
     const { rows, totals } = buildMaintenanceCostByEquipment(period);
-    const rainRows = db.prepare(`
+    const hasSiteRainDays = hasTable("site_rain_days");
+    const hasBreakdownLogs = hasTable("breakdown_downtime_logs");
+    const hasManagerDamageReports = hasTable("manager_damage_reports");
+    const hasManagerDamageReportPhotos = hasTable("manager_damage_report_photos");
+    const hasManagerInspections = hasTable("manager_inspections");
+    const rainRows = hasSiteRainDays
+      ? db.prepare(`
       SELECT rain_date
       FROM site_rain_days
       WHERE site_code = ?
         AND rain_date BETWEEN ? AND ?
       ORDER BY rain_date ASC
-    `).all(site_code, period.start, period.end);
+    `).all(site_code, period.start, period.end)
+      : [];
     const rainDates = rainRows.map((r) => String(r.rain_date || "").trim()).filter(Boolean);
     const rainCount = rainDates.length;
     const rainPlaceholders = rainDates.length ? rainDates.map(() => "?").join(",") : "";
@@ -6883,7 +6890,8 @@ export default async function reportsRoutes(app) {
       GROUP BY LOWER(IFNULL(a.category, 'uncategorized'))
       ORDER BY equipment_type ASC
     `).all(period.start, period.end);
-    const availByTypeDowntime = db.prepare(`
+    const availByTypeDowntime = hasBreakdownLogs
+      ? db.prepare(`
       SELECT
         LOWER(IFNULL(a.category, 'uncategorized')) AS equipment_type,
         COALESCE(SUM(l.hours_down), 0) AS downtime_hours
@@ -6893,7 +6901,8 @@ export default async function reportsRoutes(app) {
       WHERE l.log_date BETWEEN ? AND ?
         ${andAssetFleetHoursOnly("a")}
       GROUP BY LOWER(IFNULL(a.category, 'uncategorized'))
-    `).all(period.start, period.end);
+    `).all(period.start, period.end)
+      : [];
     const downtimeByType = new Map(availByTypeDowntime.map((r) => [String(r.equipment_type || ""), Number(r.downtime_hours || 0)]));
     const rainSchedByType = new Map();
     if (rainDates.length) {
@@ -6975,7 +6984,8 @@ export default async function reportsRoutes(app) {
     `).all(periodEndTs, periodEndTs, periodStartTs, periodStartTs, periodStartTs, periodEndTs, periodEndTs, periodStartTs);
     const woDownMap = new Map(woDowntimeByAsset.map((r) => [String(r.asset_code || ""), Number(r.true_downtime_hours || 0)]));
     const totalTrueDowntimeWo = woDowntimeByAsset.reduce((s, r) => s + Number(r.true_downtime_hours || 0), 0);
-    const hseSummary = db.prepare(`
+    const hseSummary = hasManagerDamageReports
+      ? db.prepare(`
       SELECT
         COUNT(*) AS reports,
         COALESCE(SUM(CASE WHEN COALESCE(hse_report_available, 0) = 1 THEN 1 ELSE 0 END), 0) AS hse_reports,
@@ -6983,8 +6993,10 @@ export default async function reportsRoutes(app) {
         COALESCE(SUM(CASE WHEN COALESCE(out_of_service, 0) = 1 THEN 1 ELSE 0 END), 0) AS out_of_service
       FROM manager_damage_reports
       WHERE report_date BETWEEN ? AND ?
-    `).get(period.start, period.end);
-    const hseRows = db.prepare(`
+    `).get(period.start, period.end)
+      : { reports: 0, hse_reports: 0, pending_investigation: 0, out_of_service: 0 };
+    const hseRows = hasManagerDamageReports
+      ? db.prepare(`
       SELECT
         dr.id,
         dr.report_date,
@@ -6999,10 +7011,16 @@ export default async function reportsRoutes(app) {
       WHERE dr.report_date BETWEEN ? AND ?
       ORDER BY dr.report_date DESC, dr.id DESC
       LIMIT 8
-    `).all(period.start, period.end);
-    const drPhotoReportCol = pickExistingColumn("manager_damage_report_photos", ["damage_report_id", "manager_damage_report_id", "report_id"], "damage_report_id");
-    const drPhotoPathCol = pickExistingColumn("manager_damage_report_photos", ["file_path", "photo_path", "path", "image_path", "url", "image_data"], "file_path");
-    const hsePhotoRows = db.prepare(`
+    `).all(period.start, period.end)
+      : [];
+    const drPhotoReportCol = hasManagerDamageReportPhotos
+      ? pickExistingColumn("manager_damage_report_photos", ["damage_report_id", "manager_damage_report_id", "report_id"], "damage_report_id")
+      : "damage_report_id";
+    const drPhotoPathCol = hasManagerDamageReportPhotos
+      ? pickExistingColumn("manager_damage_report_photos", ["file_path", "photo_path", "path", "image_path", "url", "image_data"], "file_path")
+      : "file_path";
+    const hsePhotoRows = hasManagerDamageReports && hasManagerDamageReportPhotos
+      ? db.prepare(`
       SELECT ${drPhotoPathCol} AS file_path
       FROM manager_damage_report_photos
       WHERE ${drPhotoReportCol} IN (
@@ -7012,15 +7030,19 @@ export default async function reportsRoutes(app) {
       )
       ORDER BY id DESC
       LIMIT 4
-    `).all(period.start, period.end);
-    const inspectionsSummary = db.prepare(`
+    `).all(period.start, period.end)
+      : [];
+    const inspectionsSummary = hasManagerInspections
+      ? db.prepare(`
       SELECT
         COUNT(*) AS inspections_done,
         COUNT(DISTINCT asset_id) AS assets_covered
       FROM manager_inspections
       WHERE inspection_date BETWEEN ? AND ?
-    `).get(period.start, period.end);
-    const inspectionsFaultRows = db.prepare(`
+    `).get(period.start, period.end)
+      : { inspections_done: 0, assets_covered: 0 };
+    const inspectionsFaultRows = hasManagerInspections
+      ? db.prepare(`
       SELECT
         mi.inspection_date,
         a.asset_code,
@@ -7031,7 +7053,8 @@ export default async function reportsRoutes(app) {
       WHERE mi.inspection_date BETWEEN ? AND ?
       ORDER BY mi.inspection_date DESC, mi.id DESC
       LIMIT 30
-    `).all(period.start, period.end);
+    `).all(period.start, period.end)
+      : [];
     const lubeByMachine = db.prepare(`
       SELECT
         a.asset_code,
@@ -7114,6 +7137,8 @@ export default async function reportsRoutes(app) {
         GROUP BY dh.work_date
       ),
       down_rows AS (
+        ${hasBreakdownLogs
+          ? `
         SELECT
           l.log_date AS day_key,
           COALESCE(SUM(l.hours_down), 0) AS downtime_hours
@@ -7123,6 +7148,14 @@ export default async function reportsRoutes(app) {
         WHERE l.log_date BETWEEN ? AND ?
           ${andAssetFleetHoursOnly("a")}
         GROUP BY l.log_date
+        `
+          : `
+        SELECT
+          NULL AS day_key,
+          0 AS downtime_hours
+        WHERE 1 = 0
+        `
+        }
       )
       SELECT
         r.day_key,
@@ -7132,7 +7165,7 @@ export default async function reportsRoutes(app) {
       FROM run_rows r
       LEFT JOIN down_rows d ON d.day_key = r.day_key
       ORDER BY r.day_key ASC
-    `).all(period.start, period.end, period.start, period.end);
+    `).all(...(hasBreakdownLogs ? [period.start, period.end, period.start, period.end] : [period.start, period.end]));
     const availabilityTrend = dailyKpiRows.map((r) => {
       const s = Number(r.scheduled_hours || 0);
       const d = Math.max(0, Math.min(Number(r.downtime_hours || 0), s));
@@ -7159,6 +7192,8 @@ export default async function reportsRoutes(app) {
         GROUP BY a.id
       ),
       down_rows AS (
+        ${hasBreakdownLogs
+          ? `
         SELECT
           b.asset_id,
           COALESCE(SUM(l.hours_down), 0) AS downtime_hours
@@ -7166,6 +7201,14 @@ export default async function reportsRoutes(app) {
         JOIN breakdowns b ON b.id = l.breakdown_id
         WHERE l.log_date BETWEEN ? AND ?
         GROUP BY b.asset_id
+        `
+          : `
+        SELECT
+          NULL AS asset_id,
+          0 AS downtime_hours
+        WHERE 1 = 0
+        `
+        }
       )
       SELECT
         r.asset_id,
@@ -7178,7 +7221,7 @@ export default async function reportsRoutes(app) {
       FROM run_rows r
       LEFT JOIN down_rows d ON d.asset_id = r.asset_id
       WHERE r.scheduled_hours > 0
-    `).all(period.start, period.end, period.start, period.end).map((r) => {
+    `).all(...(hasBreakdownLogs ? [period.start, period.end, period.start, period.end] : [period.start, period.end])).map((r) => {
       const s = Number(r.scheduled_hours || 0);
       const run = Math.max(0, Math.min(Number(r.run_hours || 0), s));
       const down = Math.max(0, Math.min(Number(r.downtime_hours || 0), s));
@@ -7243,17 +7286,17 @@ export default async function reportsRoutes(app) {
         COALESCE(w.completion_notes, '-') AS action_taken,
         COALESCE(date(COALESCE(w.completed_at, w.closed_at, w.opened_at)), '-') AS eta_on_parts,
         CASE WHEN LOWER(COALESCE(w.status, '')) IN ('done','closed','completed') THEN 'No' ELSE 'Yes' END AS parts_outstanding,
-        COALESCE(dr.responsible_person, '-') AS responsible_person,
+        ${hasManagerDamageReports ? "COALESCE(dr.responsible_person, '-')" : "'-'"} AS responsible_person,
         CASE WHEN LOWER(COALESCE(w.status, '')) IN ('done','closed','completed') THEN 'Returned / Closed' ELSE 'Pending closure' END AS expected_return_service
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
       LEFT JOIN breakdowns b ON b.id = w.reference_id AND LOWER(COALESCE(w.source, '')) = 'breakdown'
-      LEFT JOIN manager_damage_reports dr ON dr.asset_id = w.asset_id AND dr.report_date BETWEEN ? AND ?
+      ${hasManagerDamageReports ? "LEFT JOIN manager_damage_reports dr ON dr.asset_id = w.asset_id AND dr.report_date BETWEEN ? AND ?" : ""}
       WHERE LOWER(COALESCE(w.source, '')) = 'breakdown'
         AND COALESCE(w.opened_at, '') BETWEEN ? AND ?
       ORDER BY w.id DESC
       LIMIT 14
-    `).all(period.start, period.end, periodStartTs, periodEndTs);
+    `).all(...(hasManagerDamageReports ? [period.start, period.end, periodStartTs, periodEndTs] : [periodStartTs, periodEndTs]));
     const fuelAnomalyExpanded = db.prepare(`
       WITH daily AS (
         SELECT
@@ -7554,7 +7597,7 @@ export default async function reportsRoutes(app) {
           file_path: generated.file_path,
         };
       } catch (e) {
-        return reply.code(404).send({ ok: false, error: "No generated presentation found for this type/site yet" });
+        return reply.code(500).send({ ok: false, error: e?.message || "Failed to generate maintenance presentation" });
       }
     }
     const buf = fs.readFileSync(row.file_path);
