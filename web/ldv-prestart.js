@@ -62,6 +62,7 @@
   let currentAssetCode = "";
   let currentDate = todayYmd();
   let previousKm = null;
+  let currentCheckId = 0;
 
   async function loadContext() {
     currentAssetCode = getAssetCodeFromUrl();
@@ -86,11 +87,22 @@
 
     const existing = data?.existing_prestart || null;
     if (existing) {
+      currentCheckId = Number(existing.id || 0);
       if (qs("odometerKm") && existing.odometer_km != null) qs("odometerKm").value = String(existing.odometer_km);
       if (qs("inspectorName")) qs("inspectorName").value = String(existing.inspector_name || "");
       if (qs("notes")) qs("notes").value = String(existing.notes || "");
       applyChecklist(existing.checklist);
       msg("Pre-start already captured for today. You can update and resubmit if needed.", "ok");
+    }
+    const openPdfBtn = qs("openPdfBtn");
+    if (openPdfBtn) {
+      if (currentCheckId > 0) {
+        openPdfBtn.style.display = "inline-block";
+        openPdfBtn.href = `/api/reports/vehicle-ldv-check/${encodeURIComponent(String(currentCheckId))}.pdf`;
+      } else {
+        openPdfBtn.style.display = "none";
+        openPdfBtn.href = "#";
+      }
     }
 
     const openQrBtn = qs("openQrBtn");
@@ -125,9 +137,38 @@
       body: JSON.stringify(body),
     });
     const savedKm = data?.odometer_km == null ? odometer : Number(data.odometer_km);
+    currentCheckId = Number(data?.id || 0);
     previousKm = Number.isFinite(savedKm) ? savedKm : previousKm;
     txt("prevKm", previousKm == null ? "-" : `${previousKm.toFixed(1)} km`);
+    const openPdfBtn = qs("openPdfBtn");
+    if (openPdfBtn && currentCheckId > 0) {
+      openPdfBtn.style.display = "inline-block";
+      openPdfBtn.href = `/api/reports/vehicle-ldv-check/${encodeURIComponent(String(currentCheckId))}.pdf`;
+    }
     msg("Pre-start submitted successfully. KM saved to IRONLOG.", "ok");
+  }
+
+  async function uploadPhoto() {
+    if (!currentCheckId) {
+      throw new Error("Submit pre-start first so a check record exists.");
+    }
+    const file = qs("photoInput")?.files?.[0];
+    if (!file) throw new Error("Select a photo first.");
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`/api/maintenance/vehicle-ldv-checks/${encodeURIComponent(String(currentCheckId))}/photo?caption=${encodeURIComponent("Pre-start photo")}`, {
+      method: "POST",
+      body: fd,
+    });
+    const t = await res.text();
+    let data = {};
+    try {
+      data = t ? JSON.parse(t) : {};
+    } catch {
+      data = {};
+    }
+    if (!res.ok) throw new Error(data?.error || t || `Upload failed (${res.status})`);
+    msg("Photo uploaded to this pre-start check.", "ok");
   }
 
   qs("refreshBtn")?.addEventListener("click", () => {
@@ -135,6 +176,9 @@
   });
   qs("saveBtn")?.addEventListener("click", () => {
     submitPrestart().catch((e) => msg(String(e.message || e), "err"));
+  });
+  qs("uploadPhotoBtn")?.addEventListener("click", () => {
+    uploadPhoto().catch((e) => msg(String(e.message || e), "err"));
   });
 
   loadContext().catch((e) => msg(String(e.message || e), "err"));

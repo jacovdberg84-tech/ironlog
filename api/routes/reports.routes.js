@@ -3887,6 +3887,8 @@ export default async function reportsRoutes(app) {
         v.odometer_km,
         v.inspector_name,
         v.notes,
+        v.check_mode,
+        v.checklist_json,
         v.created_at,
         a.asset_code,
         a.asset_name,
@@ -3911,6 +3913,24 @@ export default async function reportsRoutes(app) {
       }
       return { ...p, markers: Array.isArray(markers) ? markers : [] };
     });
+    let checklistRows = [];
+    try {
+      const raw = check?.checklist_json ? JSON.parse(String(check.checklist_json || "{}")) : {};
+      const labelMap = {
+        brakes_ok: "Brakes",
+        lights_ok: "Lights",
+        tyres_ok: "Tyres",
+        oil_coolant_ok: "Oil/Coolant",
+        leaks_damage_ok: "Leaks/Damage",
+        safety_items_ok: "Safety Items",
+      };
+      checklistRows = Object.entries(labelMap).map(([k, label]) => ({
+        item: label,
+        status: raw && typeof raw === "object" && raw[k] === true ? "PASS" : "FAIL",
+      }));
+    } catch {
+      checklistRows = [];
+    }
 
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
     const pdf = await buildPdfBuffer(
@@ -3924,10 +3944,23 @@ export default async function reportsRoutes(app) {
           { k: "Vehicle", v: `${check.asset_code || ""} - ${check.asset_name || ""}`.trim() },
           { k: "Category", v: check.category || "" },
           { k: "Registration", v: check.vehicle_registration || "-" },
+          { k: "Mode", v: check.check_mode || "ldv_general" },
           { k: "Odometer (km)", v: check.odometer_km == null ? "-" : fmtNum(check.odometer_km, 0) },
           { k: "Inspector", v: check.inspector_name || "-" },
           { k: "Created At", v: check.created_at || "" },
         ], 2);
+
+        if (checklistRows.length) {
+          sectionTitle(doc, "Pre-Start Checklist");
+          table(
+            doc,
+            [
+              { key: "item", label: "Item", width: 0.72 },
+              { key: "status", label: "Result", width: 0.28, align: "center" },
+            ],
+            checklistRows
+          );
+        }
 
         sectionTitle(doc, "Notes");
         doc
