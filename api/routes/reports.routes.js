@@ -5700,6 +5700,196 @@ export default async function reportsRoutes(app) {
   });
 
   // =========================
+  // STOCK MOVEMENTS PDF (period ledger)
+  // =========================
+  // GET /api/reports/stock-movements.pdf?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD&part_code=&download=1
+  app.get("/stock-movements.pdf", async (req, reply) => {
+    function parseDateOnly(s) {
+      const t = String(s || "").trim();
+      return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null;
+    }
+    function normalizeStockReportPartFilter(raw) {
+      let s = String(raw || "").trim().replace(/\s+/g, " ");
+      if (!s) return "";
+      const dashIdx = s.indexOf(" - ");
+      if (dashIdx > 0) s = s.slice(0, dashIdx).trim();
+      return s;
+    }
+
+    const date_from = parseDateOnly(req.query?.date_from);
+    const date_to = parseDateOnly(req.query?.date_to);
+    if (!date_from || !date_to) {
+      return reply.code(400).send({ error: "date_from and date_to are required (YYYY-MM-DD)" });
+    }
+    if (date_from > date_to) {
+      return reply.code(400).send({ error: "date_from must be on or before date_to" });
+    }
+
+    const part_filter = normalizeStockReportPartFilter(req.query?.part_code);
+    const download = String(req.query?.download || "").trim() === "1";
+
+    const smDateCol = hasColumn("stock_movements", "created_at") ? "sm.created_at" : "sm.movement_date";
+    const smDateTimeExpr = `datetime(${smDateCol})`;
+
+    const startDt = `${date_from} 00:00:00`;
+    const endDt = `${date_to} 23:59:59`;
+
+    const where = [`${smDateTimeExpr} >= datetime(?)`, `${smDateTimeExpr} <= datetime(?)`];
+    const params = [startDt, endDt];
+
+    if (part_filter) {
+      const exactPart = db.prepare(`
+        SELECT id FROM parts WHERE UPPER(TRIM(part_code)) = UPPER(TRIM(?))
+      `).get(part_filter);
+      if (exactPart) {
+        where.push("sm.part_id = ?");
+        params.push(Number(exactPart.id));
+      } else {
+        where.push("instr(LOWER(IFNULL(p.part_code,'')), LOWER(?)) > 0");
+        params.push(part_filter);
+      }
+    }
+
+    const whereSql = where.join(" AND ");
+
+    const summaryRow = db.prepare(`
+      SELECT
+        COUNT(*) AS movement_count,
+        IFNULL(SUM(CASE WHEN sm.quantity > 0 THEN sm.quantity ELSE 0 END), 0) AS qty_in,
+        IFNULL(SUM(CASE WHEN sm.quantity < 0 THEN ABS(sm.quantity) ELSE 0 END), 0) AS qty_out,
+        IFNULL(SUM(sm.quantity), 0) AS net_qty
+      FROM stock_movements sm
+      JOIN parts p ON p.id = sm.part_id
+      WHERE ${whereSql}
+    `).get(...params);
+
+    const maxRows = 5000;
+    const hasBin = hasColumn("stock_movements", "bin_id");
+    const binJoin = hasBin ? "LEFT JOIN stock_bins b ON b.id = sm.bin_id" : "";
+    const binSelect = hasBin ? "b.bin_code" : "NULL";
+
+    const rows = db.prepare(`
+      SELECT
+        sm.id,
+        ${smDateCol} AS movement_at,
+        sm.movement_type,
+        sm.quantity,
+        sm.reference,
+        l.location_code,
+        ${binSelect} AS bin_code,
+        p.part_code,
+        p.part_name
+      FROM stock_movements sm
+      JOIN parts p ON p.id = sm.part_id
+      LEFT JOIN stock_locations l ON l.id = sm.location_id
+      ${binJoin}
+      WHERE ${whereSql}
+      ORDER BY ${smDateTimeExpr} DESC, sm.id DESC
+      LIMIT ${maxRows}
+    `).all(...params).map((r) => ({
+      ...r,
+      quantity: Number(r.quantity || 0),
+    }));
+
+    const totalMatching = Number(
+      db.prepare(`
+        SELECT COUNT(*) AS c
+        FROM stock_movements sm
+        JOIN parts p ON p.id = sm.part_id
+        WHERE ${whereSql}
+      `).get(...params)?.c || 0,
+    );
+
+    const truncated = totalMatching > rows.length;
+
+    const summary = {
+      movement_count: Number(summaryRow?.movement_count || 0),
+      qty_in: Number(summaryRow?.qty_in || 0),
+      qty_out: Number(summaryRow?.qty_out || 0),
+      net_qty: Number(summaryRow?.net_qty || 0),
+    };
+
+    const logoPath = path.join(process.cwd(), "branding", "logo.png");
+    const pdf = await buildPdfBuffer(
+      (doc) => {
+        tryDrawLogo(doc, logoPath);
+
+        sectionTitle(doc, "Stock movements summary");
+        kvGrid(
+          doc,
+          [
+            { k: "Period", v: `${date_from} → ${date_to}` },
+            { k: "Part filter", v: part_filter || "All parts" },
+            { k: "Movements", v: fmtNum(summary.movement_count, 0) },
+            { k: "Qty in", v: fmtNum(summary.qty_in, 2) },
+            { k: "Qty out", v: fmtNum(summary.qty_out, 2) },
+            { k: "Net", v: fmtNum(summary.net_qty, 2) },
+            {
+              k: "Rows in PDF",
+              v: truncated ? `${rows.length} of ${totalMatching} (cap ${maxRows})` : String(rows.length || 0),
+            },
+          ],
+          2,
+        );
+
+        sectionTitle(doc, "Movements");
+        table(
+          doc,
+          [
+            { key: "movement_at", label: "When", width: 0.14 },
+            { key: "part_code", label: "Part", width: 0.11 },
+            { key: "part_name", label: "Name", width: 0.22 },
+            { key: "qty", label: "Qty", width: 0.07, align: "right" },
+            { key: "type", label: "Type", width: 0.07 },
+            { key: "loc", label: "Loc", width: 0.08 },
+            { key: "bin", label: "Bin", width: 0.07 },
+            { key: "reference", label: "Reference", width: 0.24 },
+          ],
+          rows.length
+            ? rows.map((r) => ({
+                movement_at: compactCell(String(r.movement_at || "").replace("T", " "), 22),
+                part_code: compactCell(r.part_code, 14),
+                part_name: compactCell(r.part_name, 34),
+                qty: fmtNum(r.quantity, 2),
+                type: String(r.movement_type || ""),
+                loc: compactCell(r.location_code || "—", 10),
+                bin: compactCell(r.bin_code || "", 8),
+                reference: compactCell(r.reference || "", 42),
+              }))
+            : [
+                {
+                  movement_at: "-",
+                  part_code: "-",
+                  part_name: "No movements in period",
+                  qty: "-",
+                  type: "-",
+                  loc: "-",
+                  bin: "-",
+                  reference: "-",
+                },
+              ],
+        );
+      },
+      {
+        title: "IRONLOG",
+        subtitle: "Stock movements report",
+        rightText: part_filter ? `Filter: ${part_filter}` : "All parts",
+        showPageNumbers: true,
+      },
+    );
+
+    const safePart = part_filter ? String(part_filter).replace(/[^\w.-]+/g, "_").slice(0, 40) : "";
+
+    reply
+      .header("Content-Type", "application/pdf")
+      .header(
+        "Content-Disposition",
+        `${download ? "attachment" : "inline"}; filename="AML_Stock_Movements_${date_from}_${date_to}${safePart ? `_${safePart}` : ""}_${todayYmd()}.pdf"`,
+      )
+      .send(pdf);
+  });
+
+  // =========================
   // LEGAL COMPLIANCE PDF
   // =========================
   // GET /api/reports/legal-compliance.pdf?days=90&department=&status=approved&download=1

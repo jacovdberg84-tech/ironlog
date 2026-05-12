@@ -4669,11 +4669,19 @@ function ensureStockMovementsReportDates() {
   }
 }
 
+function normalizeStockReportPartInput(raw) {
+  let s = String(raw || "").trim().replace(/\s+/g, " ");
+  if (!s) return "";
+  const dashIdx = s.indexOf(" - ");
+  if (dashIdx > 0) s = s.slice(0, dashIdx).trim();
+  return s;
+}
+
 async function loadStockMovementsReport() {
   ensureStockMovementsReportDates();
   const date_from = (qs("smrDateFrom")?.value || "").trim();
   const date_to = (qs("smrDateTo")?.value || "").trim();
-  const part_code = (qs("smrPartFilter")?.value || "").trim();
+  const part_code = normalizeStockReportPartInput(qs("smrPartFilter")?.value || "");
   if (!date_from || !date_to) return alert("Choose From and To dates.");
 
   const q = new URLSearchParams();
@@ -4766,6 +4774,19 @@ function exportStockMovementsReportCsv() {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   setStatus("Stock movements CSV exported.");
+}
+
+function openStockMovementsReportPdf() {
+  ensureStockMovementsReportDates();
+  const date_from = (qs("smrDateFrom")?.value || "").trim();
+  const date_to = (qs("smrDateTo")?.value || "").trim();
+  const part_code = normalizeStockReportPartInput(qs("smrPartFilter")?.value || "");
+  if (!date_from || !date_to) return alert("Choose From and To dates.");
+  const q = new URLSearchParams();
+  q.set("date_from", date_from);
+  q.set("date_to", date_to);
+  if (part_code) q.set("part_code", part_code);
+  window.open(`${API}/api/reports/stock-movements.pdf?${q.toString()}`, "_blank");
 }
 
 function openStockOnHandPdf() {
@@ -11095,6 +11116,7 @@ async function init() {
     loadStockMovementsReport().catch((e) => setStatus("Stock movements report error: " + e.message))
   );
   qs("smrExportCsv")?.addEventListener("click", exportStockMovementsReportCsv);
+  qs("smrOpenPdf")?.addEventListener("click", openStockMovementsReportPdf);
   qs("loadAudit")?.addEventListener("click", () =>
     loadAuditLogs().catch((e) => setStatus("Audit error: " + e.message))
   );
