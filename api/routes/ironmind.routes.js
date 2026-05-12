@@ -4,6 +4,7 @@ import { generateIronmindReport, getIronmindHistory, getLatestIronmindReport, ge
 import {
   chatEndpointSummaryForLogs,
   getChatModel,
+  getLastLlmChatError,
   isOpenAiCompatibleConfigured,
   openAiCompatibleChatCompletion,
 } from "../utils/llmChat.js";
@@ -1214,7 +1215,7 @@ export default async function ironmindRoutes(app) {
   }
 
   function fallbackHelpAnswer(contextKey, question, meta = {}) {
-    const { llmConfigured = false, llmCallFailed = false } = meta;
+    const { llmConfigured = false, llmCallFailed = false, llmDetail = "" } = meta;
     const k = normalizeHelpContextKey(contextKey);
     const ctx = HELP_UI_CONTEXTS[k] || HELP_UI_CONTEXTS._default;
     const mergedHints = [...(ctx.hints || []), ...HELP_GLOBAL_HINTS_EXTRA];
@@ -1225,6 +1226,8 @@ export default async function ironmindRoutes(app) {
     if (llmCallFailed) {
       tail =
         "The help assistant could not get a reply from the model. Check that Ollama is running, **OLLAMA_HOST** and **LLM_MODEL** in **api/.env** match your setup (model name must match `ollama list`), then restart the API.";
+      const d = String(llmDetail || "").trim().slice(0, 400);
+      if (d) tail += `\n\nTechnical detail: ${d}`;
     } else if (!llmConfigured) {
       tail =
         "Tailored answers need a configured LLM (**OPENAI_API_KEY**, or **OLLAMA_HOST** / **OPENAI_BASE_URL** for local Ollama). Until then, use the hints above and your site’s SOP.";
@@ -1316,9 +1319,11 @@ export default async function ironmindRoutes(app) {
         }
       }
       if (!answer) {
+        const detail = triedLlm ? String(getLastLlmChatError() || "").trim().slice(0, 400) : "";
         answer = fallbackHelpAnswer(context_key, question, {
           llmConfigured: triedLlm,
           llmCallFailed: triedLlm,
+          llmDetail: detail,
         });
         helpRuntime.last_mode = "fallback";
         helpRuntime.last_error = triedLlm ? "llm_returned_empty" : "no_llm_configured";
@@ -1652,6 +1657,7 @@ export default async function ironmindRoutes(app) {
         model,
         chat_endpoint: chatEndpointSummaryForLogs(),
         live_enabled: provider === "openai",
+        last_llm_chat_error: getLastLlmChatError() || null,
         last_ask_mode: ironmindRuntime.last_ask_mode,
         last_ask_error: ironmindRuntime.last_ask_error || null,
         last_ask_at: ironmindRuntime.last_ask_at || null,
