@@ -1017,6 +1017,104 @@ export default async function stockRoutes(app) {
     });
   });
 
+  // Stock movements for a date range (ledger-style report)
+  // GET /api/stock/movements-report?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD&part_code=
+  app.get("/movements-report", async (req, reply) => {
+    function parseDateOnly(s) {
+      const t = String(s || "").trim();
+      return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null;
+    }
+
+    const date_from = parseDateOnly(req.query?.date_from);
+    const date_to = parseDateOnly(req.query?.date_to);
+    if (!date_from || !date_to) {
+      return reply.code(400).send({ error: "date_from and date_to are required (YYYY-MM-DD)" });
+    }
+    if (date_from > date_to) {
+      return reply.code(400).send({ error: "date_from must be on or before date_to" });
+    }
+
+    const part_filter = String(req.query?.part_code || "").trim();
+    const smDateCol = hasColumn("stock_movements", "created_at") ? "sm.created_at" : "sm.movement_date";
+    const smDateTimeExpr = `datetime(${smDateCol})`;
+
+    const startDt = `${date_from} 00:00:00`;
+    const endDt = `${date_to} 23:59:59`;
+
+    const where = [`${smDateTimeExpr} >= datetime(?)`, `${smDateTimeExpr} <= datetime(?)`];
+    const params = [startDt, endDt];
+
+    if (part_filter) {
+      where.push("p.part_code LIKE ?");
+      params.push(`%${part_filter}%`);
+    }
+
+    const whereSql = where.join(" AND ");
+
+    const summaryRow = db.prepare(`
+      SELECT
+        COUNT(*) AS movement_count,
+        IFNULL(SUM(CASE WHEN sm.quantity > 0 THEN sm.quantity ELSE 0 END), 0) AS qty_in,
+        IFNULL(SUM(CASE WHEN sm.quantity < 0 THEN ABS(sm.quantity) ELSE 0 END), 0) AS qty_out,
+        IFNULL(SUM(sm.quantity), 0) AS net_qty
+      FROM stock_movements sm
+      JOIN parts p ON p.id = sm.part_id
+      WHERE ${whereSql}
+    `).get(...params);
+
+    const totalMatchRow = db.prepare(`
+      SELECT COUNT(*) AS c
+      FROM stock_movements sm
+      JOIN parts p ON p.id = sm.part_id
+      WHERE ${whereSql}
+    `).get(...params);
+
+    const maxRows = 5000;
+    const rows = db.prepare(`
+      SELECT
+        sm.id,
+        ${smDateCol} AS movement_at,
+        sm.movement_type,
+        sm.quantity,
+        sm.reference,
+        l.location_code,
+        l.location_name,
+        ${hasColumn("stock_movements", "bin_id") ? "b.bin_code" : "NULL"} AS bin_code,
+        p.part_code,
+        p.part_name
+      FROM stock_movements sm
+      JOIN parts p ON p.id = sm.part_id
+      LEFT JOIN stock_locations l ON l.id = sm.location_id
+      ${hasColumn("stock_movements", "bin_id") ? "LEFT JOIN stock_bins b ON b.id = sm.bin_id" : ""}
+      WHERE ${whereSql}
+      ORDER BY ${smDateTimeExpr} DESC, sm.id DESC
+      LIMIT ${maxRows}
+    `).all(...params).map((r) => ({
+      ...r,
+      id: Number(r.id || 0),
+      quantity: Number(r.quantity || 0),
+    }));
+
+    const totalMatching = Number(totalMatchRow?.c || 0);
+
+    return reply.send({
+      ok: true,
+      date_from,
+      date_to,
+      part_filter: part_filter || null,
+      summary: {
+        movement_count: Number(summaryRow?.movement_count || 0),
+        qty_in: Number(summaryRow?.qty_in || 0),
+        qty_out: Number(summaryRow?.qty_out || 0),
+        net_qty: Number(summaryRow?.net_qty || 0),
+      },
+      truncated: totalMatching > rows.length,
+      row_limit: maxRows,
+      total_matching: totalMatching,
+      rows,
+    });
+  });
+
   // Set minimum stock for a specific part
   // POST /api/stock/part-minimum
   // Body: { part_code, min_stock }

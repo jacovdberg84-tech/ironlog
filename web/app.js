@@ -4652,6 +4652,122 @@ function exportStockOnHandCsv() {
   setStatus("Stock CSV exported.");
 }
 
+/** Last loaded stock movements report (period ledger). */
+let stockMovementsReportData = { rows: [], date_from: "", date_to: "", part_filter: "", truncated: false };
+
+function ensureStockMovementsReportDates() {
+  const fromEl = qs("smrDateFrom");
+  const toEl = qs("smrDateTo");
+  if (!fromEl || !toEl) return;
+  if (!fromEl.value || !toEl.value) {
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth(), 1);
+    const pad = (n) => String(n).padStart(2, "0");
+    const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    if (!fromEl.value) fromEl.value = ymd(start);
+    if (!toEl.value) toEl.value = ymd(today);
+  }
+}
+
+async function loadStockMovementsReport() {
+  ensureStockMovementsReportDates();
+  const date_from = (qs("smrDateFrom")?.value || "").trim();
+  const date_to = (qs("smrDateTo")?.value || "").trim();
+  const part_code = (qs("smrPartFilter")?.value || "").trim();
+  if (!date_from || !date_to) return alert("Choose From and To dates.");
+
+  const q = new URLSearchParams();
+  q.set("date_from", date_from);
+  q.set("date_to", date_to);
+  if (part_code) q.set("part_code", part_code);
+
+  setStatus("Loading stock movements report...");
+  setSkeleton("smrList", 2);
+
+  const data = await fetchJson(`${API}/api/stock/movements-report?${q.toString()}`);
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  const summary = data.summary || {};
+
+  stockMovementsReportData = {
+    rows,
+    date_from: data.date_from || date_from,
+    date_to: data.date_to || date_to,
+    part_filter: data.part_filter || part_code || "",
+    truncated: Boolean(data.truncated),
+    total_matching: Number(data.total_matching || rows.length),
+    row_limit: Number(data.row_limit || 0),
+  };
+
+  setText("smrMoveCount", String(summary.movement_count ?? "-"));
+  setText("smrQtyIn", summary.qty_in != null ? Number(summary.qty_in).toFixed(2) : "-");
+  setText("smrQtyOut", summary.qty_out != null ? Number(summary.qty_out).toFixed(2) : "-");
+  setText("smrNetQty", summary.net_qty != null ? Number(summary.net_qty).toFixed(2) : "-");
+
+  const trunc = qs("smrTruncNote");
+  const truncText = qs("smrTruncText");
+  if (trunc && truncText) {
+    if (stockMovementsReportData.truncated) {
+      trunc.style.display = "";
+      truncText.textContent = `Showing the latest ${rows.length} of ${stockMovementsReportData.total_matching} movements in this period (export CSV includes loaded rows only). Increase precision with a narrower date range or part filter.`;
+    } else {
+      trunc.style.display = "none";
+      truncText.textContent = "";
+    }
+  }
+
+  const list = qs("smrList");
+  if (list) {
+    list.innerHTML = "";
+    rows.forEach((r) => {
+      const qty = Number(r.quantity || 0);
+      const loc = r.location_code || "—";
+      const bin = r.bin_code ? String(r.bin_code) : "";
+      list.appendChild(
+        item(
+          `<b>${r.part_code || ""}</b> — ${qty.toFixed(2)} (${r.movement_type || ""})` +
+            `<br><small>${r.movement_at || ""} | ${loc}${bin ? " / " + bin : ""} | ${r.reference || "—"}</small>` +
+            `<br><small>${r.part_name || ""}</small>`
+        )
+      );
+    });
+    if (!rows.length) list.appendChild(item("<small>No movements in this period for the current filter.</small>"));
+  }
+
+  setStatus("Stock movements report ready.");
+}
+
+function exportStockMovementsReportCsv() {
+  const { rows, date_from, date_to } = stockMovementsReportData;
+  if (!rows.length) return alert("Load the stock movements report first.");
+
+  const header =
+    "movement_at,part_code,part_name,movement_type,quantity,reference,location_code,bin_code";
+  const lines = rows.map((r) =>
+    [
+      r.movement_at || "",
+      r.part_code || "",
+      `"${String(r.part_name || "").replace(/"/g, '""')}"`,
+      r.movement_type || "",
+      Number(r.quantity || 0),
+      `"${String(r.reference || "").replace(/"/g, '""')}"`,
+      r.location_code || "",
+      r.bin_code || "",
+    ].join(",")
+  );
+  const csv = [header, ...lines].join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `stock_movements_${date_from || "from"}_${date_to || "to"}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  setStatus("Stock movements CSV exported.");
+}
+
 function openStockOnHandPdf() {
   const filter = (qs("spFilter")?.value || "").trim();
   const q = filter ? `?part_code=${encodeURIComponent(filter)}` : "";
@@ -10975,6 +11091,10 @@ async function init() {
   );
   qs("spExportCsv")?.addEventListener("click", exportStockOnHandCsv);
   qs("spOpenPdf")?.addEventListener("click", openStockOnHandPdf);
+  qs("smrLoad")?.addEventListener("click", () =>
+    loadStockMovementsReport().catch((e) => setStatus("Stock movements report error: " + e.message))
+  );
+  qs("smrExportCsv")?.addEventListener("click", exportStockMovementsReportCsv);
   qs("loadAudit")?.addEventListener("click", () =>
     loadAuditLogs().catch((e) => setStatus("Audit error: " + e.message))
   );

@@ -1693,6 +1693,63 @@
           </div>
         </div>
 
+        <!-- Stock movements report -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #f0fdf4; color: #15803d;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+              </div>
+              <div>
+                <h3>Stock movements report</h3>
+                <p class="muted small">Ledger movements for a selected period (optional part filter)</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>From</label>
+                <input id="smrDateFrom" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>To</label>
+                <input id="smrDateTo" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Part code (optional)</label>
+                <input id="smrPartFilter" class="w-full" placeholder="Contains…" list="partCodeOptions" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="smrLoad" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                  Load report
+                </button>
+              </div>
+            </div>
+            <div class="kpi-pills">
+              <span class="kpi-pill kpi-pill-blue"><strong>Movements:</strong> <span id="smrMoveCount">-</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Qty in:</strong> <span id="smrQtyIn">-</span></span>
+              <span class="kpi-pill kpi-pill-orange"><strong>Qty out:</strong> <span id="smrQtyOut">-</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Net:</strong> <span id="smrNetQty">-</span></span>
+            </div>
+            <div class="info-note" id="smrTruncNote" style="display: none; margin-top: 12px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              <span id="smrTruncText"></span>
+            </div>
+            <div class="action-buttons" style="margin-top: 12px;">
+              <button id="smrExportCsv" class="btn btn-secondary btn-sm">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Export CSV
+              </button>
+            </div>
+            <div class="list" id="smrList" style="margin-top: 12px;"></div>
+          </div>
+        </div>
+
         <!-- Stores Allocation Card -->
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
