@@ -5694,6 +5694,32 @@
     IRONLOG — truthful data. Production-driven KPIs.
   </footer>
 
+  <button type="button" id="ironmindHelpFab" class="ironmind-help-fab" title="Help using IRONLOG" aria-label="Help using IRONLOG">
+    <span class="ironmind-help-fab-icon" aria-hidden="true">?</span>
+  </button>
+  <div id="ironmindHelpModal" class="ironmind-help-modal-wrap" aria-hidden="true">
+    <div id="ironmindHelpBackdrop" class="ironmind-help-backdrop"></div>
+    <div class="ironmind-help-modal" role="dialog" aria-modal="true" aria-labelledby="ironmindHelpTitle">
+      <div class="ironmind-help-modal-head">
+        <div>
+          <h3 id="ironmindHelpTitle">IRONLOG help</h3>
+          <p class="muted small" id="ironmindHelpOpener">Need help?</p>
+          <p class="muted small">Section: <span id="ironmindHelpContextLabel">—</span></p>
+        </div>
+        <button type="button" id="ironmindHelpClose" class="btn btn-secondary btn-sm">Close</button>
+      </div>
+      <p class="muted small" style="margin: 0 0 10px;">
+        Ask how to use buttons and flows on this screen. For fleet analysis and downtime insight, open the <strong>IronMind</strong> tab.
+      </p>
+      <textarea id="ironmindHelpInput" rows="3" class="w-full" placeholder="What would you like to do here? (Ctrl+Enter to send)"></textarea>
+      <div class="ironmind-help-actions">
+        <button type="button" id="ironmindHelpSend" class="btn btn-primary btn-sm">Ask</button>
+        <button type="button" id="ironmindHelpClear" class="btn btn-secondary btn-sm">Clear chat</button>
+      </div>
+      <pre class="ironmind-help-answer" id="ironmindHelpAnswer"></pre>
+    </div>
+  </div>
+
   <datalist id="assetCodeOptions"></datalist>
   <datalist id="partCodeOptions"></datalist>
   <datalist id="locationCodeOptions"></datalist>
@@ -5702,6 +5728,6 @@
 
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="./app.js?v=8"></script>
+  <script src="./app.js?v=9"></script>
 </body>
 </html>

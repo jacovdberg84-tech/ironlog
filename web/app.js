@@ -5294,6 +5294,135 @@ function switchTab(key) {
     loadBoSlipSavedList().catch(() => {});
   }
   updateSidebarActiveState(k);
+  try {
+    if (typeof window.updateIronmindHelpFabContext === "function") window.updateIronmindHelpFabContext();
+  } catch (_) {}
+}
+
+/** Current sidebar panel key (e.g. daily, dash, Breakdowns). */
+function getCurrentDashboardTabKey() {
+  const panel =
+    document.querySelector("#mainContent .panel.show") || document.querySelector(".panel.show");
+  if (panel && panel.id && panel.id.startsWith("tab-")) return panel.id.slice(4);
+  const sel = qs("tabSelect");
+  return sel && sel.value ? sel.value : "dash";
+}
+
+const IRONLOG_HELP_OPENERS = {
+  dash: "Need help with the dashboard?",
+  daily: "Need help with daily inputs?",
+  assets: "Need help with assets?",
+  fuel: "Need help with fuel logging and benchmarks?",
+  lube: "Need help with lube?",
+  stock: "Need help with stores / stock?",
+  legal: "Need help with legal documents?",
+  uploads: "Need help with CSV uploads?",
+  reports: "Need help with reports?",
+  approvals: "Need help with approvals?",
+  procurement: "Need help with supply flow?",
+  operations: "Need help with site operations?",
+  dispatch: "Need help with dispatch?",
+  quality: "Need help with data quality?",
+  audit: "Need help with the audit trail?",
+  vehicle: "Need help with LDV checks?",
+  admin: "Need help with user admin?",
+  docs: "Need help with AI documents?",
+  ironmind:
+    "IronMind analyses fleet data here — use this Help button only for how to use IRONLOG screens.",
+  finance: "Need help with finance?",
+  enterprise: "Need help with enterprise views?",
+  exec: "Need help with executive dashboards?",
+  tasks: "Need help with tasks?",
+  Breakdowns: "Need help with breakdowns?",
+  breakdowns: "Need help with breakdowns?",
+};
+
+function getIronlogHelpOpenerForTab(tabKey) {
+  const k = String(tabKey || "").trim();
+  if (IRONLOG_HELP_OPENERS[k]) return IRONLOG_HELP_OPENERS[k];
+  const lower = k.toLowerCase();
+  if (IRONLOG_HELP_OPENERS[lower]) return IRONLOG_HELP_OPENERS[lower];
+  return `Need help with this section (${k})?`;
+}
+
+let ironmindHelpHistory = [];
+
+window.updateIronmindHelpFabContext = function updateIronmindHelpFabContext() {
+  const openerEl = qs("ironmindHelpOpener");
+  const tab = getCurrentDashboardTabKey();
+  const text = getIronlogHelpOpenerForTab(tab);
+  if (openerEl) openerEl.textContent = text;
+  const ctxEl = qs("ironmindHelpContextLabel");
+  if (ctxEl) ctxEl.textContent = tab;
+};
+
+async function sendIronmindHelpMessage() {
+  const input = qs("ironmindHelpInput");
+  const out = qs("ironmindHelpAnswer");
+  const q = (input?.value || "").trim();
+  if (!q) return;
+  setStatus("Getting help…");
+  const tab = getCurrentDashboardTabKey();
+  try {
+    const data = await fetchJson(`${API}/api/ironmind/help`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question: q,
+        context_key: tab,
+        history: ironmindHelpHistory.slice(-6),
+      }),
+    });
+    const ans = String(data.answer || "");
+    if (out) {
+      const block = `Q: ${q}\n\n${ans}`;
+      out.textContent = out.textContent ? `${out.textContent}\n\n---\n\n${block}` : block;
+    }
+    ironmindHelpHistory.push({ question: q, answer: ans });
+    if (input) input.value = "";
+    setStatus(`Help ready (${data.mode === "live_ai" ? "AI" : "guide"}).`);
+  } catch (e) {
+    setStatus("Help error: " + (e.message || e));
+  }
+}
+
+function initIronmindHelpUi() {
+  const fab = qs("ironmindHelpFab");
+  const modal = qs("ironmindHelpModal");
+  const backdrop = qs("ironmindHelpBackdrop");
+  const closeBtn = qs("ironmindHelpClose");
+  const sendBtn = qs("ironmindHelpSend");
+  const clearBtn = qs("ironmindHelpClear");
+  const input = qs("ironmindHelpInput");
+
+  function closeModal() {
+    modal?.classList.remove("show");
+    modal?.setAttribute("aria-hidden", "true");
+  }
+
+  fab?.addEventListener("click", () => {
+    window.updateIronmindHelpFabContext?.();
+    if (qs("ironmindHelpAnswer")) qs("ironmindHelpAnswer").textContent = "";
+    ironmindHelpHistory = [];
+    modal?.classList.add("show");
+    modal?.setAttribute("aria-hidden", "false");
+    setTimeout(() => input?.focus(), 50);
+  });
+  backdrop?.addEventListener("click", closeModal);
+  closeBtn?.addEventListener("click", closeModal);
+  clearBtn?.addEventListener("click", () => {
+    if (qs("ironmindHelpAnswer")) qs("ironmindHelpAnswer").textContent = "";
+    ironmindHelpHistory = [];
+  });
+  sendBtn?.addEventListener("click", () => sendIronmindHelpMessage().catch(() => {}));
+  input?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      sendIronmindHelpMessage().catch(() => {});
+    }
+  });
+
+  window.updateIronmindHelpFabContext?.();
 }
 
 function initTabs() {
@@ -10588,6 +10717,7 @@ async function init() {
   await tryInitialSession();
   initSidebar();
   initTabs();
+  initIronmindHelpUi();
   initSectionCollapseToggles();
   initSessionControls();
   initVehicleCheckTab();

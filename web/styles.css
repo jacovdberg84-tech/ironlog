@@ -4863,6 +4863,100 @@ body.sidebar-collapsed .main-content {
   border-color: rgba(220, 38, 38, 0.3) !important;
 }
 
+/* Floating IRONLOG Help (UI assistant — separate from IronMind /ask) */
+.ironmind-help-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 24px;
+  z-index: 10001;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  background: linear-gradient(145deg, #4338ca, #6366f1);
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(67, 56, 202, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.ironmind-help-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(67, 56, 202, 0.5);
+}
+.ironmind-help-fab-icon {
+  font-size: 1.35rem;
+  font-weight: 800;
+  line-height: 1;
+}
+body.login-locked .ironmind-help-fab {
+  display: none;
+}
+
+.ironmind-help-modal-wrap {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 10002;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.ironmind-help-modal-wrap.show {
+  display: flex;
+}
+.ironmind-help-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+}
+.ironmind-help-modal {
+  position: relative;
+  z-index: 1;
+  width: min(520px, 100%);
+  max-height: min(88vh, 720px);
+  overflow: auto;
+  background: var(--card-bg, #fff);
+  color: var(--text, #111);
+  border-radius: 14px;
+  padding: 18px 20px 20px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+.ironmind-help-modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.ironmind-help-modal-head h3 {
+  margin: 0 0 4px;
+  font-size: 1.15rem;
+}
+.ironmind-help-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  margin-bottom: 12px;
+}
+.ironmind-help-answer {
+  margin: 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--bg-soft, #f8fafc);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
 @media (max-width: 1024px) {
   .tasks-layout {
     grid-template-columns: 1fr;

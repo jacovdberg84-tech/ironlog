@@ -895,6 +895,294 @@ export default async function ironmindRoutes(app) {
     }
   });
 
+  // --- In-app UI help (separate from maintenance /ask intelligence) ---
+  const helpRuntime = { last_mode: "unknown", last_error: "" };
+
+  function normalizeHelpContextKey(raw) {
+    const s = String(raw || "").trim();
+    if (!s) return "_default";
+    const lower = s.toLowerCase();
+    if (lower === "breakdowns") return "breakdowns";
+    return lower.replace(/\s+/g, "_");
+  }
+
+  const HELP_UI_CONTEXTS = {
+    _default: {
+      title: "IRONLOG (general)",
+      hints: [
+        "Use the left sidebar to switch areas; the mobile menu at the top of the page lists the same sections.",
+        "The top bar has the report date, scheduled hours, and session (user / role / site).",
+        "Tabs you do not see are usually hidden by your role.",
+        "For fleet and maintenance analysis (downtime, risk, PM), use the IronMind tab — not this help assistant.",
+      ],
+    },
+    dash: {
+      title: "Dashboard",
+      hints: [
+        "Shows fleet KPIs and headline metrics for the selected date (top bar).",
+        "Use other tabs for entering or editing underlying data (Daily, Fuel, etc.).",
+      ],
+    },
+    daily: {
+      title: "Daily input",
+      hints: [
+        "Capture production hours, meter readings, and utilisation per asset for the selected day.",
+        "Save per row or use bulk actions where provided; check status messages after save.",
+        "Date scope follows the global date in the top bar unless a screen overrides it.",
+      ],
+    },
+    assets: {
+      title: "Assets",
+      hints: [
+        "View and manage equipment master data: codes, categories, baselines.",
+        "Changes may affect fuel benchmarks and reporting — follow local governance.",
+      ],
+    },
+    fuel: {
+      title: "Fuel",
+      hints: [
+        "Log fills and consumption; benchmark charts compare actual vs OEM baselines.",
+        "LDVs often use km mode; heavy machines may use L/hr — see filters on the screen.",
+        "Use PDF/Excel actions on this tab where available for exports.",
+      ],
+    },
+    lube: {
+      title: "Lube",
+      hints: [
+        "Track lubrication issues and related stock usage.",
+        "Stock movements for lubricants are linked from Stores where configured.",
+      ],
+    },
+    stock: {
+      title: "Stores",
+      hints: [
+        "Stock on hand, movements, cycle counts, locations/bins, and lube receive/issue flows.",
+        "Use part codes consistently with procurement; filter lists by code to find SKUs.",
+      ],
+    },
+    legal: {
+      title: "Legal documents",
+      hints: [
+        "Register and track compliance documents, expiries, and statuses.",
+        "Upload/download follows your organisation’s legal workflow.",
+      ],
+    },
+    uploads: {
+      title: "CSV uploads",
+      hints: [
+        "Bulk import endpoints — choose the correct template, validate columns, then upload.",
+        "Prefer staging data in test before large production imports.",
+      ],
+    },
+    reports: {
+      title: "Reports",
+      hints: [
+        "Generate PDF/XLSX packs; set date ranges and filters before export.",
+        "Scheduled subscriptions are configured under Maintenance on some deployments.",
+      ],
+    },
+    approvals: {
+      title: "Approvals",
+      hints: [
+        "Review pending requests (e.g. stock adjustments, HR/legal workflows depending on setup).",
+        "Approve or reject with notes where required.",
+      ],
+    },
+    procurement: {
+      title: "Supply flow / procurement",
+      hints: [
+        "Requisitions, orders, and receiving — match parts to stock codes used in Stores.",
+      ],
+    },
+    operations: {
+      title: "Site operations",
+      hints: [
+        "Operational checklists and site-level workflows — follow instructions on each card.",
+      ],
+    },
+    dispatch: {
+      title: "Dispatch",
+      hints: [
+        "Coordinate jobs or assignments depending on your organisation’s IRONLOG setup.",
+      ],
+    },
+    quality: {
+      title: "Data quality",
+      hints: [
+        "Identify anomalies or inconsistent records; fix source data in the relevant tab.",
+      ],
+    },
+    audit: {
+      title: "Audit trail",
+      hints: [
+        "Read-only history of user and system actions — filter by module or date if available.",
+      ],
+    },
+    vehicle: {
+      title: "LDV vehicle check",
+      hints: [
+        "Light vehicle inspection flows and PDFs — complete required fields before submit.",
+      ],
+    },
+    admin: {
+      title: "User admin",
+      hints: [
+        "Manage users and roles when your login has permission; changes apply on next session refresh.",
+      ],
+    },
+    docs: {
+      title: "AI documents",
+      hints: [
+        "Organisation documents indexed for search — not the same as IronMind fleet analysis.",
+      ],
+    },
+    ironmind: {
+      title: "IronMind (maintenance intelligence)",
+      hints: [
+        "This tab is for downtime, risk, PM, and fleet-style questions using live data.",
+        "Use the Ask box there for maintenance intelligence — use the floating Help button only for how-to on using IRONLOG screens.",
+      ],
+    },
+    finance: {
+      title: "Finance",
+      hints: [
+        "Financial summaries and exports — figures depend on underlying operational data quality.",
+      ],
+    },
+    enterprise: {
+      title: "Enterprise",
+      hints: [
+        "Multi-site or portfolio views when enabled for your account.",
+      ],
+    },
+    exec: {
+      title: "Executive",
+      hints: [
+        "High-level dashboards for leadership when enabled.",
+      ],
+    },
+    tasks: {
+      title: "Tasks",
+      hints: [
+        "Personal or team task lists — create, assign, and complete items as per your workflow.",
+      ],
+    },
+    breakdowns: {
+      title: "Breakdowns",
+      hints: [
+        "Log and manage breakdown incidents, downtime, and related workflows.",
+        "Photos and ops slips may link to InspectPro depending on configuration.",
+      ],
+    },
+  };
+
+  function buildHelpScreenContextBlock(contextKey) {
+    const k = normalizeHelpContextKey(contextKey);
+    const ctx = HELP_UI_CONTEXTS[k] || HELP_UI_CONTEXTS._default;
+    const head = `Active section: ${ctx.title}`;
+    const body = (ctx.hints || []).map((h) => `• ${h}`).join("\n");
+    return `${head}\n${body}`;
+  }
+
+  function fallbackHelpAnswer(contextKey, question) {
+    const k = normalizeHelpContextKey(contextKey);
+    const ctx = HELP_UI_CONTEXTS[k] || HELP_UI_CONTEXTS._default;
+    const hints = (ctx.hints || []).map((h) => `- ${h}`).join("\n");
+    return [
+      `**${ctx.title}** — quick pointers:`,
+      hints,
+      "",
+      `You asked: "${question.slice(0, 500)}${question.length > 500 ? "…" : ""}"`,
+      "",
+      "Tailored answers need **OPENAI_API_KEY** on the IRONLOG API server. Until then, use the hints above and your site’s SOP.",
+    ].join("\n");
+  }
+
+  async function tryAnswerHelpWithOpenAI({ question, contextKey, history, cfg }) {
+    const screenBlock = buildHelpScreenContextBlock(contextKey);
+    const system = [
+      "You are IRONLOG Help — you ONLY explain how to use the IRONLOG web application (navigation, fields, workflows).",
+      "You are NOT the IronMind maintenance assistant: do not analyse downtime hours, fleet KPIs, or asset risk unless the user is asking where in the UI to find those features.",
+      "If the user wants data-driven maintenance insight, say briefly that the IronMind tab is for that, and continue with UI guidance when relevant.",
+      "Answer in clear short paragraphs or bullet steps. Do not mention model cutoffs or generic AI disclaimers.",
+      "",
+      screenBlock,
+    ].join("\n");
+
+    const hist = Array.isArray(history) ? history.slice(-6) : [];
+    const msgHist = hist.flatMap((h) => {
+      const q = String(h?.question || "").trim();
+      const a = String(h?.answer || "").trim();
+      const o = [];
+      if (q) o.push({ role: "user", content: q });
+      if (a) o.push({ role: "assistant", content: a });
+      return o;
+    });
+
+    try {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${cfg.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: cfg.model || "gpt-4o-mini",
+          temperature: 0.25,
+          max_tokens: 900,
+          messages: [{ role: "system", content: system }, ...msgHist, { role: "user", content: question }],
+        }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      const text = String(data?.choices?.[0]?.message?.content || "").trim();
+      return text || null;
+    } catch {
+      return null;
+    }
+  }
+
+  // POST /api/ironmind/help — product / UI help only (not maintenance /ask)
+  app.post("/help", async (req, reply) => {
+    try {
+      const body = req.body || {};
+      const question = String(body.question || "").trim();
+      if (!question) return reply.code(400).send({ ok: false, error: "question is required" });
+      if (question.length > 4000) return reply.code(400).send({ ok: false, error: "question is too long" });
+      const context_key = normalizeHelpContextKey(body.context_key || body.current_tab || "");
+      const history = Array.isArray(body.history) ? body.history : [];
+
+      const cfg = getAiConfig();
+      let answer = null;
+      let mode = "fallback";
+      if (cfg.provider === "openai") {
+        answer = await tryAnswerHelpWithOpenAI({ question, contextKey: context_key, history, cfg });
+        if (answer) {
+          mode = "live_ai";
+          helpRuntime.last_mode = "live_ai";
+          helpRuntime.last_error = "";
+        }
+      }
+      if (!answer) {
+        answer = fallbackHelpAnswer(context_key, question);
+        helpRuntime.last_mode = "fallback";
+        helpRuntime.last_error = cfg.provider === "openai" ? "openai_returned_empty" : "no_openai_key";
+      }
+      return reply.send({
+        ok: true,
+        answer,
+        mode,
+        context_key: context_key || "_default",
+        assistant: "ironlog_help",
+      });
+    } catch (err) {
+      helpRuntime.last_mode = "error";
+      helpRuntime.last_error = err?.message || String(err);
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
   app.post("/ask", async (req, reply) => {
     try {
       const body = req.body || {};
