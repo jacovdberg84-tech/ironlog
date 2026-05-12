@@ -545,7 +545,14 @@ export default async function ironmindRoutes(app) {
     }
   }
 
-  async function tryAnswerIronmindAskWithAi({ question, start, end, assetCode = "", history = [] }) {
+  async function tryAnswerIronmindAskWithAi({
+    question,
+    start,
+    end,
+    assetCode = "",
+    history = [],
+    contextNotes = "",
+  }) {
     const cfg = getAiConfig();
     if (!cfg.provider) return null;
     const latest = getLatestIronmindReport("daily_admin");
@@ -578,6 +585,7 @@ export default async function ironmindRoutes(app) {
       : null;
     const system = [
       "You are IronMind, a maintenance intelligence assistant for plant operations.",
+      "Respond naturally to brief greetings or thanks (e.g. match a short 'good morning'), then invite a maintenance question or offer a concise fleet tip when context allows.",
       "Answer practically and clearly with operational context.",
       "Do not ask for asset code unless absolutely needed.",
       "Use available fleet context and provide actionable next steps.",
@@ -596,6 +604,7 @@ export default async function ironmindRoutes(app) {
           return arr;
         })
       : [];
+    const notes = String(contextNotes || "").trim().slice(0, 2500);
     const context = {
       period: { start, end },
       fleet: {
@@ -606,6 +615,7 @@ export default async function ironmindRoutes(app) {
       },
       asset_context: assetContext || null,
       latest_summary: summary || null,
+      context_notes: notes || null,
     };
     try {
       const data = await openAiCompatibleChatCompletion({
@@ -1199,6 +1209,7 @@ export default async function ironmindRoutes(app) {
       "You are IRONLOG Help — you ONLY explain how to use the IRONLOG web application (navigation, fields, workflows).",
       "You are NOT the IronMind maintenance assistant: do not analyse downtime hours, fleet KPIs, or asset risk unless the user is asking where in the UI to find those features.",
       "If the user wants data-driven maintenance insight, say briefly that the IronMind tab is for that, and continue with UI guidance when relevant.",
+      "For brief greetings or thanks, reply in a short friendly line first, then offer UI help for the active section when it fits.",
       "Answer in clear short paragraphs or bullet steps. Do not mention model cutoffs or generic AI disclaimers.",
       "",
       screenBlock,
@@ -1303,8 +1314,16 @@ export default async function ironmindRoutes(app) {
       const end = isDate(body.end) ? String(body.end) : parsed.end;
       const assetCode = String(body.asset_code || parseAssetCode(question)).trim().toUpperCase();
       const history = Array.isArray(body.history) ? body.history : [];
+      const context_notes = String(body.context_notes || body.extra_context || "").trim();
       const qLower = question.toLowerCase();
-      const live = await tryAnswerIronmindAskWithAi({ question, start, end, assetCode, history });
+      const live = await tryAnswerIronmindAskWithAi({
+        question,
+        start,
+        end,
+        assetCode,
+        history,
+        contextNotes: context_notes,
+      });
       if (live) {
         ironmindRuntime.last_ask_mode = "live_ai";
         ironmindRuntime.last_ask_error = "";

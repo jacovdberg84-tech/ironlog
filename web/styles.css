@@ -4915,8 +4915,8 @@ body.login-locked .ironmind-help-fab {
 .ironmind-help-modal {
   position: relative;
   z-index: 1;
-  width: min(520px, 100%);
-  max-height: min(88vh, 720px);
+  width: min(680px, 96vw);
+  max-height: min(90vh, 800px);
   overflow: auto;
   background: var(--card-bg, #fff);
   color: var(--text, #111);
@@ -4953,7 +4953,7 @@ body.login-locked .ironmind-help-fab {
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 320px;
+  max-height: min(48vh, 420px);
   overflow-y: auto;
 }
 

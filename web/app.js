@@ -3269,6 +3269,7 @@ async function askIronmindQuestion() {
   const input = qs("ironmindAskInput");
   const out = qs("ironmindAskResult");
   const date = qs("date")?.value || todayLocalYmd();
+  const contextNotes = String(qs("ironmindContext")?.value || "").trim();
   window.__ironmindAskHistory = Array.isArray(window.__ironmindAskHistory) ? window.__ironmindAskHistory : [];
   const question = String(input?.value || "").trim();
   if (!question) {
@@ -3280,7 +3281,12 @@ async function askIronmindQuestion() {
     const res = await fetchJson(`${API}/api/ironmind/ask`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, date, history: window.__ironmindAskHistory.slice(-6) }),
+      body: JSON.stringify({
+        question,
+        date,
+        history: window.__ironmindAskHistory.slice(-6),
+        ...(contextNotes ? { context_notes: contextNotes } : {}),
+      }),
     });
     const short = String(res?.short_answer || res?.answer || res?.message || "No answer returned.");
     const safe = escapeHtml(short).replace(/\n/g, "<br>");
