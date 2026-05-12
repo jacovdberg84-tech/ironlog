@@ -2938,6 +2938,8 @@ export default async function reportsRoutes(app) {
         return bv - av;
       });
 
+    const rows = benchmarkRows;
+
     const summary = rows.reduce(
       (acc, r) => {
         acc.assets += 1;
