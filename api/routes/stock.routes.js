@@ -1034,7 +1034,16 @@ export default async function stockRoutes(app) {
       return reply.code(400).send({ error: "date_from must be on or before date_to" });
     }
 
-    const part_filter = String(req.query?.part_code || "").trim();
+    function normalizeStockReportPartFilter(raw) {
+      let s = String(raw || "").trim().replace(/\s+/g, " ");
+      if (!s) return "";
+      // Matches datalist labels "PARTCODE - Description" when users pick or paste the full line.
+      const dashIdx = s.indexOf(" - ");
+      if (dashIdx > 0) s = s.slice(0, dashIdx).trim();
+      return s;
+    }
+
+    const part_filter = normalizeStockReportPartFilter(req.query?.part_code);
     const smDateCol = hasColumn("stock_movements", "created_at") ? "sm.created_at" : "sm.movement_date";
     const smDateTimeExpr = `datetime(${smDateCol})`;
 
@@ -1045,8 +1054,17 @@ export default async function stockRoutes(app) {
     const params = [startDt, endDt];
 
     if (part_filter) {
-      where.push("p.part_code LIKE ?");
-      params.push(`%${part_filter}%`);
+      const exactPart = db.prepare(`
+        SELECT id FROM parts WHERE UPPER(TRIM(part_code)) = UPPER(TRIM(?))
+      `).get(part_filter);
+      if (exactPart) {
+        where.push("sm.part_id = ?");
+        params.push(Number(exactPart.id));
+      } else {
+        // Substring match without LIKE wildcards (% and _ in codes match literally).
+        where.push("instr(LOWER(IFNULL(p.part_code,'')), LOWER(?)) > 0");
+        params.push(part_filter);
+      }
     }
 
     const whereSql = where.join(" AND ");
