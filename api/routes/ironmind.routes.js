@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { generateIronmindReport, getIronmindHistory, getLatestIronmindReport, getIronmindSettings, setIronmindSettings } from "../utils/ironmind.js";
 import { db } from "../db/client.js";
 import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
@@ -906,7 +908,7 @@ export default async function ironmindRoutes(app) {
     return lower.replace(/\s+/g, "_");
   }
 
-  const HELP_UI_CONTEXTS = {
+  const BASE_HELP_UI_CONTEXTS = {
     _default: {
       title: "IRONLOG (general)",
       hints: [
@@ -1076,18 +1078,117 @@ export default async function ironmindRoutes(app) {
     },
   };
 
+  /**
+   * Optional JSON overlay for IRONLOG Help (restart API after edits).
+   * Set IRONLOG_HELP_CONTEXT_PATH (relative to IRONLOG_DATA_DIR or cwd, or absolute).
+   * Fallback files: IRONLOG_DATA_DIR/ironlog-help-context.json then ./ironlog-help-context.json
+   * Shape: { "_global_hints": ["..."], "_global": "paragraph...", "daily": { "hints": [], "title": "", "replace_hints": false } }
+   */
+  function mergeHelpContextsFromFile(base) {
+    const dataRoot = String(process.env.IRONLOG_DATA_DIR || "").trim() || process.cwd();
+    const candidates = [];
+    const envPath = String(process.env.IRONLOG_HELP_CONTEXT_PATH || "").trim();
+    if (envPath) {
+      candidates.push(path.isAbsolute(envPath) ? envPath : path.join(dataRoot, envPath));
+      if (!path.isAbsolute(envPath)) candidates.push(path.join(process.cwd(), envPath));
+    }
+    candidates.push(path.join(dataRoot, "ironlog-help-context.json"));
+    candidates.push(path.join(process.cwd(), "ironlog-help-context.json"));
+
+    let fileJson = null;
+    let loadedPath = "";
+    for (const p of candidates) {
+      try {
+        if (!fs.existsSync(p)) continue;
+        fileJson = JSON.parse(fs.readFileSync(p, "utf8"));
+        loadedPath = p;
+        break;
+      } catch (err) {
+        console.warn(`[ironmind/help] skipped context file ${p}: ${err?.message || err}`);
+      }
+    }
+
+    const globalHints = [];
+    let globalParagraph = "";
+    const out = JSON.parse(JSON.stringify(base));
+    if (!fileJson || typeof fileJson !== "object") {
+      return { contexts: out, globalHints, globalParagraph, loadedPath: "" };
+    }
+    if (Array.isArray(fileJson._global_hints)) {
+      globalHints.push(
+        ...fileJson._global_hints.map((x) => String(x || "").trim()).filter(Boolean),
+      );
+    }
+    if (typeof fileJson._global === "string" && fileJson._global.trim()) {
+      globalParagraph = fileJson._global.trim();
+    }
+
+    for (const [rawKey, val] of Object.entries(fileJson)) {
+      if (String(rawKey).startsWith("_")) continue;
+      const k = normalizeHelpContextKey(rawKey);
+      if (!val || typeof val !== "object") continue;
+      const title = typeof val.title === "string" ? val.title.trim() : "";
+      const hints = Array.isArray(val.hints)
+        ? val.hints.map((x) => String(x || "").trim()).filter(Boolean)
+        : [];
+      const replaceHints =
+        val.replace_hints === true ||
+        val.replace_hints === 1 ||
+        String(val.replace_hints || "").toLowerCase() === "true";
+      if (!out[k]) {
+        out[k] = { title: title || k, hints: [...hints] };
+        continue;
+      }
+      if (title) out[k].title = title;
+      if (hints.length) {
+        if (replaceHints) out[k].hints = hints;
+        else out[k].hints = [...(out[k].hints || []), ...hints];
+      }
+    }
+
+    return { contexts: out, globalHints, globalParagraph, loadedPath };
+  }
+
+  const _helpMerged = mergeHelpContextsFromFile(BASE_HELP_UI_CONTEXTS);
+  const HELP_UI_CONTEXTS = _helpMerged.contexts;
+  const HELP_GLOBAL_HINTS_EXTRA = _helpMerged.globalHints;
+  const HELP_GLOBAL_PARAGRAPH = _helpMerged.globalParagraph;
+  const HELP_CONTEXT_LOADED_PATH = _helpMerged.loadedPath;
+  if (HELP_CONTEXT_LOADED_PATH) {
+    console.info(`[ironmind/help] Loaded extra UI context from ${HELP_CONTEXT_LOADED_PATH}`);
+  }
+
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS ironmind_help_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      site_code TEXT NOT NULL DEFAULT 'main',
+      user_name TEXT NOT NULL DEFAULT '',
+      context_key TEXT NOT NULL DEFAULT '',
+      question TEXT NOT NULL,
+      answer_preview TEXT,
+      mode TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  db.prepare(`
+    CREATE INDEX IF NOT EXISTS idx_ironmind_help_logs_created
+    ON ironmind_help_logs(created_at DESC)
+  `).run();
+
   function buildHelpScreenContextBlock(contextKey) {
     const k = normalizeHelpContextKey(contextKey);
     const ctx = HELP_UI_CONTEXTS[k] || HELP_UI_CONTEXTS._default;
     const head = `Active section: ${ctx.title}`;
-    const body = (ctx.hints || []).map((h) => `• ${h}`).join("\n");
+    const bodyHints = [...(ctx.hints || []), ...HELP_GLOBAL_HINTS_EXTRA];
+    const body = bodyHints.map((h) => `• ${h}`).join("\n");
     return `${head}\n${body}`;
   }
 
   function fallbackHelpAnswer(contextKey, question) {
     const k = normalizeHelpContextKey(contextKey);
     const ctx = HELP_UI_CONTEXTS[k] || HELP_UI_CONTEXTS._default;
-    const hints = (ctx.hints || []).map((h) => `- ${h}`).join("\n");
+    const mergedHints = [...(ctx.hints || []), ...HELP_GLOBAL_HINTS_EXTRA];
+    const hints = mergedHints.map((h) => `- ${h}`).join("\n");
     return [
       `**${ctx.title}** — quick pointers:`,
       hints,
@@ -1100,6 +1201,9 @@ export default async function ironmindRoutes(app) {
 
   async function tryAnswerHelpWithOpenAI({ question, contextKey, history, cfg }) {
     const screenBlock = buildHelpScreenContextBlock(contextKey);
+    const orgNotes = HELP_GLOBAL_PARAGRAPH
+      ? `\n\nOrganisation notes:\n${HELP_GLOBAL_PARAGRAPH}`
+      : "";
     const system = [
       "You are IRONLOG Help — you ONLY explain how to use the IRONLOG web application (navigation, fields, workflows).",
       "You are NOT the IronMind maintenance assistant: do not analyse downtime hours, fleet KPIs, or asset risk unless the user is asking where in the UI to find those features.",
@@ -1107,6 +1211,7 @@ export default async function ironmindRoutes(app) {
       "Answer in clear short paragraphs or bullet steps. Do not mention model cutoffs or generic AI disclaimers.",
       "",
       screenBlock,
+      orgNotes,
     ].join("\n");
 
     const hist = Array.isArray(history) ? history.slice(-6) : [];
@@ -1168,12 +1273,32 @@ export default async function ironmindRoutes(app) {
         helpRuntime.last_mode = "fallback";
         helpRuntime.last_error = cfg.provider === "openai" ? "openai_returned_empty" : "no_openai_key";
       }
+
+      try {
+        const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+        const user_name = String(req.headers?.["x-user-name"] || "").trim().slice(0, 160);
+        db.prepare(`
+          INSERT INTO ironmind_help_logs (site_code, user_name, context_key, question, answer_preview, mode)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(
+          site_code,
+          user_name,
+          context_key || "_default",
+          question.slice(0, 4000),
+          String(answer || "").slice(0, 600),
+          mode,
+        );
+      } catch (_) {
+        /* logging must not break help */
+      }
+
       return reply.send({
         ok: true,
         answer,
         mode,
         context_key: context_key || "_default",
         assistant: "ironlog_help",
+        help_context_file: HELP_CONTEXT_LOADED_PATH || null,
       });
     } catch (err) {
       helpRuntime.last_mode = "error";

@@ -1,0 +1,18 @@
+{
+  "_global_hints": [
+    "At this site, always confirm shift handover before editing yesterday's daily rows.",
+    "Escalate SAP sync issues to the maintenance clerk."
+  ],
+  "_global": "Site policy: never delete audit-backed rows—use the correction workflow described in the Stores tab.",
+  "daily": {
+    "hints": [
+      "Use 'Apply row' after editing a single machine to avoid losing meter corrections."
+    ]
+  },
+  "stock": {
+    "replace_hints": false,
+    "hints": [
+      "Cycle counts require supervisor approval at this plant — submit from Inventory Control."
+    ]
+  }
+}
