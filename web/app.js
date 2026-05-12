@@ -5676,6 +5676,66 @@ function openLubePdf() {
   window.open(`${API}/api/reports/lube.pdf?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`, "_blank");
 }
 
+function downloadLubeUsageXlsx() {
+  const start = qs("lubeStart")?.value || "";
+  const end = qs("lubeEnd")?.value || "";
+  if (!start || !end) return alert("Select lube period first.");
+  const monthRaw = String(qs("lubeStockMonth")?.value || "").trim();
+  const month = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : start.slice(0, 7);
+  const loc = String(qs("lubeStockLoc")?.value || "").trim().toUpperCase();
+  const q = new URLSearchParams({ start, end, month });
+  if (loc) q.set("location_code", loc);
+  window.open(`${API}/api/reports/lube-usage-by-asset.xlsx?${q}`, "_blank");
+}
+
+function renderLubeMonthStockTable(data) {
+  const el = qs("lubeMonthStockList");
+  if (!el) return;
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  const loc = data?.location_code ? ` · ${escapeHtml(String(data.location_code))}` : "";
+  const head = `<div class="muted mini" style="margin-bottom:6px;">Store balances${loc} — opening as-of <strong>${escapeHtml(String(data?.opening_as_of || ""))}</strong>, closing <strong>${escapeHtml(String(data?.closing_as_of || ""))}</strong> (${escapeHtml(String(data?.month || ""))})</div>`;
+  if (!rows.length) {
+    el.innerHTML = head + "<small>No lube stock rows returned.</small>";
+    return;
+  }
+  const body = rows
+    .map(
+      (r) =>
+        `<tr><td>${escapeHtml(String(r.part_code || ""))}</td><td>${escapeHtml(String(r.part_name || ""))}</td>` +
+        `<td class="num">${Number(r.min_stock || 0).toFixed(1)}</td>` +
+        `<td class="num">${Number(r.opening_qty || 0).toFixed(2)}</td>` +
+        `<td class="num">${Number(r.closing_qty || 0).toFixed(2)}</td>` +
+        `<td class="num">${Number(r.net_month_movement || 0).toFixed(2)}</td></tr>`
+    )
+    .join("");
+  el.innerHTML =
+    head +
+    `<div style="overflow:auto;"><table class="gridTable" style="min-width:720px;"><thead><tr>` +
+    `<th>Stock code</th><th>Description</th><th>Min</th><th>Opening</th><th>Closing</th><th>Net (month)</th>` +
+    `</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+async function loadLubeMonthStock() {
+  const monthRaw = String(qs("lubeStockMonth")?.value || "").trim();
+  const month = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : "";
+  if (!month) {
+    alert("Pick a month for store opening / closing balances.");
+    return;
+  }
+  const loc = String(qs("lubeStockLoc")?.value || "").trim().toUpperCase();
+  const q = new URLSearchParams({ month });
+  if (loc) q.set("location_code", loc);
+  setStatus("Loading lube month stock...");
+  try {
+    const data = await fetchJson(`${API}/api/stock/lube-month-stock?${q}`);
+    renderLubeMonthStockTable(data);
+    setStatus("Lube month stock ready.");
+  } catch (e) {
+    setStatus("Lube month stock failed: " + (e.message || e));
+    renderLubeMonthStockTable({ rows: [], opening_as_of: "", closing_as_of: "", month: "" });
+  }
+}
+
 function openStockMonitorPdf() {
   const filter = (qs("stockPartFilter")?.value || "").trim();
   const q = filter ? `?part_code=${encodeURIComponent(filter)}` : "";
@@ -11013,6 +11073,10 @@ async function init() {
   qs("openWeekly")?.addEventListener("click", openWeeklyPdf);
   qs("openLubePdf")?.addEventListener("click", openLubePdf);
   qs("openLubePdfFromLube")?.addEventListener("click", openLubePdf);
+  qs("downloadLubeUsageXlsx")?.addEventListener("click", downloadLubeUsageXlsx);
+  qs("loadLubeMonthStock")?.addEventListener("click", () =>
+    loadLubeMonthStock().catch((e) => setStatus("Lube month stock error: " + e.message))
+  );
   qs("openStockMonitorPdf")?.addEventListener("click", openStockMonitorPdf);
   qs("downloadStockMonitorPdf")?.addEventListener("click", downloadStockMonitorPdf);
   qs("openOperationsPdf")?.addEventListener("click", () => openOperationsPdf(false));
@@ -11321,6 +11385,10 @@ async function init() {
   const lubeEnd = qs("lubeEnd");
   if (lubeStart && !lubeStart.value) lubeStart.value = lubeRange.start;
   if (lubeEnd && !lubeEnd.value) lubeEnd.value = lubeRange.end;
+  const lubeStockMonth = qs("lubeStockMonth");
+  if (lubeStockMonth && !lubeStockMonth.value) {
+    lubeStockMonth.value = (lubeStart?.value || lubeRange.end).slice(0, 7);
+  }
   const fuelStart = qs("fuelStart");
   const fuelEnd = qs("fuelEnd");
   if (fuelStart && !fuelStart.value) fuelStart.value = lubeRange.start;

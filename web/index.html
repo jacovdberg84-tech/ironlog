@@ -1046,7 +1046,23 @@
               </label>
               <button id="loadLube" class="btn btn-primary">Load Lube</button>
               <button id="openLubePdfFromLube" class="btn btn-secondary">Open PDF</button>
+              <button id="downloadLubeUsageXlsx" type="button" class="btn btn-secondary">Export Excel</button>
             </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Month (store opening / closing)</label>
+                <input id="lubeStockMonth" type="month" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Store location (optional)</label>
+                <input id="lubeStockLoc" class="w-full" placeholder="e.g. LUBE" list="locationCodeOptions" />
+              </div>
+              <div class="form-field form-field-action">
+                <label>Balances</label>
+                <button id="loadLubeMonthStock" type="button" class="btn btn-secondary">Load month stock</button>
+              </div>
+            </div>
+            <div class="list" id="lubeMonthStockList"></div>
             <div class="kpi-pills">
               <span class="kpi-pill">Qty Total: <strong id="lubeQtyTotal">0</strong></span>
               <span class="kpi-pill">Entries: <strong id="lubeEntries">0</strong></span>

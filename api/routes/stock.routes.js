@@ -7,6 +7,7 @@ import {
   validateAgainstMdmPolicy,
   validatePartGovernanceOptional,
 } from "../utils/masterdataGovernance.js";
+import { fetchLubeMonthStockSnapshot } from "../utils/lubeMonthStock.js";
 
 export default async function stockRoutes(app) {
   ensureAuditTable(db);
@@ -1185,6 +1186,33 @@ export default async function stockRoutes(app) {
       : null;
 
     return reply.send({ ok: true, q, location_code: location ? location.location_code : null, exact, rows });
+  });
+
+  // GET /api/stock/lube-month-stock?month=YYYY-MM&location_code=
+  // Store (parts) opening/closing quantities for lube/oil/grease SKUs from cumulative stock_movements.
+  app.get("/lube-month-stock", async (req, reply) => {
+    const month = String(req.query?.month || "").trim();
+    const location_code = String(req.query?.location_code || "").trim().toUpperCase();
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      return reply.code(400).send({ error: "month must be YYYY-MM" });
+    }
+    const location = location_code ? getLocationByCode.get(location_code) : null;
+    if (location_code && !location) {
+      return reply.code(404).send({ error: `location_code not found: ${location_code}` });
+    }
+    try {
+      const snap = fetchLubeMonthStockSnapshot(db, {
+        month,
+        location_id: location ? Number(location.id) : null,
+      });
+      return reply.send({
+        ok: true,
+        ...snap,
+        location_code: location ? location.location_code : null,
+      });
+    } catch (e) {
+      return reply.code(400).send({ error: String(e.message || e) });
+    }
   });
 
   // Set minimum stock for lube/oil items

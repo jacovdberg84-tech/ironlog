@@ -16,6 +16,7 @@ import {
 } from "../utils/pdfGenerator.js";
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
 import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
+import { fetchLubeMonthStockSnapshot } from "../utils/lubeMonthStock.js";
 
 let maintenanceMasterSchedulerStarted = false;
 let reportSubscriptionsSchedulerStarted = false;
@@ -2649,6 +2650,136 @@ export default async function reportsRoutes(app) {
         `${download ? "attachment" : "inline"}; filename="AML_Lube_${end}.pdf"`
       )
       .send(pdf);
+  });
+
+  // GET /api/reports/lube-usage-by-asset.xlsx?start=YYYY-MM-DD&end=YYYY-MM-DD&month=YYYY-MM&location_code=LUBE
+  // Sheet 1: oil_logs usage by asset + oil type. Sheet 2: month opening/closing store stock for lube SKUs.
+  app.get("/lube-usage-by-asset.xlsx", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
+    const start = String(req.query?.start || "").trim();
+    const end = String(req.query?.end || "").trim();
+    let month = String(req.query?.month || "").trim();
+    const location_code = String(req.query?.location_code || "").trim().toUpperCase();
+    if (!isDate(start) || !isDate(end)) {
+      return reply.code(400).send({ error: "start and end (YYYY-MM-DD) required" });
+    }
+    if (!/^\d{4}-\d{2}$/.test(month)) month = start.slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      return reply.code(400).send({ error: "month could not be derived from start date" });
+    }
+
+    const defaultLubeCost = Number(
+      db.prepare(`SELECT value FROM cost_settings WHERE key = 'lube_cost_per_qty_default' LIMIT 1`).get()?.value
+    );
+    const lubeUnitFallback = Number.isFinite(defaultLubeCost) && defaultLubeCost > 0 ? defaultLubeCost : 4.0;
+
+    let location_id = null;
+    let resolvedLocationCode = "";
+    if (location_code) {
+      const loc = db.prepare(`SELECT id, location_code FROM stock_locations WHERE UPPER(TRIM(location_code)) = ?`).get(location_code);
+      if (!loc) return reply.code(404).send({ error: `location_code not found: ${location_code}` });
+      location_id = Number(loc.id);
+      resolvedLocationCode = String(loc.location_code || location_code);
+    }
+
+    const usageRows = db.prepare(`
+      SELECT
+        a.asset_code,
+        a.asset_name,
+        CASE
+          WHEN LOWER(TRIM(COALESCE(ol.oil_type, ''))) IN ('admin','supervisor','manager','stores','artisan','operator') THEN 'UNSPECIFIED'
+          ELSE COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED')
+        END AS oil_type,
+        MAX(COALESCE(NULLIF(TRIM(p.part_name), ''), '')) AS stock_description,
+        COALESCE(SUM(ol.quantity), 0) AS qty_total,
+        COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS total_lube_cost,
+        COUNT(*) AS entries
+      FROM oil_logs ol
+      JOIN assets a ON a.id = ol.asset_id
+      LEFT JOIN parts p ON UPPER(TRIM(p.part_code)) = UPPER(TRIM(COALESCE(ol.oil_type, '')))
+      WHERE ol.log_date BETWEEN ? AND ?
+      GROUP BY a.asset_code, a.asset_name,
+        CASE
+          WHEN LOWER(TRIM(COALESCE(ol.oil_type, ''))) IN ('admin','supervisor','manager','stores','artisan','operator') THEN 'UNSPECIFIED'
+          ELSE COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED')
+        END
+      ORDER BY a.asset_code ASC, qty_total DESC, 3 ASC
+      LIMIT 5000
+    `).all(lubeUnitFallback, start, end);
+
+    let stockSnap;
+    try {
+      stockSnap = fetchLubeMonthStockSnapshot(db, { month, location_id });
+    } catch (e) {
+      return reply.code(400).send({ error: String(e.message || e) });
+    }
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "IRONLOG";
+    const wsUsage = wb.addWorksheet("Usage by asset", { views: [{ state: "frozen", ySplit: 1 }] });
+    wsUsage.columns = [
+      { header: "Asset code", key: "asset_code", width: 14 },
+      { header: "Asset name", key: "asset_name", width: 28 },
+      { header: "Oil type", key: "oil_type", width: 22 },
+      { header: "Matched stock description", key: "stock_description", width: 36 },
+      { header: "Qty", key: "qty_total", width: 12 },
+      { header: "Est. cost", key: "total_lube_cost", width: 12 },
+      { header: "Log lines", key: "entries", width: 10 },
+    ];
+    for (const r of usageRows) {
+      wsUsage.addRow({
+        asset_code: r.asset_code,
+        asset_name: r.asset_name,
+        oil_type: r.oil_type,
+        stock_description: r.stock_description || "",
+        qty_total: Number(r.qty_total || 0),
+        total_lube_cost: Number(r.total_lube_cost || 0),
+        entries: Number(r.entries || 0),
+      });
+    }
+    wsUsage.getRow(1).font = { bold: true };
+
+    const wsStock = wb.addWorksheet("Month store stock", { views: [{ state: "frozen", ySplit: 6 }] });
+    wsStock.addRow(["Lube store — month opening / closing (from stock movements)"]);
+    wsStock.addRow(["Report usage period (oil logs)", `${start} to ${end}`]);
+    wsStock.addRow(["Stock month (balances)", month]);
+    wsStock.addRow(["Location filter", resolvedLocationCode || "(all locations)"]);
+    wsStock.addRow([
+      "Opening as-of (end prev. month)",
+      stockSnap.opening_as_of,
+      "Closing as-of (end month)",
+      stockSnap.closing_as_of,
+    ]);
+    wsStock.addRow([]);
+    const hdr = wsStock.addRow([
+      "Stock code",
+      "Description",
+      "Min stock",
+      "Opening qty",
+      "Closing qty",
+      "Net movement (month)",
+    ]);
+    hdr.font = { bold: true };
+    for (const r of stockSnap.rows) {
+      wsStock.addRow([
+        r.part_code,
+        r.part_name,
+        r.min_stock,
+        r.opening_qty,
+        r.closing_qty,
+        r.net_month_movement,
+      ]);
+    }
+
+    const safeStart = start.replace(/[^\d-]/g, "");
+    const safeEnd = end.replace(/[^\d-]/g, "");
+    const buffer = await wb.xlsx.writeBuffer();
+    return reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header("Content-Disposition", `attachment; filename="IRONLOG_Lube_Usage_${safeStart}_to_${safeEnd}.xlsx"`)
+      .send(buffer);
   });
 
   // =========================
