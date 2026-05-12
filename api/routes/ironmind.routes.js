@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { generateIronmindReport, getIronmindHistory, getLatestIronmindReport, getIronmindSettings, setIronmindSettings } from "../utils/ironmind.js";
+import {
+  chatEndpointSummaryForLogs,
+  getChatModel,
+  isOpenAiCompatibleConfigured,
+  openAiCompatibleChatCompletion,
+} from "../utils/llmChat.js";
 import { db } from "../db/client.js";
 import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
 
@@ -160,8 +166,9 @@ export default async function ironmindRoutes(app) {
   `).run();
   function getAiConfig() {
     const openaiKey = process.env.OPENAI_API_KEY;
-    const openaiModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
+    const openaiModel = getChatModel();
     if (openaiKey) return { provider: "openai", apiKey: openaiKey, model: openaiModel };
+    if (isOpenAiCompatibleConfigured()) return { provider: "openai", apiKey: "", model: openaiModel };
     return { provider: null };
   }
   function normalizeText(v) {
@@ -517,23 +524,15 @@ export default async function ironmindRoutes(app) {
       ? `Use these site oils and quantities as the default unless clearly unsafe: ${preferredOils.map((o) => `${o.name} ${o.qty}${o.unit || "L"}`).join("; ")}.`
       : "If exact oil grades are uncertain, keep conservative values and tell user to verify with OEM manual.";
     const user = `Generate a ${serviceHours} hour Recommended Service Guide for ${equipmentLabel}. Include key tasks, oil/lube quantities, checks before release, and safety steps. ${oilHint}`;
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${cfg.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: cfg.model,
-        temperature: 0.2,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-      }),
+    const data = await openAiCompatibleChatCompletion({
+      model: cfg.model,
+      temperature: 0.2,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
     });
-    if (!res.ok) return null;
-    const data = await res.json();
+    if (!data) return null;
     const content = String(data?.choices?.[0]?.message?.content || "").trim();
     const start = content.indexOf("{");
     const end = content.lastIndexOf("}");
@@ -548,7 +547,7 @@ export default async function ironmindRoutes(app) {
 
   async function tryAnswerIronmindAskWithAi({ question, start, end, assetCode = "", history = [] }) {
     const cfg = getAiConfig();
-    if (cfg.provider !== "openai") return null;
+    if (!cfg.provider) return null;
     const latest = getLatestIronmindReport("daily_admin");
     const summary = String(latest?.summary || "").slice(0, 2500);
     const fleet = db.prepare(`
@@ -609,24 +608,16 @@ export default async function ironmindRoutes(app) {
       latest_summary: summary || null,
     };
     try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${cfg.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: cfg.model || "gpt-4o-mini",
-          temperature: 0.2,
-          messages: [
-            { role: "system", content: system },
-            ...hist,
-            { role: "user", content: `Context JSON:\n${JSON.stringify(context)}\n\nQuestion:\n${question}` },
-          ],
-        }),
+      const data = await openAiCompatibleChatCompletion({
+        model: cfg.model || "gpt-4o-mini",
+        temperature: 0.2,
+        messages: [
+          { role: "system", content: system },
+          ...hist,
+          { role: "user", content: `Context JSON:\n${JSON.stringify(context)}\n\nQuestion:\n${question}` },
+        ],
       });
-      if (!res.ok) return null;
-      const data = await res.json();
+      if (!data) return null;
       const text = String(data?.choices?.[0]?.message?.content || "").trim();
       const lower = text.toLowerCase();
       const looksGeneric = [
@@ -1195,7 +1186,7 @@ export default async function ironmindRoutes(app) {
       "",
       `You asked: "${question.slice(0, 500)}${question.length > 500 ? "…" : ""}"`,
       "",
-      "Tailored answers need **OPENAI_API_KEY** on the IRONLOG API server. Until then, use the hints above and your site’s SOP.",
+      "Tailored answers need a configured LLM (**OPENAI_API_KEY**, or **OLLAMA_HOST** / **OPENAI_BASE_URL** for local Ollama). Until then, use the hints above and your site’s SOP.",
     ].join("\n");
   }
 
@@ -1225,21 +1216,13 @@ export default async function ironmindRoutes(app) {
     });
 
     try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${cfg.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: cfg.model || "gpt-4o-mini",
-          temperature: 0.25,
-          max_tokens: 900,
-          messages: [{ role: "system", content: system }, ...msgHist, { role: "user", content: question }],
-        }),
+      const data = await openAiCompatibleChatCompletion({
+        model: cfg.model || "gpt-4o-mini",
+        temperature: 0.25,
+        max_tokens: 900,
+        messages: [{ role: "system", content: system }, ...msgHist, { role: "user", content: question }],
       });
-      if (!res.ok) return null;
-      const data = await res.json();
+      if (!data) return null;
       const text = String(data?.choices?.[0]?.message?.content || "").trim();
       return text || null;
     } catch {
@@ -1271,7 +1254,8 @@ export default async function ironmindRoutes(app) {
       if (!answer) {
         answer = fallbackHelpAnswer(context_key, question);
         helpRuntime.last_mode = "fallback";
-        helpRuntime.last_error = cfg.provider === "openai" ? "openai_returned_empty" : "no_openai_key";
+        helpRuntime.last_error =
+          cfg.provider === "openai" ? "llm_returned_empty" : "no_llm_configured";
       }
 
       try {
@@ -1587,11 +1571,12 @@ export default async function ironmindRoutes(app) {
     try {
       const cfg = getAiConfig();
       const provider = String(cfg?.provider || "none");
-      const model = provider === "openai" ? String(cfg?.model || "gpt-4o-mini") : "";
+      const model = provider === "openai" ? String(cfg?.model || getChatModel()) : "";
       return reply.send({
         ok: true,
         provider,
         model,
+        chat_endpoint: chatEndpointSummaryForLogs(),
         live_enabled: provider === "openai",
         last_ask_mode: ironmindRuntime.last_ask_mode,
         last_ask_error: ironmindRuntime.last_ask_error || null,

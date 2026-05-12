@@ -1,5 +1,6 @@
 import { db } from "../db/client.js";
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "./fleetHoursKpiScope.js";
+import { getChatModel, isOpenAiCompatibleConfigured, openAiCompatibleChatCompletion } from "./llmChat.js";
 
 function nowIso() {
   return new Date().toISOString();
@@ -63,7 +64,7 @@ export function ensureIronmindTable() {
 
 function getAiConfig() {
   const openaiKey = process.env.OPENAI_API_KEY;
-  const openaiModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const openaiModel = getChatModel();
 
   const azureKey = process.env.AZURE_OPENAI_API_KEY;
   const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
@@ -87,6 +88,9 @@ function getAiConfig() {
     "gpt-4o-mini";
 
   if (openaiKey) return { provider: "openai", apiKey: openaiKey, model: openaiModel };
+  if (isOpenAiCompatibleConfigured()) {
+    return { provider: "openai", apiKey: openaiKey || "", model: openaiModel };
+  }
   if (azureKey && azureEndpoint && azureDeployment) {
     return {
       provider: "azure_openai",
@@ -540,23 +544,16 @@ async function callIronmindAi(structuredData, opts = {}) {
 
   try {
     if (cfg.provider === "openai") {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${cfg.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: cfg.model,
-          temperature: Number(process.env.IRONMIND_TEMPERATURE ?? 0.1),
-          max_tokens: Number(process.env.IRONMIND_MAX_TOKENS ?? 700),
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-        }),
+      const data = await openAiCompatibleChatCompletion({
+        model: cfg.model,
+        temperature: Number(process.env.IRONMIND_TEMPERATURE ?? 0.1),
+        max_tokens: Number(process.env.IRONMIND_MAX_TOKENS ?? 700),
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
       });
-      const data = await res.json();
+      if (!data) return null;
       const text = data?.choices?.[0]?.message?.content;
       return parseJsonObject(text);
     }

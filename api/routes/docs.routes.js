@@ -1,4 +1,5 @@
 import { db } from "../db/client.js";
+import { getChatModel, isOpenAiCompatibleConfigured, openAiCompatibleChatCompletion } from "../utils/llmChat.js";
 import { buildPdfBuffer, sectionTitle, kvGrid, ensurePageSpace } from "../utils/pdfGenerator.js";
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
 import fs from "fs";
@@ -151,7 +152,7 @@ function buildDraftHeaderText({ docType, title, header }) {
 function getAiConfig(preferredProvider = "") {
   const openaiKey = process.env.OPENAI_API_KEY;
   const azureKey = process.env.AZURE_OPENAI_API_KEY;
-  const openaiModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const openaiModel = getChatModel();
 
   const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
   const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
@@ -187,6 +188,9 @@ function getAiConfig(preferredProvider = "") {
 
   if (openaiKey) {
     return { provider: "openai", apiKey: openaiKey, model: openaiModel };
+  }
+  if (isOpenAiCompatibleConfigured()) {
+    return { provider: "openai", apiKey: openaiKey || "", model: openaiModel };
   }
   if (azureKey && azureEndpoint && azureDeployment) {
     return {
@@ -386,28 +390,20 @@ async function generateAIDraftBody({ language, docType, scope, hazards, controls
 
   try {
     if (cfg.provider === "openai") {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${cfg.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: cfg.model,
-          temperature: Number(process.env.DOC_AI_TEMPERATURE ?? 0.3),
-          max_tokens: Number(process.env.DOC_AI_MAX_TOKENS ?? 900),
-          messages: [
-            {
-              role: "system",
-              content:
-                "You draft operational site compliance documents. Return only the requested document body.",
-            },
-            { role: "user", content: `${langInstruction}\n\n${user}` },
-          ],
-        }),
+      const data = await openAiCompatibleChatCompletion({
+        model: cfg.model,
+        temperature: Number(process.env.DOC_AI_TEMPERATURE ?? 0.3),
+        max_tokens: Number(process.env.DOC_AI_MAX_TOKENS ?? 900),
+        messages: [
+          {
+            role: "system",
+            content:
+              "You draft operational site compliance documents. Return only the requested document body.",
+          },
+          { role: "user", content: `${langInstruction}\n\n${user}` },
+        ],
       });
-
-      const data = await res.json();
+      if (!data) return null;
       const text = data?.choices?.[0]?.message?.content;
       return typeof text === "string" && text.trim() ? sanitizePromptEchoLines(text, 20) : null;
     }
@@ -497,24 +493,16 @@ async function generateAiDocumentReview({ content, docType, instructions, prefer
 
   try {
     if (cfg.provider === "openai") {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${cfg.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: cfg.model,
-          temperature: Number(process.env.DOC_AI_TEMPERATURE ?? 0.2),
-          max_tokens: Number(process.env.DOC_AI_MAX_TOKENS ?? 1200),
-          messages: [
-            { role: "system", content: systemInstruction },
-            { role: "user", content: requestUser },
-          ],
-        }),
+      const data = await openAiCompatibleChatCompletion({
+        model: cfg.model,
+        temperature: Number(process.env.DOC_AI_TEMPERATURE ?? 0.2),
+        max_tokens: Number(process.env.DOC_AI_MAX_TOKENS ?? 1200),
+        messages: [
+          { role: "system", content: systemInstruction },
+          { role: "user", content: requestUser },
+        ],
       });
-
-      const data = await res.json();
+      if (!data) return null;
       const text = data?.choices?.[0]?.message?.content;
       return typeof text === "string" && text.trim() ? text.trim() : null;
     }
@@ -597,24 +585,16 @@ async function generateAiTechAnswer({ machine, problem, context = "", preferFoun
 
   try {
     if (cfg.provider === "openai") {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${cfg.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: cfg.model,
-          temperature: Number(process.env.DOC_AI_TEMPERATURE ?? 0.2),
-          max_tokens: Number(process.env.DOC_AI_MAX_TOKENS ?? 900),
-          messages: [
-            { role: "system", content: systemInstruction },
-            { role: "user", content: requestUser },
-          ],
-        }),
+      const data = await openAiCompatibleChatCompletion({
+        model: cfg.model,
+        temperature: Number(process.env.DOC_AI_TEMPERATURE ?? 0.2),
+        max_tokens: Number(process.env.DOC_AI_MAX_TOKENS ?? 900),
+        messages: [
+          { role: "system", content: systemInstruction },
+          { role: "user", content: requestUser },
+        ],
       });
-
-      const data = await res.json();
+      if (!data) return null;
       const text = data?.choices?.[0]?.message?.content;
       return typeof text === "string" && text.trim() ? text.trim() : null;
     }
