@@ -12,7 +12,9 @@ import { fileURLToPath } from "url";
 import { runIronmindAutoScheduler } from "./utils/ironmind.js";
 import { startDbAutoBackup } from "./db/autoBackup.js";
 
-// Load environment variables from .env in the API root.
+// Load api/.env first, then cwd .env for any missing keys (override off by default).
+const __dirnameApi = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirnameApi, ".env") });
 dotenv.config({ path: path.join(process.cwd(), ".env") });
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;

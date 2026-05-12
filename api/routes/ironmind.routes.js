@@ -1185,19 +1185,71 @@ export default async function ironmindRoutes(app) {
     return `${head}\n${body}`;
   }
 
-  function fallbackHelpAnswer(contextKey, question) {
+  function isSimpleHelpGreeting(question) {
+    const raw = String(question || "").trim().toLowerCase();
+    if (!raw || raw.length > 80) return false;
+    const q = raw.replace(/[!?.…]+$/gu, "").trim().replace(/\s+/g, " ");
+    const exact = new Set([
+      "good day",
+      "good morning",
+      "good afternoon",
+      "good evening",
+      "hello",
+      "hi",
+      "hey",
+      "howdy",
+      "greetings",
+      "thanks",
+      "thank you",
+      "cheers",
+      "morning",
+      "afternoon",
+      "evening",
+      "hello there",
+      "hi there",
+    ]);
+    if (exact.has(q)) return true;
+    if (/^(hi|hey|hello)\b/.test(q) && q.length <= 24) return true;
+    return false;
+  }
+
+  function fallbackHelpAnswer(contextKey, question, meta = {}) {
+    const { llmConfigured = false, llmCallFailed = false } = meta;
     const k = normalizeHelpContextKey(contextKey);
     const ctx = HELP_UI_CONTEXTS[k] || HELP_UI_CONTEXTS._default;
     const mergedHints = [...(ctx.hints || []), ...HELP_GLOBAL_HINTS_EXTRA];
     const hints = mergedHints.map((h) => `- ${h}`).join("\n");
-    return [
+    const simpleGreeting = isSimpleHelpGreeting(question);
+
+    let tail = "";
+    if (llmCallFailed) {
+      tail =
+        "The help assistant could not get a reply from the model. Check that Ollama is running, **OLLAMA_HOST** and **LLM_MODEL** in **api/.env** match your setup (model name must match `ollama list`), then restart the API.";
+    } else if (!llmConfigured) {
+      tail =
+        "Tailored answers need a configured LLM (**OPENAI_API_KEY**, or **OLLAMA_HOST** / **OPENAI_BASE_URL** for local Ollama). Until then, use the hints above and your site’s SOP.";
+    }
+
+    if (simpleGreeting) {
+      let lead = "Hello.";
+      if (/good\s*day/i.test(question)) lead = "Good day to you.";
+      else if (/good\s*morning|^\s*morning\b/i.test(question)) lead = "Good morning.";
+      else if (/good\s*afternoon|^\s*afternoon\b/i.test(question)) lead = "Good afternoon.";
+      else if (/good\s*evening|^\s*evening\b/i.test(question)) lead = "Good evening.";
+      else if (/thank/i.test(question)) lead = "You're welcome.";
+      const parts = [`${lead} Quick pointers for **${ctx.title}**:`, "", hints];
+      if (tail) parts.push("", tail);
+      return parts.join("\n");
+    }
+
+    const parts = [
       `**${ctx.title}** — quick pointers:`,
       hints,
       "",
       `You asked: "${question.slice(0, 500)}${question.length > 500 ? "…" : ""}"`,
-      "",
-      "Tailored answers need a configured LLM (**OPENAI_API_KEY**, or **OLLAMA_HOST** / **OPENAI_BASE_URL** for local Ollama). Until then, use the hints above and your site’s SOP.",
-    ].join("\n");
+    ];
+    if (tail) parts.push("", tail);
+    return parts.join("\n");
   }
 
   async function tryAnswerHelpWithOpenAI({ question, contextKey, history, cfg }) {
@@ -1254,7 +1306,8 @@ export default async function ironmindRoutes(app) {
       const cfg = getAiConfig();
       let answer = null;
       let mode = "fallback";
-      if (cfg.provider === "openai") {
+      const triedLlm = cfg.provider === "openai";
+      if (triedLlm) {
         answer = await tryAnswerHelpWithOpenAI({ question, contextKey: context_key, history, cfg });
         if (answer) {
           mode = "live_ai";
@@ -1263,10 +1316,12 @@ export default async function ironmindRoutes(app) {
         }
       }
       if (!answer) {
-        answer = fallbackHelpAnswer(context_key, question);
+        answer = fallbackHelpAnswer(context_key, question, {
+          llmConfigured: triedLlm,
+          llmCallFailed: triedLlm,
+        });
         helpRuntime.last_mode = "fallback";
-        helpRuntime.last_error =
-          cfg.provider === "openai" ? "llm_returned_empty" : "no_llm_configured";
+        helpRuntime.last_error = triedLlm ? "llm_returned_empty" : "no_llm_configured";
       }
 
       try {
