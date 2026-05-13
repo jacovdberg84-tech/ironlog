@@ -72,6 +72,14 @@ export function isOpenAiCompatibleConfigured() {
   return usesCustomChatBase();
 }
 
+function getRequestTimeoutMs(body) {
+  const bodyTimeout = Number(body?.timeout_ms);
+  if (Number.isFinite(bodyTimeout) && bodyTimeout > 0) return bodyTimeout;
+  const envTimeout = Number(process.env.LLM_TIMEOUT_MS || process.env.OLLAMA_TIMEOUT_MS || 0);
+  if (Number.isFinite(envTimeout) && envTimeout > 0) return envTimeout;
+  return 0;
+}
+
 /**
  * POST chat completions. Returns parsed JSON body or null on HTTP/error parse failure.
  */
@@ -79,16 +87,27 @@ export async function openAiCompatibleChatCompletion(body) {
   lastLlmChatError = "";
   const url = resolveOpenAiCompatibleChatUrl();
   const toOllama = isOllamaChatUrl(url);
+  const timeoutMs = getRequestTimeoutMs(body);
   const headers = { "Content-Type": "application/json" };
   const llmKey = String(process.env.LLM_API_KEY || "").trim();
   const openaiKey = String(process.env.OPENAI_API_KEY || "").trim();
   if (llmKey) headers.Authorization = `Bearer ${llmKey}`;
   else if (openaiKey && !toOllama) headers.Authorization = `Bearer ${openaiKey}`;
 
-  const payload =
+  let payload =
     body && typeof body === "object"
       ? { ...body, model: normalizeModelForOllamaUrl(body.model, url) }
       : body;
+  if (payload && typeof payload === "object" && Object.prototype.hasOwnProperty.call(payload, "timeout_ms")) {
+    delete payload.timeout_ms;
+  }
+
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const timer = controller
+    ? setTimeout(() => {
+        controller.abort();
+      }, timeoutMs)
+    : null;
 
   let res;
   try {
@@ -96,11 +115,18 @@ export async function openAiCompatibleChatCompletion(body) {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
+      signal: controller?.signal,
     });
   } catch (e) {
-    lastLlmChatError = `fetch: ${e?.message || e}`;
+    if ((e?.name === "AbortError" || e?.code === "ABORT_ERR") && timeoutMs > 0) {
+      lastLlmChatError = `timeout after ${timeoutMs}ms`;
+    } else {
+      lastLlmChatError = `fetch: ${e?.message || e}`;
+    }
     console.warn("[llmChat] fetch failed:", e?.message || e);
     return null;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 
   const data = await res.json().catch(() => ({}));

@@ -557,7 +557,7 @@ export default async function ironmindRoutes(app) {
     const cfg = getAiConfig();
     if (!cfg.provider) return null;
     const latest = getLatestIronmindReport("daily_admin");
-    const summary = String(latest?.summary || "").slice(0, 2500);
+    const summary = String(latest?.summary || "").slice(0, 1200);
     const fleet = db.prepare(`
       SELECT
         COALESCE(SUM(l.hours_down), 0) AS downtime_hours,
@@ -584,10 +584,19 @@ export default async function ironmindRoutes(app) {
           LIMIT 1
         `).get(assetCode)
       : null;
+    const askMaxTokens = (() => {
+      const n = Number(process.env.IRONMIND_ASK_MAX_TOKENS ?? 220);
+      return Number.isFinite(n) && n > 0 ? Math.min(600, n) : 220;
+    })();
+    const askTimeoutMs = (() => {
+      const n = Number(process.env.IRONMIND_ASK_TIMEOUT_MS ?? process.env.LLM_TIMEOUT_MS ?? 45000);
+      return Number.isFinite(n) && n > 0 ? n : 45000;
+    })();
     const system = [
       "You are IronMind, a maintenance intelligence assistant for plant operations.",
       "Respond naturally to brief greetings or thanks (e.g. match a short 'good morning'), then invite a maintenance question or offer a concise fleet tip when context allows.",
       "Answer practically and clearly with operational context.",
+      "Keep the answer brief: one short paragraph or up to 4 compact bullets.",
       "Do not ask for asset code unless absolutely needed.",
       "Use available fleet context and provide actionable next steps.",
       "If uncertain, say what data is missing and still provide best guidance.",
@@ -605,7 +614,7 @@ export default async function ironmindRoutes(app) {
           return arr;
         })
       : [];
-    const notes = String(contextNotes || "").trim().slice(0, 2500);
+    const notes = String(contextNotes || "").trim().slice(0, 1200);
     const context = {
       period: { start, end },
       fleet: {
@@ -622,6 +631,8 @@ export default async function ironmindRoutes(app) {
       const data = await openAiCompatibleChatCompletion({
         model: cfg.model || "gpt-4o-mini",
         temperature: 0.2,
+        max_tokens: askMaxTokens,
+        timeout_ms: askTimeoutMs,
         messages: [
           { role: "system", content: system },
           ...hist,
