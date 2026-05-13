@@ -1269,23 +1269,33 @@ export default async function ironmindRoutes(app) {
   async function tryAnswerHelpWithOpenAI({ question, contextKey, history, cfg }) {
     const screenBlock = buildHelpScreenContextBlock(contextKey);
     const orgNotes = HELP_GLOBAL_PARAGRAPH
-      ? `\n\nOrganisation notes:\n${HELP_GLOBAL_PARAGRAPH}`
+      ? `\n\nOrganisation notes:\n${String(HELP_GLOBAL_PARAGRAPH || "").slice(0, 800)}`
       : "";
+    const helpMaxTokens = (() => {
+      const n = Number(process.env.IRONMIND_HELP_MAX_TOKENS ?? 220);
+      return Number.isFinite(n) && n > 0 ? Math.min(500, n) : 220;
+    })();
+    const helpTimeoutMs = (() => {
+      const n = Number(process.env.IRONMIND_HELP_TIMEOUT_MS ?? process.env.LLM_TIMEOUT_MS ?? 35000);
+      return Number.isFinite(n) && n > 0 ? n : 35000;
+    })();
     const system = [
       "You are IRONLOG Help — you ONLY explain how to use the IRONLOG web application (navigation, fields, workflows).",
       "You are NOT the IronMind maintenance assistant: do not analyse downtime hours, fleet KPIs, or asset risk unless the user is asking where in the UI to find those features.",
       "If the user wants data-driven maintenance insight, say briefly that the IronMind tab is for that, and continue with UI guidance when relevant.",
       "For brief greetings or thanks, reply in a short friendly line first, then offer UI help for the active section when it fits.",
-      "Answer in clear short paragraphs or bullet steps. Do not mention model cutoffs or generic AI disclaimers.",
+      "Answer in clear short paragraphs or bullet steps.",
+      "Keep the answer brief: one short paragraph or up to 4 compact bullets.",
+      "Do not mention model cutoffs or generic AI disclaimers.",
       "",
       screenBlock,
       orgNotes,
     ].join("\n");
 
-    const hist = Array.isArray(history) ? history.slice(-6) : [];
+    const hist = Array.isArray(history) ? history.slice(-4) : [];
     const msgHist = hist.flatMap((h) => {
-      const q = String(h?.question || "").trim();
-      const a = String(h?.answer || "").trim();
+      const q = String(h?.question || "").trim().slice(0, 400);
+      const a = String(h?.answer || "").trim().slice(0, 500);
       const o = [];
       if (q) o.push({ role: "user", content: q });
       if (a) o.push({ role: "assistant", content: a });
@@ -1296,8 +1306,9 @@ export default async function ironmindRoutes(app) {
       const data = await openAiCompatibleChatCompletion({
         model: cfg.model || "gpt-4o-mini",
         temperature: 0.25,
-        max_tokens: 900,
-        messages: [{ role: "system", content: system }, ...msgHist, { role: "user", content: question }],
+        max_tokens: helpMaxTokens,
+        timeout_ms: helpTimeoutMs,
+        messages: [{ role: "system", content: system }, ...msgHist, { role: "user", content: question.slice(0, 1200) }],
       });
       if (!data) return null;
       const text = String(data?.choices?.[0]?.message?.content || "").trim();
