@@ -145,6 +145,10 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
           <span>Assets</span>
         </a>
+        <a href="#" class="nav-item" data-tab="workshop">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+          <span>Workshop Library</span>
+        </a>
         <a href="#" class="nav-item" data-tab="fuel">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 22h18"></path><path d="M5 22V9a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v13"></path><path d="M11 9V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v3"></path><path d="M17 13h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2"></path></svg>
           <span>Fuel</span>
@@ -283,6 +287,7 @@
         <option value="dash">Dashboard</option>
         <option value="daily">Daily Input</option>
         <option value="assets">Assets</option>
+        <option value="workshop">Workshop Library</option>
         <option value="fuel">Fuel</option>
         <option value="lube">Lube</option>
         <option value="stock">Stores</option>
@@ -1599,6 +1604,88 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
               <span>Photos from InspectPro: breakdown_photos and work_order_photos</span>
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- WORKSHOP LIBRARY -->
+    <section class="panel" id="tab-workshop">
+      <div class="asset-cards-grid">
+        <div class="dash-card full-width">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eef2ff; color: #4338ca;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+              </div>
+              <div>
+                <h3>Workshop Library</h3>
+                <p class="muted small">Open the public workshop site and connect faults, manuals, and repairs API endpoints from one place.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+              </div>
+              <div>
+                <h3>Public Access & API Links</h3>
+                <p class="muted small">Use full URLs, or provide an API base URL plus relative endpoint paths.</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="info-note">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              <span>These links are opened without IRONLOG auth headers so the public library stays accessible to anyone who should use it.</span>
+            </div>
+
+            <div class="form-row">
+              <div class="form-field">
+                <label>Public library URL</label>
+                <input id="workshopLibraryUrl" class="w-full" placeholder="https://your-public-library.example.com" />
+              </div>
+              <div class="form-field">
+                <label>API base URL</label>
+                <input id="workshopApiBaseUrl" class="w-full" placeholder="https://your-public-library.example.com/api/" />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-field">
+                <label>Faults endpoint</label>
+                <input id="workshopFaultsEndpoint" class="w-full" value="faults" placeholder="faults or https://..." />
+              </div>
+              <div class="form-field">
+                <label>Manuals endpoint</label>
+                <input id="workshopManualsEndpoint" class="w-full" value="manuals" placeholder="manuals or https://..." />
+              </div>
+              <div class="form-field">
+                <label>Repairs endpoint</label>
+                <input id="workshopRepairsEndpoint" class="w-full" value="repairs" placeholder="repairs or https://..." />
+              </div>
+            </div>
+
+            <div class="action-buttons">
+              <button id="saveWorkshopLinksBtn" class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                Save Links
+              </button>
+              <button type="button" class="btn btn-secondary" data-workshop-open="site">Open Library</button>
+              <button type="button" class="btn btn-secondary" data-workshop-open="faults">Open Faults</button>
+              <button type="button" class="btn btn-secondary" data-workshop-open="manuals">Open Manuals</button>
+              <button type="button" class="btn btn-secondary" data-workshop-open="repairs">Open Repairs</button>
+              <button id="checkWorkshopApiBtn" type="button" class="btn btn-accent">Check API Overview</button>
+            </div>
+
+            <pre class="output" id="workshopApiResult">Save or paste your public Workshop Library URLs here, then open the site or test the linked endpoints.</pre>
           </div>
         </div>
       </div>

@@ -24,6 +24,14 @@ const SIDEBAR_COLLAPSED_KEY = "ironlog_sidebar_collapsed";
 const DEFAULT_LANG = "en";
 const TASK_WORKSPACE_COLLAPSED_KEY = "ironlog_task_workspace_collapsed";
 const TASK_SAVED_VIEWS_KEY = "ironlog_task_saved_views";
+const WORKSHOP_LIBRARY_SETTINGS_KEY = "ironlog_workshop_library_settings";
+const DEFAULT_WORKSHOP_LIBRARY_SETTINGS = Object.freeze({
+  siteUrl: "",
+  apiBaseUrl: "",
+  faultsPath: "faults",
+  manualsPath: "manuals",
+  repairsPath: "repairs",
+});
 
 // Sidebar navigation
 function initSidebar() {
@@ -769,18 +777,19 @@ async function openAuthedPdf(url) {
 
 function getRoleAllowedTabs(role) {
   const r = String(role || "").toLowerCase();
-  if (r === "operator") return ["dash", "daily", "fuel", "lube", "legal", "operations", "ironmind", "docs", "vehicle", "tasks"];
-  if (r === "artisan") return ["dash", "maintenance", "Breakdowns", "reports", "fuel", "lube", "legal", "operations", "dispatch", "ironmind", "docs", "vehicle", "tasks"];
-  if (r === "stores") return ["dash", "maintenance", "stock", "uploads", "reports", "finance", "legal", "procurement", "operations", "dispatch", "quality", "ironmind", "docs", "vehicle", "tasks"];
-  if (r === "procurement") return ["dash", "stock", "reports", "finance", "procurement", "operations", "quality", "docs", "tasks"];
-  if (r === "plant_manager") return ["dash", "daily", "assets", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
-  if (r === "site_manager") return ["dash", "daily", "assets", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
-  if (r === "executive") return ["dash", "reports", "finance", "operations", "quality", "audit", "docs", "tasks"];
-  if (r === "supervisor") return ["dash", "daily", "assets", "maintenance", "fuel", "lube", "stock", "legal", "uploads", "reports", "finance", "enterprise", "exec", "Breakdowns", "approvals", "procurement", "operations", "dispatch", "quality", "audit", "ironmind", "docs", "vehicle", "tasks"];
+  if (r === "operator") return ["dash", "daily", "workshop", "fuel", "lube", "legal", "operations", "ironmind", "docs", "vehicle", "tasks"];
+  if (r === "artisan") return ["dash", "maintenance", "Breakdowns", "workshop", "reports", "fuel", "lube", "legal", "operations", "dispatch", "ironmind", "docs", "vehicle", "tasks"];
+  if (r === "stores") return ["dash", "maintenance", "stock", "workshop", "uploads", "reports", "finance", "legal", "procurement", "operations", "dispatch", "quality", "ironmind", "docs", "vehicle", "tasks"];
+  if (r === "procurement") return ["dash", "stock", "workshop", "reports", "finance", "procurement", "operations", "quality", "docs", "tasks"];
+  if (r === "plant_manager") return ["dash", "daily", "assets", "workshop", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
+  if (r === "site_manager") return ["dash", "daily", "assets", "workshop", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
+  if (r === "executive") return ["dash", "workshop", "reports", "finance", "operations", "quality", "audit", "docs", "tasks"];
+  if (r === "supervisor") return ["dash", "daily", "assets", "workshop", "maintenance", "fuel", "lube", "stock", "legal", "uploads", "reports", "finance", "enterprise", "exec", "Breakdowns", "approvals", "procurement", "operations", "dispatch", "quality", "audit", "ironmind", "docs", "vehicle", "tasks"];
   return [
     "dash",
     "daily",
     "assets",
+    "workshop",
     "maintenance",
     "fuel",
     "lube",
@@ -822,6 +831,8 @@ function getEffectiveAllowedTabs() {
   }
   // Keep task workspace reachable even when older saved tab overrides exist.
   if (!list.includes("tasks")) list = [...list, "tasks"];
+  // Workshop Library is public-facing and should stay reachable even for older saved tab overrides.
+  if (!list.includes("workshop")) list = [...list, "workshop"];
   // Backward compatibility for older saved tab overrides created before Finance tab existed.
   if (roles.some((r) => ["admin", "supervisor", "stores", "procurement", "plant_manager", "site_manager", "executive"].includes(r)) && !list.includes("finance")) {
     list = [...list, "finance"];
@@ -917,6 +928,11 @@ function initGlobalSearch() {
         "dashboard": "dash",
         "daily": "daily",
         "assets": "assets",
+        "workshop": "workshop",
+        "library": "workshop",
+        "faults": "workshop",
+        "manuals": "workshop",
+        "repairs": "workshop",
         "fuel": "fuel",
         "lube": "lube",
         "stores": "stock",
@@ -973,6 +989,240 @@ function initGlobalSearch() {
       searchInput.value = "";
       searchInput.blur();
     }
+  });
+}
+
+function getStoredWorkshopLibrarySettings() {
+  try {
+    const raw = localStorage.getItem(WORKSHOP_LIBRARY_SETTINGS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return {
+      ...DEFAULT_WORKSHOP_LIBRARY_SETTINGS,
+      ...(parsed && typeof parsed === "object" ? parsed : {}),
+    };
+  } catch {
+    return { ...DEFAULT_WORKSHOP_LIBRARY_SETTINGS };
+  }
+}
+
+function getWorkshopLibrarySettingsFromInputs() {
+  const saved = getStoredWorkshopLibrarySettings();
+  return {
+    siteUrl: String(qs("workshopLibraryUrl")?.value || saved.siteUrl || "").trim(),
+    apiBaseUrl: String(qs("workshopApiBaseUrl")?.value || saved.apiBaseUrl || "").trim(),
+    faultsPath: String(qs("workshopFaultsEndpoint")?.value || saved.faultsPath || DEFAULT_WORKSHOP_LIBRARY_SETTINGS.faultsPath).trim(),
+    manualsPath: String(qs("workshopManualsEndpoint")?.value || saved.manualsPath || DEFAULT_WORKSHOP_LIBRARY_SETTINGS.manualsPath).trim(),
+    repairsPath: String(qs("workshopRepairsEndpoint")?.value || saved.repairsPath || DEFAULT_WORKSHOP_LIBRARY_SETTINGS.repairsPath).trim(),
+  };
+}
+
+function hydrateWorkshopLibraryInputs(settings = getStoredWorkshopLibrarySettings()) {
+  if (qs("workshopLibraryUrl")) qs("workshopLibraryUrl").value = String(settings.siteUrl || "");
+  if (qs("workshopApiBaseUrl")) qs("workshopApiBaseUrl").value = String(settings.apiBaseUrl || "");
+  if (qs("workshopFaultsEndpoint")) qs("workshopFaultsEndpoint").value = String(settings.faultsPath || DEFAULT_WORKSHOP_LIBRARY_SETTINGS.faultsPath);
+  if (qs("workshopManualsEndpoint")) qs("workshopManualsEndpoint").value = String(settings.manualsPath || DEFAULT_WORKSHOP_LIBRARY_SETTINGS.manualsPath);
+  if (qs("workshopRepairsEndpoint")) qs("workshopRepairsEndpoint").value = String(settings.repairsPath || DEFAULT_WORKSHOP_LIBRARY_SETTINGS.repairsPath);
+}
+
+function normalizeWorkshopUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (/^www\./i.test(raw)) return `https://${raw}`;
+  if (/^(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(raw)) return `http://${raw}`;
+  if (/^[a-z0-9.-]+\.[a-z]{2,}(\/|$)/i.test(raw)) return `https://${raw}`;
+  if (raw.startsWith("/")) {
+    try {
+      return new URL(raw, API).toString();
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
+}
+
+function resolveWorkshopEndpointUrl(endpoint, apiBaseUrl) {
+  const target = String(endpoint || "").trim();
+  if (!target) return "";
+  const direct = normalizeWorkshopUrl(target);
+  if (/^https?:\/\//i.test(direct)) return direct;
+  const base = normalizeWorkshopUrl(apiBaseUrl);
+  if (!base || !/^https?:\/\//i.test(base)) return "";
+  try {
+    const baseUrl = base.endsWith("/") ? base : `${base}/`;
+    return new URL(target.replace(/^\//, ""), baseUrl).toString();
+  } catch {
+    return "";
+  }
+}
+
+function getWorkshopLibraryTarget(kind, settings = getWorkshopLibrarySettingsFromInputs()) {
+  if (kind === "site") return normalizeWorkshopUrl(settings.siteUrl);
+  if (kind === "faults") return resolveWorkshopEndpointUrl(settings.faultsPath, settings.apiBaseUrl);
+  if (kind === "manuals") return resolveWorkshopEndpointUrl(settings.manualsPath, settings.apiBaseUrl);
+  if (kind === "repairs") return resolveWorkshopEndpointUrl(settings.repairsPath, settings.apiBaseUrl);
+  return "";
+}
+
+function saveWorkshopLibrarySettings() {
+  const settings = getWorkshopLibrarySettingsFromInputs();
+  localStorage.setItem(WORKSHOP_LIBRARY_SETTINGS_KEY, JSON.stringify(settings));
+  const out = qs("workshopApiResult");
+  if (out) {
+    out.textContent =
+      `Workshop Library links saved.\n\n` +
+      `Library: ${settings.siteUrl || "(not set)"}\n` +
+      `API base: ${settings.apiBaseUrl || "(not set)"}\n` +
+      `Faults: ${settings.faultsPath || "(not set)"}\n` +
+      `Manuals: ${settings.manualsPath || "(not set)"}\n` +
+      `Repairs: ${settings.repairsPath || "(not set)"}`;
+  }
+  setStatus("Workshop Library links saved.");
+}
+
+function openWorkshopLibraryTarget(kind) {
+  const labelMap = {
+    site: "Workshop Library",
+    faults: "Faults endpoint",
+    manuals: "Manuals endpoint",
+    repairs: "Repairs endpoint",
+  };
+  const url = getWorkshopLibraryTarget(kind);
+  if (!url || !/^https?:\/\//i.test(url)) {
+    alert(`Set a valid ${labelMap[kind] || "Workshop Library"} URL first.`);
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+  setStatus(`${labelMap[kind] || "Workshop Library"} opened.`);
+}
+
+function summarizeWorkshopApiPayload(payload, rawText) {
+  if (Array.isArray(payload)) {
+    return {
+      summary: `${payload.length} item(s)`,
+      preview: JSON.stringify(payload.slice(0, 2), null, 2),
+    };
+  }
+  if (payload && typeof payload === "object") {
+    if (Array.isArray(payload.items)) {
+      return {
+        summary: `${payload.items.length} item(s) in items`,
+        preview: JSON.stringify(payload.items.slice(0, 2), null, 2),
+      };
+    }
+    if (Array.isArray(payload.rows)) {
+      return {
+        summary: `${payload.rows.length} row(s)`,
+        preview: JSON.stringify(payload.rows.slice(0, 2), null, 2),
+      };
+    }
+    const keys = Object.keys(payload);
+    return {
+      summary: keys.length ? `keys: ${keys.slice(0, 8).join(", ")}` : "object response",
+      preview: JSON.stringify(payload, null, 2),
+    };
+  }
+  return {
+    summary: "text response",
+    preview: String(rawText || "").trim(),
+  };
+}
+
+function clipWorkshopPreview(value, maxLen = 1600) {
+  const text = String(value || "").trim();
+  if (!text) return "(empty response)";
+  return text.length > maxLen ? `${text.slice(0, maxLen)}\n...truncated...` : text;
+}
+
+async function checkWorkshopLibraryApiOverview() {
+  const out = qs("workshopApiResult");
+  if (!out) return;
+  const settings = getWorkshopLibrarySettingsFromInputs();
+  const targets = [
+    { label: "Faults", url: getWorkshopLibraryTarget("faults", settings) },
+    { label: "Manuals", url: getWorkshopLibraryTarget("manuals", settings) },
+    { label: "Repairs", url: getWorkshopLibraryTarget("repairs", settings) },
+  ].filter((entry) => entry.url);
+
+  if (!targets.length) {
+    out.textContent = "Add at least one Workshop Library API endpoint before checking the API overview.";
+    setStatus("Workshop Library API not configured.");
+    return;
+  }
+
+  out.textContent = "Checking Workshop Library endpoints...";
+  setStatus("Checking Workshop Library API...");
+
+  const results = await Promise.all(
+    targets.map(async ({ label, url }) => {
+      try {
+        const res = await fetch(url, {
+          headers: { Accept: "application/json,text/plain,*/*" },
+        });
+        const rawText = await res.text();
+        let payload = rawText;
+        try {
+          payload = JSON.parse(rawText);
+        } catch {}
+        const summary = summarizeWorkshopApiPayload(payload, rawText);
+        return {
+          label,
+          url,
+          ok: res.ok,
+          status: res.status,
+          statusText: res.statusText || "",
+          summary: summary.summary,
+          preview: clipWorkshopPreview(summary.preview),
+        };
+      } catch (error) {
+        return {
+          label,
+          url,
+          ok: false,
+          status: "fetch-error",
+          statusText: "",
+          summary: "Request failed",
+          preview:
+            `${error?.message || error}\n\n` +
+            "If the endpoint is public but this still fails in the browser, check CORS for the IRONLOG origin.",
+        };
+      }
+    })
+  );
+
+  out.textContent = results
+    .map(
+      (result) =>
+        `[${result.label}] ${result.ok ? "OK" : "ERROR"} (${result.status}${result.statusText ? ` ${result.statusText}` : ""})\n` +
+        `${result.url}\n` +
+        `Summary: ${result.summary}\n\n` +
+        `${result.preview}`
+    )
+    .join("\n\n------------------------------\n\n");
+
+  setStatus("Workshop Library API overview loaded.");
+}
+
+function initWorkshopLibraryTab() {
+  const panel = qs("tab-workshop");
+  if (!panel) return;
+
+  hydrateWorkshopLibraryInputs();
+
+  qs("saveWorkshopLinksBtn")?.addEventListener("click", saveWorkshopLibrarySettings);
+  qs("checkWorkshopApiBtn")?.addEventListener("click", () =>
+    checkWorkshopLibraryApiOverview().catch((e) =>
+      setStatus("Workshop Library API error: " + (e?.message || e))
+    )
+  );
+
+  panel.addEventListener("click", (e) => {
+    const target = e.target instanceof HTMLElement ? e.target.closest("[data-workshop-open]") : null;
+    if (!target) return;
+    e.preventDefault();
+    const kind = String(target.getAttribute("data-workshop-open") || "").trim();
+    if (!kind) return;
+    openWorkshopLibraryTarget(kind);
   });
 }
 
@@ -5318,6 +5568,7 @@ const IRONLOG_HELP_OPENERS = {
   dash: "Need help with the dashboard?",
   daily: "Need help with daily inputs?",
   assets: "Need help with assets?",
+  workshop: "Need help with the Workshop Library?",
   fuel: "Need help with fuel logging and benchmarks?",
   lube: "Need help with lube?",
   stock: "Need help with stores / stock?",
@@ -10723,6 +10974,7 @@ async function init() {
   await tryInitialSession();
   initSidebar();
   initTabs();
+  initWorkshopLibraryTab();
   initIronmindHelpUi();
   initSectionCollapseToggles();
   initSessionControls();

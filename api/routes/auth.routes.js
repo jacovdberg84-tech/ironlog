@@ -24,6 +24,7 @@ export const ASSIGNABLE_TAB_KEYS = [
   "dash",
   "daily",
   "assets",
+  "workshop",
   "maintenance",
   "fuel",
   "lube",
