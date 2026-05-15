@@ -109,6 +109,19 @@
       openPrestartBtn.style.display = isLdv ? "inline-block" : "none";
       openPrestartBtn.href = `./ldv-prestart.html?asset_code=${encodeURIComponent(assetCode)}`;
     }
+
+    const openMachinePrestartBtn = qs("openMachinePrestartBtn");
+    if (openMachinePrestartBtn) {
+      const mp = payload?.machine_prestart;
+      const showMachine = Boolean(mp?.profile_id) && !/^V(0[1-9]|1[0-5])AM$/i.test(assetCode);
+      openMachinePrestartBtn.style.display = showMachine ? "inline-block" : "none";
+      openMachinePrestartBtn.href = `./machine-prestart.html?asset_code=${encodeURIComponent(assetCode)}`;
+      if (showMachine && mp?.template_title) {
+        openMachinePrestartBtn.textContent = String(mp.template_title);
+      } else {
+        openMachinePrestartBtn.textContent = "Machine Pre-Start";
+      }
+    }
   }
 
   qs("refreshBtn")?.addEventListener("click", () => {

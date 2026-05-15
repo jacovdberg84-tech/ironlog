@@ -7,6 +7,13 @@ import crypto from "node:crypto";
 import ExcelJS from "exceljs";
 import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
+import {
+  resolveMachinePrestartProfile,
+  getMachinePrestartTemplate,
+  normalizeMachinePrestartChecklist,
+  checklistToJsonObject,
+  machinePrestartCheckMode,
+} from "../utils/machinePrestartTemplates.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -4301,6 +4308,7 @@ export default async function maintenanceRoutes(app) {
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_vehicle_ldv_photos_check ON vehicle_ldv_check_photos(check_id)`).run();
   ensureColumn("vehicle_ldv_checks", "check_mode TEXT DEFAULT 'ldv_general'", "check_mode");
   ensureColumn("vehicle_ldv_checks", "checklist_json TEXT", "checklist_json");
+  ensureColumn("vehicle_ldv_checks", "smu_hours REAL", "smu_hours");
 
   const vehicleLdvcDir = path.join(dataRoot, "uploads", "vehicle-ldv-checks");
   fs.mkdirSync(vehicleLdvcDir, { recursive: true });
@@ -4707,6 +4715,195 @@ export default async function maintenanceRoutes(app) {
         previous_odometer_km: previousOdometer == null ? null : Number(previousOdometer.toFixed(1)),
         daily_input_sync: dailySync || { synced: false },
         message: "Pre-start captured. KM reading saved to IRONLOG.",
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  // Machine-group prestart (excavator, dozer, etc.) — same storage as LDV checks, different check_mode; no daily_hours sync.
+  app.get("/machine-prestart/context", async (req, reply) => {
+    try {
+      const asset_code = String(req.query?.asset_code || "").trim().toUpperCase();
+      const check_date = String(req.query?.check_date || "").trim() || new Date().toISOString().slice(0, 10);
+      if (!asset_code) return reply.code(400).send({ ok: false, error: "asset_code is required" });
+      if (!isDate(check_date)) return reply.code(400).send({ ok: false, error: "check_date must be YYYY-MM-DD" });
+
+      const asset = db.prepare(`
+        SELECT id, asset_code, asset_name, category
+        FROM assets
+        WHERE UPPER(asset_code) = UPPER(?)
+        LIMIT 1
+      `).get(asset_code);
+      if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
+
+      const profileId = resolveMachinePrestartProfile(asset.category, asset.asset_name);
+      if (!profileId) {
+        return reply.code(404).send({
+          ok: false,
+          error: "No machine pre-start template for this asset. Set category or name (e.g. Excavator, Haul truck).",
+        });
+      }
+      const template = getMachinePrestartTemplate(profileId);
+      const mode = machinePrestartCheckMode(profileId);
+      if (!template || !mode) return reply.code(500).send({ ok: false, error: "Template resolution failed" });
+
+      const existing = db.prepare(`
+        SELECT id, check_date, odometer_km, smu_hours, inspector_name, notes, checklist_json
+        FROM vehicle_ldv_checks
+        WHERE asset_id = ?
+          AND check_date = ?
+          AND check_mode = ?
+        ORDER BY id DESC
+        LIMIT 1
+      `).get(Number(asset.id), check_date, mode);
+
+      let checklist = normalizeMachinePrestartChecklist(profileId, {});
+      if (existing?.checklist_json) {
+        try {
+          const parsed = JSON.parse(String(existing.checklist_json || "{}"));
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            checklist = normalizeMachinePrestartChecklist(profileId, parsed);
+          }
+        } catch {}
+      }
+
+      return reply.send({
+        ok: true,
+        profile_id: profileId,
+        check_mode: mode,
+        template,
+        asset: {
+          id: Number(asset.id),
+          asset_code: String(asset.asset_code || ""),
+          asset_name: String(asset.asset_name || ""),
+          category: String(asset.category || ""),
+        },
+        check_date,
+        existing_check: existing
+          ? {
+              id: Number(existing.id),
+              smu_hours: existing.smu_hours == null ? null : Number(existing.smu_hours),
+              inspector_name: existing.inspector_name || "",
+              notes: existing.notes || "",
+              checklist,
+            }
+          : null,
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  app.post("/machine-prestart", async (req, reply) => {
+    try {
+      const asset_code = String(req.body?.asset_code || "").trim().toUpperCase();
+      const check_date = String(req.body?.check_date || "").trim() || new Date().toISOString().slice(0, 10);
+      const inspector_name = String(req.body?.inspector_name || "").trim() || null;
+      const notes = String(req.body?.notes || "").trim() || null;
+      const checklistObj = req.body?.checklist || {};
+      const smu_raw = req.body?.smu_hours;
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+
+      if (!asset_code) return reply.code(400).send({ ok: false, error: "asset_code is required" });
+      if (!isDate(check_date)) return reply.code(400).send({ ok: false, error: "check_date must be YYYY-MM-DD" });
+
+      const asset = db.prepare(`
+        SELECT id, asset_code, asset_name, category
+        FROM assets
+        WHERE UPPER(asset_code) = UPPER(?)
+        LIMIT 1
+      `).get(asset_code);
+      if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
+
+      const profileId = resolveMachinePrestartProfile(asset.category, asset.asset_name);
+      if (!profileId) {
+        return reply.code(400).send({
+          ok: false,
+          error: "No machine pre-start template for this asset category/name.",
+        });
+      }
+      const mode = machinePrestartCheckMode(profileId);
+      if (!mode) return reply.code(500).send({ ok: false, error: "Template resolution failed" });
+
+      let smu_hours = null;
+      if (smu_raw != null && String(smu_raw).trim() !== "") {
+        const smu = Number(smu_raw);
+        if (!Number.isFinite(smu) || smu < 0) {
+          return reply.code(400).send({ ok: false, error: "smu_hours must be a valid number >= 0 when provided." });
+        }
+        smu_hours = Number(smu.toFixed(1));
+      }
+
+      const checklist = normalizeMachinePrestartChecklist(profileId, checklistObj);
+      const failed = checklist.filter((c) => !c.ok);
+      if (failed.length) {
+        return reply.code(400).send({
+          ok: false,
+          error: `Complete all checks before submitting (${failed.map((c) => c.label).join(", ")}).`,
+        });
+      }
+
+      const checklistJson = JSON.stringify(checklistToJsonObject(checklist));
+
+      const existing = db.prepare(`
+        SELECT id
+        FROM vehicle_ldv_checks
+        WHERE asset_id = ?
+          AND check_date = ?
+          AND check_mode = ?
+        ORDER BY id DESC
+        LIMIT 1
+      `).get(Number(asset.id), check_date, mode);
+
+      let checkId = 0;
+      if (existing?.id) {
+        checkId = Number(existing.id);
+        db.prepare(`
+          UPDATE vehicle_ldv_checks
+          SET
+            inspector_name = ?,
+            notes = ?,
+            checklist_json = ?,
+            smu_hours = ?,
+            odometer_km = NULL,
+            check_mode = ?,
+            updated_at = datetime('now')
+          WHERE id = ?
+        `).run(inspector_name, notes, checklistJson, smu_hours, mode, checkId);
+      } else {
+        const ins = db.prepare(`
+          INSERT INTO vehicle_ldv_checks (
+            asset_id, uuid, site_code, check_date, vehicle_registration, odometer_km,
+            inspector_name, notes, check_mode, checklist_json, smu_hours, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          Number(asset.id),
+          crypto.randomUUID(),
+          site_code,
+          check_date,
+          String(asset.asset_code || ""),
+          inspector_name,
+          notes,
+          mode,
+          checklistJson,
+          smu_hours
+        );
+        checkId = Number(ins.lastInsertRowid);
+      }
+
+      return reply.send({
+        ok: true,
+        id: checkId,
+        asset_code: String(asset.asset_code || ""),
+        check_date,
+        profile_id: profileId,
+        check_mode: mode,
+        smu_hours,
+        message: "Machine pre-start saved to IRONLOG.",
       });
     } catch (err) {
       req.log.error(err);

@@ -17,6 +17,7 @@ import {
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
 import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
 import { fetchLubeMonthStockSnapshot } from "../utils/lubeMonthStock.js";
+import { getMachinePrestartTemplate } from "../utils/machinePrestartTemplates.js";
 
 let maintenanceMasterSchedulerStarted = false;
 let reportSubscriptionsSchedulerStarted = false;
@@ -31,6 +32,54 @@ function todayYmd() {
 
 function yn(v) {
   return v ? "YES" : "NO";
+}
+
+function machinePrestartProfileFromCheckMode(checkMode) {
+  const m = String(checkMode || "").toLowerCase();
+  const pfx = "machine_prestart_";
+  if (!m.startsWith(pfx)) return null;
+  const id = m.slice(pfx.length).trim();
+  return id || null;
+}
+
+function buildVehicleLdvChecklistPdfRows(checkMode, checklistJsonRaw) {
+  let raw = {};
+  try {
+    const parsed = checklistJsonRaw ? JSON.parse(String(checklistJsonRaw)) : {};
+    raw = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    raw = {};
+  }
+  const mpId = machinePrestartProfileFromCheckMode(checkMode);
+  if (mpId) {
+    const tmpl = getMachinePrestartTemplate(mpId);
+    if (!tmpl?.sections) return [];
+    const rows = [];
+    for (const sec of tmpl.sections) {
+      for (const it of sec.items || []) {
+        const k = String(it.key || "").trim();
+        const secTitle = String(sec.title || "").trim();
+        const lbl = String(it.label || k);
+        rows.push({
+          item: secTitle ? `${secTitle}: ${lbl}` : lbl,
+          status: raw[k] === true ? "PASS" : "FAIL",
+        });
+      }
+    }
+    return rows;
+  }
+  const labelMap = {
+    brakes_ok: "Brakes",
+    lights_ok: "Lights",
+    tyres_ok: "Tyres",
+    oil_coolant_ok: "Oil/Coolant",
+    leaks_damage_ok: "Leaks/Damage",
+    safety_items_ok: "Safety Items",
+  };
+  return Object.entries(labelMap).map(([k, label]) => ({
+    item: label,
+    status: raw[k] === true ? "PASS" : "FAIL",
+  }));
 }
 
 function fmtNum(v, dp = 1) {
@@ -4018,6 +4067,7 @@ export default async function reportsRoutes(app) {
         v.check_date,
         v.vehicle_registration,
         v.odometer_km,
+        v.smu_hours,
         v.inspector_name,
         v.notes,
         v.check_mode,
@@ -4031,6 +4081,8 @@ export default async function reportsRoutes(app) {
       WHERE v.id = ?
     `).get(id);
     if (!check) return reply.code(404).send({ error: "vehicle check not found" });
+
+    const isMachinePrestart = Boolean(machinePrestartProfileFromCheckMode(check.check_mode));
 
     const photos = db.prepare(`
       SELECT id, file_path, caption, markers_json, created_at
@@ -4048,19 +4100,7 @@ export default async function reportsRoutes(app) {
     });
     let checklistRows = [];
     try {
-      const raw = check?.checklist_json ? JSON.parse(String(check.checklist_json || "{}")) : {};
-      const labelMap = {
-        brakes_ok: "Brakes",
-        lights_ok: "Lights",
-        tyres_ok: "Tyres",
-        oil_coolant_ok: "Oil/Coolant",
-        leaks_damage_ok: "Leaks/Damage",
-        safety_items_ok: "Safety Items",
-      };
-      checklistRows = Object.entries(labelMap).map(([k, label]) => ({
-        item: label,
-        status: raw && typeof raw === "object" && raw[k] === true ? "PASS" : "FAIL",
-      }));
+      checklistRows = buildVehicleLdvChecklistPdfRows(check.check_mode, check.checklist_json);
     } catch {
       checklistRows = [];
     }
@@ -4070,7 +4110,7 @@ export default async function reportsRoutes(app) {
       (doc) => {
         tryDrawLogo(doc, logoPath);
 
-        sectionTitle(doc, "LDV Vehicle Check");
+        sectionTitle(doc, isMachinePrestart ? "Machine pre-start" : "LDV Vehicle Check");
         kvGrid(doc, [
           { k: "Check #", v: check.id },
           { k: "Date", v: check.check_date || "" },
@@ -4079,6 +4119,7 @@ export default async function reportsRoutes(app) {
           { k: "Registration", v: check.vehicle_registration || "-" },
           { k: "Mode", v: check.check_mode || "ldv_general" },
           { k: "Odometer (km)", v: check.odometer_km == null ? "-" : fmtNum(check.odometer_km, 0) },
+          { k: "SMU (hours)", v: check.smu_hours == null ? "-" : fmtNum(check.smu_hours, 1) },
           { k: "Inspector", v: check.inspector_name || "-" },
           { k: "Created At", v: check.created_at || "" },
         ], 2);
@@ -4159,17 +4200,18 @@ export default async function reportsRoutes(app) {
       },
       {
         title: "IRONLOG",
-        subtitle: "LDV Vehicle Check Report",
+        subtitle: isMachinePrestart ? "Machine pre-start report" : "LDV Vehicle Check Report",
         rightText: `Check #${check.id}`,
         showPageNumbers: true,
       }
     );
 
+    const pdfBase = isMachinePrestart ? "AML_Machine_Prestart" : "AML_LDV_Check";
     reply
       .header("Content-Type", "application/pdf")
       .header(
         "Content-Disposition",
-        `${download ? "attachment" : "inline"}; filename="AML_LDV_Check_${check.id}.pdf"`
+        `${download ? "attachment" : "inline"}; filename="${pdfBase}_${check.id}.pdf"`
       )
       .send(pdf);
   });

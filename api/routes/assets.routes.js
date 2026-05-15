@@ -6,6 +6,11 @@ import {
   validateAgainstMdmPolicy,
   validateAssetGovernanceOptional,
 } from "../utils/masterdataGovernance.js";
+import {
+  resolveMachinePrestartProfile,
+  getMachinePrestartTemplate,
+  machinePrestartCheckMode,
+} from "../utils/machinePrestartTemplates.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -437,6 +442,17 @@ export default async function assetRoutes(app) {
     }).sort((a, b) => a.remaining_hours - b.remaining_hours);
     const nextService = dueRows[0] || null;
 
+    const machineProfileId = resolveMachinePrestartProfile(asset.category, asset.asset_name);
+    const machineTemplate = machineProfileId ? getMachinePrestartTemplate(machineProfileId) : null;
+    const machine_prestart =
+      machineProfileId && machineTemplate
+        ? {
+            profile_id: machineProfileId,
+            check_mode: machinePrestartCheckMode(machineProfileId),
+            template_title: String(machineTemplate.title || "Machine pre-start"),
+          }
+        : null;
+
     const fuel30d = db.prepare(`
       SELECT
         COALESCE(SUM(liters), 0) AS liters_30d,
@@ -464,9 +480,12 @@ export default async function assetRoutes(app) {
       },
       scan_url: (() => {
         const origin = resolveWebOrigin(req);
-        const targetPath = isLdvPrestartQrAsset(asset.asset_code)
-          ? `/web/ldv-prestart.html?asset_code=${encodeURIComponent(asset.asset_code)}`
-          : `/web/asset-qr.html?asset_code=${encodeURIComponent(asset.asset_code)}`;
+        let targetPath = `/web/asset-qr.html?asset_code=${encodeURIComponent(asset.asset_code)}`;
+        if (isLdvPrestartQrAsset(asset.asset_code)) {
+          targetPath = `/web/ldv-prestart.html?asset_code=${encodeURIComponent(asset.asset_code)}`;
+        } else if (machine_prestart?.profile_id) {
+          targetPath = `/web/machine-prestart.html?asset_code=${encodeURIComponent(asset.asset_code)}`;
+        }
         if (!origin) return targetPath;
         return `${origin}${targetPath}`;
       })(),
@@ -491,6 +510,7 @@ export default async function assetRoutes(app) {
       inspections: {
         last_inspection_date: buildInspectionSummary(asset.id),
       },
+      machine_prestart,
     };
 
     const nextDueText = nextService
