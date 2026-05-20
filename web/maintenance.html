@@ -92,6 +92,10 @@
 
       <div class="nav-section">
         <div class="nav-section-title">Analytics</div>
+        <a href="#" class="nav-item" data-section="reliability">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+          <span>MTBF / LTTR</span>
+        </a>
         <a href="#" class="nav-item" data-section="asset-kpi">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
           <span>Asset KPI</span>
@@ -1164,6 +1168,69 @@
     </div>
     </div>
 
+    <!-- MTBF / LTTR Section -->
+    <div id="reliabilitySection" class="maint-section" style="display:none;">
+      <div class="card stack-24">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0;">MTBF &amp; LTTR — selected equipment</h3>
+        </div>
+        <p class="muted" style="margin:0 0 12px 0;">
+          <strong>MTBF</strong> (mean time between failures) = operating hours ÷ failure count.
+          <strong>LTTR</strong> (lost time to repair) = downtime hours ÷ failure count.
+          Failures are breakdowns logged in the selected date range. Operating hours come from daily input run hours.
+        </p>
+        <div class="row stack-10">
+          <label>
+            Start
+            <input id="relStart" type="date" />
+          </label>
+          <label>
+            End
+            <input id="relEnd" type="date" />
+          </label>
+          <label>
+            Category (optional)
+            <select id="relCategoryFilter" class="w-200">
+              <option value="">All categories</option>
+            </select>
+          </label>
+        </div>
+        <div class="row stack-10" style="align-items:flex-end;">
+          <label style="flex:1; min-width:280px;">
+            Equipment (Ctrl+click to select multiple; none = all in category)
+            <select id="relAssetSelect" multiple size="8" style="width:100%; min-height:160px;"></select>
+          </label>
+          <div class="stack-10">
+            <button id="relSelectAllBtn" type="button">Select all listed</button>
+            <button id="relClearSelBtn" type="button">Clear selection</button>
+          </div>
+        </div>
+        <div class="row stack-10">
+          <button id="loadReliabilityBtn" type="button" class="primary">Load MTBF / LTTR</button>
+          <button id="exportReliabilityBtn" type="button">Export Excel</button>
+        </div>
+        <div id="relMsg" class="muted">Choose dates and equipment, then load.</div>
+        <div id="relSummary" class="kpi-hero" style="margin-top:12px;"></div>
+        <div style="overflow:auto; margin-top:16px;">
+          <table class="gridTable" style="min-width:880px;">
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Name</th>
+                <th>Category</th>
+                <th style="text-align:right;">Failures</th>
+                <th style="text-align:right;">Operating h</th>
+                <th style="text-align:right;">Downtime h</th>
+                <th style="text-align:right;">MTBF h</th>
+                <th style="text-align:right;">LTTR h</th>
+              </tr>
+            </thead>
+            <tbody id="relAssetBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- Asset KPI Section -->
     <div id="assetKpiSection" class="maint-section" style="display:none;">
       <div class="card stack-24">
@@ -1397,6 +1464,6 @@
     </div>
   </div>
 
-  <script src="./maintenance.js?v=18"></script>
+  <script src="./maintenance.js?v=19"></script>
 </body>
 </html>

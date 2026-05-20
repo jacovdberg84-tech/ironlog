@@ -132,6 +132,7 @@ function viewForSection(section) {
     "weekly-forum": "wf",
     "tyre-inspections": "tyre",
     "asset-kpi": "kpi",
+    "reliability": "rel",
     "histogram": "hist",
     "sync-admin": "sync",
   };
@@ -156,6 +157,7 @@ function scrollToSection(section) {
           "wf": "weeklyForumSection",
           "tyre": "tyreInspectionsSection",
           "kpi": "assetKpiSection",
+          "rel": "reliabilitySection",
           "hist": "histogramSection",
           "sync": "syncAdminSection",
           "insights": "maintenanceInsightsCard",
@@ -193,6 +195,10 @@ function refreshTopViewData(view) {
       break;
     case "kpi":
       loadAssetKpiWeekly().catch(() => {});
+      break;
+    case "rel":
+      loadReliabilityAssets().catch(() => {});
+      loadReliabilityMetrics().catch(() => {});
       break;
     case "insights":
       loadMaintenanceInsights().catch(() => {});
@@ -1921,6 +1927,7 @@ function setTopView(view) {
   const wf = document.getElementById("weeklyForumSection");
   const tyre = document.getElementById("tyreInspectionsSection");
   const kpi = document.getElementById("assetKpiSection");
+  const rel = document.getElementById("reliabilitySection");
   const hist = document.getElementById("histogramSection");
   const sync = document.getElementById("syncAdminSection");
   const planSection = document.querySelector("section.panel.page-section");
@@ -1932,6 +1939,7 @@ function setTopView(view) {
   if (wf) wf.style.display = "none";
   if (tyre) tyre.style.display = "none";
   if (kpi) kpi.style.display = "none";
+  if (rel) rel.style.display = "none";
   if (hist) hist.style.display = "none";
   if (sync) sync.style.display = "none";
   if (planSection) planSection.style.display = "none";
@@ -1966,6 +1974,9 @@ function setTopView(view) {
       break;
     case "kpi":
       if (kpi) kpi.style.display = "block";
+      break;
+    case "rel":
+      if (rel) rel.style.display = "block";
       break;
     case "hist":
       if (hist) hist.style.display = "block";
@@ -2007,6 +2018,9 @@ function setTopView(view) {
           break;
         case "kpi":
           isActive = section === "asset-kpi";
+          break;
+        case "rel":
+          isActive = section === "reliability";
           break;
         case "hist":
           isActive = section === "histogram";
@@ -4236,6 +4250,192 @@ function renderAssetKpiTables(data) {
   renderAssetKpiVisuals(data);
 }
 
+let relAssetCatalog = [];
+let relLastMeta = null;
+
+function relFmtHours(v) {
+  if (v == null || v === "") return "-";
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(2) : "-";
+}
+
+function relSelectedAssetIds() {
+  const sel = document.getElementById("relAssetSelect");
+  if (!sel) return [];
+  return Array.from(sel.selectedOptions || [])
+    .map((o) => Number(o.value || 0))
+    .filter((n) => n > 0);
+}
+
+function relRefreshCategoryOptions(assets, keepValue = "") {
+  const catSel = document.getElementById("relCategoryFilter");
+  if (!catSel) return;
+  const cats = Array.from(
+    new Set((assets || []).map((a) => String(a.category || "").trim()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b));
+  const prev = keepValue || String(catSel.value || "");
+  catSel.innerHTML = `<option value="">All categories</option>${cats.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("")}`;
+  if (prev && cats.includes(prev)) catSel.value = prev;
+}
+
+function relRenderAssetOptions(assets) {
+  const sel = document.getElementById("relAssetSelect");
+  if (!sel) return;
+  const cat = String(document.getElementById("relCategoryFilter")?.value || "").trim();
+  const filtered = (assets || []).filter((a) => !cat || String(a.category || "").trim() === cat);
+  const prev = new Set(relSelectedAssetIds());
+  sel.innerHTML = filtered.map((a) => {
+    const id = Number(a.id || a.asset_id || 0);
+    const code = String(a.asset_code || "NO-CODE");
+    const name = String(a.asset_name || "");
+    const selected = prev.has(id) ? " selected" : "";
+    return `<option value="${id}"${selected}>${esc(code)} — ${esc(name)}</option>`;
+  }).join("");
+}
+
+async function loadReliabilityAssets() {
+  const sel = document.getElementById("relAssetSelect");
+  if (!sel) return;
+  try {
+    const res = await fetch(`${API}/assets`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load assets");
+    const assets = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.assets)
+        ? data.assets
+        : Array.isArray(data?.rows)
+          ? data.rows
+          : [];
+    relAssetCatalog = assets.filter((a) => {
+      const idOk = Number.isInteger(Number(a?.id)) && Number(a.id) > 0;
+      return idOk && Number(a?.active ?? 1) !== 0 && Number(a?.archived ?? 0) !== 1;
+    });
+    relRefreshCategoryOptions(relAssetCatalog);
+    relRenderAssetOptions(relAssetCatalog);
+  } catch (e) {
+    sel.innerHTML = `<option value="">Failed to load assets</option>`;
+    const msg = document.getElementById("relMsg");
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = `Asset list error: ${e.message || e}`;
+    }
+  }
+}
+
+function renderReliabilityReport(data) {
+  const summaryEl = document.getElementById("relSummary");
+  const body = document.getElementById("relAssetBody");
+  const s = data?.summary || {};
+  if (summaryEl) {
+    summaryEl.innerHTML = `
+      <div class="kpi-card kpi-util">
+        <div class="kpi-card-header"><div class="kpi-icon">F</div><div class="kpi-title">Failures</div></div>
+        <div class="kpi-big-value">${Number(s.failure_count || 0)}</div>
+        <div class="kpi-meta">Breakdowns in period</div>
+      </div>
+      <div class="kpi-card kpi-scheduled">
+        <div class="kpi-card-header"><div class="kpi-icon">O</div><div class="kpi-title">Operating hours</div></div>
+        <div class="kpi-big-value">${relFmtHours(s.operating_hours)}</div>
+        <div class="kpi-meta">Daily input run hours</div>
+      </div>
+      <div class="kpi-card kpi-alerts">
+        <div class="kpi-card-header"><div class="kpi-icon">D</div><div class="kpi-title">Downtime hours</div></div>
+        <div class="kpi-big-value">${relFmtHours(s.downtime_hours)}</div>
+        <div class="kpi-meta">Logged breakdown downtime</div>
+      </div>
+      <div class="kpi-card kpi-avail">
+        <div class="kpi-card-header"><div class="kpi-icon">M</div><div class="kpi-title">MTBF</div></div>
+        <div class="kpi-big-value">${relFmtHours(s.mtbf_hours)}</div>
+        <div class="kpi-meta">Mean time between failures (h)</div>
+      </div>
+      <div class="kpi-card kpi-run">
+        <div class="kpi-card-header"><div class="kpi-icon">L</div><div class="kpi-title">LTTR</div></div>
+        <div class="kpi-big-value">${relFmtHours(s.lttr_hours)}</div>
+        <div class="kpi-meta">Lost time to repair (h)</div>
+      </div>
+    `;
+  }
+  if (!body) return;
+  const rows = Array.isArray(data?.by_asset) ? data.by_asset : [];
+  body.innerHTML = rows.length
+    ? rows.map((r) => `
+      <tr>
+        <td>${esc(r.asset_code || "")}</td>
+        <td>${esc(r.asset_name || "")}</td>
+        <td>${esc(r.category || "")}</td>
+        <td style="text-align:right;">${Number(r.failure_count || 0)}</td>
+        <td style="text-align:right;">${relFmtHours(r.operating_hours)}</td>
+        <td style="text-align:right;">${relFmtHours(r.downtime_hours)}</td>
+        <td style="text-align:right;">${relFmtHours(r.mtbf_hours)}</td>
+        <td style="text-align:right;">${relFmtHours(r.lttr_hours)}</td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="8" class="muted">No assets in scope for this filter.</td></tr>`;
+}
+
+async function loadReliabilityMetrics() {
+  const msg = document.getElementById("relMsg");
+  const body = document.getElementById("relAssetBody");
+  const start = String(document.getElementById("relStart")?.value || "").trim();
+  const end = String(document.getElementById("relEnd")?.value || "").trim();
+  const category = String(document.getElementById("relCategoryFilter")?.value || "").trim();
+  const assetIds = relSelectedAssetIds();
+  if (!start || !end) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = "Choose start and end dates.";
+    }
+    return;
+  }
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = "Loading MTBF / LTTR…";
+  }
+  if (body) body.innerHTML = `<tr><td colspan="8" class="muted">Loading…</td></tr>`;
+  const q = new URLSearchParams();
+  q.set("start", start);
+  q.set("end", end);
+  if (category) q.set("category", category);
+  if (assetIds.length) q.set("asset_ids", assetIds.join(","));
+  try {
+    const res = await fetch(`${API}/maintenance/reliability?${q.toString()}`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load reliability metrics");
+    relLastMeta = { start, end, category, asset_ids: assetIds.join(",") };
+    renderReliabilityReport(data);
+    if (msg) {
+      msg.className = "message-success";
+      const scope = assetIds.length
+        ? `${assetIds.length} selected asset(s)`
+        : category
+          ? `all assets in “${category}”`
+          : "all active assets";
+      msg.textContent = `Loaded ${start} → ${end} for ${scope} (${Number(data.asset_filter_count || 0)} assets).`;
+    }
+  } catch (e) {
+    relLastMeta = null;
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = `Error: ${e.message || e}`;
+    }
+    if (body) body.innerHTML = `<tr><td colspan="8" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+  }
+}
+
+function exportReliabilityToExcel() {
+  if (!relLastMeta) {
+    alert("Load MTBF / LTTR data first.");
+    return;
+  }
+  const q = new URLSearchParams();
+  q.set("start", relLastMeta.start);
+  q.set("end", relLastMeta.end);
+  if (relLastMeta.category) q.set("category", relLastMeta.category);
+  if (relLastMeta.asset_ids) q.set("asset_ids", relLastMeta.asset_ids);
+  window.open(`${API}/maintenance/reliability.xlsx?${q.toString()}`, "_blank");
+}
+
 async function loadAssetKpiWeekly() {
   const msg = document.getElementById("akpMsg");
   const catBody = document.getElementById("akpCategoryBody");
@@ -4994,6 +5194,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadAssetsForPlan().then(() => {
     loadLiveHoursForSelectedAsset();
   });
+  loadReliabilityAssets().catch(() => {});
 
   loadPlans();
   loadDue();
@@ -5069,6 +5270,16 @@ document.addEventListener("DOMContentLoaded", () => {
     d.setDate(d.getDate() + mondayOffset + 4);
     akpEnd.value = d.toISOString().slice(0, 10);
   }
+  const relStart = document.getElementById("relStart");
+  const relEnd = document.getElementById("relEnd");
+  if (relStart && !relStart.value && akpStart?.value) relStart.value = akpStart.value;
+  if (relEnd && !relEnd.value && akpEnd?.value) relEnd.value = akpEnd.value;
+  if (relStart && !relStart.value) {
+    const d = new Date();
+    d.setDate(d.getDate() - 29);
+    relStart.value = d.toISOString().slice(0, 10);
+  }
+  if (relEnd && !relEnd.value) relEnd.value = new Date().toISOString().slice(0, 10);
   const wfActionDate = document.getElementById("wfActionDate");
   if (wfActionDate && !wfActionDate.value) wfActionDate.value = new Date().toISOString().slice(0, 10);
   const histViewMode = document.getElementById("histViewMode");
@@ -5323,6 +5534,21 @@ document.addEventListener("DOMContentLoaded", () => {
     );
   });
   document.getElementById("loadAssetKpiBtn")?.addEventListener("click", () => loadAssetKpiWeekly());
+  document.getElementById("loadReliabilityBtn")?.addEventListener("click", () => loadReliabilityMetrics());
+  document.getElementById("exportReliabilityBtn")?.addEventListener("click", () => exportReliabilityToExcel());
+  document.getElementById("relCategoryFilter")?.addEventListener("change", () => {
+    relRenderAssetOptions(relAssetCatalog);
+  });
+  document.getElementById("relSelectAllBtn")?.addEventListener("click", () => {
+    const sel = document.getElementById("relAssetSelect");
+    if (!sel) return;
+    Array.from(sel.options).forEach((o) => { o.selected = true; });
+  });
+  document.getElementById("relClearSelBtn")?.addEventListener("click", () => {
+    const sel = document.getElementById("relAssetSelect");
+    if (!sel) return;
+    Array.from(sel.options).forEach((o) => { o.selected = false; });
+  });
   document.getElementById("exportAssetKpiBtn")?.addEventListener("click", () => exportAssetKpiToExcel());
   document.getElementById("exportExecutivePackBtn")?.addEventListener("click", () => exportExecutivePackFromAssetKpi());
   document.getElementById("exportExecutiveKpiPackBtn")?.addEventListener("click", () => exportExecutiveKpiPackBySite());

@@ -1108,6 +1108,272 @@ export default async function maintenanceRoutes(app) {
   });
 
   // =====================================================
+  // MTBF / LTTR (reliability) — selected dates & equipment
+  // MTBF = operating hours ÷ failure count
+  // LTTR = downtime hours ÷ failure count (same as dashboard reliability)
+  // GET /api/maintenance/reliability?start=YYYY-MM-DD&end=YYYY-MM-DD&asset_ids=1,2&category=Excavator
+  // =====================================================
+  function parseReliabilityAssetIds(raw) {
+    const out = new Set();
+    const s = String(raw || "").trim();
+    if (!s) return [];
+    s.split(/[,;\s]+/).forEach((part) => {
+      const n = Number(part);
+      if (Number.isFinite(n) && n > 0) out.add(Math.floor(n));
+    });
+    return Array.from(out);
+  }
+
+  function breakdownDowntimeColumnName() {
+    if (hasColumn("breakdowns", "downtime_total_hours")) return "downtime_total_hours";
+    if (hasColumn("breakdowns", "downtime_hours")) return "downtime_hours";
+    return null;
+  }
+
+  function buildMaintenanceReliabilityReport(start, end, opts = {}) {
+    const categoryFilter = String(opts.category || "").trim();
+    let assetIds = Array.isArray(opts.asset_ids) ? opts.asset_ids.map((x) => Number(x)).filter((n) => n > 0) : [];
+
+    let assetRows = [];
+    if (assetIds.length) {
+      const marks = assetIds.map(() => "?").join(",");
+      assetRows = db.prepare(`
+        SELECT id AS asset_id, asset_code, asset_name, category
+        FROM assets
+        WHERE id IN (${marks})
+          AND COALESCE(active, 1) = 1
+          AND COALESCE(archived, 0) = 0
+        ORDER BY asset_code ASC
+      `).all(...assetIds);
+    } else {
+      const params = [];
+      let where = `COALESCE(active, 1) = 1 AND COALESCE(archived, 0) = 0`;
+      if (categoryFilter) {
+        where += ` AND TRIM(COALESCE(category, '')) = ?`;
+        params.push(categoryFilter);
+      }
+      assetRows = db.prepare(`
+        SELECT id AS asset_id, asset_code, asset_name, category
+        FROM assets
+        WHERE ${where}
+        ORDER BY asset_code ASC
+      `).all(...params);
+    }
+
+    assetIds = assetRows.map((r) => Number(r.asset_id || 0)).filter((n) => n > 0);
+    if (!assetIds.length) {
+      return {
+        start,
+        end,
+        category: categoryFilter || null,
+        asset_filter_count: 0,
+        summary: {
+          failure_count: 0,
+          operating_hours: 0,
+          downtime_hours: 0,
+          mtbf_hours: null,
+          lttr_hours: null,
+        },
+        by_asset: [],
+      };
+    }
+
+    const marks = assetIds.map(() => "?").join(",");
+    const canBreakdowns = hasTable("breakdowns");
+    const canDtLogs = hasTable("breakdown_downtime_logs");
+    const dtCol = breakdownDowntimeColumnName();
+    const breakdownDateExpr = hasColumn("breakdowns", "breakdown_date")
+      ? "b.breakdown_date"
+      : "DATE(COALESCE(b.created_at, b.updated_at))";
+
+    const runByAsset = new Map(
+      db.prepare(`
+        SELECT asset_id, COALESCE(SUM(hours_run), 0) AS run_hours
+        FROM daily_hours
+        WHERE work_date BETWEEN ? AND ?
+          AND is_used = 1
+          AND hours_run > 0
+          AND asset_id IN (${marks})
+        GROUP BY asset_id
+      `).all(start, end, ...assetIds).map((r) => [Number(r.asset_id || 0), Number(r.run_hours || 0)])
+    );
+
+    const failuresByAsset = new Map();
+    if (canBreakdowns) {
+      for (const r of db.prepare(`
+        SELECT b.asset_id, COUNT(*) AS failure_count
+        FROM breakdowns b
+        WHERE ${breakdownDateExpr} BETWEEN ? AND ?
+          AND b.asset_id IN (${marks})
+        GROUP BY b.asset_id
+      `).all(start, end, ...assetIds)) {
+        failuresByAsset.set(Number(r.asset_id || 0), Number(r.failure_count || 0));
+      }
+    }
+
+    const downtimeByAsset = new Map();
+    if (canDtLogs) {
+      for (const r of db.prepare(`
+        SELECT b.asset_id, COALESCE(SUM(l.hours_down), 0) AS downtime_hours
+        FROM breakdown_downtime_logs l
+        JOIN breakdowns b ON b.id = l.breakdown_id
+        WHERE l.log_date BETWEEN ? AND ?
+          AND b.asset_id IN (${marks})
+        GROUP BY b.asset_id
+      `).all(start, end, ...assetIds)) {
+        downtimeByAsset.set(Number(r.asset_id || 0), Number(r.downtime_hours || 0));
+      }
+    }
+    if (canBreakdowns && dtCol) {
+      for (const r of db.prepare(`
+        SELECT b.asset_id, COALESCE(SUM(b.${dtCol}), 0) AS downtime_hours
+        FROM breakdowns b
+        WHERE ${breakdownDateExpr} BETWEEN ? AND ?
+          AND b.asset_id IN (${marks})
+        GROUP BY b.asset_id
+      `).all(start, end, ...assetIds)) {
+        const aid = Number(r.asset_id || 0);
+        const base = Number(r.downtime_hours || 0);
+        if (!downtimeByAsset.has(aid) || Number(downtimeByAsset.get(aid) || 0) <= 0) {
+          downtimeByAsset.set(aid, base);
+        }
+      }
+    }
+
+    const by_asset = assetRows.map((a) => {
+      const aid = Number(a.asset_id || 0);
+      const operating_hours = Number(runByAsset.get(aid) || 0);
+      const failure_count = Number(failuresByAsset.get(aid) || 0);
+      const downtime_hours = Number(downtimeByAsset.get(aid) || 0);
+      const mtbf_hours = failure_count > 0 ? operating_hours / failure_count : null;
+      const lttr_hours = failure_count > 0 ? downtime_hours / failure_count : null;
+      return {
+        asset_id: aid,
+        asset_code: String(a.asset_code || ""),
+        asset_name: String(a.asset_name || ""),
+        category: String(a.category || ""),
+        failure_count,
+        operating_hours: Number(operating_hours.toFixed(2)),
+        downtime_hours: Number(downtime_hours.toFixed(2)),
+        mtbf_hours: mtbf_hours == null ? null : Number(mtbf_hours.toFixed(2)),
+        lttr_hours: lttr_hours == null ? null : Number(lttr_hours.toFixed(2)),
+      };
+    }).sort((x, y) => {
+      const xm = x.mtbf_hours == null ? Infinity : Number(x.mtbf_hours);
+      const ym = y.mtbf_hours == null ? Infinity : Number(y.mtbf_hours);
+      return xm - ym;
+    });
+
+    const failure_count = by_asset.reduce((s, r) => s + Number(r.failure_count || 0), 0);
+    const operating_hours = by_asset.reduce((s, r) => s + Number(r.operating_hours || 0), 0);
+    const downtime_hours = by_asset.reduce((s, r) => s + Number(r.downtime_hours || 0), 0);
+    const mtbf_hours = failure_count > 0 ? operating_hours / failure_count : null;
+    const lttr_hours = failure_count > 0 ? downtime_hours / failure_count : null;
+
+    return {
+      start,
+      end,
+      category: categoryFilter || null,
+      asset_filter_count: assetIds.length,
+      formulas: {
+        mtbf: "operating_hours / failure_count",
+        lttr: "downtime_hours / failure_count",
+        failures: "breakdowns with breakdown_date in selected period",
+        operating_hours: "sum of daily_hours.hours_run (is_used=1) in period",
+        downtime_hours: "sum of breakdown_downtime_logs in period, else breakdown header downtime",
+      },
+      summary: {
+        failure_count,
+        operating_hours: Number(operating_hours.toFixed(2)),
+        downtime_hours: Number(downtime_hours.toFixed(2)),
+        mtbf_hours: mtbf_hours == null ? null : Number(mtbf_hours.toFixed(2)),
+        lttr_hours: lttr_hours == null ? null : Number(lttr_hours.toFixed(2)),
+      },
+      by_asset,
+    };
+  }
+
+  app.get("/reliability", async (req, reply) => {
+    try {
+      const endDate = String(req.query?.end || "").trim() || new Date().toISOString().slice(0, 10);
+      const startDate = String(req.query?.start || "").trim() || (() => {
+        const d = new Date(`${endDate}T00:00:00`);
+        d.setDate(d.getDate() - 29);
+        return d.toISOString().slice(0, 10);
+      })();
+      if (!isDate(startDate) || !isDate(endDate)) {
+        return reply.code(400).send({ ok: false, error: "start and end must be YYYY-MM-DD" });
+      }
+      if (startDate > endDate) {
+        return reply.code(400).send({ ok: false, error: "start must be <= end" });
+      }
+      const asset_ids = parseReliabilityAssetIds(req.query?.asset_ids);
+      const category = String(req.query?.category || "").trim();
+      const data = buildMaintenanceReliabilityReport(startDate, endDate, { asset_ids, category });
+      return reply.send({ ok: true, ...data });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.get("/reliability.xlsx", async (req, reply) => {
+    try {
+      const endDate = String(req.query?.end || "").trim() || new Date().toISOString().slice(0, 10);
+      const startDate = String(req.query?.start || "").trim() || (() => {
+        const d = new Date(`${endDate}T00:00:00`);
+        d.setDate(d.getDate() - 29);
+        return d.toISOString().slice(0, 10);
+      })();
+      if (!isDate(startDate) || !isDate(endDate) || startDate > endDate) {
+        return reply.code(400).send({ ok: false, error: "Provide valid start/end dates" });
+      }
+      const asset_ids = parseReliabilityAssetIds(req.query?.asset_ids);
+      const category = String(req.query?.category || "").trim();
+      const data = buildMaintenanceReliabilityReport(startDate, endDate, { asset_ids, category });
+
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "IRONLOG";
+      wb.created = new Date();
+
+      const summary = wb.addWorksheet("Summary");
+      summary.addRow(["MTBF / LTTR Report"]);
+      summary.addRow(["Period", `${startDate} to ${endDate}`]);
+      summary.addRow(["Category filter", category || "All"]);
+      summary.addRow(["Assets in scope", data.asset_filter_count]);
+      summary.addRow([]);
+      summary.addRow(["Metric", "Value"]);
+      summary.addRow(["Failures", data.summary.failure_count]);
+      summary.addRow(["Operating hours", data.summary.operating_hours]);
+      summary.addRow(["Downtime hours", data.summary.downtime_hours]);
+      summary.addRow(["MTBF (hours)", data.summary.mtbf_hours ?? ""]);
+      summary.addRow(["LTTR (hours)", data.summary.lttr_hours ?? ""]);
+
+      const assets = wb.addWorksheet("By Asset");
+      assets.columns = [
+        { header: "Asset", key: "asset_code", width: 14 },
+        { header: "Name", key: "asset_name", width: 28 },
+        { header: "Category", key: "category", width: 18 },
+        { header: "Failures", key: "failure_count", width: 12 },
+        { header: "Operating h", key: "operating_hours", width: 14 },
+        { header: "Downtime h", key: "downtime_hours", width: 14 },
+        { header: "MTBF h", key: "mtbf_hours", width: 12 },
+        { header: "LTTR h", key: "lttr_hours", width: 12 },
+      ];
+      assets.addRows(data.by_asset || []);
+
+      const buf = await wb.xlsx.writeBuffer();
+      reply
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header("Content-Disposition", `attachment; filename="IRONLOG_MTBF_LTTR_${startDate}_to_${endDate}.xlsx"`)
+        .send(Buffer.from(buf));
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // =====================================================
   // MAINTENANCE INSIGHTS (High-Impact analytics starter)
   // GET /api/maintenance/insights?start=YYYY-MM-DD&end=YYYY-MM-DD&near_due_hours=50
   // =====================================================
