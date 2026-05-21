@@ -3940,6 +3940,7 @@ async function loadLubeUsage() {
 async function saveFuelLog() {
   const meterRaw = (qs("fuelHoursRun")?.value || "").trim();
   const meter_unit = String(qs("fuelMeterUnit")?.value || "hours").trim().toLowerCase() === "km" ? "km" : "hours";
+  const cc = String(qs("fuelCostCenter")?.value || "").trim();
   const basePayload = {
     asset_code: (qs("fuelAsset")?.value || "").trim(),
     log_date: (qs("fuelDate")?.value || "").trim() || undefined,
@@ -3948,6 +3949,7 @@ async function saveFuelLog() {
     meter_unit,
     hours_run: meter_unit === "hours" && meterRaw !== "" ? Number(meterRaw) : undefined,
     source: (qs("fuelSource")?.value || "").trim() || undefined,
+    cost_center_code: cc || undefined,
   };
 
   setStatus("Saving fuel log...");
@@ -7019,6 +7021,95 @@ async function loadStoreAllocations() {
   }
 }
 
+function applyAssetCostCenterToInputs(assetCode) {
+  const code = String(assetCode || "").trim();
+  const a = code && window.__assetsByCode ? window.__assetsByCode[code] : null;
+  const cc = a?.cost_center_code ? String(a.cost_center_code) : "";
+  if (qs("fuelCostCenter")) qs("fuelCostCenter").value = cc;
+  if (qs("mlCostCenter")) qs("mlCostCenter").value = cc;
+}
+
+async function loadCostCenterOptions() {
+  const list = qs("costCenterOptions");
+  if (!list) return;
+  try {
+    const data = await fetchJson(`${API}/api/masterdata/cost-centers`);
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    list.innerHTML = "";
+    rows.forEach((r) => {
+      const code = String(r.code || "").trim();
+      if (!code) return;
+      const opt = document.createElement("option");
+      opt.value = code;
+      opt.label = String(r.name || code);
+      list.appendChild(opt);
+    });
+  } catch {}
+}
+
+async function populateAssetAllocSelect() {
+  const sel = qs("assetAllocSelect");
+  if (!sel) return;
+  const current = String(sel.value || "");
+  try {
+    const assets = await fetchJson(`${API}/api/assets?include_archived=0`);
+    const rows = Array.isArray(assets) ? assets : [];
+    window.__assetsByCode = {};
+    sel.innerHTML = '<option value="">Select asset…</option>';
+    rows.forEach((a) => {
+      const code = String(a.asset_code || "").trim();
+      if (!code) return;
+      window.__assetsByCode[code] = a;
+      const opt = document.createElement("option");
+      opt.value = code;
+      const cc = a.cost_center_code ? ` · ${a.cost_center_code}` : "";
+      opt.textContent = `${code} — ${a.asset_name || ""}${cc}`;
+      sel.appendChild(opt);
+    });
+    if (current && window.__assetsByCode[current]) sel.value = current;
+    loadAssetAllocationForm();
+  } catch (e) {
+    setStatus("Asset allocation list failed: " + (e.message || e));
+  }
+}
+
+function loadAssetAllocationForm() {
+  const code = String(qs("assetAllocSelect")?.value || "").trim();
+  const a = code && window.__assetsByCode ? window.__assetsByCode[code] : null;
+  if (qs("assetAllocSite")) qs("assetAllocSite").value = a?.site_code ? String(a.site_code) : (getSessionSite() || "main");
+  if (qs("assetAllocCostCenter")) qs("assetAllocCostCenter").value = a?.cost_center_code ? String(a.cost_center_code) : "";
+  if (qs("assetAllocDepartment")) qs("assetAllocDepartment").value = a?.department_code ? String(a.department_code) : "";
+}
+
+async function saveAssetAllocation() {
+  const code = String(qs("assetAllocSelect")?.value || "").trim();
+  const out = qs("assetAllocResult");
+  if (!code) return alert("Select an asset first.");
+  const body = {
+    site_code: String(qs("assetAllocSite")?.value || "").trim() || null,
+    cost_center_code: String(qs("assetAllocCostCenter")?.value || "").trim() || null,
+    department_code: String(qs("assetAllocDepartment")?.value || "").trim() || null,
+  };
+  setStatus("Saving asset allocation…");
+  try {
+    const res = await fetchJson(`${API}/api/assets/${encodeURIComponent(code)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (out) out.textContent = JSON.stringify(res?.asset || res, null, 2);
+    await Promise.all([
+      populateAssetAllocSelect(),
+      loadCodePickers(),
+      loadCostCenterOptions(),
+    ]);
+    setStatus(`Allocation saved for ${code}.`);
+  } catch (e) {
+    if (out) out.textContent = String(e.message || e);
+    setStatus("Asset allocation save failed.");
+  }
+}
+
 async function loadCodePickers() {
   const assetList = qs("assetCodeOptions");
   const partList = qs("partCodeOptions");
@@ -7028,10 +7119,12 @@ async function loadCodePickers() {
   if (assetList) {
     try {
       const assets = await fetchJson(`${API}/api/assets?include_archived=0`);
+      window.__assetsByCode = window.__assetsByCode || {};
       assetList.innerHTML = "";
       (Array.isArray(assets) ? assets : []).forEach((a) => {
         const code = String(a.asset_code || "").trim();
         if (!code) return;
+        window.__assetsByCode[code] = a;
         const hiredTag = isHiredAsset(a) ? " [HIRED]" : "";
         const opt = document.createElement("option");
         opt.value = code;
@@ -7040,6 +7133,7 @@ async function loadCodePickers() {
       });
     } catch {}
   }
+  await loadCostCenterOptions();
 
   if (partList) {
     try {
@@ -7410,6 +7504,7 @@ async function saveManualLube() {
     setStatus("Cannot save lube: insufficient stock.");
     return;
   }
+  const mlCc = String(qs("mlCostCenter")?.value || "").trim();
   const payload = {
     asset_code: (qs("mlAsset")?.value || "").trim(),
     log_date: (qs("mlDate")?.value || "").trim() || undefined,
@@ -7417,6 +7512,7 @@ async function saveManualLube() {
     location_code: (qs("mlLocation")?.value || "").trim() || undefined,
     oil_type: (qs("mlType")?.value || "").trim() || undefined,
     quantity: Number(qs("mlQty")?.value || 0),
+    cost_center_code: mlCc || undefined,
   };
 
   setStatus(part_code ? "Issuing lube stock..." : "Saving manual lube entry...");
@@ -10723,12 +10819,15 @@ async function saveContractorAsset() {
 
   const asset_code = codeInput || makeContractorAssetCode();
   const category = contractor ? `${categoryInput} (${contractor})` : categoryInput;
+  const cost_center_code = String(qs("caCostCenter")?.value || "").trim() || undefined;
   const payload = {
     asset_code,
     asset_name: assetName,
     category,
     active: 1,
     is_standby: isStandby ? 1 : 0,
+    site_code: getSessionSite() || "main",
+    cost_center_code,
   };
 
   setStatus(`Adding contractor asset ${asset_code}...`);
@@ -11326,7 +11425,11 @@ async function init() {
     importFuelMassPaste().catch((e) => setStatus("Fuel mass import error: " + e.message))
   );
   qs("fuelAsset")?.addEventListener("change", () => {
+    applyAssetCostCenterToInputs(qs("fuelAsset")?.value);
     syncFuelUnitFromAsset(qs("fuelAsset")?.value, "input").catch(() => {});
+  });
+  qs("mlAsset")?.addEventListener("change", () => {
+    applyAssetCostCenterToInputs(qs("mlAsset")?.value);
   });
   qs("fuelMeterUnit")?.addEventListener("change", () => {
     const mode = String(qs("fuelMeterUnit")?.value || "hours").toLowerCase() === "km" ? "km" : "hours";
@@ -11952,6 +12055,14 @@ async function init() {
   qs("saveContractorAsset")?.addEventListener("click", () =>
     saveContractorAsset().catch((e) => setStatus("Contractor asset save error: " + e.message))
   );
+  qs("assetAllocSelect")?.addEventListener("change", () => loadAssetAllocationForm());
+  qs("saveAssetAllocationBtn")?.addEventListener("click", () =>
+    saveAssetAllocation().catch((e) => setStatus("Asset allocation error: " + e.message))
+  );
+  qs("refreshAssetAllocationBtn")?.addEventListener("click", () =>
+    populateAssetAllocSelect().catch((e) => setStatus("Asset allocation refresh error: " + e.message))
+  );
+  populateAssetAllocSelect().catch(() => {});
 
   populateHistoryAssets().catch(() => {});
   const saDate = qs("saDate");

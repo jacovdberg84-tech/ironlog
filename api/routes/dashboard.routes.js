@@ -5,6 +5,7 @@ import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
 import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
 import { aggregateFuelBenchmarkByCategory, normalizeEquipmentCategory } from "../utils/fuelBenchmarkAggregate.js";
+import { ensureCostAllocationSchema, resolveLogCostCenterCode } from "../utils/costAllocation.js";
 
 function todayYYYYMMDD() {
   return new Date().toISOString().slice(0, 10);
@@ -48,6 +49,7 @@ function siteCodeFromReq(req) {
 }
 
 export default async function dashboardRoutes(app) {
+  ensureCostAllocationSchema(db);
   ensureAuditTable(db);
 
   function hasColumn(table, col) {
@@ -2068,8 +2070,9 @@ export default async function dashboardRoutes(app) {
       return reply.code(400).send({ error: "meter_run_value must be >= 0" });
     }
 
-    const asset = db.prepare(`SELECT id FROM assets WHERE asset_code = ?`).get(asset_code);
+    const asset = db.prepare(`SELECT id, cost_center_code FROM assets WHERE asset_code = ?`).get(asset_code);
     if (!asset) return reply.code(404).send({ error: `asset_code not found: ${asset_code}` });
+    const cost_center_code = resolveLogCostCenterCode(db, asset.id, body.cost_center_code);
 
     // Guard against accidental double-capture: exact same entry within 60 seconds.
     if (!forceDuplicate) {
@@ -2106,22 +2109,23 @@ export default async function dashboardRoutes(app) {
 
     const hours_final = hours_run != null ? hours_run : (meter_unit === "hours" ? meter_run_value : null);
     const ins = db.prepare(`
-      INSERT INTO fuel_logs (asset_id, log_date, liters, source, hours_run, meter_run_value, meter_unit)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(asset.id, log_date, liters, source, hours_final, meter_run_value, meter_unit);
+      INSERT INTO fuel_logs (asset_id, log_date, liters, source, hours_run, meter_run_value, meter_unit, cost_center_code)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(asset.id, log_date, liters, source, hours_final, meter_run_value, meter_unit, cost_center_code);
 
     writeAudit(db, req, {
       module: "fuel",
       action: "manual_log",
       entity_type: "asset",
       entity_id: asset_code,
-      payload: { log_date, liters, hours_run: hours_final, meter_run_value, meter_unit, source },
+      payload: { log_date, liters, hours_run: hours_final, meter_run_value, meter_unit, source, cost_center_code },
     });
 
     return reply.send({
       ok: true,
       id: Number(ins.lastInsertRowid),
       asset_code,
+      cost_center_code,
       log_date,
       liters,
       hours_run: hours_final,

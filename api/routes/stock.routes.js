@@ -8,10 +8,12 @@ import {
   validatePartGovernanceOptional,
 } from "../utils/masterdataGovernance.js";
 import { fetchLubeMonthStockSnapshot } from "../utils/lubeMonthStock.js";
+import { ensureCostAllocationSchema, resolveLogCostCenterCode } from "../utils/costAllocation.js";
 
 export default async function stockRoutes(app) {
   ensureAuditTable(db);
   ensureMasterDataSchema();
+  ensureCostAllocationSchema(db);
 
   function hasColumn(table, col) {
     const rows = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -1662,18 +1664,19 @@ export default async function stockRoutes(app) {
 
     const asset = getAssetByCode.get(asset_code);
     if (!asset) return reply.code(404).send({ error: `asset_code not found: ${asset_code}` });
+    const cost_center_code = resolveLogCostCenterCode(db, asset.id, body.cost_center_code);
 
     const ins = db.prepare(`
-      INSERT INTO oil_logs (asset_id, log_date, oil_type, quantity)
-      VALUES (?, ?, ?, ?)
-    `).run(asset.id, log_date, oil_type, quantity);
+      INSERT INTO oil_logs (asset_id, log_date, oil_type, quantity, cost_center_code)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(asset.id, log_date, oil_type, quantity, cost_center_code);
 
     writeAudit(db, req, {
       module: "lube",
       action: "manual_log",
       entity_type: "asset",
       entity_id: asset_code,
-      payload: { log_date, oil_type, quantity },
+      payload: { log_date, oil_type, quantity, cost_center_code },
     });
 
     return reply.send({
@@ -1683,6 +1686,7 @@ export default async function stockRoutes(app) {
       log_date,
       oil_type,
       quantity,
+      cost_center_code,
     });
   });
 
@@ -1748,10 +1752,11 @@ export default async function stockRoutes(app) {
 
       let lube_log_id = null;
       if (asset) {
+        const cost_center_code = resolveLogCostCenterCode(db, asset.id, body.cost_center_code);
         const lg = db.prepare(`
-          INSERT INTO oil_logs (asset_id, log_date, oil_type, quantity)
-          VALUES (?, ?, ?, ?)
-        `).run(asset.id, log_date, normalizeOilTypeInput(oil_type, part.part_code || null), quantity);
+          INSERT INTO oil_logs (asset_id, log_date, oil_type, quantity, cost_center_code)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(asset.id, log_date, normalizeOilTypeInput(oil_type, part.part_code || null), quantity, cost_center_code);
         lube_log_id = Number(lg.lastInsertRowid);
       }
 

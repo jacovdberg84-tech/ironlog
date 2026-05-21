@@ -11,6 +11,11 @@ import {
   getMachinePrestartTemplate,
   machinePrestartCheckMode,
 } from "../utils/machinePrestartTemplates.js";
+import {
+  ensureCostAllocationSchema,
+  normalizeCostCenterCode,
+  normalizeSiteCode,
+} from "../utils/costAllocation.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -22,6 +27,7 @@ function isLdvPrestartQrAsset(assetCode) {
 
 export default async function assetRoutes(app) {
   ensureMasterDataSchema();
+  ensureCostAllocationSchema(db);
   db.prepare(`
     CREATE TABLE IF NOT EXISTS asset_qr_profiles (
       asset_id INTEGER PRIMARY KEY,
@@ -94,9 +100,9 @@ export default async function assetRoutes(app) {
       asset_code, asset_name, category,
       active, is_standby,
       archived, archive_reason, archived_at,
-      department_code, cost_center_code, data_owner_username
+      department_code, cost_center_code, site_code, data_owner_username
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const updateActive = db.prepare(`UPDATE assets SET active = ? WHERE asset_code = ?`);
@@ -115,7 +121,7 @@ export default async function assetRoutes(app) {
         id, asset_code, asset_name, category,
         active, is_standby,
         archived, archive_reason, archived_at,
-        department_code, cost_center_code, data_owner_username,
+        department_code, cost_center_code, site_code, data_owner_username,
         created_at
       FROM assets
       WHERE (? = 1 OR archived = 0)
@@ -127,6 +133,9 @@ export default async function assetRoutes(app) {
       active: Number(r.active),
       is_standby: Number(r.is_standby),
       archived: Number(r.archived),
+      site_code: r.site_code != null ? String(r.site_code) : null,
+      cost_center_code: r.cost_center_code != null ? String(r.cost_center_code) : null,
+      department_code: r.department_code != null ? String(r.department_code) : null,
     }));
   });
 
@@ -153,10 +162,8 @@ export default async function assetRoutes(app) {
       body.department_code != null && String(body.department_code).trim() !== ""
         ? String(body.department_code).trim().toUpperCase()
         : null;
-    const cost_center_code =
-      body.cost_center_code != null && String(body.cost_center_code).trim() !== ""
-        ? String(body.cost_center_code).trim().toUpperCase()
-        : null;
+    const cost_center_code = normalizeCostCenterCode(body.cost_center_code);
+    const site_code = normalizeSiteCode(body.site_code) || siteCodeFromReq(req);
     const data_owner_username =
       body.data_owner_username != null && String(body.data_owner_username).trim() !== ""
         ? String(body.data_owner_username).trim()
@@ -194,6 +201,7 @@ export default async function assetRoutes(app) {
         archived_at,
         department_code,
         cost_center_code,
+        site_code,
         data_owner_username
       );
       return reply.code(201).send({ ok: true, id: Number(r.lastInsertRowid) });
@@ -230,7 +238,7 @@ export default async function assetRoutes(app) {
     return { ok: true };
   });
 
-  // PATCH /api/assets/:asset_code  { active?, is_standby? }
+  // PATCH /api/assets/:asset_code  { active?, is_standby?, site_code?, cost_center_code?, department_code?, category?, asset_name? }
   app.patch("/:asset_code", async (req, reply) => {
     const asset_code = String(req.params.asset_code || "").trim();
     const body = req.body || {};
@@ -238,14 +246,66 @@ export default async function assetRoutes(app) {
     const asset = getAssetByCode.get(asset_code);
     if (!asset) return reply.code(404).send({ error: "Asset not found" });
 
+    const sets = [];
+    const args = [];
+    if (body.active !== undefined) {
+      sets.push("active = ?");
+      args.push(body.active ? 1 : 0);
+    }
+    if (body.is_standby !== undefined) {
+      sets.push("is_standby = ?");
+      args.push(body.is_standby ? 1 : 0);
+    }
+    if (body.site_code !== undefined) {
+      sets.push("site_code = ?");
+      args.push(normalizeSiteCode(body.site_code));
+    }
+    if (body.cost_center_code !== undefined) {
+      sets.push("cost_center_code = ?");
+      args.push(normalizeCostCenterCode(body.cost_center_code));
+    }
+    if (body.department_code !== undefined) {
+      const dept = String(body.department_code || "").trim();
+      sets.push("department_code = ?");
+      args.push(dept ? dept.toUpperCase() : null);
+    }
+    if (body.category !== undefined) {
+      const cat = String(body.category || "").trim();
+      sets.push("category = ?");
+      args.push(cat || null);
+    }
+    if (body.asset_name !== undefined) {
+      const name = String(body.asset_name || "").trim();
+      if (!name) return reply.code(400).send({ error: "asset_name cannot be empty" });
+      sets.push("asset_name = ?");
+      args.push(name);
+    }
+
+    if (body.cost_center_code !== undefined || body.department_code !== undefined) {
+      const gov = validateAssetGovernanceOptional(siteCodeFromReq(req), {
+        department_code: body.department_code !== undefined
+          ? (String(body.department_code || "").trim() ? String(body.department_code).trim().toUpperCase() : null)
+          : undefined,
+        cost_center_code: body.cost_center_code !== undefined
+          ? normalizeCostCenterCode(body.cost_center_code)
+          : undefined,
+      });
+      if (!gov.ok) return reply.code(400).send({ error: gov.error });
+    }
+
     const tx = db.transaction(() => {
-      if (body.active !== undefined) updateActive.run(body.active ? 1 : 0, asset_code);
-      if (body.is_standby !== undefined) updateStandby.run(body.is_standby ? 1 : 0, asset_code);
+      if (sets.length) {
+        db.prepare(`UPDATE assets SET ${sets.join(", ")} WHERE asset_code = ?`).run(...args, asset_code);
+      }
     });
 
     tx();
 
-    const updated = getAssetByCode.get(asset_code);
+    const updated = db.prepare(`
+      SELECT id, asset_code, asset_name, category, active, is_standby, archived,
+             department_code, cost_center_code, site_code, data_owner_username, created_at
+      FROM assets WHERE asset_code = ?
+    `).get(asset_code);
     return {
       ok: true,
       asset: {

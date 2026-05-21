@@ -1125,6 +1125,10 @@
                 <label>Quantity</label>
                 <input id="mlQty" class="w-full" type="number" step="0.1" min="0.1" value="1" />
               </div>
+              <div class="form-field">
+                <label>Cost center (optional)</label>
+                <input id="mlCostCenter" list="costCenterOptions" class="w-full" placeholder="Uses asset default if blank" />
+              </div>
               <div class="form-field form-field-action">
                 <button id="loadLubeStock" class="btn btn-secondary">Check Stock</button>
                 <button id="saveManualLube" class="btn btn-primary">Save Lube</button>
@@ -1466,6 +1470,49 @@
       </div>
 
       <div class="asset-cards-grid">
+        <!-- Site & cost center allocation -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #f0fdf4; color: #15803d;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18M9 21V9"></path></svg>
+              </div>
+              <div>
+                <h3>Site &amp; Cost Center</h3>
+                <p class="muted small">Default allocation for fuel, lube, and finance reporting. Manage master cost centers under Enterprise → Master Data.</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Asset</label>
+                <select id="assetAllocSelect" class="w-full"></select>
+              </div>
+              <div class="form-field">
+                <label>Site code</label>
+                <input id="assetAllocSite" class="w-full" placeholder="e.g. main" />
+              </div>
+              <div class="form-field">
+                <label>Cost center</label>
+                <input id="assetAllocCostCenter" list="costCenterOptions" class="w-full" placeholder="e.g. MINE-OPS-01" />
+              </div>
+              <div class="form-field">
+                <label>Department</label>
+                <input id="assetAllocDepartment" class="w-full" placeholder="Optional" />
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="saveAssetAllocationBtn" class="btn btn-primary">Save allocation</button>
+              <button id="refreshAssetAllocationBtn" class="btn btn-secondary">Refresh</button>
+            </div>
+            <pre class="output" id="assetAllocResult"></pre>
+          </div>
+        </div>
+
         <!-- Add Contractor Asset Card -->
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
@@ -1501,6 +1548,10 @@
               <div class="form-field">
                 <label>Category</label>
                 <input id="caCategory" class="w-full" placeholder="Category" value="Contractor Hire" />
+              </div>
+              <div class="form-field">
+                <label>Cost center</label>
+                <input id="caCostCenter" list="costCenterOptions" class="w-full" placeholder="Optional" />
               </div>
               <div class="form-field form-field-checkbox">
                 <label class="checkbox-label">
@@ -2244,6 +2295,10 @@
               </div>
             </div>
             <div class="form-row">
+              <div class="form-field">
+                <label>Cost center (optional)</label>
+                <input id="fuelCostCenter" list="costCenterOptions" class="w-full" placeholder="Uses asset default if blank" />
+              </div>
               <div class="form-field form-field-full">
                 <label>Source / Notes</label>
                 <input id="fuelSource" class="w-full" placeholder="Optional notes" />
@@ -5851,6 +5906,7 @@
   </div>
 
   <datalist id="assetCodeOptions"></datalist>
+  <datalist id="costCenterOptions"></datalist>
   <datalist id="partCodeOptions"></datalist>
   <datalist id="locationCodeOptions"></datalist>
   <datalist id="saBinCodeOptions"></datalist>

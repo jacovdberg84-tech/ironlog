@@ -4,6 +4,7 @@
 
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
+import { ensureCostAllocationSchema } from "../utils/costAllocation.js";
 
 function getRole(req) {
   return String(req.headers["x-user-role"] || "admin").trim().toLowerCase();
@@ -168,6 +169,7 @@ const KPI_DEFINITIONS = [
 
 export default async function financeRoutes(app) {
   ensureAuditTable(db);
+  ensureCostAllocationSchema(db);
 
   /* --- ensure tables owned by this module exist --- */
   db.prepare(`
@@ -593,14 +595,20 @@ export default async function financeRoutes(app) {
     if (hasTable("fuel_logs") && hasTable("assets")) {
       const flCols = db.prepare(`PRAGMA table_info(fuel_logs)`).all();
       const flHasUnit = flCols.some((c) => String(c.name) === "unit_cost_per_liter");
+      const flHasCC = flCols.some((c) => String(c.name) === "cost_center_code");
       const fuelCostExpr = assetsHasFuelCost
         ? `COALESCE(${flHasUnit ? "fl.unit_cost_per_liter" : "NULL"}, a.fuel_cost_per_liter, ?)`
         : `COALESCE(${flHasUnit ? "fl.unit_cost_per_liter" : "NULL"}, ?)`;
+      const fuelCcExpr = flHasCC && assetsHasCC
+        ? "COALESCE(NULLIF(TRIM(fl.cost_center_code), ''), NULLIF(TRIM(a.cost_center_code), ''), ?)"
+        : assetsHasCC
+          ? "COALESCE(NULLIF(TRIM(a.cost_center_code), ''), ?)"
+          : "?";
       fuelRows = db.prepare(`
         SELECT
           COALESCE(a.category, '') AS equipment_type,
           ${siteSql} AS site_code,
-          ${assetsHasCC ? "COALESCE(NULLIF(TRIM(a.cost_center_code), ''), ?)" : "?"} AS cost_center_code,
+          ${fuelCcExpr} AS cost_center_code,
           SUM(COALESCE(fl.liters, 0) * ${fuelCostExpr}) AS amount
         FROM fuel_logs fl
         JOIN assets a ON a.id = fl.asset_id
@@ -613,11 +621,17 @@ export default async function financeRoutes(app) {
     if (hasTable("oil_logs") && hasTable("assets")) {
       const olCols = db.prepare(`PRAGMA table_info(oil_logs)`).all();
       const olHasUnit = olCols.some((c) => String(c.name) === "unit_cost");
+      const olHasCC = olCols.some((c) => String(c.name) === "cost_center_code");
+      const lubeCcExpr = olHasCC && assetsHasCC
+        ? "COALESCE(NULLIF(TRIM(ol.cost_center_code), ''), NULLIF(TRIM(a.cost_center_code), ''), ?)"
+        : assetsHasCC
+          ? "COALESCE(NULLIF(TRIM(a.cost_center_code), ''), ?)"
+          : "?";
       lubeRows = db.prepare(`
         SELECT
           COALESCE(a.category, '') AS equipment_type,
           ${siteSql} AS site_code,
-          ${assetsHasCC ? "COALESCE(NULLIF(TRIM(a.cost_center_code), ''), ?)" : "?"} AS cost_center_code,
+          ${lubeCcExpr} AS cost_center_code,
           SUM(COALESCE(ol.quantity, 0) * COALESCE(${olHasUnit ? "ol.unit_cost" : "NULL"}, ?)) AS amount
         FROM oil_logs ol
         JOIN assets a ON a.id = ol.asset_id
