@@ -1842,11 +1842,14 @@ async function submitChangePassword() {
   }
 }
 
+let smtpHasStoredPassword = false;
+
 async function loadSmtpSettings() {
   const out = qs("smtpSettingsResult");
   try {
     const data = await fetchJson(`${API}/api/reports/smtp-settings`);
     const s = data?.settings || {};
+    smtpHasStoredPassword = Boolean(s.has_password);
     if (qs("smtpHost")) qs("smtpHost").value = String(s.host || "");
     if (qs("smtpPort")) qs("smtpPort").value = String(Number(s.port || 587));
     if (qs("smtpSecure")) qs("smtpSecure").value = Number(s.secure || 0) === 1 ? "1" : "0";
@@ -1899,6 +1902,9 @@ async function saveSmtpSettings() {
   if (!body.host) return alert("SMTP host is required.");
   if (!body.username) return alert("SMTP username is required.");
   if (!body.from_email) return alert("From email is required.");
+  if (!body.password && !smtpHasStoredPassword) {
+    return alert("SMTP password is required on first setup. Enter the password, then Save SMTP.");
+  }
   setStatus("Saving SMTP settings…");
   try {
     const data = await fetchJson(`${API}/api/reports/smtp-settings`, {
@@ -1907,6 +1913,7 @@ async function saveSmtpSettings() {
       body: JSON.stringify(body),
     });
     if (qs("smtpPassword")) qs("smtpPassword").value = "";
+    smtpHasStoredPassword = Boolean(data?.settings?.has_password);
     if (out) out.textContent = JSON.stringify({ ok: true, settings: data?.settings || {} }, null, 2);
     setStatus("SMTP settings saved.");
   } catch (e) {
