@@ -1743,7 +1743,7 @@ export default async function procurementRoutes(app) {
   }
 
   app.post("/journals/summarize", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor", "procurement", "stores"])) return;
+    if (!requireRoles(req, reply, ["admin", "supervisor", "procurement", "stores", "finance", "plant_manager"])) return;
     const start = String(req.body?.start || "").trim();
     const end = String(req.body?.end || "").trim();
     if (!start || !end) return reply.code(400).send({ error: "start and end are required (YYYY-MM-DD)" });
@@ -2090,7 +2090,17 @@ export default async function procurementRoutes(app) {
       GROUP BY category
       ORDER BY category
     `).all(id);
-    return { ok: true, run, by_category: byCategory };
+    const bySite = db.prepare(`
+      SELECT COALESCE(NULLIF(TRIM(site_code), ''), '(unassigned)') AS site_code,
+             COUNT(*) AS lines,
+             COALESCE(SUM(debit), 0) AS debit_total,
+             COALESCE(SUM(credit), 0) AS credit_total
+      FROM finance_posting_run_lines
+      WHERE run_id = ?
+      GROUP BY COALESCE(NULLIF(TRIM(site_code), ''), '(unassigned)')
+      ORDER BY debit_total DESC
+    `).all(id);
+    return { ok: true, run, by_category: byCategory, by_site: bySite };
   });
 
   app.get("/journals/runs/:id/lines", async (req, reply) => {
@@ -2113,7 +2123,7 @@ export default async function procurementRoutes(app) {
   });
 
   app.post("/journals/runs/:id/mark-exported", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor", "procurement"])) return;
+    if (!requireRoles(req, reply, ["admin", "supervisor", "procurement", "finance", "plant_manager"])) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
     const run = db.prepare(`SELECT id, status FROM finance_posting_runs WHERE id = ?`).get(id);

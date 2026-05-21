@@ -5141,11 +5141,54 @@
     <!-- FINANCE -->
     <section class="panel" id="tab-finance">
       <div class="reports-header">
-        <h2>Finance Integration</h2>
-        <p class="muted">Summarized journal posting, month-end lock, budgets, forecast, and canonical KPI definitions</p>
+        <h2>Finance</h2>
+        <p class="muted">Site cost allocation for management reporting, journal posting, budgets, and month-end close</p>
       </div>
 
       <div class="form-grid">
+        <!-- SITE COST ALLOCATION -->
+        <div class="card" style="grid-column: 1 / -1;">
+          <h4 style="margin-top:0;">Site cost allocation</h4>
+          <p class="muted" style="margin:0 0 10px 0;">
+            Monthly operating costs rolled up by <strong>site</strong> (from asset <code>site_code</code> on fuel, parts, labor, lube, and downtime).
+            Set each asset’s site on the <strong>Assets</strong> tab; use <strong>Enterprise → Site Profiles</strong> for display names.
+          </p>
+          <div class="row stack-10" style="margin-bottom:8px;">
+            <label>Reporting period (YYYY-MM)<br><input id="finMasterPeriod" class="w-140" placeholder="2026-05"></label>
+            <label>Filter site (optional)<br>
+              <select id="finSiteFilter" class="w-200">
+                <option value="">All sites</option>
+              </select>
+            </label>
+            <button id="finLoadSiteAllocBtn" type="button" class="btn btn-primary">Load allocation</button>
+            <button id="finExportSiteAllocBtn" type="button">Export Excel (meeting pack)</button>
+            <button id="finSyncPeriodsBtn" type="button" title="Copy reporting period to checklist, budget, and SSOT fields">Apply period everywhere</button>
+          </div>
+          <div id="finSiteAllocMsg" class="muted">Choose a period and load.</div>
+          <div id="finSiteAllocTotals" class="kpi-hero" style="margin-top:10px;"></div>
+          <div id="finSiteAllocWarn" style="margin-top:8px;"></div>
+          <div style="overflow:auto; margin-top:12px;">
+            <table class="table" style="min-width:920px;">
+              <thead>
+                <tr>
+                  <th>Site</th>
+                  <th>Code</th>
+                  <th class="num">Budget</th>
+                  <th class="num">Actual</th>
+                  <th class="num">Variance</th>
+                  <th class="num">Var %</th>
+                  <th class="num">Parts</th>
+                  <th class="num">Labor</th>
+                  <th class="num">Fuel</th>
+                  <th class="num">Lube</th>
+                  <th class="num">Downtime</th>
+                </tr>
+              </thead>
+              <tbody id="finSiteAllocBody"></tbody>
+            </table>
+          </div>
+        </div>
+
         <!-- SUMMARIZED JOURNAL POSTING -->
         <div class="card">
           <h4 style="margin-top:0;">Summarized Journal Runs</h4>
@@ -5219,8 +5262,8 @@
             <label>Period<br><input id="finBvaPeriod" class="w-140" placeholder="2026-04"></label>
             <label>Dimension
               <select id="finBvaDimension" class="w-160">
+                <option value="site_code" selected>Site</option>
                 <option value="cost_center_code">Cost Center</option>
-                <option value="site_code">Site</option>
                 <option value="equipment_type">Equipment Type</option>
                 <option value="category">Category</option>
                 <option value="combined">Combined</option>
@@ -5232,7 +5275,7 @@
           <div id="finBvaTable" style="margin-top:10px;"></div>
 
           <h5 style="margin-top:14px;">Upsert Budget Rows (JSON)</h5>
-          <textarea id="finBudgetJson" rows="4" class="w-full" placeholder='[{"period":"2026-04","site_code":"","cost_center_code":"PLANT-A","equipment_type":"","category":"parts","budget_amount":12000}]'></textarea>
+          <textarea id="finBudgetJson" rows="4" class="w-full" placeholder='[{"period":"2026-05","site_code":"main","cost_center_code":"","equipment_type":"","category":"parts","budget_amount":12000},{"period":"2026-05","site_code":"site-b","cost_center_code":"","equipment_type":"","category":"labor","budget_amount":8500}]'></textarea>
           <div class="row stack-10" style="margin-top:6px;">
             <button id="finSaveBudgetBtn" type="button" class="btn btn-primary">Save Budgets</button>
             <button id="finLoadBudgetListBtn" type="button">List Budgets</button>

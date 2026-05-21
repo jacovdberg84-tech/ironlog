@@ -26,7 +26,7 @@ const TASK_WORKSPACE_COLLAPSED_KEY = "ironlog_task_workspace_collapsed";
 const TASK_SAVED_VIEWS_KEY = "ironlog_task_saved_views";
 const WORKSHOP_LIBRARY_SETTINGS_KEY = "ironlog_workshop_library_settings";
 const DEFAULT_WORKSHOP_LIBRARY_SETTINGS = Object.freeze({
-  siteUrl: "",
+  siteUrl: "https://iron-library.base44.app",
   apiBaseUrl: "",
   faultsPath: "faults",
   manualsPath: "manuals",
@@ -996,9 +996,18 @@ function getStoredWorkshopLibrarySettings() {
   try {
     const raw = localStorage.getItem(WORKSHOP_LIBRARY_SETTINGS_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
+    const siteUrl = String(parsed?.siteUrl || "").trim() || DEFAULT_WORKSHOP_LIBRARY_SETTINGS.siteUrl;
+    const apiBaseUrl = String(parsed?.apiBaseUrl || "").trim();
+    const faultsPath = String(parsed?.faultsPath || "").trim() || DEFAULT_WORKSHOP_LIBRARY_SETTINGS.faultsPath;
+    const manualsPath = String(parsed?.manualsPath || "").trim() || DEFAULT_WORKSHOP_LIBRARY_SETTINGS.manualsPath;
+    const repairsPath = String(parsed?.repairsPath || "").trim() || DEFAULT_WORKSHOP_LIBRARY_SETTINGS.repairsPath;
     return {
       ...DEFAULT_WORKSHOP_LIBRARY_SETTINGS,
-      ...(parsed && typeof parsed === "object" ? parsed : {}),
+      siteUrl,
+      apiBaseUrl,
+      faultsPath,
+      manualsPath,
+      repairsPath,
     };
   } catch {
     return { ...DEFAULT_WORKSHOP_LIBRARY_SETTINGS };
@@ -5550,6 +5559,12 @@ function switchTab(key) {
     loadBoSlipSavedList().catch(() => {});
   }
   updateSidebarActiveState(k);
+  if (k === "finance") {
+    try {
+      initFinanceTab();
+      loadFinanceSiteAllocation().catch(() => {});
+    } catch (_) {}
+  }
   try {
     if (typeof window.updateIronmindHelpFabContext === "function") window.updateIronmindHelpFabContext();
   } catch (_) {}
@@ -13460,10 +13475,192 @@ function initTasks() {
 
 let financeLastRunId = null;
 let financeLastForecastBatchId = null;
+let financeSiteAllocCache = null;
 
 function fmtMoney(n) {
   const v = Number(n || 0);
   return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function currentFinancePeriod() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+function monthBoundsFromPeriod(period) {
+  const p = String(period || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(p)) return { start: "", end: "" };
+  const [y, m] = p.split("-").map((x) => Number(x));
+  const start = `${p}-01`;
+  const end = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  return { start, end };
+}
+
+function initFinanceTab() {
+  const period = currentFinancePeriod();
+  const { start, end } = monthBoundsFromPeriod(period);
+  const setIfEmpty = (id, val) => {
+    const el = qs(id);
+    if (el && !String(el.value || "").trim()) el.value = val;
+  };
+  setIfEmpty("finMasterPeriod", period);
+  setIfEmpty("finBvaPeriod", period);
+  setIfEmpty("finPeriodInput", period);
+  setIfEmpty("finSsotPeriod", period);
+  setIfEmpty("finForecastStart", period);
+  setIfEmpty("finRunStart", start);
+  setIfEmpty("finRunEnd", end);
+  financeSyncPeriodFields(false);
+  loadFinanceSiteFilterFromEntity().catch(() => {});
+}
+
+async function loadFinanceSiteFilterFromEntity() {
+  const sel = qs("finSiteFilter");
+  if (!sel) return;
+  try {
+    const res = await fetchJson(`${API}/api/entity/sites`);
+    const rows = Array.isArray(res.rows) ? res.rows : [];
+    if (!rows.length) return;
+    const prev = String(sel.value || "");
+    sel.innerHTML = `<option value="">All sites</option>${rows
+      .map((r) => {
+        const code = String(r.site_code || "").trim();
+        const name = String(r.site_name || code).trim();
+        return code ? `<option value="${escapeHtml(code)}">${escapeHtml(name)} (${escapeHtml(code)})</option>` : "";
+      })
+      .filter(Boolean)
+      .join("")}`;
+    if (prev) sel.value = prev;
+  } catch {}
+}
+
+function financeSyncPeriodFields(showAlert) {
+  const period = String(qs("finMasterPeriod")?.value || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(period)) {
+    if (showAlert) alert("Enter reporting period as YYYY-MM.");
+    return;
+  }
+  const { start, end } = monthBoundsFromPeriod(period);
+  const ids = ["finBvaPeriod", "finPeriodInput", "finSsotPeriod", "finForecastStart"];
+  ids.forEach((id) => {
+    const el = qs(id);
+    if (el) el.value = period;
+  });
+  if (qs("finRunStart")) qs("finRunStart").value = start;
+  if (qs("finRunEnd")) qs("finRunEnd").value = end;
+  if (showAlert) setStatus(`Finance period set to ${period} (${start} → ${end}).`);
+}
+
+function finCatAmount(categories, name) {
+  const row = (Array.isArray(categories) ? categories : []).find((c) => String(c.category) === name);
+  return row ? Number(row.actual || 0) : 0;
+}
+
+async function loadFinanceSiteFilterOptions(sites) {
+  const sel = qs("finSiteFilter");
+  if (!sel) return;
+  const prev = String(sel.value || "");
+  const codes = Array.from(
+    new Set((sites || []).map((s) => String(s.site_code || "").trim()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b));
+  sel.innerHTML = `<option value="">All sites</option>${codes
+    .map((c) => {
+      const name = (sites || []).find((s) => String(s.site_code) === c)?.site_name || c;
+      return `<option value="${escapeHtml(c)}">${escapeHtml(name)} (${escapeHtml(c)})</option>`;
+    })
+    .join("")}`;
+  if (prev && codes.includes(prev)) sel.value = prev;
+}
+
+async function loadFinanceSiteAllocation() {
+  const period = String(qs("finMasterPeriod")?.value || "").trim();
+  const site = String(qs("finSiteFilter")?.value || "").trim();
+  const msg = qs("finSiteAllocMsg");
+  const body = qs("finSiteAllocBody");
+  const totalsEl = qs("finSiteAllocTotals");
+  const warnEl = qs("finSiteAllocWarn");
+  if (!/^\d{4}-\d{2}$/.test(period)) {
+    alert("Enter reporting period as YYYY-MM.");
+    return;
+  }
+  if (msg) msg.textContent = "Loading site allocation…";
+  if (body) body.innerHTML = `<tr><td colspan="11" class="muted">Loading…</td></tr>`;
+  const q = new URLSearchParams({ period });
+  if (site) q.set("site_code", site);
+  try {
+    const res = await fetchJson(`${API}/api/finance/site-allocation?${q.toString()}`);
+    financeSiteAllocCache = res;
+    const sites = Array.isArray(res.sites) ? res.sites : [];
+    await loadFinanceSiteFilterOptions(sites);
+    const t = res.totals || {};
+    if (totalsEl) {
+      totalsEl.innerHTML = `
+        <div class="kpi-card kpi-util">
+          <div class="kpi-card-header"><div class="kpi-icon">B</div><div class="kpi-title">Budget</div></div>
+          <div class="kpi-big-value">${fmtMoney(t.budget)}</div>
+          <div class="kpi-meta">Period ${escapeHtml(period)}</div>
+        </div>
+        <div class="kpi-card kpi-scheduled">
+          <div class="kpi-card-header"><div class="kpi-icon">A</div><div class="kpi-title">Actual</div></div>
+          <div class="kpi-big-value">${fmtMoney(t.actual)}</div>
+          <div class="kpi-meta">${escapeHtml(res.period_start || "")} → ${escapeHtml(res.period_end || "")}</div>
+        </div>
+        <div class="kpi-card kpi-alerts">
+          <div class="kpi-card-header"><div class="kpi-icon">V</div><div class="kpi-title">Variance</div></div>
+          <div class="kpi-big-value">${fmtMoney(t.variance)}</div>
+          <div class="kpi-meta">Actual minus budget</div>
+        </div>
+      `;
+    }
+    if (warnEl) {
+      const miss = Number(res.assets_missing_site || 0);
+      warnEl.innerHTML = miss > 0
+        ? `<div class="message-error" style="padding:8px 10px; border-radius:8px;">${miss} active asset(s) have no <code>site_code</code> — their costs appear under <strong>Unassigned</strong>. Update assets to improve site splits.</div>`
+        : (res.has_asset_site_column === false
+          ? `<div class="message-error" style="padding:8px 10px; border-radius:8px;">Asset <code>site_code</code> column missing — restart API to apply schema update.</div>`
+          : "");
+    }
+    if (body) {
+      body.innerHTML = sites.length
+        ? sites.map((s) => `<tr>
+            <td>${escapeHtml(s.site_name || s.site_code || "-")}</td>
+            <td><code>${escapeHtml(s.site_code || "")}</code></td>
+            <td class="num">${fmtMoney(s.budget_total)}</td>
+            <td class="num">${fmtMoney(s.total_actual)}</td>
+            <td class="num">${fmtMoney(s.variance)}</td>
+            <td class="num">${s.variance_pct == null ? "-" : Number(s.variance_pct).toFixed(1) + "%"}</td>
+            <td class="num">${fmtMoney(finCatAmount(s.categories, "parts"))}</td>
+            <td class="num">${fmtMoney(finCatAmount(s.categories, "labor"))}</td>
+            <td class="num">${fmtMoney(finCatAmount(s.categories, "fuel"))}</td>
+            <td class="num">${fmtMoney(finCatAmount(s.categories, "lube"))}</td>
+            <td class="num">${fmtMoney(finCatAmount(s.categories, "downtime"))}</td>
+          </tr>`).join("")
+        : `<tr><td colspan="11" class="muted">No costs in this period${site ? ` for site ${escapeHtml(site)}` : ""}.</td></tr>`;
+    }
+    if (msg) {
+      msg.textContent = `Loaded ${sites.length} site row(s) for ${period}.`;
+      msg.className = "message-success";
+    }
+    financeSyncPeriodFields(false);
+  } catch (e) {
+    financeSiteAllocCache = null;
+    if (msg) {
+      msg.textContent = `Load failed: ${e.message}`;
+      msg.className = "message-error";
+    }
+    if (body) body.innerHTML = `<tr><td colspan="11" class="message-error">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function financeExportSiteAllocation() {
+  const period = String(qs("finMasterPeriod")?.value || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(period)) {
+    alert("Enter reporting period as YYYY-MM.");
+    return;
+  }
+  const site = String(qs("finSiteFilter")?.value || "").trim();
+  const q = new URLSearchParams({ period });
+  if (site) q.set("site_code", site);
+  window.open(`${API}/api/finance/site-allocation/export.xlsx?${q.toString()}`, "_blank");
 }
 
 async function financeBuildSummarizedRun() {
@@ -13564,6 +13761,7 @@ async function loadFinanceRunDetail() {
     const res = await fetchJson(`${API}/api/procurement/journals/runs/${id}`);
     const run = res.run || {};
     const byCat = Array.isArray(res.by_category) ? res.by_category : [];
+    const bySite = Array.isArray(res.by_site) ? res.by_site : [];
     el.innerHTML = `
       <div class="kpi-pills">
         <span class="kpi-pill"><strong>Run:</strong> ${escapeHtml(run.run_number || "")}</span>
@@ -13572,7 +13770,20 @@ async function loadFinanceRunDetail() {
         <span class="kpi-pill"><strong>Credit:</strong> ${fmtMoney(run.total_credit)}</span>
         <span class="kpi-pill"><strong>Lines:</strong> ${Number(run.line_count || 0)}</span>
       </div>
-      <table class="table" style="margin-top:10px;">
+      <h5 style="margin-top:12px;">By site</h5>
+      <table class="table">
+        <thead><tr><th>Site</th><th class="num">Lines</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
+        <tbody>
+          ${bySite.length ? bySite.map((s) => `<tr>
+            <td><code>${escapeHtml(s.site_code || "")}</code></td>
+            <td class="num">${Number(s.lines || 0)}</td>
+            <td class="num">${fmtMoney(s.debit_total)}</td>
+            <td class="num">${fmtMoney(s.credit_total)}</td>
+          </tr>`).join("") : `<tr><td colspan="4" class="muted">No site breakdown on lines.</td></tr>`}
+        </tbody>
+      </table>
+      <h5 style="margin-top:12px;">By category</h5>
+      <table class="table">
         <thead><tr><th>Category</th><th class="num">Lines</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
         <tbody>
           ${byCat.map((c) => `<tr>
@@ -13724,10 +13935,13 @@ async function financeReopenPeriod() {
 
 async function loadFinanceBudgetVsActual() {
   const period = String(qs("finBvaPeriod")?.value || "").trim();
-  const dim = String(qs("finBvaDimension")?.value || "cost_center_code").trim();
+  const dim = String(qs("finBvaDimension")?.value || "site_code").trim();
+  const site = String(qs("finSiteFilter")?.value || "").trim();
   if (!/^\d{4}-\d{2}$/.test(period)) { alert("Enter period as YYYY-MM"); return; }
   try {
-    const res = await fetchJson(`${API}/api/finance/budgets-vs-actual?period=${encodeURIComponent(period)}&dimension=${encodeURIComponent(dim)}`);
+    const q = new URLSearchParams({ period, dimension: dim });
+    if (site) q.set("site_code", site);
+    const res = await fetchJson(`${API}/api/finance/budgets-vs-actual?${q.toString()}`);
     const rows = Array.isArray(res.rows) ? res.rows : [];
     const total = res.total || {};
     const totalsEl = qs("finBvaTotals");
@@ -13740,11 +13954,12 @@ async function loadFinanceBudgetVsActual() {
         </div>
       `;
     }
+    const dimLabel = dim === "site_code" ? "Site" : dim === "cost_center_code" ? "Cost Center" : dim;
     const tbl = qs("finBvaTable");
     if (tbl) {
       tbl.innerHTML = `
         <table class="table">
-          <thead><tr><th>${escapeHtml(dim)}</th><th class="num">Budget</th><th class="num">Actual</th><th class="num">Variance</th><th class="num">Variance %</th></tr></thead>
+          <thead><tr><th>${escapeHtml(dimLabel)}</th><th class="num">Budget</th><th class="num">Actual</th><th class="num">Variance</th><th class="num">Variance %</th></tr></thead>
           <tbody>
             ${rows.map((r) => `<tr>
               <td>${escapeHtml(r.dimension_key || "(none)")}</td>
@@ -13962,6 +14177,9 @@ async function loadFinanceKpiDefs() {
 
 function bindFinanceHandlers() {
   const bind = (id, ev, fn) => { const el = qs(id); if (el) el.addEventListener(ev, fn); };
+  bind("finLoadSiteAllocBtn", "click", () => loadFinanceSiteAllocation().catch((e) => alert(e.message)));
+  bind("finExportSiteAllocBtn", "click", financeExportSiteAllocation);
+  bind("finSyncPeriodsBtn", "click", () => financeSyncPeriodFields(true));
   bind("finBuildRunBtn", "click", financeBuildSummarizedRun);
   bind("finLoadRunsBtn", "click", () => loadFinanceRuns().catch(() => {}));
   bind("finLoadRunDetailBtn", "click", () => loadFinanceRunDetail().catch(() => {}));
@@ -14361,6 +14579,9 @@ function bindEnterpriseHandlers() {
 document.addEventListener("DOMContentLoaded", () => {
   initDarkMode();
   init().catch((e) => console.error(e));
-  try { bindFinanceHandlers(); } catch (e) { console.error("finance bind failed", e); }
+  try {
+    initFinanceTab();
+    bindFinanceHandlers();
+  } catch (e) { console.error("finance bind failed", e); }
   try { bindEnterpriseHandlers(); } catch (e) { console.error("enterprise bind failed", e); }
 });

@@ -228,6 +228,141 @@ export default async function financeRoutes(app) {
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_ffm_period ON finance_forecasts_monthly(period)`).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_ffm_batch ON finance_forecasts_monthly(batch_id)`).run();
 
+  if (!tableHasColumn("assets", "site_code")) {
+    try {
+      db.prepare(`ALTER TABLE assets ADD COLUMN site_code TEXT`).run();
+    } catch {}
+  }
+
+  const FINANCE_CATEGORIES = ["parts", "labor", "fuel", "lube", "downtime"];
+
+  function siteNameLookup() {
+    const map = new Map();
+    try {
+      const hasSites = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='site_profiles' LIMIT 1`).get();
+      if (!hasSites?.name) return map;
+      for (const r of db.prepare(`SELECT site_code, site_name FROM site_profiles WHERE COALESCE(active, 1) = 1`).all()) {
+        const code = String(r.site_code || "").trim();
+        if (!code) continue;
+        map.set(code.toLowerCase(), String(r.site_name || code));
+      }
+    } catch {}
+    return map;
+  }
+
+  function normalizeSiteKey(raw) {
+    const s = String(raw || "").trim();
+    return s || "(unassigned)";
+  }
+
+  function buildSiteAllocationReport(period, filters = {}) {
+    const actuals = buildMonthlyActuals(period, filters);
+    const siteFilter = String(filters.site_code || "").trim().toLowerCase();
+    const siteNames = siteNameLookup();
+
+    const bySite = new Map();
+    for (const row of actuals) {
+      const siteKey = normalizeSiteKey(row.site_code);
+      if (siteFilter && siteKey.toLowerCase() !== siteFilter && siteKey !== "(unassigned)") continue;
+      const cat = String(row.category || "").trim().toLowerCase();
+      const amt = Number(row.actual_amount || 0);
+      if (!bySite.has(siteKey)) {
+        bySite.set(siteKey, {
+          site_code: siteKey === "(unassigned)" ? "" : siteKey,
+          site_name: siteNames.get(siteKey.toLowerCase()) || (siteKey === "(unassigned)" ? "Unassigned" : siteKey),
+          total_actual: 0,
+          categories: {},
+        });
+      }
+      const rec = bySite.get(siteKey);
+      rec.total_actual += amt;
+      rec.categories[cat] = Number((Number(rec.categories[cat] || 0) + amt).toFixed(2));
+    }
+
+    const budgetRows = db.prepare(`
+      SELECT site_code, category, SUM(budget_amount) AS budget_amount
+      FROM finance_budgets_monthly
+      WHERE period = ?
+      GROUP BY site_code, category
+    `).all(period);
+
+    for (const b of budgetRows) {
+      const siteKey = normalizeSiteKey(b.site_code);
+      if (siteFilter && siteKey.toLowerCase() !== siteFilter && siteKey !== "(unassigned)") continue;
+      const cat = String(b.category || "").trim().toLowerCase();
+      const amt = Number(b.budget_amount || 0);
+      if (!bySite.has(siteKey)) {
+        bySite.set(siteKey, {
+          site_code: siteKey === "(unassigned)" ? "" : siteKey,
+          site_name: siteNames.get(siteKey.toLowerCase()) || (siteKey === "(unassigned)" ? "Unassigned" : siteKey),
+          total_actual: 0,
+          categories: {},
+        });
+      }
+      const rec = bySite.get(siteKey);
+      if (!rec.categories[`${cat}_budget`]) rec.categories[`${cat}_budget`] = 0;
+      rec.categories[`${cat}_budget`] = Number((Number(rec.categories[`${cat}_budget`] || 0) + amt).toFixed(2));
+    }
+
+    const sites = Array.from(bySite.values()).map((s) => {
+      let budget_total = 0;
+      for (const c of FINANCE_CATEGORIES) {
+        budget_total += Number(s.categories[`${c}_budget`] || 0);
+      }
+      budget_total = Number(budget_total.toFixed(2));
+      const total_actual = Number(Number(s.total_actual || 0).toFixed(2));
+      const variance = Number((total_actual - budget_total).toFixed(2));
+      const pct = budget_total > 0 ? Number(((variance / budget_total) * 100).toFixed(2)) : null;
+      const catRows = FINANCE_CATEGORIES.map((c) => ({
+        category: c,
+        actual: Number(s.categories[c] || 0),
+        budget: Number(s.categories[`${c}_budget`] || 0),
+        variance: Number((Number(s.categories[c] || 0) - Number(s.categories[`${c}_budget`] || 0)).toFixed(2)),
+      }));
+      return {
+        site_code: s.site_code,
+        site_name: s.site_name,
+        total_actual,
+        budget_total,
+        variance,
+        variance_pct: pct,
+        categories: catRows,
+      };
+    }).sort((a, b) => Number(b.total_actual) - Number(a.total_actual));
+
+    const totals = sites.reduce(
+      (acc, s) => {
+        acc.actual += Number(s.total_actual || 0);
+        acc.budget += Number(s.budget_total || 0);
+        return acc;
+      },
+      { actual: 0, budget: 0 }
+    );
+    totals.variance = Number((totals.actual - totals.budget).toFixed(2));
+    totals.actual = Number(totals.actual.toFixed(2));
+    totals.budget = Number(totals.budget.toFixed(2));
+
+    let assets_missing_site = 0;
+    if (tableHasColumn("assets", "site_code")) {
+      const miss = db.prepare(`
+        SELECT COUNT(*) AS c FROM assets
+        WHERE COALESCE(active, 1) = 1 AND COALESCE(archived, 0) = 0
+          AND (site_code IS NULL OR TRIM(site_code) = '')
+      `).get();
+      assets_missing_site = Number(miss?.c || 0);
+    }
+
+    return {
+      period,
+      period_start: monthStart(period),
+      period_end: monthEnd(period),
+      sites,
+      totals,
+      assets_missing_site,
+      has_asset_site_column: tableHasColumn("assets", "site_code"),
+    };
+  }
+
   /* ============================================================
      PERIOD LOCK + CHECKLIST
   ============================================================ */
@@ -486,7 +621,7 @@ export default async function financeRoutes(app) {
   ============================================================ */
 
   app.post("/budgets/upsert", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager"])) return;
+    if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "finance", "executive"])) return;
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
     if (!rows.length) return reply.code(400).send({ error: "rows required (array)" });
     const ins = db.prepare(`
@@ -541,6 +676,113 @@ export default async function financeRoutes(app) {
     return { ok: true, rows };
   });
 
+  app.get("/site-allocation", async (req, reply) => {
+    const period = String(req.query?.period || "").trim();
+    if (!/^\d{4}-\d{2}$/.test(period)) return reply.code(400).send({ error: "period (YYYY-MM) required" });
+    const site_code = req.query?.site_code ? String(req.query.site_code).trim() : "";
+    const default_cost_center_code = req.query?.default_cost_center_code
+      ? String(req.query.default_cost_center_code).trim()
+      : null;
+    const data = buildSiteAllocationReport(period, { site_code, default_cost_center_code });
+    return { ok: true, ...data };
+  });
+
+  app.get("/site-allocation/export.xlsx", async (req, reply) => {
+    const period = String(req.query?.period || "").trim();
+    if (!/^\d{4}-\d{2}$/.test(period)) return reply.code(400).send({ error: "period (YYYY-MM) required" });
+    const site_code = req.query?.site_code ? String(req.query.site_code).trim() : "";
+    const data = buildSiteAllocationReport(period, { site_code });
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "IRONLOG";
+    wb.created = new Date();
+
+    const summary = wb.addWorksheet("By Site");
+    summary.columns = [
+      { header: "Site", key: "site_name", width: 28 },
+      { header: "Site Code", key: "site_code", width: 14 },
+      { header: "Budget", key: "budget_total", width: 14 },
+      { header: "Actual", key: "total_actual", width: 14 },
+      { header: "Variance", key: "variance", width: 14 },
+      { header: "Variance %", key: "variance_pct", width: 12 },
+    ];
+    summary.addRows(
+      (data.sites || []).map((s) => ({
+        site_name: s.site_name,
+        site_code: s.site_code || "",
+        budget_total: s.budget_total,
+        total_actual: s.total_actual,
+        variance: s.variance,
+        variance_pct: s.variance_pct == null ? "" : s.variance_pct,
+      }))
+    );
+    summary.getRow(1).font = { bold: true };
+    ["budget_total", "total_actual", "variance"].forEach((k) => {
+      summary.getColumn(k).numFmt = "#,##0.00";
+    });
+
+    const detail = wb.addWorksheet("By Site and Category");
+    detail.columns = [
+      { header: "Site", key: "site_name", width: 28 },
+      { header: "Site Code", key: "site_code", width: 14 },
+      { header: "Category", key: "category", width: 14 },
+      { header: "Budget", key: "budget", width: 14 },
+      { header: "Actual", key: "actual", width: 14 },
+      { header: "Variance", key: "variance", width: 14 },
+    ];
+    for (const s of data.sites || []) {
+      for (const c of s.categories || []) {
+        detail.addRow({
+          site_name: s.site_name,
+          site_code: s.site_code || "",
+          category: c.category,
+          budget: c.budget,
+          actual: c.actual,
+          variance: c.variance,
+        });
+      }
+    }
+    detail.getRow(1).font = { bold: true };
+    ["budget", "actual", "variance"].forEach((k) => detail.getColumn(k).numFmt = "#,##0.00");
+
+    const lines = wb.addWorksheet("Source Detail");
+    const actuals = buildMonthlyActuals(period, { site_code });
+    lines.columns = [
+      { header: "Site", key: "site_code", width: 14 },
+      { header: "Cost Center", key: "cost_center_code", width: 18 },
+      { header: "Equipment Type", key: "equipment_type", width: 18 },
+      { header: "Category", key: "category", width: 14 },
+      { header: "Actual", key: "actual_amount", width: 14 },
+    ];
+    lines.addRows(
+      actuals.map((r) => ({
+        site_code: r.site_code || "",
+        cost_center_code: r.cost_center_code || "",
+        equipment_type: r.equipment_type || "",
+        category: r.category,
+        actual_amount: Number(Number(r.actual_amount || 0).toFixed(2)),
+      }))
+    );
+    lines.getRow(1).font = { bold: true };
+    lines.getColumn("actual_amount").numFmt = "#,##0.00";
+
+    const meta = wb.addWorksheet("Notes");
+    meta.addRow(["Period", period]);
+    meta.addRow(["Date range", `${data.period_start} to ${data.period_end}`]);
+    meta.addRow(["Total actual", data.totals?.actual ?? 0]);
+    meta.addRow(["Total budget", data.totals?.budget ?? 0]);
+    meta.addRow(["Variance", data.totals?.variance ?? 0]);
+    meta.addRow(["Assets missing site_code", data.assets_missing_site ?? 0]);
+    meta.addRow([]);
+    meta.addRow(["Assign site_code on each asset (Assets tab) for accurate site allocation."]);
+
+    const buf = await wb.xlsx.writeBuffer();
+    reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header("Content-Disposition", `attachment; filename="IRONLOG_Site_Allocation_${period}.xlsx"`)
+      .send(Buffer.from(buf));
+  });
+
   app.get("/budgets-vs-actual", async (req, reply) => {
     const period = String(req.query?.period || "").trim();
     if (!/^\d{4}-\d{2}$/.test(period)) return reply.code(400).send({ error: "period (YYYY-MM) required" });
@@ -549,6 +791,7 @@ export default async function financeRoutes(app) {
     if (!allowedDims.includes(dimension) && dimension !== "combined") {
       return reply.code(400).send({ error: `dimension must be one of: ${allowedDims.join(", ")}, combined` });
     }
+    const siteFilter = String(req.query?.site_code || "").trim().toLowerCase();
     const actuals = buildMonthlyActuals(period);
     const budgets = db.prepare(`
       SELECT period, site_code, cost_center_code, equipment_type, category, budget_amount, currency
@@ -559,8 +802,15 @@ export default async function financeRoutes(app) {
       ? `${r.site_code || ""}|${r.cost_center_code || ""}|${r.equipment_type || ""}|${r.category || ""}`
       : String(r[dimension] || "");
 
+    const rowMatchesSite = (r) => {
+      if (!siteFilter) return true;
+      const sk = String(r.site_code || "").trim().toLowerCase() || "(unassigned)";
+      return sk === siteFilter || (siteFilter === "(unassigned)" && !String(r.site_code || "").trim());
+    };
+
     const combined = new Map();
     for (const b of budgets) {
+      if (!rowMatchesSite(b)) continue;
       const k = keyFor(b);
       const prev = combined.get(k) || { budget: 0, actual: 0, lines: 0 };
       prev.budget += Number(b.budget_amount || 0);
@@ -568,6 +818,7 @@ export default async function financeRoutes(app) {
       combined.set(k, prev);
     }
     for (const a of actuals) {
+      if (!rowMatchesSite(a)) continue;
       const k = keyFor(a);
       const prev = combined.get(k) || { budget: 0, actual: 0, lines: 0 };
       prev.actual += Number(a.actual_amount || 0);
@@ -595,7 +846,7 @@ export default async function financeRoutes(app) {
     total.budget = Number(total.budget.toFixed(2));
     total.actual = Number(total.actual.toFixed(2));
 
-    return { ok: true, period, dimension, rows, total };
+    return { ok: true, period, dimension, site_code: siteFilter || null, rows, total };
   });
 
   /* ============================================================
@@ -669,7 +920,7 @@ export default async function financeRoutes(app) {
   }
 
   app.post("/forecast/rebuild", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager"])) return;
+    if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "finance"])) return;
     const start = String(req.body?.start_period || "").trim();
     const monthsAhead = Math.max(1, Math.min(6, Number(req.body?.months || 3)));
     if (!/^\d{4}-\d{2}$/.test(start)) return reply.code(400).send({ error: "start_period (YYYY-MM) required" });
@@ -909,6 +1160,28 @@ export default async function financeRoutes(app) {
     ];
     for (const [k, v] of Object.entries(snapshot)) wsKpi.addRow({ metric: k, value: v });
     wsKpi.getRow(1).font = { bold: true };
+
+    const siteAlloc = buildSiteAllocationReport(period);
+
+    const wsBySite = wb.addWorksheet("By Site");
+    wsBySite.columns = [
+      { header: "Site", key: "site_name", width: 28 },
+      { header: "Site Code", key: "site_code", width: 14 },
+      { header: "Budget", key: "budget_total", width: 14 },
+      { header: "Actual", key: "total_actual", width: 14 },
+      { header: "Variance", key: "variance", width: 14 },
+    ];
+    wsBySite.addRows(
+      (siteAlloc.sites || []).map((s) => ({
+        site_name: s.site_name,
+        site_code: s.site_code || "",
+        budget_total: s.budget_total,
+        total_actual: s.total_actual,
+        variance: s.variance,
+      }))
+    );
+    wsBySite.getRow(1).font = { bold: true };
+    ["budget_total", "total_actual", "variance"].forEach((k) => wsBySite.getColumn(k).numFmt = "#,##0.00");
 
     const wsActuals = wb.addWorksheet("Actuals");
     wsActuals.columns = [
