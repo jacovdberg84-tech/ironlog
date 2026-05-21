@@ -36,6 +36,20 @@ function tableHasColumn(table, col) {
     return rows.some((r) => String(r.name) === col);
   } catch { return false; }
 }
+function hasTable(table) {
+  try {
+    const r = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1`).get(String(table));
+    return Boolean(r?.name);
+  } catch { return false; }
+}
+function ensureColumn(table, colName, colDef) {
+  if (!hasTable(table)) return;
+  if (!tableHasColumn(table, colName)) {
+    try {
+      db.prepare(`ALTER TABLE ${table} ADD COLUMN ${colDef}`).run();
+    } catch {}
+  }
+}
 function readCostSetting(key, fallback) {
   try {
     const row = db.prepare(`SELECT value FROM cost_settings WHERE key = ? LIMIT 1`).get(key);
@@ -228,11 +242,10 @@ export default async function financeRoutes(app) {
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_ffm_period ON finance_forecasts_monthly(period)`).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_ffm_batch ON finance_forecasts_monthly(batch_id)`).run();
 
-  if (!tableHasColumn("assets", "site_code")) {
-    try {
-      db.prepare(`ALTER TABLE assets ADD COLUMN site_code TEXT`).run();
-    } catch {}
-  }
+  ensureColumn("assets", "site_code", "site_code TEXT");
+  ensureColumn("assets", "cost_center_code", "cost_center_code TEXT");
+  ensureColumn("assets", "fuel_cost_per_liter", "fuel_cost_per_liter REAL");
+  ensureColumn("assets", "downtime_cost_per_hour", "downtime_cost_per_hour REAL");
 
   const FINANCE_CATEGORIES = ["parts", "labor", "fuel", "lube", "downtime"];
 
@@ -499,96 +512,138 @@ export default async function financeRoutes(app) {
     const defaultCostCenter = filters.default_cost_center_code || null;
     const assetsHasCC = tableHasColumn("assets", "cost_center_code");
     const assetsHasSite = tableHasColumn("assets", "site_code");
-    const smCols = db.prepare(`PRAGMA table_info(stock_movements)`).all();
-    const smHasCreated = smCols.some((c) => String(c.name) === "created_at");
-    const smDateExpr = smHasCreated ? "DATE(sm.created_at)" : "DATE(sm.movement_date)";
-    const smHasCC = smCols.some((c) => String(c.name) === "cost_center_code");
+    const assetsHasFuelCost = tableHasColumn("assets", "fuel_cost_per_liter");
+    const assetsHasDownCost = tableHasColumn("assets", "downtime_cost_per_hour");
     const fuelDefault = readCostSetting("fuel_cost_per_liter_default", 1.5);
     const lubeDefault = readCostSetting("lube_cost_per_qty_default", 4.0);
     const laborDefault = readCostSetting("labor_cost_per_hour_default", 35.0);
     const downtimeDefault = readCostSetting("downtime_cost_per_hour_default", 120.0);
 
-    const partsRows = db.prepare(`
-      SELECT
-        COALESCE(a.category, '') AS equipment_type,
-        ${assetsHasSite ? "COALESCE(a.site_code, '')" : "''"} AS site_code,
-        ${smHasCC
-          ? `COALESCE(NULLIF(TRIM(sm.cost_center_code), ''), ${assetsHasCC ? "NULLIF(TRIM(a.cost_center_code), '')," : ""} ?)`
-          : `COALESCE(${assetsHasCC ? "NULLIF(TRIM(a.cost_center_code), ''), " : ""}?)`} AS cost_center_code,
-        SUM(ABS(sm.quantity) * COALESCE(p.unit_cost, 0)) AS amount
-      FROM stock_movements sm
-      JOIN parts p ON p.id = sm.part_id
-      LEFT JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
-      LEFT JOIN assets a ON a.id = w.asset_id
-      WHERE sm.movement_type = 'out'
-        AND ${smDateExpr} BETWEEN DATE(?) AND DATE(?)
-      GROUP BY equipment_type, site_code, cost_center_code
-    `).all(defaultCostCenter, start, end);
+    const siteSql = assetsHasSite ? "COALESCE(a.site_code, '')" : "''";
+    const ccSql = (smHasCC, woHasCC) => {
+      if (smHasCC) {
+        return `COALESCE(NULLIF(TRIM(sm.cost_center_code), ''), ${assetsHasCC ? "NULLIF(TRIM(a.cost_center_code), '')," : ""} ?)`;
+      }
+      if (woHasCC) {
+        return `COALESCE(NULLIF(TRIM(w.cost_center_code), ''), ${assetsHasCC ? "NULLIF(TRIM(a.cost_center_code), ''), " : ""} ?)`;
+      }
+      return assetsHasCC ? "COALESCE(NULLIF(TRIM(a.cost_center_code), ''), ?)" : "?";
+    };
 
-    const woCols = db.prepare(`PRAGMA table_info(work_orders)`).all();
-    const woHasCompleted = woCols.some((c) => String(c.name) === "completed_at");
-    const woHasClosed = woCols.some((c) => String(c.name) === "closed_at");
-    const woHasLaborHours = woCols.some((c) => String(c.name) === "labor_hours");
-    const woHasLaborRate = woCols.some((c) => String(c.name) === "labor_rate_per_hour");
-    const woHasCC = woCols.some((c) => String(c.name) === "cost_center_code");
-    const laborDateExpr = woHasCompleted && woHasClosed
-      ? "DATE(COALESCE(w.completed_at, w.closed_at))"
-      : (woHasCompleted ? "DATE(w.completed_at)" : "DATE(w.closed_at)");
-    const laborRows = woHasLaborHours ? db.prepare(`
-      SELECT
-        COALESCE(a.category, '') AS equipment_type,
-        ${assetsHasSite ? "COALESCE(a.site_code, '')" : "''"} AS site_code,
-        ${woHasCC
-          ? `COALESCE(NULLIF(TRIM(w.cost_center_code), ''), ${assetsHasCC ? "NULLIF(TRIM(a.cost_center_code), ''), " : ""} ?)`
-          : `COALESCE(${assetsHasCC ? "NULLIF(TRIM(a.cost_center_code), ''), " : ""} ?)`} AS cost_center_code,
-        SUM(COALESCE(w.labor_hours, 0) * COALESCE(${woHasLaborRate ? "w.labor_rate_per_hour" : "NULL"}, ?)) AS amount
-      FROM work_orders w
-      LEFT JOIN assets a ON a.id = w.asset_id
-      WHERE w.status IN ('completed','approved','closed')
-        AND ${laborDateExpr} BETWEEN DATE(?) AND DATE(?)
-      GROUP BY equipment_type, site_code, cost_center_code
-    `).all(defaultCostCenter, laborDefault, start, end) : [];
+    let partsRows = [];
+    if (hasTable("stock_movements") && hasTable("parts")) {
+      const smCols = db.prepare(`PRAGMA table_info(stock_movements)`).all();
+      const smHasCreated = smCols.some((c) => String(c.name) === "created_at");
+      const smHasMovementDate = smCols.some((c) => String(c.name) === "movement_date");
+      const smDateExpr = smHasCreated
+        ? "DATE(sm.created_at)"
+        : smHasMovementDate
+          ? "DATE(sm.movement_date)"
+          : null;
+      const smHasCC = smCols.some((c) => String(c.name) === "cost_center_code");
+      if (smDateExpr) {
+        partsRows = db.prepare(`
+          SELECT
+            COALESCE(a.category, '') AS equipment_type,
+            ${siteSql} AS site_code,
+            ${ccSql(smHasCC, false)} AS cost_center_code,
+            SUM(ABS(sm.quantity) * COALESCE(p.unit_cost, 0)) AS amount
+          FROM stock_movements sm
+          JOIN parts p ON p.id = sm.part_id
+          LEFT JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
+          LEFT JOIN assets a ON a.id = w.asset_id
+          WHERE sm.movement_type = 'out'
+            AND ${smDateExpr} BETWEEN DATE(?) AND DATE(?)
+          GROUP BY 1, 2, 3
+        `).all(defaultCostCenter, start, end);
+      }
+    }
 
-    const flCols = db.prepare(`PRAGMA table_info(fuel_logs)`).all();
-    const flHasUnit = flCols.some((c) => String(c.name) === "unit_cost_per_liter");
-    const fuelRows = db.prepare(`
-      SELECT
-        COALESCE(a.category, '') AS equipment_type,
-        ${assetsHasSite ? "COALESCE(a.site_code, '')" : "''"} AS site_code,
-        ${assetsHasCC ? "COALESCE(NULLIF(TRIM(a.cost_center_code), ''), ?)" : "?"} AS cost_center_code,
-        SUM(COALESCE(fl.liters, 0) * COALESCE(${flHasUnit ? "fl.unit_cost_per_liter" : "NULL"}, a.fuel_cost_per_liter, ?)) AS amount
-      FROM fuel_logs fl
-      JOIN assets a ON a.id = fl.asset_id
-      WHERE fl.log_date BETWEEN DATE(?) AND DATE(?)
-      GROUP BY equipment_type, site_code, cost_center_code
-    `).all(defaultCostCenter, fuelDefault, start, end);
+    let laborRows = [];
+    if (hasTable("work_orders")) {
+      const woCols = db.prepare(`PRAGMA table_info(work_orders)`).all();
+      const woHasCompleted = woCols.some((c) => String(c.name) === "completed_at");
+      const woHasClosed = woCols.some((c) => String(c.name) === "closed_at");
+      const woHasUpdated = woCols.some((c) => String(c.name) === "updated_at");
+      const woHasLaborHours = woCols.some((c) => String(c.name) === "labor_hours");
+      const woHasLaborRate = woCols.some((c) => String(c.name) === "labor_rate_per_hour");
+      const woHasCC = woCols.some((c) => String(c.name) === "cost_center_code");
+      let laborDateExpr = null;
+      if (woHasCompleted && woHasClosed) laborDateExpr = "DATE(COALESCE(w.completed_at, w.closed_at))";
+      else if (woHasCompleted) laborDateExpr = "DATE(w.completed_at)";
+      else if (woHasClosed) laborDateExpr = "DATE(w.closed_at)";
+      else if (woHasUpdated) laborDateExpr = "DATE(w.updated_at)";
+      if (woHasLaborHours && laborDateExpr) {
+        laborRows = db.prepare(`
+          SELECT
+            COALESCE(a.category, '') AS equipment_type,
+            ${siteSql} AS site_code,
+            ${ccSql(false, woHasCC)} AS cost_center_code,
+            SUM(COALESCE(w.labor_hours, 0) * COALESCE(${woHasLaborRate ? "w.labor_rate_per_hour" : "NULL"}, ?)) AS amount
+          FROM work_orders w
+          LEFT JOIN assets a ON a.id = w.asset_id
+          WHERE w.status IN ('completed','approved','closed')
+            AND ${laborDateExpr} BETWEEN DATE(?) AND DATE(?)
+          GROUP BY 1, 2, 3
+        `).all(defaultCostCenter, laborDefault, start, end);
+      }
+    }
 
-    const olCols = db.prepare(`PRAGMA table_info(oil_logs)`).all();
-    const olHasUnit = olCols.some((c) => String(c.name) === "unit_cost");
-    const lubeRows = db.prepare(`
-      SELECT
-        COALESCE(a.category, '') AS equipment_type,
-        ${assetsHasSite ? "COALESCE(a.site_code, '')" : "''"} AS site_code,
-        ${assetsHasCC ? "COALESCE(NULLIF(TRIM(a.cost_center_code), ''), ?)" : "?"} AS cost_center_code,
-        SUM(COALESCE(ol.quantity, 0) * COALESCE(${olHasUnit ? "ol.unit_cost" : "NULL"}, ?)) AS amount
-      FROM oil_logs ol
-      JOIN assets a ON a.id = ol.asset_id
-      WHERE ol.log_date BETWEEN DATE(?) AND DATE(?)
-      GROUP BY equipment_type, site_code, cost_center_code
-    `).all(defaultCostCenter, lubeDefault, start, end);
+    let fuelRows = [];
+    if (hasTable("fuel_logs") && hasTable("assets")) {
+      const flCols = db.prepare(`PRAGMA table_info(fuel_logs)`).all();
+      const flHasUnit = flCols.some((c) => String(c.name) === "unit_cost_per_liter");
+      const fuelCostExpr = assetsHasFuelCost
+        ? `COALESCE(${flHasUnit ? "fl.unit_cost_per_liter" : "NULL"}, a.fuel_cost_per_liter, ?)`
+        : `COALESCE(${flHasUnit ? "fl.unit_cost_per_liter" : "NULL"}, ?)`;
+      fuelRows = db.prepare(`
+        SELECT
+          COALESCE(a.category, '') AS equipment_type,
+          ${siteSql} AS site_code,
+          ${assetsHasCC ? "COALESCE(NULLIF(TRIM(a.cost_center_code), ''), ?)" : "?"} AS cost_center_code,
+          SUM(COALESCE(fl.liters, 0) * ${fuelCostExpr}) AS amount
+        FROM fuel_logs fl
+        JOIN assets a ON a.id = fl.asset_id
+        WHERE fl.log_date BETWEEN DATE(?) AND DATE(?)
+        GROUP BY 1, 2, 3
+      `).all(defaultCostCenter, fuelDefault, start, end);
+    }
 
-    const downtimeRows = db.prepare(`
-      SELECT
-        COALESCE(a.category, '') AS equipment_type,
-        ${assetsHasSite ? "COALESCE(a.site_code, '')" : "''"} AS site_code,
-        ${assetsHasCC ? "COALESCE(NULLIF(TRIM(a.cost_center_code), ''), ?)" : "?"} AS cost_center_code,
-        SUM(COALESCE(l.hours_down, 0) * COALESCE(a.downtime_cost_per_hour, ?)) AS amount
-      FROM breakdown_downtime_logs l
-      JOIN breakdowns b ON b.id = l.breakdown_id
-      JOIN assets a ON a.id = b.asset_id
-      WHERE l.log_date BETWEEN DATE(?) AND DATE(?)
-      GROUP BY equipment_type, site_code, cost_center_code
-    `).all(defaultCostCenter, downtimeDefault, start, end);
+    let lubeRows = [];
+    if (hasTable("oil_logs") && hasTable("assets")) {
+      const olCols = db.prepare(`PRAGMA table_info(oil_logs)`).all();
+      const olHasUnit = olCols.some((c) => String(c.name) === "unit_cost");
+      lubeRows = db.prepare(`
+        SELECT
+          COALESCE(a.category, '') AS equipment_type,
+          ${siteSql} AS site_code,
+          ${assetsHasCC ? "COALESCE(NULLIF(TRIM(a.cost_center_code), ''), ?)" : "?"} AS cost_center_code,
+          SUM(COALESCE(ol.quantity, 0) * COALESCE(${olHasUnit ? "ol.unit_cost" : "NULL"}, ?)) AS amount
+        FROM oil_logs ol
+        JOIN assets a ON a.id = ol.asset_id
+        WHERE ol.log_date BETWEEN DATE(?) AND DATE(?)
+        GROUP BY 1, 2, 3
+      `).all(defaultCostCenter, lubeDefault, start, end);
+    }
+
+    let downtimeRows = [];
+    if (hasTable("breakdown_downtime_logs") && hasTable("breakdowns") && hasTable("assets")) {
+      const downCostExpr = assetsHasDownCost
+        ? "COALESCE(a.downtime_cost_per_hour, ?)"
+        : "?";
+      downtimeRows = db.prepare(`
+        SELECT
+          COALESCE(a.category, '') AS equipment_type,
+          ${siteSql} AS site_code,
+          ${assetsHasCC ? "COALESCE(NULLIF(TRIM(a.cost_center_code), ''), ?)" : "?"} AS cost_center_code,
+          SUM(COALESCE(l.hours_down, 0) * ${downCostExpr}) AS amount
+        FROM breakdown_downtime_logs l
+        JOIN breakdowns b ON b.id = l.breakdown_id
+        JOIN assets a ON a.id = b.asset_id
+        WHERE l.log_date BETWEEN DATE(?) AND DATE(?)
+        GROUP BY 1, 2, 3
+      `).all(defaultCostCenter, downtimeDefault, start, end);
+    }
 
     const out = new Map();
     const addRow = (rows, cat) => {
@@ -677,17 +732,23 @@ export default async function financeRoutes(app) {
   });
 
   app.get("/site-allocation", async (req, reply) => {
-    const period = String(req.query?.period || "").trim();
-    if (!/^\d{4}-\d{2}$/.test(period)) return reply.code(400).send({ error: "period (YYYY-MM) required" });
-    const site_code = req.query?.site_code ? String(req.query.site_code).trim() : "";
-    const default_cost_center_code = req.query?.default_cost_center_code
-      ? String(req.query.default_cost_center_code).trim()
-      : null;
-    const data = buildSiteAllocationReport(period, { site_code, default_cost_center_code });
-    return { ok: true, ...data };
+    try {
+      const period = String(req.query?.period || "").trim();
+      if (!/^\d{4}-\d{2}$/.test(period)) return reply.code(400).send({ ok: false, error: "period (YYYY-MM) required" });
+      const site_code = req.query?.site_code ? String(req.query.site_code).trim() : "";
+      const default_cost_center_code = req.query?.default_cost_center_code
+        ? String(req.query.default_cost_center_code).trim()
+        : null;
+      const data = buildSiteAllocationReport(period, { site_code, default_cost_center_code });
+      return { ok: true, ...data };
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
   });
 
   app.get("/site-allocation/export.xlsx", async (req, reply) => {
+    try {
     const period = String(req.query?.period || "").trim();
     if (!/^\d{4}-\d{2}$/.test(period)) return reply.code(400).send({ error: "period (YYYY-MM) required" });
     const site_code = req.query?.site_code ? String(req.query.site_code).trim() : "";
@@ -781,6 +842,10 @@ export default async function financeRoutes(app) {
       .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
       .header("Content-Disposition", `attachment; filename="IRONLOG_Site_Allocation_${period}.xlsx"`)
       .send(Buffer.from(buf));
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
   });
 
   app.get("/budgets-vs-actual", async (req, reply) => {
