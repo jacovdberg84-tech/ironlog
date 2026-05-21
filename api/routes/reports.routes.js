@@ -16,6 +16,7 @@ import {
 } from "../utils/pdfGenerator.js";
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
 import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
+import { aggregateFuelBenchmarkByCategory } from "../utils/fuelBenchmarkAggregate.js";
 import { fetchLubeMonthStockSnapshot } from "../utils/lubeMonthStock.js";
 import { getMachinePrestartTemplate } from "../utils/machinePrestartTemplates.js";
 
@@ -3037,6 +3038,11 @@ export default async function reportsRoutes(app) {
       });
 
     const rows = benchmarkRows;
+    const categoryRows = assetFilter ? [] : aggregateFuelBenchmarkByCategory(
+      rows.map((r) => ({ ...r, is_excessive: r.flag === "EXCESSIVE" })),
+      tolerance
+    );
+    const displayRows = categoryRows.length ? categoryRows : rows;
 
     const summary = rows.reduce(
       (acc, r) => {
@@ -3054,6 +3060,7 @@ export default async function reportsRoutes(app) {
       },
       { assets: 0, fuel_liters: 0, hours_run: 0, km_run: 0, excessive: 0, hours_fuel: 0, km_fuel: 0 }
     );
+    summary.categories = categoryRows.length;
     summary.fuel_liters = Number(summary.fuel_liters.toFixed(2));
     summary.hours_run = Number(summary.hours_run.toFixed(2));
     summary.km_run = Number(summary.km_run.toFixed(2));
@@ -3074,7 +3081,8 @@ export default async function reportsRoutes(app) {
           { k: "Period", v: `${start} to ${end}` },
           { k: "Tolerance", v: `${fmtNum(tolerance * 100, 1)}%` },
           { k: "Mode filter", v: modeFilter ? modeFilter : "all" },
-          { k: "Assets", v: fmtNum(summary.assets, 0) },
+          { k: "Categories", v: fmtNum(summary.categories, 0) },
+          { k: "Assets (detail)", v: fmtNum(summary.assets, 0) },
           { k: "Excessive", v: fmtNum(summary.excessive, 0) },
           { k: "Fuel Total (L)", v: fmtNum(summary.fuel_liters, 2) },
           { k: "Hours Run", v: fmtNum(summary.hours_run, 2) },
@@ -3084,40 +3092,74 @@ export default async function reportsRoutes(app) {
         doc.moveDown(0.4);
         doc.font("Helvetica").fontSize(9).fillColor("#111111");
 
-        sectionTitle(doc, "Fuel Benchmark by Machine");
+        const byCategory = categoryRows.length > 0;
+        sectionTitle(doc, byCategory ? "Fuel Used by Equipment Category" : "Fuel Benchmark by Machine");
         table(
           doc,
-          [
-            { key: "asset_code", label: "Asset", width: 0.12 },
-            { key: "asset_name", label: "Name", width: 0.24 },
-            { key: "metric_mode", label: "Mode", width: 0.08, align: "center" },
-            { key: "fuel_liters", label: "Fuel (L)", width: 0.12, align: "right" },
-            { key: "run", label: "Run", width: 0.12, align: "right" },
-            { key: "actual", label: "Actual", width: 0.10, align: "right" },
-            { key: "oem", label: "OEM", width: 0.08, align: "right" },
-            { key: "variance", label: "Variance", width: 0.08, align: "right" },
-            { key: "flag", label: "Flag", width: 0.08, align: "center" },
-          ],
-          rows.length
-            ? rows.map((r) => ({
-                asset_code: r.asset_code,
-                asset_name: r.asset_name || "",
-                metric_mode: r.metric_mode,
-                fuel_liters: fmtNum(r.fuel_liters, 2),
-                run: r.metric_mode === "km" ? `${fmtNum(r.km_run, 2)} km` : `${fmtNum(r.hours_run, 2)} h`,
-                actual: r.metric_mode === "km"
-                  ? (r.actual_km_per_l == null ? "-" : `${fmtNum(r.actual_km_per_l, 3)} km/L`)
-                  : (r.actual_lph == null ? "-" : `${fmtNum(r.actual_lph, 3)} L/hr`),
-                oem: r.metric_mode === "km" ? `${fmtNum(r.oem_km_per_l, 3)}` : `${fmtNum(r.oem_lph, 3)}`,
-                variance: r.metric_mode === "km"
-                  ? (r.variance_km_per_l == null ? "-" : fmtNum(r.variance_km_per_l, 3))
-                  : (r.variance_lph == null ? "-" : fmtNum(r.variance_lph, 3)),
-                flag: r.flag,
-              }))
+          byCategory
+            ? [
+                { key: "category", label: "Category", width: 0.22 },
+                { key: "metric_mode", label: "Mode", width: 0.08, align: "center" },
+                { key: "asset_count", label: "Units", width: 0.08, align: "center" },
+                { key: "fuel_liters", label: "Fuel (L)", width: 0.14, align: "right" },
+                { key: "run", label: "Run", width: 0.12, align: "right" },
+                { key: "actual", label: "Actual", width: 0.10, align: "right" },
+                { key: "oem", label: "OEM", width: 0.08, align: "right" },
+                { key: "variance", label: "Variance", width: 0.08, align: "right" },
+                { key: "flag", label: "Flag", width: 0.08, align: "center" },
+              ]
+            : [
+                { key: "asset_code", label: "Asset", width: 0.12 },
+                { key: "asset_name", label: "Name", width: 0.24 },
+                { key: "metric_mode", label: "Mode", width: 0.08, align: "center" },
+                { key: "fuel_liters", label: "Fuel (L)", width: 0.12, align: "right" },
+                { key: "run", label: "Run", width: 0.12, align: "right" },
+                { key: "actual", label: "Actual", width: 0.10, align: "right" },
+                { key: "oem", label: "OEM", width: 0.08, align: "right" },
+                { key: "variance", label: "Variance", width: 0.08, align: "right" },
+                { key: "flag", label: "Flag", width: 0.08, align: "center" },
+              ],
+          displayRows.length
+            ? displayRows.map((r) => {
+                if (byCategory) {
+                  return {
+                    category: r.category,
+                    metric_mode: r.metric_mode,
+                    asset_count: fmtNum(r.asset_count, 0),
+                    fuel_liters: fmtNum(r.fuel_liters, 2),
+                    run: r.metric_mode === "km" ? `${fmtNum(r.km_run, 2)} km` : `${fmtNum(r.hours_run, 2)} h`,
+                    actual: r.metric_mode === "km"
+                      ? (r.actual_km_per_l == null ? "-" : `${fmtNum(r.actual_km_per_l, 3)} km/L`)
+                      : (r.actual_lph == null ? "-" : `${fmtNum(r.actual_lph, 3)} L/hr`),
+                    oem: r.metric_mode === "km" ? `${fmtNum(r.oem_km_per_l, 3)}` : `${fmtNum(r.oem_lph, 3)}`,
+                    variance: r.metric_mode === "km"
+                      ? (r.variance_km_per_l == null ? "-" : fmtNum(r.variance_km_per_l, 3))
+                      : (r.variance_lph == null ? "-" : fmtNum(r.variance_lph, 3)),
+                    flag: r.flag,
+                  };
+                }
+                return {
+                  asset_code: r.asset_code,
+                  asset_name: r.asset_name || "",
+                  metric_mode: r.metric_mode,
+                  fuel_liters: fmtNum(r.fuel_liters, 2),
+                  run: r.metric_mode === "km" ? `${fmtNum(r.km_run, 2)} km` : `${fmtNum(r.hours_run, 2)} h`,
+                  actual: r.metric_mode === "km"
+                    ? (r.actual_km_per_l == null ? "-" : `${fmtNum(r.actual_km_per_l, 3)} km/L`)
+                    : (r.actual_lph == null ? "-" : `${fmtNum(r.actual_lph, 3)} L/hr`),
+                  oem: r.metric_mode === "km" ? `${fmtNum(r.oem_km_per_l, 3)}` : `${fmtNum(r.oem_lph, 3)}`,
+                  variance: r.metric_mode === "km"
+                    ? (r.variance_km_per_l == null ? "-" : fmtNum(r.variance_km_per_l, 3))
+                    : (r.variance_lph == null ? "-" : fmtNum(r.variance_lph, 3)),
+                  flag: r.flag,
+                };
+              })
             : [{
+                category: "-",
                 asset_code: "-",
                 asset_name: "No fuel benchmark data for period",
                 metric_mode: "-",
+                asset_count: "-",
                 fuel_liters: "-",
                 run: "-",
                 actual: "-",
@@ -3748,6 +3790,11 @@ export default async function reportsRoutes(app) {
       })
       .sort((a, b) => String(a.asset_code || "").localeCompare(String(b.asset_code || "")));
 
+    const categoryRows = assetFilter ? [] : aggregateFuelBenchmarkByCategory(
+      rows.map((r) => ({ ...r, is_excessive: r.flag === "EXCESSIVE" })),
+      tolerance
+    );
+
     const summary = rows.reduce(
       (acc, r) => {
         acc.assets += 1;
@@ -3764,6 +3811,7 @@ export default async function reportsRoutes(app) {
       },
       { assets: 0, fuel_liters: 0, hours_run: 0, km_run: 0, excessive: 0, hours_fuel: 0, km_fuel: 0 }
     );
+    summary.categories = categoryRows.length;
     summary.fuel_liters = Number(summary.fuel_liters.toFixed(2));
     summary.hours_run = Number(summary.hours_run.toFixed(2));
     summary.km_run = Number(summary.km_run.toFixed(2));
@@ -3784,7 +3832,8 @@ export default async function reportsRoutes(app) {
       { field: "Tolerance (%)", value: Number((tolerance * 100).toFixed(2)) },
       { field: "Mode filter", value: modeFilter || "all" },
       { field: "Asset filter", value: assetFilter || "all" },
-      { field: "Assets", value: summary.assets },
+      { field: "Equipment categories", value: summary.categories },
+      { field: "Assets (detail sheet)", value: summary.assets },
       { field: "Missing / Not Shown", value: missingRows.length },
       { field: "Excessive", value: summary.excessive },
       { field: "Fuel Total (L)", value: summary.fuel_liters },
@@ -3794,10 +3843,51 @@ export default async function reportsRoutes(app) {
       { field: "Avg km/L", value: summary.avg_km_per_l == null ? "" : summary.avg_km_per_l },
     ]);
 
-    const wsRows = wb.addWorksheet("Fuel Benchmark");
+    const wsCategory = wb.addWorksheet("Fuel by Category");
+    wsCategory.columns = [
+      { header: "Category", key: "category", width: 22 },
+      { header: "Mode", key: "metric_mode", width: 10 },
+      { header: "Units", key: "asset_count", width: 8 },
+      { header: "Fuel Liters", key: "fuel_liters", width: 14 },
+      { header: "Km Run", key: "km_run", width: 12 },
+      { header: "Hours Run", key: "hours_run", width: 12 },
+      { header: "Actual L/hr", key: "actual_lph", width: 12 },
+      { header: "OEM L/hr", key: "oem_lph", width: 12 },
+      { header: "Variance L/hr", key: "variance_lph", width: 14 },
+      { header: "Actual km/L", key: "actual_km_per_l", width: 12 },
+      { header: "OEM km/L", key: "oem_km_per_l", width: 12 },
+      { header: "Variance km/L", key: "variance_km_per_l", width: 14 },
+      { header: "Fill Count", key: "fill_count", width: 10 },
+      { header: "Excessive Assets", key: "excessive_asset_count", width: 14 },
+      { header: "Flag", key: "flag", width: 12 },
+    ];
+    if (categoryRows.length) {
+      wsCategory.addRows(categoryRows);
+    } else {
+      wsCategory.addRow({
+        category: assetFilter ? "Single asset filter — see By Asset sheet" : "No fuel benchmark data for period",
+        metric_mode: "",
+        asset_count: "",
+        fuel_liters: "",
+        km_run: "",
+        hours_run: "",
+        actual_lph: "",
+        oem_lph: "",
+        variance_lph: "",
+        actual_km_per_l: "",
+        oem_km_per_l: "",
+        variance_km_per_l: "",
+        fill_count: "",
+        excessive_asset_count: "",
+        flag: "",
+      });
+    }
+
+    const wsRows = wb.addWorksheet("By Asset");
     wsRows.columns = [
       { header: "Asset Code", key: "asset_code", width: 16 },
       { header: "Asset Name", key: "asset_name", width: 32 },
+      { header: "Category", key: "category", width: 18 },
       { header: "Mode", key: "metric_mode", width: 10 },
       { header: "Fuel Liters", key: "fuel_liters", width: 14 },
       { header: "Km Run", key: "km_run", width: 12 },
@@ -3819,6 +3909,7 @@ export default async function reportsRoutes(app) {
       wsRows.addRow({
         asset_code: "-",
         asset_name: "No fuel benchmark data for period",
+        category: "",
         metric_mode: "-",
         fuel_liters: "",
         km_run: "",

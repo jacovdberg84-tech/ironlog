@@ -4236,9 +4236,10 @@ async function loadFuelBenchmark() {
   if (window.__fuelBenchmarkRunToken !== runToken) return;
 
   const rawRows = Array.isArray(data.rows) ? data.rows : [];
-  const benchmarkRows = duplicatesOnly
-    ? rawRows
-    : rawRows;
+  const categoryRows = duplicatesOnly ? [] : (Array.isArray(data.category_rows) ? data.category_rows : []);
+  const benchmarkRows = rawRows;
+  const byCategory = !duplicatesOnly && !assetCode && categoryRows.length > 0;
+  const displayRows = duplicatesOnly ? benchmarkRows : (byCategory ? categoryRows : benchmarkRows);
 
   const benchmarkSummary = duplicatesOnly
     ? {
@@ -4298,7 +4299,32 @@ async function loadFuelBenchmark() {
       return actual > benchmark;
     };
     list.innerHTML = "";
-    benchmarkRows.forEach((r) => {
+    displayRows.forEach((r) => {
+      if (byCategory) {
+        const isKm = String(r.metric_mode || "hours") === "km";
+        const flag = isRowFlagged(r)
+          ? `<span class='pill red'>${isKm ? "UNDER BENCHMARK" : "EXCESSIVE"}</span>`
+          : "<span class='pill blue'>OK</span>";
+        const units = Number(r.asset_count || 0);
+        const codes = Array.isArray(r.asset_codes) ? r.asset_codes.join(", ") : "";
+        list.appendChild(
+          item(
+            `<div class="fuel-item-head"><b>${escapeHtml(r.category || "Uncategorized")}</b> — ${
+              isKm
+                ? `${r.actual_km_per_l == null ? "-" : Number(r.actual_km_per_l).toFixed(3)} km/L`
+                : `${r.actual_lph == null ? "-" : Number(r.actual_lph).toFixed(3)} L/hr`
+            } ${flag}</div>` +
+            `<small class="fuel-item-desc">${units} unit${units === 1 ? "" : "s"} in period</small>` +
+            `<small class="fuel-item-meta">${
+              isKm
+                ? `OEM: ${Number(r.oem_km_per_l || 0).toFixed(3)} km/L | Fuel used: ${Number(r.fuel_liters || 0).toFixed(2)} L | Distance: ${Number(r.km_run || 0).toFixed(2)} km`
+                : `OEM: ${Number(r.oem_lph || 0).toFixed(3)} L/hr | Fuel used: ${Number(r.fuel_liters || 0).toFixed(2)} L | Hours: ${Number(r.hours_run || 0).toFixed(2)}`
+            }${Number(r.excessive_asset_count || 0) > 0 ? ` | ${Number(r.excessive_asset_count)} machine(s) over benchmark` : ""}</small>` +
+            (codes ? `<small class="fuel-item-meta muted">Assets: ${escapeHtml(codes)}</small>` : "")
+          )
+        );
+        return;
+      }
       if (duplicatesOnly) {
         const runVal = Number(r.meter_run_value ?? r.hours_run ?? 0);
         const runTxt = String(r.metric_mode || "hours") === "km"
@@ -4338,13 +4364,15 @@ async function loadFuelBenchmark() {
         )
       );
     });
-    if (!benchmarkRows.length) {
+    if (!displayRows.length) {
       list.appendChild(item(`<small>${duplicatesOnly ? "No duplicate fuel entries found in this period." : "No fuel benchmark data in this period."}</small>`));
     }
   }
 
   if (duplicatesOnly) {
     setStatus(`Duplicate filter ready (${Number(data.summary?.duplicate_rows || 0)} rows in ${Number(data.summary?.duplicate_groups || 0)} groups).`);
+  } else if (byCategory) {
+    setStatus(`Fuel benchmark ready (${categoryRows.length} equipment categories).`);
   } else {
     setStatus("Fuel benchmark ready.");
   }

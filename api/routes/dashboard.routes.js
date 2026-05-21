@@ -4,6 +4,7 @@ import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
 import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
+import { aggregateFuelBenchmarkByCategory, normalizeEquipmentCategory } from "../utils/fuelBenchmarkAggregate.js";
 
 function todayYYYYMMDD() {
   return new Date().toISOString().slice(0, 10);
@@ -2690,6 +2691,7 @@ export default async function dashboardRoutes(app) {
         asset_id: Number(r.asset_id),
         asset_code: r.asset_code,
         asset_name: r.asset_name,
+        category: normalizeEquipmentCategory(r.category),
         metric_mode: mode,
         fuel_liters: Number(fuel.toFixed(2)),
         km_run: Number(km.toFixed(2)),
@@ -2746,14 +2748,22 @@ export default async function dashboardRoutes(app) {
       ? Number((summary.km_run / summary.km_fuel).toFixed(3))
       : null;
 
+    const category_rows = assetFilter
+      ? []
+      : aggregateFuelBenchmarkByCategory(rows, tolerance);
+
     return reply.send({
       ok: true,
       start,
       end,
       tolerance,
       mode: modeFilter || null,
-      summary,
+      summary: {
+        ...summary,
+        categories: category_rows.length,
+      },
       rows,
+      category_rows,
     });
   });
 
