@@ -139,6 +139,49 @@ export default async function assetRoutes(app) {
     }));
   });
 
+  // GET /api/assets/fleet-summary?include_archived=1
+  app.get("/fleet-summary", async (req) => {
+    const includeArchived = String(req.query?.include_archived || "0") === "1";
+
+    const rows = db.prepare(`
+      SELECT
+        id, asset_code, asset_name, category,
+        active, is_standby,
+        archived, archive_reason
+      FROM assets
+      WHERE (? = 1 OR archived = 0)
+      ORDER BY asset_code ASC
+    `).all(includeArchived ? 1 : 0);
+
+    const fuel30Stmt = hasTable("fuel_logs")
+      ? db.prepare(`
+          SELECT COALESCE(SUM(liters), 0) AS liters_30d
+          FROM fuel_logs
+          WHERE asset_id = ?
+            AND log_date >= date('now', '-30 days')
+        `)
+      : null;
+
+    const cards = rows.map((a) => {
+      const meter = getAssetCurrentHoursInfo(a.id);
+      const fuelRow = fuel30Stmt ? fuel30Stmt.get(a.id) : null;
+      return {
+        asset_code: a.asset_code,
+        asset_name: a.asset_name,
+        category: a.category,
+        active: Number(a.active),
+        is_standby: Number(a.is_standby),
+        archived: Number(a.archived),
+        archive_reason: a.archive_reason || null,
+        current_hours: Number(Number(meter.hours || 0).toFixed(1)),
+        status: buildMachineStatus(a.id),
+        fuel_liters_30d: Number(Number(fuelRow?.liters_30d || 0).toFixed(1)),
+      };
+    });
+
+    return { ok: true, cards };
+  });
+
   function siteCodeFromReq(req) {
     return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
   }
@@ -1195,6 +1238,96 @@ export default async function assetRoutes(app) {
       }));
     }
 
+    // ---- FUEL LOG EVENTS
+    let fuelEvents = [];
+    if (hasTable("fuel_logs")) {
+      const fuelF = dateFilter("f.log_date");
+      fuelEvents = db.prepare(`
+        SELECT f.id, f.log_date AS date, f.liters, f.source
+        FROM fuel_logs f
+        WHERE f.asset_id = ? ${fuelF.sql}
+        ORDER BY f.log_date DESC, f.id DESC
+        LIMIT 300
+      `).all(asset.id, ...fuelF.params).map((f) => ({
+        type: "fuel",
+        date: f.date,
+        title: `Fuel: ${Number(f.liters || 0).toFixed(1)} L`,
+        work_order_id: null,
+        details: {
+          fuel_log_id: f.id,
+          liters: Number(f.liters || 0),
+          source: f.source || null,
+        },
+      }));
+    }
+
+    // ---- LUBE / OIL LOG EVENTS
+    let lubeEvents = [];
+    if (hasTable("oil_logs")) {
+      const lubeEvF = dateFilter("o.log_date");
+      const hasOilType = hasColumn("oil_logs", "oil_type");
+      lubeEvents = db.prepare(`
+        SELECT o.id, o.log_date AS date, o.quantity, ${hasOilType ? "o.oil_type" : "NULL AS oil_type"}
+        FROM oil_logs o
+        WHERE o.asset_id = ? ${lubeEvF.sql}
+        ORDER BY o.log_date DESC, o.id DESC
+        LIMIT 300
+      `).all(asset.id, ...lubeEvF.params).map((o) => ({
+        type: "lube",
+        date: o.date,
+        title: `Lube: ${Number(o.quantity || 0).toFixed(1)} L${o.oil_type ? ` (${o.oil_type})` : ""}`,
+        work_order_id: null,
+        details: {
+          oil_log_id: o.id,
+          quantity: Number(o.quantity || 0),
+          oil_type: o.oil_type || null,
+        },
+      }));
+    }
+
+    // ---- MANAGER / PRESTART INSPECTIONS
+    let inspectionEvents = [];
+    if (hasTable("manager_inspections")) {
+      const miDateCol = firstExistingColumn("manager_inspections", [
+        "inspection_date",
+        "check_date",
+        "created_at",
+      ]);
+      const miInspectorCol = firstExistingColumn("manager_inspections", [
+        "inspector_name",
+        "inspector",
+        "created_by",
+      ]);
+      const miNotesCol = firstExistingColumn("manager_inspections", ["notes", "comment", "remarks"]);
+      if (miDateCol) {
+        const miDateExpr = `DATE(mi.${miDateCol})`;
+        const miF = dateFilter(miDateExpr);
+        const miInspectorExpr = miInspectorCol ? `mi.${miInspectorCol}` : "NULL";
+        const miNotesExpr = miNotesCol ? `mi.${miNotesCol}` : "NULL";
+        inspectionEvents = db.prepare(`
+          SELECT
+            mi.id,
+            ${miDateExpr} AS date,
+            ${miInspectorExpr} AS inspector,
+            ${miNotesExpr} AS notes
+          FROM manager_inspections mi
+          WHERE mi.asset_id = ? ${miF.sql}
+          ORDER BY date DESC, mi.id DESC
+          LIMIT 200
+        `).all(asset.id, ...miF.params).map((mi) => ({
+          type: "inspection",
+          date: mi.date,
+          title: `Inspection #${mi.id}${mi.inspector ? ` — ${mi.inspector}` : ""}`,
+          work_order_id: null,
+          details: {
+            inspection_id: mi.id,
+            inspector: mi.inspector || null,
+            notes: mi.notes || null,
+          },
+        }));
+      }
+    }
+
     // ---- OIL TOTALS (qty + optional cost)
     const oilF = dateFilter("o.log_date");
     const hasOilTotalCost = hasColumn("oil_logs", "total_cost");
@@ -1251,6 +1384,8 @@ export default async function assetRoutes(app) {
         `).get(asset.id, ...smF.params)
       : { parts_qty_total: 0, parts_cost_total: 0 };
 
+    const fuelLitersTotal = fuelEvents.reduce((s, e) => s + Number(e.details?.liters || 0), 0);
+
     const history = [
       ...breakdownEvents,
       ...workOrders,
@@ -1260,6 +1395,9 @@ export default async function assetRoutes(app) {
       ...damageEvents,
       ...tyreChangeEvents,
       ...tyreInspectionEvents,
+      ...fuelEvents,
+      ...lubeEvents,
+      ...inspectionEvents,
     ].sort((a, b) =>
       String(b.date).localeCompare(String(a.date))
     );
@@ -1276,6 +1414,9 @@ export default async function assetRoutes(app) {
         damage_reports: damageEvents.length,
         tyre_changes: tyreChangeEvents.length,
         tyre_inspections: tyreInspectionEvents.length,
+        fuel_logs: fuelEvents.length,
+        lube_logs: lubeEvents.length,
+        inspections: inspectionEvents.length,
         events_total: history.length,
       },
       totals: {
@@ -1283,6 +1424,7 @@ export default async function assetRoutes(app) {
         parts_cost_total: Number(partTotals?.parts_cost_total || 0),
         oil_qty_total: Number(oilTotals?.oil_qty_total || 0),
         oil_cost_total: Number(oilTotals?.oil_cost_total || 0),
+        fuel_liters_total: Number(fuelLitersTotal.toFixed(1)),
       },
       maintenance_cost_total:
         Number(partTotals?.parts_cost_total || 0) + Number(oilTotals?.oil_cost_total || 0),

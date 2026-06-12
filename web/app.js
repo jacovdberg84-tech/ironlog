@@ -3869,15 +3869,12 @@ function ironmindDrillDown(sectionKey) {
 
 async function ironmindGoToAsset(assetCode) {
   switchTab("assets");
-  const sel = qs("histAsset");
-  if (!sel) return;
-  if (sel.options.length <= 1) {
-    await populateHistoryAssets().catch(() => {});
-  }
-  const exists = Array.from(sel.options).some((o) => o.value === assetCode);
+  await loadAssetsFleet().catch(() => {});
+  const code = String(assetCode || "").trim();
+  if (!code) return;
+  const exists = assetsFleetCache.some((c) => c.asset_code === code);
   if (exists) {
-    sel.value = assetCode;
-    await loadAssetHistory().catch(() => {});
+    await selectAssetCard(code, { loadHistory: true, scroll: true });
   }
 }
 
@@ -5639,6 +5636,9 @@ function switchTab(key) {
       loadFinanceSiteAllocation().catch(() => {});
     } catch (_) {}
   }
+  if (k === "assets") {
+    loadAssetsFleet().catch(() => {});
+  }
   try {
     if (typeof window.updateIronmindHelpFabContext === "function") window.updateIronmindHelpFabContext();
   } catch (_) {}
@@ -6363,9 +6363,9 @@ function downloadStockMonitorPdf() {
 }
 
 function downloadAssetHistoryPdf() {
-  const asset_code = (qs("histAsset")?.value || "").trim();
+  const asset_code = getSelectedAssetCode();
   if (!asset_code) {
-    alert("Select an asset first.");
+    alert("Select a fleet card first.");
     return;
   }
   const start = qs("histStart")?.value || "";
@@ -10896,15 +10896,178 @@ async function saveContractorAsset() {
     if (qs("caStandby")) qs("caStandby").checked = false;
     setStatus(`Contractor asset ${asset_code} added.`);
     await Promise.all([
-      populateHistoryAssets().catch(() => {}),
+      loadAssetsFleet().catch(() => {}),
       loadCodePickers().catch(() => {}),
       loadDashboard().catch(() => {}),
     ]);
-    const histSel = qs("histAsset");
-    if (histSel) histSel.value = asset_code;
+    await selectAssetCard(asset_code, { loadHistory: false, scroll: true }).catch(() => {});
   } catch (e) {
     if (out) out.textContent = String(e.message || e);
     setStatus("Failed to add contractor asset.");
+  }
+}
+
+let assetsFleetCache = [];
+let assetsSelectedCode = "";
+
+function getSelectedAssetCode() {
+  return String(assetsSelectedCode || qs("histAsset")?.value || "").trim();
+}
+
+function syncAssetsArchiveLabel() {
+  const label = qs("assetsArchiveSelectedLabel");
+  if (!label) return;
+  const code = getSelectedAssetCode();
+  label.textContent = code || "—";
+}
+
+function fleetStatusPill(status) {
+  const st = String(status || "UNKNOWN").toUpperCase();
+  if (st === "PRODUCTION") return "<span class='pill green'>PROD</span>";
+  if (st === "STANDBY") return "<span class='pill orange'>STBY</span>";
+  if (st === "DOWN") return "<span class='pill red'>DOWN</span>";
+  return "<span class='pill'>—</span>";
+}
+
+function ensureAssetHistoryDateRange() {
+  const endEl = qs("histEnd");
+  const startEl = qs("histStart");
+  const today = todayLocalYmd();
+  if (endEl && !endEl.value) endEl.value = today;
+  if (startEl && !startEl.value) {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 12);
+    startEl.value = d.toISOString().slice(0, 10);
+  }
+}
+
+function renderAssetFleetGrid(cards) {
+  const grid = qs("assetFleetGrid");
+  if (!grid) return;
+  const filter = String(qs("assetsFleetFilter")?.value || "").trim().toLowerCase();
+  const filtered = (cards || []).filter((c) => {
+    if (!filter) return true;
+    const hay = `${c.asset_code} ${c.asset_name} ${c.category || ""}`.toLowerCase();
+    return hay.includes(filter);
+  });
+
+  grid.innerHTML = "";
+  if (!filtered.length) {
+    grid.innerHTML = `<div class="muted small">${cards?.length ? "No machines match your search." : "No assets found."}</div>`;
+    return;
+  }
+
+  for (const c of filtered) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "asset-fleet-card";
+    if (Number(c.archived)) btn.classList.add("archived");
+    if (c.asset_code === assetsSelectedCode) btn.classList.add("selected");
+    btn.dataset.assetCode = c.asset_code;
+    const hired = isHiredAsset(c);
+    btn.innerHTML = `
+      <div class="asset-fleet-code">${escapeHtml(c.asset_code)}${hired ? " <span class='pill' style='font-size:0.65rem;'>HIRED</span>" : ""}${Number(c.archived) ? " <span class='pill red' style='font-size:0.65rem;'>ARCH</span>" : ""}</div>
+      <div class="asset-fleet-name">${escapeHtml(c.asset_name || "")}</div>
+      <div class="asset-fleet-meta">
+        ${fleetStatusPill(c.status)}
+        ${c.category ? `<span class="pill">${escapeHtml(String(c.category))}</span>` : ""}
+        <span class="pill blue">${Number(c.current_hours || 0).toFixed(0)}h</span>
+        ${Number(c.fuel_liters_30d) > 0 ? `<span class="pill green">${Number(c.fuel_liters_30d).toFixed(0)}L/30d</span>` : ""}
+      </div>
+    `;
+    grid.appendChild(btn);
+  }
+}
+
+async function loadAssetsFleet() {
+  const showArchived = !!qs("showArchived")?.checked;
+  const url = `${API}/api/assets/fleet-summary?include_archived=${showArchived ? 1 : 0}`;
+  const grid = qs("assetFleetGrid");
+  if (grid && !assetsFleetCache.length) {
+    grid.innerHTML = `<div class="muted small">Loading fleet…</div>`;
+  }
+  try {
+    const data = await fetchJson(url);
+    assetsFleetCache = Array.isArray(data?.cards) ? data.cards : [];
+    renderAssetFleetGrid(assetsFleetCache);
+    await populateHistoryAssets().catch(() => {});
+    if (assetsSelectedCode && !assetsFleetCache.some((c) => c.asset_code === assetsSelectedCode)) {
+      assetsSelectedCode = "";
+      qs("assetDetailPanel")?.classList.add("hidden");
+    } else if (assetsSelectedCode) {
+      renderAssetFleetGrid(assetsFleetCache);
+    }
+    syncAssetsArchiveLabel();
+  } catch (e) {
+    if (grid) grid.innerHTML = `<div class="muted small">Fleet load error: ${escapeHtml(e.message || e)}</div>`;
+    setStatus("Fleet load error: " + (e.message || e));
+  }
+}
+
+async function loadAssetDetailHeader(asset_code) {
+  const header = qs("assetDetailHeader");
+  const title = qs("assetDetailTitle");
+  const subtitle = qs("assetDetailSubtitle");
+  if (!header) return;
+  header.innerHTML = `<div class="skeleton-block"></div>`;
+  try {
+    const data = await fetchJson(`${API}/api/assets/${encodeURIComponent(asset_code)}/qr-profile`);
+    const p = data?.live_preview || {};
+    const card = assetsFleetCache.find((c) => c.asset_code === asset_code);
+    if (title) title.textContent = asset_code;
+    if (subtitle) {
+      subtitle.textContent = [
+        card?.asset_name || p.asset?.asset_name,
+        card?.category || p.asset?.category,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    }
+    const nextSvc = p.next_service_due;
+    const insp = p.inspections?.last_inspection_date;
+    const hours = p.meter?.current_hours ?? card?.current_hours ?? 0;
+    const fuel30 = p.fuel?.liters_last_30_days ?? card?.fuel_liters_30d ?? 0;
+    header.innerHTML = `
+      ${fleetStatusPill(p.status || card?.status)}
+      <span class="pill blue">${Number(hours).toFixed(1)} h meter</span>
+      <span class="pill green">${Number(fuel30).toFixed(1)} L fuel (30d)</span>
+      ${
+        nextSvc
+          ? `<span class="pill orange">Next ${escapeHtml(nextSvc.service_name || "service")}: ${Number(nextSvc.remaining_hours ?? 0).toFixed(0)} h</span>`
+          : ""
+      }
+      ${insp ? `<span class="pill blue">Last inspection ${escapeHtml(String(insp))}</span>` : ""}
+      ${Number(card?.archived) ? `<span class="pill red">Archived</span>` : ""}
+    `;
+  } catch (_) {
+    const card = assetsFleetCache.find((c) => c.asset_code === asset_code);
+    if (title) title.textContent = asset_code;
+    if (subtitle) subtitle.textContent = card?.asset_name || "";
+    header.innerHTML = card
+      ? `${fleetStatusPill(card.status)} <span class="pill blue">${Number(card.current_hours || 0).toFixed(1)} h</span>`
+      : "";
+  }
+}
+
+async function selectAssetCard(asset_code, opts = {}) {
+  const code = String(asset_code || "").trim();
+  if (!code) return;
+  assetsSelectedCode = code;
+  const sel = qs("histAsset");
+  if (sel) {
+    const exists = Array.from(sel.options).some((o) => o.value === code);
+    if (exists) sel.value = code;
+  }
+  syncAssetsArchiveLabel();
+  renderAssetFleetGrid(assetsFleetCache);
+  qs("assetDetailPanel")?.classList.remove("hidden");
+  ensureAssetHistoryDateRange();
+  await loadAssetDetailHeader(code);
+  if (opts.loadHistory !== false) {
+    await loadAssetHistory().catch((e) => setStatus("History error: " + (e.message || e)));
+  }
+  if (opts.scroll) {
+    qs("assetDetailPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 }
 
@@ -10948,10 +11111,12 @@ async function populateHistoryAssets() {
     sel.appendChild(opt);
   }
 
-  if (current) {
-    const exists = Array.from(sel.options).some((o) => o.value === current);
-    if (exists) sel.value = current;
+  const keep = assetsSelectedCode || current;
+  if (keep) {
+    const exists = Array.from(sel.options).some((o) => o.value === keep);
+    if (exists) sel.value = keep;
   }
+  syncAssetsArchiveLabel();
 }
 
 function formatOpsSlipHistoryExtra(ev) {
@@ -10994,6 +11159,9 @@ function formatOpsSlipHistoryExtra(ev) {
 function pillForType(t) {
   if (t === "breakdown") return "<span class='pill red'>BD</span>";
   if (t === "service") return "<span class='pill blue'>SV</span>";
+  if (t === "fuel") return "<span class='pill green'>FUEL</span>";
+  if (t === "lube") return "<span class='pill' style='background:#0d9488;color:#fff;'>LUBE</span>";
+  if (t === "inspection") return "<span class='pill blue'>INSP</span>";
   if (t === "get_slip") return "<span class='pill orange'>GET</span>";
   if (t === "component_slip") return "<span class='pill orange'>COMP</span>";
   if (t === "damage_report") return "<span class='pill red'>DMG</span>";
@@ -11024,8 +11192,8 @@ function buildPhotoDebugBadge(photoPath) {
 }
 
 async function loadAssetHistory() {
-  const asset_code = qs("histAsset")?.value;
-  if (!asset_code) return alert("Select an asset.");
+  const asset_code = getSelectedAssetCode();
+  if (!asset_code) return alert("Select a fleet card first.");
 
   const start = qs("histStart")?.value || "";
   const end = qs("histEnd")?.value || "";
@@ -11055,6 +11223,10 @@ async function loadAssetHistory() {
       <div class="pill red">Damage Reports: ${Number(counts.damage_reports || 0)}</div>
       <div class="pill orange">Tyre Changes: ${Number(counts.tyre_changes || 0)}</div>
       <div class="pill blue">Tyre Inspections: ${Number(counts.tyre_inspections || 0)}</div>
+      <div class="pill green">Fuel logs: ${Number(counts.fuel_logs || 0)}</div>
+      <div class="pill" style="background:#0d9488;color:#fff;">Lube logs: ${Number(counts.lube_logs || 0)}</div>
+      <div class="pill blue">Inspections: ${Number(counts.inspections || 0)}</div>
+      <div class="pill green">Fuel total: ${Number(totals.fuel_liters_total || 0).toFixed(1)} L</div>
       <div class="pill orange">Parts Qty: ${Number(totals.parts_qty_total || 0).toFixed(1)}</div>
       <div class="pill orange">Oil Qty: ${Number(totals.oil_qty_total || 0).toFixed(1)}</div>
       <div class="pill red">Parts Cost: ${Number(totals.parts_cost_total || 0).toFixed(2)}</div>
@@ -11120,6 +11292,12 @@ async function loadAssetHistory() {
           }${ev.details?.notes ? `<br><small>${ev.details.notes}</small>` : ""}${photoBlock}`
         : ev.type === "ops_slip"
         ? formatOpsSlipHistoryExtra(ev)
+        : ev.type === "fuel"
+        ? `<br><small>${Number(ev.details?.liters || 0).toFixed(1)} L${ev.details?.source ? ` · ${escapeHtml(String(ev.details.source))}` : ""}</small>`
+        : ev.type === "lube"
+        ? `<br><small>${Number(ev.details?.quantity || 0).toFixed(1)} L${ev.details?.oil_type ? ` · ${escapeHtml(String(ev.details.oil_type))}` : ""}</small>`
+        : ev.type === "inspection"
+        ? `<br><small>${ev.details?.inspector ? `Inspector: ${escapeHtml(String(ev.details.inspector))}` : "Inspection recorded"}${ev.details?.notes ? `<br>${escapeHtml(String(ev.details.notes))}` : ""}</small>`
         : "";
 
     list.appendChild(item(`${pillForType(ev.type)} <b>${ev.date}</b> — ${ev.title}${wo}${extra}`));
@@ -11131,8 +11309,8 @@ async function loadAssetHistory() {
 }
 
 async function archiveSelectedAsset() {
-  const code = qs("histAsset")?.value;
-  if (!code) return alert("Select an asset first.");
+  const code = getSelectedAssetCode();
+  if (!code) return alert("Select a fleet card first.");
 
   const reason = prompt(`Archive ${code}.\nReason (optional):`, "Scrapped / Not in use");
   if (reason === null) return;
@@ -11145,13 +11323,13 @@ async function archiveSelectedAsset() {
   });
 
   setStatus(`Archived ${code} ✅`);
-  await populateHistoryAssets().catch(() => {});
+  await loadAssetsFleet().catch(() => {});
   await loadDashboard().catch(() => {});
 }
 
 async function unarchiveSelectedAsset() {
-  const code = qs("histAsset")?.value;
-  if (!code) return alert("Select an asset first.");
+  const code = getSelectedAssetCode();
+  if (!code) return alert("Select a fleet card first.");
 
   if (!confirm(`Unarchive ${code}?`)) return;
 
@@ -11163,7 +11341,7 @@ async function unarchiveSelectedAsset() {
   });
 
   setStatus(`Unarchived ${code} ✅`);
-  await populateHistoryAssets().catch(() => {});
+  await loadAssetsFleet().catch(() => {});
   await loadDashboard().catch(() => {});
 }
 
@@ -12095,7 +12273,21 @@ async function init() {
   });
 
   qs("showArchived")?.addEventListener("change", () => {
-    populateHistoryAssets().catch(() => {});
+    loadAssetsFleet().catch(() => {});
+  });
+
+  qs("assetsFleetFilter")?.addEventListener("input", () => {
+    renderAssetFleetGrid(assetsFleetCache);
+  });
+
+  qs("assetFleetGrid")?.addEventListener("click", (e) => {
+    const card = e.target.closest(".asset-fleet-card");
+    if (!card) return;
+    const code = card.dataset.assetCode;
+    if (!code) return;
+    selectAssetCard(code, { loadHistory: true, scroll: true }).catch((err) =>
+      setStatus("Asset select error: " + (err.message || err))
+    );
   });
 
   qs("btnArchiveAsset")?.addEventListener("click", () =>
@@ -12117,7 +12309,7 @@ async function init() {
   );
   populateAssetAllocSelect().catch(() => {});
 
-  populateHistoryAssets().catch(() => {});
+  loadAssetsFleet().catch(() => {});
   const saDate = qs("saDate");
   if (saDate) saDate.value = new Date().toISOString().slice(0, 10);
   const mlDate = qs("mlDate");

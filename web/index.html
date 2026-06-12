@@ -1390,13 +1390,84 @@
       <div class="section-header">
         <div class="section-header-left">
           <h2>Assets & Equipment</h2>
-          <p class="muted">Manage assets, view history, and track contractor equipment</p>
+          <p class="muted">Select a machine card to view fuel, services, inspections, and full history</p>
         </div>
       </div>
 
       <div class="asset-cards-grid">
-        <!-- Site & cost center allocation -->
-        <div class="dash-card collapsible full-width" data-collapsed="false">
+        <!-- Equipment fleet cards -->
+        <div class="dash-card full-width" id="assetFleetCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #1d4ed8;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"></path></svg>
+              </div>
+              <div>
+                <h3>Fleet</h3>
+                <p class="muted small">All equipment — click a card for complete machine history</p>
+              </div>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <div class="asset-fleet-toolbar">
+              <input id="assetsFleetFilter" class="w-full" type="search" placeholder="Search code, name, or category…" style="max-width: 320px;" />
+              <label class="checkbox-label">
+                <input type="checkbox" id="showArchived" />
+                <span>Show archived / scrapped</span>
+              </label>
+            </div>
+            <div id="assetFleetGrid" class="asset-fleet-grid">
+              <div class="muted small">Loading fleet…</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Selected asset detail + history -->
+        <div id="assetDetailPanel" class="dash-card full-width hidden">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              </div>
+              <div>
+                <h3 id="assetDetailTitle">Machine history</h3>
+                <p class="muted small" id="assetDetailSubtitle">Select a fleet card above</p>
+              </div>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <div id="assetDetailHeader" class="asset-detail-header"></div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Start Date</label>
+                <input id="histStart" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>End Date</label>
+                <input id="histEnd" type="date" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadHistory" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                  Load History
+                </button>
+                <button id="downloadHistoryPdf" class="btn btn-secondary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                  Download PDF
+                </button>
+              </div>
+            </div>
+            <div id="historySummary" class="history-summary"></div>
+            <div id="historyList" class="list"></div>
+            <div class="info-note">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              <span>Timeline includes fuel, lube, inspections, breakdowns, work orders, GET/component changes, and tyre events.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Site & cost center allocation (hidden on production Assets tab) -->
+        <div class="dash-card collapsible full-width hidden" id="assetSiteCostCard" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon" style="background: #f0fdf4; color: #15803d;">
@@ -1439,7 +1510,7 @@
         </div>
 
         <!-- Add Contractor Asset Card -->
-        <div class="dash-card collapsible" data-collapsed="false">
+        <div class="dash-card collapsible collapsed" data-collapsed="true">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon">
@@ -1496,7 +1567,7 @@
         </div>
 
         <!-- Archive/Unarchive Card -->
-        <div class="dash-card collapsible" data-collapsed="false">
+        <div class="dash-card collapsible collapsed" data-collapsed="true">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon">
@@ -1504,7 +1575,7 @@
               </div>
               <div>
                 <h3>Archive Management</h3>
-                <p class="muted small">Archive or restore assets</p>
+                <p class="muted small">Archive or restore the selected fleet card</p>
               </div>
             </div>
             <button class="report-card-toggle" aria-label="Toggle">
@@ -1512,18 +1583,8 @@
             </button>
           </div>
           <div class="report-card-body">
-            <div class="form-row">
-              <div class="form-field form-field-full">
-                <label>Select Asset</label>
-                <select id="histAsset" class="w-full"></select>
-              </div>
-            </div>
-            <div class="form-row">
-              <label class="checkbox-label">
-                <input type="checkbox" id="showArchived" />
-                <span>Show archived / scrapped assets</span>
-              </label>
-            </div>
+            <p class="muted small">Selected: <strong id="assetsArchiveSelectedLabel">—</strong></p>
+            <select id="histAsset" class="hidden" aria-hidden="true" tabindex="-1"></select>
             <div class="action-buttons">
               <button id="btnArchiveAsset" class="btn btn-danger">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
@@ -1533,52 +1594,6 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
                 Unarchive
               </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Asset History Card -->
-        <div class="dash-card collapsible" data-collapsed="false">
-          <div class="dash-card-header">
-            <div class="dash-card-title">
-              <div class="dash-card-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-              </div>
-              <div>
-                <h3>Asset History</h3>
-                <p class="muted small">View breakdowns, downtime, work orders, and component changes</p>
-              </div>
-            </div>
-            <button class="report-card-toggle" aria-label="Toggle">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
-            </button>
-          </div>
-          <div class="report-card-body">
-            <div class="form-row">
-              <div class="form-field">
-                <label>Start Date</label>
-                <input id="histStart" type="date" class="w-full" />
-              </div>
-              <div class="form-field">
-                <label>End Date</label>
-                <input id="histEnd" type="date" class="w-full" />
-              </div>
-              <div class="form-field form-field-action">
-                <button id="loadHistory" class="btn btn-primary">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                  Load History
-                </button>
-                <button id="downloadHistoryPdf" class="btn btn-secondary">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-                  Download PDF
-                </button>
-              </div>
-            </div>
-            <div id="historySummary" class="history-summary"></div>
-            <div id="historyList" class="list"></div>
-            <div class="info-note">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              <span>Photos from InspectPro: breakdown_photos and work_order_photos</span>
             </div>
           </div>
         </div>
