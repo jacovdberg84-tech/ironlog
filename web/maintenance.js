@@ -3194,6 +3194,10 @@ async function saveWeeklyInspectionWeekPlan() {
     wiSetMsg("Select a week and inspection day.", true);
     return;
   }
+  if (!window.confirm(
+    `Move every inspection in the week of ${week_start} to ${wiFormatDayTitle(planned_date)}?\n` +
+    "This overrides the Mon–Sat spread for that week."
+  )) return;
   wiSetMsg("Saving week plan...");
   try {
     const res = await fetch(`${API}/maintenance/weekly-inspections/week-plan`, {
@@ -3252,6 +3256,30 @@ async function removeWeeklyInspectionAsset(id) {
     wiSetMsg("Equipment removed from weekly schedule.");
   } catch (e) {
     wiSetMsg(`Remove failed: ${e.message || e}`, true);
+  }
+}
+
+async function spreadWeeklyInspectionWeek() {
+  const week_start = String(document.getElementById("wiWeekSelect")?.value || "").trim();
+  if (!week_start) {
+    wiSetMsg("Select a week to re-spread.", true);
+    return;
+  }
+  const weekday_minutes = Math.max(15, Number(document.getElementById("wiWeekdayCapacity")?.value || 120) || 120);
+  const saturday_hours = Math.max(1, Number(document.getElementById("wiSaturdayHours")?.value || 5) || 5);
+  wiSetMsg("Re-spreading inspections across Mon–Sat...");
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-inspections/spread-week`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ week_start, weekday_minutes, saturday_hours }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to re-spread week");
+    await loadWeeklyInspectionCalendar();
+    wiSetMsg(`Re-spread ${Number(data.assignment_count || 0)} inspection(s) for week of ${week_start}.`);
+  } catch (e) {
+    wiSetMsg(`Re-spread failed: ${e.message || e}`, true);
   }
 }
 
@@ -6404,6 +6432,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("wiGenerateMonthBtn")?.addEventListener("click", () => generateWeeklyInspectionMonth());
   document.getElementById("wiSaveWeekPlanBtn")?.addEventListener("click", () => saveWeeklyInspectionWeekPlan());
+  document.getElementById("wiSpreadWeekBtn")?.addEventListener("click", () => spreadWeeklyInspectionWeek());
   document.getElementById("wiWeekSelect")?.addEventListener("change", () => {
     const sel = document.getElementById("wiWeekSelect");
     const dateInp = document.getElementById("wiWeekPlanDate");
