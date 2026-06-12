@@ -745,13 +745,13 @@
           </div>
         </div>
         <p class="muted mini" style="margin:0 0 12px;">
-          Select in-use equipment and <b>Generate month schedule</b> to plan one machine per equipment group each week (rotates if already released).
+          Select in-use equipment and <b>Generate month schedule</b>. Inspections are spread <b>Mon–Sat</b> (Saturday has your 5-hour block). One machine per equipment group each week; rotates if already released.
           Click a scheduled cell to cycle: <b>Pending</b> → <b>Released</b> → <b>Skipped</b>.
         </p>
         <div class="card wi-no-print" style="padding:12px; margin-bottom:12px;">
           <h4 style="margin:0 0 8px;">Generate month schedule</h4>
           <p class="muted mini" style="margin:0 0 8px;">
-            Picks at least one asset from each equipment group for every week in the month. If an asset is already released for a week, another asset from the same group is scheduled instead.
+            Spreads inspections across the week. Saturday uses your inspection block (default 5 hours). Mon–Fri use the weekday capacity below.
           </p>
           <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end; margin-bottom:8px;">
             <label>
@@ -761,6 +761,14 @@
             <label>
               Default est. minutes
               <input id="wiGenerateEst" type="number" min="5" step="5" value="30" class="w-90" />
+            </label>
+            <label>
+              Weekday capacity (min/day)
+              <input id="wiWeekdayCapacity" type="number" min="15" step="15" value="120" class="w-90" title="Mon–Fri budget per day" />
+            </label>
+            <label>
+              Saturday block (hours)
+              <input id="wiSaturdayHours" type="number" min="1" step="0.5" value="5" class="w-90" title="Total inspection hours available on Saturday" />
             </label>
             <button type="button" id="wiLoadCandidatesBtn">Load in-use equipment</button>
             <button type="button" id="wiSelectAllCandidatesBtn">Select all</button>
@@ -794,8 +802,8 @@
           <button type="button" id="wiAddAssetBtn">Add to schedule</button>
         </div>
         <div class="card wi-no-print" style="padding:12px; margin-bottom:12px;">
-          <h4 style="margin:0 0 8px;">Week inspection day</h4>
-          <p class="muted mini" style="margin:0 0 8px;">Set which day machines are scheduled (e.g. Monday 1 June for A300AM, B01AM, E500AM, V01AM).</p>
+          <h4 style="margin:0 0 8px;">Manual week override</h4>
+          <p class="muted mini" style="margin:0 0 8px;">Move every inspection in a week to a single day (optional). Auto-generate normally spreads Mon–Sat.</p>
           <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
             <label>
               Week
@@ -1606,6 +1614,6 @@
 
   </div>
 
-  <script src="./maintenance.js?v=24"></script>
+  <script src="./maintenance.js?v=25"></script>
 </body>
 </html>

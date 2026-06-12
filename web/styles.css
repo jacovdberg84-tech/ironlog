@@ -5225,6 +5225,14 @@ body.bare-child-tab #mainContent > .card.stack-12 {
   filter: brightness(0.98);
 }
 
+.wi-cell-day {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  opacity: 0.75;
+}
+
 .wi-cell-est {
   font-size: 0.72rem;
   font-weight: 500;
@@ -5310,6 +5318,11 @@ body.bare-child-tab #mainContent > .card.stack-12 {
   border-radius: 10px;
   padding: 10px 12px;
   background: #fff;
+}
+
+.wi-day-card--over {
+  border-color: #fecaca;
+  background: #fff7f7;
 }
 
 .wi-day-head {

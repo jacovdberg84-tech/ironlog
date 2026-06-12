@@ -2943,11 +2943,15 @@ function renderWeeklyInspectionDayAgenda(data) {
       const cls = st === "done" ? "wi-chip--released" : st === "skipped" ? "wi-chip--skipped" : "wi-chip--pending";
       return `<span class="wi-chip ${cls}" title="${esc(wiStatusLabel(st))}">${esc(it.asset_code)} · ${wiFormatMinutes(it.est_minutes)}</span>`;
     }).join("");
+    const cap = Number(day.capacity_minutes || 0);
+    const used = Number(day.est_minutes || 0);
+    const capLabel = cap > 0 ? ` · ${wiFormatMinutes(used)} / ${wiFormatMinutes(cap)}` : ` · ${wiFormatMinutes(used)} planned`;
+    const overCap = cap > 0 && used > cap;
     return `
-      <div class="wi-day-card">
+      <div class="wi-day-card${overCap ? " wi-day-card--over" : ""}">
         <div class="wi-day-head">
           <strong>${esc(wiFormatDayTitle(day.date))}</strong>
-          <span class="muted mini">${items.length} machine${items.length === 1 ? "" : "s"} · ${wiFormatMinutes(day.est_minutes)} planned</span>
+          <span class="muted mini">${items.length} machine${items.length === 1 ? "" : "s"}${capLabel}</span>
         </div>
         <div class="wi-day-chips">${chips || `<span class="muted mini">No machines planned</span>`}</div>
       </div>
@@ -2964,7 +2968,10 @@ function populateWeeklyInspectionWeekSelect(data) {
   const cur = String(sel.value || "");
   sel.innerHTML = weeks.map((w) => {
     const sum = summary.find((s) => String(s.week_start) === String(w.week_start));
-    const label = `${wiWeekHeader(w)}${sum?.planned_date ? ` · inspect ${wiFormatDayTitle(sum.planned_date).split(",").slice(0, 1).join("")}` : ""}`;
+    const dayCount = Array.isArray(sum?.planned_dates) ? sum.planned_dates.length : (sum?.planned_date ? 1 : 0);
+    const spread = dayCount > 1 ? ` · ${dayCount} days` : "";
+    const sat = sum?.saturday_minutes ? ` · Sat ${wiFormatMinutes(sum.saturday_minutes)}` : "";
+    const label = `${wiWeekHeader(w)}${spread}${sat}`;
     return `<option value="${esc(w.week_start)}">${esc(label)}</option>`;
   }).join("");
   if (cur && weeks.some((w) => String(w.week_start) === cur)) sel.value = cur;
@@ -3038,12 +3045,14 @@ function renderWeeklyInspectionCalendar(data) {
   }
   const head = weeks.map((w) => {
     const sum = weekSummary.find((s) => String(s.week_start) === String(w.week_start));
-    const inspectDay = sum?.planned_date ? wiFormatDayTitle(sum.planned_date).split(",").slice(0, 1).join("") : "";
+    const dayCount = Array.isArray(sum?.planned_dates) ? sum.planned_dates.length : 0;
     const estTotal = sum?.est_minutes_total ? wiFormatMinutes(sum.est_minutes_total) : "";
+    const satUsed = sum?.saturday_minutes ? wiFormatMinutes(sum.saturday_minutes) : "";
     return `<th class="wi-week-col">
       <div>${esc(wiWeekHeader(w))}</div>
-      ${inspectDay ? `<div class="wi-week-sub">${esc(inspectDay)}</div>` : ""}
+      ${dayCount > 1 ? `<div class="wi-week-sub">Mon–Sat · ${dayCount} days</div>` : ""}
       ${estTotal ? `<div class="wi-week-sub">${esc(estTotal)} planned</div>` : ""}
+      ${satUsed ? `<div class="wi-week-sub">Sat ${esc(satUsed)}</div>` : ""}
     </th>`;
   }).join("");
   const body = calendarAssets.map((a) => {
@@ -3059,6 +3068,7 @@ function renderWeeklyInspectionCalendar(data) {
       const est = Number(plan.est_minutes ?? a.est_minutes ?? 30);
       const inspector = String(entry.inspector_name || "").trim();
       const plannedDate = String(plan.planned_date || w.week_start);
+      const dayShort = new Date(`${plannedDate}T12:00:00`).toLocaleDateString(undefined, { weekday: "short" });
       const tip = [inspector ? `Inspector: ${inspector}` : "", `Planned: ${wiFormatDayTitle(plannedDate)}`, `Est: ${wiFormatMinutes(est)}`].filter(Boolean).join(" · ");
       const titleAttr = tip ? ` title="${esc(tip)}"` : "";
       return `
@@ -3072,6 +3082,7 @@ function renderWeeklyInspectionCalendar(data) {
             data-wi-status="${esc(status)}"
             ${titleAttr}
           >
+            <span class="wi-cell-day">${esc(dayShort)}</span>
             <span class="wi-cell-status">${esc(wiStatusLabel(status))}</span>
             <span class="wi-cell-est">${esc(wiFormatMinutes(est))}</span>
           </button>
@@ -3340,14 +3351,19 @@ async function generateWeeklyInspectionMonth() {
     return;
   }
   const est_minutes = Math.max(5, Number(document.getElementById("wiGenerateEst")?.value || 30) || 30);
+  const weekday_minutes = Math.max(15, Number(document.getElementById("wiWeekdayCapacity")?.value || 120) || 120);
+  const saturday_hours = Math.max(1, Number(document.getElementById("wiSaturdayHours")?.value || 5) || 5);
   const month = wiCurrentMonth();
-  if (!window.confirm(`Generate inspection schedule for ${wiMonthTitle(month)} using ${asset_ids.length} selected machine(s)?`)) return;
+  if (!window.confirm(
+    `Generate inspection schedule for ${wiMonthTitle(month)} using ${asset_ids.length} selected machine(s)?\n` +
+    `Spread Mon–Sat · weekday ${weekday_minutes} min/day · Saturday ${saturday_hours}h block.`
+  )) return;
   wiSetMsg("Generating month schedule...");
   try {
     const res = await fetch(`${API}/maintenance/weekly-inspections/generate`, {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ month, asset_ids, est_minutes }),
+      body: JSON.stringify({ month, asset_ids, est_minutes, weekday_minutes, saturday_hours }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to generate schedule");

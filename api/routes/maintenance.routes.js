@@ -109,6 +109,76 @@ function pickAssetForWeeklyInspection(groupAssets, weekStart, entryMap, monthPic
   };
 }
 
+const WI_DEFAULT_WEEKDAY_MINUTES = 120;
+const WI_DEFAULT_SATURDAY_MINUTES = 300;
+
+function resolveWeekInspectionCapacities(opts = {}) {
+  const saturday_minutes = Math.max(30, Number(opts.saturday_minutes ?? WI_DEFAULT_SATURDAY_MINUTES) || WI_DEFAULT_SATURDAY_MINUTES);
+  const weekday_minutes = Math.max(15, Number(opts.weekday_minutes ?? WI_DEFAULT_WEEKDAY_MINUTES) || WI_DEFAULT_WEEKDAY_MINUTES);
+  return { weekday_minutes, saturday_minutes };
+}
+
+function buildWeekInspectionDaySlots(weekStart, capacities = {}) {
+  const caps = resolveWeekInspectionCapacities(capacities);
+  return [0, 1, 2, 3, 4, 5].map((offset) => ({
+    offset,
+    date: addDaysYmd(weekStart, offset),
+    capacity: offset === 5 ? caps.saturday_minutes : caps.weekday_minutes,
+    used: 0,
+  }));
+}
+
+function assignInspectionDatesAcrossWeek(weekStart, picks, capacities = {}) {
+  const buckets = buildWeekInspectionDaySlots(weekStart, capacities);
+  const sorted = [...(picks || [])].sort(
+    (a, b) => Number(b.est_minutes || 0) - Number(a.est_minutes || 0) || String(a.asset_code || "").localeCompare(String(b.asset_code || ""))
+  );
+  let roundRobin = 0;
+  const out = [];
+
+  function pickBucketIndex(est, useRoundRobin) {
+    const indices = useRoundRobin
+      ? Array.from({ length: buckets.length }, (_, i) => (roundRobin + i) % buckets.length)
+      : [...buckets.keys()].sort(
+          (a, b) => (buckets[b].capacity - buckets[b].used) - (buckets[a].capacity - buckets[a].used)
+        );
+    for (const idx of indices) {
+      const b = buckets[idx];
+      if (b.used + est <= b.capacity) return idx;
+    }
+    return -1;
+  }
+
+  for (const pick of sorted) {
+    const est = Math.max(5, Number(pick.est_minutes ?? 30) || 30);
+    let idx = pickBucketIndex(est, true);
+    if (idx < 0) idx = pickBucketIndex(est, false);
+    if (idx < 0) {
+      idx = buckets.reduce(
+        (best, b, i) => ((b.capacity - b.used) > (buckets[best].capacity - buckets[best].used) ? i : best),
+        0
+      );
+    }
+    buckets[idx].used += est;
+    roundRobin = (idx + 1) % buckets.length;
+    out.push({
+      ...pick,
+      planned_date: buckets[idx].date,
+      planned_day_offset: buckets[idx].offset,
+    });
+  }
+
+  return {
+    assignments: out,
+    day_usage: buckets.map((b) => ({
+      date: b.date,
+      capacity_minutes: b.capacity,
+      used_minutes: b.used,
+      remaining_minutes: Math.max(0, b.capacity - b.used),
+    })),
+  };
+}
+
 function upsertWeeklyInspectionRosterAsset(assetId, estMinutes, notes = "") {
   const est = Math.max(5, Number(estMinutes ?? 30) || 30);
   const existing = db.prepare(`SELECT id FROM weekly_inspection_assets WHERE asset_id = ?`).get(assetId);
@@ -128,7 +198,13 @@ function upsertWeeklyInspectionRosterAsset(assetId, estMinutes, notes = "") {
   return Number(ins.lastInsertRowid);
 }
 
-function generateWeeklyInspectionMonthSchedule({ month, assetIds, estMinutesDefault = 30 }) {
+function generateWeeklyInspectionMonthSchedule({
+  month,
+  assetIds,
+  estMinutesDefault = 30,
+  weekday_minutes = WI_DEFAULT_WEEKDAY_MINUTES,
+  saturday_minutes = WI_DEFAULT_SATURDAY_MINUTES,
+}) {
   ensureWeeklyInspectionSchema();
   if (!isMonth(month)) throw new Error("month must be YYYY-MM");
   const ids = Array.from(new Set((assetIds || []).map((x) => Number(x)).filter((n) => n > 0)));
@@ -173,6 +249,8 @@ function generateWeeklyInspectionMonthSchedule({ month, assetIds, estMinutesDefa
 
   const monthPickCount = {};
   const assignments = [];
+  const weekDayUsage = [];
+  const capacityOpts = { weekday_minutes, saturday_minutes };
   const upsertPlan = db.prepare(`
     INSERT INTO weekly_inspection_week_plan (
       week_start, asset_id, planned_date, est_minutes, sort_order, created_at, updated_at
@@ -186,8 +264,7 @@ function generateWeeklyInspectionMonthSchedule({ month, assetIds, estMinutesDefa
 
   for (const week of weeks) {
     const weekStart = week.week_start;
-    const plannedDate = weekStart;
-    let sortOrder = 0;
+    const weekPicks = [];
     for (const [category, groupAssets] of byCategory.entries()) {
       const picked = pickAssetForWeeklyInspection(groupAssets, weekStart, entryMap, monthPickCount);
       if (!picked) continue;
@@ -207,18 +284,34 @@ function generateWeeklyInspectionMonthSchedule({ month, assetIds, estMinutesDefa
             AND asset_id != ?
         `).run(weekStart, ...peerIds, aid);
       }
-      upsertPlan.run(weekStart, aid, plannedDate, est, sortOrder);
-      monthPickCount[aid] = (monthPickCount[aid] || 0) + 1;
-      sortOrder += 1;
-      assignments.push({
-        week_start: weekStart,
-        planned_date: plannedDate,
+      weekPicks.push({
         category,
         asset_id: aid,
         asset_code: picked.asset_code,
         est_minutes: est,
         rotated: Boolean(picked.rotated),
         status: String(entryMap[`${aid}|${weekStart}`]?.status || "pending"),
+      });
+      monthPickCount[aid] = (monthPickCount[aid] || 0) + 1;
+    }
+
+    const spread = assignInspectionDatesAcrossWeek(weekStart, weekPicks, capacityOpts);
+    weekDayUsage.push({ week_start: weekStart, days: spread.day_usage });
+    let sortOrder = 0;
+    for (const item of spread.assignments) {
+      const aid = Number(item.asset_id);
+      upsertPlan.run(weekStart, aid, item.planned_date, item.est_minutes, sortOrder);
+      sortOrder += 1;
+      assignments.push({
+        week_start: weekStart,
+        planned_date: item.planned_date,
+        planned_day_offset: item.planned_day_offset,
+        category: item.category,
+        asset_id: aid,
+        asset_code: item.asset_code,
+        est_minutes: item.est_minutes,
+        rotated: Boolean(item.rotated),
+        status: item.status,
       });
     }
   }
@@ -230,6 +323,8 @@ function generateWeeklyInspectionMonthSchedule({ month, assetIds, estMinutesDefa
     asset_pool_count: poolAssets.length,
     assignment_count: assignments.length,
     assignments,
+    schedule_settings: resolveWeekInspectionCapacities(capacityOpts),
+    week_day_usage: weekDayUsage,
   };
 }
 
@@ -421,16 +516,23 @@ function buildWeeklyInspectionCalendarData(query = {}) {
           planned_date: String(p.planned_date || w.week_start),
         };
       });
-    const plannedDate = items[0]?.planned_date || w.week_start;
+    const plannedDates = [...new Set(items.map((it) => String(it.planned_date || w.week_start)))].sort();
+    const saturdayDate = addDaysYmd(w.week_start, 5);
     const estTotal = items.reduce((sum, it) => sum + Number(it.est_minutes || 0), 0);
+    const saturdayMinutes = items
+      .filter((it) => String(it.planned_date) === saturdayDate)
+      .reduce((sum, it) => sum + Number(it.est_minutes || 0), 0);
     return {
       week_start: w.week_start,
       week_end: w.week_end,
-      planned_date: plannedDate,
+      planned_date: plannedDates[0] || w.week_start,
+      planned_dates: plannedDates,
       est_minutes_total: estTotal,
+      saturday_minutes: saturdayMinutes,
       asset_count: items.length,
     };
   });
+  const schedule_settings = resolveWeekInspectionCapacities();
   const compliance = computeWeeklyInspectionCompliance(
     assets,
     weeks,
@@ -438,6 +540,17 @@ function buildWeeklyInspectionCalendarData(query = {}) {
     planMap,
     new Date().toISOString().slice(0, 10)
   );
+  if (Array.isArray(compliance.day_agenda)) {
+    compliance.day_agenda = compliance.day_agenda.map((day) => {
+      const dow = new Date(`${String(day.date).trim()}T12:00:00`).getDay();
+      const capacity_minutes = dow === 6 ? schedule_settings.saturday_minutes : schedule_settings.weekday_minutes;
+      return {
+        ...day,
+        capacity_minutes,
+        remaining_minutes: Math.max(0, capacity_minutes - Number(day.est_minutes || 0)),
+      };
+    });
+  }
   return {
     ok: true,
     month: `${year}-${String(month).padStart(2, "0")}`,
@@ -449,6 +562,7 @@ function buildWeeklyInspectionCalendarData(query = {}) {
     plans: planMap,
     week_plan_summary: weekPlanSummary,
     compliance,
+    schedule_settings,
   };
 }
 
@@ -4083,10 +4197,20 @@ export default async function maintenanceRoutes(app) {
       const month = String(req.body?.month || "").trim();
       const asset_ids = Array.isArray(req.body?.asset_ids) ? req.body.asset_ids : [];
       const est_minutes = Math.max(5, Number(req.body?.est_minutes ?? 30) || 30);
+      const saturday_hours = Number(req.body?.saturday_hours ?? 5);
+      const saturday_minutes = Math.max(
+        30,
+        Number.isFinite(saturday_hours) && saturday_hours > 0
+          ? Math.round(saturday_hours * 60)
+          : Number(req.body?.saturday_minutes ?? WI_DEFAULT_SATURDAY_MINUTES) || WI_DEFAULT_SATURDAY_MINUTES
+      );
+      const weekday_minutes = Math.max(15, Number(req.body?.weekday_minutes ?? WI_DEFAULT_WEEKDAY_MINUTES) || WI_DEFAULT_WEEKDAY_MINUTES);
       const result = generateWeeklyInspectionMonthSchedule({
         month,
         assetIds: asset_ids,
         estMinutesDefault: est_minutes,
+        weekday_minutes,
+        saturday_minutes,
       });
       return reply.send({ ok: true, ...result });
     } catch (err) {
