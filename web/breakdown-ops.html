@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>IRONLOG Breakdown Ops</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="./styles.css?v=2" />
+</head>
+<body class="page-shell">
+  <div class="page-header">
+    <h2 style="margin:0;">Breakdown Ops</h2>
+    <div class="page-header-actions">
+      <button type="button" onclick="location.href='index.html'">Dashboard</button>
+      <button type="button" onclick="location.href='maintenance.html'">Maintenance</button>
+      <button type="button" onclick="location.href='workorders.html'">Work Orders</button>
+    </div>
+  </div>
+
+  <p id="status" class="muted" style="margin:0 0 12px;">Ready.</p>
+
+  <section class="panel show page-section">
+    <div class="card stack-12">
+      <div class="card">
+        <div class="section-head-row">
+          <h4>Open incidents</h4>
+          <button type="button" class="sectionToggleBtn" data-section-body="boOpenBody" data-storage-key="ironlog_section_bo_open">Hide</button>
+        </div>
+        <div id="boOpenBody" class="section-collapsible">
+          <p class="muted">Active breakdowns with an open (or non-terminal) primary work order. Use for shift handover.</p>
+          <div class="row">
+            <label class="chk">Filter by start date <input id="boOpenDate" type="date" /></label>
+            <button type="button" id="boRefreshOpen">Refresh</button>
+          </div>
+          <div class="list" id="boOpenList"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-head-row">
+          <h4>Recent breakdowns</h4>
+          <button type="button" class="sectionToggleBtn" data-section-body="boRecentBody" data-storage-key="ironlog_section_bo_recent">Hide</button>
+        </div>
+        <div id="boRecentBody" class="section-collapsible">
+          <div class="row">
+            <button type="button" id="boRefreshRecent">Refresh</button>
+          </div>
+          <div class="list" id="boRecentList"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h4>Get or create open breakdown</h4>
+        <p class="muted">If the asset already has an open incident, returns it; otherwise creates breakdown + primary WO (same as Daily Input).</p>
+        <div class="row">
+          <input id="boEnsureAsset" list="assetCodeOptions" class="w-200" placeholder="Asset code" />
+          <label class="chk">Date <input id="boEnsureDate" type="date" /></label>
+          <button type="button" id="boEnsureOpen">Ensure open + WO</button>
+        </div>
+        <pre class="output" id="boEnsureResult"></pre>
+      </div>
+
+      <div class="card">
+        <h4>Operational slip reports (PDF)</h4>
+        <p class="muted">
+          Generate PDF slips for hose failures, G.E.T., components, and tyres. Part codes pull description and unit cost from Stores when the part exists.
+        </p>
+        <div class="row stack-10" style="flex-wrap:wrap;">
+          <label>Report type
+            <select id="boSlipType" class="w-260">
+              <option value="hose_failure">Hose failure report</option>
+              <option value="get_change">G.E.T. change slip</option>
+              <option value="component_change">Component change slip</option>
+              <option value="tyre_change">Tyre change slip</option>
+            </select>
+          </label>
+          <input id="boSlipAsset" list="assetCodeOptions" class="w-200" placeholder="Asset code" />
+          <label class="chk">Report date <input id="boSlipDate" type="date" /></label>
+          <button type="button" id="boSlipPullAsset">Pull from asset</button>
+          <button type="button" id="boSlipSave">Save &amp; open PDF</button>
+          <button type="button" id="boSlipLoadList">Refresh saved list</button>
+        </div>
+
+        <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-start; margin-top:8px;">
+          <div class="stack-6">
+            <label class="chk">Add pictures (optional, max 4, JPEG/PNG, 512 KB each)
+              <input type="file" id="boSlipPhotosInput" accept="image/jpeg,image/png,.jpg,.jpeg,.png" multiple />
+            </label>
+            <button type="button" id="boSlipPhotosClear">Clear pictures</button>
+          </div>
+          <div id="boSlipPhotosPreview" class="row stack-10" style="flex-wrap:wrap; gap:8px; align-items:flex-start;"></div>
+        </div>
+
+        <div id="boWrapHose" class="bo-slip-panel">
+          <h5>Hose failure</h5>
+          <div class="row stack-10" style="flex-wrap:wrap;">
+            <label class="chk">Date fitted <input id="boHoseDateFitted" type="date" /></label>
+            <input id="boHoseReason" class="minw-260" placeholder="Reason fitted" />
+            <label class="chk"><input id="boHosePreventable" type="checkbox" /> Failure was preventable</label>
+          </div>
+          <div class="row stack-10" style="flex-wrap:wrap;">
+            <input id="boHosePart" list="partCodeOptions" class="w-200" placeholder="Hose part code (stores)" />
+            <label class="chk">Qty <input id="boHoseQty" class="w-70" type="number" min="0.01" step="0.01" value="1" /></label>
+            <input id="boHoseCostOv" class="w-140" type="number" min="0" step="0.01" placeholder="Hose line total override" />
+            <input id="boOilPart" list="partCodeOptions" class="w-200" placeholder="Oil loss part code (stores)" />
+            <label class="chk">Qty <input id="boOilQty" class="w-70" type="number" min="0.01" step="0.01" value="1" /></label>
+            <input id="boOilCostOv" class="w-140" type="number" min="0" step="0.01" placeholder="Oil line total override" />
+          </div>
+          <input id="boHoseNotes" class="minw-260" placeholder="Notes (optional)" style="width:100%;" />
+        </div>
+
+        <div id="boWrapGet" class="bo-slip-panel" style="display:none;">
+          <h5>G.E.T. (Ground Engaging Tools)</h5>
+          <div class="row stack-10" style="flex-wrap:wrap;">
+            <input id="boGetHours" class="w-140" type="number" min="0" step="0.1" placeholder="Hours fitted" />
+            <input id="boGetPart" list="partCodeOptions" class="w-200" placeholder="Part number (stores)" />
+            <label class="chk">Qty <input id="boGetPartQty" class="w-70" type="number" min="0.01" step="0.01" value="1" /></label>
+            <input id="boGetSupplier" class="w-200" placeholder="Supplier" />
+            <label class="chk">Date changed <input id="boGetDateChg" type="date" /></label>
+            <input id="boGetDescPart" list="partCodeOptions" class="w-220" placeholder="Description part code (stores)" />
+            <label class="chk">Desc qty <input id="boGetDescPartQty" class="w-70" type="number" min="0.01" step="0.01" value="1" /></label>
+          </div>
+          <input id="boGetNotes" class="minw-260" placeholder="Notes (optional)" style="width:100%;" />
+        </div>
+
+        <div id="boWrapComp" class="bo-slip-panel" style="display:none;">
+          <h5>Component change</h5>
+          <div class="row stack-10" style="flex-wrap:wrap;">
+            <label class="chk">Date changed <input id="boCompDate" type="date" /></label>
+            <input id="boCompHrsSvc" class="w-140" type="number" min="0" step="0.1" placeholder="Hours in service" />
+            <input id="boCompReason" class="minw-260" placeholder="Reason for changing" />
+            <input id="boCompType" class="w-200" placeholder="Component type" />
+            <input id="boCompPart" list="partCodeOptions" class="w-200" placeholder="Part number (stores)" />
+            <input id="boCompCostOv" class="w-140" type="number" min="0" step="0.01" placeholder="Cost override (USD)" />
+          </div>
+          <input id="boCompNotes" class="minw-260" placeholder="Notes (optional)" style="width:100%;" />
+        </div>
+
+        <div id="boWrapTyre" class="bo-slip-panel" style="display:none;">
+          <h5>Tyre change (up to 10 positions)</h5>
+          <div style="overflow:auto; max-height:420px;">
+            <table class="gridTable" style="min-width:980px;">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Position</th>
+                  <th>Serial removed</th>
+                  <th>Serial new</th>
+                  <th>Tread left</th>
+                  <th>Reason</th>
+                  <th>Hrs in use</th>
+                  <th>Hrs fitted</th>
+                  <th>Part (stores)</th>
+                  <th>Cost ov.</th>
+                  <th>Make (stores)</th>
+                </tr>
+              </thead>
+              <tbody id="boTyreTbody"></tbody>
+            </table>
+          </div>
+          <input id="boTyreNotes" class="minw-260" placeholder="Slip notes (optional)" style="width:100%; margin-top:8px;" />
+        </div>
+
+        <div class="list" id="boSlipSavedList" style="margin-top:12px;"></div>
+        <pre class="output" id="boSlipResult"></pre>
+      </div>
+
+      <h4>Create Breakdown</h4>
+      <div class="row">
+        <input id="bAsset" list="assetCodeOptions" placeholder="Asset code (e.g. A300AM)" />
+        <input id="bDesc" class="minw-260" placeholder="Description" />
+        <label class="chk">Date <input id="bDate" type="date" /></label>
+        <input id="bDown" class="w-110" type="number" step="0.5" min="0" max="24" value="0" />
+        <label class="chk">
+          <input id="bCrit" type="checkbox" />
+          Critical
+        </label>
+        <button type="button" id="makeBreakdown">Create</button>
+      </div>
+      <pre class="output" id="breakdownResult"></pre>
+
+      <h4>Short breakdown (quick log)</h4>
+      <p class="muted">
+        One closed repair: downtime is written to breakdown logs. Parts issue to the linked work order; oils go to the oil log for the asset.
+      </p>
+      <div class="row">
+        <button type="button" id="boPullLiveHours">Pull live meter (uses asset + event date)</button>
+        <span class="muted" id="boLiveHoursHint"></span>
+      </div>
+      <div class="row">
+        <input id="sqAsset" list="assetCodeOptions" placeholder="Asset code" />
+        <input id="sqDesc" class="minw-260" placeholder="What was done (e.g. replaced hydraulic hose)" />
+      </div>
+      <div class="row">
+        <label>Event date <input id="sqDate" type="date" /></label>
+        <label>Time down <input id="sqTimeDown" type="datetime-local" /></label>
+        <label>Time up <input id="sqTimeUp" type="datetime-local" /></label>
+        <span class="muted">or</span>
+        <label>Hours down <input id="sqHours" class="w-90" type="number" step="0.25" min="0" max="24" placeholder="If no times" /></label>
+      </div>
+      <div class="row">
+        <input id="sqComponent" class="w-180" placeholder="Component (optional)" />
+        <label class="chk"><input id="sqCrit" type="checkbox" /> Critical</label>
+      </div>
+      <div class="row">
+        <input id="sqPart1" list="partCodeOptions" class="w-180" placeholder="Part 1 code" />
+        <input id="sqQty1" class="w-70" type="number" min="1" step="1" placeholder="Qty" />
+        <input id="sqPart2" list="partCodeOptions" class="w-180" placeholder="Part 2 (optional)" />
+        <input id="sqQty2" class="w-70" type="number" min="1" step="1" placeholder="Qty" />
+      </div>
+      <div class="row">
+        <input id="sqOilType" class="w-220" placeholder="Oil / lube product (optional)" />
+        <input id="sqOilQty" class="w-100" type="number" step="0.1" min="0" placeholder="Qty" />
+      </div>
+      <div class="row">
+        <button type="button" id="sqSubmit">Log short breakdown</button>
+      </div>
+      <pre class="output" id="shortBreakdownResult"></pre>
+
+      <h4>Issue Part to Work Order</h4>
+      <div class="row">
+        <input id="iWo" class="w-140" placeholder="Work order ID" />
+        <input id="iPart" list="partCodeOptions" class="w-200" placeholder="Part code" />
+        <input id="iQty" class="w-90" type="number" step="1" min="1" value="1" />
+        <button type="button" id="issuePart">Issue</button>
+      </div>
+      <pre class="output" id="issueResult"></pre>
+    </div>
+  </section>
+
+  <datalist id="assetCodeOptions"></datalist>
+  <datalist id="partCodeOptions"></datalist>
+
+  <script src="./breakdown-ops.js?v=1"></script>
+</body>
+</html>

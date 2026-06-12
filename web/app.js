@@ -89,9 +89,15 @@ function initSidebar() {
   sidebar.addEventListener("click", (e) => {
     const item = e.target?.closest?.(".nav-item");
     if (!item || !sidebar.contains(item)) return;
-    e.preventDefault();
     const tab = item.dataset.tab;
-    if (!tab) return;
+    if (!tab) {
+      const href = String(item.getAttribute("href") || "").trim();
+      if (href && href !== "#") {
+        location.href = href;
+      }
+      return;
+    }
+    e.preventDefault();
     const taskView = String(item.dataset.taskView || "").trim();
     const taskProject = String(item.dataset.taskProject || "").trim();
     const taskAssigned = String(item.dataset.taskAssigned || "").trim();

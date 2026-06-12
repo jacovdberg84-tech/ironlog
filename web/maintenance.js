@@ -131,7 +131,6 @@ function viewForSection(section) {
     "reliability": "rel",
     "histogram": "hist",
     "sync-admin": "sync",
-    "breakdowns": "breakdowns",
   };
   return viewMap[String(section || "").trim()] || "";
 }
@@ -140,18 +139,8 @@ let currentMaintenanceSection = "maintenance";
 
 const MAINT_EXTERNAL_SECTIONS = {
   "work-orders": "workorders.html",
+  "breakdowns": "breakdown-ops.html",
 };
-
-const BREAKDOWN_OPS_FRAME_SRC = "index.html?tab=Breakdowns&bare=1";
-
-function ensureBreakdownOpsFrame() {
-  const frame = document.getElementById("breakdownOpsFrame");
-  if (!frame) return;
-  const cur = String(frame.getAttribute("src") || "").trim();
-  if (!cur || cur === "about:blank") {
-    frame.src = BREAKDOWN_OPS_FRAME_SRC;
-  }
-}
 
 function isMaintenanceSection(section) {
   const s = String(section || "").trim();
@@ -193,7 +182,6 @@ function scrollToSection(section) {
           "hist": "histogramSection",
           "sync": "syncAdminSection",
           "insights": "maintenanceInsightsCard",
-          "breakdowns": "breakdownOpsSection",
         };
         targetEl = document.getElementById(sectionMap[targetView]);
       }
@@ -245,9 +233,6 @@ function refreshTopViewData(view) {
       break;
     case "sync":
       syncLoadState().catch(() => {});
-      break;
-    case "breakdowns":
-      ensureBreakdownOpsFrame();
       break;
     default:
       break;
@@ -2107,7 +2092,6 @@ function setTopView(view, section = "") {
   const rel = document.getElementById("reliabilitySection");
   const hist = document.getElementById("histogramSection");
   const sync = document.getElementById("syncAdminSection");
-  const breakdownOps = document.getElementById("breakdownOpsSection");
   const planSection = document.querySelector("section.panel.page-section");
 
   if (section) currentMaintenanceSection = section;
@@ -2123,7 +2107,6 @@ function setTopView(view, section = "") {
   if (rel) rel.style.display = "none";
   if (hist) hist.style.display = "none";
   if (sync) sync.style.display = "none";
-  if (breakdownOps) breakdownOps.style.display = "none";
   if (planSection) planSection.style.display = "none";
 
   // Show the selected section
@@ -2160,10 +2143,6 @@ function setTopView(view, section = "") {
       break;
     case "sync":
       if (sync) sync.style.display = "block";
-      break;
-    case "breakdowns":
-      if (breakdownOps) breakdownOps.style.display = "block";
-      ensureBreakdownOpsFrame();
       break;
   }
 
@@ -2209,9 +2188,6 @@ function setTopView(view, section = "") {
           break;
         case "sync":
           isActive = navSection === "sync-admin";
-          break;
-        case "breakdowns":
-          isActive = navSection === "breakdowns";
           break;
       }
       item.classList.toggle("active", isActive);
