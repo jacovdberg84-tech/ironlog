@@ -64,11 +64,6 @@ function initMaintSidebar() {
       const section = item.dataset.section;
       if (!section) return;
       
-      // Highlight active item
-      sidebar.querySelectorAll(".nav-item").forEach(i => i.classList.remove("active"));
-      item.classList.add("active");
-      
-      // Scroll to section or trigger button
       scrollToSection(section);
       
       // Close mobile sidebar
@@ -2127,7 +2122,6 @@ function setTopView(view, section = "") {
 
   // Update active state in sidebar
   const sidebar = document.getElementById("sidebar");
-  const activeSection = section || currentMaintenanceSection;
   if (sidebar) {
     sidebar.querySelectorAll(".nav-item").forEach((item) => {
       const navSection = item.dataset.section;
@@ -2143,28 +2137,28 @@ function setTopView(view, section = "") {
           isActive = navSection === "maintenance-insights";
           break;
         case "mi":
-          isActive = section === "manager-inspections";
+          isActive = navSection === "manager-inspections";
           break;
         case "ai":
-          isActive = section === "artisan-inspections";
+          isActive = navSection === "artisan-inspections";
           break;
         case "wf":
-          isActive = section === "weekly-forum";
+          isActive = navSection === "weekly-forum";
           break;
         case "tyre":
-          isActive = section === "tyre-inspections";
+          isActive = navSection === "tyre-inspections";
           break;
         case "kpi":
-          isActive = section === "asset-kpi";
+          isActive = navSection === "asset-kpi";
           break;
         case "rel":
-          isActive = section === "reliability";
+          isActive = navSection === "reliability";
           break;
         case "hist":
-          isActive = section === "histogram";
+          isActive = navSection === "histogram";
           break;
         case "sync":
-          isActive = section === "sync-admin";
+          isActive = navSection === "sync-admin";
           break;
       }
       item.classList.toggle("active", isActive);
