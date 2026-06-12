@@ -641,18 +641,23 @@ function renderMaintenanceInsights(data) {
   );
 
   const costRows = Array.isArray(data?.maintenance_cost) ? data.maintenance_cost : [];
-  costEl.innerHTML = insightsRowsTable(
-    ["Asset", "Jobs", "Labor", "Parts", "Lube", "Outsourced", "Total"],
+  const laborRate = Number(data?.range?.labor_cost_per_hour || 0);
+  const laborHint = laborRate > 0
+    ? `<div class="muted mini" style="margin:0 0 8px;">Labor includes work-order hours and downtime at ${fmtMoney(laborRate)}/hr from cost settings.</div>`
+    : "";
+  costEl.innerHTML = `${laborHint}${insightsRowsTable(
+    ["Asset", "Jobs", "Down Hrs", "Labor", "Parts", "Fuel", "Lube", "Total"],
     costRows.slice(0, 15).map((r) => [
       `${r.asset_code || "-"} - ${r.asset_name || "-"}`,
       Number(r.service_jobs || 0),
+      Number(r.downtime_hours || 0).toFixed(2),
       Number(r.labor_cost || 0).toFixed(2),
       Number(r.parts_cost || 0).toFixed(2),
+      Number(r.fuel_cost || 0).toFixed(2),
       Number(r.lube_cost || 0).toFixed(2),
-      Number(r.outsourced_cost || 0).toFixed(2),
       Number(r.total_cost || 0).toFixed(2),
     ])
-  );
+  )}`;
 
   const downtimeDaily = Array.isArray(data?.trends?.downtime_daily) ? data.trends.downtime_daily : [];
   const laborDaily = Array.isArray(data?.trends?.labor_daily) ? data.trends.labor_daily : [];
@@ -5299,10 +5304,12 @@ document.addEventListener("DOMContentLoaded", () => {
   loadDue();
   loadHistory();
   loadBackfillHistory();
-  loadInspectproStatus();
-  setInterval(() => {
-    loadInspectproStatus().catch(() => {});
-  }, 20000);
+  if (!document.getElementById("inspectproStatusCard")?.classList.contains("hidden")) {
+    loadInspectproStatus();
+    setInterval(() => {
+      loadInspectproStatus().catch(() => {});
+    }, 20000);
+  }
   const miDate = document.getElementById("miDate");
   const aiDate = document.getElementById("aiDate");
   const aiFormNo = document.getElementById("aiFormNumber");
@@ -5590,7 +5597,9 @@ document.addEventListener("DOMContentLoaded", () => {
   loadWeeklyForumParts().catch(() => {});
   loadWeeklyForumInputs().catch(() => {});
   loadMaintenancePackStatus().catch(() => {});
-  loadRsgProfiles().catch(() => {});
+  if (!document.getElementById("rsgProfilesCard")?.classList.contains("hidden")) {
+    loadRsgProfiles().catch(() => {});
+  }
   document.getElementById("syncStatsBtn")?.addEventListener("click", syncLoadStats);
   document.getElementById("syncStateBtn")?.addEventListener("click", syncLoadState);
   document.getElementById("syncOutboxBtn")?.addEventListener("click", syncLoadOutbox);
@@ -5770,7 +5779,9 @@ document.addEventListener("DOMContentLoaded", () => {
   loadMaintenanceInsights().catch(() => {});
   loadGovernanceSignals().catch(() => {});
   loadReportBuilderMeta().then(() => loadReportBuilderTemplates()).catch(() => {});
-  loadReportSubscriptions().catch(() => {});
+  if (!document.getElementById("reportSubscriptionsCard")?.classList.contains("hidden")) {
+    loadReportSubscriptions().catch(() => {});
+  }
   setTopView("main");
   loadHistogramEvents().catch(() => {});
 });
