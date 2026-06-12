@@ -745,8 +745,10 @@
           </div>
         </div>
         <p class="muted mini" style="margin:0 0 12px;">
-          Add equipment that must be inspected every week. Click a calendar cell to cycle: pending → done → skipped.
+          Plan weekly inspections with estimated times. Click a calendar cell to cycle: <b>Pending</b> → <b>Released</b> → <b>Skipped</b>.
+          Machines still pending after the planned day score as <b>not released</b> on the compliance card.
         </p>
+        <div id="wiComplianceCard" class="wi-compliance-grid"></div>
         <div class="row stack-10 wi-no-print" style="flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
           <label>
             Month
@@ -761,13 +763,35 @@
             <select id="wiAssetSelect" class="w-200"></select>
           </label>
           <label>
+            Est. minutes
+            <input id="wiAssetEst" type="number" min="5" step="5" value="30" class="w-90" />
+          </label>
+          <label>
             Notes
             <input id="wiAssetNotes" type="text" placeholder="Optional" class="w-200" />
           </label>
           <button type="button" id="wiAddAssetBtn">Add to schedule</button>
         </div>
+        <div class="card wi-no-print" style="padding:12px; margin-bottom:12px;">
+          <h4 style="margin:0 0 8px;">Week inspection day</h4>
+          <p class="muted mini" style="margin:0 0 8px;">Set which day machines are scheduled (e.g. Monday 1 June for A300AM, B01AM, E500AM, V01AM).</p>
+          <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
+            <label>
+              Week
+              <select id="wiWeekSelect" class="w-260"></select>
+            </label>
+            <label>
+              Inspection day
+              <input id="wiWeekPlanDate" type="date" />
+            </label>
+            <button type="button" id="wiSaveWeekPlanBtn">Save week plan</button>
+          </div>
+        </div>
         <div id="wiMsg" class="muted">Loading weekly inspection calendar...</div>
         <div id="wiMonthTitle" style="font-weight:700; font-size:1.1rem; margin:8px 0;"></div>
+        <h4 style="margin:0 0 8px;">Daily inspection lineup</h4>
+        <div id="wiDayAgenda" class="wi-day-agenda"></div>
+        <h4 style="margin:16px 0 8px;">Month calendar</h4>
         <div id="wiCalendarWrap" style="overflow:auto;"></div>
         <h4 style="margin:16px 0 8px;">Scheduled equipment</h4>
         <div id="wiAssetList" class="list"></div>
@@ -1561,6 +1585,6 @@
 
   </div>
 
-  <script src="./maintenance.js?v=22"></script>
+  <script src="./maintenance.js?v=23"></script>
 </body>
 </html>

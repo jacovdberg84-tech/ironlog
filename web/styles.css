@@ -5188,6 +5188,10 @@ body.bare-child-tab #mainContent > .card.stack-12 {
 }
 
 .wi-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
   width: 100%;
   min-width: 88px;
   border: 1px solid #cbd5e1;
@@ -5220,6 +5224,141 @@ body.bare-child-tab #mainContent > .card.stack-12 {
 .wi-cell:hover {
   filter: brightness(0.98);
 }
+
+.wi-cell-est {
+  font-size: 0.72rem;
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+.wi-week-sub {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.wi-compliance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.wi-kpi {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.wi-kpi-value {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.1;
+}
+
+.wi-kpi-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #334155;
+  margin-top: 4px;
+}
+
+.wi-kpi-meta {
+  font-size: 0.72rem;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+.wi-kpi--good {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+
+.wi-kpi--good .wi-kpi-value {
+  color: #047857;
+}
+
+.wi-kpi--warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.wi-kpi--warn .wi-kpi-value {
+  color: #b45309;
+}
+
+.wi-kpi--bad {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.wi-kpi--bad .wi-kpi-value {
+  color: #b91c1c;
+}
+
+.wi-day-agenda {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.wi-day-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.wi-day-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.wi-day-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wi-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.wi-chip--pending {
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.wi-chip--released {
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+  color: #047857;
+}
+
+.wi-chip--skipped {
+  background: #fffbeb;
+  border-color: #fcd34d;
+  color: #b45309;
+}
+
+.wi-score-good { color: #047857; font-weight: 600; }
+.wi-score-warn { color: #b45309; font-weight: 600; }
+.wi-score-bad { color: #b91c1c; font-weight: 600; }
 
 @media print {
   body.wi-print-mode .sidebar,

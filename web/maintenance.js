@@ -2878,28 +2878,135 @@ function wiNextStatus(status) {
 
 function wiStatusLabel(status) {
   const s = String(status || "pending").toLowerCase();
-  if (s === "done") return "Done";
+  if (s === "done") return "Released";
   if (s === "skipped") return "Skipped";
   return "Pending";
 }
 
-function renderWeeklyInspectionAssetList(assets) {
+function wiFormatMinutes(mins) {
+  const n = Math.max(0, Number(mins || 0));
+  if (n < 60) return `${n}m`;
+  const h = Math.floor(n / 60);
+  const m = n % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+function wiFormatDayTitle(ymd) {
+  const d = new Date(`${String(ymd).trim()}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return String(ymd || "");
+  return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+}
+
+function renderWeeklyInspectionCompliance(compliance) {
+  const card = document.getElementById("wiComplianceCard");
+  if (!card) return;
+  const c = compliance || {};
+  const score = Number(c.score ?? 0);
+  const scoreClass = score >= 90 ? "wi-kpi--good" : score >= 70 ? "wi-kpi--warn" : "wi-kpi--bad";
+  card.innerHTML = `
+    <div class="wi-kpi ${scoreClass}">
+      <div class="wi-kpi-value">${score}%</div>
+      <div class="wi-kpi-label">Compliance score</div>
+      <div class="wi-kpi-meta">${Number(c.completion_pct ?? 0)}% released · -${Number(c.penalty_points ?? 0)} not released</div>
+    </div>
+    <div class="wi-kpi">
+      <div class="wi-kpi-value">${Number(c.done_count ?? 0)} / ${Number(c.total_slots ?? 0)}</div>
+      <div class="wi-kpi-label">Released</div>
+      <div class="wi-kpi-meta">${Number(c.pending_count ?? 0)} pending · ${Number(c.skipped_count ?? 0)} skipped</div>
+    </div>
+    <div class="wi-kpi wi-kpi--bad">
+      <div class="wi-kpi-value">${Number(c.not_released_count ?? 0)}</div>
+      <div class="wi-kpi-label">Not released</div>
+      <div class="wi-kpi-meta">-5 pts each on compliance</div>
+    </div>
+    <div class="wi-kpi">
+      <div class="wi-kpi-value">${wiFormatMinutes(c.est_minutes_total)}</div>
+      <div class="wi-kpi-label">Planned time</div>
+      <div class="wi-kpi-meta">${wiFormatMinutes(c.est_minutes_released)} released</div>
+    </div>
+  `;
+}
+
+function renderWeeklyInspectionDayAgenda(data) {
+  const wrap = document.getElementById("wiDayAgenda");
+  if (!wrap) return;
+  const days = Array.isArray(data?.compliance?.day_agenda) ? data.compliance.day_agenda : [];
+  if (!days.length) {
+    wrap.innerHTML = `<div class="empty">Add equipment to build the daily inspection lineup.</div>`;
+    return;
+  }
+  wrap.innerHTML = days.map((day) => {
+    const items = Array.isArray(day.items) ? day.items : [];
+    const chips = items.map((it) => {
+      const st = String(it.status || "pending").toLowerCase();
+      const cls = st === "done" ? "wi-chip--released" : st === "skipped" ? "wi-chip--skipped" : "wi-chip--pending";
+      return `<span class="wi-chip ${cls}" title="${esc(wiStatusLabel(st))}">${esc(it.asset_code)} · ${wiFormatMinutes(it.est_minutes)}</span>`;
+    }).join("");
+    return `
+      <div class="wi-day-card">
+        <div class="wi-day-head">
+          <strong>${esc(wiFormatDayTitle(day.date))}</strong>
+          <span class="muted mini">${items.length} machine${items.length === 1 ? "" : "s"} · ${wiFormatMinutes(day.est_minutes)} planned</span>
+        </div>
+        <div class="wi-day-chips">${chips || `<span class="muted mini">No machines planned</span>`}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+function populateWeeklyInspectionWeekSelect(data) {
+  const sel = document.getElementById("wiWeekSelect");
+  const dateInp = document.getElementById("wiWeekPlanDate");
+  if (!sel) return;
+  const weeks = Array.isArray(data?.weeks) ? data.weeks : [];
+  const summary = Array.isArray(data?.week_plan_summary) ? data.week_plan_summary : [];
+  const cur = String(sel.value || "");
+  sel.innerHTML = weeks.map((w) => {
+    const sum = summary.find((s) => String(s.week_start) === String(w.week_start));
+    const label = `${wiWeekHeader(w)}${sum?.planned_date ? ` · inspect ${wiFormatDayTitle(sum.planned_date).split(",").slice(0, 1).join("")}` : ""}`;
+    return `<option value="${esc(w.week_start)}">${esc(label)}</option>`;
+  }).join("");
+  if (cur && weeks.some((w) => String(w.week_start) === cur)) sel.value = cur;
+  else if (weeks.length) sel.value = String(weeks[0].week_start);
+  const active = summary.find((s) => String(s.week_start) === String(sel.value));
+  if (dateInp) dateInp.value = String(active?.planned_date || sel.value || "");
+}
+
+function renderWeeklyInspectionAssetList(assets, compliance) {
   const list = document.getElementById("wiAssetList");
   if (!list) return;
   const rows = Array.isArray(assets) ? assets : [];
+  const scoreByAsset = {};
+  for (const row of (Array.isArray(compliance?.by_asset) ? compliance.by_asset : [])) {
+    scoreByAsset[Number(row.asset_id)] = row;
+  }
   if (!rows.length) {
     list.innerHTML = `<div class="empty">No equipment on the weekly schedule yet. Add assets above.</div>`;
     return;
   }
-  list.innerHTML = rows.map((a) => `
+  list.innerHTML = rows.map((a) => {
+    const scoreRow = scoreByAsset[Number(a.asset_id)] || {};
+    const score = Number(scoreRow.score ?? 100);
+    const notReleased = Number(scoreRow.not_released ?? 0);
+    const scoreCls = score >= 90 ? "wi-score-good" : score >= 70 ? "wi-score-warn" : "wi-score-bad";
+    return `
     <div class="item" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
       <div>
         <strong>${esc(a.asset_code)}</strong> — ${esc(a.asset_name)}
+        <div class="muted mini">Default est. ${wiFormatMinutes(a.est_minutes || 30)} · <span class="${scoreCls}">Compliance ${score}%</span>${notReleased ? ` · <span class="wi-score-bad">${notReleased} not released</span>` : ""}</div>
         ${a.notes ? `<div class="muted mini">${esc(a.notes)}</div>` : ""}
       </div>
-      <button type="button" class="wi-no-print" data-wi-remove="${Number(a.id)}">Remove</button>
+      <div class="row stack-10 wi-no-print" style="align-items:center;">
+        <label class="mini muted">
+          Est.
+          <input type="number" min="5" step="5" class="w-70" data-wi-est="${Number(a.id)}" value="${Number(a.est_minutes || 30)}" />
+        </label>
+        <button type="button" data-wi-save-est="${Number(a.id)}">Save</button>
+        <button type="button" data-wi-remove="${Number(a.id)}">Remove</button>
+      </div>
     </div>
-  `).join("");
+  `;
+  }).join("");
 }
 
 function renderWeeklyInspectionCalendar(data) {
@@ -2909,8 +3016,13 @@ function renderWeeklyInspectionCalendar(data) {
   const assets = Array.isArray(data?.assets) ? data.assets : [];
   const weeks = Array.isArray(data?.weeks) ? data.weeks : [];
   const entries = data?.entries || {};
+  const plans = data?.plans || {};
+  const weekSummary = Array.isArray(data?.week_plan_summary) ? data.week_plan_summary : [];
   if (title) title.textContent = wiMonthTitle(data?.month || wiCurrentMonth());
-  renderWeeklyInspectionAssetList(assets);
+  renderWeeklyInspectionCompliance(data?.compliance);
+  renderWeeklyInspectionDayAgenda(data);
+  populateWeeklyInspectionWeekSelect(data);
+  renderWeeklyInspectionAssetList(assets, data?.compliance);
   if (!assets.length) {
     wrap.innerHTML = `<div class="empty">Add equipment to build the weekly inspection calendar.</div>`;
     return;
@@ -2919,15 +3031,28 @@ function renderWeeklyInspectionCalendar(data) {
     wrap.innerHTML = `<div class="empty">No weeks found for this month.</div>`;
     return;
   }
-  const head = weeks.map((w) => `<th class="wi-week-col">${esc(wiWeekHeader(w))}</th>`).join("");
+  const head = weeks.map((w) => {
+    const sum = weekSummary.find((s) => String(s.week_start) === String(w.week_start));
+    const inspectDay = sum?.planned_date ? wiFormatDayTitle(sum.planned_date).split(",").slice(0, 1).join("") : "";
+    const estTotal = sum?.est_minutes_total ? wiFormatMinutes(sum.est_minutes_total) : "";
+    return `<th class="wi-week-col">
+      <div>${esc(wiWeekHeader(w))}</div>
+      ${inspectDay ? `<div class="wi-week-sub">${esc(inspectDay)}</div>` : ""}
+      ${estTotal ? `<div class="wi-week-sub">${esc(estTotal)} planned</div>` : ""}
+    </th>`;
+  }).join("");
   const body = assets.map((a) => {
     const assetId = Number(a.asset_id);
     const cells = weeks.map((w) => {
       const key = `${assetId}|${String(w.week_start)}`;
       const entry = entries[key] || {};
+      const plan = plans[key] || {};
       const status = String(entry.status || "pending").toLowerCase();
+      const est = Number(plan.est_minutes ?? a.est_minutes ?? 30);
       const inspector = String(entry.inspector_name || "").trim();
-      const titleAttr = inspector ? ` title="${esc(inspector)}"` : "";
+      const plannedDate = String(plan.planned_date || w.week_start);
+      const tip = [inspector ? `Inspector: ${inspector}` : "", `Planned: ${wiFormatDayTitle(plannedDate)}`, `Est: ${wiFormatMinutes(est)}`].filter(Boolean).join(" · ");
+      const titleAttr = tip ? ` title="${esc(tip)}"` : "";
       return `
         <td>
           <button
@@ -2938,7 +3063,10 @@ function renderWeeklyInspectionCalendar(data) {
             data-wi-week="${esc(w.week_start)}"
             data-wi-status="${esc(status)}"
             ${titleAttr}
-          >${esc(wiStatusLabel(status))}</button>
+          >
+            <span class="wi-cell-status">${esc(wiStatusLabel(status))}</span>
+            <span class="wi-cell-est">${esc(wiFormatMinutes(est))}</span>
+          </button>
         </td>
       `;
     }).join("");
@@ -2979,7 +3107,9 @@ async function loadWeeklyInspectionCalendar() {
     renderWeeklyInspectionCalendar(data);
     const assetCount = Array.isArray(data.assets) ? data.assets.length : 0;
     const weekCount = Array.isArray(data.weeks) ? data.weeks.length : 0;
-    wiSetMsg(`${assetCount} scheduled asset${assetCount === 1 ? "" : "s"} · ${weekCount} week${weekCount === 1 ? "" : "s"} in ${wiMonthTitle(data.month)}.`);
+    const score = Number(data?.compliance?.score ?? 0);
+    const notReleased = Number(data?.compliance?.not_released_count ?? 0);
+    wiSetMsg(`${assetCount} scheduled asset${assetCount === 1 ? "" : "s"} · ${weekCount} week${weekCount === 1 ? "" : "s"} · compliance ${score}%${notReleased ? ` · ${notReleased} not released` : ""}.`);
   } catch (e) {
     wiCalendarCache = null;
     if (wrap) wrap.innerHTML = `<div class="empty">Load failed: ${esc(e.message || String(e))}</div>`;
@@ -3017,9 +3147,54 @@ async function cycleWeeklyInspectionCell(assetId, weekStart, currentStatus) {
   }
 }
 
+async function saveWeeklyInspectionAssetEst(id) {
+  const rowId = Number(id || 0);
+  if (!rowId) return;
+  const inp = document.querySelector(`input[data-wi-est="${rowId}"]`);
+  const est_minutes = Math.max(5, Number(inp?.value || 30) || 30);
+  wiSetMsg("Saving estimate...");
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-inspections/assets/${rowId}`, {
+      method: "PUT",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ est_minutes }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save estimate");
+    await loadWeeklyInspectionCalendar();
+    wiSetMsg("Estimate time saved.");
+  } catch (e) {
+    wiSetMsg(`Save failed: ${e.message || e}`, true);
+  }
+}
+
+async function saveWeeklyInspectionWeekPlan() {
+  const week_start = String(document.getElementById("wiWeekSelect")?.value || "").trim();
+  const planned_date = String(document.getElementById("wiWeekPlanDate")?.value || "").trim();
+  if (!week_start || !planned_date) {
+    wiSetMsg("Select a week and inspection day.", true);
+    return;
+  }
+  wiSetMsg("Saving week plan...");
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-inspections/week-plan`, {
+      method: "PUT",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ week_start, planned_date }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save week plan");
+    await loadWeeklyInspectionCalendar();
+    wiSetMsg(`Inspection day set to ${wiFormatDayTitle(planned_date)}.`);
+  } catch (e) {
+    wiSetMsg(`Week plan failed: ${e.message || e}`, true);
+  }
+}
+
 async function addWeeklyInspectionAsset() {
   const asset_id = Number(document.getElementById("wiAssetSelect")?.value || 0);
   const notes = String(document.getElementById("wiAssetNotes")?.value || "").trim();
+  const est_minutes = Math.max(5, Number(document.getElementById("wiAssetEst")?.value || 30) || 30);
   if (!asset_id) {
     wiSetMsg("Select equipment to add.", true);
     return;
@@ -3029,7 +3204,7 @@ async function addWeeklyInspectionAsset() {
     const res = await fetch(`${API}/maintenance/weekly-inspections/assets`, {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ asset_id, notes }),
+      body: JSON.stringify({ asset_id, notes, est_minutes }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to add equipment");
@@ -6116,6 +6291,16 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("wiOpenPdfBtn")?.addEventListener("click", () => openWeeklyInspectionPdf(false));
   document.getElementById("wiDownloadPdfBtn")?.addEventListener("click", () => openWeeklyInspectionPdf(true));
   document.getElementById("wiAddAssetBtn")?.addEventListener("click", () => addWeeklyInspectionAsset());
+  document.getElementById("wiSaveWeekPlanBtn")?.addEventListener("click", () => saveWeeklyInspectionWeekPlan());
+  document.getElementById("wiWeekSelect")?.addEventListener("change", () => {
+    const sel = document.getElementById("wiWeekSelect");
+    const dateInp = document.getElementById("wiWeekPlanDate");
+    const week = String(sel?.value || "");
+    const sum = Array.isArray(wiCalendarCache?.week_plan_summary)
+      ? wiCalendarCache.week_plan_summary.find((s) => String(s.week_start) === week)
+      : null;
+    if (dateInp) dateInp.value = String(sum?.planned_date || week || "");
+  });
   document.getElementById("wiMonth")?.addEventListener("change", () => loadWeeklyInspectionCalendar());
   document.getElementById("wiCalendarWrap")?.addEventListener("click", (evt) => {
     const btn = evt.target?.closest?.("button[data-wi-cell]");
@@ -6127,6 +6312,11 @@ document.addEventListener("DOMContentLoaded", () => {
     );
   });
   document.getElementById("wiAssetList")?.addEventListener("click", (evt) => {
+    const saveBtn = evt.target?.closest?.("button[data-wi-save-est]");
+    if (saveBtn) {
+      saveWeeklyInspectionAssetEst(Number(saveBtn.getAttribute("data-wi-save-est") || 0));
+      return;
+    }
     const btn = evt.target?.closest?.("button[data-wi-remove]");
     if (!btn) return;
     removeWeeklyInspectionAsset(Number(btn.getAttribute("data-wi-remove") || 0));
