@@ -919,8 +919,16 @@ function applyRoleVisibility() {
 
   const activePanel = document.querySelector(".panel.show");
   const activeKey = String(activePanel?.id || "").replace(/^tab-/, "");
-  const urlTab = String(new URLSearchParams(window.location.search).get("tab") || "").trim();
-  const preferredTab = urlTab && allowed.has(urlTab) ? urlTab : "";
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlTab = String(urlParams.get("tab") || "").trim();
+  const urlAssetCode = String(urlParams.get("asset_code") || "").trim().toUpperCase();
+  if (urlAssetCode && allowed.has("vehicle")) {
+    clPendingAssetCode = urlAssetCode;
+  }
+  let preferredTab = urlTab && allowed.has(urlTab) ? urlTab : "";
+  if (!preferredTab && urlAssetCode && allowed.has("vehicle")) {
+    preferredTab = "vehicle";
+  }
   if (!activeKey || !allowed.has(activeKey)) {
     const target = preferredTab || allowedList[0];
     if (target) {
@@ -974,6 +982,9 @@ function initGlobalSearch() {
         "quality": "quality",
         "audit": "audit",
         "vehicle": "vehicle",
+        "checklist": "vehicle",
+        "checklists": "vehicle",
+        "prestart": "vehicle",
         "admin": "admin",
         "ai": "docs",
         "ironmind": "ironmind"
@@ -2099,6 +2110,428 @@ async function executeBackupRestoreNow() {
   setStatus("Restore execute requested. Reconnect after restart.");
 }
 
+/** Daily checklists — LDV + machine pre-start (QR mirror) */
+let clHubData = null;
+let clSelectedAssetCode = "";
+let clSelectedKind = "";
+let clSelectedProfileId = "";
+let clCurrentCheckId = 0;
+let clPreviousKm = null;
+let clPendingAssetCode = String(
+  new URLSearchParams(window.location.search).get("asset_code") || ""
+)
+  .trim()
+  .toUpperCase();
+
+const CL_LDV_ITEMS = [
+  { key: "brakes_ok", label: "Brakes OK" },
+  { key: "lights_ok", label: "Lights OK" },
+  { key: "tyres_ok", label: "Tyres OK" },
+  { key: "oil_coolant_ok", label: "Oil/Coolant OK" },
+  { key: "leaks_damage_ok", label: "No leaks or visible damage" },
+  { key: "safety_items_ok", label: "Safety items in place" },
+];
+
+function clCheckDate() {
+  return qs("clCheckDate")?.value || todayLocalYmd();
+}
+
+function clSafeDomId(key) {
+  return `cl_chk_${String(key || "").replace(/[^a-zA-Z0-9_]/g, "_")}`;
+}
+
+function clSetFormMsg(text, ok) {
+  const el = qs("clFormMsg");
+  if (!el) return;
+  el.textContent = String(text || "");
+  el.style.color = ok === true ? "#15803d" : ok === false ? "#b91c1c" : "";
+}
+
+function clShowSyncState(sync) {
+  const el = qs("clSyncState");
+  if (!el) return;
+  if (!sync || sync.synced !== true) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    return;
+  }
+  const mode = String(sync.mode || "updated");
+  const action = mode === "inserted" ? "created" : "updated";
+  el.textContent =
+    `Synced to Daily Input (${action}) — ${String(sync.work_date || "")}: ` +
+    `open ${Number(sync.opening_km || 0).toFixed(1)} km, ` +
+    `close ${Number(sync.closing_km || 0).toFixed(1)} km, ` +
+    `run ${Number(sync.run_km || 0).toFixed(1)} km.`;
+  el.classList.remove("hidden");
+}
+
+function renderClHubSummary(data) {
+  const el = qs("clHubSummary");
+  if (!el) return;
+  const s = data?.summary || {};
+  const ldvDone = Number(s.ldv_compliant || 0);
+  const ldvTotal = Number(s.ldv_total || 0);
+  const macDone = Number(s.machine_compliant || 0);
+  const macTotal = Number(s.machine_total || 0);
+  el.innerHTML = `
+    <span class="pill blue">LDV: ${ldvDone}/${ldvTotal}</span>
+    <span class="pill blue">Machines: ${macDone}/${macTotal}</span>
+    <span class="pill">${escapeHtml(String(data?.check_date || clCheckDate()))}</span>
+  `;
+}
+
+function renderClAssetChip(asset, selectedCode) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "checklist-asset-chip";
+  if (asset.status === "compliant") btn.classList.add("compliant");
+  if (asset.asset_code === selectedCode) btn.classList.add("selected");
+  btn.dataset.assetCode = asset.asset_code;
+  btn.dataset.kind = asset.kind || "";
+  if (asset.profile_id) btn.dataset.profileId = asset.profile_id;
+  const pill =
+    asset.status === "compliant"
+      ? "<span class='pill green' style='font-size:0.65rem;'>DONE</span>"
+      : "<span class='pill orange' style='font-size:0.65rem;'>PENDING</span>";
+  btn.innerHTML = `
+    <div class="chip-code">${escapeHtml(asset.asset_code)} ${pill}</div>
+    <div class="chip-name">${escapeHtml(asset.asset_name || "")}</div>
+  `;
+  return btn;
+}
+
+function renderClHubSections(data) {
+  const host = qs("clHubSections");
+  if (!host) return;
+  host.innerHTML = "";
+  const selected = clSelectedAssetCode;
+
+  const ldv = Array.isArray(data?.ldv) ? data.ldv : [];
+  if (ldv.length) {
+    const sec = document.createElement("div");
+    sec.className = "checklist-hub-section";
+    sec.innerHTML = `<h4>LDV Pre-Start (V01–V15)</h4>`;
+    const grid = document.createElement("div");
+    grid.className = "checklist-asset-grid";
+    ldv.forEach((a) => grid.appendChild(renderClAssetChip(a, selected)));
+    sec.appendChild(grid);
+    host.appendChild(sec);
+  }
+
+  const groups = Array.isArray(data?.machine_groups) ? data.machine_groups : [];
+  groups.forEach((g) => {
+    if (!g.assets?.length) return;
+    const sec = document.createElement("div");
+    sec.className = "checklist-hub-section";
+    sec.innerHTML = `<h4>${escapeHtml(g.title || g.profile_id || "Machine")}</h4>`;
+    const grid = document.createElement("div");
+    grid.className = "checklist-asset-grid";
+    g.assets.forEach((a) => grid.appendChild(renderClAssetChip(a, selected)));
+    sec.appendChild(grid);
+    host.appendChild(sec);
+  });
+
+  if (!ldv.length && !groups.length) {
+    host.innerHTML = `<div class="muted small">No checklist assets configured. LDV codes V01AM–V15AM or machine categories (Excavator, Dozer, etc.) are required.</div>`;
+  }
+}
+
+async function loadChecklistHub() {
+  const host = qs("clHubSections");
+  if (host && !clHubData) host.innerHTML = `<div class="muted small">Loading checklists…</div>`;
+  const date = clCheckDate();
+  try {
+    const data = await fetchJson(`${API}/api/maintenance/checklist-hub?date=${encodeURIComponent(date)}`);
+    clHubData = data;
+    renderClHubSummary(data);
+    renderClHubSections(data);
+    if (clPendingAssetCode) {
+      const code = clPendingAssetCode;
+      clPendingAssetCode = "";
+      await selectChecklistAsset(code).catch(() => {});
+    }
+  } catch (e) {
+    if (host) host.innerHTML = `<div class="muted small">Checklist load error: ${escapeHtml(e.message || e)}</div>`;
+    setStatus("Checklist load error: " + (e.message || e));
+  }
+}
+
+function findClHubAsset(assetCode) {
+  const code = String(assetCode || "").trim().toUpperCase();
+  if (!code || !clHubData) return null;
+  const ldv = (clHubData.ldv || []).find((a) => a.asset_code === code);
+  if (ldv) return ldv;
+  for (const g of clHubData.machine_groups || []) {
+    const hit = (g.assets || []).find((a) => a.asset_code === code);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function renderClLdvChecklist(checklist) {
+  const root = qs("clChecklistRoot");
+  if (!root) return;
+  const byKey = {};
+  (Array.isArray(checklist) ? checklist : []).forEach((c) => {
+    byKey[String(c.key)] = Boolean(c.ok);
+  });
+  root.innerHTML = `<div class="cl-sec"><div class="cl-sec-title">Pre-start checks (all required)</div>`;
+  const sec = root.querySelector(".cl-sec");
+  CL_LDV_ITEMS.forEach((it) => {
+    const id = clSafeDomId(it.key);
+    const row = document.createElement("div");
+    row.className = "cl-check-row";
+    row.innerHTML = `<input type="checkbox" id="${id}" data-key="${escapeHtml(it.key)}" ${byKey[it.key] ? "checked" : ""} /><label for="${id}">${escapeHtml(it.label)}</label>`;
+    sec.appendChild(row);
+  });
+}
+
+function renderClMachineChecklist(template, checklist) {
+  const root = qs("clChecklistRoot");
+  if (!root) return;
+  root.innerHTML = "";
+  const byKey = {};
+  (Array.isArray(checklist) ? checklist : []).forEach((c) => {
+    byKey[String(c.key)] = Boolean(c.ok);
+  });
+  for (const sec of template?.sections || []) {
+    const wrap = document.createElement("div");
+    wrap.className = "cl-sec";
+    const title = document.createElement("div");
+    title.className = "cl-sec-title";
+    title.textContent = String(sec.title || "");
+    wrap.appendChild(title);
+    for (const it of sec.items || []) {
+      const key = String(it.key || "").trim();
+      if (!key) continue;
+      const id = clSafeDomId(key);
+      const row = document.createElement("div");
+      row.className = "cl-check-row";
+      row.innerHTML = `<input type="checkbox" id="${id}" data-key="${escapeHtml(key)}" ${byKey[key] ? "checked" : ""} /><label for="${id}">${escapeHtml(it.label || key)}</label>`;
+      wrap.appendChild(row);
+    }
+    root.appendChild(wrap);
+  }
+}
+
+function readClChecklistObject() {
+  const out = {};
+  qs("clChecklistRoot")?.querySelectorAll("input[type=checkbox][data-key]").forEach((el) => {
+    const k = String(el.dataset.key || "").trim();
+    if (!k) return;
+    out[k] = Boolean(el.checked);
+  });
+  return out;
+}
+
+async function selectChecklistAsset(assetCode) {
+  const code = String(assetCode || "").trim().toUpperCase();
+  if (!code) return;
+  const hubAsset = findClHubAsset(code);
+  if (!hubAsset) {
+    clSetFormMsg(`Asset ${code} is not in today's checklist hub. Refresh or check asset category.`, false);
+    return;
+  }
+  clSelectedAssetCode = code;
+  clSelectedKind = hubAsset.kind === "machine" ? "machine" : "ldv";
+  clSelectedProfileId = String(hubAsset.profile_id || "");
+  renderClHubSections(clHubData);
+  qs("clFormPanel")?.classList.remove("hidden");
+  clSetFormMsg("Loading checklist…", null);
+  clShowSyncState(null);
+
+  if (clSelectedKind === "ldv") {
+    qs("clLdvFields")?.classList.remove("hidden");
+    qs("clMachineFields")?.classList.add("hidden");
+    const data = await fetchJson(
+      `${API}/api/maintenance/vehicle-ldv-checks/prestart-context?asset_code=${encodeURIComponent(code)}&check_date=${encodeURIComponent(clCheckDate())}`
+    );
+    const asset = data?.asset || {};
+    clPreviousKm = data?.previous_odometer_km == null ? null : Number(data.previous_odometer_km);
+    if (qs("clFormTitle")) qs("clFormTitle").textContent = `LDV Pre-Start — ${code}`;
+    if (qs("clFormSubtitle")) qs("clFormSubtitle").textContent = String(asset.asset_name || "");
+    if (qs("clFormMeta")) {
+      qs("clFormMeta").innerHTML = `<span class="pill blue">${escapeHtml(code)}</span><span class="pill">${escapeHtml(clCheckDate())}</span>`;
+    }
+    if (qs("clPrevKm")) {
+      qs("clPrevKm").textContent = clPreviousKm == null ? "—" : `${clPreviousKm.toFixed(1)} km`;
+    }
+    const existing = data?.existing_prestart || null;
+    clCurrentCheckId = Number(existing?.id || 0);
+    if (qs("clOdometer")) qs("clOdometer").value = existing?.odometer_km != null ? String(existing.odometer_km) : "";
+    if (qs("clInspector")) qs("clInspector").value = existing?.inspector_name || getSessionUser() || "";
+    if (qs("clNotes")) qs("clNotes").value = existing?.notes || "";
+    renderClLdvChecklist(existing?.checklist || []);
+    clSetFormMsg(existing ? "Pre-start exists for this date — update if needed." : "", existing ? true : null);
+  } else {
+    qs("clLdvFields")?.classList.add("hidden");
+    qs("clMachineFields")?.classList.remove("hidden");
+    const data = await fetchJson(
+      `${API}/api/maintenance/machine-prestart/context?asset_code=${encodeURIComponent(code)}&check_date=${encodeURIComponent(clCheckDate())}`
+    );
+    const asset = data?.asset || {};
+    const template = data?.template || {};
+    if (qs("clFormTitle")) qs("clFormTitle").textContent = String(template.title || "Machine pre-start");
+    if (qs("clFormSubtitle")) qs("clFormSubtitle").textContent = `${code} — ${asset.asset_name || ""}`;
+    if (qs("clFormMeta")) {
+      qs("clFormMeta").innerHTML = `<span class="pill blue">${escapeHtml(code)}</span><span class="pill">${escapeHtml(String(data?.profile_id || ""))}</span><span class="pill">${escapeHtml(clCheckDate())}</span>`;
+    }
+    const existing = data?.existing_check || null;
+    clCurrentCheckId = Number(existing?.id || 0);
+    if (qs("clSmuHours")) qs("clSmuHours").value = existing?.smu_hours != null ? String(existing.smu_hours) : "";
+    if (qs("clInspector")) qs("clInspector").value = existing?.inspector_name || getSessionUser() || "";
+    if (qs("clNotes")) qs("clNotes").value = existing?.notes || "";
+    renderClMachineChecklist(template, existing?.checklist || []);
+    clSetFormMsg(existing ? "Pre-start exists for this date — update if needed." : "", existing ? true : null);
+  }
+
+  const pdfBtn = qs("clPdfBtn");
+  const uploadBtn = qs("clUploadPhotoBtn");
+  if (pdfBtn) {
+    if (clCurrentCheckId > 0) {
+      pdfBtn.classList.remove("hidden");
+      pdfBtn.dataset.checkId = String(clCurrentCheckId);
+    } else {
+      pdfBtn.classList.add("hidden");
+      pdfBtn.dataset.checkId = "";
+    }
+  }
+  if (uploadBtn) uploadBtn.disabled = clCurrentCheckId <= 0;
+  qs("clFormPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  setStatus(`Checklist loaded for ${code}`);
+}
+
+async function submitChecklistForm() {
+  if (!clSelectedAssetCode) return alert("Select an asset from the checklist sections first.");
+  clSetFormMsg("", null);
+  clShowSyncState(null);
+  const checklist = readClChecklistObject();
+  const inspector_name = String(qs("clInspector")?.value || "").trim();
+  const notes = String(qs("clNotes")?.value || "").trim();
+
+  if (clSelectedKind === "ldv") {
+    const odoRaw = String(qs("clOdometer")?.value || "").trim();
+    if (!odoRaw) throw new Error("Enter current odometer KM.");
+    const odometer_km = Number(odoRaw);
+    if (!Number.isFinite(odometer_km) || odometer_km < 0) throw new Error("Odometer must be a valid number ≥ 0.");
+    if (clPreviousKm != null && odometer_km < clPreviousKm) {
+      throw new Error(`Odometer cannot be less than previous KM (${clPreviousKm.toFixed(1)}).`);
+    }
+    const data = await fetchJson(`${API}/api/maintenance/vehicle-ldv-checks/prestart`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        asset_code: clSelectedAssetCode,
+        check_date: clCheckDate(),
+        odometer_km,
+        inspector_name,
+        notes,
+        checklist,
+      }),
+    });
+    clCurrentCheckId = Number(data?.id || 0);
+    clPreviousKm = data?.odometer_km != null ? Number(data.odometer_km) : clPreviousKm;
+    if (qs("clPrevKm")) {
+      qs("clPrevKm").textContent = clPreviousKm == null ? "—" : `${clPreviousKm.toFixed(1)} km`;
+    }
+    clShowSyncState(data?.daily_input_sync || null);
+    clSetFormMsg(data?.message || "LDV pre-start saved.", true);
+  } else {
+    const smuRaw = String(qs("clSmuHours")?.value || "").trim();
+    let smu_hours = null;
+    if (smuRaw) {
+      const smu = Number(smuRaw);
+      if (!Number.isFinite(smu) || smu < 0) throw new Error("SMU hours must be a valid number ≥ 0.");
+      smu_hours = smu;
+    }
+    const data = await fetchJson(`${API}/api/maintenance/machine-prestart`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        asset_code: clSelectedAssetCode,
+        check_date: clCheckDate(),
+        smu_hours,
+        inspector_name,
+        notes,
+        checklist,
+      }),
+    });
+    clCurrentCheckId = Number(data?.id || 0);
+    clSetFormMsg(data?.message || "Machine pre-start saved.", true);
+  }
+
+  const pdfBtn = qs("clPdfBtn");
+  if (pdfBtn && clCurrentCheckId > 0) {
+    pdfBtn.classList.remove("hidden");
+    pdfBtn.dataset.checkId = String(clCurrentCheckId);
+  }
+  qs("clUploadPhotoBtn") && (qs("clUploadPhotoBtn").disabled = clCurrentCheckId <= 0);
+  setStatus("Checklist saved ✅");
+  await loadChecklistHub();
+  renderClHubSections(clHubData);
+}
+
+async function uploadChecklistPhoto() {
+  if (!clCurrentCheckId) return alert("Submit the checklist first.");
+  const file = qs("clPhotoFile")?.files?.[0];
+  if (!file) return alert("Choose a photo file.");
+  const fd = new FormData();
+  fd.append("file", file);
+  const headers = new Headers(authHeaders());
+  headers.delete("Content-Type");
+  const caption = clSelectedKind === "ldv" ? "Pre-start photo" : "Machine pre-start photo";
+  const res = await fetch(
+    `${API}/api/maintenance/vehicle-ldv-checks/${clCurrentCheckId}/photo?caption=${encodeURIComponent(caption)}`,
+    { method: "POST", headers, body: fd }
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || data.message || "Upload failed");
+  if (qs("clPhotoFile")) qs("clPhotoFile").value = "";
+  clSetFormMsg("Photo uploaded to this checklist.", true);
+  setStatus("Checklist photo uploaded ✅");
+}
+
+function initChecklistTab() {
+  if (window.__clTabInit) return;
+  window.__clTabInit = true;
+  const d = qs("clCheckDate");
+  if (d && !d.value) d.value = todayLocalYmd();
+  const ins = qs("clInspector");
+  if (ins && !ins.value) ins.value = getSessionUser();
+
+  qs("clRefreshHub")?.addEventListener("click", () => loadChecklistHub().catch((e) => setStatus(String(e.message || e))));
+  qs("clCheckDate")?.addEventListener("change", () => {
+    clSelectedAssetCode = "";
+    qs("clFormPanel")?.classList.add("hidden");
+    loadChecklistHub().catch(() => {});
+  });
+  qs("clHubSections")?.addEventListener("click", (e) => {
+    const chip = e.target.closest(".checklist-asset-chip");
+    if (!chip) return;
+    const code = chip.dataset.assetCode;
+    if (!code) return;
+    selectChecklistAsset(code).catch((err) => clSetFormMsg(String(err.message || err), false));
+  });
+  qs("clSubmitBtn")?.addEventListener("click", () =>
+    submitChecklistForm().catch((e) => clSetFormMsg(String(e.message || e), false))
+  );
+  qs("clUploadPhotoBtn")?.addEventListener("click", () =>
+    uploadChecklistPhoto().catch((e) => clSetFormMsg(String(e.message || e), false))
+  );
+  qs("clPdfBtn")?.addEventListener("click", () => {
+    const id = Number(qs("clPdfBtn")?.dataset.checkId || clCurrentCheckId || 0);
+    if (!id) return alert("Submit the checklist first.");
+    window.open(`${API}/api/reports/vehicle-ldv-check/${id}.pdf`, "_blank");
+  });
+}
+
+function openChecklistTabForAsset(assetCode) {
+  const code = String(assetCode || "").trim().toUpperCase();
+  if (!code) return;
+  clPendingAssetCode = code;
+  switchTab("vehicle");
+}
+
 /** LDV vehicle check — photos + fractional damage pins */
 const vcMarkerDrafts = new Map();
 let vcActiveCheckId = null;
@@ -2392,6 +2825,7 @@ function vcOpenBulkPdf(download = false) {
 }
 
 function initVehicleCheckTab() {
+  initChecklistTab();
   if (window.__vcTabInit) return;
   window.__vcTabInit = true;
   const d = qs("vcDate");
@@ -5663,6 +6097,9 @@ function switchTab(key) {
   if (k === "workshop") {
     openWorkshopLibraryOnTabActivate();
   }
+  if (k === "vehicle") {
+    loadChecklistHub().catch(() => {});
+  }
   try {
     if (typeof window.updateIronmindHelpFabContext === "function") window.updateIronmindHelpFabContext();
   } catch (_) {}
@@ -5694,7 +6131,7 @@ const IRONLOG_HELP_OPENERS = {
   dispatch: "Need help with dispatch?",
   quality: "Need help with data quality?",
   audit: "Need help with the audit trail?",
-  vehicle: "Need help with LDV checks?",
+  vehicle: "Need help with daily checklists?",
   admin: "Need help with user admin?",
   docs: "Need help with AI documents?",
   ironmind:

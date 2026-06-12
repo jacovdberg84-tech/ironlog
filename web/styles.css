@@ -3005,6 +3005,97 @@ body.sidebar-collapsed .main-content {
   margin-bottom: 12px;
 }
 
+.checklist-hub-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.checklist-hub-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.checklist-hub-section h4 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+.checklist-asset-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.checklist-asset-chip {
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  min-width: 120px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.checklist-asset-chip:hover {
+  border-color: #94a3b8;
+}
+
+.checklist-asset-chip.selected {
+  border-color: var(--accent, #2563eb);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.16);
+}
+
+.checklist-asset-chip.compliant {
+  border-color: rgba(22, 163, 74, 0.55);
+}
+
+.checklist-asset-chip .chip-code {
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.checklist-asset-chip .chip-name {
+  font-size: 0.72rem;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.checklist-form-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.checklist-form-items .cl-sec {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line, #e5e7eb);
+}
+
+.checklist-form-items .cl-sec-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+}
+
+.checklist-form-items .cl-check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 0.88rem;
+}
+
+.checklist-form-items .cl-check-row label {
+  cursor: pointer;
+  line-height: 1.35;
+}
+
 /* Dash Card Collapsible */
 .dash-card.collapsible {
   overflow: hidden;

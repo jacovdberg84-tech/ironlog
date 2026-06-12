@@ -123,7 +123,7 @@
         if (wo) wo.href = "./asset-qr-detail.html?view=workorders&asset_code=" + encodeURIComponent(code);
         if (pre && /^V(0[1-9]|1[0-5])AM$/i.test(code)) {
           pre.style.display = "inline-block";
-          pre.href = "./ldv-prestart.html?asset_code=" + encodeURIComponent(code);
+          pre.href = "./index.html?tab=vehicle&asset_code=" + encodeURIComponent(code);
         }
       } catch {}
     })();

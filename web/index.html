@@ -158,8 +158,8 @@
           <span>Lube</span>
         </a>
         <a href="#" class="nav-item" data-tab="vehicle">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="6" width="22" height="10" rx="2"></rect><circle cx="6" cy="16" r="2"></circle><circle cx="18" cy="16" r="2"></circle></svg>
-          <span>LDV Checks</span>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+          <span>Checklists</span>
         </a>
       </div>
 
@@ -300,7 +300,7 @@
         <option value="dispatch">Dispatch</option>
         <option value="quality">Data Quality</option>
         <option value="audit">Audit Trail</option>
-        <option value="vehicle">LDV vehicle check</option>
+        <option value="vehicle">Checklists</option>
         <option value="admin">User admin</option>
         <option value="docs">AI Documents</option>
       </select>
@@ -4186,24 +4186,98 @@
       </div>
     </section>
 
-    <!-- LDV VEHICLE CHECK (photos + damage pins) -->
+    <!-- CHECKLISTS (LDV + machine pre-start) -->
     <section class="panel" id="tab-vehicle">
       <div class="asset-cards-grid">
-        <!-- LDV Checks Header -->
         <div class="dash-card full-width">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"></path><path d="M17 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"></path><path d="M5 17h-2v-6l2-5h9l4 5h1a2 2 0 0 1 2 2v4h-2m-4 0h-6m-6 -6h15m-6 0v-5"></path></svg>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
               </div>
               <div>
-                <h3>LDV Vehicle Check</h3>
-                <p class="muted small">Record checks for light vehicles, add photos, and pin damage locations</p>
+                <h3>Daily Checklists</h3>
+                <p class="muted small">LDV and machine pre-starts — same forms as QR scan. Select an asset below.</p>
               </div>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Check date</label>
+                <input id="clCheckDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="clRefreshHub" type="button" class="btn btn-secondary">Refresh</button>
+              </div>
+            </div>
+            <div class="checklist-hub-summary" id="clHubSummary"></div>
+            <div id="clHubSections" class="checklist-hub-sections">
+              <div class="muted small">Loading checklists…</div>
             </div>
           </div>
         </div>
 
+        <div id="clFormPanel" class="dash-card full-width hidden">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+              </div>
+              <div>
+                <h3 id="clFormTitle">Checklist</h3>
+                <p class="muted small" id="clFormSubtitle">Complete all items before operating</p>
+              </div>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <div id="clFormMeta" class="checklist-form-meta"></div>
+            <div id="clLdvFields" class="hidden">
+              <div class="form-row">
+                <div class="form-field">
+                  <label>Previous KM</label>
+                  <div id="clPrevKm" class="w-full" style="padding:10px 0;font-weight:600;">—</div>
+                </div>
+                <div class="form-field">
+                  <label>Current odometer (KM) *</label>
+                  <input id="clOdometer" type="number" step="0.1" min="0" class="w-full" placeholder="Enter current KM" />
+                </div>
+              </div>
+            </div>
+            <div id="clMachineFields" class="hidden">
+              <div class="form-row">
+                <div class="form-field">
+                  <label>SMU / meter (hours, optional)</label>
+                  <input id="clSmuHours" type="number" step="0.1" min="0" class="w-full" placeholder="e.g. 4521.5" />
+                </div>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Inspector / operator</label>
+                <input id="clInspector" class="w-full" placeholder="Your name" />
+              </div>
+              <div class="form-field form-field-full">
+                <label>Notes</label>
+                <input id="clNotes" class="w-full" placeholder="Any remarks before start" />
+              </div>
+            </div>
+            <div id="clChecklistRoot" class="checklist-form-items"></div>
+            <div id="clSyncState" class="info-note hidden"></div>
+            <pre class="output" id="clFormMsg"></pre>
+            <div class="action-buttons">
+              <button id="clSubmitBtn" type="button" class="btn btn-primary">Submit checklist</button>
+              <button id="clPdfBtn" type="button" class="btn btn-secondary hidden">Open PDF</button>
+              <input id="clPhotoFile" type="file" accept="image/jpeg,image/png,image/webp" />
+              <button id="clUploadPhotoBtn" type="button" class="btn btn-secondary" disabled>Upload photo</button>
+            </div>
+            <div class="info-note">
+              <span>Submit the checklist first, then optionally attach a photo. QR scans open the same form here when logged into IRONLOG.</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="legacyVehiclePhotoCheck" class="hidden">
         <!-- New Check Card -->
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
@@ -4363,6 +4437,7 @@
             <div class="list" id="vcChecksList"></div>
             <pre class="output" id="vcResult"></pre>
           </div>
+        </div>
         </div>
       </div>
     </section>

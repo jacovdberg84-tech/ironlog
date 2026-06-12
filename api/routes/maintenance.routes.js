@@ -10,6 +10,7 @@ import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import {
   resolveMachinePrestartProfile,
   getMachinePrestartTemplate,
+  listMachinePrestartProfiles,
   normalizeMachinePrestartChecklist,
   checklistToJsonObject,
   machinePrestartCheckMode,
@@ -4612,6 +4613,23 @@ export default async function maintenanceRoutes(app) {
     return Number.isFinite(n) ? n : null;
   }
 
+  function isLdvPrestartAssetCode(assetCode) {
+    return /^V(0[1-9]|1[0-5])AM$/i.test(String(assetCode || "").trim());
+  }
+
+  function checklistRowStatus(checklistJson, normalizeFn) {
+    if (!checklistJson) return { status: "pending", check_id: null };
+    try {
+      const parsed = JSON.parse(String(checklistJson || "{}"));
+      const rows = normalizeFn(parsed);
+      if (!rows.length) return { status: "pending", check_id: null };
+      const allOk = rows.every((r) => r.ok === true);
+      return { status: allOk ? "compliant" : "pending" };
+    } catch {
+      return { status: "pending" };
+    }
+  }
+
   function syncLdvPrestartToDailyHours(assetId, checkDate, odometerKm, inspectorName, previousOdometerKm) {
     if (!assetId || !isDate(checkDate) || !Number.isFinite(Number(odometerKm))) return { synced: false };
     const odometer = Number(odometerKm);
@@ -4798,6 +4816,116 @@ export default async function maintenanceRoutes(app) {
           ...r,
           photos: photosByCheck.get(Number(r.id)) || [],
         })),
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/maintenance/checklist-hub?date=YYYY-MM-DD
+  app.get("/checklist-hub", async (req, reply) => {
+    try {
+      const check_date = String(req.query?.date || "").trim() || new Date().toISOString().slice(0, 10);
+      if (!isDate(check_date)) return reply.code(400).send({ ok: false, error: "date must be YYYY-MM-DD" });
+
+      const assets = db.prepare(`
+        SELECT id, asset_code, asset_name, category
+        FROM assets
+        WHERE archived = 0
+        ORDER BY asset_code ASC
+      `).all();
+
+      const ldvAssets = [];
+      const machineGroupMap = new Map();
+      for (const profile of listMachinePrestartProfiles()) {
+        machineGroupMap.set(profile.id, {
+          profile_id: profile.id,
+          title: profile.title,
+          assets: [],
+        });
+      }
+
+      const ldvCheckStmt = db.prepare(`
+        SELECT id, checklist_json
+        FROM vehicle_ldv_checks
+        WHERE asset_id = ?
+          AND check_date = ?
+          AND COALESCE(check_mode, 'ldv_general') = 'prestart'
+        ORDER BY id DESC
+        LIMIT 1
+      `);
+
+      for (const a of assets) {
+        const assetId = Number(a.id);
+        const code = String(a.asset_code || "");
+        if (isLdvPrestartAssetCode(code)) {
+          const row = ldvCheckStmt.get(assetId, check_date);
+          const st = row
+            ? { ...checklistRowStatus(row.checklist_json, normalizeLdvPrestartChecklist), check_id: Number(row.id) }
+            : { status: "pending", check_id: null };
+          ldvAssets.push({
+            asset_id: assetId,
+            asset_code: code,
+            asset_name: String(a.asset_name || ""),
+            category: String(a.category || ""),
+            kind: "ldv",
+            ...st,
+          });
+          continue;
+        }
+        const profileId = resolveMachinePrestartProfile(a.category, a.asset_name);
+        if (!profileId) continue;
+        const mode = machinePrestartCheckMode(profileId);
+        if (!mode) continue;
+        const row = db.prepare(`
+          SELECT id, checklist_json
+          FROM vehicle_ldv_checks
+          WHERE asset_id = ?
+            AND check_date = ?
+            AND check_mode = ?
+          ORDER BY id DESC
+          LIMIT 1
+        `).get(assetId, check_date, mode);
+        const st = row
+          ? {
+              ...checklistRowStatus(row.checklist_json, (parsed) =>
+                normalizeMachinePrestartChecklist(profileId, parsed)
+              ),
+              check_id: Number(row.id),
+            }
+          : { status: "pending", check_id: null };
+        const group = machineGroupMap.get(profileId);
+        if (group) {
+          group.assets.push({
+            asset_id: assetId,
+            asset_code: code,
+            asset_name: String(a.asset_name || ""),
+            category: String(a.category || ""),
+            kind: "machine",
+            profile_id: profileId,
+            ...st,
+          });
+        }
+      }
+
+      const machine_groups = [...machineGroupMap.values()].filter((g) => g.assets.length > 0);
+      const summary = {
+        ldv_total: ldvAssets.length,
+        ldv_compliant: ldvAssets.filter((x) => x.status === "compliant").length,
+        machine_total: machine_groups.reduce((s, g) => s + g.assets.length, 0),
+        machine_compliant: machine_groups.reduce(
+          (s, g) => s + g.assets.filter((x) => x.status === "compliant").length,
+          0
+        ),
+      };
+
+      return reply.send({
+        ok: true,
+        check_date,
+        summary,
+        ldv: ldvAssets,
+        machine_groups,
       });
     } catch (err) {
       req.log.error(err);

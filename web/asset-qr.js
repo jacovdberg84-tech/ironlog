@@ -103,11 +103,13 @@
     if (openHistoryBtn) openHistoryBtn.href = `./asset-qr-detail.html?view=history&asset_code=${encodeURIComponent(assetCode)}`;
     const openWoBtn = qs("openWoBtn");
     if (openWoBtn) openWoBtn.href = `./asset-qr-detail.html?view=workorders&asset_code=${encodeURIComponent(assetCode)}`;
+    const appChecklistUrl = `./index.html?tab=vehicle&asset_code=${encodeURIComponent(assetCode)}`;
     const openPrestartBtn = qs("openPrestartBtn");
     if (openPrestartBtn) {
       const isLdv = /^V(0[1-9]|1[0-5])AM$/i.test(assetCode);
       openPrestartBtn.style.display = isLdv ? "inline-block" : "none";
-      openPrestartBtn.href = `./ldv-prestart.html?asset_code=${encodeURIComponent(assetCode)}`;
+      openPrestartBtn.href = appChecklistUrl;
+      openPrestartBtn.textContent = "LDV Checklist (IRONLOG)";
     }
 
     const openMachinePrestartBtn = qs("openMachinePrestartBtn");
@@ -115,11 +117,11 @@
       const mp = payload?.machine_prestart;
       const showMachine = Boolean(mp?.profile_id) && !/^V(0[1-9]|1[0-5])AM$/i.test(assetCode);
       openMachinePrestartBtn.style.display = showMachine ? "inline-block" : "none";
-      openMachinePrestartBtn.href = `./machine-prestart.html?asset_code=${encodeURIComponent(assetCode)}`;
+      openMachinePrestartBtn.href = appChecklistUrl;
       if (showMachine && mp?.template_title) {
-        openMachinePrestartBtn.textContent = String(mp.template_title);
+        openMachinePrestartBtn.textContent = `${String(mp.template_title)} (IRONLOG)`;
       } else {
-        openMachinePrestartBtn.textContent = "Machine Pre-Start";
+        openMachinePrestartBtn.textContent = "Machine Checklist (IRONLOG)";
       }
     }
   }

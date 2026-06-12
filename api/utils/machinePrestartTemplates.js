@@ -218,6 +218,13 @@ export function getMachinePrestartTemplate(profileId) {
   return TEMPLATES[id] || null;
 }
 
+export function listMachinePrestartProfiles() {
+  return Object.values(TEMPLATES).map((t) => ({
+    id: t.id,
+    title: t.title,
+  }));
+}
+
 /**
  * Resolve which machine prestart profile applies from free-text category and asset name.
  */
