@@ -148,8 +148,13 @@ function scrollToSection(section) {
       let targetEl = null;
       
       if (targetView === "main") {
-        const plansSection = document.querySelector(".panel h3");
-        targetEl = plansSection || document.getElementById("mainContent");
+        if (section === "service-history") {
+          targetEl = document.getElementById("serviceRecordsCard");
+        }
+        if (!targetEl) {
+          const plansSection = document.querySelector(".panel h3");
+          targetEl = plansSection || document.getElementById("mainContent");
+        }
       } else {
         const sectionMap = {
           "mi": "managerInspectionsSection",
@@ -340,22 +345,69 @@ function histRow(r) {
     daily_sum: "Daily sum",
   };
   const src = sourceMap[String(r.current_hours_source || "").trim()] || "Unknown";
-  const backfillId = Number(r.last_service_history_id || 0);
-  const canDelete = String(r.last_service_source || "").trim() === "backfill" && backfillId > 0;
+  const assetCode = String(r.asset_code || "").trim();
+  const lastSrc = String(r.last_service_source || "").trim();
+  const srcLabel = lastSrc === "backfill" ? " <span class='pill orange' style='font-size:0.65rem;'>record</span>" : lastSrc === "work_order" ? " <span class='pill blue' style='font-size:0.65rem;'>WO</span>" : "";
   return `
     <tr class="${hrsToNext <= 0 ? "downRow" : ""}">
-      <td><b>${eq}</b></td>
-      <td>
-        ${r.service_name || "-"}
-        ${canDelete ? `<div style="margin-top:6px;"><button data-hist-backfill-del="${backfillId}">Remove duplicate</button></div>` : ""}
-      </td>
-      <td>${last}</td>
-      <td style="text-align:right;">${fmt1(r.current_hours)}<br><small class="muted">(${src})</small></td>
+      <td><b>${escBackfill(eq)}</b></td>
+      <td>${escBackfill(r.service_name || "-")}</td>
+      <td>${escBackfill(last)}${srcLabel}</td>
+      <td style="text-align:right;">${fmt1(r.current_hours)}<br><small class="muted">(${escBackfill(src)})</small></td>
       <td style="text-align:right;"><span class="${warn}">${fmt1(r.remaining_hours)}</span></td>
       <td style="text-align:right;">${fmt1(r.avg_daily_hours)}</td>
-      <td>${est}</td>
+      <td>
+        ${escBackfill(est)}
+        ${assetCode ? `<div style="margin-top:6px;"><button type="button" data-hist-view-records="${assetCode.replace(/"/g, "")}">View records</button></div>` : ""}
+      </td>
     </tr>
   `;
+}
+
+function filterHistoryRows(rows) {
+  const code = String(document.getElementById("histAssetFilter")?.value || "").trim().toUpperCase();
+  if (!code) return rows;
+  return rows.filter((r) => String(r.asset_code || "").trim().toUpperCase() === code);
+}
+
+function openServiceRecordsForAsset(assetCode, assetId = 0) {
+  const code = String(assetCode || "").trim().toUpperCase();
+  const listSel = document.getElementById("backfillListAsset");
+  if (listSel) {
+    if (assetId > 0) {
+      listSel.value = String(assetId);
+    } else {
+      const opt = Array.from(listSel.options).find(
+        (o) => String(o.textContent || "").toUpperCase().includes(code)
+      );
+      if (opt) listSel.value = opt.value;
+    }
+  }
+  document.getElementById("serviceRecordsCard")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  loadBackfillHistory().catch(() => {});
+}
+
+function hideBackfillEditPanel() {
+  document.getElementById("backfillEditPanel")?.classList.add("hidden");
+  const idEl = document.getElementById("backfillEditId");
+  if (idEl) idEl.value = "";
+}
+
+function showBackfillEditPanel(row) {
+  const panel = document.getElementById("backfillEditPanel");
+  if (!panel || !row) return;
+  const idEl = document.getElementById("backfillEditId");
+  if (idEl) idEl.value = String(row.id || "");
+  const nameEl = document.getElementById("backfillEditServiceName");
+  if (nameEl) nameEl.value = String(row.service_name || "");
+  const dateEl = document.getElementById("backfillEditServiceDate");
+  if (dateEl) dateEl.value = String(row.service_date || "");
+  const hoursEl = document.getElementById("backfillEditServiceHours");
+  if (hoursEl) hoursEl.value = row.service_hours == null ? "" : String(row.service_hours);
+  const notesEl = document.getElementById("backfillEditNotes");
+  if (notesEl) notesEl.value = String(row.notes || "");
+  panel.classList.remove("hidden");
+  panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function escBackfill(s) {
@@ -416,7 +468,7 @@ async function loadHistory() {
     const mode = String(modeEl?.value || "all").trim().toLowerCase();
     if (limitWrap) limitWrap.style.display = mode === "closest" ? "" : "none";
     const rawRows = Array.isArray(data.rows) ? data.rows : [];
-    let rows = rawRows.slice();
+    let rows = filterHistoryRows(rawRows.slice());
     if (mode === "closest") {
       rows.sort((a, b) => Number(a?.remaining_hours || 0) - Number(b?.remaining_hours || 0));
       const n = Number(limitEl?.value || 20);
@@ -424,8 +476,9 @@ async function loadHistory() {
       rows = rows.slice(0, topN);
     }
     if (meta) {
-      const suffix = mode === "closest" ? ` | Showing closest due (${rows.length}/${rawRows.length})` : "";
-      meta.textContent = `As of: ${data.as_of || "-"}${suffix}`;
+      const filt = String(document.getElementById("histAssetFilter")?.value || "").trim();
+      const suffix = mode === "closest" ? ` | Closest due (${rows.length})` : filt ? ` | Filtered: ${filt}` : "";
+      meta.textContent = `As of: ${data.as_of || "-"} | ${rawRows.length} plan(s)${suffix}`;
     }
     body.innerHTML = rows.length ? rows.map(histRow).join("") : `<tr><td colspan="7" class="muted">No history rows.</td></tr>`;
   } catch (e) {
@@ -1255,31 +1308,30 @@ async function deleteSubscription(id) {
   }
 }
 
-async function deleteHistoryDuplicate(id) {
-  const iid = Number(id || 0);
-  if (!iid) throw new Error("Invalid history id");
-  if (!confirm("Remove this duplicate service history entry?")) return;
-  const res = await fetch(`${API}/maintenance/history/backfill/${iid}`, { method: "DELETE" });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "Failed to delete history entry");
-  await loadHistory();
-  await loadBackfillHistory();
-}
-
 async function loadBackfillHistory() {
   const body = document.getElementById("backfillBody");
+  const meta = document.getElementById("backfillListMeta");
   if (!body) return;
   body.innerHTML = `<tr><td colspan="6" class="muted">Loading...</td></tr>`;
   try {
-    const res = await fetch(`${API}/maintenance/history/backfill?limit=20`);
+    const assetId = Number(document.getElementById("backfillListAsset")?.value || 0);
+    const limit = assetId > 0 ? 500 : 200;
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (assetId > 0) q.set("asset_id", String(assetId));
+    const res = await fetch(`${API}/maintenance/history/backfill?${q.toString()}`);
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to load backfill history");
+    if (!res.ok) throw new Error(data.error || "Failed to load service records");
     const rows = Array.isArray(data.rows) ? data.rows : [];
+    window.__backfillRowsById = new Map(rows.map((r) => [Number(r.id), r]));
     body.innerHTML = rows.length
       ? rows.map(backfillRow).join("")
-      : `<tr><td colspan="6" class="muted">No historical entries yet.</td></tr>`;
+      : `<tr><td colspan="6" class="muted">No service records found for this filter.</td></tr>`;
+    if (meta) {
+      meta.textContent = `${rows.length} record(s)${assetId > 0 ? " for selected asset" : ""}`;
+    }
   } catch (e) {
     body.innerHTML = `<tr><td colspan="6" class="message-error">${escBackfill(e.message || e)}</td></tr>`;
+    if (meta) meta.textContent = "Load failed";
   }
 }
 
@@ -1301,6 +1353,41 @@ async function loadInspectproStatus() {
     body.innerHTML = `<tr><td colspan="7" class="message-error">${escBackfill(e.message || e)}</td></tr>`;
     if (meta) meta.textContent = "Status load failed.";
   }
+}
+
+function populateMaintAssetSelects(validAssets) {
+  const optionsHtml = `
+    <option value="">Select asset</option>
+    ${validAssets.map(a => `
+      <option value="${a.id}">
+        ${a.asset_code || "NO-CODE"} - ${a.asset_name || "Unnamed Asset"}
+      </option>
+    `).join("")}
+  `;
+  const filterOptionsHtml = `
+    <option value="">All assets</option>
+    ${validAssets.map(a => `
+      <option value="${a.id}">
+        ${a.asset_code || "NO-CODE"} - ${a.asset_name || "Unnamed Asset"}
+      </option>
+    `).join("")}
+  `;
+  const histFilterOptionsHtml = `
+    <option value="">All equipment</option>
+    ${validAssets.map(a => `
+      <option value="${escBackfill(a.asset_code || "")}">
+        ${a.asset_code || "NO-CODE"} - ${a.asset_name || "Unnamed Asset"}
+      </option>
+    `).join("")}
+  `;
+  const select = document.getElementById("planAsset");
+  const backfillSelect = document.getElementById("backfillAsset");
+  const backfillListSelect = document.getElementById("backfillListAsset");
+  const histAssetFilter = document.getElementById("histAssetFilter");
+  if (select) select.innerHTML = optionsHtml;
+  if (backfillSelect) backfillSelect.innerHTML = optionsHtml;
+  if (backfillListSelect) backfillListSelect.innerHTML = filterOptionsHtml;
+  if (histAssetFilter) histAssetFilter.innerHTML = histFilterOptionsHtml;
 }
 
 async function loadAssetsForPlan() {
@@ -1347,24 +1434,7 @@ async function loadAssetsForPlan() {
       return;
     }
 
-    select.innerHTML = `
-      <option value="">Select asset</option>
-      ${validAssets.map(a => `
-        <option value="${a.id}">
-          ${a.asset_code || "NO-CODE"} - ${a.asset_name || "Unnamed Asset"}
-        </option>
-      `).join("")}
-    `;
-    if (backfillSelect) {
-      backfillSelect.innerHTML = `
-        <option value="">Select asset</option>
-        ${validAssets.map(a => `
-          <option value="${a.id}">
-            ${a.asset_code || "NO-CODE"} - ${a.asset_name || "Unnamed Asset"}
-          </option>
-        `).join("")}
-      `;
-    }
+    populateMaintAssetSelects(validAssets);
   } catch (err) {
     console.error("Assets load error:", err);
     select.innerHTML = `<option value="">Failed to load assets</option>`;
@@ -1432,43 +1502,56 @@ async function saveBackfillHistory() {
   }
 }
 
-async function editBackfillHistory(id) {
+function startEditBackfillHistory(id) {
   const iid = Number(id || 0);
   if (!iid) return;
-  const service_name = prompt("Service name:");
-  if (service_name == null) return;
-  const service_date = prompt("Service date (YYYY-MM-DD):");
-  if (service_date == null) return;
-  const service_hours = prompt("Service hours (blank for none):", "");
-  if (service_hours == null) return;
-  const notes = prompt("Notes (optional):", "");
-  if (notes == null) return;
+  const row = window.__backfillRowsById?.get(iid);
+  if (!row) return;
+  showBackfillEditPanel(row);
+}
+
+async function saveBackfillEditPanel() {
+  const iid = Number(document.getElementById("backfillEditId")?.value || 0);
+  if (!iid) return;
   const payload = {
-    service_name: String(service_name || "").trim(),
-    service_date: String(service_date || "").trim(),
-    service_hours: String(service_hours || "").trim() === "" ? null : Number(service_hours),
-    notes: String(notes || "").trim(),
+    service_name: String(document.getElementById("backfillEditServiceName")?.value || "").trim(),
+    service_date: String(document.getElementById("backfillEditServiceDate")?.value || "").trim(),
+    service_hours: (() => {
+      const raw = String(document.getElementById("backfillEditServiceHours")?.value || "").trim();
+      return raw === "" ? null : Number(raw);
+    })(),
+    notes: String(document.getElementById("backfillEditNotes")?.value || "").trim(),
   };
+  if (!payload.service_name || !payload.service_date) {
+    alert("Service name and date are required.");
+    return;
+  }
   const res = await fetch(`${API}/maintenance/history/backfill/${iid}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Failed to update historical entry");
+  if (!res.ok) throw new Error(data.error || "Failed to update service record");
+  hideBackfillEditPanel();
   await loadBackfillHistory();
   await loadHistory();
+  await loadPlans();
+  await loadDue();
 }
 
 async function deleteBackfillHistory(id) {
   const iid = Number(id || 0);
   if (!iid) return;
-  if (!confirm("Delete this historical service entry?")) return;
+  if (!confirm("Delete this service record? This cannot be undone.")) return;
   const res = await fetch(`${API}/maintenance/history/backfill/${iid}`, { method: "DELETE" });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Failed to delete historical entry");
+  if (Number(document.getElementById("backfillEditId")?.value || 0) === iid) hideBackfillEditPanel();
   await loadBackfillHistory();
   await loadHistory();
+  await loadPlans();
+  await loadDue();
 }
 
 async function loadLiveHoursForSelectedAsset() {
@@ -5153,6 +5236,18 @@ document.addEventListener("DOMContentLoaded", () => {
       loadInspectproStatus().catch(() => {});
     });
   }
+  document.getElementById("refreshBackfillListBtn")?.addEventListener("click", () => {
+    loadBackfillHistory().catch((err) => alert(err.message || err));
+  });
+  document.getElementById("backfillListAsset")?.addEventListener("change", () => {
+    hideBackfillEditPanel();
+    loadBackfillHistory().catch(() => {});
+  });
+  document.getElementById("backfillEditSaveBtn")?.addEventListener("click", () => {
+    saveBackfillEditPanel().catch((err) => alert(err.message || err));
+  });
+  document.getElementById("backfillEditCancelBtn")?.addEventListener("click", hideBackfillEditPanel);
+  document.getElementById("histAssetFilter")?.addEventListener("change", () => loadHistory());
   if (backfillBody) {
     backfillBody.addEventListener("click", (e) => {
       const btn = e.target instanceof HTMLElement ? e.target.closest("button[data-backfill-action]") : null;
@@ -5162,7 +5257,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const action = String(btn.getAttribute("data-backfill-action") || "");
       if (!id || !action) return;
       if (action === "edit") {
-        editBackfillHistory(id).catch((err) => alert(err.message || err));
+        startEditBackfillHistory(id);
       } else if (action === "delete") {
         deleteBackfillHistory(id).catch((err) => alert(err.message || err));
       }
@@ -5193,6 +5288,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   loadAssetsForPlan().then(() => {
     loadLiveHoursForSelectedAsset();
+    const urlCode = String(new URLSearchParams(window.location.search).get("asset_code") || "")
+      .trim()
+      .toUpperCase();
+    if (urlCode) openServiceRecordsForAsset(urlCode);
   });
   loadReliabilityAssets().catch(() => {});
 
@@ -5527,11 +5626,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
   document.getElementById("histBody")?.addEventListener("click", (evt) => {
-    const delBtn = evt.target?.closest?.("button[data-hist-backfill-del]");
-    if (!delBtn) return;
-    deleteHistoryDuplicate(Number(delBtn.getAttribute("data-hist-backfill-del") || 0)).catch((err) =>
-      alert(err.message || err)
-    );
+    const viewBtn = evt.target?.closest?.("button[data-hist-view-records]");
+    if (!viewBtn) return;
+    openServiceRecordsForAsset(String(viewBtn.getAttribute("data-hist-view-records") || ""));
   });
   document.getElementById("loadAssetKpiBtn")?.addEventListener("click", () => loadAssetKpiWeekly());
   document.getElementById("loadReliabilityBtn")?.addEventListener("click", () => loadReliabilityMetrics());

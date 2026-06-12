@@ -66,7 +66,7 @@
         </a>
         <a href="#" class="nav-item" data-section="service-history">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-          <span>Service History</span>
+          <span>Service Records</span>
         </a>
         <a href="#" class="nav-item" data-section="maintenance-insights">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="20" x2="4" y2="10"></line><line x1="10" y1="20" x2="10" y2="4"></line><line x1="16" y1="20" x2="16" y2="13"></line><line x1="22" y1="20" x2="22" y2="7"></line></svg>
@@ -193,20 +193,115 @@
       </div>
     </div>
 
-    <div class="maintenance-card collapsible" data-collapsed="false">
+    <div id="serviceRecordsCard" class="maintenance-card collapsible" data-collapsed="false">
       <div class="maintenance-card-header">
-        <h3>Service History (Live)</h3>
+        <h3>Service Records</h3>
         <button class="maintenance-card-toggle" aria-label="Toggle">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
         </button>
       </div>
       <div class="maintenance-card-body">
+        <p class="muted mini" style="margin:0 0 12px;">
+          Past services logged in IRONLOG (including backfill). Use <strong>Edit</strong> or <strong>Delete</strong> to fix duplicates — e.g. multiple entries for F500AM / F501AM.
+        </p>
+        <div class="row stack-10" style="margin-bottom:10px;">
+          <label>
+            Filter by asset
+            <select id="backfillListAsset" class="w-200">
+              <option value="">All assets</option>
+            </select>
+          </label>
+          <button id="refreshBackfillListBtn" type="button" style="margin-top:22px;">Refresh list</button>
+          <div class="muted" id="backfillListMeta" style="margin-top:22px;">—</div>
+        </div>
+        <div id="backfillEditPanel" class="card stack-12 hidden" style="margin-bottom:12px; border:1px solid var(--line);">
+          <h4 style="margin:0;">Edit service record</h4>
+          <input id="backfillEditId" type="hidden" />
+          <div class="form-grid">
+            <label>Service name <input id="backfillEditServiceName" type="text" class="w-full" /></label>
+            <label>Service date <input id="backfillEditServiceDate" type="date" class="w-full" /></label>
+            <label>Service hours <input id="backfillEditServiceHours" type="number" min="0" step="0.1" class="w-full" placeholder="Optional" /></label>
+          </div>
+          <label>Notes <textarea id="backfillEditNotes" rows="2" class="w-full"></textarea></label>
+          <div class="row" style="gap:8px;">
+            <button id="backfillEditSaveBtn" type="button">Save changes</button>
+            <button id="backfillEditCancelBtn" type="button">Cancel</button>
+          </div>
+        </div>
+        <div style="overflow:auto;">
+          <table class="gridTable" style="min-width:980px;">
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Service</th>
+                <th>Date</th>
+                <th style="text-align:right;">Hours</th>
+                <th>Notes</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="backfillBody"></tbody>
+          </table>
+        </div>
+        <details style="margin-top:16px;">
+          <summary style="cursor:pointer; font-weight:600;">Add historical service record</summary>
+          <div class="form-grid" style="margin-top:12px;">
+            <label>
+              Asset
+              <select id="backfillAsset"></select>
+            </label>
+            <label>
+              Service Name
+              <input id="backfillServiceName" type="text" placeholder="250H Service" />
+            </label>
+            <label>
+              Service Date
+              <input id="backfillServiceDate" type="date" />
+            </label>
+            <label>
+              Service Hours
+              <input id="backfillServiceHours" type="number" min="0" step="0.1" placeholder="e.g. 8120.5" />
+            </label>
+          </div>
+          <label>
+            Notes
+            <textarea id="backfillNotes" rows="2" placeholder="Optional: job card number, workshop notes, etc." style="width:100%;"></textarea>
+          </label>
+          <label style="display:flex; align-items:center; gap:8px;">
+            <input id="backfillUpdatePlanHours" type="checkbox" checked />
+            Update matching maintenance plan's Last Service Hours (when service name matches)
+          </label>
+          <div class="row">
+            <button id="saveBackfillBtn" type="button">Save record</button>
+          </div>
+          <div id="backfillMsg" class="muted">For services done before IRONLOG or entered manually from job cards.</div>
+        </details>
+      </div>
+    </div>
+
+    <div id="serviceScheduleCard" class="maintenance-card collapsible" data-collapsed="true">
+      <div class="maintenance-card-header">
+        <h3>Service Schedule (Due &amp; Forecast)</h3>
+        <button class="maintenance-card-toggle" aria-label="Toggle">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+        </button>
+      </div>
+      <div class="maintenance-card-body">
+        <p class="muted mini" style="margin:0 0 12px;">
+          One row per <strong>maintenance plan</strong> (e.g. 250H and 500H on the same machine = two rows). This is not a list of past services — use <strong>Service Records</strong> above to edit or remove logged services.
+        </p>
         <div class="row stack-10">
+          <label>
+            Filter equipment
+            <select id="histAssetFilter">
+              <option value="">All equipment</option>
+            </select>
+          </label>
           <label>
             View
             <select id="histViewMode">
-              <option value="all">All Services</option>
-              <option value="closest">Closest Due</option>
+              <option value="all">All plans</option>
+              <option value="closest">Closest due</option>
             </select>
           </label>
           <label id="histClosestLimitWrap" style="display:none;">
@@ -220,71 +315,20 @@
             <thead>
               <tr>
                 <th>Equipment</th>
-                <th>Service</th>
-                <th>Last Serviced</th>
-                <th style="text-align:right;">Current Hours</th>
-                <th style="text-align:right;">Hours To Next</th>
-                <th style="text-align:right;">Avg / Day</th>
-                <th>Est. Service Date</th>
+                <th>Service plan</th>
+                <th>Last serviced</th>
+                <th style="text-align:right;">Current hours</th>
+                <th style="text-align:right;">Hours to next</th>
+                <th style="text-align:right;">Avg / day</th>
+                <th>Est. service date</th>
               </tr>
             </thead>
             <tbody id="histBody"></tbody>
           </table>
         </div>
         <div class="muted mini" style="margin-top:8px;">
-          Estimated date is calculated from average daily run hours per equipment (from Daily Input).
+          Estimated date uses average daily run hours from Daily Input.
         </div>
-      </div>
-    </div>
-
-    <div class="card stack-24">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <h3 style="margin:0;">Backfill Ancient Service History</h3>
-      </div>
-      <div class="form-grid">
-        <label>
-          Asset
-          <select id="backfillAsset"></select>
-        </label>
-        <label>
-          Service Name
-          <input id="backfillServiceName" type="text" placeholder="250H Service" />
-        </label>
-        <label>
-          Service Date
-          <input id="backfillServiceDate" type="date" />
-        </label>
-        <label>
-          Service Hours
-          <input id="backfillServiceHours" type="number" min="0" step="0.1" placeholder="e.g. 8120.5" />
-        </label>
-      </div>
-      <label>
-        Notes
-        <textarea id="backfillNotes" rows="2" placeholder="Optional: job card number, workshop notes, etc." style="width:100%;"></textarea>
-      </label>
-      <label style="display:flex; align-items:center; gap:8px;">
-        <input id="backfillUpdatePlanHours" type="checkbox" checked />
-        Update matching maintenance plan's Last Service Hours (when service name matches)
-      </label>
-      <div class="row">
-        <button id="saveBackfillBtn">Save Historical Service</button>
-      </div>
-      <div id="backfillMsg" class="muted">Use this for old/manual records that happened before IRONLOG.</div>
-      <div style="overflow:auto; margin-top:10px;">
-        <table class="gridTable" style="min-width:980px;">
-          <thead>
-            <tr>
-              <th>Asset</th>
-              <th>Service</th>
-              <th>Date</th>
-              <th style="text-align:right;">Hours</th>
-              <th>Notes</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="backfillBody"></tbody>
-        </table>
       </div>
     </div>
 
