@@ -125,7 +125,7 @@ function initMaintCollapsibles() {
 function viewForSection(section) {
   const viewMap = {
     "maintenance": "main",
-    "service-history": "main",
+    "service-history": "service-history",
     "maintenance-insights": "insights",
     "manager-inspections": "mi",
     "artisan-inspections": "ai",
@@ -139,10 +139,13 @@ function viewForSection(section) {
   return viewMap[String(section || "").trim()] || "";
 }
 
+let currentMaintenanceSection = "maintenance";
+
 function scrollToSection(section) {
   const targetView = viewForSection(section);
   if (targetView) {
-    setTopView(targetView);
+    if (section) currentMaintenanceSection = section;
+    setTopView(targetView, section);
     
     setTimeout(() => {
       let targetEl = null;
@@ -207,6 +210,10 @@ function refreshTopViewData(view) {
       break;
     case "insights":
       loadMaintenanceInsights().catch(() => {});
+      break;
+    case "service-history":
+      loadBackfillHistory().catch(() => {});
+      loadHistory().catch(() => {});
       break;
     case "sync":
       syncLoadState().catch(() => {});
@@ -371,6 +378,7 @@ function filterHistoryRows(rows) {
 }
 
 function openServiceRecordsForAsset(assetCode, assetId = 0) {
+  scrollToSection("service-history");
   const code = String(assetCode || "").trim().toUpperCase();
   const listSel = document.getElementById("backfillListAsset");
   if (listSel) {
@@ -2007,9 +2015,59 @@ function syncHeaders() {
   return authHeaders({ "Content-Type": "application/json" });
 }
 
-function setTopView(view) {
+function maintenanceHubModeFor(view, section) {
+  if (view === "insights") return "insights";
+  if (view === "service-history") return "service-history";
+  return "plans";
+}
+
+function applyMaintenanceHubMode(mode) {
+  const planSection = document.querySelector("section.panel.page-section");
+  const showCard = (id, visible) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = visible ? "" : "none";
+  };
+  const modes = {
+    plans: {
+      planSection: true,
+      plans: true,
+      serviceRecords: false,
+      serviceSchedule: true,
+      due: true,
+      insights: false,
+    },
+    "service-history": {
+      planSection: false,
+      plans: false,
+      serviceRecords: true,
+      serviceSchedule: true,
+      due: false,
+      insights: false,
+    },
+    insights: {
+      planSection: false,
+      plans: false,
+      serviceRecords: false,
+      serviceSchedule: false,
+      due: false,
+      insights: true,
+    },
+  };
+  const cfg = modes[mode] || modes.plans;
+
+  if (planSection) planSection.style.display = cfg.planSection ? "block" : "none";
+  showCard("maintenancePlansCard", cfg.plans);
+  showCard("serviceRecordsCard", cfg.serviceRecords);
+  showCard("serviceScheduleCard", cfg.serviceSchedule);
+  showCard("dueServicesCard", cfg.due);
+  showCard("maintenanceInsightsCard", cfg.insights);
+  showCard("inspectproStatusCard", false);
+  showCard("rsgProfilesCard", false);
+}
+
+function setTopView(view, section = "") {
   const main = document.getElementById("mainMaintenanceCards");
-  const insightsCard = document.getElementById("maintenanceInsightsCard");
+  const mainPageSection = main?.closest(".page-section");
   const mi = document.getElementById("managerInspectionsSection");
   const ai = document.getElementById("artisanInspectionsSection");
   const wf = document.getElementById("weeklyForumSection");
@@ -2020,8 +2078,10 @@ function setTopView(view) {
   const sync = document.getElementById("syncAdminSection");
   const planSection = document.querySelector("section.panel.page-section");
 
+  if (section) currentMaintenanceSection = section;
+
   // Hide all sections first
-  if (main) main.style.display = "none";
+  if (mainPageSection) mainPageSection.style.display = "none";
   if (mi) mi.style.display = "none";
   if (ai) ai.style.display = "none";
   if (wf) wf.style.display = "none";
@@ -2035,18 +2095,11 @@ function setTopView(view) {
   // Show the selected section
   switch (view) {
     case "main":
-      if (main) main.style.display = "block";
-      if (planSection) planSection.style.display = "block";
-      if (insightsCard) insightsCard.style.display = "";
-      break;
+    case "service-history":
     case "insights":
+      if (mainPageSection) mainPageSection.style.display = "block";
       if (main) main.style.display = "block";
-      if (planSection) planSection.style.display = "none";
-      if (main) {
-        main.querySelectorAll(":scope > .card").forEach((el) => {
-          el.style.display = el.id === "maintenanceInsightsCard" ? "" : "none";
-        });
-      }
+      applyMaintenanceHubMode(maintenanceHubModeFor(view, section || currentMaintenanceSection));
       break;
     case "mi":
       if (mi) mi.style.display = "block";
@@ -2073,24 +2126,23 @@ function setTopView(view) {
       if (sync) sync.style.display = "block";
       break;
   }
-  if (view !== "insights" && main) {
-    main.querySelectorAll(":scope > .card").forEach((el) => {
-      el.style.display = "";
-    });
-  }
 
   // Update active state in sidebar
   const sidebar = document.getElementById("sidebar");
+  const activeSection = section || currentMaintenanceSection;
   if (sidebar) {
     sidebar.querySelectorAll(".nav-item").forEach((item) => {
-      const section = item.dataset.section;
+      const navSection = item.dataset.section;
       let isActive = false;
       switch (view) {
         case "main":
-          isActive = section === "maintenance" || section === "service-history";
+          isActive = navSection === "maintenance";
+          break;
+        case "service-history":
+          isActive = navSection === "service-history";
           break;
         case "insights":
-          isActive = section === "maintenance-insights";
+          isActive = navSection === "maintenance-insights";
           break;
         case "mi":
           isActive = section === "manager-inspections";
@@ -5201,10 +5253,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const item = evt.target instanceof HTMLElement ? evt.target.closest(".nav-item[data-section]") : null;
     if (!item) return;
     const section = String(item.getAttribute("data-section") || "").trim();
-    const v = viewForSection(section);
-    if (!v) return;
+    if (!viewForSection(section)) return;
     evt.preventDefault();
-    setTopView(v);
+    scrollToSection(section);
   });
   
   // Initialize collapsible cards
@@ -5609,7 +5660,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("syncApplyDryRunBtn")?.addEventListener("click", syncApplyLastPullDryRun);
   document.getElementById("syncAckBtn")?.addEventListener("click", syncAckLastPull);
   document.getElementById("syncCheckpointBtn")?.addEventListener("click", syncCheckpointLastPull);
-  document.getElementById("showMainMaintBtn")?.addEventListener("click", () => setTopView("main"));
+  document.getElementById("showMainMaintBtn")?.addEventListener("click", () => scrollToSection("maintenance"));
   document.getElementById("showManagerInspectionsBtn")?.addEventListener("click", () => setTopView("mi"));
   document.getElementById("showArtisanInspectionsBtn")?.addEventListener("click", () => setTopView("ai"));
   document.getElementById("showWeeklyForumBtn")?.addEventListener("click", () => setTopView("wf"));
@@ -5782,6 +5833,6 @@ document.addEventListener("DOMContentLoaded", () => {
   if (!document.getElementById("reportSubscriptionsCard")?.classList.contains("hidden")) {
     loadReportSubscriptions().catch(() => {});
   }
-  setTopView("main");
+  scrollToSection("maintenance");
   loadHistogramEvents().catch(() => {});
 });
