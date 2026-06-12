@@ -69,14 +69,12 @@ function formatWiDayTitleYmd(ymd) {
   return `${day} ${s}`;
 }
 
-function formatWiPlanCell(plan, entry, estFallback = 30) {
-  const est = Math.max(5, Number(plan?.est_minutes ?? estFallback) || estFallback);
-  const day = weekdayShortYmd(plan?.planned_date);
-  const st = String(entry?.status || "pending").toUpperCase();
-  const dayPrefix = day ? `${day} ` : "";
-  if (st === "PENDING") return `${dayPrefix}-${est}m`;
-  if (st === "DONE") return `${dayPrefix}REL ${est}m`;
-  return `${dayPrefix}${st.slice(0, 4)} ${est}m`;
+function wiFormatMinutesPdf(mins) {
+  const n = Math.max(0, Number(mins || 0));
+  if (n < 60) return `${n} min`;
+  const h = Math.floor(n / 60);
+  const m = n % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
 }
 
 function ensureWeeklyInspectionSchema() {
@@ -102,6 +100,77 @@ function ensureWeeklyInspectionSchema() {
       FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
     )
   `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS weekly_inspection_slots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      planned_date TEXT NOT NULL,
+      asset_id INTEGER NOT NULL,
+      est_minutes INTEGER NOT NULL DEFAULT 30,
+      status TEXT NOT NULL DEFAULT 'pending',
+      inspector_name TEXT,
+      notes TEXT,
+      completed_at TEXT,
+      released INTEGER NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(planned_date, asset_id),
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    )
+  `).run();
+  const slotCols = db.prepare(`PRAGMA table_info(weekly_inspection_slots)`).all();
+  if (!slotCols.some((c) => c.name === "status")) {
+    db.prepare(`ALTER TABLE weekly_inspection_slots ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'`).run();
+  }
+  if (!slotCols.some((c) => c.name === "inspector_name")) {
+    db.prepare(`ALTER TABLE weekly_inspection_slots ADD COLUMN inspector_name TEXT`).run();
+  }
+  if (!slotCols.some((c) => c.name === "notes")) {
+    db.prepare(`ALTER TABLE weekly_inspection_slots ADD COLUMN notes TEXT`).run();
+  }
+  if (!slotCols.some((c) => c.name === "completed_at")) {
+    db.prepare(`ALTER TABLE weekly_inspection_slots ADD COLUMN completed_at TEXT`).run();
+  }
+  if (!slotCols.some((c) => c.name === "released")) {
+    db.prepare(`ALTER TABLE weekly_inspection_slots ADD COLUMN released INTEGER NOT NULL DEFAULT 0`).run();
+  }
+  migrateLegacyWeeklyInspectionPlansToSlots();
+}
+
+function migrateLegacyWeeklyInspectionPlansToSlots() {
+  const slotCount = Number(db.prepare(`SELECT COUNT(*) AS c FROM weekly_inspection_slots`).get()?.c || 0);
+  if (slotCount > 0) return;
+  const legacy = db.prepare(`
+    SELECT wp.asset_id, wp.planned_date, wp.est_minutes, wp.sort_order,
+           e.status, e.inspector_name, e.notes, e.completed_at, COALESCE(e.released, 0) AS released
+    FROM weekly_inspection_week_plan wp
+    LEFT JOIN weekly_inspection_entries e
+      ON e.asset_id = wp.asset_id AND e.week_start = wp.week_start
+    WHERE TRIM(COALESCE(wp.planned_date, '')) != ''
+  `).all();
+  if (!legacy.length) return;
+  const ins = db.prepare(`
+    INSERT OR IGNORE INTO weekly_inspection_slots (
+      planned_date, asset_id, est_minutes, status, inspector_name, notes, completed_at, released,
+      sort_order, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `);
+  for (const row of legacy) {
+    const planned_date = String(row.planned_date || "").trim();
+    if (!isDate(planned_date)) continue;
+    const status = String(row.status || "pending").toLowerCase();
+    ins.run(
+      planned_date,
+      Number(row.asset_id),
+      Math.max(5, Number(row.est_minutes ?? 30) || 30),
+      ["pending", "done", "skipped"].includes(status) ? status : "pending",
+      row.inspector_name || null,
+      row.notes || null,
+      row.completed_at || null,
+      status === "done" ? 1 : Number(row.released || 0),
+      Number(row.sort_order || 0)
+    );
+  }
 }
 
 function normalizeEquipCategory(raw) {
@@ -109,133 +178,73 @@ function normalizeEquipCategory(raw) {
   return s || "Uncategorized";
 }
 
-function pickAssetForWeeklyInspection(groupAssets, weekStart, entryMap, monthPickCount) {
-  const scored = (groupAssets || []).map((a) => {
-    const aid = Number(a.asset_id || a.id);
-    const status = String(entryMap[`${aid}|${weekStart}`]?.status || "pending").toLowerCase();
-    return {
-      ...a,
-      asset_id: aid,
-      asset_code: String(a.asset_code || ""),
-      status,
-      picks: Number(monthPickCount[aid] || 0),
-      done: status === "done",
-    };
-  }).filter((a) => a.asset_id);
-  if (!scored.length) return null;
-  const notDone = scored.filter((c) => !c.done);
-  const pool = notDone.length ? notDone : scored;
-  pool.sort((a, b) => a.picks - b.picks || String(a.asset_code).localeCompare(String(b.asset_code)));
-  const picked = pool[0];
-  return {
-    ...picked,
-    rotated: notDone.length > 0 && scored.some((c) => c.done),
-  };
+function monthBoundsYmd(year, month) {
+  const y = Number(year);
+  const m = Number(month);
+  const monthStart = `${y}-${String(m).padStart(2, "0")}-01`;
+  const lastDay = new Date(y, m, 0).getDate();
+  const monthEnd = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  return { monthStart, monthEnd, lastDay };
 }
 
-const WI_DEFAULT_WEEKDAY_MINUTES = 120;
-const WI_DEFAULT_SATURDAY_MINUTES = 300;
-
-function resolveWeekInspectionCapacities(opts = {}) {
-  const saturday_minutes = Math.max(30, Number(opts.saturday_minutes ?? WI_DEFAULT_SATURDAY_MINUTES) || WI_DEFAULT_SATURDAY_MINUTES);
-  const weekday_minutes = Math.max(15, Number(opts.weekday_minutes ?? WI_DEFAULT_WEEKDAY_MINUTES) || WI_DEFAULT_WEEKDAY_MINUTES);
-  return { weekday_minutes, saturday_minutes };
-}
-
-function buildWeekInspectionDaySlots(weekStart, capacities = {}) {
-  const caps = resolveWeekInspectionCapacities(capacities);
-  return [0, 1, 2, 3, 4, 5].map((offset) => ({
-    offset,
-    date: addDaysYmd(weekStart, offset),
-    capacity: offset === 5 ? caps.saturday_minutes : caps.weekday_minutes,
-    used: 0,
-  }));
-}
-
-function assignInspectionDatesAcrossWeek(weekStart, picks, capacities = {}) {
-  const buckets = buildWeekInspectionDaySlots(weekStart, capacities);
-  const sorted = [...(picks || [])].sort(
-    (a, b) => Number(b.est_minutes || 0) - Number(a.est_minutes || 0) || String(a.asset_code || "").localeCompare(String(b.asset_code || ""))
-  );
-  let roundRobin = 0;
-  const out = [];
-
-  function pickBucketIndex(est, useRoundRobin) {
-    const indices = useRoundRobin
-      ? Array.from({ length: buckets.length }, (_, i) => (roundRobin + i) % buckets.length)
-      : [...buckets.keys()].sort(
-          (a, b) => (buckets[b].capacity - buckets[b].used) - (buckets[a].capacity - buckets[a].used)
-        );
-    for (const idx of indices) {
-      const b = buckets[idx];
-      if (b.used + est <= b.capacity) return idx;
-    }
-    return -1;
+function buildMonthCalendarWeeks(year, month) {
+  const { monthStart, monthEnd, lastDay } = monthBoundsYmd(year, month);
+  const firstDow = new Date(`${monthStart}T12:00:00`).getDay();
+  const startPad = (firstDow + 6) % 7;
+  const cells = [];
+  for (let i = 0; i < startPad; i++) cells.push({ date: null, in_month: false, day: null });
+  for (let d = 1; d <= lastDay; d++) {
+    const date = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    cells.push({ date, in_month: true, day: d });
   }
-
-  for (const pick of sorted) {
-    const est = Math.max(5, Number(pick.est_minutes ?? 30) || 30);
-    let idx = pickBucketIndex(est, true);
-    if (idx < 0) idx = pickBucketIndex(est, false);
-    if (idx < 0) {
-      idx = buckets.reduce(
-        (best, b, i) => ((b.capacity - b.used) > (buckets[best].capacity - buckets[best].used) ? i : best),
-        0
-      );
-    }
-    buckets[idx].used += est;
-    roundRobin = (idx + 1) % buckets.length;
-    out.push({
-      ...pick,
-      planned_date: buckets[idx].date,
-      planned_day_offset: buckets[idx].offset,
-    });
-  }
-
-  return {
-    assignments: out,
-    day_usage: buckets.map((b) => ({
-      date: b.date,
-      capacity_minutes: b.capacity,
-      used_minutes: b.used,
-      remaining_minutes: Math.max(0, b.capacity - b.used),
-    })),
-  };
+  while (cells.length % 7 !== 0) cells.push({ date: null, in_month: false, day: null });
+  const weeks = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  return { monthStart, monthEnd, weeks };
 }
 
-function respreadWeeklyInspectionWeekPlans(weekStartRaw, capacities = {}) {
-  ensureWeeklyInspectionSchema();
-  const week_start = mondayOfWeekYmd(String(weekStartRaw || "").trim());
-  if (!isDate(week_start)) throw new Error("week_start must be YYYY-MM-DD");
-  const plans = db.prepare(`
-    SELECT wp.asset_id, wp.est_minutes, a.asset_code
-    FROM weekly_inspection_week_plan wp
-    JOIN assets a ON a.id = wp.asset_id
-    WHERE wp.week_start = ?
-    ORDER BY COALESCE(wp.sort_order, 0), wp.asset_id ASC
-  `).all(week_start);
-  if (!plans.length) throw new Error("No inspections planned for this week");
-  const picks = plans.map((p) => ({
-    asset_id: Number(p.asset_id),
-    asset_code: String(p.asset_code || ""),
-    est_minutes: Math.max(5, Number(p.est_minutes ?? 30) || 30),
-  }));
-  const spread = assignInspectionDatesAcrossWeek(week_start, picks, capacities);
-  const upd = db.prepare(`
-    UPDATE weekly_inspection_week_plan
-    SET planned_date = ?, sort_order = ?, updated_at = datetime('now')
-    WHERE week_start = ? AND asset_id = ?
-  `);
-  spread.assignments.forEach((item, idx) => {
-    upd.run(item.planned_date, idx, week_start, Number(item.asset_id));
-  });
-  return {
-    week_start,
-    assignment_count: spread.assignments.length,
-    assignments: spread.assignments,
-    day_usage: spread.day_usage,
-    schedule_settings: resolveWeekInspectionCapacities(capacities),
-  };
+function loadWeeklyInspectionRosterAssets() {
+  return db.prepare(`
+    SELECT
+      wia.id,
+      wia.asset_id,
+      wia.notes,
+      wia.sort_order,
+      wia.active,
+      COALESCE(wia.est_minutes, 30) AS est_minutes,
+      a.asset_code,
+      a.asset_name,
+      a.category
+    FROM weekly_inspection_assets wia
+    JOIN assets a ON a.id = wia.asset_id
+    WHERE COALESCE(wia.active, 1) = 1
+      AND COALESCE(a.active, 1) = 1
+      AND COALESCE(a.archived, 0) = 0
+    ORDER BY COALESCE(wia.sort_order, 0), a.asset_code ASC
+  `).all();
+}
+
+function loadWeeklyInspectionSlotsBetween(monthStart, monthEnd) {
+  return db.prepare(`
+    SELECT
+      s.id,
+      s.planned_date,
+      s.asset_id,
+      s.est_minutes,
+      s.status,
+      s.inspector_name,
+      s.notes,
+      s.completed_at,
+      COALESCE(s.released, 0) AS released,
+      s.sort_order,
+      a.asset_code,
+      a.asset_name
+    FROM weekly_inspection_slots s
+    JOIN assets a ON a.id = s.asset_id
+    WHERE s.planned_date >= ?
+      AND s.planned_date <= ?
+    ORDER BY s.planned_date ASC, COALESCE(s.sort_order, 0) ASC, a.asset_code ASC
+  `).all(monthStart, monthEnd);
 }
 
 function upsertWeeklyInspectionRosterAsset(assetId, estMinutes, notes = "") {
@@ -257,156 +266,11 @@ function upsertWeeklyInspectionRosterAsset(assetId, estMinutes, notes = "") {
   return Number(ins.lastInsertRowid);
 }
 
-function generateWeeklyInspectionMonthSchedule({
-  month,
-  assetIds,
-  estMinutesDefault = 30,
-  weekday_minutes = WI_DEFAULT_WEEKDAY_MINUTES,
-  saturday_minutes = WI_DEFAULT_SATURDAY_MINUTES,
-}) {
-  ensureWeeklyInspectionSchema();
-  if (!isMonth(month)) throw new Error("month must be YYYY-MM");
-  const ids = Array.from(new Set((assetIds || []).map((x) => Number(x)).filter((n) => n > 0)));
-  if (!ids.length) throw new Error("Select at least one asset");
-
-  const [year, monthNum] = month.split("-").map(Number);
-  const weekStarts = weeksOverlappingMonth(year, monthNum);
-  if (!weekStarts.length) throw new Error("No weeks found for month");
-
-  db.prepare(`DELETE FROM weekly_inspection_week_plan WHERE week_start IS NULL OR TRIM(week_start) = ''`).run();
-  db.prepare(`
-    DELETE FROM weekly_inspection_week_plan
-    WHERE week_start IN (${weekStarts.map(() => "?").join(",")})
-  `).run(...weekStarts);
-
-  const placeholders = ids.map(() => "?").join(",");
-  const poolAssets = db.prepare(`
-    SELECT id AS asset_id, asset_code, asset_name, category
-    FROM assets
-    WHERE id IN (${placeholders})
-      AND COALESCE(active, 1) = 1
-      AND COALESCE(archived, 0) = 0
-  `).all(...ids);
-  if (!poolAssets.length) throw new Error("No valid assets in selection");
-
-  const estDefault = Math.max(5, Number(estMinutesDefault ?? 30) || 30);
-  for (const a of poolAssets) {
-    upsertWeeklyInspectionRosterAsset(Number(a.asset_id), estDefault);
-  }
-
-  const entries = db.prepare(`
-    SELECT asset_id, week_start, status
-    FROM weekly_inspection_entries
-    WHERE week_start IN (${weekStarts.map(() => "?").join(",")})
-  `).all(...weekStarts);
-  const entryMap = {};
-  for (const e of entries) {
-    entryMap[`${Number(e.asset_id)}|${String(e.week_start)}`] = e;
-  }
-
-  const byCategory = new Map();
-  for (const a of poolAssets) {
-    const cat = normalizeEquipCategory(a.category);
-    if (!byCategory.has(cat)) byCategory.set(cat, []);
-    byCategory.get(cat).push(a);
-  }
-
-  const monthPickCount = {};
-  const assignments = [];
-  const weekDayUsage = [];
-  const capacityOpts = { weekday_minutes, saturday_minutes };
-  const upsertPlan = db.prepare(`
-    INSERT INTO weekly_inspection_week_plan (
-      week_start, asset_id, planned_date, est_minutes, sort_order, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-    ON CONFLICT(week_start, asset_id) DO UPDATE SET
-      planned_date = excluded.planned_date,
-      est_minutes = excluded.est_minutes,
-      sort_order = excluded.sort_order,
-      updated_at = datetime('now')
-  `);
-
-  for (const weekStart of weekStarts) {
-    const weekPicks = [];
-    for (const [category, groupAssets] of byCategory.entries()) {
-      const picked = pickAssetForWeeklyInspection(groupAssets, weekStart, entryMap, monthPickCount);
-      if (!picked) continue;
-      const aid = Number(picked.asset_id);
-      const roster = db.prepare(`
-        SELECT COALESCE(est_minutes, 30) AS est_minutes
-        FROM weekly_inspection_assets
-        WHERE asset_id = ?
-      `).get(aid);
-      const est = Math.max(5, Number(roster?.est_minutes ?? estDefault) || estDefault);
-      const peerIds = groupAssets.map((g) => Number(g.asset_id)).filter((n) => n > 0);
-      if (peerIds.length > 1) {
-        db.prepare(`
-          DELETE FROM weekly_inspection_week_plan
-          WHERE week_start = ?
-            AND asset_id IN (${peerIds.map(() => "?").join(",")})
-            AND asset_id != ?
-        `).run(weekStart, ...peerIds, aid);
-      }
-      weekPicks.push({
-        category,
-        asset_id: aid,
-        asset_code: picked.asset_code,
-        est_minutes: est,
-        rotated: Boolean(picked.rotated),
-        status: String(entryMap[`${aid}|${weekStart}`]?.status || "pending"),
-      });
-      monthPickCount[aid] = (monthPickCount[aid] || 0) + 1;
-    }
-
-    const spread = assignInspectionDatesAcrossWeek(weekStart, weekPicks, capacityOpts);
-    weekDayUsage.push({ week_start: weekStart, days: spread.day_usage });
-    let sortOrder = 0;
-    for (const item of spread.assignments) {
-      const aid = Number(item.asset_id);
-      upsertPlan.run(weekStart, aid, item.planned_date, item.est_minutes, sortOrder);
-      sortOrder += 1;
-      assignments.push({
-        week_start: weekStart,
-        planned_date: item.planned_date,
-        planned_day_offset: item.planned_day_offset,
-        category: item.category,
-        asset_id: aid,
-        asset_code: item.asset_code,
-        est_minutes: item.est_minutes,
-        rotated: Boolean(item.rotated),
-        status: item.status,
-      });
-    }
-  }
-
-  return {
-    month,
-    week_count: weekStarts.length,
-    category_count: byCategory.size,
-    asset_pool_count: poolAssets.length,
-    assignment_count: assignments.length,
-    assignments,
-    schedule_settings: resolveWeekInspectionCapacities(capacityOpts),
-    week_day_usage: weekDayUsage,
-  };
-}
-
-function loadWeeklyInspectionWeekPlans(weekStarts) {
-  if (!weekStarts.length) return [];
-  return db.prepare(`
-    SELECT id, week_start, asset_id, planned_date, est_minutes, sort_order
-    FROM weekly_inspection_week_plan
-    WHERE week_start IN (${weekStarts.map(() => "?").join(",")})
-    ORDER BY planned_date ASC, COALESCE(sort_order, 0) ASC, asset_id ASC
-  `).all(...weekStarts);
-}
-
-function computeWeeklyInspectionCompliance(assets, weeks, entryMap, planMap, todayYmd) {
+function computeWeeklyInspectionComplianceFromSlots(assets, slots, year, month, todayYmd) {
   const today = String(todayYmd || new Date().toISOString().slice(0, 10));
-  const assetById = {};
-  for (const a of assets || []) assetById[Number(a.asset_id)] = a;
-  const weekEndByStart = {};
-  for (const w of weeks || []) weekEndByStart[String(w.week_start)] = String(w.week_end || "");
+  const { monthStart, monthEnd } = monthBoundsYmd(year, month);
+  const weekStarts = weeksOverlappingMonth(year, month);
+  const slotsByDate = {};
 
   let totalSlots = 0;
   let doneCount = 0;
@@ -418,15 +282,20 @@ function computeWeeklyInspectionCompliance(assets, weeks, entryMap, planMap, tod
   const byAsset = {};
   const dayAgendaMap = {};
 
-  for (const [key, plan] of Object.entries(planMap || {})) {
-    const [assetIdStr, weekStart] = String(key).split("|");
-    const assetId = Number(assetIdStr);
-    const asset = assetById[assetId] || {};
+  for (const s of slots || []) {
+    const plannedDate = String(s.planned_date || "").trim();
+    const assetId = Number(s.asset_id);
+    if (!isDate(plannedDate) || !assetId) continue;
+    const status = String(s.status || "pending").toLowerCase();
+    const est = Math.max(5, Number(s.est_minutes ?? 30) || 30);
+    if (!slotsByDate[plannedDate]) slotsByDate[plannedDate] = [];
+    slotsByDate[plannedDate].push(s);
+
     if (!byAsset[assetId]) {
       byAsset[assetId] = {
         asset_id: assetId,
-        asset_code: String(asset.asset_code || ""),
-        asset_name: String(asset.asset_name || ""),
+        asset_code: String(s.asset_code || ""),
+        asset_name: String(s.asset_name || ""),
         total: 0,
         done: 0,
         pending: 0,
@@ -435,11 +304,6 @@ function computeWeeklyInspectionCompliance(assets, weeks, entryMap, planMap, tod
         score: 100,
       };
     }
-    const entry = entryMap[key] || {};
-    const status = String(entry.status || "pending").toLowerCase();
-    const est = Math.max(5, Number(plan.est_minutes ?? asset.est_minutes ?? 30) || 30);
-    const plannedDate = String(plan.planned_date || weekStart);
-    const weekEnd = weekEndByStart[String(weekStart)] || plannedDate;
 
     totalSlots += 1;
     estMinutesTotal += est;
@@ -448,16 +312,15 @@ function computeWeeklyInspectionCompliance(assets, weeks, entryMap, planMap, tod
     if (!dayAgendaMap[plannedDate]) {
       dayAgendaMap[plannedDate] = { date: plannedDate, est_minutes: 0, items: [] };
     }
-    const released = status === "done";
     dayAgendaMap[plannedDate].est_minutes += est;
     dayAgendaMap[plannedDate].items.push({
+      slot_id: Number(s.id),
       asset_id: assetId,
-      asset_code: String(asset.asset_code || ""),
-      asset_name: String(asset.asset_name || ""),
-      week_start: weekStart,
+      asset_code: String(s.asset_code || ""),
+      asset_name: String(s.asset_name || ""),
       est_minutes: est,
       status,
-      released,
+      released: status === "done",
     });
 
     if (status === "done") {
@@ -470,10 +333,33 @@ function computeWeeklyInspectionCompliance(assets, weeks, entryMap, planMap, tod
     } else {
       pendingCount += 1;
       byAsset[assetId].pending += 1;
-      const overdue = today > weekEnd || today > plannedDate;
-      if (overdue) {
+      if (today > plannedDate) {
         notReleasedCount += 1;
         byAsset[assetId].not_released += 1;
+      }
+    }
+  }
+
+  const weekly_gaps = [];
+  for (const asset of assets || []) {
+    const assetId = Number(asset.asset_id);
+    if (!assetId) continue;
+    for (const weekStart of weekStarts) {
+      const weekEnd = addDaysYmd(weekStart, 6);
+      const touchesMonth = weekEnd >= monthStart && weekStart <= monthEnd;
+      if (!touchesMonth) continue;
+      const hasSlot = (slots || []).some((row) => {
+        const d = String(row.planned_date || "");
+        return Number(row.asset_id) === assetId && d >= weekStart && d <= weekEnd;
+      });
+      if (!hasSlot) {
+        weekly_gaps.push({
+          asset_id: assetId,
+          asset_code: String(asset.asset_code || ""),
+          asset_name: String(asset.asset_name || ""),
+          week_start: weekStart,
+          week_end: weekEnd,
+        });
       }
     }
   }
@@ -501,6 +387,7 @@ function computeWeeklyInspectionCompliance(assets, weeks, entryMap, planMap, tod
     est_minutes_released: estMinutesReleased,
     by_asset: Object.values(byAsset).sort((x, y) => x.score - y.score || String(x.asset_code).localeCompare(String(y.asset_code))),
     day_agenda: Object.values(dayAgendaMap).sort((x, y) => String(x.date).localeCompare(String(y.date))),
+    weekly_gaps,
   };
 }
 
@@ -519,114 +406,116 @@ function buildWeeklyInspectionCalendarData(query = {}) {
     year = d.getFullYear();
     month = d.getMonth() + 1;
   }
-  const weeks = weeksOverlappingMonth(year, month).map((week_start) => ({
-    week_start,
-    week_end: addDaysYmd(week_start, 6),
-    label: `Mon ${week_start.slice(5)}`,
-  }));
-  const weekStarts = weeks.map((w) => w.week_start);
-  const assets = db.prepare(`
-    SELECT
-      wia.id,
-      wia.asset_id,
-      wia.notes,
-      wia.sort_order,
-      wia.active,
-      COALESCE(wia.est_minutes, 30) AS est_minutes,
-      a.asset_code,
-      a.asset_name,
-      a.category
-    FROM weekly_inspection_assets wia
-    JOIN assets a ON a.id = wia.asset_id
-    WHERE COALESCE(wia.active, 1) = 1
-      AND COALESCE(a.active, 1) = 1
-      AND COALESCE(a.archived, 0) = 0
-    ORDER BY COALESCE(wia.sort_order, 0), a.asset_code ASC
-  `).all();
-  const plans = loadWeeklyInspectionWeekPlans(weekStarts);
-  const planMap = {};
-  for (const p of plans) {
-    planMap[`${Number(p.asset_id)}|${String(p.week_start)}`] = p;
-  }
-  const entries = weekStarts.length
-    ? db.prepare(`
-        SELECT
-          e.id,
-          e.asset_id,
-          e.week_start,
-          e.status,
-          e.inspector_name,
-          e.notes,
-          e.completed_at,
-          COALESCE(e.released, 0) AS released
-        FROM weekly_inspection_entries e
-        WHERE e.week_start IN (${weekStarts.map(() => "?").join(",")})
-      `).all(...weekStarts)
-    : [];
-  const entryMap = {};
-  for (const e of entries) {
-    entryMap[`${Number(e.asset_id)}|${String(e.week_start)}`] = e;
-  }
-  const weekPlanSummary = weeks.map((w) => {
-    const items = plans
-      .filter((p) => String(p.week_start) === String(w.week_start))
-      .map((p) => {
-        const asset = assets.find((a) => Number(a.asset_id) === Number(p.asset_id));
-        return {
-          asset_id: Number(p.asset_id),
-          asset_code: String(asset?.asset_code || ""),
-          est_minutes: Number(p.est_minutes || asset?.est_minutes || 30),
-          planned_date: String(p.planned_date || w.week_start),
-        };
-      });
-    const plannedDates = [...new Set(items.map((it) => String(it.planned_date || w.week_start)))].sort();
-    const saturdayDate = addDaysYmd(w.week_start, 5);
-    const estTotal = items.reduce((sum, it) => sum + Number(it.est_minutes || 0), 0);
-    const saturdayMinutes = items
-      .filter((it) => String(it.planned_date) === saturdayDate)
-      .reduce((sum, it) => sum + Number(it.est_minutes || 0), 0);
-    return {
-      week_start: w.week_start,
-      week_end: w.week_end,
-      planned_date: plannedDates[0] || w.week_start,
-      planned_dates: plannedDates,
-      est_minutes_total: estTotal,
-      saturday_minutes: saturdayMinutes,
-      asset_count: items.length,
-    };
-  });
-  const schedule_settings = resolveWeekInspectionCapacities();
-  const compliance = computeWeeklyInspectionCompliance(
-    assets,
-    weeks,
-    entryMap,
-    planMap,
-    new Date().toISOString().slice(0, 10)
-  );
-  if (Array.isArray(compliance.day_agenda)) {
-    compliance.day_agenda = compliance.day_agenda.map((day) => {
-      const dow = new Date(`${String(day.date).trim()}T12:00:00`).getDay();
-      const capacity_minutes = dow === 6 ? schedule_settings.saturday_minutes : schedule_settings.weekday_minutes;
-      return {
-        ...day,
-        capacity_minutes,
-        remaining_minutes: Math.max(0, capacity_minutes - Number(day.est_minutes || 0)),
-      };
+  const { monthStart, monthEnd, weeks: calendarWeeks } = buildMonthCalendarWeeks(year, month);
+  const assets = loadWeeklyInspectionRosterAssets();
+  const slots = loadWeeklyInspectionSlotsBetween(monthStart, monthEnd);
+  const slotsByDate = {};
+  for (const s of slots) {
+    const date = String(s.planned_date);
+    if (!slotsByDate[date]) slotsByDate[date] = [];
+    slotsByDate[date].push({
+      id: Number(s.id),
+      asset_id: Number(s.asset_id),
+      asset_code: String(s.asset_code || ""),
+      asset_name: String(s.asset_name || ""),
+      est_minutes: Number(s.est_minutes || 30),
+      status: String(s.status || "pending").toLowerCase(),
+      inspector_name: String(s.inspector_name || ""),
+      released: Number(s.released || 0),
     });
   }
+  const today = new Date().toISOString().slice(0, 10);
+  const calendar_weeks = calendarWeeks.map((row) => row.map((cell) => {
+    if (!cell?.date) return { ...cell, is_today: false, slots: [] };
+    return {
+      ...cell,
+      is_today: String(cell.date) === today,
+      slots: slotsByDate[String(cell.date)] || [],
+    };
+  }));
+  const compliance = computeWeeklyInspectionComplianceFromSlots(assets, slots, year, month, today);
   return {
     ok: true,
     month: `${year}-${String(month).padStart(2, "0")}`,
     year,
     month_num: month,
-    weeks,
+    month_start: monthStart,
+    month_end: monthEnd,
+    calendar_weeks,
     assets,
-    entries: entryMap,
-    plans: planMap,
-    week_plan_summary: weekPlanSummary,
+    slots,
     compliance,
-    schedule_settings,
   };
+}
+
+function addWeeklyInspectionSlot({ planned_date, asset_id, est_minutes }) {
+  ensureWeeklyInspectionSchema();
+  const date = String(planned_date || "").trim();
+  const aid = Number(asset_id || 0);
+  if (!isDate(date)) throw new Error("planned_date must be YYYY-MM-DD");
+  if (!aid) throw new Error("asset_id is required");
+  const roster = db.prepare(`
+    SELECT COALESCE(est_minutes, 30) AS est_minutes
+    FROM weekly_inspection_assets
+    WHERE asset_id = ? AND COALESCE(active, 1) = 1
+  `).get(aid);
+  if (!roster) throw new Error("Add equipment to the workshop roster first");
+  const est = Math.max(5, Number(est_minutes ?? roster.est_minutes ?? 30) || 30);
+  const sortOrder = Number(db.prepare(`
+    SELECT COALESCE(MAX(sort_order), 0) AS m
+    FROM weekly_inspection_slots
+    WHERE planned_date = ?
+  `).get(date)?.m || 0) + 1;
+  db.prepare(`
+    INSERT INTO weekly_inspection_slots (
+      planned_date, asset_id, est_minutes, sort_order, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
+    ON CONFLICT(planned_date, asset_id) DO UPDATE SET
+      est_minutes = excluded.est_minutes,
+      sort_order = excluded.sort_order,
+      updated_at = datetime('now')
+  `).run(date, aid, est, sortOrder);
+  return db.prepare(`
+    SELECT
+      s.id, s.planned_date, s.asset_id, s.est_minutes, s.status, s.inspector_name,
+      COALESCE(s.released, 0) AS released, a.asset_code, a.asset_name
+    FROM weekly_inspection_slots s
+    JOIN assets a ON a.id = s.asset_id
+    WHERE s.planned_date = ? AND s.asset_id = ?
+  `).get(date, aid);
+}
+
+function updateWeeklyInspectionSlotStatus({ slot_id, asset_id, planned_date, status, inspector_name }) {
+  ensureWeeklyInspectionSchema();
+  let row = null;
+  if (slot_id) {
+    row = db.prepare(`SELECT id, asset_id, planned_date, status FROM weekly_inspection_slots WHERE id = ?`).get(Number(slot_id));
+  } else if (asset_id && isDate(String(planned_date || "").trim())) {
+    row = db.prepare(`
+      SELECT id, asset_id, planned_date, status
+      FROM weekly_inspection_slots
+      WHERE asset_id = ? AND planned_date = ?
+    `).get(Number(asset_id), String(planned_date).trim());
+  }
+  if (!row) throw new Error("Inspection slot not found");
+  const next = String(status || "pending").trim().toLowerCase();
+  if (!["pending", "done", "skipped"].includes(next)) {
+    throw new Error("status must be pending, done, or skipped");
+  }
+  const completed_at = next === "done" ? new Date().toISOString() : null;
+  const released = next === "done" ? 1 : 0;
+  db.prepare(`
+    UPDATE weekly_inspection_slots
+    SET status = ?, inspector_name = ?, completed_at = ?, released = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(next, inspector_name || null, completed_at, released, Number(row.id));
+  return db.prepare(`
+    SELECT
+      id, planned_date, asset_id, est_minutes, status, inspector_name, notes, completed_at,
+      COALESCE(released, 0) AS released
+    FROM weekly_inspection_slots
+    WHERE id = ?
+  `).get(Number(row.id));
 }
 
 function getAssetCurrentHoursInfo(assetId) {
@@ -4255,33 +4144,6 @@ export default async function maintenanceRoutes(app) {
     }
   });
 
-  app.post("/weekly-inspections/generate", async (req, reply) => {
-    try {
-      const month = String(req.body?.month || "").trim();
-      const asset_ids = Array.isArray(req.body?.asset_ids) ? req.body.asset_ids : [];
-      const est_minutes = Math.max(5, Number(req.body?.est_minutes ?? 30) || 30);
-      const saturday_hours = Number(req.body?.saturday_hours ?? 5);
-      const saturday_minutes = Math.max(
-        30,
-        Number.isFinite(saturday_hours) && saturday_hours > 0
-          ? Math.round(saturday_hours * 60)
-          : Number(req.body?.saturday_minutes ?? WI_DEFAULT_SATURDAY_MINUTES) || WI_DEFAULT_SATURDAY_MINUTES
-      );
-      const weekday_minutes = Math.max(15, Number(req.body?.weekday_minutes ?? WI_DEFAULT_WEEKDAY_MINUTES) || WI_DEFAULT_WEEKDAY_MINUTES);
-      const result = generateWeeklyInspectionMonthSchedule({
-        month,
-        assetIds: asset_ids,
-        estMinutesDefault: est_minutes,
-        weekday_minutes,
-        saturday_minutes,
-      });
-      return reply.send({ ok: true, ...result });
-    } catch (err) {
-      req.log.error(err);
-      return reply.code(400).send({ ok: false, error: err.message || String(err) });
-    }
-  });
-
   app.get("/weekly-inspections/calendar", async (req, reply) => {
     try {
       const month = String(req.query?.month || "").trim();
@@ -4378,7 +4240,7 @@ export default async function maintenanceRoutes(app) {
         WHERE id = ?
       `).run(notes, est_minutes, id);
       db.prepare(`
-        UPDATE weekly_inspection_week_plan
+        UPDATE weekly_inspection_slots
         SET est_minutes = ?, updated_at = datetime('now')
         WHERE asset_id = ?
       `).run(est_minutes, Number(row.asset_id));
@@ -4389,61 +4251,33 @@ export default async function maintenanceRoutes(app) {
     }
   });
 
-  app.put("/weekly-inspections/week-plan", async (req, reply) => {
+  app.post("/weekly-inspections/slots", async (req, reply) => {
     try {
-      ensureWeeklyInspectionSchema();
-      const week_start = mondayOfWeekYmd(String(req.body?.week_start || "").trim());
-      if (!isDate(week_start)) {
-        return reply.code(400).send({ ok: false, error: "week_start must be YYYY-MM-DD (Monday)" });
-      }
-      const planned_date = isDate(String(req.body?.planned_date || "").trim())
-        ? String(req.body.planned_date).trim()
-        : week_start;
-      const items = Array.isArray(req.body?.items) ? req.body.items : [];
-      if (items.length) {
-        const upd = db.prepare(`
-          UPDATE weekly_inspection_week_plan
-          SET planned_date = ?, est_minutes = ?, sort_order = ?, updated_at = datetime('now')
-          WHERE week_start = ? AND asset_id = ?
-        `);
-        for (const it of items) {
-          const asset_id = Number(it?.asset_id || 0);
-          if (!asset_id) continue;
-          const est = Math.max(5, Number(it?.est_minutes ?? 30) || 30);
-          const sort = Number(it?.sort_order ?? 0) || 0;
-          const date = isDate(String(it?.planned_date || "").trim()) ? String(it.planned_date).trim() : planned_date;
-          upd.run(date, est, sort, week_start, asset_id);
-        }
-      } else {
-        db.prepare(`
-          UPDATE weekly_inspection_week_plan
-          SET planned_date = ?, updated_at = datetime('now')
-          WHERE week_start = ?
-        `).run(planned_date, week_start);
-      }
-      return reply.send({ ok: true, week_start, planned_date });
-    } catch (err) {
-      req.log.error(err);
-      return reply.code(500).send({ ok: false, error: err.message || String(err) });
-    }
-  });
-
-  app.post("/weekly-inspections/spread-week", async (req, reply) => {
-    try {
-      const week_start = String(req.body?.week_start || "").trim();
-      const saturday_hours = Number(req.body?.saturday_hours ?? 5);
-      const saturday_minutes = Math.max(
-        30,
-        Number.isFinite(saturday_hours) && saturday_hours > 0
-          ? Math.round(saturday_hours * 60)
-          : Number(req.body?.saturday_minutes ?? WI_DEFAULT_SATURDAY_MINUTES) || WI_DEFAULT_SATURDAY_MINUTES
-      );
-      const weekday_minutes = Math.max(15, Number(req.body?.weekday_minutes ?? WI_DEFAULT_WEEKDAY_MINUTES) || WI_DEFAULT_WEEKDAY_MINUTES);
-      const result = respreadWeeklyInspectionWeekPlans(week_start, { weekday_minutes, saturday_minutes });
-      return reply.send({ ok: true, ...result });
+      const planned_date = String(req.body?.planned_date || "").trim();
+      const asset_id = Number(req.body?.asset_id || 0);
+      const est_minutes = req.body?.est_minutes != null
+        ? Math.max(5, Number(req.body.est_minutes) || 30)
+        : undefined;
+      const slot = addWeeklyInspectionSlot({ planned_date, asset_id, est_minutes });
+      return reply.send({ ok: true, slot });
     } catch (err) {
       req.log.error(err);
       return reply.code(400).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.delete("/weekly-inspections/slots/:id", async (req, reply) => {
+    try {
+      ensureWeeklyInspectionSchema();
+      const id = Number(req.params?.id || 0);
+      if (!id) return reply.code(400).send({ ok: false, error: "Invalid slot id" });
+      const row = db.prepare(`SELECT id, planned_date, asset_id FROM weekly_inspection_slots WHERE id = ?`).get(id);
+      if (!row) return reply.code(404).send({ ok: false, error: "Inspection slot not found" });
+      db.prepare(`DELETE FROM weekly_inspection_slots WHERE id = ?`).run(id);
+      return reply.send({ ok: true, id, planned_date: row.planned_date, asset_id: Number(row.asset_id) });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
     }
   });
 
@@ -4463,50 +4297,22 @@ export default async function maintenanceRoutes(app) {
 
   app.put("/weekly-inspections/entries", async (req, reply) => {
     try {
+      const slot_id = Number(req.body?.slot_id || 0);
       const asset_id = Number(req.body?.asset_id || 0);
-      const week_start = mondayOfWeekYmd(String(req.body?.week_start || "").trim());
+      const planned_date = String(req.body?.planned_date || "").trim();
       const status = String(req.body?.status || "pending").trim().toLowerCase();
       const inspector_name = String(req.body?.inspector_name || "").trim();
-      const notes = String(req.body?.notes || "").trim();
-      if (!asset_id || !isDate(week_start)) {
-        return reply.code(400).send({ ok: false, error: "asset_id and week_start (YYYY-MM-DD) are required" });
-      }
-      if (!["pending", "done", "skipped"].includes(status)) {
-        return reply.code(400).send({ ok: false, error: "status must be pending, done, or skipped" });
-      }
-      const scheduled = db.prepare(`
-        SELECT id FROM weekly_inspection_assets
-        WHERE asset_id = ? AND COALESCE(active, 1) = 1
-      `).get(asset_id);
-      if (!scheduled) return reply.code(404).send({ ok: false, error: "Asset is not on the weekly inspection schedule" });
-      const planned = db.prepare(`
-        SELECT id FROM weekly_inspection_week_plan
-        WHERE asset_id = ? AND week_start = ?
-      `).get(asset_id, week_start);
-      if (!planned) return reply.code(404).send({ ok: false, error: "Asset is not scheduled for this week" });
-      const completed_at = status === "done" ? new Date().toISOString() : null;
-      const released = status === "done" ? 1 : 0;
-      db.prepare(`
-        INSERT INTO weekly_inspection_entries (
-          asset_id, week_start, status, inspector_name, notes, completed_at, released, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-        ON CONFLICT(asset_id, week_start) DO UPDATE SET
-          status = excluded.status,
-          inspector_name = excluded.inspector_name,
-          notes = excluded.notes,
-          completed_at = excluded.completed_at,
-          released = excluded.released,
-          updated_at = datetime('now')
-      `).run(asset_id, week_start, status, inspector_name || null, notes || null, completed_at, released);
-      const row = db.prepare(`
-        SELECT id, asset_id, week_start, status, inspector_name, notes, completed_at, COALESCE(released, 0) AS released
-        FROM weekly_inspection_entries
-        WHERE asset_id = ? AND week_start = ?
-      `).get(asset_id, week_start);
-      return reply.send({ ok: true, entry: row });
+      const slot = updateWeeklyInspectionSlotStatus({
+        slot_id: slot_id || undefined,
+        asset_id: asset_id || undefined,
+        planned_date,
+        status,
+        inspector_name,
+      });
+      return reply.send({ ok: true, slot });
     } catch (err) {
       req.log.error(err);
-      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+      return reply.code(400).send({ ok: false, error: err.message || String(err) });
     }
   });
 
@@ -4514,72 +4320,52 @@ export default async function maintenanceRoutes(app) {
     try {
       const data = buildWeeklyInspectionCalendarData(req.query || {});
       const isDownload = String(req.query?.download || "").trim() === "1";
-      const assets = Array.isArray(data.assets) ? data.assets : [];
-      const weeks = Array.isArray(data.weeks) ? data.weeks : [];
-      const entryMap = data.entries || {};
-      const planMap = data.plans || {};
       const compliance = data.compliance || {};
+      const dayAgenda = Array.isArray(compliance.day_agenda) ? compliance.day_agenda : [];
+      const weeklyGaps = Array.isArray(compliance.weekly_gaps) ? compliance.weekly_gaps : [];
       const pdf = await buildPdfBuffer(
         (doc) => {
-          sectionTitle(doc, "Weekly Inspection Calendar");
+          sectionTitle(doc, "Workshop Inspection Calendar");
           doc.font("Helvetica").fontSize(10).fillColor("#334155");
           doc.text(`Month: ${String(data.month || "")}`, { lineGap: 2 });
           doc.text(
-            `Compliance score: ${Number(compliance.score ?? 0)}% · Not released: ${Number(compliance.not_released_count ?? 0)} · Penalty: -${Number(compliance.penalty_points ?? 0)} pts`,
+            `Released: ${Number(compliance.done_count ?? 0)} / ${Number(compliance.total_slots ?? 0)} · Not released (overdue): ${Number(compliance.not_released_count ?? 0)}`,
             { lineGap: 2 }
           );
           doc.moveDown(0.5);
-          const rows = assets.map((a) => {
-            const row = {
-              asset: `${String(a.asset_code || "-")} - ${String(a.asset_name || "-")}`,
-            };
-            for (const w of weeks) {
-              const key = `${Number(a.asset_id)}|${String(w.week_start)}`;
-              const plan = planMap[key];
-              if (!plan) {
-                row[w.week_start] = "";
-                continue;
-              }
-              row[w.week_start] = formatWiPlanCell(plan, entryMap[key], Number(a.est_minutes ?? 30));
-            }
-            return row;
-          });
-          const cols = [
-            { key: "asset", label: "Equipment", width: 0.28 },
-            ...weeks.map((w) => ({
-              key: w.week_start,
-              label: w.label,
-              width: Math.max(0.12, 0.72 / Math.max(1, weeks.length)),
-              align: "center",
-            })),
-          ];
-          table(doc, cols, rows.length ? rows : [{ asset: "No equipment on weekly schedule" }]);
-          doc.moveDown(0.6);
-          const dayAgenda = Array.isArray(compliance.day_agenda) ? compliance.day_agenda : [];
-          if (dayAgenda.length) {
-            sectionTitle(doc, "Daily inspection lineup");
-            doc.font("Helvetica").fontSize(9).fillColor("#334155");
+          sectionTitle(doc, "Daily schedule");
+          doc.font("Helvetica").fontSize(9).fillColor("#334155");
+          if (!dayAgenda.length) {
+            doc.text("No inspections scheduled this month.", { lineGap: 2 });
+          } else {
             for (const day of dayAgenda) {
               const items = Array.isArray(day.items) ? day.items : [];
-              const cap = Number(day.capacity_minutes || 0);
-              const used = Number(day.est_minutes || 0);
-              const capTxt = cap > 0 ? ` (${used}/${cap} min)` : "";
-              doc.text(`${formatWiDayTitleYmd(day.date)}${capTxt}`, { lineGap: 1 });
+              doc.text(`${formatWiDayTitleYmd(day.date)} — ${wiFormatMinutesPdf(day.est_minutes)} planned`, { lineGap: 1 });
               const line = items.map((it) => {
                 const st = String(it.status || "pending").toUpperCase();
                 const tag = st === "DONE" ? "REL" : st === "SKIPPED" ? "SKIP" : "PEN";
                 return `${String(it.asset_code || "-")} ${tag} ${Number(it.est_minutes || 0)}m`;
               }).join("  |  ");
-              doc.fontSize(8).fillColor("#475569").text(line || "No machines planned", { lineGap: 2 });
+              doc.fontSize(8).fillColor("#475569").text(line || "—", { lineGap: 2 });
               doc.fontSize(9).fillColor("#334155");
-              doc.moveDown(0.25);
+              doc.moveDown(0.2);
             }
-            doc.moveDown(0.35);
           }
+          if (weeklyGaps.length) {
+            doc.moveDown(0.4);
+            sectionTitle(doc, "Missing weekly workshop visit");
+            doc.fontSize(8).fillColor("#b45309");
+            const gapLines = weeklyGaps.slice(0, 40).map((g) =>
+              `${String(g.asset_code || "-")} — week ${String(g.week_start || "").slice(5)} to ${String(g.week_end || "").slice(5)}`
+            );
+            doc.text(gapLines.join("\n"), { lineGap: 2 });
+            if (weeklyGaps.length > 40) doc.text(`…and ${weeklyGaps.length - 40} more`, { lineGap: 2 });
+          }
+          doc.moveDown(0.35);
           doc.fontSize(9).fillColor("#64748b");
-          doc.text("Legend: Mon/Tue/... = planned day  |  REL = released  |  SKIP = skipped  |  -Xm = pending");
+          doc.text("Legend: REL = released  |  SKIP = skipped  |  PEN = pending");
         },
-        { title: "AML Weekly Inspections", subtitle: String(data.month || "") }
+        { title: "AML Workshop Inspections", subtitle: String(data.month || "") }
       );
       reply.header("Content-Type", "application/pdf");
       reply.header(

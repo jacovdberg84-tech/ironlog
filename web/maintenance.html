@@ -733,7 +733,7 @@
     <div id="weeklyInspectionSection" class="maint-section" style="display:none;">
       <div class="card stack-24" id="wiPrintArea">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
-          <h3 style="margin:0;">Weekly Inspection Calendar</h3>
+          <h3 style="margin:0;">Workshop Inspection Calendar</h3>
           <div class="row stack-10 wi-no-print">
             <button type="button" id="wiPrevMonthBtn">Previous</button>
             <button type="button" id="wiNextMonthBtn">Next</button>
@@ -745,38 +745,9 @@
           </div>
         </div>
         <p class="muted mini" style="margin:0 0 12px;">
-          Select in-use equipment and <b>Generate month schedule</b>. Inspections are spread <b>Mon–Sat</b> (Saturday has your 5-hour block). One machine per equipment group each week; rotates if already released.
-          Click a scheduled cell to cycle: <b>Pending</b> → <b>Released</b> → <b>Skipped</b>.
+          Click a day to add equipment from your workshop roster. Each machine should visit the workshop <b>at least once per week</b>.
+          Click a scheduled chip to cycle: <b>Pending</b> → <b>Released</b> → <b>Skipped</b>.
         </p>
-        <div class="card wi-no-print" style="padding:12px; margin-bottom:12px;">
-          <h4 style="margin:0 0 8px;">Generate month schedule</h4>
-          <p class="muted mini" style="margin:0 0 8px;">
-            Spreads inspections across the week. Saturday uses your inspection block (default 5 hours). Mon–Fri use the weekday capacity below.
-          </p>
-          <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end; margin-bottom:8px;">
-            <label>
-              Lookback days
-              <input id="wiCandidateDays" type="number" min="7" max="120" step="1" value="30" class="w-90" />
-            </label>
-            <label>
-              Default est. minutes
-              <input id="wiGenerateEst" type="number" min="5" step="5" value="30" class="w-90" />
-            </label>
-            <label>
-              Weekday capacity (min/day)
-              <input id="wiWeekdayCapacity" type="number" min="15" step="15" value="120" class="w-90" title="Mon–Fri budget per day" />
-            </label>
-            <label>
-              Saturday block (hours)
-              <input id="wiSaturdayHours" type="number" min="1" step="0.5" value="5" class="w-90" title="Total inspection hours available on Saturday" />
-            </label>
-            <button type="button" id="wiLoadCandidatesBtn">Load in-use equipment</button>
-            <button type="button" id="wiSelectAllCandidatesBtn">Select all</button>
-            <button type="button" id="wiClearCandidatesBtn">Clear</button>
-            <button type="button" id="wiGenerateMonthBtn">Generate month schedule</button>
-          </div>
-          <div id="wiCandidateGroups" class="wi-candidate-groups muted mini">Load in-use equipment to select machines for auto-scheduling.</div>
-        </div>
         <div id="wiComplianceCard" class="wi-compliance-grid"></div>
         <div class="row stack-10 wi-no-print" style="flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
           <label>
@@ -788,42 +759,42 @@
             <input id="wiInspector" type="text" placeholder="Your name" class="w-200" />
           </label>
           <label>
-            Add equipment
+            Add to roster
             <select id="wiAssetSelect" class="w-200"></select>
           </label>
           <label>
-            Est. minutes
+            Default est. minutes
             <input id="wiAssetEst" type="number" min="5" step="5" value="30" class="w-90" />
           </label>
           <label>
             Notes
             <input id="wiAssetNotes" type="text" placeholder="Optional" class="w-200" />
           </label>
-          <button type="button" id="wiAddAssetBtn">Add to schedule</button>
+          <button type="button" id="wiAddAssetBtn">Add to roster</button>
         </div>
-        <div class="card wi-no-print" style="padding:12px; margin-bottom:12px;">
-          <h4 style="margin:0 0 8px;">Manual week override</h4>
-          <p class="muted mini" style="margin:0 0 8px;">Move every inspection in a week to a single day (optional). Auto-generate normally spreads Mon–Sat.</p>
-          <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
-            <label>
-              Week
-              <select id="wiWeekSelect" class="w-260"></select>
-            </label>
-            <label>
-              Inspection day
-              <input id="wiWeekPlanDate" type="date" />
-            </label>
-            <button type="button" id="wiSaveWeekPlanBtn">Move all to one day</button>
-            <button type="button" id="wiSpreadWeekBtn">Re-spread Mon–Sat</button>
-          </div>
-        </div>
-        <div id="wiMsg" class="muted">Loading weekly inspection calendar...</div>
+        <div id="wiMsg" class="muted">Loading calendar...</div>
         <div id="wiMonthTitle" style="font-weight:700; font-size:1.1rem; margin:8px 0;"></div>
-        <h4 style="margin:0 0 8px;">Daily inspection lineup</h4>
-        <div id="wiDayAgenda" class="wi-day-agenda"></div>
-        <h4 style="margin:16px 0 8px;">Month calendar</h4>
-        <div id="wiCalendarWrap" style="overflow:auto;"></div>
-        <h4 style="margin:16px 0 8px;">Scheduled equipment</h4>
+        <div id="wiWeeklyGaps" class="wi-weekly-gaps wi-no-print"></div>
+        <div id="wiCalendarWrap" class="wi-month-grid-wrap"></div>
+        <div id="wiDayPanel" class="card wi-day-panel wi-no-print" style="display:none; padding:12px; margin-top:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+            <h4 id="wiDayPanelTitle" style="margin:0;"></h4>
+            <button type="button" id="wiCloseDayPanelBtn">Close</button>
+          </div>
+          <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end; margin-bottom:8px;">
+            <label>
+              Equipment
+              <select id="wiDayAssetSelect" class="w-260"></select>
+            </label>
+            <label>
+              Est. minutes
+              <input id="wiDayEst" type="number" min="5" step="5" value="30" class="w-90" />
+            </label>
+            <button type="button" id="wiAddSlotBtn">Add to this day</button>
+          </div>
+          <div id="wiDaySlotList" class="wi-day-slot-list"></div>
+        </div>
+        <h4 style="margin:16px 0 8px;">Workshop roster</h4>
         <div id="wiAssetList" class="list"></div>
       </div>
     </div>
@@ -1615,6 +1586,6 @@
 
   </div>
 
-  <script src="./maintenance.js?v=26"></script>
+  <script src="./maintenance.js?v=27"></script>
 </body>
 </html>

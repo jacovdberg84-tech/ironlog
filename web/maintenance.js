@@ -216,7 +216,6 @@ function refreshTopViewData(view) {
       break;
     case "wi":
       loadWeeklyInspectionCalendar().catch(() => {});
-      loadWeeklyInspectionCandidates().catch(() => {});
       break;
     case "kpi":
       loadAssetKpiWeekly().catch(() => {});
@@ -2824,6 +2823,7 @@ async function saveTyreInspection() {
 }
 
 let wiCalendarCache = null;
+let wiSelectedDate = "";
 
 function wiMonthInput() {
   return document.getElementById("wiMonth");
@@ -2859,17 +2859,6 @@ function wiMonthTitle(ym) {
   return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
-function wiWeekHeader(w) {
-  const start = String(w?.week_start || "");
-  const end = String(w?.week_end || "");
-  if (!start || !end) return "-";
-  const fmt = (ymd) => {
-    const d = new Date(`${ymd}T12:00:00`);
-    return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
-  };
-  return `${fmt(start)} – ${fmt(end)}`;
-}
-
 function wiNextStatus(status) {
   const s = String(status || "pending").toLowerCase();
   if (s === "pending") return "done";
@@ -2898,18 +2887,32 @@ function wiFormatDayTitle(ymd) {
   return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
 }
 
+function wiSlotChipClass(status) {
+  const s = String(status || "pending").toLowerCase();
+  if (s === "done") return "wi-slot-chip--released";
+  if (s === "skipped") return "wi-slot-chip--skipped";
+  return "wi-slot-chip--pending";
+}
+
+function populateWiDayAssetSelect(assets) {
+  const sel = document.getElementById("wiDayAssetSelect");
+  if (!sel) return;
+  const rows = Array.isArray(assets) ? assets : [];
+  if (!rows.length) {
+    sel.innerHTML = `<option value="">Add equipment to roster first</option>`;
+    return;
+  }
+  sel.innerHTML = `<option value="">Select equipment</option>${rows.map((a) =>
+    `<option value="${Number(a.asset_id)}">${esc(a.asset_code)} — ${esc(a.asset_name)}</option>`
+  ).join("")}`;
+}
+
 function renderWeeklyInspectionCompliance(compliance) {
   const card = document.getElementById("wiComplianceCard");
   if (!card) return;
   const c = compliance || {};
-  const score = Number(c.score ?? 0);
-  const scoreClass = score >= 90 ? "wi-kpi--good" : score >= 70 ? "wi-kpi--warn" : "wi-kpi--bad";
+  const gaps = Array.isArray(c.weekly_gaps) ? c.weekly_gaps.length : 0;
   card.innerHTML = `
-    <div class="wi-kpi ${scoreClass}">
-      <div class="wi-kpi-value">${score}%</div>
-      <div class="wi-kpi-label">Compliance score</div>
-      <div class="wi-kpi-meta">${Number(c.completion_pct ?? 0)}% released · -${Number(c.penalty_points ?? 0)} not released</div>
-    </div>
     <div class="wi-kpi">
       <div class="wi-kpi-value">${Number(c.done_count ?? 0)} / ${Number(c.total_slots ?? 0)}</div>
       <div class="wi-kpi-label">Released</div>
@@ -2917,8 +2920,13 @@ function renderWeeklyInspectionCompliance(compliance) {
     </div>
     <div class="wi-kpi wi-kpi--bad">
       <div class="wi-kpi-value">${Number(c.not_released_count ?? 0)}</div>
-      <div class="wi-kpi-label">Not released</div>
-      <div class="wi-kpi-meta">-5 pts each on compliance</div>
+      <div class="wi-kpi-label">Overdue</div>
+      <div class="wi-kpi-meta">Past date, not released</div>
+    </div>
+    <div class="wi-kpi${gaps ? " wi-kpi--warn" : ""}">
+      <div class="wi-kpi-value">${gaps}</div>
+      <div class="wi-kpi-label">Missing weekly visit</div>
+      <div class="wi-kpi-meta">Roster machine with no slot that week</div>
     </div>
     <div class="wi-kpi">
       <div class="wi-kpi-value">${wiFormatMinutes(c.est_minutes_total)}</div>
@@ -2928,80 +2936,39 @@ function renderWeeklyInspectionCompliance(compliance) {
   `;
 }
 
-function renderWeeklyInspectionDayAgenda(data) {
-  const wrap = document.getElementById("wiDayAgenda");
+function renderWeeklyInspectionWeeklyGaps(compliance) {
+  const wrap = document.getElementById("wiWeeklyGaps");
   if (!wrap) return;
-  const days = Array.isArray(data?.compliance?.day_agenda) ? data.compliance.day_agenda : [];
-  if (!days.length) {
-    wrap.innerHTML = `<div class="empty">Add equipment to build the daily inspection lineup.</div>`;
+  const gaps = Array.isArray(compliance?.weekly_gaps) ? compliance.weekly_gaps : [];
+  if (!gaps.length) {
+    wrap.innerHTML = "";
     return;
   }
-  wrap.innerHTML = days.map((day) => {
-    const items = Array.isArray(day.items) ? day.items : [];
-    const chips = items.map((it) => {
-      const st = String(it.status || "pending").toLowerCase();
-      const cls = st === "done" ? "wi-chip--released" : st === "skipped" ? "wi-chip--skipped" : "wi-chip--pending";
-      return `<span class="wi-chip ${cls}" title="${esc(wiStatusLabel(st))}">${esc(it.asset_code)} · ${wiFormatMinutes(it.est_minutes)}</span>`;
-    }).join("");
-    const cap = Number(day.capacity_minutes || 0);
-    const used = Number(day.est_minutes || 0);
-    const capLabel = cap > 0 ? ` · ${wiFormatMinutes(used)} / ${wiFormatMinutes(cap)}` : ` · ${wiFormatMinutes(used)} planned`;
-    const overCap = cap > 0 && used > cap;
-    return `
-      <div class="wi-day-card${overCap ? " wi-day-card--over" : ""}">
-        <div class="wi-day-head">
-          <strong>${esc(wiFormatDayTitle(day.date))}</strong>
-          <span class="muted mini">${items.length} machine${items.length === 1 ? "" : "s"}${capLabel}</span>
-        </div>
-        <div class="wi-day-chips">${chips || `<span class="muted mini">No machines planned</span>`}</div>
-      </div>
-    `;
-  }).join("");
+  const lines = gaps.slice(0, 12).map((g) =>
+    `<span class="wi-gap-chip">${esc(g.asset_code)} · week ${esc(String(g.week_start || "").slice(5))}</span>`
+  ).join("");
+  const more = gaps.length > 12 ? `<span class="muted mini">+${gaps.length - 12} more</span>` : "";
+  wrap.innerHTML = `
+    <div class="wi-weekly-gaps-box">
+      <strong>Missing weekly workshop visit</strong>
+      <div class="wi-gap-chips">${lines}${more}</div>
+    </div>
+  `;
 }
 
-function populateWeeklyInspectionWeekSelect(data) {
-  const sel = document.getElementById("wiWeekSelect");
-  const dateInp = document.getElementById("wiWeekPlanDate");
-  if (!sel) return;
-  const weeks = Array.isArray(data?.weeks) ? data.weeks : [];
-  const summary = Array.isArray(data?.week_plan_summary) ? data.week_plan_summary : [];
-  const cur = String(sel.value || "");
-  sel.innerHTML = weeks.map((w) => {
-    const sum = summary.find((s) => String(s.week_start) === String(w.week_start));
-    const dayCount = Array.isArray(sum?.planned_dates) ? sum.planned_dates.length : (sum?.planned_date ? 1 : 0);
-    const spread = dayCount > 1 ? ` · ${dayCount} days` : "";
-    const sat = sum?.saturday_minutes ? ` · Sat ${wiFormatMinutes(sum.saturday_minutes)}` : "";
-    const label = `${wiWeekHeader(w)}${spread}${sat}`;
-    return `<option value="${esc(w.week_start)}">${esc(label)}</option>`;
-  }).join("");
-  if (cur && weeks.some((w) => String(w.week_start) === cur)) sel.value = cur;
-  else if (weeks.length) sel.value = String(weeks[0].week_start);
-  const active = summary.find((s) => String(s.week_start) === String(sel.value));
-  if (dateInp) dateInp.value = String(active?.planned_date || sel.value || "");
-}
-
-function renderWeeklyInspectionAssetList(assets, compliance) {
+function renderWeeklyInspectionAssetList(assets) {
   const list = document.getElementById("wiAssetList");
   if (!list) return;
   const rows = Array.isArray(assets) ? assets : [];
-  const scoreByAsset = {};
-  for (const row of (Array.isArray(compliance?.by_asset) ? compliance.by_asset : [])) {
-    scoreByAsset[Number(row.asset_id)] = row;
-  }
   if (!rows.length) {
-    list.innerHTML = `<div class="empty">No equipment on the weekly schedule yet. Add assets above.</div>`;
+    list.innerHTML = `<div class="empty">No equipment on the workshop roster yet. Add machines above, then click calendar days to schedule them.</div>`;
     return;
   }
-  list.innerHTML = rows.map((a) => {
-    const scoreRow = scoreByAsset[Number(a.asset_id)] || {};
-    const score = Number(scoreRow.score ?? 100);
-    const notReleased = Number(scoreRow.not_released ?? 0);
-    const scoreCls = score >= 90 ? "wi-score-good" : score >= 70 ? "wi-score-warn" : "wi-score-bad";
-    return `
+  list.innerHTML = rows.map((a) => `
     <div class="item" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
       <div>
         <strong>${esc(a.asset_code)}</strong> — ${esc(a.asset_name)}
-        <div class="muted mini">Default est. ${wiFormatMinutes(a.est_minutes || 30)} · <span class="${scoreCls}">Compliance ${score}%</span>${notReleased ? ` · <span class="wi-score-bad">${notReleased} not released</span>` : ""}</div>
+        <div class="muted mini">Default est. ${wiFormatMinutes(a.est_minutes || 30)}</div>
         ${a.notes ? `<div class="muted mini">${esc(a.notes)}</div>` : ""}
       </div>
       <div class="row stack-10 wi-no-print" style="align-items:center;">
@@ -3013,122 +2980,126 @@ function renderWeeklyInspectionAssetList(assets, compliance) {
         <button type="button" data-wi-remove="${Number(a.id)}">Remove</button>
       </div>
     </div>
-  `;
-  }).join("");
+  `).join("");
+}
+
+function renderWiDaySlotList(date) {
+  const list = document.getElementById("wiDaySlotList");
+  if (!list) return;
+  const weeks = Array.isArray(wiCalendarCache?.calendar_weeks) ? wiCalendarCache.calendar_weeks : [];
+  let slots = [];
+  for (const row of weeks) {
+    const cell = (row || []).find((c) => String(c?.date) === String(date));
+    if (cell) {
+      slots = Array.isArray(cell.slots) ? cell.slots : [];
+      break;
+    }
+  }
+  if (!slots.length) {
+    list.innerHTML = `<div class="empty">No equipment scheduled for this day yet.</div>`;
+    return;
+  }
+  list.innerHTML = slots.map((slot) => `
+    <div class="wi-day-slot-row">
+      <button
+        type="button"
+        class="wi-slot-chip ${wiSlotChipClass(slot.status)}"
+        data-wi-slot-status="${Number(slot.id)}"
+        data-wi-status="${esc(String(slot.status || "pending"))}"
+        title="Click to cycle status"
+      >${esc(slot.asset_code)} · ${wiFormatMinutes(slot.est_minutes)} · ${esc(wiStatusLabel(slot.status))}</button>
+      <button type="button" class="wi-slot-remove" data-wi-slot-remove="${Number(slot.id)}">Remove</button>
+    </div>
+  `).join("");
+}
+
+function openWiDayPanel(date) {
+  wiSelectedDate = String(date || "");
+  const panel = document.getElementById("wiDayPanel");
+  const title = document.getElementById("wiDayPanelTitle");
+  if (!panel || !wiSelectedDate) return;
+  if (title) title.textContent = wiFormatDayTitle(wiSelectedDate);
+  const estInp = document.getElementById("wiDayEst");
+  if (estInp && !estInp.value) estInp.value = "30";
+  populateWiDayAssetSelect(wiCalendarCache?.assets || []);
+  renderWiDaySlotList(wiSelectedDate);
+  panel.style.display = "block";
+  panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function closeWiDayPanel() {
+  wiSelectedDate = "";
+  const panel = document.getElementById("wiDayPanel");
+  if (panel) panel.style.display = "none";
 }
 
 function renderWeeklyInspectionCalendar(data) {
   const wrap = document.getElementById("wiCalendarWrap");
   const title = document.getElementById("wiMonthTitle");
   if (!wrap) return;
-  const assets = Array.isArray(data?.assets) ? data.assets : [];
-  const weeks = Array.isArray(data?.weeks) ? data.weeks : [];
-  const entries = data?.entries || {};
-  const plans = data?.plans || {};
-  const weekSummary = Array.isArray(data?.week_plan_summary) ? data.week_plan_summary : [];
+  const weeks = Array.isArray(data?.calendar_weeks) ? data.calendar_weeks : [];
   if (title) title.textContent = wiMonthTitle(data?.month || wiCurrentMonth());
   renderWeeklyInspectionCompliance(data?.compliance);
-  renderWeeklyInspectionDayAgenda(data);
-  populateWeeklyInspectionWeekSelect(data);
-  renderWeeklyInspectionAssetList(assets, data?.compliance);
+  renderWeeklyInspectionWeeklyGaps(data?.compliance);
+  renderWeeklyInspectionAssetList(data?.assets || []);
+  populateWiDayAssetSelect(data?.assets || []);
   if (!weeks.length) {
-    wrap.innerHTML = `<div class="empty">No weeks found for this month.</div>`;
+    wrap.innerHTML = `<div class="empty">No calendar data for this month.</div>`;
     return;
   }
-  const plannedAssetIds = new Set(
-    Object.keys(plans).map((k) => Number(String(k).split("|")[0])).filter((n) => n > 0)
-  );
-  const calendarAssets = assets.filter((a) => plannedAssetIds.has(Number(a.asset_id)));
-  if (!calendarAssets.length) {
-    wrap.innerHTML = `<div class="empty">Load in-use equipment, select machines, and click <b>Generate month schedule</b> to build the calendar.</div>`;
-    return;
-  }
-  const head = weeks.map((w) => {
-    const sum = weekSummary.find((s) => String(s.week_start) === String(w.week_start));
-    const dayCount = Array.isArray(sum?.planned_dates) ? sum.planned_dates.length : 0;
-    const estTotal = sum?.est_minutes_total ? wiFormatMinutes(sum.est_minutes_total) : "";
-    const satUsed = sum?.saturday_minutes ? wiFormatMinutes(sum.saturday_minutes) : "";
-    return `<th class="wi-week-col">
-      <div>${esc(wiWeekHeader(w))}</div>
-      ${dayCount > 1 ? `<div class="wi-week-sub">Mon–Sat · ${dayCount} days</div>` : ""}
-      ${estTotal ? `<div class="wi-week-sub">${esc(estTotal)} planned</div>` : ""}
-      ${satUsed ? `<div class="wi-week-sub">Sat ${esc(satUsed)}</div>` : ""}
-    </th>`;
-  }).join("");
-  const body = calendarAssets.map((a) => {
-    const assetId = Number(a.asset_id);
-    const cells = weeks.map((w) => {
-      const key = `${assetId}|${String(w.week_start)}`;
-      const plan = plans[key];
-      if (!plan) {
-        return `<td><span class="wi-cell-static wi-cell--unscheduled">—</span></td>`;
+  const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const head = dayNames.map((d) => `<div class="wi-month-dow">${d}</div>`).join("");
+  const body = weeks.map((row) => {
+    const cells = (row || []).map((cell) => {
+      if (!cell?.in_month || !cell?.date) {
+        return `<div class="wi-month-cell wi-month-cell--pad"></div>`;
       }
-      const entry = entries[key] || {};
-      const status = String(entry.status || "pending").toLowerCase();
-      const est = Number(plan.est_minutes ?? a.est_minutes ?? 30);
-      const inspector = String(entry.inspector_name || "").trim();
-      const plannedDate = String(plan.planned_date || w.week_start);
-      const dayShort = new Date(`${plannedDate}T12:00:00`).toLocaleDateString(undefined, { weekday: "short" });
-      const tip = [inspector ? `Inspector: ${inspector}` : "", `Planned: ${wiFormatDayTitle(plannedDate)}`, `Est: ${wiFormatMinutes(est)}`].filter(Boolean).join(" · ");
-      const titleAttr = tip ? ` title="${esc(tip)}"` : "";
+      const slots = Array.isArray(cell.slots) ? cell.slots : [];
+      const chips = slots.map((slot) => `
+        <button
+          type="button"
+          class="wi-slot-chip ${wiSlotChipClass(slot.status)}"
+          data-wi-slot-status="${Number(slot.id)}"
+          data-wi-status="${esc(String(slot.status || "pending"))}"
+          title="${esc(wiStatusLabel(slot.status))}"
+        >${esc(slot.asset_code)}</button>
+      `).join("");
+      const todayCls = cell.is_today ? " wi-month-cell--today" : "";
+      const selectedCls = String(cell.date) === wiSelectedDate ? " wi-month-cell--selected" : "";
       return `
-        <td>
-          <button
-            type="button"
-            class="wi-cell wi-cell--${esc(status)}"
-            data-wi-cell="1"
-            data-wi-asset="${assetId}"
-            data-wi-week="${esc(w.week_start)}"
-            data-wi-status="${esc(status)}"
-            ${titleAttr}
-          >
-            <span class="wi-cell-day">${esc(dayShort)}</span>
-            <span class="wi-cell-status">${esc(wiStatusLabel(status))}</span>
-            <span class="wi-cell-est">${esc(wiFormatMinutes(est))}</span>
-          </button>
-        </td>
+        <button type="button" class="wi-month-cell${todayCls}${selectedCls}" data-wi-open-day="${esc(cell.date)}">
+          <div class="wi-month-daynum">${Number(cell.day || 0)}</div>
+          <div class="wi-month-chips">${chips}</div>
+        </button>
       `;
     }).join("");
-    return `
-      <tr>
-        <th class="wi-asset-col">
-          <div class="wi-asset-code">${esc(a.asset_code)}</div>
-          <div class="wi-asset-name">${esc(a.asset_name)}</div>
-        </th>
-        ${cells}
-      </tr>
-    `;
+    return `<div class="wi-month-row">${cells}</div>`;
   }).join("");
   wrap.innerHTML = `
-    <table class="wi-calendar-table">
-      <thead>
-        <tr>
-          <th class="wi-asset-col">Equipment</th>
-          ${head}
-        </tr>
-      </thead>
-      <tbody>${body}</tbody>
-    </table>
+    <div class="wi-month-grid">
+      <div class="wi-month-head">${head}</div>
+      ${body}
+    </div>
   `;
+  if (wiSelectedDate) renderWiDaySlotList(wiSelectedDate);
 }
 
 async function loadWeeklyInspectionCalendar() {
   const wrap = document.getElementById("wiCalendarWrap");
   if (wrap) wrap.innerHTML = `<div class="empty">Loading calendar...</div>`;
-  wiSetMsg("Loading weekly inspection calendar...");
+  wiSetMsg("Loading workshop calendar...");
   const q = new URLSearchParams();
   q.set("month", wiCurrentMonth());
   try {
     const res = await fetch(`${API}/maintenance/weekly-inspections/calendar?${q.toString()}`);
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to load weekly inspection calendar");
+    if (!res.ok) throw new Error(data.error || "Failed to load calendar");
     wiCalendarCache = data;
     renderWeeklyInspectionCalendar(data);
     const assetCount = Array.isArray(data.assets) ? data.assets.length : 0;
-    const weekCount = Array.isArray(data.weeks) ? data.weeks.length : 0;
-    const score = Number(data?.compliance?.score ?? 0);
-    const notReleased = Number(data?.compliance?.not_released_count ?? 0);
-    wiSetMsg(`${assetCount} scheduled asset${assetCount === 1 ? "" : "s"} · ${weekCount} week${weekCount === 1 ? "" : "s"} · compliance ${score}%${notReleased ? ` · ${notReleased} not released` : ""}.`);
+    const slotCount = Number(data?.compliance?.total_slots ?? 0);
+    const gaps = Array.isArray(data?.compliance?.weekly_gaps) ? data.compliance.weekly_gaps.length : 0;
+    wiSetMsg(`${assetCount} roster machine${assetCount === 1 ? "" : "s"} · ${slotCount} scheduled visit${slotCount === 1 ? "" : "s"}${gaps ? ` · ${gaps} missing weekly visit${gaps === 1 ? "" : "s"}` : ""}.`);
   } catch (e) {
     wiCalendarCache = null;
     if (wrap) wrap.innerHTML = `<div class="empty">Load failed: ${esc(e.message || String(e))}</div>`;
@@ -3136,7 +3107,7 @@ async function loadWeeklyInspectionCalendar() {
   }
 }
 
-async function cycleWeeklyInspectionCell(assetId, weekStart, currentStatus) {
+async function cycleWeeklyInspectionSlot(slotId, currentStatus) {
   const next = wiNextStatus(currentStatus);
   const inspector_name = String(document.getElementById("wiInspector")?.value || "").trim();
   wiSetMsg("Saving...");
@@ -3144,25 +3115,63 @@ async function cycleWeeklyInspectionCell(assetId, weekStart, currentStatus) {
     const res = await fetch(`${API}/maintenance/weekly-inspections/entries`, {
       method: "PUT",
       headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({
-        asset_id: Number(assetId),
-        week_start: String(weekStart),
-        status: next,
-        inspector_name,
-      }),
+      body: JSON.stringify({ slot_id: Number(slotId), status: next, inspector_name }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to update inspection entry");
-    if (wiCalendarCache?.entries) {
-      const key = `${Number(assetId)}|${String(weekStart)}`;
-      wiCalendarCache.entries[key] = data.entry || { status: next, inspector_name };
-      renderWeeklyInspectionCalendar(wiCalendarCache);
-      wiSetMsg(`Marked ${wiStatusLabel(next).toLowerCase()} for week of ${weekStart}.`);
-      return;
-    }
+    if (!res.ok) throw new Error(data.error || "Failed to update status");
     await loadWeeklyInspectionCalendar();
+    if (wiSelectedDate) openWiDayPanel(wiSelectedDate);
+    wiSetMsg(`Marked ${wiStatusLabel(next).toLowerCase()}.`);
   } catch (e) {
     wiSetMsg(`Update failed: ${e.message || e}`, true);
+  }
+}
+
+async function addWeeklyInspectionSlot() {
+  const planned_date = String(wiSelectedDate || "").trim();
+  const asset_id = Number(document.getElementById("wiDayAssetSelect")?.value || 0);
+  const est_minutes = Math.max(5, Number(document.getElementById("wiDayEst")?.value || 30) || 30);
+  if (!planned_date) {
+    wiSetMsg("Click a calendar day first.", true);
+    return;
+  }
+  if (!asset_id) {
+    wiSetMsg("Select equipment to schedule.", true);
+    return;
+  }
+  wiSetMsg("Adding to day...");
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-inspections/slots`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ planned_date, asset_id, est_minutes }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to add equipment to day");
+    await loadWeeklyInspectionCalendar();
+    openWiDayPanel(planned_date);
+    wiSetMsg(`Added to ${wiFormatDayTitle(planned_date)}.`);
+  } catch (e) {
+    wiSetMsg(`Add failed: ${e.message || e}`, true);
+  }
+}
+
+async function removeWeeklyInspectionSlot(slotId) {
+  const id = Number(slotId || 0);
+  if (!id) return;
+  wiSetMsg("Removing...");
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-inspections/slots/${id}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to remove slot");
+    await loadWeeklyInspectionCalendar();
+    if (wiSelectedDate) openWiDayPanel(wiSelectedDate);
+    wiSetMsg("Removed from day.");
+  } catch (e) {
+    wiSetMsg(`Remove failed: ${e.message || e}`, true);
   }
 }
 
@@ -3181,36 +3190,9 @@ async function saveWeeklyInspectionAssetEst(id) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to save estimate");
     await loadWeeklyInspectionCalendar();
-    wiSetMsg("Estimate time saved.");
+    wiSetMsg("Default estimate saved.");
   } catch (e) {
     wiSetMsg(`Save failed: ${e.message || e}`, true);
-  }
-}
-
-async function saveWeeklyInspectionWeekPlan() {
-  const week_start = String(document.getElementById("wiWeekSelect")?.value || "").trim();
-  const planned_date = String(document.getElementById("wiWeekPlanDate")?.value || "").trim();
-  if (!week_start || !planned_date) {
-    wiSetMsg("Select a week and inspection day.", true);
-    return;
-  }
-  if (!window.confirm(
-    `Move every inspection in the week of ${week_start} to ${wiFormatDayTitle(planned_date)}?\n` +
-    "This overrides the Mon–Sat spread for that week."
-  )) return;
-  wiSetMsg("Saving week plan...");
-  try {
-    const res = await fetch(`${API}/maintenance/weekly-inspections/week-plan`, {
-      method: "PUT",
-      headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ week_start, planned_date }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to save week plan");
-    await loadWeeklyInspectionCalendar();
-    wiSetMsg(`Inspection day set to ${wiFormatDayTitle(planned_date)}.`);
-  } catch (e) {
-    wiSetMsg(`Week plan failed: ${e.message || e}`, true);
   }
 }
 
@@ -3222,7 +3204,7 @@ async function addWeeklyInspectionAsset() {
     wiSetMsg("Select equipment to add.", true);
     return;
   }
-  wiSetMsg("Adding equipment...");
+  wiSetMsg("Adding to roster...");
   try {
     const res = await fetch(`${API}/maintenance/weekly-inspections/assets`, {
       method: "POST",
@@ -3234,7 +3216,7 @@ async function addWeeklyInspectionAsset() {
     const notesInp = document.getElementById("wiAssetNotes");
     if (notesInp) notesInp.value = "";
     await loadWeeklyInspectionCalendar();
-    wiSetMsg("Equipment added to weekly schedule.");
+    wiSetMsg("Equipment added to workshop roster.");
   } catch (e) {
     wiSetMsg(`Add failed: ${e.message || e}`, true);
   }
@@ -3243,7 +3225,7 @@ async function addWeeklyInspectionAsset() {
 async function removeWeeklyInspectionAsset(id) {
   const rowId = Number(id || 0);
   if (!rowId) return;
-  if (!window.confirm("Remove this equipment from the weekly inspection schedule?")) return;
+  if (!window.confirm("Remove this equipment from the workshop roster?")) return;
   wiSetMsg("Removing...");
   try {
     const res = await fetch(`${API}/maintenance/weekly-inspections/assets/${rowId}`, {
@@ -3253,33 +3235,9 @@ async function removeWeeklyInspectionAsset(id) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to remove equipment");
     await loadWeeklyInspectionCalendar();
-    wiSetMsg("Equipment removed from weekly schedule.");
+    wiSetMsg("Equipment removed from roster.");
   } catch (e) {
     wiSetMsg(`Remove failed: ${e.message || e}`, true);
-  }
-}
-
-async function spreadWeeklyInspectionWeek() {
-  const week_start = String(document.getElementById("wiWeekSelect")?.value || "").trim();
-  if (!week_start) {
-    wiSetMsg("Select a week to re-spread.", true);
-    return;
-  }
-  const weekday_minutes = Math.max(15, Number(document.getElementById("wiWeekdayCapacity")?.value || 120) || 120);
-  const saturday_hours = Math.max(1, Number(document.getElementById("wiSaturdayHours")?.value || 5) || 5);
-  wiSetMsg("Re-spreading inspections across Mon–Sat...");
-  try {
-    const res = await fetch(`${API}/maintenance/weekly-inspections/spread-week`, {
-      method: "POST",
-      headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ week_start, weekday_minutes, saturday_hours }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to re-spread week");
-    await loadWeeklyInspectionCalendar();
-    wiSetMsg(`Re-spread ${Number(data.assignment_count || 0)} inspection(s) for week of ${week_start}.`);
-  } catch (e) {
-    wiSetMsg(`Re-spread failed: ${e.message || e}`, true);
   }
 }
 
@@ -3299,7 +3257,7 @@ async function openWeeklyInspectionPdf(download = false) {
     if (download) {
       const a = document.createElement("a");
       a.href = blobUrl;
-      a.download = `weekly-inspections-${wiCurrentMonth()}.pdf`;
+      a.download = `workshop-inspections-${wiCurrentMonth()}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -3319,91 +3277,6 @@ function printWeeklyInspectionCalendar() {
   window.addEventListener("afterprint", cleanup, { once: true });
   window.print();
   setTimeout(cleanup, 2000);
-}
-
-let wiCandidateAssets = [];
-
-function renderWeeklyInspectionCandidateGroups(groups) {
-  const wrap = document.getElementById("wiCandidateGroups");
-  if (!wrap) return;
-  const groupMap = groups && typeof groups === "object" ? groups : {};
-  const keys = Object.keys(groupMap).sort((a, b) => a.localeCompare(b));
-  if (!keys.length) {
-    wrap.innerHTML = `<div class="empty">No in-use equipment found for the selected lookback period.</div>`;
-    return;
-  }
-  wrap.innerHTML = keys.map((cat) => {
-    const rows = Array.isArray(groupMap[cat]) ? groupMap[cat] : [];
-    const items = rows.map((r) => `
-      <label class="wi-candidate-item chk">
-        <input type="checkbox" class="wi-candidate-cb" value="${Number(r.asset_id)}" checked />
-        <span><strong>${esc(r.asset_code)}</strong> — ${esc(r.asset_name || "")} <span class="muted">(${Number(r.recent_hours || 0).toFixed(1)} h)</span></span>
-      </label>
-    `).join("");
-    return `
-      <div class="wi-candidate-group">
-        <div class="wi-candidate-group-title">${esc(cat)} <span class="muted">(${rows.length})</span></div>
-        <div class="wi-candidate-group-items">${items}</div>
-      </div>
-    `;
-  }).join("");
-}
-
-function getSelectedWeeklyInspectionCandidateIds() {
-  return Array.from(document.querySelectorAll(".wi-candidate-cb:checked"))
-    .map((el) => Number(el.value || 0))
-    .filter((n) => n > 0);
-}
-
-async function loadWeeklyInspectionCandidates() {
-  const days = Math.max(7, Math.min(120, Number(document.getElementById("wiCandidateDays")?.value || 30) || 30));
-  wiSetMsg("Loading in-use equipment...");
-  try {
-    const res = await fetch(`${API}/maintenance/weekly-inspections/candidate-assets?days=${days}`);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to load in-use equipment");
-    wiCandidateAssets = Array.isArray(data.assets) ? data.assets : [];
-    renderWeeklyInspectionCandidateGroups(data.groups || {});
-    wiSetMsg(`Loaded ${wiCandidateAssets.length} in-use machine${wiCandidateAssets.length === 1 ? "" : "s"} (last ${days} days).`);
-  } catch (e) {
-    wiCandidateAssets = [];
-    renderWeeklyInspectionCandidateGroups({});
-    wiSetMsg(`Load failed: ${e.message || e}`, true);
-  }
-}
-
-async function generateWeeklyInspectionMonth() {
-  const asset_ids = getSelectedWeeklyInspectionCandidateIds();
-  if (!asset_ids.length) {
-    wiSetMsg("Select at least one in-use machine to generate the schedule.", true);
-    return;
-  }
-  const est_minutes = Math.max(5, Number(document.getElementById("wiGenerateEst")?.value || 30) || 30);
-  const weekday_minutes = Math.max(15, Number(document.getElementById("wiWeekdayCapacity")?.value || 120) || 120);
-  const saturday_hours = Math.max(1, Number(document.getElementById("wiSaturdayHours")?.value || 5) || 5);
-  const month = wiCurrentMonth();
-  if (!window.confirm(
-    `Generate inspection schedule for ${wiMonthTitle(month)} using ${asset_ids.length} selected machine(s)?\n` +
-    `Spread Mon–Sat · weekday ${weekday_minutes} min/day · Saturday ${saturday_hours}h block.`
-  )) return;
-  wiSetMsg("Generating month schedule...");
-  try {
-    const res = await fetch(`${API}/maintenance/weekly-inspections/generate`, {
-      method: "POST",
-      headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ month, asset_ids, est_minutes, weekday_minutes, saturday_hours }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to generate schedule");
-    const rotated = (Array.isArray(data.assignments) ? data.assignments : []).filter((a) => a.rotated).length;
-    await loadWeeklyInspectionCalendar();
-    wiSetMsg(
-      `Generated ${Number(data.assignment_count || 0)} weekly slot(s) across ${Number(data.week_count || 0)} week(s) ` +
-      `and ${Number(data.category_count || 0)} equipment group(s)${rotated ? ` · ${rotated} rotation pick(s)` : ""}.`
-    );
-  } catch (e) {
-    wiSetMsg(`Generate failed: ${e.message || e}`, true);
-  }
 }
 
 async function saveManagerInspection() {
@@ -6407,14 +6280,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const wiMonth = document.getElementById("wiMonth");
   if (wiMonth && !wiMonth.value) wiMonth.value = new Date().toISOString().slice(0, 7);
   document.getElementById("wiPrevMonthBtn")?.addEventListener("click", () => {
+    closeWiDayPanel();
     wiShiftMonth(-1);
     loadWeeklyInspectionCalendar().catch(() => {});
   });
   document.getElementById("wiNextMonthBtn")?.addEventListener("click", () => {
+    closeWiDayPanel();
     wiShiftMonth(1);
     loadWeeklyInspectionCalendar().catch(() => {});
   });
   document.getElementById("wiTodayBtn")?.addEventListener("click", () => {
+    closeWiDayPanel();
     wiSetMonth(new Date().toISOString().slice(0, 7));
     loadWeeklyInspectionCalendar().catch(() => {});
   });
@@ -6423,34 +6299,38 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("wiOpenPdfBtn")?.addEventListener("click", () => openWeeklyInspectionPdf(false));
   document.getElementById("wiDownloadPdfBtn")?.addEventListener("click", () => openWeeklyInspectionPdf(true));
   document.getElementById("wiAddAssetBtn")?.addEventListener("click", () => addWeeklyInspectionAsset());
-  document.getElementById("wiLoadCandidatesBtn")?.addEventListener("click", () => loadWeeklyInspectionCandidates());
-  document.getElementById("wiSelectAllCandidatesBtn")?.addEventListener("click", () => {
-    document.querySelectorAll(".wi-candidate-cb").forEach((el) => { el.checked = true; });
+  document.getElementById("wiAddSlotBtn")?.addEventListener("click", () => addWeeklyInspectionSlot());
+  document.getElementById("wiCloseDayPanelBtn")?.addEventListener("click", () => closeWiDayPanel());
+  document.getElementById("wiMonth")?.addEventListener("change", () => {
+    closeWiDayPanel();
+    loadWeeklyInspectionCalendar();
   });
-  document.getElementById("wiClearCandidatesBtn")?.addEventListener("click", () => {
-    document.querySelectorAll(".wi-candidate-cb").forEach((el) => { el.checked = false; });
-  });
-  document.getElementById("wiGenerateMonthBtn")?.addEventListener("click", () => generateWeeklyInspectionMonth());
-  document.getElementById("wiSaveWeekPlanBtn")?.addEventListener("click", () => saveWeeklyInspectionWeekPlan());
-  document.getElementById("wiSpreadWeekBtn")?.addEventListener("click", () => spreadWeeklyInspectionWeek());
-  document.getElementById("wiWeekSelect")?.addEventListener("change", () => {
-    const sel = document.getElementById("wiWeekSelect");
-    const dateInp = document.getElementById("wiWeekPlanDate");
-    const week = String(sel?.value || "");
-    const sum = Array.isArray(wiCalendarCache?.week_plan_summary)
-      ? wiCalendarCache.week_plan_summary.find((s) => String(s.week_start) === week)
-      : null;
-    if (dateInp) dateInp.value = String(sum?.planned_date || week || "");
-  });
-  document.getElementById("wiMonth")?.addEventListener("change", () => loadWeeklyInspectionCalendar());
   document.getElementById("wiCalendarWrap")?.addEventListener("click", (evt) => {
-    const btn = evt.target?.closest?.("button[data-wi-cell]");
-    if (!btn) return;
-    cycleWeeklyInspectionCell(
-      Number(btn.getAttribute("data-wi-asset") || 0),
-      String(btn.getAttribute("data-wi-week") || ""),
-      String(btn.getAttribute("data-wi-status") || "pending"),
+    const dayBtn = evt.target?.closest?.("button[data-wi-open-day]");
+    if (dayBtn) {
+      openWiDayPanel(String(dayBtn.getAttribute("data-wi-open-day") || ""));
+      return;
+    }
+    const slotBtn = evt.target?.closest?.("button[data-wi-slot-status]");
+    if (!slotBtn) return;
+    evt.stopPropagation();
+    cycleWeeklyInspectionSlot(
+      Number(slotBtn.getAttribute("data-wi-slot-status") || 0),
+      String(slotBtn.getAttribute("data-wi-status") || "pending"),
     );
+  });
+  document.getElementById("wiDayPanel")?.addEventListener("click", (evt) => {
+    const slotBtn = evt.target?.closest?.("button[data-wi-slot-status]");
+    if (slotBtn) {
+      cycleWeeklyInspectionSlot(
+        Number(slotBtn.getAttribute("data-wi-slot-status") || 0),
+        String(slotBtn.getAttribute("data-wi-status") || "pending"),
+      );
+      return;
+    }
+    const removeBtn = evt.target?.closest?.("button[data-wi-slot-remove]");
+    if (!removeBtn) return;
+    removeWeeklyInspectionSlot(Number(removeBtn.getAttribute("data-wi-slot-remove") || 0));
   });
   document.getElementById("wiAssetList")?.addEventListener("click", (evt) => {
     const saveBtn = evt.target?.closest?.("button[data-wi-save-est]");
