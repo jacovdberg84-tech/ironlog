@@ -5126,3 +5126,20 @@ body.login-locked .ironmind-help-fab {
     position: static;
   }
 }
+
+body.bare-child-tab .sidebar,
+body.bare-child-tab .sidebar-overlay,
+body.bare-child-tab .topbar,
+body.bare-child-tab .mobile-nav {
+  display: none !important;
+}
+
+body.bare-child-tab .main-content {
+  margin-left: 0 !important;
+  padding: 12px !important;
+  max-width: none !important;
+}
+
+body.bare-child-tab #mainContent > .card.stack-12 {
+  display: none !important;
+}

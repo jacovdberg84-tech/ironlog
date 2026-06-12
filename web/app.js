@@ -193,6 +193,41 @@ function isAllowedDashboardTab(tabKey, allowed) {
   return isMaintenanceChildTab(k) && hasMaintenanceAccessGate();
 }
 
+function isBareChildTabEmbed() {
+  return new URLSearchParams(window.location.search).get("bare") === "1";
+}
+
+function applyBareChildTabView() {
+  if (!isBareChildTabEmbed()) return false;
+  const tab = String(new URLSearchParams(window.location.search).get("tab") || "Breakdowns").trim();
+  if (!tab || !isMaintenanceChildTab(tab)) return false;
+  if (!hasMaintenanceAccessGate()) {
+    location.href = "maintenance.html";
+    return true;
+  }
+  document.body.classList.add("bare-child-tab");
+  document.querySelector(".sidebar")?.style.setProperty("display", "none");
+  document.getElementById("sidebarOverlay")?.style.setProperty("display", "none");
+  document.querySelector(".topbar")?.style.setProperty("display", "none");
+  document.querySelector(".mobile-nav")?.style.setProperty("display", "none");
+  document.querySelector("#mainContent > .card.stack-12")?.style.setProperty("display", "none");
+  document.querySelectorAll(".panel").forEach((p) => p.classList.remove("show"));
+  const panel = qs(`tab-${tab}`);
+  if (panel) panel.classList.add("show");
+  switchTab(tab);
+  return true;
+}
+
+function resolveInitialTabFromUrl() {
+  if (isBareChildTabEmbed()) return;
+  const urlTab = String(new URLSearchParams(window.location.search).get("tab") || "").trim();
+  if (!urlTab || !document.getElementById(`tab-${urlTab}`)) return;
+  if (isMaintenanceChildTab(urlTab) && !hasMaintenanceAccessGate()) return;
+  const allowed = new Set(getEffectiveAllowedTabs());
+  if (!isAllowedDashboardTab(urlTab, allowed)) return;
+  switchTab(urlTab);
+}
+
 const I18N = {
   en: {
     statusReady: "Ready.",
@@ -891,8 +926,7 @@ function applyRoleVisibility() {
         opt.hidden = !roles.some((r) => ["admin", "supervisor"].includes(r));
         return;
       }
-      const blockedByMaintenanceGate = isMaintenanceChildTab(opt.value) && !hasMaintenanceAccessGate();
-      opt.hidden = !allowed.has(opt.value) || blockedByMaintenanceGate;
+      opt.hidden = !isAllowedDashboardTab(opt.value, allowed);
     });
   }
   
@@ -910,8 +944,7 @@ function applyRoleVisibility() {
         item.style.display = allowed.has("maintenance") ? "" : "none";
         return;
       }
-      const blockedByMaintenanceGate = isMaintenanceChildTab(tab) && !hasMaintenanceAccessGate();
-      item.style.display = (!allowed.has(tab) || blockedByMaintenanceGate) ? "none" : "";
+      item.style.display = isAllowedDashboardTab(tab, allowed) ? "" : "none";
     });
     
     // Hide nav sections that are empty
@@ -936,17 +969,27 @@ function applyRoleVisibility() {
   if (!preferredTab && urlAssetCode && allowed.has("vehicle")) {
     preferredTab = "vehicle";
   }
-  if (!activeKey || !allowed.has(activeKey)) {
+  if (isBareChildTabEmbed()) {
+    const bareTab = String(urlParams.get("tab") || "Breakdowns").trim();
+    if (bareTab) switchTab(bareTab);
+    updateSidebarActiveState(bareTab);
+    return;
+  }
+  if (!activeKey || !isAllowedDashboardTab(activeKey, allowed)) {
     const target = preferredTab || allowedList[0];
     if (target) {
       switchTab(target);
+      updateSidebarActiveState(target);
+      return;
     }
   } else if (preferredTab && activeKey !== preferredTab) {
     switchTab(preferredTab);
+    updateSidebarActiveState(preferredTab);
+    return;
   } else if (tabSelect) {
     tabSelect.value = activeKey;
   }
-  
+
   updateSidebarActiveState(activeKey);
 }
 
@@ -11832,6 +11875,10 @@ async function init() {
   initReportCardCollapsible();
   initTasks();
   applyRoleVisibility();
+  if (!isBareChildTabEmbed()) {
+    resolveInitialTabFromUrl();
+  }
+  applyBareChildTabView();
   applyI18n();
   applyGlobalPageTranslation();
 
