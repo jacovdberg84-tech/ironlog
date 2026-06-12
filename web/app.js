@@ -30,6 +30,11 @@ const PRODUCTION_SITE_TABS = [
   "reports",
 ];
 const PRODUCTION_NAV_ENABLED = true;
+/** Dashboard cards hidden during production UI cleanup (remove class `hidden` in index.html to restore). */
+function isDashSectionVisible(id) {
+  const el = qs(id);
+  return Boolean(el && !el.classList.contains("hidden"));
+}
 const DEFAULT_ROLE = "admin";
 const DEFAULT_USER = "admin";
 const DEFAULT_SITE = "main";
@@ -2813,12 +2818,12 @@ async function loadDashboard() {
   setSkeleton("stockList", 2);
   setSkeleton("woList", 2);
   setSkeleton("riskBoardList", 2);
-  setSkeleton("slaList", 2);
-  setSkeleton("syncDiagList", 2);
-  setSkeleton("costTrendList", 2);
+  if (isDashSectionVisible("dashSlaCard")) setSkeleton("slaList", 2);
+  if (isDashSectionVisible("dashSyncDiagCard")) setSkeleton("syncDiagList", 2);
+  if (isDashSectionVisible("dashCostTrendCard")) setSkeleton("costTrendList", 2);
   setSkeleton("costList", 2);
   setSkeleton("lubeList", 2);
-  setSkeleton("stockMonitorList", 2);
+  if (isDashSectionVisible("dashStockMonitorCard")) setSkeleton("stockMonitorList", 2);
   setSkeleton("telematicsFleetList", 2);
 
   const data = await fetchJson(`${API}/api/dashboard?date=${date}&scheduled=${scheduled}`);
@@ -3042,12 +3047,13 @@ async function loadDashboard() {
     }
   }
 
+  const slaList = qs("slaList");
+  if (isDashSectionVisible("dashSlaCard") && slaList) {
   const sla = data.workorder_sla || {};
   const slaSummary = sla.summary || {};
   setText("slaOpen24", Number(slaSummary.open_gt_24h || 0));
   setText("slaProgress48", Number(slaSummary.in_progress_gt_48h || 0));
   setText("slaCompleted12", Number(slaSummary.completed_gt_12h || 0));
-  const slaList = qs("slaList");
   if (slaList) {
     slaList.innerHTML = "";
     (sla.breaches || []).forEach((r) => {
@@ -3073,8 +3079,9 @@ async function loadDashboard() {
     });
     if (!sla.breaches?.length) slaList.appendChild(item("<small>No SLA breaches right now.</small>"));
   }
+  }
 
-  if (slaList && !slaList.dataset.bound) {
+  if (isDashSectionVisible("dashSlaCard") && slaList && !slaList.dataset.bound) {
     slaList.dataset.bound = "1";
     slaList.addEventListener("click", async (evt) => {
       const target = evt.target;
@@ -3114,7 +3121,7 @@ async function loadDashboard() {
 
   const syncDiagList = qs("syncDiagList");
   const syncDiagTrend = qs("syncDiagTrend");
-  if (syncDiagList) {
+  if (isDashSectionVisible("dashSyncDiagCard") && syncDiagList) {
     syncDiagList.innerHTML = "";
     try {
       const sd = await fetchJson(`${API}/api/sync/diagnostics`);
@@ -3212,7 +3219,7 @@ async function loadDashboard() {
   }
 
   const refreshSyncBtn = qs("refreshSyncDiagnostics");
-  if (refreshSyncBtn && !refreshSyncBtn.dataset.bound) {
+  if (isDashSectionVisible("dashSyncDiagCard") && refreshSyncBtn && !refreshSyncBtn.dataset.bound) {
     refreshSyncBtn.dataset.bound = "1";
     refreshSyncBtn.addEventListener("click", () => {
       loadDashboard().catch((e) => setStatus(`Dashboard reload failed: ${e.message || e}`));
@@ -3262,8 +3269,10 @@ async function loadDashboard() {
     });
   }
 
+  let trendRows = [];
+  if (isDashSectionVisible("dashCostTrendCard")) {
   const trend = await fetchJson(`${API}/api/dashboard/cost/trend?months=12`);
-  const trendRows = Array.isArray(trend.rows) ? trend.rows : [];
+  trendRows = Array.isArray(trend.rows) ? trend.rows : [];
   const mom = trend.mom || {};
   setText("ctCurrentMonth", trend.latest?.month || "-");
   setText("ctCurrentTotal", fmtMoney(trend.latest?.total_cost || 0));
@@ -3318,6 +3327,7 @@ async function loadDashboard() {
     });
     if (!trendRows.length) trendList.appendChild(item("<small>No monthly cost trend data.</small>"));
   }
+  }
 
   const costs = data.cost_engine || {};
   setText("cTotalCost", fmtMoney(costs.total_cost));
@@ -3357,7 +3367,9 @@ async function loadDashboard() {
   };
   renderLubeUsageTable(lubeUsageCache);
 
-  await loadStockMonitor().catch(() => {});
+  if (isDashSectionVisible("dashStockMonitorCard")) {
+    await loadStockMonitor().catch(() => {});
+  }
   await loadIronmindInsight({ silent: true }).catch(() => {});
   await loadIronmindHealth().catch(() => {});
   await loadIronmindSettings().catch(() => {});
@@ -12207,7 +12219,9 @@ async function init() {
   loadQualityCenter().catch(() => {});
   // Fuel endpoints are expensive on large datasets; keep initial page load responsive.
   // Users can load these manually from the Fuel tab buttons.
-  loadCostSettings().catch(() => {});
+  if (getSessionRoles().some((r) => ["admin", "supervisor"].includes(r))) {
+    loadCostSettings().catch(() => {});
+  }
   loadLegalDepartments().catch(() => {});
   loadLegalDocs().catch(() => {});
   loadLegalExpiry().catch(() => {});

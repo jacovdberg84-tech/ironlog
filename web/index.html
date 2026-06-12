@@ -446,7 +446,7 @@
             <p class="muted small">Most recent open work orders</p>
           </div>
 
-          <div class="dash-card">
+          <div class="dash-card hidden" id="dashSlaCard" data-dash-hidden="1">
             <div class="dash-card-header">
               <h3>WO SLA Escalations</h3>
             </div>
@@ -471,7 +471,7 @@
             <div class="list" id="slaList"></div>
           </div>
 
-          <div class="dash-card">
+          <div class="dash-card hidden" id="dashSyncDiagCard" data-dash-hidden="1">
             <div class="dash-card-header">
               <h3>Sync Diagnostics</h3>
               <button id="refreshSyncDiagnostics" class="btn-secondary">Refresh</button>
@@ -518,7 +518,7 @@
 
         <!-- Right Column: Cost & Stock Monitor -->
         <div class="dashboard-column">
-          <div class="dash-card">
+          <div class="dash-card hidden" id="dashCostTrendCard" data-dash-hidden="1">
             <div class="dash-card-header">
               <h3>Cost Trend (12 Months)</h3>
             </div>
@@ -568,7 +568,7 @@
             <div class="list" id="costList"></div>
           </div>
 
-          <div class="dash-card">
+          <div class="dash-card hidden" id="dashStockMonitorCard" data-dash-hidden="1">
             <div class="dash-card-header">
               <h3>Stock Monitor</h3>
             </div>
@@ -587,55 +587,6 @@
             </div>
             <div class="list" id="stockMonitorList"></div>
           </div>
-        </div>
-      </div>
-
-      <!-- Cost Setup Section -->
-      <div class="dash-section">
-        <div class="dash-card full-width">
-          <div class="dash-card-header">
-            <h3>Cost Setup</h3>
-            <span class="dash-card-badge">Configuration</span>
-          </div>
-          <div class="cost-setup-grid">
-            <div class="cost-setup-group">
-              <h4>Default Rates</h4>
-              <div class="row">
-                <input id="costFuelDefault" class="w-110" type="number" min="0" step="0.01" placeholder="Fuel/L" />
-                <input id="costLubeDefault" class="w-110" type="number" min="0" step="0.01" placeholder="Lube/Q" />
-                <input id="costLaborDefault" class="w-110" type="number" min="0" step="0.01" placeholder="Labor/hr" />
-                <input id="costDowntimeDefault" class="w-140" type="number" min="0" step="0.01" placeholder="Downtime/hr" />
-              </div>
-              <div class="row">
-                <button id="loadCostSettings" class="btn-secondary">Load Defaults</button>
-                <button id="saveCostSettings" class="btn-primary">Save Defaults</button>
-              </div>
-            </div>
-            <div class="cost-setup-group">
-              <h4>Asset Rates</h4>
-              <div class="row">
-                <input id="costAssetCode" list="assetCodeOptions" class="w-140" placeholder="Asset code" />
-                <input id="costAssetFuel" class="w-110" type="number" min="0" step="0.01" placeholder="Fuel/L" />
-                <input id="costAssetDowntime" class="w-140" type="number" min="0" step="0.01" placeholder="Downtime/hr" />
-                <select id="costAssetUtilMode" class="w-140">
-                  <option value="">Util mode</option>
-                  <option value="hours">hours</option>
-                  <option value="km">km</option>
-                </select>
-                <input id="costAssetKmFactor" class="w-140" type="number" min="0.1" step="0.1" placeholder="KM factor" />
-              </div>
-              <button id="saveCostAssetRates" class="btn-primary">Save Asset Rates</button>
-            </div>
-            <div class="cost-setup-group">
-              <h4>Part Costs</h4>
-              <div class="row">
-                <input id="costPartCode" list="partCodeOptions" class="w-140" placeholder="Part code" />
-                <input id="costPartUnit" class="w-110" type="number" min="0" step="0.01" placeholder="Unit Cost" />
-              </div>
-              <button id="saveCostPartRate" class="btn-primary">Save Part Cost</button>
-            </div>
-          </div>
-          <pre class="output" id="costSetupResult"></pre>
         </div>
       </div>
 
@@ -4615,6 +4566,65 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
               <span>Create logins per workstation or department. Optionally restrict <b>sections</b> (leave none selected to use the role default). Set <code>IRONLOG_AUTH_REQUIRED=true</code> in server <code>.env</code> to require sign-in.</span>
             </div>
+          </div>
+        </div>
+
+        <!-- Cost Setup (moved from Dashboard) -->
+        <div class="dash-card collapsible full-width" data-collapsed="false" id="adminCostSetupCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #ecfdf5; color: #059669;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+              </div>
+              <div>
+                <h3>Cost Setup</h3>
+                <p class="muted small">Default fuel, lube, labor, and downtime rates for the cost engine</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="cost-setup-grid">
+              <div class="cost-setup-group">
+                <h4>Default Rates</h4>
+                <div class="row">
+                  <input id="costFuelDefault" class="w-110" type="number" min="0" step="0.01" placeholder="Fuel/L" />
+                  <input id="costLubeDefault" class="w-110" type="number" min="0" step="0.01" placeholder="Lube/Q" />
+                  <input id="costLaborDefault" class="w-110" type="number" min="0" step="0.01" placeholder="Labor/hr" />
+                  <input id="costDowntimeDefault" class="w-140" type="number" min="0" step="0.01" placeholder="Downtime/hr" />
+                </div>
+                <div class="row">
+                  <button id="loadCostSettings" class="btn-secondary">Load Defaults</button>
+                  <button id="saveCostSettings" class="btn-primary">Save Defaults</button>
+                </div>
+              </div>
+              <div class="cost-setup-group">
+                <h4>Asset Rates</h4>
+                <div class="row">
+                  <input id="costAssetCode" list="assetCodeOptions" class="w-140" placeholder="Asset code" />
+                  <input id="costAssetFuel" class="w-110" type="number" min="0" step="0.01" placeholder="Fuel/L" />
+                  <input id="costAssetDowntime" class="w-140" type="number" min="0" step="0.01" placeholder="Downtime/hr" />
+                  <select id="costAssetUtilMode" class="w-140">
+                    <option value="">Util mode</option>
+                    <option value="hours">hours</option>
+                    <option value="km">km</option>
+                  </select>
+                  <input id="costAssetKmFactor" class="w-140" type="number" min="0.1" step="0.1" placeholder="KM factor" />
+                </div>
+                <button id="saveCostAssetRates" class="btn-primary">Save Asset Rates</button>
+              </div>
+              <div class="cost-setup-group">
+                <h4>Part Costs</h4>
+                <div class="row">
+                  <input id="costPartCode" list="partCodeOptions" class="w-140" placeholder="Part code" />
+                  <input id="costPartUnit" class="w-110" type="number" min="0" step="0.01" placeholder="Unit Cost" />
+                </div>
+                <button id="saveCostPartRate" class="btn-primary">Save Part Cost</button>
+              </div>
+            </div>
+            <pre class="output" id="costSetupResult"></pre>
           </div>
         </div>
 
