@@ -1611,13 +1611,19 @@
               </div>
               <div>
                 <h3>Workshop Library</h3>
-                <p class="muted small">Open the public workshop site and connect faults, manuals, and repairs API endpoints from one place.</p>
+                <p class="muted small">Opens automatically in a new browser tab when you select this section.</p>
               </div>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <p class="muted small" id="workshopLibraryStatus">Opening Workshop Library…</p>
+            <div class="action-buttons" style="margin-top: 12px;">
+              <button type="button" class="btn btn-primary" data-workshop-open="site">Open Library again</button>
             </div>
           </div>
         </div>
 
-        <div class="dash-card collapsible full-width" data-collapsed="false">
+        <div id="workshopLibraryConfigCard" class="dash-card collapsible full-width hidden" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">

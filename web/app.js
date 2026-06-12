@@ -1123,10 +1123,31 @@ function openWorkshopLibraryTarget(kind) {
   const url = getWorkshopLibraryTarget(kind);
   if (!url || !/^https?:\/\//i.test(url)) {
     alert(`Set a valid ${labelMap[kind] || "Workshop Library"} URL first.`);
+    return false;
+  }
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  setStatus(`${labelMap[kind] || "Workshop Library"} opened.`);
+  return Boolean(opened);
+}
+
+function openWorkshopLibraryOnTabActivate() {
+  hydrateWorkshopLibraryInputs();
+  const settings = getWorkshopLibrarySettingsFromInputs();
+  const url = getWorkshopLibraryTarget("site", settings);
+  const statusEl = qs("workshopLibraryStatus");
+  if (!url || !/^https?:\/\//i.test(url)) {
+    if (statusEl) {
+      statusEl.textContent = "Workshop Library URL is not configured.";
+    }
+    setStatus("Workshop Library URL is not configured.");
     return;
   }
-  window.open(url, "_blank", "noopener,noreferrer");
-  setStatus(`${labelMap[kind] || "Workshop Library"} opened.`);
+  const opened = openWorkshopLibraryTarget("site");
+  if (statusEl) {
+    statusEl.textContent = opened
+      ? `Opened ${url} in a new tab. Use the button below if you need to open it again.`
+      : `Could not open a new tab (popup blocked?). Open manually: ${url}`;
+  }
 }
 
 function summarizeWorkshopApiPayload(payload, rawText) {
@@ -5638,6 +5659,9 @@ function switchTab(key) {
   }
   if (k === "assets") {
     loadAssetsFleet().catch(() => {});
+  }
+  if (k === "workshop") {
+    openWorkshopLibraryOnTabActivate();
   }
   try {
     if (typeof window.updateIronmindHelpFabContext === "function") window.updateIronmindHelpFabContext();
