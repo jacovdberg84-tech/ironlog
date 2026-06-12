@@ -166,6 +166,80 @@ function monthRange(monthStr) {
   return { start: fmt(start), end: fmt(end) };
 }
 
+/** Calendar months overlapping an inclusive date range (YYYY-MM-DD). */
+function monthsInRange(start, end) {
+  const months = [];
+  const [sy, sm] = String(start).split("-").map((n) => Number(n));
+  const [ey, em] = String(end).split("-").map((n) => Number(n));
+  if (!Number.isFinite(sy) || !Number.isFinite(sm) || !Number.isFinite(ey) || !Number.isFinite(em)) return months;
+  let y = sy;
+  let m = sm;
+  while (y < ey || (y === ey && m <= em)) {
+    const label = `${y}-${String(m).padStart(2, "0")}`;
+    const { start: monthStart, end: monthEnd } = monthRange(label);
+    const rangeStart = monthStart < start ? start : monthStart;
+    const rangeEnd = monthEnd > end ? end : monthEnd;
+    if (rangeStart <= rangeEnd) {
+      months.push({ label, start: rangeStart, end: rangeEnd });
+    }
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return months;
+}
+
+const FUEL_BENCHMARK_BY_ASSET_COLUMNS = [
+  { header: "Asset Code", key: "asset_code", width: 16 },
+  { header: "Asset Name", key: "asset_name", width: 32 },
+  { header: "Category", key: "category", width: 18 },
+  { header: "Mode", key: "metric_mode", width: 10 },
+  { header: "Fuel Liters", key: "fuel_liters", width: 14 },
+  { header: "Km Run", key: "km_run", width: 12 },
+  { header: "Hours Run", key: "hours_run", width: 12 },
+  { header: "Actual L/hr", key: "actual_lph", width: 12 },
+  { header: "OEM L/hr", key: "oem_lph", width: 12 },
+  { header: "Threshold L/hr", key: "threshold_lph", width: 14 },
+  { header: "Variance L/hr", key: "variance_lph", width: 14 },
+  { header: "Actual km/L", key: "actual_km_per_l", width: 12 },
+  { header: "OEM km/L", key: "oem_km_per_l", width: 12 },
+  { header: "Threshold km/L", key: "threshold_km_per_l", width: 14 },
+  { header: "Variance km/L", key: "variance_km_per_l", width: 14 },
+  { header: "Fill Count", key: "fill_count", width: 10 },
+  { header: "Flag", key: "flag", width: 12 },
+];
+
+function addFuelBenchmarkByAssetWorksheet(wb, sheetName, rows, emptyMessage = "No fuel benchmark data for period") {
+  const ws = wb.addWorksheet(sheetName);
+  ws.columns = FUEL_BENCHMARK_BY_ASSET_COLUMNS;
+  if (rows.length) {
+    ws.addRows(rows);
+  } else {
+    ws.addRow({
+      asset_code: "-",
+      asset_name: emptyMessage,
+      category: "",
+      metric_mode: "-",
+      fuel_liters: "",
+      km_run: "",
+      hours_run: "",
+      actual_lph: "",
+      oem_lph: "",
+      threshold_lph: "",
+      variance_lph: "",
+      actual_km_per_l: "",
+      oem_km_per_l: "",
+      threshold_km_per_l: "",
+      variance_km_per_l: "",
+      fill_count: "",
+      flag: "",
+    });
+  }
+  return ws;
+}
+
 function prevMonth(monthStr) {
   const [y, m] = String(monthStr).split("-").map((n) => Number(n));
   const d = new Date(Date.UTC(y, m - 1, 1));
@@ -3632,7 +3706,7 @@ export default async function reportsRoutes(app) {
       return reply.code(400).send({ error: "start and end (YYYY-MM-DD) required" });
     }
 
-    const fuelByAsset = db.prepare(`
+    const fuelByAssetStmt = db.prepare(`
       SELECT
         a.id AS asset_id,
         a.asset_code,
@@ -3665,7 +3739,7 @@ export default async function reportsRoutes(app) {
       WHERE a.active = 1
       GROUP BY a.id
       ORDER BY a.asset_code ASC
-    `).all(start, end);
+    `);
 
     const getFuelLogsInRange = db.prepare(`
       SELECT
@@ -3715,61 +3789,68 @@ export default async function reportsRoutes(app) {
       return getRunFromFuelRows(logs, prev, assetMetricMode);
     }
 
-    const benchmarkRows = fuelByAsset.map((r) => {
-      const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
-      const fuelRun = getRunFromFuel(r.asset_id, start, end, mode) || {};
-      const fuelKm = Number(fuelRun.km_run || 0);
-      const fuelHours = Number(fuelRun.hours_run || 0);
-      const dailyHoursRun = mode === "hours"
-        ? Number(getDailyHoursRunInRange.get(r.asset_id, start, end)?.v || 0)
-        : 0;
-      const km = fuelKm > 0 ? fuelKm : 0;
-      const hours = mode === "hours"
-        ? (fuelHours > 0 ? fuelHours : (dailyHoursRun > 0 ? dailyHoursRun : 0))
-        : (fuelHours > 0 ? fuelHours : 0);
-      const fuel = Number(r.fuel_liters || 0);
-      const oem = Number(r.oem_lph || 5);
-      const oemK = Number(r.oem_kmpl || 2);
-      const fillCount = Number(r.fill_count || 0);
-      const lph = hours > 0 ? fuel / hours : null;
-      const kmpl = fuel > 0 && km > 0 ? km / fuel : null;
-      const excessiveThreshold = oem * (1 + tolerance);
-      const lowThresholdKmpl = oemK * Math.max(0, 1 - tolerance);
-      const hasEnoughSamples = fillCount >= 2;
-      const is_excessive = hasEnoughSamples && (mode === "km"
-        ? (kmpl != null && kmpl < lowThresholdKmpl)
-        : (lph != null && lph > excessiveThreshold));
-      return {
-        metric_mode: mode,
-        asset_code: r.asset_code,
-        asset_name: r.asset_name,
-        category: r.category || "",
-        fuel_liters: Number(fuel.toFixed(2)),
-        km_run: Number(km.toFixed(2)),
-        hours_run: Number(hours.toFixed(2)),
-        actual_lph: lph == null ? null : Number(lph.toFixed(3)),
-        oem_lph: Number(oem.toFixed(3)),
-        threshold_lph: Number(excessiveThreshold.toFixed(3)),
-        variance_lph: lph == null ? null : Number((lph - oem).toFixed(3)),
-        actual_km_per_l: kmpl == null ? null : Number(kmpl.toFixed(3)),
-        oem_km_per_l: Number(oemK.toFixed(3)),
-        threshold_km_per_l: Number(lowThresholdKmpl.toFixed(3)),
-        variance_km_per_l: kmpl == null ? null : Number((kmpl - oemK).toFixed(3)),
-        fill_count: fillCount,
-        flag: is_excessive ? "EXCESSIVE" : "OK",
-      };
-    });
-    const rows = benchmarkRows
-      .filter((r) => r.fuel_liters > 0)
-      .filter((r) => (assetFilter ? String(r.asset_code || "").trim().toLowerCase() === assetFilter : true))
-      .filter((r) => (modeFilter === "km" ? r.metric_mode === "km" : modeFilter === "hours" ? r.metric_mode === "hours" : true))
-      .sort((a, b) => {
-        const ex = (b.flag === "EXCESSIVE" ? 1 : 0) - (a.flag === "EXCESSIVE" ? 1 : 0);
-        if (ex !== 0) return ex;
-        const av = a.metric_mode === "km" ? Number(a.variance_km_per_l || -999) : Number(a.variance_lph || -999);
-        const bv = b.metric_mode === "km" ? Number(b.variance_km_per_l || -999) : Number(b.variance_lph || -999);
-        return bv - av;
+    function buildRowsForPeriod(periodStart, periodEnd) {
+      const fuelByAsset = fuelByAssetStmt.all(periodStart, periodEnd);
+      const benchmarkRows = fuelByAsset.map((r) => {
+        const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
+        const fuelRun = getRunFromFuel(r.asset_id, periodStart, periodEnd, mode) || {};
+        const fuelKm = Number(fuelRun.km_run || 0);
+        const fuelHours = Number(fuelRun.hours_run || 0);
+        const dailyHoursRun = mode === "hours"
+          ? Number(getDailyHoursRunInRange.get(r.asset_id, periodStart, periodEnd)?.v || 0)
+          : 0;
+        const km = fuelKm > 0 ? fuelKm : 0;
+        const hours = mode === "hours"
+          ? (fuelHours > 0 ? fuelHours : (dailyHoursRun > 0 ? dailyHoursRun : 0))
+          : (fuelHours > 0 ? fuelHours : 0);
+        const fuel = Number(r.fuel_liters || 0);
+        const oem = Number(r.oem_lph || 5);
+        const oemK = Number(r.oem_kmpl || 2);
+        const fillCount = Number(r.fill_count || 0);
+        const lph = hours > 0 ? fuel / hours : null;
+        const kmpl = fuel > 0 && km > 0 ? km / fuel : null;
+        const excessiveThreshold = oem * (1 + tolerance);
+        const lowThresholdKmpl = oemK * Math.max(0, 1 - tolerance);
+        const hasEnoughSamples = fillCount >= 2;
+        const is_excessive = hasEnoughSamples && (mode === "km"
+          ? (kmpl != null && kmpl < lowThresholdKmpl)
+          : (lph != null && lph > excessiveThreshold));
+        return {
+          metric_mode: mode,
+          asset_code: r.asset_code,
+          asset_name: r.asset_name,
+          category: r.category || "",
+          fuel_liters: Number(fuel.toFixed(2)),
+          km_run: Number(km.toFixed(2)),
+          hours_run: Number(hours.toFixed(2)),
+          actual_lph: lph == null ? null : Number(lph.toFixed(3)),
+          oem_lph: Number(oem.toFixed(3)),
+          threshold_lph: Number(excessiveThreshold.toFixed(3)),
+          variance_lph: lph == null ? null : Number((lph - oem).toFixed(3)),
+          actual_km_per_l: kmpl == null ? null : Number(kmpl.toFixed(3)),
+          oem_km_per_l: Number(oemK.toFixed(3)),
+          threshold_km_per_l: Number(lowThresholdKmpl.toFixed(3)),
+          variance_km_per_l: kmpl == null ? null : Number((kmpl - oemK).toFixed(3)),
+          fill_count: fillCount,
+          flag: is_excessive ? "EXCESSIVE" : "OK",
+        };
       });
+      const rows = benchmarkRows
+        .filter((r) => r.fuel_liters > 0)
+        .filter((r) => (assetFilter ? String(r.asset_code || "").trim().toLowerCase() === assetFilter : true))
+        .filter((r) => (modeFilter === "km" ? r.metric_mode === "km" : modeFilter === "hours" ? r.metric_mode === "hours" : true))
+        .sort((a, b) => {
+          const ex = (b.flag === "EXCESSIVE" ? 1 : 0) - (a.flag === "EXCESSIVE" ? 1 : 0);
+          if (ex !== 0) return ex;
+          const av = a.metric_mode === "km" ? Number(a.variance_km_per_l || -999) : Number(a.variance_lph || -999);
+          const bv = b.metric_mode === "km" ? Number(b.variance_km_per_l || -999) : Number(b.variance_lph || -999);
+          return bv - av;
+        });
+      return { rows, benchmarkRows };
+    }
+
+    const periodMonths = monthsInRange(start, end);
+    const { rows, benchmarkRows } = buildRowsForPeriod(start, end);
     const includedCodes = new Set(rows.map((r) => String(r.asset_code || "").trim().toLowerCase()).filter(Boolean));
     const missingRows = benchmarkRows
       .filter((r) => (assetFilter ? String(r.asset_code || "").trim().toLowerCase() === assetFilter : true))
@@ -3829,11 +3910,12 @@ export default async function reportsRoutes(app) {
     ];
     wsSummary.addRows([
       { field: "Period", value: `${start} to ${end}` },
+      { field: "Monthly tabs", value: periodMonths.map((m) => `${m.label} (${m.start} to ${m.end})`).join(", ") || start },
       { field: "Tolerance (%)", value: Number((tolerance * 100).toFixed(2)) },
       { field: "Mode filter", value: modeFilter || "all" },
       { field: "Asset filter", value: assetFilter || "all" },
       { field: "Equipment categories", value: summary.categories },
-      { field: "Assets (detail sheet)", value: summary.assets },
+      { field: "Assets (Totals sheet)", value: summary.assets },
       { field: "Missing / Not Shown", value: missingRows.length },
       { field: "Excessive", value: summary.excessive },
       { field: "Fuel Total (L)", value: summary.fuel_liters },
@@ -3842,6 +3924,18 @@ export default async function reportsRoutes(app) {
       { field: "Avg L/hr", value: summary.avg_lph == null ? "" : summary.avg_lph },
       { field: "Avg km/L", value: summary.avg_km_per_l == null ? "" : summary.avg_km_per_l },
     ]);
+
+    for (const month of periodMonths) {
+      const { rows: monthRows } = buildRowsForPeriod(month.start, month.end);
+      addFuelBenchmarkByAssetWorksheet(
+        wb,
+        month.label,
+        monthRows,
+        `No fuel benchmark data for ${month.label} (${month.start} to ${month.end})`
+      );
+    }
+
+    addFuelBenchmarkByAssetWorksheet(wb, "Totals", rows);
 
     const wsCategory = wb.addWorksheet("Fuel by Category");
     wsCategory.columns = [
@@ -3865,7 +3959,7 @@ export default async function reportsRoutes(app) {
       wsCategory.addRows(categoryRows);
     } else {
       wsCategory.addRow({
-        category: assetFilter ? "Single asset filter — see By Asset sheet" : "No fuel benchmark data for period",
+        category: assetFilter ? "Single asset filter — see Totals sheet" : "No fuel benchmark data for period",
         metric_mode: "",
         asset_count: "",
         fuel_liters: "",
@@ -3879,50 +3973,6 @@ export default async function reportsRoutes(app) {
         variance_km_per_l: "",
         fill_count: "",
         excessive_asset_count: "",
-        flag: "",
-      });
-    }
-
-    const wsRows = wb.addWorksheet("By Asset");
-    wsRows.columns = [
-      { header: "Asset Code", key: "asset_code", width: 16 },
-      { header: "Asset Name", key: "asset_name", width: 32 },
-      { header: "Category", key: "category", width: 18 },
-      { header: "Mode", key: "metric_mode", width: 10 },
-      { header: "Fuel Liters", key: "fuel_liters", width: 14 },
-      { header: "Km Run", key: "km_run", width: 12 },
-      { header: "Hours Run", key: "hours_run", width: 12 },
-      { header: "Actual L/hr", key: "actual_lph", width: 12 },
-      { header: "OEM L/hr", key: "oem_lph", width: 12 },
-      { header: "Threshold L/hr", key: "threshold_lph", width: 14 },
-      { header: "Variance L/hr", key: "variance_lph", width: 14 },
-      { header: "Actual km/L", key: "actual_km_per_l", width: 12 },
-      { header: "OEM km/L", key: "oem_km_per_l", width: 12 },
-      { header: "Threshold km/L", key: "threshold_km_per_l", width: 14 },
-      { header: "Variance km/L", key: "variance_km_per_l", width: 14 },
-      { header: "Fill Count", key: "fill_count", width: 10 },
-      { header: "Flag", key: "flag", width: 12 },
-    ];
-    if (rows.length) {
-      wsRows.addRows(rows);
-    } else {
-      wsRows.addRow({
-        asset_code: "-",
-        asset_name: "No fuel benchmark data for period",
-        category: "",
-        metric_mode: "-",
-        fuel_liters: "",
-        km_run: "",
-        hours_run: "",
-        actual_lph: "",
-        oem_lph: "",
-        threshold_lph: "",
-        variance_lph: "",
-        actual_km_per_l: "",
-        oem_km_per_l: "",
-        threshold_km_per_l: "",
-        variance_km_per_l: "",
-        fill_count: "",
         flag: "",
       });
     }
