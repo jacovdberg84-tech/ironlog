@@ -5143,3 +5143,113 @@ body.bare-child-tab .main-content {
 body.bare-child-tab #mainContent > .card.stack-12 {
   display: none !important;
 }
+
+/* Weekly Inspection Calendar */
+.wi-calendar-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.wi-calendar-table th,
+.wi-calendar-table td {
+  border: 1px solid #e5e7eb;
+  padding: 8px;
+  vertical-align: middle;
+  text-align: center;
+}
+
+.wi-calendar-table thead th {
+  background: #f8fafc;
+  font-weight: 600;
+  color: #334155;
+}
+
+.wi-asset-col {
+  text-align: left !important;
+  min-width: 180px;
+  max-width: 240px;
+}
+
+.wi-week-col {
+  min-width: 110px;
+  font-size: 0.82rem;
+  line-height: 1.3;
+}
+
+.wi-asset-code {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.wi-asset-name {
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.wi-cell {
+  width: 100%;
+  min-width: 88px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.82rem;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.wi-cell--pending {
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.wi-cell--done {
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+  color: #047857;
+}
+
+.wi-cell--skipped {
+  background: #fffbeb;
+  border-color: #fcd34d;
+  color: #b45309;
+}
+
+.wi-cell:hover {
+  filter: brightness(0.98);
+}
+
+@media print {
+  body.wi-print-mode .sidebar,
+  body.wi-print-mode .sidebar-overlay,
+  body.wi-print-mode .topbar,
+  body.wi-print-mode .mobile-nav,
+  body.wi-print-mode .wi-no-print {
+    display: none !important;
+  }
+
+  body.wi-print-mode .main-content {
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: none !important;
+  }
+
+  body.wi-print-mode .maint-section {
+    display: none !important;
+  }
+
+  body.wi-print-mode #weeklyInspectionSection {
+    display: block !important;
+  }
+
+  body.wi-print-mode #wiPrintArea {
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  body.wi-print-mode .wi-cell {
+    cursor: default;
+  }
+}

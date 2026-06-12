@@ -20,6 +20,106 @@ function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
 }
 
+function isMonth(s) {
+  return /^\d{4}-\d{2}$/.test(String(s || "").trim());
+}
+
+function addDaysYmd(ymd, days) {
+  const d = new Date(`${String(ymd).trim()}T12:00:00`);
+  d.setDate(d.getDate() + Number(days || 0));
+  return d.toISOString().slice(0, 10);
+}
+
+function mondayOfWeekYmd(ymd) {
+  const d = new Date(`${String(ymd).trim()}T12:00:00`);
+  const dow = d.getDay();
+  const offset = dow === 0 ? -6 : 1 - dow;
+  d.setDate(d.getDate() + offset);
+  return d.toISOString().slice(0, 10);
+}
+
+function weeksOverlappingMonth(year, month) {
+  const y = Number(year);
+  const m = Number(month);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return [];
+  const monthStart = `${y}-${String(m).padStart(2, "0")}-01`;
+  const lastDay = new Date(y, m, 0).getDate();
+  const monthEnd = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  const weeks = [];
+  let ws = mondayOfWeekYmd(monthStart);
+  for (let i = 0; i < 6; i++) {
+    const we = addDaysYmd(ws, 6);
+    if (we >= monthStart && ws <= monthEnd) weeks.push(ws);
+    ws = addDaysYmd(ws, 7);
+  }
+  return weeks;
+}
+
+function buildWeeklyInspectionCalendarData(query = {}) {
+  const monthRaw = String(query.month || "").trim();
+  let year;
+  let month;
+  if (isMonth(monthRaw)) {
+    [year, month] = monthRaw.split("-").map(Number);
+  } else {
+    const anchor = isDate(String(query.week_start || "").trim())
+      ? String(query.week_start).trim()
+      : new Date().toISOString().slice(0, 10);
+    const d = new Date(`${anchor}T12:00:00`);
+    year = d.getFullYear();
+    month = d.getMonth() + 1;
+  }
+  const weeks = weeksOverlappingMonth(year, month).map((week_start) => ({
+    week_start,
+    week_end: addDaysYmd(week_start, 6),
+    label: `Mon ${week_start.slice(5)}`,
+  }));
+  const weekStarts = weeks.map((w) => w.week_start);
+  const assets = db.prepare(`
+    SELECT
+      wia.id,
+      wia.asset_id,
+      wia.notes,
+      wia.sort_order,
+      wia.active,
+      a.asset_code,
+      a.asset_name
+    FROM weekly_inspection_assets wia
+    JOIN assets a ON a.id = wia.asset_id
+    WHERE COALESCE(wia.active, 1) = 1
+      AND COALESCE(a.active, 1) = 1
+      AND COALESCE(a.archived, 0) = 0
+    ORDER BY COALESCE(wia.sort_order, 0), a.asset_code ASC
+  `).all();
+  const entries = weekStarts.length
+    ? db.prepare(`
+        SELECT
+          e.id,
+          e.asset_id,
+          e.week_start,
+          e.status,
+          e.inspector_name,
+          e.notes,
+          e.completed_at
+        FROM weekly_inspection_entries e
+        WHERE e.week_start IN (${weekStarts.map(() => "?").join(",")})
+      `).all(...weekStarts)
+    : [];
+  const entryMap = {};
+  for (const e of entries) {
+    entryMap[`${Number(e.asset_id)}|${String(e.week_start)}`] = e;
+  }
+  return {
+    ok: true,
+    month: `${year}-${String(month).padStart(2, "0")}`,
+    year,
+    month_num: month,
+    weeks,
+    assets,
+    entries: entryMap,
+  };
+}
+
 function getAssetCurrentHoursInfo(assetId) {
   const fromAssetHours = db.prepare(`
     SELECT total_hours
@@ -288,6 +388,33 @@ export default async function maintenanceRoutes(app) {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (damage_report_id) REFERENCES manager_damage_reports(id) ON DELETE CASCADE
+    )
+  `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS weekly_inspection_assets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      asset_id INTEGER NOT NULL UNIQUE,
+      active INTEGER NOT NULL DEFAULT 1,
+      notes TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    )
+  `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS weekly_inspection_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      asset_id INTEGER NOT NULL,
+      week_start TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      inspector_name TEXT,
+      notes TEXT,
+      completed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(asset_id, week_start),
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
     )
   `).run();
   db.prepare(`
@@ -3570,6 +3697,191 @@ export default async function maintenanceRoutes(app) {
     } catch (err) {
       req.log.error(err);
       return reply.code(Number(err?.statusCode || 500)).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // =====================================================
+  // WEEKLY INSPECTION CALENDAR
+  // =====================================================
+  app.get("/weekly-inspections/calendar", async (req, reply) => {
+    try {
+      const month = String(req.query?.month || "").trim();
+      const weekStart = String(req.query?.week_start || "").trim();
+      if (month && !isMonth(month)) {
+        return reply.code(400).send({ ok: false, error: "month must be YYYY-MM" });
+      }
+      if (weekStart && !isDate(weekStart)) {
+        return reply.code(400).send({ ok: false, error: "week_start must be YYYY-MM-DD" });
+      }
+      return reply.send(buildWeeklyInspectionCalendarData(req.query || {}));
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.get("/weekly-inspections/assets", async (_req, reply) => {
+    try {
+      const rows = db.prepare(`
+        SELECT
+          wia.id,
+          wia.asset_id,
+          wia.notes,
+          wia.sort_order,
+          wia.active,
+          a.asset_code,
+          a.asset_name
+        FROM weekly_inspection_assets wia
+        JOIN assets a ON a.id = wia.asset_id
+        WHERE COALESCE(wia.active, 1) = 1
+        ORDER BY COALESCE(wia.sort_order, 0), a.asset_code ASC
+      `).all();
+      return reply.send({ ok: true, assets: rows });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.post("/weekly-inspections/assets", async (req, reply) => {
+    try {
+      const asset_id = Number(req.body?.asset_id || 0);
+      const notes = String(req.body?.notes || "").trim();
+      if (!asset_id) return reply.code(400).send({ ok: false, error: "asset_id is required" });
+      const asset = db.prepare(`
+        SELECT id, asset_code, asset_name
+        FROM assets
+        WHERE id = ?
+          AND COALESCE(active, 1) = 1
+          AND COALESCE(archived, 0) = 0
+      `).get(asset_id);
+      if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
+      const existing = db.prepare(`SELECT id FROM weekly_inspection_assets WHERE asset_id = ?`).get(asset_id);
+      if (existing) {
+        db.prepare(`
+          UPDATE weekly_inspection_assets
+          SET active = 1, notes = ?, updated_at = datetime('now')
+          WHERE asset_id = ?
+        `).run(notes, asset_id);
+        return reply.send({ ok: true, id: Number(existing.id), asset_id, reactivated: true });
+      }
+      const maxSort = Number(db.prepare(`SELECT COALESCE(MAX(sort_order), 0) AS m FROM weekly_inspection_assets`).get()?.m || 0);
+      const ins = db.prepare(`
+        INSERT INTO weekly_inspection_assets (asset_id, notes, sort_order, active, created_at, updated_at)
+        VALUES (?, ?, ?, 1, datetime('now'), datetime('now'))
+      `).run(asset_id, notes, maxSort + 1);
+      return reply.send({ ok: true, id: Number(ins.lastInsertRowid), asset_id });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.delete("/weekly-inspections/assets/:id", async (req, reply) => {
+    try {
+      const id = Number(req.params?.id || 0);
+      if (!id) return reply.code(400).send({ ok: false, error: "Invalid id" });
+      const row = db.prepare(`SELECT id, asset_id FROM weekly_inspection_assets WHERE id = ?`).get(id);
+      if (!row) return reply.code(404).send({ ok: false, error: "Schedule row not found" });
+      db.prepare(`UPDATE weekly_inspection_assets SET active = 0, updated_at = datetime('now') WHERE id = ?`).run(id);
+      return reply.send({ ok: true, id, asset_id: Number(row.asset_id) });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.put("/weekly-inspections/entries", async (req, reply) => {
+    try {
+      const asset_id = Number(req.body?.asset_id || 0);
+      const week_start = mondayOfWeekYmd(String(req.body?.week_start || "").trim());
+      const status = String(req.body?.status || "pending").trim().toLowerCase();
+      const inspector_name = String(req.body?.inspector_name || "").trim();
+      const notes = String(req.body?.notes || "").trim();
+      if (!asset_id || !isDate(week_start)) {
+        return reply.code(400).send({ ok: false, error: "asset_id and week_start (YYYY-MM-DD) are required" });
+      }
+      if (!["pending", "done", "skipped"].includes(status)) {
+        return reply.code(400).send({ ok: false, error: "status must be pending, done, or skipped" });
+      }
+      const scheduled = db.prepare(`
+        SELECT id FROM weekly_inspection_assets
+        WHERE asset_id = ? AND COALESCE(active, 1) = 1
+      `).get(asset_id);
+      if (!scheduled) return reply.code(404).send({ ok: false, error: "Asset is not on the weekly inspection schedule" });
+      const completed_at = status === "done" ? new Date().toISOString() : null;
+      db.prepare(`
+        INSERT INTO weekly_inspection_entries (
+          asset_id, week_start, status, inspector_name, notes, completed_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+        ON CONFLICT(asset_id, week_start) DO UPDATE SET
+          status = excluded.status,
+          inspector_name = excluded.inspector_name,
+          notes = excluded.notes,
+          completed_at = excluded.completed_at,
+          updated_at = datetime('now')
+      `).run(asset_id, week_start, status, inspector_name || null, notes || null, completed_at);
+      const row = db.prepare(`
+        SELECT id, asset_id, week_start, status, inspector_name, notes, completed_at
+        FROM weekly_inspection_entries
+        WHERE asset_id = ? AND week_start = ?
+      `).get(asset_id, week_start);
+      return reply.send({ ok: true, entry: row });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.get("/weekly-inspections.pdf", async (req, reply) => {
+    try {
+      const data = buildWeeklyInspectionCalendarData(req.query || {});
+      const isDownload = String(req.query?.download || "").trim() === "1";
+      const assets = Array.isArray(data.assets) ? data.assets : [];
+      const weeks = Array.isArray(data.weeks) ? data.weeks : [];
+      const entryMap = data.entries || {};
+      const pdf = await buildPdfBuffer(
+        (doc) => {
+          sectionTitle(doc, "Weekly Inspection Calendar");
+          doc.font("Helvetica").fontSize(10).fillColor("#334155");
+          doc.text(`Month: ${String(data.month || "")}`, { lineGap: 2 });
+          doc.moveDown(0.5);
+          const rows = assets.map((a) => {
+            const row = {
+              asset: `${String(a.asset_code || "-")} - ${String(a.asset_name || "-")}`,
+            };
+            for (const w of weeks) {
+              const key = `${Number(a.asset_id)}|${String(w.week_start)}`;
+              const st = String(entryMap[key]?.status || "pending").toUpperCase();
+              row[w.week_start] = st === "PENDING" ? "-" : st.slice(0, 4);
+            }
+            return row;
+          });
+          const cols = [
+            { key: "asset", label: "Equipment", width: 0.28 },
+            ...weeks.map((w) => ({
+              key: w.week_start,
+              label: w.label,
+              width: Math.max(0.12, 0.72 / Math.max(1, weeks.length)),
+              align: "center",
+            })),
+          ];
+          table(doc, cols, rows.length ? rows : [{ asset: "No equipment on weekly schedule" }]);
+          doc.moveDown(0.6);
+          doc.fontSize(9).fillColor("#64748b");
+          doc.text("Legend: DONE = inspected  |  SKIP = skipped  |  - = pending");
+        },
+        { title: "AML Weekly Inspections", subtitle: String(data.month || "") }
+      );
+      reply.header("Content-Type", "application/pdf");
+      reply.header(
+        "Content-Disposition",
+        `${isDownload ? "attachment" : "inline"}; filename="AML_Weekly_Inspections_${String(data.month || "calendar")}.pdf"`
+      );
+      return reply.send(pdf);
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
     }
   });
 
