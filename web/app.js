@@ -10151,16 +10151,6 @@ async function loadDailyInput() {
 
   dailyRows = [];
 
-  let telematicsByCode = new Map();
-  try {
-    const telem = await fetchJson(`${API}/api/telematics/devices`);
-    for (const d of Array.isArray(telem?.devices) ? telem.devices : []) {
-      if (d?.asset_code) telematicsByCode.set(d.asset_code, d);
-    }
-  } catch {
-    telematicsByCode = new Map();
-  }
-
   let openBreakdownByAsset = new Map();
   try {
     const openData = await fetchJson(`${API}/api/breakdowns/open-all?date=${encodeURIComponent(date)}`);
@@ -10210,9 +10200,9 @@ async function loadDailyInput() {
       suggested_input_unit: ex?.input_unit
         ? String(ex.input_unit).toLowerCase()
         : (String(a.category || "").toLowerCase().includes("truck") || String(a.category || "").toLowerCase().includes("vehicle") ? "km" : "hours"),
-      input_unit_locked: Boolean(ex?.input_unit_locked) || telematicsByCode.has(a.asset_code),
-      telematics_locked: Boolean(ex?.telematics_locked) || telematicsByCode.has(a.asset_code),
-      meter_source: ex?.meter_source || (telematicsByCode.has(a.asset_code) ? "telematics" : "manual"),
+      input_unit_locked: Boolean(ex?.input_unit_locked) || Boolean(ex?.telematics_locked),
+      telematics_locked: Boolean(ex?.telematics_locked),
+      meter_source: ex?.meter_source || "manual",
 
       scheduled_hours: ex ? toNum(ex.scheduled_hours) : null,
       opening_hours: ex ? toNum(ex.opening_hours) : null,

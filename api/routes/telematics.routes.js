@@ -48,7 +48,9 @@ function checkIngestAuth(req, reply) {
 
 export default async function telematicsRoutes(app) {
   ensureTelematicsTables();
-  ensurePilotDevices();
+  if (String(process.env.TELEMATICS_AUTO_PILOT || "").trim() === "1") {
+    ensurePilotDevices();
+  }
 
   // POST /api/telematics/ingest — FSC webhook / poll push (API key when configured)
   app.post("/ingest", async (req, reply) => {

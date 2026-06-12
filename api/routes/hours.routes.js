@@ -1,6 +1,6 @@
 // IRONLOG/api/routes/hours.routes.js
 import { db } from "../db/client.js";
-import { ensureTelematicsTables, isTelematicsAsset, syncTelematicsDailyHours } from "../utils/telematics.js";
+import { ensureTelematicsTables, isTelematicsMeterLocked, syncTelematicsDailyHours } from "../utils/telematics.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -131,7 +131,7 @@ export default async function hoursRoutes(app) {
       ...r,
       is_used: Boolean(r.is_used),
       is_standby: Boolean(r.is_standby),
-      telematics_locked: isTelematicsAsset(r.asset_id),
+      telematics_locked: isTelematicsMeterLocked(r.asset_id),
       meter_source: r.meter_source || "manual",
     }));
   });
@@ -202,7 +202,7 @@ export default async function hoursRoutes(app) {
     if (!asset) return reply.code(404).send({ error: `asset_code not found: ${asset_code}` });
     if (Number(asset.active) === 0) return reply.code(409).send({ error: "asset is inactive" });
 
-    const telematicsLocked = isTelematicsAsset(asset.id);
+    const telematicsLocked = isTelematicsMeterLocked(asset.id);
 
     // If the asset itself is standby in master data, it cannot be used for production
     if (Number(asset.is_standby) === 1 && body.is_used !== false) {

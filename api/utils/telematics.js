@@ -133,6 +133,20 @@ export function isTelematicsAsset(assetId) {
   return Boolean(row?.ok);
 }
 
+/** Lock manual hourmeters only when a live FSC feed exists (not merely registered). */
+export function isTelematicsMeterLocked(assetId) {
+  const row = db.prepare(`
+    SELECT 1 AS ok
+    FROM telematics_snapshots s
+    JOIN telematics_devices d ON d.asset_id = s.asset_id AND d.active = 1
+    WHERE s.asset_id = ?
+      AND s.engine_hours IS NOT NULL
+      AND datetime(s.updated_at) >= datetime('now', '-24 hours')
+    LIMIT 1
+  `).get(assetId);
+  return Boolean(row?.ok);
+}
+
 function prevDate(dateStr) {
   const d = new Date(`${dateStr}T12:00:00`);
   d.setDate(d.getDate() - 1);
