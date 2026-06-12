@@ -186,6 +186,13 @@ function isMaintenanceChildTab(tabKey) {
   return MAINT_CHILD_TABS.has(String(tabKey || "").trim());
 }
 
+function isAllowedDashboardTab(tabKey, allowed) {
+  const k = String(tabKey || "").trim();
+  if (!k) return false;
+  if (allowed.has(k)) return true;
+  return isMaintenanceChildTab(k) && hasMaintenanceAccessGate();
+}
+
 const I18N = {
   en: {
     statusReady: "Ready.",
@@ -925,7 +932,7 @@ function applyRoleVisibility() {
   if (urlAssetCode && allowed.has("vehicle")) {
     clPendingAssetCode = urlAssetCode;
   }
-  let preferredTab = urlTab && allowed.has(urlTab) ? urlTab : "";
+  let preferredTab = urlTab && isAllowedDashboardTab(urlTab, allowed) ? urlTab : "";
   if (!preferredTab && urlAssetCode && allowed.has("vehicle")) {
     preferredTab = "vehicle";
   }
