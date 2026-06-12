@@ -136,7 +136,23 @@ function viewForSection(section) {
 
 let currentMaintenanceSection = "maintenance";
 
+const MAINT_EXTERNAL_SECTIONS = {
+  breakdowns: "index.html?tab=Breakdowns",
+  "work-orders": "workorders.html",
+};
+
+function isMaintenanceSection(section) {
+  const s = String(section || "").trim();
+  return Boolean(viewForSection(s) || MAINT_EXTERNAL_SECTIONS[s]);
+}
+
 function scrollToSection(section) {
+  const s = String(section || "").trim();
+  const externalHref = MAINT_EXTERNAL_SECTIONS[s];
+  if (externalHref) {
+    location.href = externalHref;
+    return;
+  }
   const targetView = viewForSection(section);
   if (targetView) {
     if (section) currentMaintenanceSection = section;
@@ -5245,7 +5261,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const item = evt.target instanceof HTMLElement ? evt.target.closest(".nav-item[data-section]") : null;
     if (!item) return;
     const section = String(item.getAttribute("data-section") || "").trim();
-    if (!viewForSection(section)) return;
+    if (!isMaintenanceSection(section)) return;
     evt.preventDefault();
     scrollToSection(section);
   });
