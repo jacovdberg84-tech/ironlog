@@ -2067,7 +2067,6 @@ function applyMaintenanceHubMode(mode) {
 
 function setTopView(view, section = "") {
   const main = document.getElementById("mainMaintenanceCards");
-  const mainPageSection = main?.closest(".page-section");
   const mi = document.getElementById("managerInspectionsSection");
   const ai = document.getElementById("artisanInspectionsSection");
   const wf = document.getElementById("weeklyForumSection");
@@ -2080,8 +2079,8 @@ function setTopView(view, section = "") {
 
   if (section) currentMaintenanceSection = section;
 
-  // Hide all sections first
-  if (mainPageSection) mainPageSection.style.display = "none";
+  // Hide all sections first (only mainMaintenanceCards — sibling sections live in the same page-section)
+  if (main) main.style.display = "none";
   if (mi) mi.style.display = "none";
   if (ai) ai.style.display = "none";
   if (wf) wf.style.display = "none";
@@ -2097,7 +2096,6 @@ function setTopView(view, section = "") {
     case "main":
     case "service-history":
     case "insights":
-      if (mainPageSection) mainPageSection.style.display = "block";
       if (main) main.style.display = "block";
       applyMaintenanceHubMode(maintenanceHubModeFor(view, section || currentMaintenanceSection));
       break;
