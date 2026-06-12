@@ -216,6 +216,7 @@ function refreshTopViewData(view) {
       break;
     case "wi":
       loadWeeklyInspectionCalendar().catch(() => {});
+      loadWeeklyInspectionCandidates().catch(() => {});
       break;
     case "kpi":
       loadAssetKpiWeekly().catch(() => {});
@@ -3023,12 +3024,16 @@ function renderWeeklyInspectionCalendar(data) {
   renderWeeklyInspectionDayAgenda(data);
   populateWeeklyInspectionWeekSelect(data);
   renderWeeklyInspectionAssetList(assets, data?.compliance);
-  if (!assets.length) {
-    wrap.innerHTML = `<div class="empty">Add equipment to build the weekly inspection calendar.</div>`;
-    return;
-  }
   if (!weeks.length) {
     wrap.innerHTML = `<div class="empty">No weeks found for this month.</div>`;
+    return;
+  }
+  const plannedAssetIds = new Set(
+    Object.keys(plans).map((k) => Number(String(k).split("|")[0])).filter((n) => n > 0)
+  );
+  const calendarAssets = assets.filter((a) => plannedAssetIds.has(Number(a.asset_id)));
+  if (!calendarAssets.length) {
+    wrap.innerHTML = `<div class="empty">Load in-use equipment, select machines, and click <b>Generate month schedule</b> to build the calendar.</div>`;
     return;
   }
   const head = weeks.map((w) => {
@@ -3041,12 +3046,15 @@ function renderWeeklyInspectionCalendar(data) {
       ${estTotal ? `<div class="wi-week-sub">${esc(estTotal)} planned</div>` : ""}
     </th>`;
   }).join("");
-  const body = assets.map((a) => {
+  const body = calendarAssets.map((a) => {
     const assetId = Number(a.asset_id);
     const cells = weeks.map((w) => {
       const key = `${assetId}|${String(w.week_start)}`;
+      const plan = plans[key];
+      if (!plan) {
+        return `<td><span class="wi-cell-static wi-cell--unscheduled">—</span></td>`;
+      }
       const entry = entries[key] || {};
-      const plan = plans[key] || {};
       const status = String(entry.status || "pending").toLowerCase();
       const est = Number(plan.est_minutes ?? a.est_minutes ?? 30);
       const inspector = String(entry.inspector_name || "").trim();
@@ -3272,6 +3280,86 @@ function printWeeklyInspectionCalendar() {
   window.addEventListener("afterprint", cleanup, { once: true });
   window.print();
   setTimeout(cleanup, 2000);
+}
+
+let wiCandidateAssets = [];
+
+function renderWeeklyInspectionCandidateGroups(groups) {
+  const wrap = document.getElementById("wiCandidateGroups");
+  if (!wrap) return;
+  const groupMap = groups && typeof groups === "object" ? groups : {};
+  const keys = Object.keys(groupMap).sort((a, b) => a.localeCompare(b));
+  if (!keys.length) {
+    wrap.innerHTML = `<div class="empty">No in-use equipment found for the selected lookback period.</div>`;
+    return;
+  }
+  wrap.innerHTML = keys.map((cat) => {
+    const rows = Array.isArray(groupMap[cat]) ? groupMap[cat] : [];
+    const items = rows.map((r) => `
+      <label class="wi-candidate-item chk">
+        <input type="checkbox" class="wi-candidate-cb" value="${Number(r.asset_id)}" checked />
+        <span><strong>${esc(r.asset_code)}</strong> — ${esc(r.asset_name || "")} <span class="muted">(${Number(r.recent_hours || 0).toFixed(1)} h)</span></span>
+      </label>
+    `).join("");
+    return `
+      <div class="wi-candidate-group">
+        <div class="wi-candidate-group-title">${esc(cat)} <span class="muted">(${rows.length})</span></div>
+        <div class="wi-candidate-group-items">${items}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+function getSelectedWeeklyInspectionCandidateIds() {
+  return Array.from(document.querySelectorAll(".wi-candidate-cb:checked"))
+    .map((el) => Number(el.value || 0))
+    .filter((n) => n > 0);
+}
+
+async function loadWeeklyInspectionCandidates() {
+  const days = Math.max(7, Math.min(120, Number(document.getElementById("wiCandidateDays")?.value || 30) || 30));
+  wiSetMsg("Loading in-use equipment...");
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-inspections/candidate-assets?days=${days}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load in-use equipment");
+    wiCandidateAssets = Array.isArray(data.assets) ? data.assets : [];
+    renderWeeklyInspectionCandidateGroups(data.groups || {});
+    wiSetMsg(`Loaded ${wiCandidateAssets.length} in-use machine${wiCandidateAssets.length === 1 ? "" : "s"} (last ${days} days).`);
+  } catch (e) {
+    wiCandidateAssets = [];
+    renderWeeklyInspectionCandidateGroups({});
+    wiSetMsg(`Load failed: ${e.message || e}`, true);
+  }
+}
+
+async function generateWeeklyInspectionMonth() {
+  const asset_ids = getSelectedWeeklyInspectionCandidateIds();
+  if (!asset_ids.length) {
+    wiSetMsg("Select at least one in-use machine to generate the schedule.", true);
+    return;
+  }
+  const est_minutes = Math.max(5, Number(document.getElementById("wiGenerateEst")?.value || 30) || 30);
+  const month = wiCurrentMonth();
+  if (!window.confirm(`Generate inspection schedule for ${wiMonthTitle(month)} using ${asset_ids.length} selected machine(s)?`)) return;
+  wiSetMsg("Generating month schedule...");
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-inspections/generate`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ month, asset_ids, est_minutes }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to generate schedule");
+    const rotated = (Array.isArray(data.assignments) ? data.assignments : []).filter((a) => a.rotated).length;
+    await loadWeeklyInspectionCalendar();
+    wiSetMsg(
+      `Generated ${Number(data.assignment_count || 0)} weekly slot(s) across ${Number(data.week_count || 0)} week(s) ` +
+      `and ${Number(data.category_count || 0)} equipment group(s)${rotated ? ` · ${rotated} rotation pick(s)` : ""}.`
+    );
+  } catch (e) {
+    wiSetMsg(`Generate failed: ${e.message || e}`, true);
+  }
 }
 
 async function saveManagerInspection() {
@@ -6291,6 +6379,14 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("wiOpenPdfBtn")?.addEventListener("click", () => openWeeklyInspectionPdf(false));
   document.getElementById("wiDownloadPdfBtn")?.addEventListener("click", () => openWeeklyInspectionPdf(true));
   document.getElementById("wiAddAssetBtn")?.addEventListener("click", () => addWeeklyInspectionAsset());
+  document.getElementById("wiLoadCandidatesBtn")?.addEventListener("click", () => loadWeeklyInspectionCandidates());
+  document.getElementById("wiSelectAllCandidatesBtn")?.addEventListener("click", () => {
+    document.querySelectorAll(".wi-candidate-cb").forEach((el) => { el.checked = true; });
+  });
+  document.getElementById("wiClearCandidatesBtn")?.addEventListener("click", () => {
+    document.querySelectorAll(".wi-candidate-cb").forEach((el) => { el.checked = false; });
+  });
+  document.getElementById("wiGenerateMonthBtn")?.addEventListener("click", () => generateWeeklyInspectionMonth());
   document.getElementById("wiSaveWeekPlanBtn")?.addEventListener("click", () => saveWeeklyInspectionWeekPlan());
   document.getElementById("wiWeekSelect")?.addEventListener("change", () => {
     const sel = document.getElementById("wiWeekSelect");

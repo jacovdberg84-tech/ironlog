@@ -5360,6 +5360,53 @@ body.bare-child-tab #mainContent > .card.stack-12 {
 .wi-score-warn { color: #b45309; font-weight: 600; }
 .wi-score-bad { color: #b91c1c; font-weight: 600; }
 
+.wi-candidate-groups {
+  display: grid;
+  gap: 10px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.wi-candidate-group {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fafafa;
+}
+
+.wi-candidate-group-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: #334155;
+}
+
+.wi-candidate-group-items {
+  display: grid;
+  gap: 4px;
+}
+
+.wi-candidate-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+.wi-cell-static {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 88px;
+  min-height: 44px;
+  color: #cbd5e1;
+  font-weight: 600;
+}
+
+.wi-cell--unscheduled {
+  background: #f8fafc;
+  border-radius: 8px;
+}
+
 @media print {
   body.wi-print-mode .sidebar,
   body.wi-print-mode .sidebar-overlay,

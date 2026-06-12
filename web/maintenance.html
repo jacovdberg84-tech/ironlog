@@ -745,9 +745,30 @@
           </div>
         </div>
         <p class="muted mini" style="margin:0 0 12px;">
-          Plan weekly inspections with estimated times. Click a calendar cell to cycle: <b>Pending</b> → <b>Released</b> → <b>Skipped</b>.
-          Machines still pending after the planned day score as <b>not released</b> on the compliance card.
+          Select in-use equipment and <b>Generate month schedule</b> to plan one machine per equipment group each week (rotates if already released).
+          Click a scheduled cell to cycle: <b>Pending</b> → <b>Released</b> → <b>Skipped</b>.
         </p>
+        <div class="card wi-no-print" style="padding:12px; margin-bottom:12px;">
+          <h4 style="margin:0 0 8px;">Generate month schedule</h4>
+          <p class="muted mini" style="margin:0 0 8px;">
+            Picks at least one asset from each equipment group for every week in the month. If an asset is already released for a week, another asset from the same group is scheduled instead.
+          </p>
+          <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end; margin-bottom:8px;">
+            <label>
+              Lookback days
+              <input id="wiCandidateDays" type="number" min="7" max="120" step="1" value="30" class="w-90" />
+            </label>
+            <label>
+              Default est. minutes
+              <input id="wiGenerateEst" type="number" min="5" step="5" value="30" class="w-90" />
+            </label>
+            <button type="button" id="wiLoadCandidatesBtn">Load in-use equipment</button>
+            <button type="button" id="wiSelectAllCandidatesBtn">Select all</button>
+            <button type="button" id="wiClearCandidatesBtn">Clear</button>
+            <button type="button" id="wiGenerateMonthBtn">Generate month schedule</button>
+          </div>
+          <div id="wiCandidateGroups" class="wi-candidate-groups muted mini">Load in-use equipment to select machines for auto-scheduling.</div>
+        </div>
         <div id="wiComplianceCard" class="wi-compliance-grid"></div>
         <div class="row stack-10 wi-no-print" style="flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
           <label>
@@ -1585,6 +1606,6 @@
 
   </div>
 
-  <script src="./maintenance.js?v=23"></script>
+  <script src="./maintenance.js?v=24"></script>
 </body>
 </html>
