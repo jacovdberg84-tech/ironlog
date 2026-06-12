@@ -1,5 +1,6 @@
 // IRONLOG/api/routes/hours.routes.js
 import { db } from "../db/client.js";
+import { ensureTelematicsTables, isTelematicsAsset, syncTelematicsDailyHours } from "../utils/telematics.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -21,6 +22,7 @@ function numOrNull(v) {
 }
 
 export default async function hoursRoutes(app) {
+  ensureTelematicsTables();
   db.prepare(`
     CREATE TABLE IF NOT EXISTS asset_input_units (
       asset_id INTEGER PRIMARY KEY,
@@ -113,10 +115,12 @@ export default async function hoursRoutes(app) {
         dh.is_used,
         dh.operator,
         dh.notes,
+        COALESCE(dh.meter_source, 'manual') AS meter_source,
         a.asset_code,
         a.asset_name,
         a.category,
-        a.is_standby
+        a.is_standby,
+        a.id AS asset_id
       FROM daily_hours dh
       JOIN assets a ON a.id = dh.asset_id
       WHERE dh.work_date = ?
@@ -126,7 +130,9 @@ export default async function hoursRoutes(app) {
     return rows.map(r => ({
       ...r,
       is_used: Boolean(r.is_used),
-      is_standby: Boolean(r.is_standby)
+      is_standby: Boolean(r.is_standby),
+      telematics_locked: isTelematicsAsset(r.asset_id),
+      meter_source: r.meter_source || "manual",
     }));
   });
 
@@ -196,6 +202,8 @@ export default async function hoursRoutes(app) {
     if (!asset) return reply.code(404).send({ error: `asset_code not found: ${asset_code}` });
     if (Number(asset.active) === 0) return reply.code(409).send({ error: "asset is inactive" });
 
+    const telematicsLocked = isTelematicsAsset(asset.id);
+
     // If the asset itself is standby in master data, it cannot be used for production
     if (Number(asset.is_standby) === 1 && body.is_used !== false) {
       // you can still log it, but it must be standby/not used
@@ -216,6 +224,20 @@ export default async function hoursRoutes(app) {
     let opening_hours = numOrNull(body.opening_hours);
     let closing_hours = numOrNull(body.closing_hours);
     let hours_run = numOrNull(body.hours_run);
+
+    if (telematicsLocked && body.allow_manual_meter !== true) {
+      syncTelematicsDailyHours(asset.id, work_date);
+      const telemRow = db.prepare(`
+        SELECT opening_hours, closing_hours, hours_run
+        FROM daily_hours
+        WHERE asset_id = ? AND work_date = ?
+      `).get(asset.id, work_date);
+      if (telemRow) {
+        opening_hours = numOrNull(telemRow.opening_hours);
+        closing_hours = numOrNull(telemRow.closing_hours);
+        hours_run = numOrNull(telemRow.hours_run);
+      }
+    }
 
     // Validate numeric
     const badNonNeg = (n) => n != null && n < 0;
@@ -296,13 +318,14 @@ export default async function hoursRoutes(app) {
     const notes = body.notes != null && String(body.notes).trim() !== "" ? String(body.notes).trim() : null;
 
     // Upsert
+    const meterSource = telematicsLocked && body.allow_manual_meter !== true ? "telematics" : "manual";
     db.prepare(`
       INSERT INTO daily_hours (
         asset_id, work_date,
         scheduled_hours, opening_hours, closing_hours,
-        hours_run, input_unit, is_used, operator, notes
+        hours_run, input_unit, is_used, operator, notes, meter_source
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(asset_id, work_date) DO UPDATE SET
         scheduled_hours = excluded.scheduled_hours,
         opening_hours = excluded.opening_hours,
@@ -311,7 +334,8 @@ export default async function hoursRoutes(app) {
         input_unit = excluded.input_unit,
         is_used = excluded.is_used,
         operator = excluded.operator,
-        notes = excluded.notes
+        notes = excluded.notes,
+        meter_source = excluded.meter_source
     `).run(
       asset.id,
       work_date,
@@ -322,7 +346,8 @@ export default async function hoursRoutes(app) {
       input_unit,
       is_used,
       operator,
-      notes
+      notes,
+      meterSource
     );
 
     // Persist selected input unit per asset for next-day suggestion (editable anytime).
@@ -339,7 +364,9 @@ export default async function hoursRoutes(app) {
       closing_hours,
       hours_run,
       input_unit,
-      input_unit_locked: false,
+      input_unit_locked: telematicsLocked,
+      telematics_locked: telematicsLocked,
+      meter_source: meterSource,
       is_used: Boolean(is_used)
     });
   });

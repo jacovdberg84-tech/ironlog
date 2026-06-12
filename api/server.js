@@ -33,6 +33,7 @@ import breakdownOpsRoutes from "./routes/breakdownOps.routes.js";
 import tasksRoutes from "./routes/tasks.routes.js";
 import backupsRoutes from "./routes/backups.routes.js";
 import masterdataRoutes from "./routes/masterdata.routes.js";
+import telematicsRoutes from "./routes/telematics.routes.js";
 import { ironlogAuthHook } from "./auth/hook.js";
 
 export function buildServer() {
@@ -67,6 +68,7 @@ app.register(maintenanceRoutes, { prefix: "/api/maintenance" });
 app.register(reportsRoutes, { prefix: "/api/reports" });
 app.register(alertsRoutes, { prefix: "/api/alerts" });
 app.register(dashboardRoutes, { prefix: "/api/dashboard" });
+  app.register(telematicsRoutes, { prefix: "/api/telematics" });
 app.register(authRoutes, { prefix: "/api/auth" });
 app.register(auditRoutes, { prefix: "/api/audit" });
 app.register(legalRoutes, { prefix: "/api/legal" });

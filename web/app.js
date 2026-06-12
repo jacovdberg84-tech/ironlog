@@ -16,6 +16,20 @@ const MAINT_LOCK_KEY = "ironlog_maintenance_access_ok";
 const MAINT_LOCK_USER = "BJ van den Berg";
 const MAINT_LOCK_PASSWORD = "0mhliac789";
 const MAINT_CHILD_TABS = new Set(["Breakdowns", "ironmind"]);
+/** Production site nav — only tabs in active use (telematics pilot + go-live). */
+const PRODUCTION_SITE_TABS = [
+  "dash",
+  "daily",
+  "maintenance",
+  "assets",
+  "workshop",
+  "fuel",
+  "lube",
+  "vehicle",
+  "stock",
+  "reports",
+];
+const PRODUCTION_NAV_ENABLED = true;
 const DEFAULT_ROLE = "admin";
 const DEFAULT_USER = "admin";
 const DEFAULT_SITE = "main";
@@ -829,18 +843,23 @@ function getEffectiveAllowedTabs() {
   if (!list) {
     list = Array.from(new Set(roles.flatMap((r) => getRoleAllowedTabs(r))));
   }
-  // Keep task workspace reachable even when older saved tab overrides exist.
-  if (!list.includes("tasks")) list = [...list, "tasks"];
-  // Workshop Library is public-facing and should stay reachable even for older saved tab overrides.
-  if (!list.includes("workshop")) list = [...list, "workshop"];
-  // Backward compatibility for older saved tab overrides created before Finance tab existed.
-  if (roles.some((r) => ["admin", "supervisor", "stores", "procurement", "plant_manager", "site_manager", "executive"].includes(r)) && !list.includes("finance")) {
-    list = [...list, "finance"];
-  }
-  // Enterprise + executive tabs visibility guards (introduced in big-out roll)
-  if (roles.some((r) => ["admin", "supervisor", "executive"].includes(r))) {
-    if (!list.includes("enterprise")) list = [...list, "enterprise"];
-    if (!list.includes("exec")) list = [...list, "exec"];
+  if (PRODUCTION_NAV_ENABLED) {
+    const production = new Set(PRODUCTION_SITE_TABS);
+    list = list.filter((t) => production.has(t));
+  } else {
+    // Keep task workspace reachable even when older saved tab overrides exist.
+    if (!list.includes("tasks")) list = [...list, "tasks"];
+    // Workshop Library is public-facing and should stay reachable even for older saved tab overrides.
+    if (!list.includes("workshop")) list = [...list, "workshop"];
+    // Backward compatibility for older saved tab overrides created before Finance tab existed.
+    if (roles.some((r) => ["admin", "supervisor", "stores", "procurement", "plant_manager", "site_manager", "executive"].includes(r)) && !list.includes("finance")) {
+      list = [...list, "finance"];
+    }
+    // Enterprise + executive tabs visibility guards (introduced in big-out roll)
+    if (roles.some((r) => ["admin", "supervisor", "executive"].includes(r))) {
+      if (!list.includes("enterprise")) list = [...list, "enterprise"];
+      if (!list.includes("exec")) list = [...list, "exec"];
+    }
   }
   // "admin" is not an assignable section in the multiselect; always allow the User admin tab for these roles
   if (roles.some((r) => ["admin", "supervisor"].includes(r)) && !list.includes("admin")) list = [...list, "admin"];
@@ -2749,6 +2768,38 @@ async function postHoursWithOffline(payload) {
    DASHBOARD
 ========================= */
 
+async function loadTelematicsFleet() {
+  const list = qs("telematicsFleetList");
+  if (!list) return;
+  try {
+    const data = await fetchJson(`${API}/api/telematics/fleet`);
+    list.innerHTML = "";
+    const fleet = Array.isArray(data?.fleet) ? data.fleet : [];
+    if (!fleet.length) {
+      list.appendChild(item("<small>No telematics devices registered yet.</small>"));
+      return;
+    }
+    fleet.forEach((r) => {
+      const status = String(r.link_status || "offline");
+      const statusClass = status === "live" ? "pill green" : status === "stale" ? "pill amber" : "pill";
+      const runHrs = r.run_seconds_today != null ? (Number(r.run_seconds_today) / 3600).toFixed(2) : "-";
+      const idleHrs = r.idle_seconds_today != null ? (Number(r.idle_seconds_today) / 3600).toFixed(2) : "-";
+      const faults = Number(r.active_fault_count || 0);
+      list.appendChild(
+        item(
+          `<div class="fuel-item-head"><b>${escapeHtml(r.asset_code || "-")}</b> — ${escapeHtml(r.unit_model || "FSC")} <span class="${statusClass}">${status.toUpperCase()}</span>${faults > 0 ? ` <span class="pill red">${faults} FAULT${faults === 1 ? "" : "S"}</span>` : ""}</div>` +
+          `<small class="fuel-item-desc">${escapeHtml(r.asset_name || "")}</small>` +
+          `<small class="fuel-item-meta">Meter: ${r.engine_hours == null ? "-" : Number(r.engine_hours).toFixed(1)} h | Run today: ${runHrs} h | Idle today: ${idleHrs} h | Ignition: ${Number(r.ignition_on) === 1 ? "ON" : "OFF"}</small>` +
+          `<small class="fuel-item-meta muted">Last seen: ${escapeHtml(r.recorded_at || r.updated_at || "-")}</small>`
+        )
+      );
+    });
+  } catch (e) {
+    list.innerHTML = "";
+    list.appendChild(item(`<small>Telematics unavailable: ${escapeHtml(e.message || String(e))}</small>`));
+  }
+}
+
 async function loadDashboard() {
   const dateEl = qs("date");
   const scheduledEl = qs("scheduled");
@@ -2768,8 +2819,10 @@ async function loadDashboard() {
   setSkeleton("costList", 2);
   setSkeleton("lubeList", 2);
   setSkeleton("stockMonitorList", 2);
+  setSkeleton("telematicsFleetList", 2);
 
   const data = await fetchJson(`${API}/api/dashboard?date=${date}&scheduled=${scheduled}`);
+  loadTelematicsFleet().catch(() => {});
 
   const sqDateEl = qs("sqDate");
   if (sqDateEl && !sqDateEl.value) sqDateEl.value = date;
@@ -9661,6 +9714,19 @@ function validateDailyRows() {
       continue;
     }
 
+    if (r.telematics_locked) {
+      if (!r.is_used && r.hours_run > 0) {
+        r.error = "STANDBY SELECTED — HOURS NOT ALLOWED.";
+        continue;
+      }
+      if (r.is_used && (r.scheduled_hours == null || r.scheduled_hours === 0)) {
+        r.error = "PRODUCTION SELECTED — SCHEDULED HOURS IS 0.";
+      } else if (r.is_used && r.hours_run === 0) {
+        r.warning = "TELEMATICS — METER WILL SYNC FROM FSC ON SAVE.";
+      }
+      continue;
+    }
+
     if (!r.is_used && r.hours_run > 0) {
       r.error = "STANDBY SELECTED — HOURS NOT ALLOWED.";
       continue;
@@ -9821,6 +9887,7 @@ function renderDailyTable() {
         <span class="daily-asset-code">${r.asset_code}</span>
         <button class="daily-btn-icon daily-asset-qr" title="Download QR PNG for ${r.asset_code}">QR</button>
         <span class="daily-asset-name">${r.asset_name || ""}</span>
+        ${r.telematics_locked ? '<span class="pill blue" style="margin-left:8px">TELEMATICS</span>' : ""}
       </div>
       <div class="daily-status-badge ${r.is_down ? 'status-down' : r.error ? 'status-error' : r.warning ? 'status-warning' : 'status-ok'}">
         ${r.is_down ? '⬇ DOWN' : r.error ? '✕ ' + r.error : r.warning ? '⚠ ' + r.warning : r.is_used ? '▶ PRODUCTION' : '⏸ STANDBY'}
@@ -9847,7 +9914,7 @@ function renderDailyTable() {
         </div>
         <div class="daily-hour-field">
           <label>Closing</label>
-          <input type="number" step="0.1" value="${fmt(r.closing_hours)}" class="daily-input ${r.is_down ? 'disabled' : ''}" ${r.is_down ? 'readonly' : ''} />
+          <input type="number" step="0.1" value="${fmt(r.closing_hours)}" class="daily-input ${r.is_down || r.telematics_locked ? 'disabled readonly' : ''}" ${r.is_down || r.telematics_locked ? 'readonly' : ''} title="${r.telematics_locked ? 'Hourmeter from FSC telematics' : ''}" />
         </div>
         <div class="daily-hour-field">
           <label>Run</label>
@@ -10072,6 +10139,16 @@ async function loadDailyInput() {
 
   dailyRows = [];
 
+  let telematicsByCode = new Map();
+  try {
+    const telem = await fetchJson(`${API}/api/telematics/devices`);
+    for (const d of Array.isArray(telem?.devices) ? telem.devices : []) {
+      if (d?.asset_code) telematicsByCode.set(d.asset_code, d);
+    }
+  } catch {
+    telematicsByCode = new Map();
+  }
+
   let openBreakdownByAsset = new Map();
   try {
     const openData = await fetchJson(`${API}/api/breakdowns/open-all?date=${encodeURIComponent(date)}`);
@@ -10121,7 +10198,9 @@ async function loadDailyInput() {
       suggested_input_unit: ex?.input_unit
         ? String(ex.input_unit).toLowerCase()
         : (String(a.category || "").toLowerCase().includes("truck") || String(a.category || "").toLowerCase().includes("vehicle") ? "km" : "hours"),
-      input_unit_locked: Boolean(ex?.input_unit_locked),
+      input_unit_locked: Boolean(ex?.input_unit_locked) || telematicsByCode.has(a.asset_code),
+      telematics_locked: Boolean(ex?.telematics_locked) || telematicsByCode.has(a.asset_code),
+      meter_source: ex?.meter_source || (telematicsByCode.has(a.asset_code) ? "telematics" : "manual"),
 
       scheduled_hours: ex ? toNum(ex.scheduled_hours) : null,
       opening_hours: ex ? toNum(ex.opening_hours) : null,
