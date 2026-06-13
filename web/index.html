@@ -4833,6 +4833,27 @@
                 </div>
               </div>
             </div>
+
+            <h4 style="margin:16px 0 8px;">Printable register (PDF)</h4>
+            <p class="muted small" style="margin:0 0 8px;">Print a walk-around sheet grouped by equipment type. Use blank for manual sign-off, or register to include captured QR inspections for the date.</p>
+            <div class="form-row" style="flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
+              <div class="form-field">
+                <label>Equipment type</label>
+                <select id="safetyPdfType" class="w-full">
+                  <option value="">All types</option>
+                  <option value="fire_extinguisher">Fire extinguisher</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Inspection date</label>
+                <input id="safetyPdfDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button type="button" id="safetyPdfRegisterBtn" class="btn btn-secondary btn-sm">Print register PDF</button>
+                <button type="button" id="safetyPdfBlankBtn" class="btn btn-secondary btn-sm">Print blank sheet</button>
+              </div>
+            </div>
+
             <pre class="output" id="safetyAdminResult"></pre>
           </div>
         </div>

@@ -7,6 +7,7 @@ import {
   buildChecklistFromTemplate,
   checklistStatus,
 } from "../utils/safetyChecklistTemplates.js";
+import { buildSafetyRegisterPdf } from "../utils/safetyRegisterPdf.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -174,6 +175,54 @@ function latestInspectionForDate(itemId, date) {
     FROM safety_inspections
     WHERE item_id = ? AND inspection_date = ?
   `).get(Number(itemId), String(date));
+}
+
+function loadSafetyRegisterGroups(templateKey, checkDate) {
+  const keyFilter = String(templateKey || "").trim();
+  const templateRows = keyFilter
+    ? db.prepare(`
+        SELECT id, template_key, title, items_json, site_code
+        FROM safety_checklist_templates
+        WHERE template_key = ? AND COALESCE(active, 1) = 1
+      `).all(keyFilter)
+    : db.prepare(`
+        SELECT id, template_key, title, items_json, site_code
+        FROM safety_checklist_templates
+        WHERE COALESCE(active, 1) = 1
+        ORDER BY title ASC
+      `).all();
+
+  const groups = [];
+  for (const row of templateRows) {
+    const template = {
+      template_key: String(row.template_key),
+      title: String(row.title),
+      site_code: String(row.site_code || "main"),
+      items: parseTemplateItemsJson(row.items_json),
+    };
+    const itemRows = db.prepare(`
+      SELECT id, item_code, template_key, item_name, location, notes, site_code
+      FROM safety_equipment_items
+      WHERE template_key = ? AND site_code = ? AND COALESCE(active, 1) = 1
+      ORDER BY item_code ASC
+    `).all(template.template_key, template.site_code);
+
+    const items = itemRows.map((item) => {
+      const insp = latestInspectionForDate(Number(item.id), checkDate);
+      let checklist = [];
+      if (insp?.checklist_json) {
+        try {
+          checklist = buildChecklistFromTemplate(template.items, JSON.parse(String(insp.checklist_json)));
+        } catch {
+          checklist = [];
+        }
+      }
+      return { item, inspection: insp || null, checklist };
+    });
+
+    if (items.length) groups.push({ template, items });
+  }
+  return groups;
 }
 
 export default async function safetyRoutes(app) {
@@ -533,6 +582,38 @@ export default async function safetyRoutes(app) {
         qr_text: built.qrText,
         generated_at: built.profile.generated_at,
       });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // GET /api/safety/register.pdf?template_key=fire_extinguisher&date=YYYY-MM-DD&blank=1&download=1
+  app.get("/register.pdf", async (req, reply) => {
+    try {
+      const template_key = String(req.query?.template_key || "").trim();
+      const check_date = String(req.query?.date || "").trim() || new Date().toISOString().slice(0, 10);
+      const blank = String(req.query?.blank || "").trim() === "1";
+      const download = String(req.query?.download || "").trim() === "1";
+      if (!isDate(check_date)) {
+        return reply.code(400).send({ ok: false, error: "date must be YYYY-MM-DD" });
+      }
+      if (template_key && !getTemplate(template_key)) {
+        return reply.code(404).send({ ok: false, error: "Template not found" });
+      }
+
+      const groups = loadSafetyRegisterGroups(template_key, check_date);
+      const pdf = await buildSafetyRegisterPdf({ groups, checkDate: check_date, blank });
+      const slug = template_key ? template_key.replace(/[^a-z0-9_-]+/gi, "_") : "all_types";
+      const mode = blank ? "blank" : "register";
+
+      return reply
+        .header("Content-Type", "application/pdf")
+        .header(
+          "Content-Disposition",
+          `${download ? "attachment" : "inline"}; filename="AML_Safety_${mode}_${slug}_${check_date}.pdf"`
+        )
+        .send(pdf);
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message || String(err) });

@@ -1812,11 +1812,15 @@ function renderSafetyTemplateEditor(items) {
 async function loadSafetyTemplatesSelect() {
   const data = await fetchJson(`${API}/api/safety/templates`);
   const templates = Array.isArray(data.templates) ? data.templates : [];
-  const selects = ["safetyTplSelect", "safetyItemTemplate"].map((id) => qs(id)).filter(Boolean);
+  const selects = ["safetyTplSelect", "safetyItemTemplate", "safetyPdfType"].map((id) => qs(id)).filter(Boolean);
   selects.forEach((sel) => {
-    sel.innerHTML = templates.map((t) =>
+    const keepAll = sel.id === "safetyPdfType";
+    const opts = templates.map((t) =>
       `<option value="${escapeHtml(t.template_key)}">${escapeHtml(t.title || t.template_key)}</option>`
-    ).join("");
+    );
+    sel.innerHTML = keepAll
+      ? `<option value="">All types</option>${opts.join("")}`
+      : opts.join("");
   });
   return templates;
 }
@@ -1955,8 +1959,22 @@ function printSafetyQr() {
   w.document.close();
 }
 
+async function openSafetyRegisterPdf(blank = false) {
+  const template_key = String(qs("safetyPdfType")?.value || "").trim();
+  const date = String(qs("safetyPdfDate")?.value || "").trim() || new Date().toISOString().slice(0, 10);
+  const q = new URLSearchParams();
+  if (template_key) q.set("template_key", template_key);
+  q.set("date", date);
+  if (blank) q.set("blank", "1");
+  setStatus(blank ? "Opening blank safety sheet…" : "Opening safety register PDF…");
+  await openAuthedPdf(`${API}/api/safety/register.pdf?${q.toString()}`);
+  setStatus("Safety PDF opened.");
+}
+
 async function initSafetyAdminPanel() {
   if (!qs("adminSafetyCard")) return;
+  const pdfDate = qs("safetyPdfDate");
+  if (pdfDate && !pdfDate.value) pdfDate.value = new Date().toISOString().slice(0, 10);
   try {
     await loadSafetyTemplatesSelect();
     await loadSafetyTemplateEditor();
@@ -13030,6 +13048,12 @@ async function init() {
     generateSafetyQr().catch((e) => setStatus("Safety QR error: " + e.message))
   );
   qs("safetyQrPrint")?.addEventListener("click", printSafetyQr);
+  qs("safetyPdfRegisterBtn")?.addEventListener("click", () =>
+    openSafetyRegisterPdf(false).catch((e) => setStatus("Safety PDF error: " + e.message))
+  );
+  qs("safetyPdfBlankBtn")?.addEventListener("click", () =>
+    openSafetyRegisterPdf(true).catch((e) => setStatus("Safety PDF error: " + e.message))
+  );
   initSafetyAdminPanel().catch(() => {});
 
   // Net banner
