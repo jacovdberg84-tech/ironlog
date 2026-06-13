@@ -1946,17 +1946,35 @@ function printSafetyQr() {
     return;
   }
   const code = String(qs("safetyQrItemCode")?.value || "").trim().toUpperCase();
-  const w = window.open("", "_blank");
-  if (!w) return alert("Pop-up blocked.");
-  w.document.write(`
-    <html><head><title>Safety QR ${code}</title></head>
-    <body style="font-family:Arial;text-align:center;padding:24px;">
-      <h2>${escapeHtml(code || "Safety item")}</h2>
-      <img src="${lastSafetyQrUrl}" alt="QR" style="width:280px;height:280px;" />
-      <p>Scan to open safety inspection form.</p>
-      <script>window.onload=function(){window.print();};</script>
-    </body></html>`);
-  w.document.close();
+  openQrLabelSheetPrintWindow(
+    [{ code: code || "Safety item", qrUrl: lastSafetyQrUrl }],
+    readQrSheetLayout("safety"),
+    "IRONLOG Safety QR Label Sheet"
+  );
+  setStatus("Safety QR print sheet opened.");
+}
+
+async function printAllSafetyQrSheet() {
+  setStatus("Building safety QR label sheet…");
+  const data = await fetchJson(`${API}/api/safety/items`);
+  const rows = Array.isArray(data.items) ? data.items : [];
+  if (!rows.length) return alert("No safety items registered yet.");
+  const labels = [];
+  for (let i = 0; i < rows.length; i += 1) {
+    const code = String(rows[i]?.item_code || "").trim();
+    if (!code) continue;
+    try {
+      const { qrUrl } = await buildSafetyQrImageData(code);
+      labels.push({ code, qrUrl });
+      setStatus(`Preparing safety label ${i + 1}/${rows.length}: ${code}`);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    } catch {
+      /* skip failed rows */
+    }
+  }
+  if (!labels.length) throw new Error("Could not prepare any safety QR labels.");
+  openQrLabelSheetPrintWindow(labels, readQrSheetLayout("safety"), "IRONLOG Safety QR Label Sheet");
+  setStatus(`Safety QR sheet ready (${labels.length} labels) ✅`);
 }
 
 async function openSafetyRegisterPdf(blank = false) {
@@ -1975,6 +1993,7 @@ async function initSafetyAdminPanel() {
   if (!qs("adminSafetyCard")) return;
   const pdfDate = qs("safetyPdfDate");
   if (pdfDate && !pdfDate.value) pdfDate.value = new Date().toISOString().slice(0, 10);
+  applySafetyQrSheetPreset();
   try {
     await loadSafetyTemplatesSelect();
     await loadSafetyTemplateEditor();
@@ -11329,22 +11348,65 @@ async function printVisibleDailyQrSheet() {
 
   if (!labels.length) throw new Error("Could not prepare any QR labels.");
 
-  const cols = Math.max(1, Math.min(8, Number(toNum(qs("qrCols")?.value) ?? 4)));
-  const qrSizeMm = Math.max(12, Math.min(60, Number(toNum(qs("qrSizeMm")?.value) ?? 28)));
-  const cellMm = Math.max(20, Math.min(80, Number(toNum(qs("qrCellMm")?.value) ?? 45)));
-  const gapMm = Math.max(0, Math.min(20, Number(toNum(qs("qrGapMm")?.value) ?? 4)));
+  openQrLabelSheetPrintWindow(labels, readQrSheetLayout("daily"), "IRONLOG QR Label Sheet");
+  setStatus(`Printable QR sheet ready (${labels.length} labels) ✅`);
+}
 
+const QR_SHEET_PRESETS = {
+  small: { cols: 5, qr: 22, cell: 32, gap: 2 },
+  medium: { cols: 4, qr: 28, cell: 45, gap: 4 },
+  large: { cols: 3, qr: 35, cell: 55, gap: 5 },
+  avery_3474: { cols: 4, qr: 23, cell: 34, gap: 2 },
+  avery_l7163: { cols: 2, qr: 35, cell: 43, gap: 4 },
+};
+
+function qrSheetFieldIds(scope) {
+  if (scope === "safety") {
+    return {
+      preset: "safetyQrPreset",
+      cols: "safetyQrCols",
+      qr: "safetyQrSizeMm",
+      cell: "safetyQrCellMm",
+      gap: "safetyQrGapMm",
+    };
+  }
+  return {
+    preset: "qrPreset",
+    cols: "qrCols",
+    qr: "qrSizeMm",
+    cell: "qrCellMm",
+    gap: "qrGapMm",
+  };
+}
+
+function readQrSheetLayout(scope) {
+  const ids = qrSheetFieldIds(scope);
+  const defaults = scope === "safety"
+    ? { cols: 5, qr: 22, cell: 32, gap: 2 }
+    : { cols: 4, qr: 28, cell: 45, gap: 4 };
+  return {
+    cols: Math.max(1, Math.min(8, Number(toNum(qs(ids.cols)?.value) ?? defaults.cols))),
+    qrSizeMm: Math.max(12, Math.min(60, Number(toNum(qs(ids.qr)?.value) ?? defaults.qr))),
+    cellMm: Math.max(20, Math.min(80, Number(toNum(qs(ids.cell)?.value) ?? defaults.cell))),
+    gapMm: Math.max(0, Math.min(20, Number(toNum(qs(ids.gap)?.value) ?? defaults.gap))),
+  };
+}
+
+function openQrLabelSheetPrintWindow(labels, layout, sheetTitle) {
+  const safeLabels = Array.isArray(labels) ? labels.filter((l) => l?.qrUrl && l?.code) : [];
+  if (!safeLabels.length) throw new Error("No QR labels to print.");
+  const { cols, qrSizeMm, cellMm, gapMm } = layout || readQrSheetLayout("daily");
   const win = window.open("", "_blank", "width=1100,height=800");
   if (!win) {
     alert("Pop-up blocked. Allow pop-ups and try again.");
     return;
   }
-  const cells = labels
+  const cells = safeLabels
     .map(
       (l) => `
       <div class="cell">
-        <img src="${l.qrUrl}" alt="${l.code} QR" />
-        <div class="code">${l.code}</div>
+        <img src="${l.qrUrl}" alt="${escapeHtml(l.code)} QR" />
+        <div class="code">${escapeHtml(l.code)}</div>
       </div>
     `
     )
@@ -11353,7 +11415,7 @@ async function printVisibleDailyQrSheet() {
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>IRONLOG QR Label Sheet</title>
+  <title>${escapeHtml(sheetTitle || "IRONLOG QR Label Sheet")}</title>
   <style>
     @page { size: A4 portrait; margin: 8mm; }
     * { box-sizing: border-box; }
@@ -11394,7 +11456,7 @@ async function printVisibleDailyQrSheet() {
 </head>
 <body>
   <div class="sheet">
-    <div class="head">IRONLOG QR Label Sheet | Total: ${labels.length} | Layout: ${cols} cols, QR ${qrSizeMm}mm, Cell ${cellMm}mm, Gap ${gapMm}mm | Generated: ${new Date().toISOString()}</div>
+    <div class="head">${escapeHtml(sheetTitle || "IRONLOG QR Label Sheet")} | Total: ${safeLabels.length} | Layout: ${cols} cols, QR ${qrSizeMm}mm, Cell ${cellMm}mm, Gap ${gapMm}mm | Generated: ${new Date().toISOString()}</div>
     <div class="grid">${cells}</div>
     <div class="no-print" style="margin-top:10px;font-size:12px;color:#555;">Use browser print scaling at 100% for label alignment.</div>
   </div>
@@ -11404,28 +11466,29 @@ async function printVisibleDailyQrSheet() {
   win.document.open();
   win.document.write(html);
   win.document.close();
-  setStatus(`Printable QR sheet ready (${labels.length} labels) ✅`);
 }
 
-function applyQrSheetPreset() {
-  const preset = String(qs("qrPreset")?.value || "custom");
-  const defs = {
-    small: { cols: 5, qr: 22, cell: 32, gap: 2 },
-    medium: { cols: 4, qr: 28, cell: 45, gap: 4 },
-    large: { cols: 3, qr: 35, cell: 55, gap: 5 },
-    avery_3474: { cols: 4, qr: 23, cell: 34, gap: 2 },
-    avery_l7163: { cols: 2, qr: 35, cell: 43, gap: 4 },
-  };
-  const target = defs[preset];
+function applyQrSheetPresetScope(scope) {
+  const ids = qrSheetFieldIds(scope);
+  const preset = String(qs(ids.preset)?.value || "custom");
+  const target = QR_SHEET_PRESETS[preset];
   if (!target) return;
   const setVal = (id, value) => {
     const el = qs(id);
     if (el) el.value = String(value);
   };
-  setVal("qrCols", target.cols);
-  setVal("qrSizeMm", target.qr);
-  setVal("qrCellMm", target.cell);
-  setVal("qrGapMm", target.gap);
+  setVal(ids.cols, target.cols);
+  setVal(ids.qr, target.qr);
+  setVal(ids.cell, target.cell);
+  setVal(ids.gap, target.gap);
+}
+
+function applyQrSheetPreset() {
+  applyQrSheetPresetScope("daily");
+}
+
+function applySafetyQrSheetPreset() {
+  applyQrSheetPresetScope("safety");
 }
 
 async function generateDailyAssetQr() {
@@ -13048,6 +13111,16 @@ async function init() {
     generateSafetyQr().catch((e) => setStatus("Safety QR error: " + e.message))
   );
   qs("safetyQrPrint")?.addEventListener("click", printSafetyQr);
+  qs("safetyQrPrintSheet")?.addEventListener("click", () =>
+    printAllSafetyQrSheet().catch((e) => setStatus("Safety QR sheet error: " + e.message))
+  );
+  qs("safetyQrPreset")?.addEventListener("change", applySafetyQrSheetPreset);
+  ["safetyQrCols", "safetyQrSizeMm", "safetyQrCellMm", "safetyQrGapMm"].forEach((id) => {
+    qs(id)?.addEventListener("input", () => {
+      const preset = qs("safetyQrPreset");
+      if (preset && preset.value !== "custom") preset.value = "custom";
+    });
+  });
   qs("safetyPdfRegisterBtn")?.addEventListener("click", () =>
     openSafetyRegisterPdf(false).catch((e) => setStatus("Safety PDF error: " + e.message))
   );

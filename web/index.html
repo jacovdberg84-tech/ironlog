@@ -4815,7 +4815,7 @@
             <div id="safetyItemsList" class="list" style="margin-bottom:12px;"></div>
 
             <h4 style="margin:0 0 8px;">QR label</h4>
-            <div class="daily-actions" style="margin-bottom:12px;">
+            <div class="daily-actions" style="margin-bottom:8px;">
               <div class="bulk-sched">
                 <label>
                   <span>Safety item code</span>
@@ -4823,6 +4823,24 @@
                 </label>
                 <button id="safetyQrGenerate" type="button" class="btn btn-secondary btn-sm">Generate QR</button>
                 <button id="safetyQrPrint" type="button" class="btn btn-secondary btn-sm">Print QR</button>
+                <button id="safetyQrPrintSheet" type="button" class="btn btn-secondary btn-sm">Print all QR sheet</button>
+              </div>
+              <div class="bulk-sched" style="margin-top:10px;">
+                <label>
+                  <span>Preset</span>
+                  <select id="safetyQrPreset" class="w-140">
+                    <option value="custom">Custom</option>
+                    <option value="small" selected>Small (5 col)</option>
+                    <option value="medium">Medium (4 col)</option>
+                    <option value="large">Large (3 col)</option>
+                    <option value="avery_3474">Avery 3474 style</option>
+                    <option value="avery_l7163">Avery L7163 style</option>
+                  </select>
+                </label>
+                <label><span>Cols</span><input id="safetyQrCols" class="w-80" type="number" min="1" max="8" step="1" value="5" /></label>
+                <label><span>QR mm</span><input id="safetyQrSizeMm" class="w-80" type="number" min="12" max="60" step="1" value="22" /></label>
+                <label><span>Cell mm</span><input id="safetyQrCellMm" class="w-80" type="number" min="20" max="80" step="1" value="32" /></label>
+                <label><span>Gap mm</span><input id="safetyQrGapMm" class="w-80" type="number" min="0" max="20" step="1" value="2" /></label>
               </div>
             </div>
             <div id="safetyQrPreview" class="dash-card" style="display:none; margin-top:12px;">
