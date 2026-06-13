@@ -545,6 +545,24 @@ function copyWeeklyInspectionDay(from_date, to_date) {
   return { from_date: from, to_date: to, copied, skipped, total: sourceSlots.length };
 }
 
+function clearWeeklyInspectionRoster({ clear_slots = true } = {}) {
+  ensureWeeklyInspectionSchema();
+  const rosterResult = db.prepare(`
+    UPDATE weekly_inspection_assets
+    SET active = 0, updated_at = datetime('now')
+    WHERE COALESCE(active, 1) = 1
+  `).run();
+  let slots_cleared = 0;
+  if (clear_slots) {
+    slots_cleared = Number(db.prepare(`SELECT COUNT(*) AS c FROM weekly_inspection_slots`).get()?.c || 0);
+    db.prepare(`DELETE FROM weekly_inspection_slots`).run();
+  }
+  return {
+    roster_cleared: Number(rosterResult.changes || 0),
+    slots_cleared,
+  };
+}
+
 function updateWeeklyInspectionSlotStatus({ slot_id, asset_id, planned_date, status, inspector_name }) {
   ensureWeeklyInspectionSchema();
   let row = null;
@@ -4364,6 +4382,17 @@ export default async function maintenanceRoutes(app) {
       if (!row) return reply.code(404).send({ ok: false, error: "Schedule row not found" });
       db.prepare(`UPDATE weekly_inspection_assets SET active = 0, updated_at = datetime('now') WHERE id = ?`).run(id);
       return reply.send({ ok: true, id, asset_id: Number(row.asset_id) });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.delete("/weekly-inspections/roster", async (req, reply) => {
+    try {
+      const clearSlots = String(req.query?.clear_slots ?? "1").trim() !== "0";
+      const result = clearWeeklyInspectionRoster({ clear_slots: clearSlots });
+      return reply.send({ ok: true, ...result, clear_slots: clearSlots });
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message || String(err) });

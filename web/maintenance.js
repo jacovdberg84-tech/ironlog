@@ -3392,6 +3392,37 @@ async function removeWeeklyInspectionAsset(id) {
   }
 }
 
+async function clearWeeklyInspectionRoster() {
+  const rosterCount = Array.isArray(wiCalendarCache?.assets) ? wiCalendarCache.assets.length : 0;
+  const slotCount = Number(wiCalendarCache?.compliance?.total_slots ?? 0);
+  if (!rosterCount && !slotCount) {
+    wiSetMsg("Roster is already empty.");
+    return;
+  }
+  const msg = [
+    "Clear the entire workshop roster and start fresh?",
+    rosterCount ? `${rosterCount} roster item${rosterCount === 1 ? "" : "s"} will be removed.` : "",
+    slotCount ? `${slotCount} scheduled calendar visit${slotCount === 1 ? "" : "s"} will also be cleared.` : "",
+  ].filter(Boolean).join("\n\n");
+  if (!window.confirm(msg)) return;
+  wiSetMsg("Clearing roster...");
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-inspections/roster?clear_slots=1`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to clear roster");
+    closeWiDayPanel();
+    await loadWeeklyInspectionCalendar();
+    wiSetMsg(
+      `Roster cleared (${Number(data.roster_cleared || 0)} item${Number(data.roster_cleared || 0) === 1 ? "" : "s"}${Number(data.slots_cleared || 0) ? `, ${Number(data.slots_cleared)} calendar visit${Number(data.slots_cleared) === 1 ? "" : "s"} removed` : ""}).`,
+    );
+  } catch (e) {
+    wiSetMsg(`Clear failed: ${e.message || e}`, true);
+  }
+}
+
 async function openWeeklyInspectionPdf(download = false) {
   const q = new URLSearchParams();
   q.set("month", wiCurrentMonth());
@@ -6454,6 +6485,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("wiAssetSelect")?.focus();
   });
   document.getElementById("wiAddAssetBtn")?.addEventListener("click", () => addWeeklyInspectionAsset());
+  document.getElementById("wiClearRosterBtn")?.addEventListener("click", () => clearWeeklyInspectionRoster());
   document.getElementById("wiAddSlotBtn")?.addEventListener("click", () => addWeeklyInspectionSlot());
   document.getElementById("wiCopyDayBtn")?.addEventListener("click", () => copyWeeklyInspectionDay());
   document.getElementById("wiCloseDayPanelBtn")?.addEventListener("click", () => closeWiDayPanel());
