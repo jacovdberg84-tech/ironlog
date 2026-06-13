@@ -45,7 +45,7 @@ export function drawHeaderFooter(doc, opts = {}) {
     rightText = "",
     showPageNumbers = true,
   } = opts;
-  const displayTitle = String(title || "").trim().toUpperCase() === "IRONLOG" ? "AML" : title;
+  const displayTitle = String(title || "").trim() || "IRONLOG";
 
   // Important: header/footer drawing must NOT move the main content cursor.
   // PDFKit's text() updates doc.y, so we snapshot and restore it.

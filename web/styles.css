@@ -136,9 +136,10 @@ body{
   align-items:center;
 }
 .logo img{
-  height:34px;
+  height:40px;
   width:auto;
   display:block;
+  border-radius:6px;
 }
 .title{font-weight:800; letter-spacing:0.04em; color:var(--ink)}
 .subtitle{color:var(--muted); font-size:12px}
@@ -4155,8 +4156,9 @@ body.sidebar-collapsed .main-content {
 }
 
 .has-sidebar .logo img {
-  height: 32px;
+  height: 38px;
   width: auto;
+  border-radius: 6px;
 }
 
 .has-sidebar .title {
