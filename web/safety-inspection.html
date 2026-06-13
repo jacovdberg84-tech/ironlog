@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IRONLOG Safety Inspection</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1115;
+      --panel: #151a22;
+      --line: #253044;
+      --text: #e7edf5;
+      --muted: #97a2b3;
+      --accent: #2563eb;
+      --ok: #16a34a;
+      --bad: #dc2626;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Arial, sans-serif; background: var(--bg); color: var(--text); }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 16px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+    h1 { margin: 0 0 8px; font-size: 24px; }
+    .muted { color: var(--muted); font-size: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    .kv { border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+    .kv .k { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    .kv .v { font-weight: 700; font-size: 15px; }
+    .row { margin: 10px 0; }
+    .row label.block { display: block; margin-bottom: 6px; font-size: 13px; color: var(--muted); }
+    input, textarea {
+      width: 100%; border: 1px solid var(--line); border-radius: 8px;
+      background: #0f172a; color: var(--text); padding: 10px; font-size: 15px;
+    }
+    textarea { min-height: 72px; resize: vertical; }
+    .chk-row {
+      display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start;
+      padding: 10px 0; border-bottom: 1px dashed rgba(148, 163, 184, 0.2);
+    }
+    .chk-row:last-child { border-bottom: 0; }
+    .chk-label { font-size: 14px; line-height: 1.35; padding-top: 4px; }
+    .chk-opts { display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px; }
+    .chk-opts label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+    .chk-note { margin-top: 6px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    button, a.btn {
+      border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px;
+      background: #1a2333; color: var(--text); text-decoration: none; cursor: pointer; font-size: 14px;
+    }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+    .msg { margin-top: 8px; font-size: 14px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); }
+    .msg.ok { background: rgba(22, 163, 74, 0.15); border-color: rgba(22, 163, 74, 0.55); color: #bbf7d0; }
+    .msg.err { background: rgba(220, 38, 38, 0.18); border-color: rgba(220, 38, 38, 0.6); color: #fecaca; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1 id="pageTitle">Safety Inspection</h1>
+      <div id="sub" class="muted">Loading...</div>
+      <div class="actions">
+        <a class="btn" id="backBtn" href="./index.html?tab=vehicle">Back to Checklists</a>
+        <button id="refreshBtn" type="button">Refresh</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="grid">
+        <div class="kv"><div class="k">Item code</div><div class="v" id="itemCode">-</div></div>
+        <div class="kv"><div class="k">Name</div><div class="v" id="itemName">-</div></div>
+        <div class="kv"><div class="k">Location</div><div class="v" id="itemLocation">-</div></div>
+        <div class="kv"><div class="k">Date</div><div class="v" id="inspDate">-</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <label class="block" for="inspectorName">Inspector</label>
+        <input id="inspectorName" type="text" placeholder="Your name" />
+      </div>
+      <div class="row">
+        <label class="block">Checklist</label>
+        <div id="checklistRoot"></div>
+      </div>
+      <div class="row">
+        <label class="block" for="notes">Notes</label>
+        <textarea id="notes" placeholder="General remarks"></textarea>
+      </div>
+      <div class="actions">
+        <button class="primary" id="saveBtn" type="button">Submit inspection</button>
+      </div>
+      <div id="msg"></div>
+    </div>
+  </div>
+  <script src="/web/safety-inspection.js?v=1"></script>
+</body>
+</html>

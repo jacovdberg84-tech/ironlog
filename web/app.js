@@ -968,11 +968,15 @@ function applyRoleVisibility() {
   const urlParams = new URLSearchParams(window.location.search);
   const urlTab = String(urlParams.get("tab") || "").trim();
   const urlAssetCode = String(urlParams.get("asset_code") || "").trim().toUpperCase();
+  const urlItemCode = String(urlParams.get("item_code") || "").trim().toUpperCase();
   if (urlAssetCode && allowed.has("vehicle")) {
     clPendingAssetCode = urlAssetCode;
   }
+  if (urlItemCode && allowed.has("vehicle")) {
+    clPendingSafetyItemCode = urlItemCode;
+  }
   let preferredTab = urlTab && isAllowedDashboardTab(urlTab, allowed) ? urlTab : "";
-  if (!preferredTab && urlAssetCode && allowed.has("vehicle")) {
+  if (!preferredTab && (urlAssetCode || urlItemCode) && allowed.has("vehicle")) {
     preferredTab = "vehicle";
   }
   if (isBareChildTabEmbed()) {
@@ -1777,6 +1781,191 @@ async function saveAdminUser() {
   }
 }
 
+let safetyTplItems = [];
+let lastSafetyQrUrl = "";
+
+function setSafetyAdminResult(text) {
+  const pre = qs("safetyAdminResult");
+  if (pre) pre.textContent = String(text || "");
+}
+
+function renderSafetyTemplateEditor(items) {
+  safetyTplItems = Array.isArray(items) ? items.map((it) => ({
+    key: String(it.key || ""),
+    label: String(it.label || ""),
+  })) : [];
+  const host = qs("safetyTplItems");
+  if (!host) return;
+  if (!safetyTplItems.length) {
+    host.innerHTML = `<div class="muted small">No checklist rows.</div>`;
+    return;
+  }
+  host.innerHTML = safetyTplItems.map((it, idx) => `
+    <div class="item" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:6px;">
+      <input type="text" class="w-140" data-safety-tpl-key="${idx}" value="${escapeHtml(it.key)}" placeholder="key" />
+      <input type="text" style="flex:1; min-width:200px;" data-safety-tpl-label="${idx}" value="${escapeHtml(it.label)}" placeholder="Label" />
+      <button type="button" class="btn btn-secondary btn-sm" data-safety-tpl-remove="${idx}">Remove</button>
+    </div>
+  `).join("");
+}
+
+async function loadSafetyTemplatesSelect() {
+  const data = await fetchJson(`${API}/api/safety/templates`);
+  const templates = Array.isArray(data.templates) ? data.templates : [];
+  const selects = ["safetyTplSelect", "safetyItemTemplate"].map((id) => qs(id)).filter(Boolean);
+  selects.forEach((sel) => {
+    sel.innerHTML = templates.map((t) =>
+      `<option value="${escapeHtml(t.template_key)}">${escapeHtml(t.title || t.template_key)}</option>`
+    ).join("");
+  });
+  return templates;
+}
+
+async function loadSafetyTemplateEditor() {
+  const key = String(qs("safetyTplSelect")?.value || "fire_extinguisher").trim();
+  setStatus("Loading safety template…");
+  const data = await fetchJson(`${API}/api/safety/templates/${encodeURIComponent(key)}`);
+  renderSafetyTemplateEditor(data?.template?.items || []);
+  setSafetyAdminResult(`Loaded template: ${key}`);
+  setStatus("Safety template loaded.");
+}
+
+async function saveSafetyTemplateEditor() {
+  const key = String(qs("safetyTplSelect")?.value || "fire_extinguisher").trim();
+  const items = safetyTplItems.map((_, idx) => {
+    const keyInp = document.querySelector(`input[data-safety-tpl-key="${idx}"]`);
+    const labelInp = document.querySelector(`input[data-safety-tpl-label="${idx}"]`);
+    return {
+      key: String(keyInp?.value || "").trim(),
+      label: String(labelInp?.value || "").trim(),
+    };
+  }).filter((r) => r.key && r.label);
+  if (!items.length) return alert("Add at least one checklist row.");
+  setStatus("Saving safety template…");
+  const data = await fetchJson(`${API}/api/safety/templates/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  renderSafetyTemplateEditor(data?.template?.items || items);
+  setSafetyAdminResult(`Saved template ${key} (${items.length} rows).`);
+  setStatus("Safety template saved.");
+}
+
+async function loadSafetyItemsList() {
+  const host = qs("safetyItemsList");
+  if (!host) return;
+  const data = await fetchJson(`${API}/api/safety/items`);
+  const rows = Array.isArray(data.items) ? data.items : [];
+  if (!rows.length) {
+    host.innerHTML = `<div class="muted small">No safety items registered yet.</div>`;
+    return;
+  }
+  host.innerHTML = rows.map((r) => `
+    <div class="item" style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">
+      <div>
+        <strong>${escapeHtml(r.item_code)}</strong> — ${escapeHtml(r.item_name || r.template_title || "")}
+        <div class="muted small">${escapeHtml(r.template_title || r.template_key || "")}${r.location ? ` · ${escapeHtml(r.location)}` : ""}</div>
+      </div>
+      <div class="row stack-10">
+        <button type="button" class="btn btn-secondary btn-sm" data-safety-use-qr="${escapeHtml(r.item_code)}">QR</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-safety-open-insp="${escapeHtml(r.item_code)}">Inspect</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-safety-remove-item="${Number(r.id)}">Remove</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function addSafetyEquipmentItem() {
+  const item_code = String(qs("safetyItemCode")?.value || "").trim();
+  const template_key = String(qs("safetyItemTemplate")?.value || "fire_extinguisher").trim();
+  const item_name = String(qs("safetyItemName")?.value || "").trim();
+  const location = String(qs("safetyItemLocation")?.value || "").trim();
+  if (!item_code) return alert("Item code is required (e.g. FE-WS-01).");
+  setStatus("Adding safety item…");
+  await fetchJson(`${API}/api/safety/items`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_code, template_key, item_name, location }),
+  });
+  if (qs("safetyItemCode")) qs("safetyItemCode").value = "";
+  if (qs("safetyItemName")) qs("safetyItemName").value = "";
+  if (qs("safetyItemLocation")) qs("safetyItemLocation").value = "";
+  await loadSafetyItemsList();
+  setSafetyAdminResult(`Added ${item_code.toUpperCase()}.`);
+  setStatus("Safety item added.");
+}
+
+async function removeSafetyEquipmentItem(id) {
+  const rowId = Number(id || 0);
+  if (!rowId) return;
+  if (!window.confirm("Remove this safety item from the register?")) return;
+  setStatus("Removing safety item…");
+  await fetchJson(`${API}/api/safety/items/${rowId}`, { method: "DELETE" });
+  await loadSafetyItemsList();
+  setStatus("Safety item removed.");
+}
+
+async function buildSafetyQrImageData(itemCode) {
+  const code = String(itemCode || "").trim().toUpperCase();
+  if (!code) throw new Error("Item code is required.");
+  const res = await fetchJson(`${API}/api/safety/items/${encodeURIComponent(code)}/qr-profile/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  const scanValue = String(res?.qr_payload?.scan_url || "").trim();
+  if (!scanValue) throw new Error("No QR scan URL generated.");
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=${encodeURIComponent(scanValue)}`;
+  return { qrUrl, qrText: String(res?.qr_text || ""), scanValue };
+}
+
+async function generateSafetyQr() {
+  const code = String(qs("safetyQrItemCode")?.value || qs("safetyItemCode")?.value || "").trim();
+  if (!code) return alert("Enter a safety item code.");
+  setStatus(`Generating QR for ${code}…`);
+  const { qrUrl, qrText } = await buildSafetyQrImageData(code);
+  lastSafetyQrUrl = qrUrl;
+  const prev = qs("safetyQrPreview");
+  const img = qs("safetyQrImg");
+  const txt = qs("safetyQrText");
+  if (img) img.src = qrUrl;
+  if (txt) txt.textContent = qrText;
+  if (prev) prev.style.display = "block";
+  setSafetyAdminResult(`QR ready for ${code.toUpperCase()}.`);
+  setStatus(`QR generated for ${code.toUpperCase()}.`);
+}
+
+function printSafetyQr() {
+  if (!lastSafetyQrUrl) {
+    alert("Generate a QR first.");
+    return;
+  }
+  const code = String(qs("safetyQrItemCode")?.value || "").trim().toUpperCase();
+  const w = window.open("", "_blank");
+  if (!w) return alert("Pop-up blocked.");
+  w.document.write(`
+    <html><head><title>Safety QR ${code}</title></head>
+    <body style="font-family:Arial;text-align:center;padding:24px;">
+      <h2>${escapeHtml(code || "Safety item")}</h2>
+      <img src="${lastSafetyQrUrl}" alt="QR" style="width:280px;height:280px;" />
+      <p>Scan to open safety inspection form.</p>
+      <script>window.onload=function(){window.print();};</script>
+    </body></html>`);
+  w.document.close();
+}
+
+async function initSafetyAdminPanel() {
+  if (!qs("adminSafetyCard")) return;
+  try {
+    await loadSafetyTemplatesSelect();
+    await loadSafetyTemplateEditor();
+    await loadSafetyItemsList();
+  } catch (e) {
+    setSafetyAdminResult(String(e.message || e));
+  }
+}
+
 function applyMdmPolicyCheckboxes(policies) {
   const p = policies && typeof policies === "object" ? policies : {};
   const asset = Array.isArray(p.asset) ? p.asset : [];
@@ -2166,8 +2355,9 @@ async function executeBackupRestoreNow() {
   setStatus("Restore execute requested. Reconnect after restart.");
 }
 
-/** Daily checklists — LDV + machine pre-start (QR mirror) */
+/** Daily checklists — LDV + machine pre-start + safety (QR mirror) */
 let clHubData = null;
+let clSafetyHubData = null;
 let clSelectedAssetCode = "";
 let clSelectedKind = "";
 let clSelectedProfileId = "";
@@ -2175,6 +2365,11 @@ let clCurrentCheckId = 0;
 let clPreviousKm = null;
 let clPendingAssetCode = String(
   new URLSearchParams(window.location.search).get("asset_code") || ""
+)
+  .trim()
+  .toUpperCase();
+let clPendingSafetyItemCode = String(
+  new URLSearchParams(window.location.search).get("item_code") || ""
 )
   .trim()
   .toUpperCase();
@@ -2232,6 +2427,7 @@ function renderClHubSummary(data) {
   el.innerHTML = `
     <span class="pill blue">LDV: ${ldvDone}/${ldvTotal}</span>
     <span class="pill blue">Machines: ${macDone}/${macTotal}</span>
+    ${clSafetyHubData?.summary ? `<span class="pill blue">Safety: ${Number(clSafetyHubData.summary.compliant || 0)}/${Number(clSafetyHubData.summary.total || 0)}</span>` : ""}
     <span class="pill">${escapeHtml(String(data?.check_date || clCheckDate()))}</span>
   `;
 }
@@ -2287,8 +2483,34 @@ function renderClHubSections(data) {
     host.appendChild(sec);
   });
 
-  if (!ldv.length && !groups.length) {
-    host.innerHTML = `<div class="muted small">No checklist assets configured. LDV codes V01AM–V15AM or machine categories (Excavator, Dozer, etc.) are required.</div>`;
+  const safetyItems = Array.isArray(clSafetyHubData?.items) ? clSafetyHubData.items : [];
+  if (safetyItems.length) {
+    const sec = document.createElement("div");
+    sec.className = "checklist-hub-section";
+    sec.innerHTML = `<h4>Safety equipment</h4>`;
+    const grid = document.createElement("div");
+    grid.className = "checklist-asset-grid";
+    safetyItems.forEach((it) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "checklist-asset-chip checklist-safety-chip";
+      if (it.status === "compliant") btn.classList.add("compliant");
+      const pill = it.status === "compliant"
+        ? "<span class='pill green' style='font-size:0.65rem;'>DONE</span>"
+        : "<span class='pill orange' style='font-size:0.65rem;'>PENDING</span>";
+      btn.dataset.itemCode = String(it.item_code || "");
+      btn.innerHTML = `
+        <div class="chip-code">${escapeHtml(it.item_code)} ${pill}</div>
+        <div class="chip-name">${escapeHtml(it.item_name || it.template_title || "")}${it.location ? ` · ${escapeHtml(it.location)}` : ""}</div>
+      `;
+      grid.appendChild(btn);
+    });
+    sec.appendChild(grid);
+    host.appendChild(sec);
+  }
+
+  if (!ldv.length && !groups.length && !safetyItems.length) {
+    host.innerHTML = `<div class="muted small">No checklist assets configured. Add LDV codes, machine categories, or safety equipment in User Admin.</div>`;
   }
 }
 
@@ -2297,10 +2519,20 @@ async function loadChecklistHub() {
   if (host && !clHubData) host.innerHTML = `<div class="muted small">Loading checklists…</div>`;
   const date = clCheckDate();
   try {
-    const data = await fetchJson(`${API}/api/maintenance/checklist-hub?date=${encodeURIComponent(date)}`);
+    const [data, safety] = await Promise.all([
+      fetchJson(`${API}/api/maintenance/checklist-hub?date=${encodeURIComponent(date)}`),
+      fetchJson(`${API}/api/safety/hub?date=${encodeURIComponent(date)}`).catch(() => null),
+    ]);
     clHubData = data;
+    clSafetyHubData = safety;
     renderClHubSummary(data);
     renderClHubSections(data);
+    if (clPendingSafetyItemCode) {
+      const code = clPendingSafetyItemCode;
+      clPendingSafetyItemCode = "";
+      window.location.href = `./safety-inspection.html?item_code=${encodeURIComponent(code)}`;
+      return;
+    }
     if (clPendingAssetCode) {
       const code = clPendingAssetCode;
       clPendingAssetCode = "";
@@ -2562,6 +2794,13 @@ function initChecklistTab() {
     loadChecklistHub().catch(() => {});
   });
   qs("clHubSections")?.addEventListener("click", (e) => {
+    const safetyChip = e.target.closest(".checklist-safety-chip");
+    if (safetyChip) {
+      const code = String(safetyChip.dataset.itemCode || "").trim();
+      if (!code) return;
+      window.location.href = `./safety-inspection.html?item_code=${encodeURIComponent(code)}`;
+      return;
+    }
     const chip = e.target.closest(".checklist-asset-chip");
     if (!chip) return;
     const code = chip.dataset.assetCode;
@@ -12746,6 +12985,52 @@ async function init() {
     });
   });
   applyQrSheetPreset();
+
+  qs("safetyTplLoadBtn")?.addEventListener("click", () =>
+    loadSafetyTemplateEditor().catch((e) => setStatus("Safety template error: " + e.message))
+  );
+  qs("safetyTplSaveBtn")?.addEventListener("click", () =>
+    saveSafetyTemplateEditor().catch((e) => setStatus("Safety template save error: " + e.message))
+  );
+  qs("safetyTplAddRowBtn")?.addEventListener("click", () => {
+    safetyTplItems.push({ key: `item_${safetyTplItems.length + 1}`, label: "New checklist item" });
+    renderSafetyTemplateEditor(safetyTplItems);
+  });
+  qs("safetyTplItems")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-safety-tpl-remove]");
+    if (!btn) return;
+    const idx = Number(btn.getAttribute("data-safety-tpl-remove"));
+    safetyTplItems.splice(idx, 1);
+    renderSafetyTemplateEditor(safetyTplItems);
+  });
+  qs("safetyItemAddBtn")?.addEventListener("click", () =>
+    addSafetyEquipmentItem().catch((e) => setStatus("Add safety item error: " + e.message))
+  );
+  qs("safetyItemsList")?.addEventListener("click", (e) => {
+    const qrBtn = e.target.closest("button[data-safety-use-qr]");
+    if (qrBtn) {
+      const code = String(qrBtn.getAttribute("data-safety-use-qr") || "");
+      if (qs("safetyQrItemCode")) qs("safetyQrItemCode").value = code;
+      generateSafetyQr().catch((err) => setStatus("QR error: " + err.message));
+      return;
+    }
+    const inspBtn = e.target.closest("button[data-safety-open-insp]");
+    if (inspBtn) {
+      const code = String(inspBtn.getAttribute("data-safety-open-insp") || "");
+      if (code) window.open(`./safety-inspection.html?item_code=${encodeURIComponent(code)}`, "_blank");
+      return;
+    }
+    const rmBtn = e.target.closest("button[data-safety-remove-item]");
+    if (rmBtn) {
+      removeSafetyEquipmentItem(Number(rmBtn.getAttribute("data-safety-remove-item") || 0))
+        .catch((err) => setStatus("Remove error: " + err.message));
+    }
+  });
+  qs("safetyQrGenerate")?.addEventListener("click", () =>
+    generateSafetyQr().catch((e) => setStatus("Safety QR error: " + e.message))
+  );
+  qs("safetyQrPrint")?.addEventListener("click", printSafetyQr);
+  initSafetyAdminPanel().catch(() => {});
 
   // Net banner
   refreshNetBanner();

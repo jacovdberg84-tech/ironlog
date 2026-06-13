@@ -34,6 +34,7 @@ import tasksRoutes from "./routes/tasks.routes.js";
 import backupsRoutes from "./routes/backups.routes.js";
 import masterdataRoutes from "./routes/masterdata.routes.js";
 import telematicsRoutes from "./routes/telematics.routes.js";
+import safetyRoutes from "./routes/safety.routes.js";
 import { ironlogAuthHook } from "./auth/hook.js";
 
 export function buildServer() {
@@ -65,6 +66,7 @@ app.register(workOrderRoutes, { prefix: "/api/workorders" });
 app.register(stockRoutes, { prefix: "/api/stock" });
 app.register(kpiRoutes, { prefix: "/api/kpi" });
 app.register(maintenanceRoutes, { prefix: "/api/maintenance" });
+app.register(safetyRoutes, { prefix: "/api/safety" });
 app.register(reportsRoutes, { prefix: "/api/reports" });
 app.register(alertsRoutes, { prefix: "/api/alerts" });
 app.register(dashboardRoutes, { prefix: "/api/dashboard" });
