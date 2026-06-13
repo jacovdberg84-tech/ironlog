@@ -732,50 +732,49 @@
 
     <div id="weeklyInspectionSection" class="maint-section" style="display:none;">
       <div class="card stack-24" id="wiPrintArea">
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
-          <h3 style="margin:0;">Workshop Inspection Calendar</h3>
-          <div class="row stack-10 wi-no-print">
-            <button type="button" id="wiPrevMonthBtn">Previous</button>
-            <button type="button" id="wiNextMonthBtn">Next</button>
-            <button type="button" id="wiTodayBtn">This month</button>
-            <button type="button" id="wiRefreshBtn">Refresh</button>
+        <div class="wi-page-header wi-no-print">
+          <div>
+            <h3 style="margin:0;">Inspection Calendar</h3>
+            <p class="muted mini" style="margin:4px 0 0;">Track and manage workshop inspections. Click a day to schedule equipment.</p>
+          </div>
+          <div class="row stack-10">
+            <button type="button" id="wiToggleComplianceBtn" class="btn-secondary">Compliance</button>
             <button type="button" id="wiPrintBtn">Print</button>
-            <button type="button" id="wiOpenPdfBtn">Open PDF</button>
-            <button type="button" id="wiDownloadPdfBtn">Download PDF</button>
+            <button type="button" id="wiOpenPdfBtn">PDF</button>
+            <button type="button" id="wiAddEquipmentBtn" class="btn-primary">+ Add equipment</button>
           </div>
         </div>
-        <p class="muted mini" style="margin:0 0 12px;">
-          Click a day to add equipment from your workshop roster. Each machine should visit the workshop <b>at least once per week</b>.
-          Click a scheduled chip to cycle: <b>Pending</b> → <b>Released</b> → <b>Skipped</b>.
+        <p class="muted mini wi-no-print" style="margin:0 0 12px;">
+          Schedule machines on calendar days. Mark each as <b>Released</b> when the unit reaches the workshop.
+          Past dates that were not released count as <b>non-compliant</b>. Use <b>Copy day</b> to duplicate a plan to a future date.
         </p>
-        <div id="wiComplianceCard" class="wi-compliance-grid"></div>
+        <div id="wiComplianceCard" class="wi-compliance-grid wi-no-print"></div>
         <div class="row stack-10 wi-no-print" style="flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
           <label>
             Month
             <input id="wiMonth" type="month" />
           </label>
+          <button type="button" id="wiPrevMonthBtn">Previous</button>
+          <button type="button" id="wiNextMonthBtn">Next</button>
+          <button type="button" id="wiTodayBtn">Today</button>
+          <button type="button" id="wiRefreshBtn">Refresh</button>
           <label>
             Inspector (optional)
             <input id="wiInspector" type="text" placeholder="Your name" class="w-200" />
           </label>
-          <label>
-            Add to roster
-            <select id="wiAssetSelect" class="w-200"></select>
-          </label>
-          <label>
-            Default est. minutes
-            <input id="wiAssetEst" type="number" min="5" step="5" value="30" class="w-90" />
-          </label>
-          <label>
-            Notes
-            <input id="wiAssetNotes" type="text" placeholder="Optional" class="w-200" />
-          </label>
-          <button type="button" id="wiAddAssetBtn">Add to roster</button>
         </div>
         <div id="wiMsg" class="muted">Loading calendar...</div>
-        <div id="wiMonthTitle" style="font-weight:700; font-size:1.1rem; margin:8px 0;"></div>
         <div id="wiWeeklyGaps" class="wi-weekly-gaps wi-no-print"></div>
-        <div id="wiCalendarWrap" class="wi-month-grid-wrap"></div>
+        <div class="wi-calendar-layout">
+          <div class="wi-calendar-main">
+            <div id="wiMonthTitle" class="wi-month-title"></div>
+            <div id="wiCalendarWrap" class="wi-month-grid-wrap"></div>
+          </div>
+          <aside id="wiUpcomingPanel" class="wi-upcoming-panel wi-no-print">
+            <h4 class="wi-upcoming-title">Upcoming inspections</h4>
+            <div id="wiUpcomingList" class="wi-upcoming-list"></div>
+          </aside>
+        </div>
         <div id="wiDayPanel" class="card wi-day-panel wi-no-print" style="display:none; padding:12px; margin-top:12px;">
           <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
             <h4 id="wiDayPanelTitle" style="margin:0;"></h4>
@@ -792,10 +791,34 @@
             </label>
             <button type="button" id="wiAddSlotBtn">Add to this day</button>
           </div>
+          <div class="row stack-10 wi-copy-day-row" style="flex-wrap:wrap; align-items:flex-end; margin-bottom:8px;">
+            <label>
+              Copy this day to
+              <input id="wiCopyToDate" type="date" />
+            </label>
+            <button type="button" id="wiCopyDayBtn">Copy day</button>
+          </div>
           <div id="wiDaySlotList" class="wi-day-slot-list"></div>
         </div>
-        <h4 style="margin:16px 0 8px;">Workshop roster</h4>
-        <div id="wiAssetList" class="list"></div>
+        <div id="wiRosterSection" class="wi-roster-section wi-no-print">
+          <h4 style="margin:16px 0 8px;">Workshop roster</h4>
+          <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end; margin-bottom:8px;">
+            <label>
+              Add to roster
+              <select id="wiAssetSelect" class="w-200"></select>
+            </label>
+            <label>
+              Default est. minutes
+              <input id="wiAssetEst" type="number" min="5" step="5" value="30" class="w-90" />
+            </label>
+            <label>
+              Notes
+              <input id="wiAssetNotes" type="text" placeholder="Optional" class="w-200" />
+            </label>
+            <button type="button" id="wiAddAssetBtn">Add to roster</button>
+          </div>
+          <div id="wiAssetList" class="list"></div>
+        </div>
       </div>
     </div>
 

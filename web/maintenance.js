@@ -2824,6 +2824,11 @@ async function saveTyreInspection() {
 
 let wiCalendarCache = null;
 let wiSelectedDate = "";
+const WI_MAX_CHIPS_VISIBLE = 3;
+
+function wiTodayYmd() {
+  return new Date().toISOString().slice(0, 10);
+}
 
 function wiMonthInput() {
   return document.getElementById("wiMonth");
@@ -2892,6 +2897,87 @@ function wiSlotChipClass(status) {
   if (s === "done") return "wi-slot-chip--released";
   if (s === "skipped") return "wi-slot-chip--skipped";
   return "wi-slot-chip--pending";
+}
+
+function wiSlotChipClassForDate(status, ymd) {
+  const base = wiSlotChipClass(status);
+  const s = String(status || "pending").toLowerCase();
+  if (s !== "done" && String(ymd || "") < wiTodayYmd()) return `${base} wi-slot-chip--overdue`;
+  return base;
+}
+
+function wiDayHasNonCompliance(date, slots) {
+  const ymd = String(date || "");
+  if (!ymd || ymd >= wiTodayYmd()) return false;
+  return (slots || []).some((slot) => String(slot?.status || "pending").toLowerCase() !== "done");
+}
+
+function wiFormatShortDate(ymd) {
+  const d = new Date(`${String(ymd).trim()}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return String(ymd || "");
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function wiUpcomingStatusMeta(status, date) {
+  const s = String(status || "pending").toLowerCase();
+  if (s === "done") return { label: "Released", cls: "wi-upcoming-badge--done" };
+  if (String(date || "") < wiTodayYmd()) return { label: "Non-compliant", cls: "wi-upcoming-badge--overdue" };
+  if (s === "skipped") return { label: "Skipped", cls: "wi-upcoming-badge--skipped" };
+  return { label: "Pending", cls: "wi-upcoming-badge--pending" };
+}
+
+function renderWiUpcomingSidebar(data) {
+  const list = document.getElementById("wiUpcomingList");
+  if (!list) return;
+  const today = wiTodayYmd();
+  const items = [];
+  const weeks = Array.isArray(data?.calendar_weeks) ? data.calendar_weeks : [];
+  for (const row of weeks) {
+    for (const cell of row || []) {
+      if (!cell?.date) continue;
+      for (const slot of cell.slots || []) {
+        items.push({
+          date: cell.date,
+          asset_code: slot.asset_code,
+          asset_name: slot.asset_name,
+          status: slot.status,
+          est_minutes: slot.est_minutes,
+        });
+      }
+    }
+  }
+  if (!items.length) {
+    list.innerHTML = `<div class="empty">No inspections scheduled this month.</div>`;
+    return;
+  }
+  items.sort((a, b) => {
+    const aOver = a.date < today && String(a.status || "").toLowerCase() !== "done";
+    const bOver = b.date < today && String(b.status || "").toLowerCase() !== "done";
+    if (aOver !== bOver) return aOver ? -1 : 1;
+    return String(a.date).localeCompare(String(b.date)) || String(a.asset_code).localeCompare(String(b.asset_code));
+  });
+  const shown = items.slice(0, 24);
+  list.innerHTML = shown.map((item) => {
+    const meta = wiUpcomingStatusMeta(item.status, item.date);
+    const title = item.asset_name ? esc(item.asset_name) : esc(item.asset_code);
+    const sub = item.asset_name ? esc(item.asset_code) : "";
+    return `
+      <button type="button" class="wi-upcoming-item" data-wi-open-day="${esc(item.date)}">
+        <div class="wi-upcoming-item-head">
+          <strong>${title}</strong>
+          <span class="wi-upcoming-badge ${meta.cls}">${esc(meta.label)}</span>
+        </div>
+        <div class="wi-upcoming-item-meta muted mini">
+          <span>${esc(wiFormatShortDate(item.date))}</span>
+          ${sub ? `<span>· ${sub}</span>` : ""}
+          <span>· ${esc(wiFormatMinutes(item.est_minutes))}</span>
+        </div>
+      </button>
+    `;
+  }).join("");
+  if (items.length > shown.length) {
+    list.innerHTML += `<div class="muted mini" style="padding:8px 4px;">+${items.length - shown.length} more this month</div>`;
+  }
 }
 
 function populateWiDayAssetSelect(assets) {
@@ -3003,10 +3089,10 @@ function renderWiDaySlotList(date) {
     <div class="wi-day-slot-row">
       <button
         type="button"
-        class="wi-slot-chip ${wiSlotChipClass(slot.status)}"
+        class="wi-slot-chip ${wiSlotChipClassForDate(slot.status, wiSelectedDate)}"
         data-wi-slot-status="${Number(slot.id)}"
         data-wi-status="${esc(String(slot.status || "pending"))}"
-        title="Click to cycle status"
+        title="Click to cycle: Pending → Released → Skipped"
       >${esc(slot.asset_code)} · ${wiFormatMinutes(slot.est_minutes)} · ${esc(wiStatusLabel(slot.status))}</button>
       <button type="button" class="wi-slot-remove" data-wi-slot-remove="${Number(slot.id)}">Remove</button>
     </div>
@@ -3021,6 +3107,13 @@ function openWiDayPanel(date) {
   if (title) title.textContent = wiFormatDayTitle(wiSelectedDate);
   const estInp = document.getElementById("wiDayEst");
   if (estInp && !estInp.value) estInp.value = "30";
+  const copyInp = document.getElementById("wiCopyToDate");
+  if (copyInp) {
+    const d = new Date(`${wiSelectedDate}T12:00:00`);
+    d.setDate(d.getDate() + 7);
+    copyInp.min = wiTodayYmd();
+    copyInp.value = d.toISOString().slice(0, 10);
+  }
   populateWiDayAssetSelect(wiCalendarCache?.assets || []);
   renderWiDaySlotList(wiSelectedDate);
   panel.style.display = "block";
@@ -3042,6 +3135,7 @@ function renderWeeklyInspectionCalendar(data) {
   renderWeeklyInspectionCompliance(data?.compliance);
   renderWeeklyInspectionWeeklyGaps(data?.compliance);
   renderWeeklyInspectionAssetList(data?.assets || []);
+  renderWiUpcomingSidebar(data);
   populateWiDayAssetSelect(data?.assets || []);
   if (!weeks.length) {
     wrap.innerHTML = `<div class="empty">No calendar data for this month.</div>`;
@@ -3055,22 +3149,33 @@ function renderWeeklyInspectionCalendar(data) {
         return `<div class="wi-month-cell wi-month-cell--pad"></div>`;
       }
       const slots = Array.isArray(cell.slots) ? cell.slots : [];
-      const chips = slots.map((slot) => `
+      const visible = slots.slice(0, WI_MAX_CHIPS_VISIBLE);
+      const hiddenCount = Math.max(0, slots.length - visible.length);
+      const chips = visible.map((slot) => `
         <button
           type="button"
-          class="wi-slot-chip ${wiSlotChipClass(slot.status)}"
+          class="wi-slot-chip ${wiSlotChipClassForDate(slot.status, cell.date)}"
           data-wi-slot-status="${Number(slot.id)}"
           data-wi-status="${esc(String(slot.status || "pending"))}"
           title="${esc(wiStatusLabel(slot.status))}"
         >${esc(slot.asset_code)}</button>
       `).join("");
+      const moreLink = hiddenCount
+        ? `<button type="button" class="wi-month-more" data-wi-open-day="${esc(cell.date)}">+${hiddenCount} more</button>`
+        : "";
       const todayCls = cell.is_today ? " wi-month-cell--today" : "";
       const selectedCls = String(cell.date) === wiSelectedDate ? " wi-month-cell--selected" : "";
+      const nonCompliantCls = wiDayHasNonCompliance(cell.date, slots) ? " wi-month-cell--noncompliant" : "";
       return `
-        <button type="button" class="wi-month-cell${todayCls}${selectedCls}" data-wi-open-day="${esc(cell.date)}">
+        <div
+          class="wi-month-cell${todayCls}${selectedCls}${nonCompliantCls}"
+          role="button"
+          tabindex="0"
+          data-wi-open-day="${esc(cell.date)}"
+        >
           <div class="wi-month-daynum">${Number(cell.day || 0)}</div>
-          <div class="wi-month-chips">${chips}</div>
-        </button>
+          <div class="wi-month-chips">${chips}${moreLink}</div>
+        </div>
       `;
     }).join("");
     return `<div class="wi-month-row">${cells}</div>`;
@@ -3154,6 +3259,52 @@ async function addWeeklyInspectionSlot() {
   } catch (e) {
     wiSetMsg(`Add failed: ${e.message || e}`, true);
   }
+}
+
+async function copyWeeklyInspectionDay() {
+  const from_date = String(wiSelectedDate || "").trim();
+  const to_date = String(document.getElementById("wiCopyToDate")?.value || "").trim();
+  if (!from_date) {
+    wiSetMsg("Click a calendar day first.", true);
+    return;
+  }
+  if (!to_date) {
+    wiSetMsg("Choose the target date to copy to.", true);
+    return;
+  }
+  if (from_date === to_date) {
+    wiSetMsg("Choose a different target date.", true);
+    return;
+  }
+  wiSetMsg("Copying day...");
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-inspections/slots/copy-day`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ from_date, to_date }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to copy day");
+    const targetMonth = to_date.slice(0, 7);
+    if (targetMonth !== wiCurrentMonth()) wiSetMonth(targetMonth);
+    await loadWeeklyInspectionCalendar();
+    openWiDayPanel(to_date);
+    const skipped = Number(data.skipped || 0);
+    wiSetMsg(
+      `Copied ${Number(data.copied || 0)} item${Number(data.copied || 0) === 1 ? "" : "s"} to ${wiFormatDayTitle(to_date)}${skipped ? ` (${skipped} already scheduled)` : ""}.`,
+    );
+  } catch (e) {
+    wiSetMsg(`Copy failed: ${e.message || e}`, true);
+  }
+}
+
+function toggleWiCompliancePanel() {
+  const card = document.getElementById("wiComplianceCard");
+  const gaps = document.getElementById("wiWeeklyGaps");
+  if (!card) return;
+  const hidden = card.style.display === "none";
+  card.style.display = hidden ? "" : "none";
+  if (gaps) gaps.style.display = hidden ? "" : "none";
 }
 
 async function removeWeeklyInspectionSlot(slotId) {
@@ -6297,27 +6448,44 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("wiRefreshBtn")?.addEventListener("click", () => loadWeeklyInspectionCalendar());
   document.getElementById("wiPrintBtn")?.addEventListener("click", () => printWeeklyInspectionCalendar());
   document.getElementById("wiOpenPdfBtn")?.addEventListener("click", () => openWeeklyInspectionPdf(false));
-  document.getElementById("wiDownloadPdfBtn")?.addEventListener("click", () => openWeeklyInspectionPdf(true));
+  document.getElementById("wiToggleComplianceBtn")?.addEventListener("click", () => toggleWiCompliancePanel());
+  document.getElementById("wiAddEquipmentBtn")?.addEventListener("click", () => {
+    document.getElementById("wiRosterSection")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById("wiAssetSelect")?.focus();
+  });
   document.getElementById("wiAddAssetBtn")?.addEventListener("click", () => addWeeklyInspectionAsset());
   document.getElementById("wiAddSlotBtn")?.addEventListener("click", () => addWeeklyInspectionSlot());
+  document.getElementById("wiCopyDayBtn")?.addEventListener("click", () => copyWeeklyInspectionDay());
   document.getElementById("wiCloseDayPanelBtn")?.addEventListener("click", () => closeWiDayPanel());
   document.getElementById("wiMonth")?.addEventListener("change", () => {
     closeWiDayPanel();
     loadWeeklyInspectionCalendar();
   });
   document.getElementById("wiCalendarWrap")?.addEventListener("click", (evt) => {
-    const dayBtn = evt.target?.closest?.("button[data-wi-open-day]");
-    if (dayBtn) {
-      openWiDayPanel(String(dayBtn.getAttribute("data-wi-open-day") || ""));
+    const slotBtn = evt.target?.closest?.("button[data-wi-slot-status]");
+    if (slotBtn) {
+      evt.stopPropagation();
+      cycleWeeklyInspectionSlot(
+        Number(slotBtn.getAttribute("data-wi-slot-status") || 0),
+        String(slotBtn.getAttribute("data-wi-status") || "pending"),
+      );
       return;
     }
-    const slotBtn = evt.target?.closest?.("button[data-wi-slot-status]");
-    if (!slotBtn) return;
-    evt.stopPropagation();
-    cycleWeeklyInspectionSlot(
-      Number(slotBtn.getAttribute("data-wi-slot-status") || 0),
-      String(slotBtn.getAttribute("data-wi-status") || "pending"),
-    );
+    const dayEl = evt.target?.closest?.("[data-wi-open-day]");
+    if (!dayEl) return;
+    openWiDayPanel(String(dayEl.getAttribute("data-wi-open-day") || ""));
+  });
+  document.getElementById("wiUpcomingList")?.addEventListener("click", (evt) => {
+    const dayBtn = evt.target?.closest?.("button[data-wi-open-day]");
+    if (!dayBtn) return;
+    const date = String(dayBtn.getAttribute("data-wi-open-day") || "");
+    const month = date.slice(0, 7);
+    if (month && month !== wiCurrentMonth()) {
+      wiSetMonth(month);
+      loadWeeklyInspectionCalendar().then(() => openWiDayPanel(date)).catch(() => {});
+      return;
+    }
+    openWiDayPanel(date);
   });
   document.getElementById("wiDayPanel")?.addEventListener("click", (evt) => {
     const slotBtn = evt.target?.closest?.("button[data-wi-slot-status]");

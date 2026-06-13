@@ -5584,6 +5584,143 @@ body.bare-child-tab #mainContent > .card.stack-12 {
   border-color: #3b82f6;
 }
 
+.wi-month-cell--noncompliant {
+  background: #fff1f2;
+  border-color: #fca5a5;
+}
+
+.wi-month-more {
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wi-month-more:hover {
+  text-decoration: underline;
+}
+
+.wi-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.wi-calendar-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 16px;
+  align-items: start;
+}
+
+.wi-calendar-main {
+  min-width: 0;
+}
+
+.wi-month-title {
+  font-weight: 700;
+  font-size: 1.1rem;
+  margin: 8px 0;
+}
+
+.wi-upcoming-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+  max-height: 720px;
+  overflow: auto;
+}
+
+.wi-upcoming-title {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+}
+
+.wi-upcoming-list {
+  display: grid;
+  gap: 8px;
+}
+
+.wi-upcoming-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 10px;
+  cursor: pointer;
+}
+
+.wi-upcoming-item:hover {
+  border-color: #94a3b8;
+  background: #fff;
+}
+
+.wi-upcoming-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.wi-upcoming-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.wi-upcoming-badge--done {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.wi-upcoming-badge--pending {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.wi-upcoming-badge--skipped {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.wi-upcoming-badge--overdue {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.wi-upcoming-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.wi-copy-day-row {
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 8px;
+}
+
+@media (max-width: 960px) {
+  .wi-calendar-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .wi-upcoming-panel {
+    max-height: none;
+  }
+}
+
 .wi-month-daynum {
   font-weight: 700;
   color: #0f172a;
@@ -5612,8 +5749,15 @@ body.bare-child-tab #mainContent > .card.stack-12 {
 }
 
 .wi-slot-chip--pending {
-  background: #f8fafc;
-  color: #64748b;
+  background: #fef9c3;
+  border-color: #fde047;
+  color: #713f12;
+}
+
+.wi-slot-chip--overdue {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #b91c1c;
 }
 
 .wi-slot-chip--released {
@@ -5717,6 +5861,11 @@ body.bare-child-tab #mainContent > .card.stack-12 {
   }
 
   body.wi-print-mode .wi-day-panel {
+    display: none !important;
+  }
+
+  body.wi-print-mode .wi-upcoming-panel,
+  body.wi-print-mode .wi-roster-section {
     display: none !important;
   }
 }

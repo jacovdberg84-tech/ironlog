@@ -508,6 +508,43 @@ function addWeeklyInspectionSlot({ planned_date, asset_id, est_minutes }) {
   `).get(date, aid);
 }
 
+function copyWeeklyInspectionDay(from_date, to_date) {
+  ensureWeeklyInspectionSchema();
+  const from = String(from_date || "").trim();
+  const to = String(to_date || "").trim();
+  if (!isDate(from)) throw new Error("from_date must be YYYY-MM-DD");
+  if (!isDate(to)) throw new Error("to_date must be YYYY-MM-DD");
+  if (from === to) throw new Error("Source and target dates must differ");
+
+  const sourceSlots = db.prepare(`
+    SELECT asset_id, est_minutes, sort_order
+    FROM weekly_inspection_slots
+    WHERE planned_date = ?
+    ORDER BY COALESCE(sort_order, 0) ASC, asset_id ASC
+  `).all(from);
+  if (!sourceSlots.length) throw new Error("No equipment scheduled on the source day");
+
+  const ins = db.prepare(`
+    INSERT INTO weekly_inspection_slots (
+      planned_date, asset_id, est_minutes, sort_order, status, released, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'pending', 0, datetime('now'), datetime('now'))
+    ON CONFLICT(planned_date, asset_id) DO NOTHING
+  `);
+
+  let copied = 0;
+  let skipped = 0;
+  for (const row of sourceSlots) {
+    const est = Math.max(5, Number(row.est_minutes ?? 30) || 30);
+    const result = ins.run(to, Number(row.asset_id), est, Number(row.sort_order || 0));
+    if (Number(result.changes || 0) > 0) copied += 1;
+    else skipped += 1;
+  }
+  if (!copied && skipped) {
+    throw new Error("All equipment from that day is already scheduled on the target date");
+  }
+  return { from_date: from, to_date: to, copied, skipped, total: sourceSlots.length };
+}
+
 function updateWeeklyInspectionSlotStatus({ slot_id, asset_id, planned_date, status, inspector_name }) {
   ensureWeeklyInspectionSchema();
   let row = null;
@@ -4286,6 +4323,18 @@ export default async function maintenanceRoutes(app) {
         : undefined;
       const slot = addWeeklyInspectionSlot({ planned_date, asset_id, est_minutes });
       return reply.send({ ok: true, slot });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(400).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.post("/weekly-inspections/slots/copy-day", async (req, reply) => {
+    try {
+      const from_date = String(req.body?.from_date || "").trim();
+      const to_date = String(req.body?.to_date || "").trim();
+      const result = copyWeeklyInspectionDay(from_date, to_date);
+      return reply.send({ ok: true, ...result });
     } catch (err) {
       req.log.error(err);
       return reply.code(400).send({ ok: false, error: err.message || String(err) });
