@@ -15,6 +15,8 @@ import {
   checklistToJsonObject,
   machinePrestartCheckMode,
 } from "../utils/machinePrestartTemplates.js";
+import { normalizeUploadedPhoto } from "../utils/imagePdf.js";
+import { resolveStorageAbs as resolveStorageAbsPath, getDataRoot } from "../utils/storagePaths.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -663,7 +665,10 @@ function sqlStockMovementLineCostExpr(smAlias = "sm", partsAlias = "p", joinPart
 
 export default async function maintenanceRoutes(app) {
   ensureAuditTable(db);
-  const dataRoot = process.env.IRONLOG_DATA_DIR || process.cwd();
+  const dataRoot = getDataRoot();
+  function resolveStorageAbs(relPath) {
+    return resolveStorageAbsPath(relPath, dataRoot);
+  }
   await app.register(multipart, {
     limits: { fileSize: 20 * 1024 * 1024 },
   });
@@ -6366,11 +6371,17 @@ export default async function maintenanceRoutes(app) {
       const part = await req.file();
       if (!part) return reply.code(400).send({ ok: false, error: "Upload file field named 'file'" });
 
-      const extRaw = path.extname(part.filename || "").toLowerCase();
-      const ext = [".jpg", ".jpeg", ".png", ".webp"].includes(extRaw) ? extRaw : ".jpg";
-      const safe = `ldv_${checkId}_${Date.now()}_${Math.floor(Math.random() * 100000)}${ext}`;
+      const rawBuffer = await part.toBuffer();
+      let fileBuffer;
+      try {
+        fileBuffer = await normalizeUploadedPhoto(rawBuffer);
+      } catch {
+        return reply.code(400).send({ ok: false, error: "Could not process image file" });
+      }
+
+      const safe = `ldv_${checkId}_${Date.now()}_${Math.floor(Math.random() * 100000)}.jpg`;
       const absPath = path.join(vehicleLdvcDir, safe);
-      await fs.promises.writeFile(absPath, await part.toBuffer());
+      await fs.promises.writeFile(absPath, fileBuffer);
 
       const caption = String(req.query?.caption || "").trim() || null;
       const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";

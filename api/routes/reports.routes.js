@@ -19,6 +19,12 @@ import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
 import { aggregateFuelBenchmarkByCategory } from "../utils/fuelBenchmarkAggregate.js";
 import { fetchLubeMonthStockSnapshot } from "../utils/lubeMonthStock.js";
 import { getMachinePrestartTemplate } from "../utils/machinePrestartTemplates.js";
+import {
+  resolvePdfImage,
+  drawPhotoInPdf,
+  cleanupTempPdfImages,
+} from "../utils/imagePdf.js";
+import { resolveStorageAbs as resolveStorageAbsUtil, getDataRoot } from "../utils/storagePaths.js";
 
 let maintenanceMasterSchedulerStarted = false;
 let reportSubscriptionsSchedulerStarted = false;
@@ -1044,7 +1050,7 @@ function buildGmWeeklyExecutiveSheet(wb, p) {
 }
 
 export default async function reportsRoutes(app) {
-  const dataRoot = process.env.IRONLOG_DATA_DIR || process.cwd();
+  const dataRoot = getDataRoot();
   function hasColumn(table, col) {
     const rows = db.prepare(`PRAGMA table_info(${table})`).all();
     return rows.some((r) => String(r.name || "") === String(col));
@@ -1056,11 +1062,7 @@ export default async function reportsRoutes(app) {
     return fallback;
   }
   function resolveStorageAbs(relPath) {
-    const rel = String(relPath || "").replace(/\\/g, "/").replace(/^\/+/, "");
-    if (!rel) return "";
-    const fromData = path.join(dataRoot, rel);
-    if (fs.existsSync(fromData)) return fromData;
-    return path.join(process.cwd(), rel);
+    return resolveStorageAbsUtil(relPath, dataRoot);
   }
 
   function ensureColumn(table, colName, colDef) {
@@ -4295,6 +4297,16 @@ export default async function reportsRoutes(app) {
       checklistRows = [];
     }
 
+    const tempPdfImages = [];
+    const photosForPdf = [];
+    for (const p of photos) {
+      const rel = String(p.file_path || "").replace(/\\/g, "/").replace(/^\/+/, "");
+      const abs = resolveStorageAbs(rel);
+      const resolved = await resolvePdfImage(abs);
+      if (resolved.temp && resolved.path) tempPdfImages.push(resolved.path);
+      photosForPdf.push({ ...p, pdfPath: resolved.path, rel });
+    }
+
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
     const pdf = await buildPdfBuffer(
       (doc) => {
@@ -4336,32 +4348,19 @@ export default async function reportsRoutes(app) {
           });
 
         sectionTitle(doc, "Photos and Pinned Damages");
-        if (!photos.length) {
+        if (!photosForPdf.length) {
           doc.font("Helvetica").fontSize(10).fillColor("#555555").text("No photos attached.");
           return;
         }
 
-        for (const p of photos) {
-          const rel = String(p.file_path || "").replace(/\\/g, "/").replace(/^\/+/, "");
-          const abs = resolveStorageAbs(rel);
+        for (const p of photosForPdf) {
           ensurePageSpace(doc, 300);
           doc.font("Helvetica-Bold").fontSize(10).fillColor("#111111");
           doc.text(`Photo #${p.id}${p.caption ? ` - ${p.caption}` : ""}`, {
             width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
           });
           doc.moveDown(0.2);
-          if (abs && fs.existsSync(abs)) {
-            try {
-              doc.image(abs, doc.page.margins.left, doc.y, { fit: [420, 190], align: "left", valign: "top" });
-              doc.y += 196;
-            } catch {
-              doc.font("Helvetica").fontSize(9).fillColor("#b91c1c").text("Photo file exists but could not be rendered.");
-              doc.moveDown(0.5);
-            }
-          } else {
-            doc.font("Helvetica").fontSize(9).fillColor("#b91c1c").text(`Photo missing: ${rel || "-"}`);
-            doc.moveDown(0.5);
-          }
+          drawPhotoInPdf(doc, p.pdfPath, { missingLabel: p.rel || "-", maxWidth: 420, maxHeight: 190 });
 
           if (!p.markers.length) {
             doc.font("Helvetica").fontSize(9).fillColor("#555555").text("No pinned damages on this photo.");
@@ -4395,6 +4394,8 @@ export default async function reportsRoutes(app) {
         showPageNumbers: true,
       }
     );
+
+    cleanupTempPdfImages(tempPdfImages);
 
     const pdfBase = isMachinePrestart ? "AML_Machine_Prestart" : "AML_LDV_Check";
     reply
@@ -4480,6 +4481,22 @@ export default async function reportsRoutes(app) {
       ),
     };
 
+    const tempPdfImages = [];
+    const photosByCheckPdf = new Map();
+    if (withPhotos) {
+      for (const [checkId, photos] of photosByCheck.entries()) {
+        const resolvedPhotos = [];
+        for (const p of photos) {
+          const rel = String(p.file_path || "").replace(/\\/g, "/").replace(/^\/+/, "");
+          const abs = resolveStorageAbs(rel);
+          const resolved = await resolvePdfImage(abs);
+          if (resolved.temp && resolved.path) tempPdfImages.push(resolved.path);
+          resolvedPhotos.push({ ...p, pdfPath: resolved.path, rel });
+        }
+        photosByCheckPdf.set(checkId, resolvedPhotos);
+      }
+    }
+
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
     const pdf = await buildPdfBuffer(
       (doc) => {
@@ -4521,29 +4538,16 @@ export default async function reportsRoutes(app) {
         if (!withPhotos) return;
 
         for (const r of rows) {
-          const photos = photosByCheck.get(Number(r.id)) || [];
+          const photos = photosByCheckPdf.get(Number(r.id)) || [];
           if (!photos.length) continue;
           ensurePageSpace(doc, 40);
           sectionTitle(doc, `Check #${r.id} — ${r.asset_code || ""} (${r.check_date || ""})`);
           for (const p of photos) {
-            const rel = String(p.file_path || "").replace(/\\/g, "/").replace(/^\/+/, "");
-            const abs = resolveStorageAbs(rel);
             ensurePageSpace(doc, 240);
             doc.font("Helvetica-Bold").fontSize(9).fillColor("#111111")
               .text(`Photo #${p.id}${p.caption ? ` - ${p.caption}` : ""} • pins: ${(p.markers || []).length}`);
             doc.moveDown(0.15);
-            if (abs && fs.existsSync(abs)) {
-              try {
-                doc.image(abs, doc.page.margins.left, doc.y, { fit: [360, 150], align: "left", valign: "top" });
-                doc.y += 156;
-              } catch {
-                doc.font("Helvetica").fontSize(9).fillColor("#b91c1c").text("Photo exists but could not be rendered.");
-                doc.moveDown(0.4);
-              }
-            } else {
-              doc.font("Helvetica").fontSize(9).fillColor("#b91c1c").text(`Photo missing: ${rel || "-"}`);
-              doc.moveDown(0.4);
-            }
+            drawPhotoInPdf(doc, p.pdfPath, { missingLabel: p.rel || "-", maxWidth: 360, maxHeight: 150 });
           }
         }
       },
@@ -4554,6 +4558,8 @@ export default async function reportsRoutes(app) {
         showPageNumbers: true,
       }
     );
+
+    cleanupTempPdfImages(tempPdfImages);
 
     reply
       .header("Content-Type", "application/pdf")
