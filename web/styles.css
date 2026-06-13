@@ -866,6 +866,53 @@ body.sidebar-collapsed .footer {
 }
 .syncBtn:hover{ filter:brightness(1.1); }
 
+/* Global telematics fault float — visible on every tab */
+.telematics-fault-float{
+  position:fixed;
+  top:72px;
+  left:50%;
+  transform:translateX(-50%);
+  z-index:10050;
+  width:min(760px, calc(100vw - 24px));
+  pointer-events:auto;
+}
+.telematics-fault-float.hidden{ display:none; }
+.telematics-fault-float-inner{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:12px 16px;
+  background:#2a0f0f;
+  color:#fff;
+  border:2px solid #ff4b4b;
+  border-radius:10px;
+  box-shadow:0 8px 32px rgba(255,75,75,0.35);
+  animation:telematicsFaultPulse 2s ease-in-out infinite;
+}
+.telematics-fault-float-icon{
+  font-size:22px;
+  line-height:1;
+  flex-shrink:0;
+}
+.telematics-fault-float-body{
+  flex:1;
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+.telematics-fault-float-text{
+  font-size:13px;
+  opacity:0.95;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+@keyframes telematicsFaultPulse{
+  0%,100%{ box-shadow:0 8px 32px rgba(255,75,75,0.35); border-color:#ff4b4b; }
+  50%{ box-shadow:0 8px 40px rgba(255,75,75,0.65); border-color:#ff8080; }
+}
+
 /* Remove number spinners (Chrome/Edge/Safari) */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button{

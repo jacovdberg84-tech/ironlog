@@ -113,6 +113,18 @@
     </div>
   </header>
 
+  <!-- Global telematics fault alert — visible on every tab when a unit reports active faults -->
+  <div id="telematicsFaultFloat" class="telematics-fault-float hidden" role="alert" aria-live="assertive">
+    <div class="telematics-fault-float-inner">
+      <span class="telematics-fault-float-icon" aria-hidden="true">⚠</span>
+      <div class="telematics-fault-float-body">
+        <strong id="telematicsFaultFloatTitle">Active machine fault</strong>
+        <span id="telematicsFaultFloatText" class="telematics-fault-float-text"></span>
+      </div>
+      <button type="button" id="telematicsFaultFloatView" class="btn-primary btn-sm">View Telematics</button>
+    </div>
+  </div>
+
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-content">
       <div class="nav-section">
@@ -148,6 +160,10 @@
         <a href="#" class="nav-item" data-tab="assets">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
           <span>Assets</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="telematics">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"></path><circle cx="12" cy="14" r="2"></circle><path d="M12 12v-2"></path></svg>
+          <span>Telematics</span>
         </a>
         <a href="#" class="nav-item" data-tab="workshop">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
@@ -291,6 +307,7 @@
         <option value="dash">Dashboard</option>
         <option value="daily">Daily Input</option>
         <option value="assets">Assets</option>
+        <option value="telematics">Telematics</option>
         <option value="workshop">Workshop Library</option>
         <option value="fuel">Fuel</option>
         <option value="lube">Lube</option>
@@ -1386,6 +1403,43 @@
       <!-- Output areas -->
       <pre class="output" id="dailyResult"></pre>
       <pre class="output" id="shiftSelfCheckResult"></pre>
+    </section>
+
+    <!-- TELEMATICS -->
+    <section class="panel" id="tab-telematics">
+      <div class="section-header">
+        <div class="section-header-left">
+          <h2>Telematics</h2>
+          <p class="muted">Live FSC units — hours, link status, and active faults</p>
+        </div>
+        <div class="section-header-right">
+          <button type="button" id="telematicsRefreshBtn" class="btn-primary">Refresh</button>
+        </div>
+      </div>
+
+      <div class="kpi-pills" id="telematicsKpiPills">
+        <span class="kpi-pill"><strong>Active units:</strong> <span id="telematicsKpiUnits">0</span></span>
+        <span class="kpi-pill"><strong>Live link:</strong> <span id="telematicsKpiLive">0</span></span>
+        <span class="kpi-pill kpi-pill-red" id="telematicsKpiFaultsPill"><strong>Units with faults:</strong> <span id="telematicsKpiFaults">0</span></span>
+      </div>
+
+      <div class="dash-card full-width" id="telematicsFaultsCard">
+        <div class="dash-card-header">
+          <h3>Active Faults</h3>
+          <span class="dash-card-badge pill red" id="telematicsFaultsBadge">0</span>
+        </div>
+        <div class="list" id="telematicsActiveFaultsList"></div>
+        <p class="muted small">Faults clear automatically when the FSC unit reports them cleared on the next ingest.</p>
+      </div>
+
+      <div class="dash-card full-width">
+        <div class="dash-card-header">
+          <h3>Active Units</h3>
+          <span class="dash-card-badge">FSC</span>
+        </div>
+        <div class="list" id="telematicsActiveUnitsList"></div>
+        <p class="muted small">Register units in <b>User Admin → Telematics</b>. Data arrives via <code>POST /api/telematics/ingest</code> from your FSC poller or gateway.</p>
+      </div>
     </section>
 
     <!-- ASSETS -->

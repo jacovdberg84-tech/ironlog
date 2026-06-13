@@ -393,6 +393,69 @@ export function listRecentFaults(limit = 50) {
   `).all(Math.max(1, Math.min(500, Number(limit) || 50)));
 }
 
+/** Active fault rows for live alerts (ingest marks cleared faults inactive). */
+export function listActiveFaults() {
+  ensureTelematicsTables();
+  return db.prepare(`
+    SELECT
+      e.id,
+      e.event_time,
+      e.fault_code,
+      e.description,
+      e.severity,
+      e.active,
+      a.asset_code,
+      a.asset_name,
+      d.unit_model,
+      d.device_serial
+    FROM telematics_events e
+    JOIN assets a ON a.id = e.asset_id
+    JOIN telematics_devices d ON d.asset_id = e.asset_id AND d.active = 1
+    WHERE e.event_type = 'fault' AND e.active = 1
+    ORDER BY
+      CASE LOWER(COALESCE(e.severity, 'warning'))
+        WHEN 'critical' THEN 0
+        WHEN 'error' THEN 1
+        WHEN 'severe' THEN 1
+        ELSE 2
+      END,
+      e.event_time DESC,
+      e.id DESC
+  `).all();
+}
+
+export function getActiveFaultSummary() {
+  ensureTelematicsTables();
+  const faults = listActiveFaults();
+  const units = db.prepare(`
+    SELECT
+      a.asset_code,
+      a.asset_name,
+      d.unit_model,
+      d.device_serial,
+      COALESCE(s.active_fault_count, 0) AS active_fault_count,
+      s.updated_at AS snapshot_updated_at
+    FROM telematics_devices d
+    JOIN assets a ON a.id = d.asset_id
+    LEFT JOIN telematics_snapshots s ON s.asset_id = d.asset_id
+    WHERE d.active = 1 AND a.active = 1
+    ORDER BY a.asset_code ASC
+  `).all();
+  const unitsWithFaults = units.filter((u) => Number(u.active_fault_count || 0) > 0);
+  const faultCountFromSnapshots = unitsWithFaults.reduce(
+    (sum, u) => sum + Number(u.active_fault_count || 0),
+    0
+  );
+  return {
+    fault_count: Math.max(faults.length, faultCountFromSnapshots),
+    units_with_faults: unitsWithFaults.length,
+    active_unit_count: units.length,
+    faults,
+    units_with_faults_list: unitsWithFaults,
+    units,
+  };
+}
+
 function linkStatusFromSnapshot(updatedAt) {
   if (!updatedAt) return "offline";
   const row = db.prepare(`

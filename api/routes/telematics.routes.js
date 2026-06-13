@@ -8,6 +8,7 @@ import {
   ingestTelematicsPayload,
   listFleetSnapshots,
   listRecentFaults,
+  getActiveFaultSummary,
   listTelematicsDevices,
   upsertTelematicsDevice,
   deactivateTelematicsDevice,
@@ -68,7 +69,21 @@ export default async function telematicsRoutes(app) {
     if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "site_manager", "operator", "artisan", "stores"])) return;
     const fleet = listFleetSnapshots();
     const faults = listRecentFaults(30);
-    return reply.send({ ok: true, fleet, recent_faults: faults });
+    const active = getActiveFaultSummary();
+    return reply.send({
+      ok: true,
+      fleet,
+      recent_faults: faults,
+      active_fault_count: active.fault_count,
+      units_with_faults: active.units_with_faults,
+    });
+  });
+
+  // GET /api/telematics/faults/active — lightweight poll for global fault banner
+  app.get("/faults/active", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "site_manager", "operator", "artisan", "stores"])) return;
+    const summary = getActiveFaultSummary();
+    return reply.send({ ok: true, ...summary });
   });
 
   // GET /api/telematics/assets/:asset_code

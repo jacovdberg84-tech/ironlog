@@ -22,6 +22,7 @@ const PRODUCTION_SITE_TABS = [
   "daily",
   "maintenance",
   "assets",
+  "telematics",
   "workshop",
   "fuel",
   "lube",
@@ -844,18 +845,19 @@ async function openAuthedPdf(url) {
 
 function getRoleAllowedTabs(role) {
   const r = String(role || "").toLowerCase();
-  if (r === "operator") return ["dash", "daily", "workshop", "fuel", "lube", "legal", "operations", "ironmind", "docs", "vehicle", "tasks"];
-  if (r === "artisan") return ["dash", "maintenance", "Breakdowns", "workshop", "reports", "fuel", "lube", "legal", "operations", "dispatch", "ironmind", "docs", "vehicle", "tasks"];
-  if (r === "stores") return ["dash", "maintenance", "stock", "workshop", "uploads", "reports", "finance", "legal", "procurement", "operations", "dispatch", "quality", "ironmind", "docs", "vehicle", "tasks"];
+  if (r === "operator") return ["dash", "daily", "workshop", "fuel", "lube", "legal", "operations", "ironmind", "docs", "vehicle", "tasks", "telematics"];
+  if (r === "artisan") return ["dash", "maintenance", "Breakdowns", "workshop", "reports", "fuel", "lube", "legal", "operations", "dispatch", "ironmind", "docs", "vehicle", "tasks", "telematics"];
+  if (r === "stores") return ["dash", "maintenance", "stock", "workshop", "uploads", "reports", "finance", "legal", "procurement", "operations", "dispatch", "quality", "ironmind", "docs", "vehicle", "tasks", "telematics"];
   if (r === "procurement") return ["dash", "stock", "workshop", "reports", "finance", "procurement", "operations", "quality", "docs", "tasks"];
-  if (r === "plant_manager") return ["dash", "daily", "assets", "workshop", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
-  if (r === "site_manager") return ["dash", "daily", "assets", "workshop", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
+  if (r === "plant_manager") return ["dash", "daily", "assets", "telematics", "workshop", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
+  if (r === "site_manager") return ["dash", "daily", "assets", "telematics", "workshop", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
   if (r === "executive") return ["dash", "workshop", "reports", "finance", "operations", "quality", "audit", "docs", "tasks"];
-  if (r === "supervisor") return ["dash", "daily", "assets", "workshop", "maintenance", "fuel", "lube", "stock", "legal", "uploads", "reports", "finance", "enterprise", "exec", "Breakdowns", "approvals", "procurement", "operations", "dispatch", "quality", "audit", "ironmind", "docs", "vehicle", "tasks"];
+  if (r === "supervisor") return ["dash", "daily", "assets", "telematics", "workshop", "maintenance", "fuel", "lube", "stock", "legal", "uploads", "reports", "finance", "enterprise", "exec", "Breakdowns", "approvals", "procurement", "operations", "dispatch", "quality", "audit", "ironmind", "docs", "vehicle", "tasks"];
   return [
     "dash",
     "daily",
     "assets",
+    "telematics",
     "workshop",
     "maintenance",
     "fuel",
@@ -3670,35 +3672,181 @@ async function postHoursWithOffline(payload) {
 }
 
 /* =========================
-   DASHBOARD
+   DASHBOARD / TELEMATICS
 ========================= */
+
+const TELEMATICS_FAULT_POLL_MS = 45000;
+let telematicsFaultPollTimer = null;
+
+function telematicsStatusClass(status) {
+  const s = String(status || "offline");
+  if (s === "live") return "pill green";
+  if (s === "stale") return "pill amber";
+  return "pill";
+}
+
+function buildTelematicsUnitItemHtml(r) {
+  const status = String(r.link_status || "offline");
+  const statusClass = telematicsStatusClass(status);
+  const runHrs = r.run_seconds_today != null ? (Number(r.run_seconds_today) / 3600).toFixed(2) : "-";
+  const idleHrs = r.idle_seconds_today != null ? (Number(r.idle_seconds_today) / 3600).toFixed(2) : "-";
+  const faults = Number(r.active_fault_count || 0);
+  return (
+    `<div class="fuel-item-head"><b>${escapeHtml(r.asset_code || "-")}</b> — ${escapeHtml(r.unit_model || "FSC")} <span class="${statusClass}">${status.toUpperCase()}</span>${faults > 0 ? ` <span class="pill red">${faults} FAULT${faults === 1 ? "" : "S"}</span>` : ""}</div>` +
+    `<small class="fuel-item-desc">${escapeHtml(r.asset_name || "")}</small>` +
+    `<small class="fuel-item-meta">Serial: ${escapeHtml(r.device_serial || "-")} | Meter: ${r.engine_hours == null ? "-" : Number(r.engine_hours).toFixed(1)} h | Run today: ${runHrs} h | Idle today: ${idleHrs} h | Ignition: ${Number(r.ignition_on) === 1 ? "ON" : "OFF"}</small>` +
+    `<small class="fuel-item-meta muted">Last seen: ${escapeHtml(r.recorded_at || r.updated_at || r.snapshot_updated_at || "-")}</small>`
+  );
+}
+
+function renderTelematicsFleetList(container, fleet) {
+  if (!container) return;
+  container.innerHTML = "";
+  const rows = Array.isArray(fleet) ? fleet : [];
+  if (!rows.length) {
+    container.appendChild(item("<small>No telematics devices registered yet.</small>"));
+    return;
+  }
+  rows.forEach((r) => {
+    container.appendChild(item(buildTelematicsUnitItemHtml(r)));
+  });
+}
+
+function renderTelematicsActiveFaultsList(container, faults) {
+  if (!container) return;
+  container.innerHTML = "";
+  const rows = Array.isArray(faults) ? faults : [];
+  if (!rows.length) {
+    container.appendChild(item("<small>No active faults — all units clear.</small>"));
+    return;
+  }
+  rows.forEach((f) => {
+    const sev = String(f.severity || "warning").toLowerCase();
+    const sevClass = sev === "critical" || sev === "error" || sev === "severe" ? "pill red" : "pill amber";
+    container.appendChild(
+      item(
+        `<div class="fuel-item-head"><b>${escapeHtml(f.asset_code || "-")}</b> <span class="${sevClass}">${escapeHtml(sev.toUpperCase())}</span> <code>${escapeHtml(f.fault_code || "-")}</code></div>` +
+        `<small class="fuel-item-desc">${escapeHtml(f.description || "No description")}</small>` +
+        `<small class="fuel-item-meta muted">${escapeHtml(f.unit_model || "FSC")} · ${escapeHtml(f.event_time || "-")}</small>`
+      )
+    );
+  });
+}
+
+function updateTelematicsFaultFloat(summary) {
+  const banner = qs("telematicsFaultFloat");
+  const titleEl = qs("telematicsFaultFloatTitle");
+  const textEl = qs("telematicsFaultFloatText");
+  if (!banner || !titleEl || !textEl) return;
+
+  const faults = Array.isArray(summary?.faults) ? summary.faults : [];
+  const unitsWithFaults = Number(summary?.units_with_faults || 0);
+  const faultCount = Number(summary?.fault_count || faults.length || 0);
+  const hasFaults = faultCount > 0 || unitsWithFaults > 0;
+
+  if (!hasFaults) {
+    banner.classList.add("hidden");
+    document.body.classList.remove("telematics-fault-visible");
+    return;
+  }
+
+  const assetCodes = Array.from(new Set(faults.map((f) => f.asset_code).filter(Boolean)));
+  const preview = faults.slice(0, 3).map((f) => {
+    const code = f.asset_code || "?";
+    const fc = f.fault_code || "?";
+    return `${code}: ${fc}`;
+  });
+  const more = faults.length > 3 ? ` (+${faults.length - 3} more)` : "";
+
+  titleEl.textContent =
+    unitsWithFaults === 1
+      ? "Active machine fault"
+      : `${unitsWithFaults || assetCodes.length} machine(s) with active faults`;
+  textEl.textContent = preview.length
+    ? `${preview.join(" · ")}${more}`
+    : `${faultCount} active fault signal(s) on telematics units`;
+
+  banner.classList.remove("hidden");
+  document.body.classList.add("telematics-fault-visible");
+}
+
+async function refreshTelematicsFaultBanner() {
+  const allowed = getEffectiveAllowedTabs();
+  if (!allowed.includes("telematics") && !allowed.includes("dash")) return;
+  try {
+    const data = await fetchJson(`${API}/api/telematics/faults/active`);
+    updateTelematicsFaultFloat(data);
+  } catch (_) {
+    /* silent — banner stays as last known state */
+  }
+}
+
+function initTelematicsFaultBanner() {
+  qs("telematicsFaultFloatView")?.addEventListener("click", () => {
+    switchTab("telematics");
+    loadTelematicsTab().catch(() => {});
+  });
+  refreshTelematicsFaultBanner().catch(() => {});
+  if (telematicsFaultPollTimer) clearInterval(telematicsFaultPollTimer);
+  telematicsFaultPollTimer = setInterval(() => {
+    refreshTelematicsFaultBanner().catch(() => {});
+  }, TELEMATICS_FAULT_POLL_MS);
+}
+
+async function loadTelematicsTab() {
+  const unitsList = qs("telematicsActiveUnitsList");
+  const faultsList = qs("telematicsActiveFaultsList");
+  if (!unitsList && !faultsList) return;
+
+  setStatus("Loading telematics…");
+  if (unitsList) setSkeleton("telematicsActiveUnitsList", 3);
+  if (faultsList) setSkeleton("telematicsActiveFaultsList", 2);
+
+  try {
+    const [fleetData, faultData] = await Promise.all([
+      fetchJson(`${API}/api/telematics/fleet`),
+      fetchJson(`${API}/api/telematics/faults/active`),
+    ]);
+    const fleet = Array.isArray(fleetData?.fleet) ? fleetData.fleet : [];
+    renderTelematicsFleetList(unitsList, fleet);
+    renderTelematicsActiveFaultsList(faultsList, faultData?.faults || []);
+    updateTelematicsFaultFloat(faultData);
+
+    const liveCount = fleet.filter((r) => String(r.link_status) === "live").length;
+    const faultUnits = Number(faultData?.units_with_faults || 0);
+    const setText = (id, v) => {
+      const el = qs(id);
+      if (el) el.textContent = String(v);
+    };
+    setText("telematicsKpiUnits", fleet.length);
+    setText("telematicsKpiLive", liveCount);
+    setText("telematicsKpiFaults", faultUnits);
+    setText("telematicsFaultsBadge", faultData?.fault_count || faultData?.faults?.length || 0);
+    qs("telematicsFaultsCard")?.classList.toggle("kpi-alert-crit", faultUnits > 0);
+    qs("telematicsKpiFaultsPill")?.classList.toggle("kpi-pill-red", faultUnits > 0);
+    setStatus(`Telematics loaded — ${fleet.length} unit(s), ${faultUnits} with faults.`);
+  } catch (e) {
+    if (unitsList) {
+      unitsList.innerHTML = "";
+      unitsList.appendChild(item(`<small>Telematics unavailable: ${escapeHtml(e.message || String(e))}</small>`));
+    }
+    setStatus(`Telematics error: ${e.message || e}`);
+  }
+}
 
 async function loadTelematicsFleet() {
   const list = qs("telematicsFleetList");
   if (!list) return;
   try {
     const data = await fetchJson(`${API}/api/telematics/fleet`);
-    list.innerHTML = "";
-    const fleet = Array.isArray(data?.fleet) ? data.fleet : [];
-    if (!fleet.length) {
-      list.appendChild(item("<small>No telematics devices registered yet.</small>"));
-      return;
+    renderTelematicsFleetList(list, data?.fleet);
+    if (data?.active_fault_count != null || data?.units_with_faults != null) {
+      updateTelematicsFaultFloat({
+        fault_count: data.active_fault_count,
+        units_with_faults: data.units_with_faults,
+        faults: [],
+      });
     }
-    fleet.forEach((r) => {
-      const status = String(r.link_status || "offline");
-      const statusClass = status === "live" ? "pill green" : status === "stale" ? "pill amber" : "pill";
-      const runHrs = r.run_seconds_today != null ? (Number(r.run_seconds_today) / 3600).toFixed(2) : "-";
-      const idleHrs = r.idle_seconds_today != null ? (Number(r.idle_seconds_today) / 3600).toFixed(2) : "-";
-      const faults = Number(r.active_fault_count || 0);
-      list.appendChild(
-        item(
-          `<div class="fuel-item-head"><b>${escapeHtml(r.asset_code || "-")}</b> — ${escapeHtml(r.unit_model || "FSC")} <span class="${statusClass}">${status.toUpperCase()}</span>${faults > 0 ? ` <span class="pill red">${faults} FAULT${faults === 1 ? "" : "S"}</span>` : ""}</div>` +
-          `<small class="fuel-item-desc">${escapeHtml(r.asset_name || "")}</small>` +
-          `<small class="fuel-item-meta">Meter: ${r.engine_hours == null ? "-" : Number(r.engine_hours).toFixed(1)} h | Run today: ${runHrs} h | Idle today: ${idleHrs} h | Ignition: ${Number(r.ignition_on) === 1 ? "ON" : "OFF"}</small>` +
-          `<small class="fuel-item-meta muted">Last seen: ${escapeHtml(r.recorded_at || r.updated_at || "-")}</small>`
-        )
-      );
-    });
   } catch (e) {
     list.innerHTML = "";
     list.appendChild(item(`<small>Telematics unavailable: ${escapeHtml(e.message || String(e))}</small>`));
@@ -6545,6 +6693,9 @@ function switchTab(key) {
   if (k === "vehicle") {
     loadChecklistHub().catch(() => {});
   }
+  if (k === "telematics") {
+    loadTelematicsTab().catch(() => {});
+  }
   try {
     if (typeof window.updateIronmindHelpFabContext === "function") window.updateIronmindHelpFabContext();
   } catch (_) {}
@@ -6577,6 +6728,7 @@ const IRONLOG_HELP_OPENERS = {
   quality: "Need help with data quality?",
   audit: "Need help with the audit trail?",
   vehicle: "Need help with daily checklists?",
+  telematics: "Need help with telematics units and faults?",
   admin: "Need help with user admin?",
   docs: "Need help with AI documents?",
   ironmind:
@@ -12313,6 +12465,7 @@ async function init() {
   initGlobalSearch();
   initReportCardCollapsible();
   initTasks();
+  initTelematicsFaultBanner();
   applyRoleVisibility();
   if (!isBareChildTabEmbed()) {
     resolveInitialTabFromUrl();
@@ -13251,6 +13404,9 @@ async function init() {
   );
   qs("telemShowInactive")?.addEventListener("change", () =>
     loadTelematicsAdminDevices().catch(() => {})
+  );
+  qs("telematicsRefreshBtn")?.addEventListener("click", () =>
+    loadTelematicsTab().catch((e) => setStatus("Telematics refresh error: " + (e.message || e)))
   );
   qs("telemDevicesList")?.addEventListener("click", (e) => {
     const editBtn = e.target.closest("button[data-telem-edit]");
