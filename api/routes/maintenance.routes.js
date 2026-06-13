@@ -5899,7 +5899,7 @@ export default async function maintenanceRoutes(app) {
           });
           continue;
         }
-        const profileId = resolveMachinePrestartProfile(a.category, a.asset_name);
+        const profileId = resolveMachinePrestartProfile(a.category, a.asset_name, code);
         if (!profileId) continue;
         const mode = machinePrestartCheckMode(profileId);
         if (!mode) continue;
@@ -6157,7 +6157,7 @@ export default async function maintenanceRoutes(app) {
       `).get(asset_code);
       if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
 
-      const profileId = resolveMachinePrestartProfile(asset.category, asset.asset_name);
+      const profileId = resolveMachinePrestartProfile(asset.category, asset.asset_name, asset.asset_code);
       if (!profileId) {
         return reply.code(404).send({
           ok: false,
@@ -6237,7 +6237,7 @@ export default async function maintenanceRoutes(app) {
       `).get(asset_code);
       if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
 
-      const profileId = resolveMachinePrestartProfile(asset.category, asset.asset_name);
+      const profileId = resolveMachinePrestartProfile(asset.category, asset.asset_name, asset.asset_code);
       if (!profileId) {
         return reply.code(400).send({
           ok: false,

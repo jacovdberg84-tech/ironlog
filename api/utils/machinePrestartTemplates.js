@@ -211,6 +211,99 @@ const TEMPLATES = {
       },
     ],
   },
+  crusher: {
+    id: "crusher",
+    title: "Mobile crusher pre-start",
+    sections: [
+      {
+        id: "fluids",
+        title: "Fluid levels",
+        items: [
+          { key: "engine_oil_ok", label: "Engine oil level OK" },
+          { key: "coolant_ok", label: "Coolant level OK" },
+          { key: "hydraulic_oil_ok", label: "Hydraulic oil level OK" },
+          { key: "grease_points_ok", label: "Auto / manual grease system OK" },
+        ],
+      },
+      {
+        id: "crushing",
+        title: "Crushing plant",
+        items: [
+          { key: "feed_hopper_ok", label: "Feed hopper, grizzly & feeder OK" },
+          { key: "crusher_liner_ok", label: "Jaw / cone liner & chamber OK (no loose parts)" },
+          { key: "discharge_conveyor_ok", label: "Discharge conveyor, belt & scrapers OK" },
+          { key: "dust_suppression_ok", label: "Dust suppression / water spray OK" },
+          { key: "leaks_damage_ok", label: "No abnormal leaks, cracks, or damage" },
+        ],
+      },
+      {
+        id: "running_gear",
+        title: "Tracks / undercarriage",
+        items: [
+          { key: "track_tension_ok", label: "Track tension OK" },
+          { key: "rollers_idlers_ok", label: "Rollers & idlers OK" },
+          { key: "sprocket_ok", label: "Sprocket teeth OK" },
+        ],
+      },
+      {
+        id: "safety",
+        title: "Safety",
+        items: [
+          { key: "guards_ok", label: "Guards & covers in place" },
+          { key: "horn_estop_ok", label: "Horn & emergency stop OK" },
+          { key: "fire_extinguisher_ok", label: "Fire extinguisher present & charged" },
+          { key: "seat_belt_ok", label: "Seat belt OK" },
+          { key: "lights_beacon_ok", label: "Lights & beacon OK" },
+        ],
+      },
+    ],
+  },
+  mobile_screen: {
+    id: "mobile_screen",
+    title: "Mobile screen pre-start",
+    sections: [
+      {
+        id: "fluids",
+        title: "Fluid levels",
+        items: [
+          { key: "engine_oil_ok", label: "Engine oil level OK" },
+          { key: "coolant_ok", label: "Coolant level OK" },
+          { key: "hydraulic_oil_ok", label: "Hydraulic oil level OK" },
+        ],
+      },
+      {
+        id: "screening",
+        title: "Screening plant",
+        items: [
+          { key: "screen_media_ok", label: "Screen panels / mesh & tension OK" },
+          { key: "feed_conveyor_ok", label: "Feed conveyor & chutes OK" },
+          { key: "discharge_conveyors_ok", label: "Discharge conveyors & belts OK" },
+          { key: "springs_mounts_ok", label: "Springs, mounts & vibration unit OK" },
+          { key: "leaks_damage_ok", label: "No abnormal leaks, cracks, or damage" },
+        ],
+      },
+      {
+        id: "running_gear",
+        title: "Tracks / undercarriage",
+        items: [
+          { key: "track_tension_ok", label: "Track tension OK" },
+          { key: "rollers_idlers_ok", label: "Rollers & idlers OK" },
+          { key: "sprocket_ok", label: "Sprocket teeth OK" },
+        ],
+      },
+      {
+        id: "safety",
+        title: "Safety",
+        items: [
+          { key: "guards_ok", label: "Guards & covers in place" },
+          { key: "horn_estop_ok", label: "Horn & emergency stop OK" },
+          { key: "fire_extinguisher_ok", label: "Fire extinguisher present & charged" },
+          { key: "seat_belt_ok", label: "Seat belt OK" },
+          { key: "lights_beacon_ok", label: "Lights & beacon OK" },
+        ],
+      },
+    ],
+  },
 };
 
 export function getMachinePrestartTemplate(profileId) {
@@ -225,12 +318,29 @@ export function listMachinePrestartProfiles() {
   }));
 }
 
+/** Site mobile crushers (CR01AM–CR05AM) and screens (e.g. FIN694). */
+const CRUSHER_ASSET_CODES = new Set(["CR01AM", "CR02AM", "CR03AM", "CR04AM", "CR05AM"]);
+const MOBILE_SCREEN_ASSET_CODES = new Set(["FIN694"]);
+
+function resolveProfileByAssetCode(assetCode) {
+  const code = String(assetCode || "").trim().toUpperCase();
+  if (!code) return null;
+  if (CRUSHER_ASSET_CODES.has(code) || /^CR0[1-9]AM$/.test(code)) return "crusher";
+  if (MOBILE_SCREEN_ASSET_CODES.has(code)) return "mobile_screen";
+  return null;
+}
+
 /**
- * Resolve which machine prestart profile applies from free-text category and asset name.
+ * Resolve which machine prestart profile applies from asset code, category, and name.
  */
-export function resolveMachinePrestartProfile(category, assetName = "") {
+export function resolveMachinePrestartProfile(category, assetName = "", assetCode = "") {
+  const byCode = resolveProfileByAssetCode(assetCode);
+  if (byCode) return byCode;
+
   const hay = `${String(category || "")} ${String(assetName || "")}`.toLowerCase();
   if (!hay.trim()) return null;
+  if (/(mobile\s*)?crusher|crushing\s*plant|jaw\s*crusher|cone\s*crusher|\bcrusher\b/.test(hay)) return "crusher";
+  if (/(mobile\s*)?(screen|screener|finisher|screening\s*plant)/.test(hay)) return "mobile_screen";
   if (/(excavator|digger|shovel)/.test(hay)) return "excavator";
   if (/(dozer|bulldozer)/.test(hay)) return "dozer";
   if (/(wheel\s*loader|front\s*end\s*loader|\bloader\b)/.test(hay) && !/excavator/.test(hay)) return "wheel_loader";

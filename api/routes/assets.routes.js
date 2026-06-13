@@ -545,7 +545,7 @@ export default async function assetRoutes(app) {
     }).sort((a, b) => a.remaining_hours - b.remaining_hours);
     const nextService = dueRows[0] || null;
 
-    const machineProfileId = resolveMachinePrestartProfile(asset.category, asset.asset_name);
+    const machineProfileId = resolveMachinePrestartProfile(asset.category, asset.asset_name, asset.asset_code);
     const machineTemplate = machineProfileId ? getMachinePrestartTemplate(machineProfileId) : null;
     const machine_prestart =
       machineProfileId && machineTemplate
