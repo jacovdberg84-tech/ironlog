@@ -26,6 +26,27 @@ function isMonth(s) {
   return /^\d{4}-\d{2}$/.test(String(s || "").trim());
 }
 
+function getMaintenanceRoles(req) {
+  const many = String(req.headers["x-user-roles"] || "")
+    .split(",")
+    .map((x) => String(x || "").trim().toLowerCase())
+    .filter(Boolean);
+  const one = String(req.headers["x-user-role"] || "")
+    .split(",")
+    .map((x) => String(x || "").trim().toLowerCase())
+    .filter(Boolean);
+  return Array.from(new Set([...many, ...one]));
+}
+
+function requireMaintenanceRoles(req, reply, allowed) {
+  const roles = getMaintenanceRoles(req);
+  if (!roles.some((r) => allowed.includes(r))) {
+    reply.code(403).send({ ok: false, error: "not allowed" });
+    return false;
+  }
+  return true;
+}
+
 function addDaysYmd(ymd, days) {
   const d = new Date(`${String(ymd).trim()}T12:00:00`);
   d.setDate(d.getDate() + Number(days || 0));
@@ -5622,20 +5643,81 @@ export default async function maintenanceRoutes(app) {
     }));
   }
 
-  function getLatestLdvOdometerKm(assetId, checkDate) {
+  function getLatestLdvOdometerKm(assetId, checkDate, opts = {}) {
     if (!assetId || !isDate(checkDate)) return null;
-    const row = db.prepare(`
-      SELECT odometer_km
+    const excludeCheckId = Number(opts.excludeCheckId || 0) || 0;
+
+    /** Prior daily input closing (km) — preferred baseline for LDV odometer. */
+    let fromDaily = null;
+    if (hasColumn("daily_hours", "input_unit")) {
+      const dailyRow = db.prepare(`
+        SELECT closing_hours
+        FROM daily_hours
+        WHERE asset_id = ?
+          AND work_date < ?
+          AND LOWER(COALESCE(NULLIF(TRIM(input_unit), ''), 'hours')) = 'km'
+          AND closing_hours IS NOT NULL
+        ORDER BY work_date DESC, id DESC
+        LIMIT 1
+      `).get(assetId, checkDate);
+      if (dailyRow?.closing_hours != null) {
+        const n = Number(dailyRow.closing_hours);
+        if (Number.isFinite(n) && n >= 0) fromDaily = n;
+      }
+    }
+
+    /** Pre-start checks strictly before this date (never same-day — avoids a bad resubmit poisoning "previous"). */
+    const priorChecks = db.prepare(`
+      SELECT id, odometer_km, check_date
       FROM vehicle_ldv_checks
       WHERE asset_id = ?
         AND odometer_km IS NOT NULL
-        AND check_date <= ?
+        AND check_date < ?
       ORDER BY check_date DESC, id DESC
-      LIMIT 1
-    `).get(assetId, checkDate);
-    if (row?.odometer_km == null) return null;
-    const n = Number(row.odometer_km);
-    return Number.isFinite(n) ? n : null;
+      LIMIT 8
+    `).all(assetId, checkDate);
+
+    const priorKm = priorChecks
+      .map((r) => Number(r.odometer_km))
+      .filter((v) => Number.isFinite(v) && v >= 0);
+
+    if (fromDaily != null) {
+      const trustedPrestart = priorKm.filter((v) => v >= fromDaily * 0.98);
+      const pool = [fromDaily, ...trustedPrestart];
+      return Math.max(...pool);
+    }
+
+    if (priorKm.length) return Math.max(...priorKm);
+
+    /** Same-day earlier submission when editing an existing check (exclude current record). */
+    if (excludeCheckId > 0) {
+      const sameDay = db.prepare(`
+        SELECT odometer_km
+        FROM vehicle_ldv_checks
+        WHERE asset_id = ?
+          AND check_date = ?
+          AND id != ?
+          AND odometer_km IS NOT NULL
+        ORDER BY id DESC
+        LIMIT 1
+      `).get(assetId, checkDate, excludeCheckId);
+      if (sameDay?.odometer_km != null) {
+        const n = Number(sameDay.odometer_km);
+        if (Number.isFinite(n) && n >= 0) return n;
+      }
+    }
+
+    return null;
+  }
+
+  function resolveLdvOpeningKm(assetId, checkDate, odometerKm, previousOdometerKm, existingOpening) {
+    if (previousOdometerKm != null && Number.isFinite(Number(previousOdometerKm))) {
+      return Number(previousOdometerKm);
+    }
+    if (existingOpening != null && Number.isFinite(Number(existingOpening))) {
+      return Number(existingOpening);
+    }
+    return Number(odometerKm);
   }
 
   function isLdvPrestartAssetCode(assetCode) {
@@ -5666,10 +5748,13 @@ export default async function maintenanceRoutes(app) {
       LIMIT 1
     `).get(assetId, checkDate);
 
-    const openingCandidate = existing?.opening_hours != null
-      ? Number(existing.opening_hours)
-      : (previousOdometerKm != null ? Number(previousOdometerKm) : odometer);
-    const opening = Number.isFinite(openingCandidate) ? openingCandidate : odometer;
+    const opening = resolveLdvOpeningKm(
+      assetId,
+      checkDate,
+      odometer,
+      previousOdometerKm,
+      existing?.opening_hours
+    );
     const runDelta = Math.max(0, odometer - opening);
 
     if (existing?.id) {
@@ -5684,31 +5769,25 @@ export default async function maintenanceRoutes(app) {
         db.prepare(`
           UPDATE daily_hours
           SET
-            opening_hours = COALESCE(opening_hours, ?),
+            opening_hours = ?,
             closing_hours = ?,
-            hours_run = CASE
-              WHEN COALESCE(hours_run, 0) > ? THEN hours_run
-              ELSE ?
-            END,
+            hours_run = ?,
             input_unit = 'km',
             operator = COALESCE(NULLIF(operator, ''), ?),
             notes = ?
           WHERE id = ?
-        `).run(opening, odometer, runDelta, runDelta, inspectorName || null, nextNotes, Number(existing.id));
+        `).run(opening, odometer, runDelta, inspectorName || null, nextNotes, Number(existing.id));
       } else {
         db.prepare(`
           UPDATE daily_hours
           SET
-            opening_hours = COALESCE(opening_hours, ?),
+            opening_hours = ?,
             closing_hours = ?,
-            hours_run = CASE
-              WHEN COALESCE(hours_run, 0) > ? THEN hours_run
-              ELSE ?
-            END,
+            hours_run = ?,
             operator = COALESCE(NULLIF(operator, ''), ?),
             notes = ?
           WHERE id = ?
-        `).run(opening, odometer, runDelta, runDelta, inspectorName || null, nextNotes, Number(existing.id));
+        `).run(opening, odometer, runDelta, inspectorName || null, nextNotes, Number(existing.id));
       }
       return {
         synced: true,
@@ -5729,11 +5808,9 @@ export default async function maintenanceRoutes(app) {
         )
         VALUES (?, ?, 0, ?, ?, ?, 'km', 1, ?, ?)
         ON CONFLICT(asset_id, work_date) DO UPDATE SET
+          opening_hours = excluded.opening_hours,
           closing_hours = excluded.closing_hours,
-          hours_run = CASE
-            WHEN COALESCE(daily_hours.hours_run, 0) > excluded.hours_run THEN daily_hours.hours_run
-            ELSE excluded.hours_run
-          END,
+          hours_run = excluded.hours_run,
           input_unit = 'km',
           operator = COALESCE(NULLIF(daily_hours.operator, ''), excluded.operator),
           notes = COALESCE(NULLIF(daily_hours.notes, ''), excluded.notes)
@@ -5746,11 +5823,9 @@ export default async function maintenanceRoutes(app) {
         )
         VALUES (?, ?, 0, ?, ?, ?, 1, ?, ?)
         ON CONFLICT(asset_id, work_date) DO UPDATE SET
+          opening_hours = excluded.opening_hours,
           closing_hours = excluded.closing_hours,
-          hours_run = CASE
-            WHEN COALESCE(daily_hours.hours_run, 0) > excluded.hours_run THEN daily_hours.hours_run
-            ELSE excluded.hours_run
-          END,
+          hours_run = excluded.hours_run,
           operator = COALESCE(NULLIF(daily_hours.operator, ''), excluded.operator),
           notes = COALESCE(NULLIF(daily_hours.notes, ''), excluded.notes)
       `).run(assetId, checkDate, opening, odometer, runDelta, inspectorName || null, "LDV pre-start KM captured via QR");
@@ -5993,7 +6068,6 @@ export default async function maintenanceRoutes(app) {
       `).get(asset_code);
       if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
 
-      const previous_odometer_km = getLatestLdvOdometerKm(Number(asset.id), check_date);
       const existing = db.prepare(`
         SELECT id, check_date, odometer_km, inspector_name, notes, checklist_json
         FROM vehicle_ldv_checks
@@ -6003,6 +6077,10 @@ export default async function maintenanceRoutes(app) {
         ORDER BY id DESC
         LIMIT 1
       `).get(Number(asset.id), check_date);
+
+      const previous_odometer_km = getLatestLdvOdometerKm(Number(asset.id), check_date, {
+        excludeCheckId: existing?.id ? Number(existing.id) : 0,
+      });
 
       let checklist = normalizeLdvPrestartChecklist({});
       if (existing?.checklist_json) {
@@ -6024,6 +6102,8 @@ export default async function maintenanceRoutes(app) {
         },
         check_date,
         previous_odometer_km,
+        previous_odometer_source:
+          previous_odometer_km != null ? "daily_hours_or_prior_prestart" : null,
         existing_prestart: existing
           ? {
               id: Number(existing.id),
@@ -6068,7 +6148,19 @@ export default async function maintenanceRoutes(app) {
       `).get(asset_code);
       if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
 
-      const previousOdometer = getLatestLdvOdometerKm(Number(asset.id), check_date);
+      const existing = db.prepare(`
+        SELECT id
+        FROM vehicle_ldv_checks
+        WHERE asset_id = ?
+          AND check_date = ?
+          AND COALESCE(check_mode, 'ldv_general') = 'prestart'
+        ORDER BY id DESC
+        LIMIT 1
+      `).get(Number(asset.id), check_date);
+
+      const previousOdometer = getLatestLdvOdometerKm(Number(asset.id), check_date, {
+        excludeCheckId: existing?.id ? Number(existing.id) : 0,
+      });
       if (previousOdometer != null && odometer_km < previousOdometer) {
         return reply.code(400).send({
           ok: false,
@@ -6092,16 +6184,6 @@ export default async function maintenanceRoutes(app) {
           return acc;
         }, {})
       );
-
-      const existing = db.prepare(`
-        SELECT id
-        FROM vehicle_ldv_checks
-        WHERE asset_id = ?
-          AND check_date = ?
-          AND COALESCE(check_mode, 'ldv_general') = 'prestart'
-        ORDER BY id DESC
-        LIMIT 1
-      `).get(Number(asset.id), check_date);
 
       let checkId = 0;
       if (existing?.id) {
@@ -6154,6 +6236,162 @@ export default async function maintenanceRoutes(app) {
         previous_odometer_km: previousOdometer == null ? null : Number(previousOdometer.toFixed(1)),
         daily_input_sync: dailySync || { synced: false },
         message: "Pre-start captured. KM reading saved to IRONLOG.",
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/maintenance/vehicle-ldv-checks/prestart-correction — fix wrong KM on LDV + daily hours (supervisor)
+  app.post("/vehicle-ldv-checks/prestart-correction", async (req, reply) => {
+    try {
+      if (!requireMaintenanceRoles(req, reply, ["admin", "supervisor", "plant_manager", "site_manager"])) return;
+
+      const asset_code = String(req.body?.asset_code || "").trim().toUpperCase();
+      const work_date = String(req.body?.work_date || req.body?.check_date || "").trim()
+        || new Date().toISOString().slice(0, 10);
+      const closing_km = Number(req.body?.closing_km ?? req.body?.correct_odometer_km ?? req.body?.odometer_km);
+      const opening_km_raw = req.body?.opening_km;
+      const inspector_name = String(req.body?.inspector_name || "Supervisor correction").trim() || "Supervisor correction";
+      const correction_note = String(req.body?.notes || "Supervisor KM correction").trim() || "Supervisor KM correction";
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+
+      if (!asset_code) return reply.code(400).send({ ok: false, error: "asset_code is required" });
+      if (!isLdvPrestartAssetCode(asset_code)) {
+        return reply.code(400).send({ ok: false, error: "Asset is not an LDV pre-start code (V01–V15)" });
+      }
+      if (!isDate(work_date)) return reply.code(400).send({ ok: false, error: "work_date must be YYYY-MM-DD" });
+      if (!Number.isFinite(closing_km) || closing_km < 0) {
+        return reply.code(400).send({ ok: false, error: "closing_km must be a valid number >= 0" });
+      }
+
+      const asset = db.prepare(`
+        SELECT id, asset_code, asset_name FROM assets WHERE UPPER(asset_code) = UPPER(?) LIMIT 1
+      `).get(asset_code);
+      if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
+
+      const assetId = Number(asset.id);
+      const existing = db.prepare(`
+        SELECT id, checklist_json FROM vehicle_ldv_checks
+        WHERE asset_id = ? AND check_date = ? AND COALESCE(check_mode, 'ldv_general') = 'prestart'
+        ORDER BY id DESC LIMIT 1
+      `).get(assetId, work_date);
+
+      let checkId = Number(existing?.id || 0);
+      const previousOdometer = getLatestLdvOdometerKm(assetId, work_date, {
+        excludeCheckId: checkId,
+      });
+      const opening_km =
+        opening_km_raw != null && String(opening_km_raw).trim() !== ""
+          ? Number(opening_km_raw)
+          : previousOdometer;
+      if (!Number.isFinite(opening_km) || opening_km < 0) {
+        return reply.code(400).send({ ok: false, error: "opening_km could not be resolved — pass opening_km explicitly" });
+      }
+      if (closing_km < opening_km) {
+        return reply.code(400).send({
+          ok: false,
+          error: `Closing KM (${closing_km}) cannot be less than opening KM (${opening_km}).`,
+          previous_odometer_km: previousOdometer,
+          opening_km,
+        });
+      }
+
+      const checklistJsonOut = (() => {
+        if (existing?.checklist_json && String(existing.checklist_json).trim()) {
+          return String(existing.checklist_json);
+        }
+        return JSON.stringify(
+          normalizeLdvPrestartChecklist({}).reduce((acc, c) => {
+            acc[c.key] = true;
+            return acc;
+          }, {})
+        );
+      })();
+
+      if (checkId > 0) {
+        db.prepare(`
+          UPDATE vehicle_ldv_checks
+          SET odometer_km = ?, inspector_name = ?, notes = ?, check_mode = 'prestart',
+              checklist_json = COALESCE(NULLIF(checklist_json, ''), ?), updated_at = datetime('now')
+          WHERE id = ?
+        `).run(closing_km, inspector_name, correction_note, checklistJsonOut, checkId);
+      } else {
+        const ins = db.prepare(`
+          INSERT INTO vehicle_ldv_checks (
+            asset_id, uuid, site_code, check_date, vehicle_registration, odometer_km,
+            inspector_name, notes, check_mode, checklist_json, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'prestart', ?, datetime('now'))
+        `).run(
+          assetId,
+          crypto.randomUUID(),
+          site_code,
+          work_date,
+          String(asset.asset_code || ""),
+          closing_km,
+          inspector_name,
+          correction_note,
+          checklistJsonOut
+        );
+        checkId = Number(ins.lastInsertRowid);
+      }
+
+      const run_km = Math.max(0, closing_km - opening_km);
+      const hasInputUnit = hasColumn("daily_hours", "input_unit");
+      const dailyNote = `Supervisor KM correction | ${correction_note}`;
+      if (hasInputUnit) {
+        db.prepare(`
+          INSERT INTO daily_hours (
+            asset_id, work_date, scheduled_hours, opening_hours, closing_hours,
+            hours_run, input_unit, is_used, operator, notes
+          )
+          VALUES (?, ?, 0, ?, ?, ?, 'km', 1, ?, ?)
+          ON CONFLICT(asset_id, work_date) DO UPDATE SET
+            opening_hours = excluded.opening_hours,
+            closing_hours = excluded.closing_hours,
+            hours_run = excluded.hours_run,
+            input_unit = 'km',
+            is_used = 1,
+            operator = excluded.operator,
+            notes = excluded.notes
+        `).run(assetId, work_date, opening_km, closing_km, run_km, inspector_name, dailyNote);
+      } else {
+        db.prepare(`
+          INSERT INTO daily_hours (
+            asset_id, work_date, scheduled_hours, opening_hours, closing_hours,
+            hours_run, is_used, operator, notes
+          )
+          VALUES (?, ?, 0, ?, ?, ?, 1, ?, ?)
+          ON CONFLICT(asset_id, work_date) DO UPDATE SET
+            opening_hours = excluded.opening_hours,
+            closing_hours = excluded.closing_hours,
+            hours_run = excluded.hours_run,
+            is_used = 1,
+            operator = excluded.operator,
+            notes = excluded.notes
+        `).run(assetId, work_date, opening_km, closing_km, run_km, inspector_name, dailyNote);
+      }
+
+      if (hasColumn("daily_hours", "input_unit")) {
+        db.prepare(`
+          INSERT INTO asset_input_units (asset_id, input_unit, updated_at)
+          VALUES (?, 'km', datetime('now'))
+          ON CONFLICT(asset_id) DO UPDATE SET input_unit = 'km', updated_at = datetime('now')
+        `).run(assetId);
+      }
+
+      return reply.send({
+        ok: true,
+        asset_code,
+        work_date,
+        check_id: checkId,
+        opening_km: Number(opening_km.toFixed(1)),
+        closing_km: Number(closing_km.toFixed(1)),
+        run_km: Number(run_km.toFixed(1)),
+        previous_odometer_km: previousOdometer == null ? null : Number(previousOdometer.toFixed(1)),
+        message: `KM corrected for ${asset_code} on ${work_date}.`,
       });
     } catch (err) {
       req.log.error(err);

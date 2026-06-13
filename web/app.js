@@ -2783,6 +2783,7 @@ async function selectChecklistAsset(assetCode) {
   if (clSelectedKind === "ldv") {
     qs("clLdvFields")?.classList.remove("hidden");
     qs("clMachineFields")?.classList.add("hidden");
+    updateClLdvSupervisorPanel();
     const data = await fetchJson(
       `${API}/api/maintenance/vehicle-ldv-checks/prestart-context?asset_code=${encodeURIComponent(code)}&check_date=${encodeURIComponent(clCheckDate())}`
     );
@@ -2806,6 +2807,7 @@ async function selectChecklistAsset(assetCode) {
   } else {
     qs("clLdvFields")?.classList.add("hidden");
     qs("clMachineFields")?.classList.remove("hidden");
+    updateClLdvSupervisorPanel();
     const data = await fetchJson(
       `${API}/api/maintenance/machine-prestart/context?asset_code=${encodeURIComponent(code)}&check_date=${encodeURIComponent(clCheckDate())}`
     );
@@ -2909,6 +2911,47 @@ async function submitChecklistForm() {
   setStatus("Checklist saved ✅");
   await loadChecklistHub();
   renderClHubSections(clHubData);
+  loadClHistory().catch(() => {});
+}
+
+function canCorrectLdvKm() {
+  return getSessionRoles().some((r) => ["admin", "supervisor", "plant_manager", "site_manager"].includes(r));
+}
+
+function updateClLdvSupervisorPanel() {
+  const panel = qs("clLdvSupervisorPanel");
+  if (!panel) return;
+  panel.classList.toggle("hidden", !canCorrectLdvKm() || clSelectedKind !== "ldv");
+}
+
+async function applyLdvKmCorrection() {
+  if (!clSelectedAssetCode) return alert("Select an LDV asset first.");
+  const closing_km = Number(String(qs("clCorrectClosingKm")?.value || "").trim());
+  if (!Number.isFinite(closing_km) || closing_km < 0) return alert("Enter the correct closing KM.");
+  const openingRaw = String(qs("clCorrectOpeningKm")?.value || "").trim();
+  const body = {
+    asset_code: clSelectedAssetCode,
+    work_date: clCheckDate(),
+    closing_km,
+    notes: `Corrected via Checklists tab by ${getSessionUser() || "supervisor"}`,
+  };
+  if (openingRaw) body.opening_km = Number(openingRaw);
+  setStatus("Applying KM correction…");
+  const data = await fetchJson(`${API}/api/maintenance/vehicle-ldv-checks/prestart-correction`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  if (qs("clOdometer")) qs("clOdometer").value = String(data.closing_km ?? closing_km);
+  if (qs("clPrevKm")) {
+    qs("clPrevKm").textContent =
+      data.opening_km != null ? `${Number(data.opening_km).toFixed(1)} km` : "—";
+  }
+  clSetFormMsg(data.message || "KM corrected.", true);
+  setStatus(`KM corrected for ${clSelectedAssetCode} ✅`);
+  await loadChecklistHub();
+  renderClHubSections(clHubData);
+  await selectChecklistAsset(clSelectedAssetCode).catch(() => {});
   loadClHistory().catch(() => {});
 }
 
@@ -3119,6 +3162,9 @@ function initChecklistTab() {
   qs("clHistLoad")?.addEventListener("click", () => loadClHistory().catch((e) => setStatus(String(e.message || e))));
   qs("clHistOpenRangePdf")?.addEventListener("click", () => clOpenRangePdf(false));
   qs("clHistDownloadRangePdf")?.addEventListener("click", () => clOpenRangePdf(true));
+  qs("clApplyKmCorrection")?.addEventListener("click", () =>
+    applyLdvKmCorrection().catch((e) => clSetFormMsg(String(e.message || e), false))
+  );
 }
 
 function openChecklistTabForAsset(assetCode) {
