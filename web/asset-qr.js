@@ -103,26 +103,52 @@
     if (openHistoryBtn) openHistoryBtn.href = `./asset-qr-detail.html?view=history&asset_code=${encodeURIComponent(assetCode)}`;
     const openWoBtn = qs("openWoBtn");
     if (openWoBtn) openWoBtn.href = `./asset-qr-detail.html?view=workorders&asset_code=${encodeURIComponent(assetCode)}`;
+
+    const isLdv = /^V(0[1-9]|1[0-5])AM$/i.test(assetCode);
+    const mp = payload?.machine_prestart;
+    const hasMachineChecklist = Boolean(mp?.profile_id) && !isLdv;
+    const ldvChecklistUrl = `./ldv-prestart.html?asset_code=${encodeURIComponent(assetCode)}`;
+    const machineChecklistUrl = `./machine-prestart.html?asset_code=${encodeURIComponent(assetCode)}`;
     const appChecklistUrl = `./index.html?tab=vehicle&asset_code=${encodeURIComponent(assetCode)}`;
+
+    const openChecklistQrBtn = qs("openChecklistQrBtn");
+    if (openChecklistQrBtn) {
+      if (isLdv || hasMachineChecklist) {
+        openChecklistQrBtn.style.display = "inline-block";
+        openChecklistQrBtn.href = isLdv ? ldvChecklistUrl : machineChecklistUrl;
+        openChecklistQrBtn.textContent = isLdv
+          ? "Start LDV checklist"
+          : mp?.template_title
+            ? `Start ${String(mp.template_title)}`
+            : "Start daily checklist";
+      } else {
+        openChecklistQrBtn.style.display = "none";
+        openChecklistQrBtn.href = "#";
+      }
+    }
+
     const openPrestartBtn = qs("openPrestartBtn");
     if (openPrestartBtn) {
-      const isLdv = /^V(0[1-9]|1[0-5])AM$/i.test(assetCode);
       openPrestartBtn.style.display = isLdv ? "inline-block" : "none";
-      openPrestartBtn.href = appChecklistUrl;
-      openPrestartBtn.textContent = "LDV Checklist (IRONLOG)";
+      openPrestartBtn.href = ldvChecklistUrl;
+      openPrestartBtn.textContent = "LDV checklist (QR form)";
     }
 
     const openMachinePrestartBtn = qs("openMachinePrestartBtn");
     if (openMachinePrestartBtn) {
-      const mp = payload?.machine_prestart;
-      const showMachine = Boolean(mp?.profile_id) && !/^V(0[1-9]|1[0-5])AM$/i.test(assetCode);
-      openMachinePrestartBtn.style.display = showMachine ? "inline-block" : "none";
-      openMachinePrestartBtn.href = appChecklistUrl;
-      if (showMachine && mp?.template_title) {
-        openMachinePrestartBtn.textContent = `${String(mp.template_title)} (IRONLOG)`;
+      openMachinePrestartBtn.style.display = hasMachineChecklist ? "inline-block" : "none";
+      openMachinePrestartBtn.href = machineChecklistUrl;
+      if (hasMachineChecklist && mp?.template_title) {
+        openMachinePrestartBtn.textContent = `${String(mp.template_title)} (QR form)`;
       } else {
-        openMachinePrestartBtn.textContent = "Machine Checklist (IRONLOG)";
+        openMachinePrestartBtn.textContent = "Machine checklist (QR form)";
       }
+    }
+
+    const openAppChecklistBtn = qs("openAppChecklistBtn");
+    if (openAppChecklistBtn) {
+      openAppChecklistBtn.style.display = isLdv || hasMachineChecklist ? "inline-block" : "none";
+      openAppChecklistBtn.href = appChecklistUrl;
     }
   }
 

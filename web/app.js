@@ -2937,8 +2937,20 @@ function clCheckModeLabel(mode) {
   const m = String(mode || "").trim();
   if (m === "prestart") return "LDV Pre-Start";
   if (m.startsWith("machine_prestart_")) {
-    const profile = m.replace("machine_prestart_", "").replace(/_/g, " ");
-    return profile.charAt(0).toUpperCase() + profile.slice(1);
+    const profileId = m.replace("machine_prestart_", "");
+    const titles = {
+      excavator: "Excavator",
+      dozer: "Dozer",
+      wheel_loader: "Wheel loader",
+      haul_truck: "Haul truck",
+      grader: "Grader",
+      mobile_crane: "Mobile crane",
+      crusher: "Crusher",
+      mobile_screen: "Mobile screen",
+      generator: "Generator",
+      backhoe_loader: "Backhoe / loader",
+    };
+    return titles[profileId] || profileId.replace(/_/g, " ");
   }
   if (m === "ldv_general") return "Vehicle Check";
   return m || "Checklist";

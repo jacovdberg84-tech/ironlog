@@ -84,9 +84,11 @@
       <h1>Asset QR Detail</h1>
       <div class="muted" id="sub">Loading...</div>
       <div class="actions">
+        <a class="btn primary" id="openChecklistQrBtn" href="#" style="display:none;">Start daily checklist</a>
         <button class="primary" id="refreshBtn">Refresh</button>
-        <a class="btn primary" id="openPrestartBtn" href="#" style="display:none;">LDV Pre-Start</a>
-        <a class="btn primary" id="openMachinePrestartBtn" href="#" style="display:none;">Machine Pre-Start</a>
+        <a class="btn" id="openPrestartBtn" href="#" style="display:none;">LDV Pre-Start</a>
+        <a class="btn" id="openMachinePrestartBtn" href="#" style="display:none;">Machine Pre-Start</a>
+        <a class="btn" id="openAppChecklistBtn" href="#" style="display:none;">Open in IRONLOG app</a>
         <a class="btn" id="openInspectionsBtn" href="#">Inspections</a>
         <a class="btn" id="openHistoryBtn" href="#">Service History</a>
         <a class="btn" id="openWoBtn" href="#">Work Orders</a>
@@ -107,7 +109,7 @@
     </div>
   </div>
 
-  <script src="/web/asset-qr.js?v=5"></script>
+  <script src="/web/asset-qr.js?v=6"></script>
   <script>
     (function () {
       try {
@@ -117,14 +119,9 @@
         var ins = document.getElementById("openInspectionsBtn");
         var his = document.getElementById("openHistoryBtn");
         var wo = document.getElementById("openWoBtn");
-        var pre = document.getElementById("openPrestartBtn");
         if (ins) ins.href = "./asset-qr-detail.html?view=inspections&asset_code=" + encodeURIComponent(code);
         if (his) his.href = "./asset-qr-detail.html?view=history&asset_code=" + encodeURIComponent(code);
         if (wo) wo.href = "./asset-qr-detail.html?view=workorders&asset_code=" + encodeURIComponent(code);
-        if (pre && /^V(0[1-9]|1[0-5])AM$/i.test(code)) {
-          pre.style.display = "inline-block";
-          pre.href = "./index.html?tab=vehicle&asset_code=" + encodeURIComponent(code);
-        }
       } catch {}
     })();
   </script>

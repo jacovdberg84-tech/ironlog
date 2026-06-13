@@ -304,6 +304,90 @@ const TEMPLATES = {
       },
     ],
   },
+  generator: {
+    id: "generator",
+    title: "Generator pre-start",
+    sections: [
+      {
+        id: "fluids",
+        title: "Fluids & fuel",
+        items: [
+          { key: "engine_oil_ok", label: "Engine oil level OK" },
+          { key: "coolant_ok", label: "Coolant level OK" },
+          { key: "fuel_level_ok", label: "Fuel tank level OK" },
+          { key: "no_fuel_leaks_ok", label: "No fuel or oil leaks" },
+        ],
+      },
+      {
+        id: "electrical",
+        title: "Electrical & connections",
+        items: [
+          { key: "cables_ok", label: "Power cables & plugs OK (no damage)" },
+          { key: "earthing_ok", label: "Earthing / bonding OK" },
+          { key: "panel_breakers_ok", label: "Distribution panel & breakers OK" },
+          { key: "auto_start_ok", label: "Auto-start / control panel OK (if fitted)" },
+        ],
+      },
+      {
+        id: "operation",
+        title: "Operation",
+        items: [
+          { key: "exhaust_ok", label: "Exhaust & ventilation clear" },
+          { key: "battery_ok", label: "Battery & charging OK" },
+          { key: "run_test_ok", label: "Brief run / load test OK (no abnormal noise or smoke)" },
+        ],
+      },
+      {
+        id: "safety",
+        title: "Safety",
+        items: [
+          { key: "fire_extinguisher_ok", label: "Fire extinguisher present & charged" },
+          { key: "guards_ok", label: "Guards & covers in place" },
+          { key: "emergency_stop_ok", label: "Emergency stop OK" },
+          { key: "signage_ok", label: "Warning signage visible" },
+        ],
+      },
+    ],
+  },
+  backhoe_loader: {
+    id: "backhoe_loader",
+    title: "Backhoe / loader pre-start",
+    sections: [
+      {
+        id: "fluids",
+        title: "Fluid levels",
+        items: [
+          { key: "engine_oil_ok", label: "Engine oil level OK" },
+          { key: "coolant_ok", label: "Coolant level OK" },
+          { key: "hydraulic_oil_ok", label: "Hydraulic oil level OK" },
+          { key: "transmission_ok", label: "Transmission / axle oils OK" },
+          { key: "brake_fluid_ok", label: "Brake fluid OK" },
+        ],
+      },
+      {
+        id: "machine",
+        title: "Machine & attachments",
+        items: [
+          { key: "tyre_condition_ok", label: "Tyres — pressure & damage OK" },
+          { key: "loader_bucket_ok", label: "Loader bucket & linkage OK" },
+          { key: "backhoe_arm_ok", label: "Backhoe arm, pins & bucket OK" },
+          { key: "steering_ok", label: "Steering & articulation OK" },
+          { key: "leaks_damage_ok", label: "No abnormal leaks or damage" },
+        ],
+      },
+      {
+        id: "safety",
+        title: "Safety",
+        items: [
+          { key: "lights_beacon_ok", label: "Lights & beacon OK" },
+          { key: "horn_reversing_ok", label: "Horn & reversing alarm OK" },
+          { key: "seat_belt_ok", label: "Seat belt OK" },
+          { key: "fire_extinguisher_ok", label: "Fire extinguisher OK" },
+          { key: "mirrors_ok", label: "Mirrors clean & intact" },
+        ],
+      },
+    ],
+  },
 };
 
 export function getMachinePrestartTemplate(profileId) {
@@ -322,11 +406,28 @@ export function listMachinePrestartProfiles() {
 const CRUSHER_ASSET_CODES = new Set(["CR01AM", "CR02AM", "CR03AM", "CR04AM", "CR05AM"]);
 const MOBILE_SCREEN_ASSET_CODES = new Set(["FIN694"]);
 
+/** Explicit site equipment codes for daily pre-start checklists. */
+const DOZER_ASSET_CODES = new Set(["DR01AM"]);
+const WHEEL_LOADER_ASSET_CODES = new Set(["FL01AM", "FL03AM"]);
+const BACKHOE_LOADER_ASSET_CODES = new Set(["B01AM"]);
+const GENERATOR_ASSET_CODES = new Set([
+  "GS01AM",
+  "GS02AM",
+  "GS03AM",
+  "GS04AM",
+  "GS05AM",
+  "GS06AM",
+]);
+
 function resolveProfileByAssetCode(assetCode) {
   const code = String(assetCode || "").trim().toUpperCase();
   if (!code) return null;
   if (CRUSHER_ASSET_CODES.has(code) || /^CR0[1-9]AM$/.test(code)) return "crusher";
   if (MOBILE_SCREEN_ASSET_CODES.has(code)) return "mobile_screen";
+  if (GENERATOR_ASSET_CODES.has(code) || /^GS0[1-9]AM$/.test(code)) return "generator";
+  if (DOZER_ASSET_CODES.has(code) || /^DR\d+AM$/.test(code)) return "dozer";
+  if (WHEEL_LOADER_ASSET_CODES.has(code) || /^FL\d+AM$/.test(code)) return "wheel_loader";
+  if (BACKHOE_LOADER_ASSET_CODES.has(code) || /^B0[1-9]AM$/.test(code)) return "backhoe_loader";
   return null;
 }
 
@@ -339,6 +440,8 @@ export function resolveMachinePrestartProfile(category, assetName = "", assetCod
 
   const hay = `${String(category || "")} ${String(assetName || "")}`.toLowerCase();
   if (!hay.trim()) return null;
+  if (/(generator|gen\s*set|genset|diesel\s*gen)/.test(hay)) return "generator";
+  if (/(backhoe|back\s*hoe|tlb|tractor\s*loader)/.test(hay)) return "backhoe_loader";
   if (/(mobile\s*)?crusher|crushing\s*plant|jaw\s*crusher|cone\s*crusher|\bcrusher\b/.test(hay)) return "crusher";
   if (/(mobile\s*)?(screen|screener|finisher|screening\s*plant)/.test(hay)) return "mobile_screen";
   if (/(excavator|digger|shovel)/.test(hay)) return "excavator";
