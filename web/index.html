@@ -4276,6 +4276,55 @@
           </div>
         </div>
 
+        <div class="dash-card full-width" id="clHistoryCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef3c7; color: #b45309;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              </div>
+              <div>
+                <h3>Checklist History</h3>
+                <p class="muted small">Browse completed checks and save PDF records for any date range</p>
+              </div>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row cl-history-filters">
+              <div class="form-field">
+                <label for="clHistStart">From</label>
+                <input id="clHistStart" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label for="clHistEnd">To</label>
+                <input id="clHistEnd" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label for="clHistType">Type</label>
+                <select id="clHistType" class="w-full">
+                  <option value="">All checklists</option>
+                  <option value="ldv">LDV pre-start</option>
+                  <option value="machine">Machine pre-start</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label for="clHistAsset">Asset</label>
+                <input id="clHistAsset" type="search" class="w-full" placeholder="All assets (e.g. V01)" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="clHistLoad" type="button" class="btn btn-primary">Load history</button>
+              </div>
+            </div>
+            <div class="action-buttons" style="margin-bottom:12px;">
+              <button id="clHistOpenRangePdf" type="button" class="btn btn-secondary">Open range PDF</button>
+              <button id="clHistDownloadRangePdf" type="button" class="btn btn-secondary">Download range PDF</button>
+            </div>
+            <div id="clHistorySummary" class="muted small" style="margin-bottom:8px;"></div>
+            <div id="clHistoryList" class="list cl-history-list">
+              <div class="muted small">Choose dates and click Load history.</div>
+            </div>
+          </div>
+        </div>
+
         <div id="clFormPanel" class="dash-card full-width hidden">
           <div class="dash-card-header">
             <div class="dash-card-title">

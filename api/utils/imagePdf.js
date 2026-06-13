@@ -16,28 +16,24 @@ export async function normalizeUploadedPhoto(buffer) {
 
 /**
  * Resolve an on-disk image to a PDFKit-compatible file path.
- * Converts WebP/HEIC and mislabeled formats via sharp when needed.
+ * Re-encodes through sharp so CMYK/progressive/WebP/HEIC cameras embed reliably.
  */
 export async function resolvePdfImage(absPath) {
   const abs = String(absPath || "").trim();
   if (!abs || !fs.existsSync(abs)) return { path: null, temp: false };
 
-  const ext = path.extname(abs).toLowerCase();
-  if (PDF_NATIVE_EXTS.has(ext)) {
-    try {
-      await sharp(abs).metadata();
-      return { path: abs, temp: false };
-    } catch {
-      /* re-encode below */
-    }
-  }
-
   const tmp = path.join(
     os.tmpdir(),
     `ironlog-pdf-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.jpg`
   );
-  await sharp(abs, { failOn: "none" }).rotate().jpeg({ quality: 85 }).toFile(tmp);
-  return { path: tmp, temp: true };
+  try {
+    await sharp(abs, { failOn: "none" }).rotate().jpeg({ quality: 88, mozjpeg: true }).toFile(tmp);
+    return { path: tmp, temp: true };
+  } catch {
+    const ext = path.extname(abs).toLowerCase();
+    if (PDF_NATIVE_EXTS.has(ext)) return { path: abs, temp: false };
+    return { path: null, temp: false };
+  }
 }
 
 export function drawPhotoInPdf(doc, absPath, opts = {}) {

@@ -24,7 +24,7 @@ import {
   drawPhotoInPdf,
   cleanupTempPdfImages,
 } from "../utils/imagePdf.js";
-import { resolveStorageAbs as resolveStorageAbsUtil, getDataRoot } from "../utils/storagePaths.js";
+import { resolveStorageAbs as resolveStorageAbsUtil, getDataRoot, normalizeStorageRel } from "../utils/storagePaths.js";
 
 let maintenanceMasterSchedulerStarted = false;
 let reportSubscriptionsSchedulerStarted = false;
@@ -1063,6 +1063,26 @@ export default async function reportsRoutes(app) {
   }
   function resolveStorageAbs(relPath) {
     return resolveStorageAbsUtil(relPath, dataRoot);
+  }
+
+  async function resolveCheckPhotoForPdf(photoRow) {
+    const rel = normalizeStorageRel(photoRow?.file_path);
+    const abs = resolveStorageAbs(rel);
+    const resolved = await resolvePdfImage(abs);
+    let markers = [];
+    try {
+      markers = photoRow?.markers_json ? JSON.parse(photoRow.markers_json) : [];
+    } catch {
+      markers = [];
+    }
+    if (Array.isArray(photoRow?.markers)) markers = photoRow.markers;
+    return {
+      ...photoRow,
+      rel,
+      pdfPath: resolved.path,
+      tempPath: resolved.temp ? resolved.path : null,
+      markers: Array.isArray(markers) ? markers : [],
+    };
   }
 
   function ensureColumn(table, colName, colDef) {
@@ -4300,11 +4320,9 @@ export default async function reportsRoutes(app) {
     const tempPdfImages = [];
     const photosForPdf = [];
     for (const p of photos) {
-      const rel = String(p.file_path || "").replace(/\\/g, "/").replace(/^\/+/, "");
-      const abs = resolveStorageAbs(rel);
-      const resolved = await resolvePdfImage(abs);
-      if (resolved.temp && resolved.path) tempPdfImages.push(resolved.path);
-      photosForPdf.push({ ...p, pdfPath: resolved.path, rel });
+      const resolved = await resolveCheckPhotoForPdf(p);
+      if (resolved.tempPath) tempPdfImages.push(resolved.tempPath);
+      photosForPdf.push(resolved);
     }
 
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
@@ -4360,9 +4378,10 @@ export default async function reportsRoutes(app) {
             width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
           });
           doc.moveDown(0.2);
-          drawPhotoInPdf(doc, p.pdfPath, { missingLabel: p.rel || "-", maxWidth: 420, maxHeight: 190 });
+          drawPhotoInPdf(doc, p.pdfPath, { missingLabel: p.rel || p.file_path || "-", maxWidth: 420, maxHeight: 190 });
 
-          if (!p.markers.length) {
+          const markers = Array.isArray(p.markers) ? p.markers : [];
+          if (!markers.length) {
             doc.font("Helvetica").fontSize(9).fillColor("#555555").text("No pinned damages on this photo.");
             doc.moveDown(0.4);
             continue;
@@ -4370,7 +4389,7 @@ export default async function reportsRoutes(app) {
 
           doc.font("Helvetica-Bold").fontSize(9).fillColor("#111111").text("Pinned damages:");
           doc.moveDown(0.15);
-          p.markers.forEach((m, idx) => {
+          markers.forEach((m, idx) => {
             const label = compactCell(m?.label || "Damage", 80);
             const note = compactCell(m?.note || "", 160);
             doc
@@ -4487,11 +4506,9 @@ export default async function reportsRoutes(app) {
       for (const [checkId, photos] of photosByCheck.entries()) {
         const resolvedPhotos = [];
         for (const p of photos) {
-          const rel = String(p.file_path || "").replace(/\\/g, "/").replace(/^\/+/, "");
-          const abs = resolveStorageAbs(rel);
-          const resolved = await resolvePdfImage(abs);
-          if (resolved.temp && resolved.path) tempPdfImages.push(resolved.path);
-          resolvedPhotos.push({ ...p, pdfPath: resolved.path, rel });
+          const resolved = await resolveCheckPhotoForPdf(p);
+          if (resolved.tempPath) tempPdfImages.push(resolved.tempPath);
+          resolvedPhotos.push(resolved);
         }
         photosByCheckPdf.set(checkId, resolvedPhotos);
       }
@@ -4547,7 +4564,7 @@ export default async function reportsRoutes(app) {
             doc.font("Helvetica-Bold").fontSize(9).fillColor("#111111")
               .text(`Photo #${p.id}${p.caption ? ` - ${p.caption}` : ""} • pins: ${(p.markers || []).length}`);
             doc.moveDown(0.15);
-            drawPhotoInPdf(doc, p.pdfPath, { missingLabel: p.rel || "-", maxWidth: 360, maxHeight: 150 });
+            drawPhotoInPdf(doc, p.pdfPath, { missingLabel: p.rel || p.file_path || "-", maxWidth: 360, maxHeight: 150 });
           }
         }
       },

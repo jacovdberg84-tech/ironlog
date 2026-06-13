@@ -2909,6 +2909,7 @@ async function submitChecklistForm() {
   setStatus("Checklist saved ✅");
   await loadChecklistHub();
   renderClHubSections(clHubData);
+  loadClHistory().catch(() => {});
 }
 
 async function uploadChecklistPhoto() {
@@ -2929,6 +2930,138 @@ async function uploadChecklistPhoto() {
   if (qs("clPhotoFile")) qs("clPhotoFile").value = "";
   clSetFormMsg("Photo uploaded to this checklist.", true);
   setStatus("Checklist photo uploaded ✅");
+  loadClHistory().catch(() => {});
+}
+
+function clCheckModeLabel(mode) {
+  const m = String(mode || "").trim();
+  if (m === "prestart") return "LDV Pre-Start";
+  if (m.startsWith("machine_prestart_")) {
+    const profile = m.replace("machine_prestart_", "").replace(/_/g, " ");
+    return profile.charAt(0).toUpperCase() + profile.slice(1);
+  }
+  if (m === "ldv_general") return "Vehicle Check";
+  return m || "Checklist";
+}
+
+function clInitHistoryDates() {
+  const end = qs("clHistEnd");
+  const start = qs("clHistStart");
+  const today = todayLocalYmd();
+  if (end && !end.value) end.value = today;
+  if (start && !start.value) {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    start.value = d.toISOString().slice(0, 10);
+  }
+}
+
+async function clResolveHistAssetId() {
+  const code = String(qs("clHistAsset")?.value || "").trim().toUpperCase();
+  if (!code) return 0;
+  try {
+    const data = await fetchJson(`${API}/api/assets`);
+    const list = Array.isArray(data) ? data : [];
+    const hit = list.find((a) => String(a.asset_code || "").toUpperCase() === code);
+    return hit ? Number(hit.id) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function clOpenCheckPdf(checkId, download = false) {
+  const id = Number(checkId || 0);
+  if (!id) return alert("No check selected.");
+  const q = download ? "?download=1" : "";
+  window.open(`${API}/api/reports/vehicle-ldv-check/${id}.pdf${q}`, "_blank");
+}
+
+async function clOpenRangePdf(download = false) {
+  const start = String(qs("clHistStart")?.value || "").trim();
+  const end = String(qs("clHistEnd")?.value || "").trim();
+  if (!start || !end) return alert("Select From and To dates first.");
+  const assetId = await clResolveHistAssetId();
+  const q = new URLSearchParams({ start, end, with_photos: "1" });
+  if (assetId > 0) q.set("asset_id", String(assetId));
+  if (download) q.set("download", "1");
+  window.open(`${API}/api/reports/vehicle-ldv-checks.pdf?${q.toString()}`, "_blank");
+}
+
+function renderClHistory(rows) {
+  const list = qs("clHistoryList");
+  const summary = qs("clHistorySummary");
+  if (!list) return;
+  list.innerHTML = "";
+  const items = Array.isArray(rows) ? rows : [];
+  if (summary) {
+    summary.textContent = items.length
+      ? `${items.length} check(s) in selected period — photos included in PDF exports.`
+      : "No checks found for the selected filters.";
+  }
+  if (!items.length) {
+    list.innerHTML = `<div class="muted small">No checklist records found. Try a wider date range or clear filters.</div>`;
+    return;
+  }
+  const table = document.createElement("div");
+  table.className = "cl-history-table";
+  table.innerHTML = `
+    <div class="cl-history-head">
+      <span>Date</span><span>Asset</span><span>Type</span><span>Inspector</span><span>Photos</span><span>Actions</span>
+    </div>
+  `;
+  items.forEach((r) => {
+    const row = document.createElement("div");
+    row.className = "cl-history-row";
+    const photoCount = Number(r.photo_count ?? (r.photos || []).length ?? 0);
+    const meter =
+      r.odometer_km != null
+        ? `${Number(r.odometer_km).toFixed(0)} km`
+        : r.smu_hours != null
+          ? `${Number(r.smu_hours).toFixed(1)} h SMU`
+          : "";
+    row.innerHTML = `
+      <span>${escapeHtml(r.check_date || "-")}</span>
+      <span><b>${escapeHtml(r.asset_code || "-")}</b><br><small class="muted">${escapeHtml(r.asset_name || "")}${meter ? ` · ${escapeHtml(meter)}` : ""}</small></span>
+      <span><span class="pill">${escapeHtml(clCheckModeLabel(r.check_mode))}</span></span>
+      <span>${escapeHtml(r.inspector_name || "-")}</span>
+      <span>${photoCount > 0 ? `<span class="pill green">${photoCount}</span>` : `<span class="muted">0</span>`}</span>
+      <span class="cl-history-actions">
+        <button type="button" class="btn btn-secondary btn-sm" data-cl-view="${Number(r.id)}">View</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-cl-pdf="${Number(r.id)}">PDF</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-cl-dlpdf="${Number(r.id)}">Save</button>
+      </span>
+    `;
+    row.querySelector("[data-cl-view]")?.addEventListener("click", () => {
+      if (qs("clCheckDate")) qs("clCheckDate").value = String(r.check_date || clCheckDate());
+      selectChecklistAsset(String(r.asset_code || "")).catch((e) => clSetFormMsg(String(e.message || e), false));
+    });
+    row.querySelector("[data-cl-pdf]")?.addEventListener("click", () => clOpenCheckPdf(r.id, false));
+    row.querySelector("[data-cl-dlpdf]")?.addEventListener("click", () => clOpenCheckPdf(r.id, true));
+    table.appendChild(row);
+  });
+  list.appendChild(table);
+}
+
+async function loadClHistory() {
+  const start = String(qs("clHistStart")?.value || "").trim();
+  const end = String(qs("clHistEnd")?.value || "").trim();
+  const checkMode = String(qs("clHistType")?.value || "").trim();
+  const assetCode = String(qs("clHistAsset")?.value || "").trim().toUpperCase();
+  if (!start || !end) {
+    clInitHistoryDates();
+    return loadClHistory();
+  }
+  const list = qs("clHistoryList");
+  if (list) list.innerHTML = `<div class="muted small">Loading history…</div>`;
+  try {
+    const q = new URLSearchParams({ start, end });
+    if (checkMode) q.set("check_mode", checkMode);
+    if (assetCode) q.set("asset_code", assetCode);
+    const data = await fetchJson(`${API}/api/maintenance/vehicle-ldv-checks?${q.toString()}`);
+    renderClHistory(data?.rows || []);
+  } catch (e) {
+    if (list) list.innerHTML = `<div class="muted small">History load error: ${escapeHtml(e.message || e)}</div>`;
+  }
 }
 
 function initChecklistTab() {
@@ -2936,6 +3069,7 @@ function initChecklistTab() {
   window.__clTabInit = true;
   const d = qs("clCheckDate");
   if (d && !d.value) d.value = todayLocalYmd();
+  clInitHistoryDates();
   const ins = qs("clInspector");
   if (ins && !ins.value) ins.value = getSessionUser();
 
@@ -2970,6 +3104,9 @@ function initChecklistTab() {
     if (!id) return alert("Submit the checklist first.");
     window.open(`${API}/api/reports/vehicle-ldv-check/${id}.pdf`, "_blank");
   });
+  qs("clHistLoad")?.addEventListener("click", () => loadClHistory().catch((e) => setStatus(String(e.message || e))));
+  qs("clHistOpenRangePdf")?.addEventListener("click", () => clOpenRangePdf(false));
+  qs("clHistDownloadRangePdf")?.addEventListener("click", () => clOpenRangePdf(true));
 }
 
 function openChecklistTabForAsset(assetCode) {
@@ -6692,6 +6829,7 @@ function switchTab(key) {
   }
   if (k === "vehicle") {
     loadChecklistHub().catch(() => {});
+    loadClHistory().catch(() => {});
   }
   if (k === "telematics") {
     loadTelematicsTab().catch(() => {});

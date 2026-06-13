@@ -5771,6 +5771,8 @@ export default async function maintenanceRoutes(app) {
       const checkIdFilter = Number(req.query?.check_id || 0);
       const start = String(req.query?.start || "").trim();
       const end = String(req.query?.end || "").trim();
+      const checkModeFilter = String(req.query?.check_mode || "").trim().toLowerCase();
+      const assetCodeFilter = String(req.query?.asset_code || "").trim().toUpperCase();
       const params = [];
       const where = [];
       if (checkIdFilter > 0) {
@@ -5789,6 +5791,17 @@ export default async function maintenanceRoutes(app) {
         where.push("v.check_date <= ?");
         params.push(end);
       }
+      if (assetCodeFilter) {
+        where.push("UPPER(a.asset_code) = ?");
+        params.push(assetCodeFilter);
+      }
+      if (checkModeFilter === "ldv") {
+        where.push("COALESCE(v.check_mode, 'ldv_general') = 'prestart'");
+      } else if (checkModeFilter === "machine") {
+        where.push("COALESCE(v.check_mode, '') LIKE 'machine_prestart_%'");
+      } else if (checkModeFilter === "vehicle") {
+        where.push("COALESCE(v.check_mode, 'ldv_general') = 'ldv_general'");
+      }
 
       const rows = db.prepare(`
         SELECT
@@ -5797,8 +5810,10 @@ export default async function maintenanceRoutes(app) {
           v.check_date,
           v.vehicle_registration,
           v.odometer_km,
+          v.smu_hours,
           v.inspector_name,
           v.notes,
+          v.check_mode,
           v.created_at,
           a.asset_code,
           a.asset_name
@@ -5806,6 +5821,7 @@ export default async function maintenanceRoutes(app) {
         JOIN assets a ON a.id = v.asset_id
         ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
         ORDER BY v.check_date DESC, v.id DESC
+        LIMIT 500
       `).all(...params);
 
       const ids = rows.map((r) => Number(r.id)).filter((n) => n > 0);
@@ -5837,10 +5853,14 @@ export default async function maintenanceRoutes(app) {
 
       return reply.send({
         ok: true,
-        rows: rows.map((r) => ({
-          ...r,
-          photos: photosByCheck.get(Number(r.id)) || [],
-        })),
+        rows: rows.map((r) => {
+          const photos = photosByCheck.get(Number(r.id)) || [];
+          return {
+            ...r,
+            photos,
+            photo_count: photos.length,
+          };
+        }),
       });
     } catch (err) {
       req.log.error(err);

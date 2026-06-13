@@ -3118,6 +3118,62 @@ body.sidebar-collapsed .main-content {
   margin-bottom: 12px;
 }
 
+.cl-history-filters {
+  align-items: flex-end;
+  margin-bottom: 8px;
+}
+
+.cl-history-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.cl-history-head,
+.cl-history-row {
+  display: grid;
+  grid-template-columns: 100px 1.2fr 1fr 1fr 70px 200px;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+}
+
+.cl-history-head {
+  background: #f8fafc;
+  font-weight: 600;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #64748b;
+}
+
+.cl-history-row {
+  border-top: 1px solid var(--line, #e5e7eb);
+}
+
+.cl-history-row:hover {
+  background: #fafafa;
+}
+
+.cl-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+@media (max-width: 900px) {
+  .cl-history-head { display: none; }
+  .cl-history-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .cl-history-actions { margin-top: 6px; }
+}
+
 .checklist-form-items .cl-sec {
   margin-top: 14px;
   padding-top: 10px;
