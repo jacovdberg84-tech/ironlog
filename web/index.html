@@ -404,7 +404,7 @@
               <span class="dash-card-badge">FSC Pilot</span>
             </div>
             <div class="list" id="telematicsFleetList"></div>
-            <p class="muted small">A300AM &amp; F500AM — hours, idle, faults from FSC units (telematics is source of truth for meters)</p>
+            <p class="muted small">FSC telematics — live hours, idle, and faults (meter locks when a unit has reported in the last 24h)</p>
           </div>
 
           <div class="dash-card" id="ldvPrestartCard">
@@ -4747,6 +4747,65 @@
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- FSC telematics units -->
+        <div class="dash-card collapsible full-width" data-collapsed="true" id="adminTelematicsCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4"></path><path d="M12 18v4"></path><path d="M4.93 4.93l2.83 2.83"></path><path d="M16.24 16.24l2.83 2.83"></path><path d="M2 12h4"></path><path d="M18 12h4"></path><path d="M4.93 19.07l2.83-2.83"></path><path d="M16.24 7.76l2.83-2.83"></path></svg>
+              </div>
+              <div>
+                <h3>Telematics units (FSC)</h3>
+                <p class="muted small">Register FSC650 / FSC150 units on machines. Replace serial when a unit is faulty — clears stale meter lock until the new unit reports.</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row" style="flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
+              <div class="form-field">
+                <label>Asset code *</label>
+                <input id="telemAssetCode" list="assetCodeOptions" class="w-full" placeholder="e.g. A300AM" />
+              </div>
+              <div class="form-field">
+                <label>Device serial *</label>
+                <input id="telemDeviceSerial" class="w-full" placeholder="e.g. FSC-A300AM or unit S/N" />
+              </div>
+              <div class="form-field">
+                <label>Unit model</label>
+                <select id="telemUnitModel" class="w-full">
+                  <option value="FSC650">FSC650</option>
+                  <option value="FSC150">FSC150</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>External ID</label>
+                <input id="telemExternalId" class="w-full" placeholder="Optional — defaults to serial" />
+              </div>
+              <div class="form-field form-field-action">
+                <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                  <input id="telemReplaceFaulty" type="checkbox" />
+                  Replace faulty unit
+                </label>
+              </div>
+              <div class="form-field form-field-action">
+                <button type="button" id="telemSaveDeviceBtn" class="btn btn-primary btn-sm">Save unit</button>
+                <button type="button" id="telemRefreshDevicesBtn" class="btn btn-secondary btn-sm">Refresh</button>
+              </div>
+            </div>
+            <div class="form-row" style="margin-bottom:8px;">
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                <input id="telemShowInactive" type="checkbox" />
+                Show inactive units
+              </label>
+            </div>
+            <div id="telemDevicesList" class="list muted small" style="margin-bottom:12px;">Loading telematics units…</div>
+            <pre class="output" id="telemAdminResult"></pre>
           </div>
         </div>
 

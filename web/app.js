@@ -2003,6 +2003,119 @@ async function initSafetyAdminPanel() {
   }
 }
 
+function setTelemAdminResult(text) {
+  const pre = qs("telemAdminResult");
+  if (pre) pre.textContent = String(text || "");
+}
+
+function telemLinkStatusPill(status) {
+  const st = String(status || "offline").toLowerCase();
+  if (st === "live") return `<span class="pill green" style="font-size:0.65rem;">LIVE</span>`;
+  if (st === "stale") return `<span class="pill amber" style="font-size:0.65rem;">STALE</span>`;
+  if (st === "inactive") return `<span class="pill" style="font-size:0.65rem;">INACTIVE</span>`;
+  return `<span class="pill" style="font-size:0.65rem;">OFFLINE</span>`;
+}
+
+async function loadTelematicsAdminDevices() {
+  const host = qs("telemDevicesList");
+  if (!host) return;
+  const showInactive = qs("telemShowInactive")?.checked === true;
+  setStatus("Loading telematics units…");
+  try {
+    const q = showInactive ? "?all=1" : "";
+    const data = await fetchJson(`${API}/api/telematics/devices${q}`);
+    const rows = Array.isArray(data.devices) ? data.devices : [];
+    if (!rows.length) {
+      host.innerHTML = `<div class="muted small">No telematics units registered yet. Add one above.</div>`;
+      setStatus("No telematics units.");
+      return;
+    }
+    host.innerHTML = rows.map((r) => {
+      const active = Number(r.active) === 1 || r.active === true;
+      const meter = r.engine_hours == null ? "—" : `${Number(r.engine_hours).toFixed(1)} h`;
+      const lastSeen = String(r.recorded_at || r.snapshot_updated_at || r.updated_at || "—");
+      return `
+        <div class="item" style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center; opacity:${active ? "1" : "0.65"};">
+          <div>
+            <strong>${escapeHtml(r.asset_code)}</strong> ${telemLinkStatusPill(active ? r.link_status : "inactive")}
+            <div class="muted small">${escapeHtml(r.asset_name || "")} · ${escapeHtml(r.unit_model || "FSC")} · S/N ${escapeHtml(r.device_serial || "")}</div>
+            <div class="muted small">Meter: ${escapeHtml(meter)} · Last seen: ${escapeHtml(lastSeen)}</div>
+          </div>
+          <div class="row stack-10">
+            <button type="button" class="btn btn-secondary btn-sm" data-telem-edit="${Number(r.id)}" data-telem-asset="${escapeHtml(r.asset_code)}" data-telem-serial="${escapeHtml(r.device_serial || "")}" data-telem-model="${escapeHtml(r.unit_model || "FSC650")}" data-telem-ext="${escapeHtml(r.external_id || "")}">Replace unit</button>
+            ${active ? `<button type="button" class="btn btn-secondary btn-sm" data-telem-deactivate="${Number(r.id)}" data-telem-asset-label="${escapeHtml(r.asset_code)}">Deactivate</button>` : ""}
+          </div>
+        </div>
+      `;
+    }).join("");
+    setStatus(`Telematics units loaded (${rows.length}).`);
+  } catch (e) {
+    host.innerHTML = `<div class="muted small">Load failed: ${escapeHtml(e.message || String(e))}</div>`;
+    setStatus("Telematics load failed.");
+  }
+}
+
+function fillTelematicsDeviceForm({ assetCode, deviceSerial, unitModel, externalId, replaceFaulty = false }) {
+  if (qs("telemAssetCode")) qs("telemAssetCode").value = String(assetCode || "");
+  if (qs("telemDeviceSerial")) qs("telemDeviceSerial").value = String(deviceSerial || "");
+  if (qs("telemUnitModel")) qs("telemUnitModel").value = String(unitModel || "FSC650");
+  if (qs("telemExternalId")) qs("telemExternalId").value = String(externalId || "");
+  if (qs("telemReplaceFaulty")) qs("telemReplaceFaulty").checked = Boolean(replaceFaulty);
+  qs("telemDeviceSerial")?.focus();
+}
+
+async function saveTelematicsDevice() {
+  const asset_code = String(qs("telemAssetCode")?.value || "").trim();
+  const device_serial = String(qs("telemDeviceSerial")?.value || "").trim();
+  const unit_model = String(qs("telemUnitModel")?.value || "FSC650").trim();
+  const external_id = String(qs("telemExternalId")?.value || "").trim();
+  const replace_faulty = qs("telemReplaceFaulty")?.checked === true;
+  if (!asset_code || !device_serial) return alert("Asset code and device serial are required.");
+  setStatus("Saving telematics unit…");
+  const data = await fetchJson(`${API}/api/telematics/devices`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({
+      asset_code,
+      device_serial,
+      unit_model,
+      external_id: external_id || device_serial,
+      replace_faulty,
+    }),
+  });
+  const msg = data.replaced
+    ? `Replaced unit on ${asset_code.toUpperCase()} → serial ${device_serial}.`
+    : data.created
+      ? `Registered ${device_serial} on ${asset_code.toUpperCase()}.`
+      : `Updated ${asset_code.toUpperCase()}.`;
+  setTelemAdminResult(msg);
+  if (qs("telemReplaceFaulty")) qs("telemReplaceFaulty").checked = false;
+  await loadTelematicsAdminDevices();
+  loadTelematicsFleet().catch(() => {});
+  setStatus(msg);
+}
+
+async function deactivateTelematicsDeviceAdmin(id, assetLabel) {
+  const deviceId = Number(id || 0);
+  if (!deviceId) return;
+  const label = String(assetLabel || "this asset").trim();
+  if (!window.confirm(`Deactivate telematics unit for ${label}? Daily hours will unlock until a new unit is registered and reports.`)) return;
+  setStatus("Deactivating telematics unit…");
+  const data = await fetchJson(`${API}/api/telematics/devices/${deviceId}/deactivate`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  setTelemAdminResult(`Deactivated ${data.device_serial || "unit"} on ${data.asset_code || label}.`);
+  await loadTelematicsAdminDevices();
+  loadTelematicsFleet().catch(() => {});
+  setStatus("Telematics unit deactivated.");
+}
+
+async function initTelematicsAdminPanel() {
+  if (!qs("adminTelematicsCard")) return;
+  await loadTelematicsAdminDevices().catch((e) => setTelemAdminResult(String(e.message || e)));
+}
+
 function applyMdmPolicyCheckboxes(policies) {
   const p = policies && typeof policies === "object" ? policies : {};
   const asset = Array.isArray(p.asset) ? p.asset : [];
@@ -13128,6 +13241,38 @@ async function init() {
     openSafetyRegisterPdf(true).catch((e) => setStatus("Safety PDF error: " + e.message))
   );
   initSafetyAdminPanel().catch(() => {});
+  initTelematicsAdminPanel().catch(() => {});
+
+  qs("telemSaveDeviceBtn")?.addEventListener("click", () =>
+    saveTelematicsDevice().catch((e) => setTelemAdminResult(String(e.message || e)))
+  );
+  qs("telemRefreshDevicesBtn")?.addEventListener("click", () =>
+    loadTelematicsAdminDevices().catch((e) => setTelemAdminResult(String(e.message || e)))
+  );
+  qs("telemShowInactive")?.addEventListener("change", () =>
+    loadTelematicsAdminDevices().catch(() => {})
+  );
+  qs("telemDevicesList")?.addEventListener("click", (e) => {
+    const editBtn = e.target.closest("button[data-telem-edit]");
+    if (editBtn) {
+      fillTelematicsDeviceForm({
+        assetCode: editBtn.getAttribute("data-telem-asset"),
+        deviceSerial: "",
+        unitModel: editBtn.getAttribute("data-telem-model") || "FSC650",
+        externalId: "",
+        replaceFaulty: true,
+      });
+      setTelemAdminResult(`Enter new serial for ${editBtn.getAttribute("data-telem-asset")} (was ${editBtn.getAttribute("data-telem-serial")}).`);
+      return;
+    }
+    const deactBtn = e.target.closest("button[data-telem-deactivate]");
+    if (deactBtn) {
+      deactivateTelematicsDeviceAdmin(
+        deactBtn.getAttribute("data-telem-deactivate"),
+        deactBtn.getAttribute("data-telem-asset-label")
+      ).catch((err) => setTelemAdminResult(String(err.message || err)));
+    }
+  });
 
   // Net banner
   refreshNetBanner();

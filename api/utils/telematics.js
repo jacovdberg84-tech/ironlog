@@ -392,3 +392,149 @@ export function listRecentFaults(limit = 50) {
     LIMIT ?
   `).all(Math.max(1, Math.min(500, Number(limit) || 50)));
 }
+
+function linkStatusFromSnapshot(updatedAt) {
+  if (!updatedAt) return "offline";
+  const row = db.prepare(`
+    SELECT CASE
+      WHEN datetime(?) < datetime('now', '-15 minutes') THEN 'stale'
+      ELSE 'live'
+    END AS status
+  `).get(String(updatedAt));
+  return String(row?.status || "offline");
+}
+
+export function listTelematicsDevices({ includeInactive = false } = {}) {
+  ensureTelematicsTables();
+  const where = includeInactive ? "" : "WHERE d.active = 1";
+  const rows = db.prepare(`
+    SELECT
+      d.id,
+      d.asset_id,
+      d.device_serial,
+      d.unit_model,
+      d.external_id,
+      d.active,
+      d.created_at,
+      d.updated_at,
+      a.asset_code,
+      a.asset_name,
+      s.recorded_at,
+      s.engine_hours,
+      s.active_fault_count,
+      s.updated_at AS snapshot_updated_at
+    FROM telematics_devices d
+    JOIN assets a ON a.id = d.asset_id
+    LEFT JOIN telematics_snapshots s ON s.asset_id = d.asset_id
+    ${where}
+    ORDER BY a.asset_code ASC, d.active DESC, d.id ASC
+  `).all();
+  return rows.map((r) => ({
+    ...r,
+    active: Number(r.active) === 1,
+    link_status: Number(r.active) === 1 ? linkStatusFromSnapshot(r.snapshot_updated_at) : "inactive",
+  }));
+}
+
+export function upsertTelematicsDevice({
+  assetCode,
+  deviceSerial,
+  unitModel = "FSC650",
+  externalId = "",
+  replaceFaulty = false,
+}) {
+  ensureTelematicsTables();
+  const code = String(assetCode || "").trim();
+  const serial = String(deviceSerial || "").trim();
+  const model = String(unitModel || "FSC650").trim() || "FSC650";
+  const ext = String(externalId || serial).trim() || serial;
+  if (!code || !serial) {
+    return { ok: false, error: "asset_code and device_serial are required" };
+  }
+
+  const asset = db.prepare(`SELECT id, asset_code FROM assets WHERE asset_code = ?`).get(code);
+  if (!asset) return { ok: false, error: `Asset not found: ${code}` };
+
+  const existing = db.prepare(`
+    SELECT id, device_serial FROM telematics_devices WHERE asset_id = ?
+  `).get(asset.id);
+
+  const serialOwner = db.prepare(`
+    SELECT d.id, a.asset_code
+    FROM telematics_devices d
+    JOIN assets a ON a.id = d.asset_id
+    WHERE d.device_serial = ? AND d.asset_id != ?
+  `).get(serial, asset.id);
+  if (serialOwner) {
+    return {
+      ok: false,
+      error: `Device serial already assigned to ${serialOwner.asset_code}. Deactivate or replace that unit first.`,
+    };
+  }
+
+  const serialChanged = Boolean(existing && String(existing.device_serial) !== serial);
+  const isNew = !existing;
+
+  db.prepare(`
+    INSERT INTO telematics_devices (asset_id, device_serial, unit_model, external_id, active, updated_at)
+    VALUES (?, ?, ?, ?, 1, datetime('now'))
+    ON CONFLICT(asset_id) DO UPDATE SET
+      device_serial = excluded.device_serial,
+      unit_model = excluded.unit_model,
+      external_id = excluded.external_id,
+      active = 1,
+      updated_at = datetime('now')
+  `).run(asset.id, serial, model, ext);
+
+  if (serialChanged || replaceFaulty) {
+    db.prepare(`DELETE FROM telematics_snapshots WHERE asset_id = ?`).run(asset.id);
+    db.prepare(`
+      INSERT INTO telematics_ingest_log (device_serial, asset_code, status, detail)
+      VALUES (?, ?, 'device_replaced', ?)
+    `).run(
+      serial,
+      asset.asset_code,
+      existing
+        ? `Replaced faulty unit ${existing.device_serial} → ${serial} (${model})`
+        : `Registered unit ${serial} (${model})`
+    );
+  }
+
+  const row = db.prepare(`
+    SELECT d.id, d.device_serial, d.unit_model, d.external_id, d.active, a.asset_code
+    FROM telematics_devices d
+    JOIN assets a ON a.id = d.asset_id
+    WHERE d.asset_id = ?
+  `).get(asset.id);
+
+  return {
+    ok: true,
+    created: isNew,
+    replaced: serialChanged || replaceFaulty,
+    device: row,
+  };
+}
+
+export function deactivateTelematicsDevice(deviceId) {
+  ensureTelematicsTables();
+  const id = Number(deviceId || 0);
+  if (!id) return { ok: false, error: "Invalid device id" };
+  const row = db.prepare(`
+    SELECT d.id, d.asset_id, d.device_serial, a.asset_code
+    FROM telematics_devices d
+    JOIN assets a ON a.id = d.asset_id
+    WHERE d.id = ?
+  `).get(id);
+  if (!row) return { ok: false, error: "Device not found" };
+
+  db.prepare(`
+    UPDATE telematics_devices SET active = 0, updated_at = datetime('now') WHERE id = ?
+  `).run(id);
+  db.prepare(`DELETE FROM telematics_snapshots WHERE asset_id = ?`).run(row.asset_id);
+  db.prepare(`
+    INSERT INTO telematics_ingest_log (device_serial, asset_code, status, detail)
+    VALUES (?, ?, 'device_deactivated', ?)
+  `).run(row.device_serial, row.asset_code, `Deactivated telematics unit ${row.device_serial}`);
+
+  return { ok: true, id, asset_code: row.asset_code, device_serial: row.device_serial };
+}

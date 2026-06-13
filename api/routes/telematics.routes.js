@@ -8,6 +8,9 @@ import {
   ingestTelematicsPayload,
   listFleetSnapshots,
   listRecentFaults,
+  listTelematicsDevices,
+  upsertTelematicsDevice,
+  deactivateTelematicsDevice,
   syncTelematicsDailyHours,
 } from "../utils/telematics.js";
 import { db } from "../db/client.js";
@@ -101,38 +104,34 @@ export default async function telematicsRoutes(app) {
   // GET /api/telematics/devices
   app.get("/devices", async (req, reply) => {
     if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "site_manager"])) return;
-    const rows = db.prepare(`
-      SELECT d.id, d.device_serial, d.unit_model, d.external_id, d.active,
-             a.asset_code, a.asset_name, d.updated_at
-      FROM telematics_devices d
-      JOIN assets a ON a.id = d.asset_id
-      ORDER BY a.asset_code ASC
-    `).all();
-    return reply.send({ ok: true, devices: rows });
+    const includeInactive = String(req.query?.all || "").trim() === "1";
+    const devices = listTelematicsDevices({ includeInactive });
+    return reply.send({ ok: true, devices });
   });
 
-  // POST /api/telematics/devices — register or update device mapping
+  // POST /api/telematics/devices — register, add, or replace FSC unit on an asset
   app.post("/devices", async (req, reply) => {
     if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
-    const assetCode = String(req.body?.asset_code || "").trim();
-    const deviceSerial = String(req.body?.device_serial || "").trim();
-    const unitModel = String(req.body?.unit_model || "FSC650").trim();
-    const externalId = String(req.body?.external_id || deviceSerial).trim();
-    if (!assetCode || !deviceSerial) {
-      return reply.code(400).send({ error: "asset_code and device_serial required" });
+    const out = upsertTelematicsDevice({
+      assetCode: req.body?.asset_code,
+      deviceSerial: req.body?.device_serial,
+      unitModel: req.body?.unit_model,
+      externalId: req.body?.external_id,
+      replaceFaulty: req.body?.replace_faulty === true
+        || String(req.body?.replace_faulty || "").trim() === "1",
+    });
+    if (!out.ok) {
+      const code = String(out.error || "").includes("not found") ? 404 : 400;
+      return reply.code(code).send(out);
     }
-    const asset = db.prepare(`SELECT id FROM assets WHERE asset_code = ?`).get(assetCode);
-    if (!asset) return reply.code(404).send({ error: `asset not found: ${assetCode}` });
-    db.prepare(`
-      INSERT INTO telematics_devices (asset_id, device_serial, unit_model, external_id, active, updated_at)
-      VALUES (?, ?, ?, ?, 1, datetime('now'))
-      ON CONFLICT(asset_id) DO UPDATE SET
-        device_serial = excluded.device_serial,
-        unit_model = excluded.unit_model,
-        external_id = excluded.external_id,
-        active = 1,
-        updated_at = datetime('now')
-    `).run(asset.id, deviceSerial, unitModel, externalId);
-    return reply.send({ ok: true, asset_code: assetCode, device_serial: deviceSerial, unit_model: unitModel });
+    return reply.send(out);
+  });
+
+  // POST /api/telematics/devices/:id/deactivate — retire a unit mapping
+  app.post("/devices/:id/deactivate", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    const out = deactivateTelematicsDevice(req.params?.id);
+    if (!out.ok) return reply.code(out.error === "Device not found" ? 404 : 400).send(out);
+    return reply.send(out);
   });
 }
