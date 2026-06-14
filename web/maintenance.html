@@ -708,7 +708,25 @@
         </div>
 
         <div class="muted" style="margin-top:6px;">
-          Machine layout: 2x front and 4x rear tyres.
+          Machine layout: 2x front and 4x rear tyres. Track serial, change date, and cost to build running-hour history and cost per hour per position.
+        </div>
+        <div id="tyreLifecyclePanel" class="tyre-lifecycle-panel" style="margin-top:12px; display:none;">
+          <div id="tyreLifecycleKpis" class="kpi-hero" style="margin-bottom:12px;"></div>
+          <div id="tyreLifecycleAlerts" style="margin-bottom:10px;"></div>
+          <h4 style="margin:0 0 8px;">Active tyre lifecycle</h4>
+          <div id="tyreLifecycleTable" style="overflow:auto; margin-bottom:14px;"></div>
+          <h4 style="margin:0 0 8px;">Change history (removed tyres)</h4>
+          <div id="tyreChangeHistory" style="overflow:auto;"></div>
+        </div>
+        <div class="row stack-10" style="margin-top:10px; flex-wrap:wrap; align-items:flex-end;">
+          <label>
+            Warn tread (mm)
+            <input id="tyreWarnTread" type="number" min="1" step="0.5" value="8" class="w-90" title="Flag when tread at or below this depth" />
+          </label>
+          <label>
+            Min tread (mm)
+            <input id="tyreMinTread" type="number" min="0.5" step="0.5" value="3" class="w-90" title="End of life — replace immediately" />
+          </label>
         </div>
         <div id="tyreGrid" class="form-grid" style="margin-top:10px;"></div>
 
@@ -1616,6 +1634,6 @@
 
   </div>
 
-  <script src="./maintenance.js?v=30"></script>
+  <script src="./maintenance.js?v=31"></script>
 </body>
 </html>

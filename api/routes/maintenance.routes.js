@@ -6,7 +6,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import ExcelJS from "exceljs";
 import { buildPdfBuffer, ensurePageSpace, pdfBodyBottom, pdfBodyTop, sectionTitle, table } from "../utils/pdfGenerator.js";
-import { getPdfReportBranding } from "../utils/reportSettings.js";
+import { getPdfReportBranding, getReportSetting } from "../utils/reportSettings.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import {
   resolveMachinePrestartProfile,
@@ -6087,8 +6087,384 @@ export default async function maintenanceRoutes(app) {
   });
 
   // =====================================================
-  // TYRE INSPECTIONS
+  // TYRE INSPECTIONS + LIFECYCLE
   // =====================================================
+  function ensureTyreLifecycleSchema() {
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS tyre_installs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL,
+        site_code TEXT NOT NULL DEFAULT 'main',
+        position_key TEXT NOT NULL,
+        position_label TEXT,
+        serial_number TEXT,
+        install_date TEXT NOT NULL,
+        install_running_hours REAL NOT NULL DEFAULT 0,
+        tyre_cost REAL NOT NULL DEFAULT 0,
+        removed_date TEXT,
+        removed_running_hours REAL,
+        removed_reason TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+      )
+    `).run();
+    db.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_tyre_installs_asset_pos
+      ON tyre_installs(asset_id, position_key, status)
+    `).run();
+  }
+
+  function getTyreThresholds() {
+    const warn = Number(getReportSetting(db, "tyre_warn_tread_mm", "8"));
+    const min = Number(getReportSetting(db, "tyre_min_tread_mm", "3"));
+    return {
+      warn_tread_mm: Number.isFinite(warn) && warn > 0 ? warn : 8,
+      min_tread_mm: Number.isFinite(min) && min > 0 ? min : 3,
+    };
+  }
+
+  function lookupTyreRunningHoursNearDate(assetId, dateYmd) {
+    if (!assetId || !isDate(String(dateYmd || ""))) return null;
+    const row = db.prepare(`
+      SELECT running_hours
+      FROM tyre_inspections
+      WHERE asset_id = ? AND inspection_date <= ?
+      ORDER BY inspection_date DESC, id DESC
+      LIMIT 1
+    `).get(Number(assetId), String(dateYmd).trim());
+    const hours = Number(row?.running_hours);
+    return Number.isFinite(hours) && hours >= 0 ? hours : null;
+  }
+
+  function evaluateTyreTreadStatus(treadDepth, thresholds) {
+    const tread = treadDepth == null ? null : Number(treadDepth);
+    if (!Number.isFinite(tread)) {
+      return { lifecycle_status: "unknown", tread_alert: null };
+    }
+    if (tread <= thresholds.min_tread_mm) {
+      return {
+        lifecycle_status: "replace",
+        tread_alert: `Tread ${tread.toFixed(1)} mm — at or below minimum (${thresholds.min_tread_mm} mm)`,
+      };
+    }
+    if (tread <= thresholds.warn_tread_mm) {
+      return {
+        lifecycle_status: "warn",
+        tread_alert: `Tread ${tread.toFixed(1)} mm — approaching end of life (warn ${thresholds.warn_tread_mm} mm)`,
+      };
+    }
+    return { lifecycle_status: "ok", tread_alert: null };
+  }
+
+  function getActiveTyreInstall(assetId, positionKey, siteCode) {
+    return db.prepare(`
+      SELECT *
+      FROM tyre_installs
+      WHERE asset_id = ?
+        AND LOWER(TRIM(position_key)) = LOWER(TRIM(?))
+        AND LOWER(TRIM(COALESCE(site_code, 'main'))) = LOWER(TRIM(?))
+        AND LOWER(TRIM(COALESCE(status, 'active'))) = 'active'
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(Number(assetId), String(positionKey || ""), String(siteCode || "main"));
+  }
+
+  function closeTyreInstall(installId, { removed_date, removed_running_hours, removed_reason }) {
+    db.prepare(`
+      UPDATE tyre_installs
+      SET status = 'removed',
+          removed_date = ?,
+          removed_running_hours = ?,
+          removed_reason = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      removed_date || null,
+      removed_running_hours == null ? null : Number(removed_running_hours),
+      removed_reason || null,
+      Number(installId),
+    );
+  }
+
+  function createTyreInstall({
+    asset_id,
+    site_code,
+    position_key,
+    position_label,
+    serial_number,
+    install_date,
+    install_running_hours,
+    tyre_cost,
+    notes,
+  }) {
+    const ins = db.prepare(`
+      INSERT INTO tyre_installs (
+        asset_id, site_code, position_key, position_label, serial_number,
+        install_date, install_running_hours, tyre_cost, status, notes, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, datetime('now'))
+    `).run(
+      Number(asset_id),
+      String(site_code || "main"),
+      String(position_key || ""),
+      String(position_label || position_key || ""),
+      serial_number || null,
+      install_date,
+      Math.max(0, Number(install_running_hours || 0)),
+      Math.max(0, Number(tyre_cost || 0)),
+      notes || null,
+    );
+    return Number(ins.lastInsertRowid);
+  }
+
+  function tyreChangeDetected(activeInstall, tyreRow, inspection_date) {
+    const serial = String(tyreRow?.serial_number || "").trim();
+    const activeSerial = String(activeInstall?.serial_number || "").trim();
+    const changedDate = isDate(String(tyreRow?.last_changed_date || "").trim())
+      ? String(tyreRow.last_changed_date).trim()
+      : null;
+    const installDate = String(activeInstall?.install_date || "").trim();
+    if (!activeInstall) return { changed: true, reason: "new_position" };
+    if (serial && activeSerial && serial.toLowerCase() !== activeSerial.toLowerCase()) {
+      return { changed: true, reason: "serial_change" };
+    }
+    if (changedDate && installDate && changedDate > installDate) {
+      return { changed: true, reason: "change_date" };
+    }
+    if (changedDate && !installDate) {
+      return { changed: true, reason: "change_date" };
+    }
+    const costNow = Number(tyreRow?.tyre_cost || 0);
+    const costWas = Number(activeInstall?.tyre_cost || 0);
+    if (changedDate && changedDate === inspection_date && costNow > 0 && costNow !== costWas) {
+      return { changed: true, reason: "cost_and_date" };
+    }
+    return { changed: false, reason: null };
+  }
+
+  function enrichTyreLifecycleRow(tyreRow, {
+    asset_id,
+    site_code,
+    inspection_date,
+    running_hours,
+    thresholds,
+    persist = true,
+  }) {
+    const position_key = String(tyreRow?.position_key || "").trim().toLowerCase();
+    const active = getActiveTyreInstall(asset_id, position_key, site_code);
+    const change = tyreChangeDetected(active, tyreRow, inspection_date);
+    let installId = Number(active?.id || 0);
+    let install_date = String(active?.install_date || "");
+    let install_running_hours = Number(active?.install_running_hours || 0);
+    let tyre_cost = Number(active?.tyre_cost || 0);
+
+    if (change.changed) {
+      if (active) {
+        closeTyreInstall(active.id, {
+          removed_date: inspection_date,
+          removed_running_hours: running_hours,
+          removed_reason: change.reason,
+        });
+      }
+      const changedDate = isDate(String(tyreRow?.last_changed_date || "").trim())
+        ? String(tyreRow.last_changed_date).trim()
+        : inspection_date;
+      install_running_hours = lookupTyreRunningHoursNearDate(asset_id, changedDate);
+      if (install_running_hours == null) install_running_hours = running_hours;
+      install_date = changedDate;
+      tyre_cost = Number(tyreRow?.tyre_cost || 0);
+      if (persist) {
+        installId = createTyreInstall({
+          asset_id,
+          site_code,
+          position_key,
+          position_label: tyreRow?.position_label,
+          serial_number: tyreRow?.serial_number,
+          install_date,
+          install_running_hours,
+          tyre_cost,
+          notes: change.reason,
+        });
+      } else {
+        installId = 0;
+      }
+    } else if (active) {
+      installId = Number(active.id);
+      install_date = String(active.install_date || "");
+      install_running_hours = Number(active.install_running_hours || 0);
+      tyre_cost = Number(tyreRow?.tyre_cost || 0) > 0
+        ? Number(tyreRow.tyre_cost)
+        : Number(active.tyre_cost || 0);
+      if (persist && tyre_cost !== Number(active.tyre_cost || 0)) {
+        db.prepare(`
+          UPDATE tyre_installs
+          SET tyre_cost = ?, serial_number = COALESCE(?, serial_number), updated_at = datetime('now')
+          WHERE id = ?
+        `).run(
+          tyre_cost,
+          String(tyreRow?.serial_number || "").trim() || null,
+          installId,
+        );
+      }
+    } else if (persist) {
+      install_running_hours = running_hours;
+      install_date = inspection_date;
+      tyre_cost = Number(tyreRow?.tyre_cost || 0);
+      installId = createTyreInstall({
+        asset_id,
+        site_code,
+        position_key,
+        position_label: tyreRow?.position_label,
+        serial_number: tyreRow?.serial_number,
+        install_date,
+        install_running_hours,
+        tyre_cost,
+        notes: "initial_capture",
+      });
+    }
+
+    const hours_on_tyre = Math.max(0, Number(running_hours || 0) - Number(install_running_hours || 0));
+    const cost_per_hour = hours_on_tyre > 0 && tyre_cost > 0
+      ? Number((tyre_cost / hours_on_tyre).toFixed(4))
+      : null;
+    const treadEval = evaluateTyreTreadStatus(tyreRow?.tread_depth, thresholds);
+
+    return {
+      ...tyreRow,
+      install_id: installId || null,
+      install_date: install_date || null,
+      install_running_hours: Number(install_running_hours.toFixed(1)),
+      hours_on_tyre: Number(hours_on_tyre.toFixed(1)),
+      cost_per_hour,
+      lifecycle_status: treadEval.lifecycle_status,
+      tread_alert: treadEval.tread_alert,
+      change_detected: change.changed,
+      change_reason: change.reason,
+    };
+  }
+
+  function buildTyreLifecycleSummary(assetId, siteCode) {
+    ensureTyreLifecycleSchema();
+    const thresholds = getTyreThresholds();
+    const asset = db.prepare(`
+      SELECT id, asset_code, asset_name
+      FROM assets
+      WHERE id = ?
+      LIMIT 1
+    `).get(Number(assetId));
+    if (!asset) return null;
+
+    const latest = db.prepare(`
+      SELECT id, inspection_date, running_hours, tyres_json
+      FROM tyre_inspections
+      WHERE asset_id = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = LOWER(TRIM(?))
+      ORDER BY inspection_date DESC, id DESC
+      LIMIT 1
+    `).get(Number(assetId), String(siteCode || "main"));
+
+    const latestRunning = Number(latest?.running_hours || 0);
+    const latestMap = new Map();
+    if (latest) {
+      try {
+        for (const row of normalizeTyreRows(JSON.parse(String(latest.tyres_json || "[]")))) {
+          latestMap.set(String(row.position_key || "").toLowerCase(), row);
+        }
+      } catch {}
+    }
+
+    const activeInstalls = db.prepare(`
+      SELECT *
+      FROM tyre_installs
+      WHERE asset_id = ?
+        AND LOWER(TRIM(COALESCE(site_code, 'main'))) = LOWER(TRIM(?))
+        AND LOWER(TRIM(COALESCE(status, 'active'))) = 'active'
+      ORDER BY position_key ASC, id DESC
+    `).all(Number(assetId), String(siteCode || "main"));
+
+    const positions = activeInstalls.map((inst) => {
+      const key = String(inst.position_key || "").toLowerCase();
+      const latestRow = latestMap.get(key) || {};
+      const hours_on_tyre = Math.max(0, latestRunning - Number(inst.install_running_hours || 0));
+      const tyre_cost = Number(inst.tyre_cost || 0);
+      const cost_per_hour = hours_on_tyre > 0 && tyre_cost > 0
+        ? Number((tyre_cost / hours_on_tyre).toFixed(4))
+        : null;
+      const treadEval = evaluateTyreTreadStatus(latestRow.tread_depth, thresholds);
+      return {
+        install_id: Number(inst.id),
+        position_key: inst.position_key,
+        position_label: inst.position_label || inst.position_key,
+        serial_number: inst.serial_number || latestRow.serial_number || null,
+        install_date: inst.install_date,
+        install_running_hours: Number(Number(inst.install_running_hours || 0).toFixed(1)),
+        tyre_cost,
+        hours_on_tyre: Number(hours_on_tyre.toFixed(1)),
+        cost_per_hour,
+        pressure: latestRow.pressure ?? null,
+        tread_depth: latestRow.tread_depth ?? null,
+        lifecycle_status: treadEval.lifecycle_status,
+        tread_alert: treadEval.tread_alert,
+        last_inspection_date: latest?.inspection_date || null,
+      };
+    });
+
+    const removed = db.prepare(`
+      SELECT
+        id, position_key, position_label, serial_number,
+        install_date, install_running_hours, removed_date, removed_running_hours,
+        tyre_cost, removed_reason, notes
+      FROM tyre_installs
+      WHERE asset_id = ?
+        AND LOWER(TRIM(COALESCE(site_code, 'main'))) = LOWER(TRIM(?))
+        AND LOWER(TRIM(COALESCE(status, 'active'))) = 'removed'
+      ORDER BY COALESCE(removed_date, install_date) DESC, id DESC
+      LIMIT 100
+    `).all(Number(assetId), String(siteCode || "main")).map((row) => {
+      const hours = Math.max(
+        0,
+        Number(row.removed_running_hours ?? 0) - Number(row.install_running_hours ?? 0),
+      );
+      const cost = Number(row.tyre_cost || 0);
+      return {
+        ...row,
+        hours_on_tyre: Number(hours.toFixed(1)),
+        cost_per_hour: hours > 0 && cost > 0 ? Number((cost / hours).toFixed(4)) : null,
+      };
+    });
+
+    const withCost = positions.filter((p) => p.cost_per_hour != null);
+    const fleet_cost_per_hour = withCost.length
+      ? Number(withCost.reduce((sum, p) => sum + Number(p.cost_per_hour || 0), 0).toFixed(4))
+      : null;
+    const alerts = positions.filter((p) => p.lifecycle_status === "warn" || p.lifecycle_status === "replace");
+
+    return {
+      asset,
+      thresholds,
+      latest_inspection: latest
+        ? {
+            id: Number(latest.id),
+            inspection_date: latest.inspection_date,
+            running_hours: Number(Number(latest.running_hours || 0).toFixed(1)),
+          }
+        : null,
+      positions,
+      change_history: removed,
+      summary: {
+        active_tyres: positions.length,
+        warn_count: positions.filter((p) => p.lifecycle_status === "warn").length,
+        replace_count: positions.filter((p) => p.lifecycle_status === "replace").length,
+        fleet_cost_per_hour,
+        avg_cost_per_hour: withCost.length
+          ? Number((withCost.reduce((s, p) => s + Number(p.cost_per_hour || 0), 0) / withCost.length).toFixed(4))
+          : null,
+      },
+      alerts,
+    };
+  }
+
   function normalizeTyreRows(raw) {
     if (!Array.isArray(raw)) return [];
     return raw
@@ -6113,6 +6489,21 @@ export default async function maintenanceRoutes(app) {
       })
       .filter((x) => x.position_key);
   }
+
+  app.get("/tyre-inspections/lifecycle", async (req, reply) => {
+    try {
+      ensureTyreLifecycleSchema();
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const assetId = Number(req.query?.asset_id || 0);
+      if (!assetId) return reply.code(400).send({ ok: false, error: "asset_id is required" });
+      const summary = buildTyreLifecycleSummary(assetId, site_code);
+      if (!summary) return reply.code(404).send({ ok: false, error: "Asset not found" });
+      return reply.send({ ok: true, ...summary });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
 
   app.get("/tyre-inspections", async (req, reply) => {
     try {
@@ -6172,6 +6563,7 @@ export default async function maintenanceRoutes(app) {
 
   app.post("/tyre-inspections", async (req, reply) => {
     try {
+      ensureTyreLifecycleSchema();
       const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
       const asset_id = Number(req.body?.asset_id || 0);
       const inspection_date = String(req.body?.inspection_date || "").trim() || new Date().toISOString().slice(0, 10);
@@ -6182,7 +6574,7 @@ export default async function maintenanceRoutes(app) {
       const asset = db.prepare(`SELECT id FROM assets WHERE id = ?`).get(asset_id);
       if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
 
-      const tyres = normalizeTyreRows(req.body?.tyres);
+      const tyresIn = normalizeTyreRows(req.body?.tyres);
       const runningRaw = req.body?.running_hours;
       const running_hours = runningRaw == null || runningRaw === ""
         ? 0
@@ -6190,12 +6582,32 @@ export default async function maintenanceRoutes(app) {
       if (!Number.isFinite(running_hours) || running_hours < 0) {
         return reply.code(400).send({ ok: false, error: "running_hours must be a positive number" });
       }
+
+      const thresholds = getTyreThresholds();
+      const tyres = tyresIn.map((row) => enrichTyreLifecycleRow(row, {
+        asset_id,
+        site_code,
+        inspection_date,
+        running_hours,
+        thresholds,
+        persist: true,
+      }));
+
       const total_tyre_cost = Number(
-        tyres.reduce((sum, t) => sum + Number(t.tyre_cost || 0), 0).toFixed(2)
+        tyres.reduce((sum, t) => sum + Number(t.tyre_cost || 0), 0).toFixed(2),
       );
-      const cost_per_running_hour = Number(
-        (total_tyre_cost / (running_hours > 0 ? running_hours : 1)).toFixed(4)
-      );
+      const withCost = tyres.filter((t) => t.cost_per_hour != null);
+      const cost_per_running_hour = withCost.length
+        ? Number(withCost.reduce((sum, t) => sum + Number(t.cost_per_hour || 0), 0).toFixed(4))
+        : 0;
+      const alerts = tyres
+        .filter((t) => t.lifecycle_status === "warn" || t.lifecycle_status === "replace")
+        .map((t) => ({
+          position_key: t.position_key,
+          position_label: t.position_label,
+          lifecycle_status: t.lifecycle_status,
+          tread_alert: t.tread_alert,
+        }));
 
       const ins = db.prepare(`
         INSERT INTO tyre_inspections (
@@ -6212,7 +6624,7 @@ export default async function maintenanceRoutes(app) {
         total_tyre_cost,
         cost_per_running_hour,
         JSON.stringify(tyres),
-        notes
+        notes,
       );
 
       return reply.send({
@@ -6220,6 +6632,10 @@ export default async function maintenanceRoutes(app) {
         id: Number(ins.lastInsertRowid),
         total_tyre_cost,
         cost_per_running_hour,
+        fleet_cost_per_hour: cost_per_running_hour,
+        tyres,
+        alerts,
+        thresholds,
       });
     } catch (err) {
       req.log.error(err);

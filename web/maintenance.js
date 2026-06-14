@@ -196,6 +196,7 @@ function refreshTopViewData(view) {
       break;
     case "tyre":
       loadTyreInspections();
+      loadTyreLifecycle().catch(() => {});
       break;
     case "wi":
       loadWeeklyInspectionCalendar().catch(() => {});
@@ -3017,6 +3018,140 @@ function tyreInputId(positionKey, field) {
   return `tyre_${positionKey}_${field}`;
 }
 
+function tyreStatusBadge(status) {
+  const s = String(status || "unknown").toLowerCase();
+  if (s === "replace") return `<span class="badge err">Replace</span>`;
+  if (s === "warn") return `<span class="badge warn">End of life soon</span>`;
+  if (s === "ok") return `<span class="badge ok">OK</span>`;
+  return `<span class="badge">Unknown</span>`;
+}
+
+function renderTyreLifecyclePanel(data) {
+  const panel = document.getElementById("tyreLifecyclePanel");
+  const kpis = document.getElementById("tyreLifecycleKpis");
+  const alertsEl = document.getElementById("tyreLifecycleAlerts");
+  const tableEl = document.getElementById("tyreLifecycleTable");
+  const historyEl = document.getElementById("tyreChangeHistory");
+  if (!panel || !kpis || !tableEl || !historyEl) return;
+
+  if (!data?.asset?.id) {
+    panel.style.display = "none";
+    return;
+  }
+  panel.style.display = "block";
+  const s = data.summary || {};
+  const thresholds = data.thresholds || {};
+  const warnInp = document.getElementById("tyreWarnTread");
+  const minInp = document.getElementById("tyreMinTread");
+  if (warnInp && thresholds.warn_tread_mm != null) warnInp.value = Number(thresholds.warn_tread_mm);
+  if (minInp && thresholds.min_tread_mm != null) minInp.value = Number(thresholds.min_tread_mm);
+
+  kpis.innerHTML = `
+    <div class="kpi-card kpi-util">
+      <div class="kpi-card-header"><div class="kpi-icon">T</div><div class="kpi-title">Active Tyres</div></div>
+      <div class="kpi-big-value">${Number(s.active_tyres || 0)}</div>
+      <div class="kpi-meta">${esc(data.asset.asset_code || "-")} — ${esc(data.asset.asset_name || "")}</div>
+    </div>
+    <div class="kpi-card kpi-alerts">
+      <div class="kpi-card-header"><div class="kpi-icon">!</div><div class="kpi-title">End-of-life flags</div></div>
+      <div class="kpi-big-value">${Number(s.replace_count || 0) + Number(s.warn_count || 0)}</div>
+      <div class="kpi-meta">${Number(s.replace_count || 0)} replace · ${Number(s.warn_count || 0)} warn</div>
+    </div>
+    <div class="kpi-card kpi-avail">
+      <div class="kpi-card-header"><div class="kpi-icon">$</div><div class="kpi-title">Fleet tyre $/hr</div></div>
+      <div class="kpi-big-value">${s.fleet_cost_per_hour != null ? Number(s.fleet_cost_per_hour).toFixed(2) : "—"}</div>
+      <div class="kpi-meta">Sum of position cost/hr · avg ${s.avg_cost_per_hour != null ? Number(s.avg_cost_per_hour).toFixed(2) : "—"}</div>
+    </div>
+  `;
+
+  const alerts = Array.isArray(data.alerts) ? data.alerts : [];
+  alertsEl.innerHTML = alerts.length
+    ? `<div class="message-error" style="padding:8px 10px; border-radius:8px;">${alerts.map((a) =>
+        `<div><strong>${esc(a.position_label || a.position_key)}</strong>: ${esc(a.tread_alert || a.lifecycle_status)}</div>`
+      ).join("")}</div>`
+    : `<div class="muted mini">No end-of-life tread alerts on active tyres.</div>`;
+
+  const positions = Array.isArray(data.positions) ? data.positions : [];
+  tableEl.innerHTML = positions.length
+    ? `<table class="gridTable" style="min-width:980px;">
+        <thead><tr>
+          <th>Position</th><th>Serial</th><th>Status</th><th>Tread</th>
+          <th>Installed</th><th>Hrs on tyre</th><th>Cost</th><th>$/hr</th><th>Last insp.</th>
+        </tr></thead>
+        <tbody>${positions.map((p) => `
+          <tr>
+            <td>${esc(p.position_label || p.position_key)}</td>
+            <td>${esc(p.serial_number || "-")}</td>
+            <td>${tyreStatusBadge(p.lifecycle_status)}</td>
+            <td>${p.tread_depth == null ? "-" : Number(p.tread_depth).toFixed(1)}</td>
+            <td>${esc(p.install_date || "-")}</td>
+            <td>${Number(p.hours_on_tyre || 0).toFixed(1)}</td>
+            <td>${Number(p.tyre_cost || 0).toFixed(2)}</td>
+            <td>${p.cost_per_hour == null ? "-" : Number(p.cost_per_hour).toFixed(4)}</td>
+            <td>${esc(p.last_inspection_date || "-")}</td>
+          </tr>`).join("")}</tbody>
+      </table>`
+    : `<div class="empty">No active tyre installs yet — save an inspection to start lifecycle tracking.</div>`;
+
+  const history = Array.isArray(data.change_history) ? data.change_history : [];
+  historyEl.innerHTML = history.length
+    ? `<table class="gridTable" style="min-width:920px;">
+        <thead><tr>
+          <th>Position</th><th>Serial</th><th>Installed</th><th>Removed</th>
+          <th>Hrs on tyre</th><th>Cost</th><th>$/hr</th><th>Reason</th>
+        </tr></thead>
+        <tbody>${history.map((h) => `
+          <tr>
+            <td>${esc(h.position_label || h.position_key)}</td>
+            <td>${esc(h.serial_number || "-")}</td>
+            <td>${esc(h.install_date || "-")}</td>
+            <td>${esc(h.removed_date || "-")}</td>
+            <td>${Number(h.hours_on_tyre || 0).toFixed(1)}</td>
+            <td>${Number(h.tyre_cost || 0).toFixed(2)}</td>
+            <td>${h.cost_per_hour == null ? "-" : Number(h.cost_per_hour).toFixed(4)}</td>
+            <td>${esc(String(h.removed_reason || "-").replace(/_/g, " "))}</td>
+          </tr>`).join("")}</tbody>
+      </table>`
+    : `<div class="empty">No tyre changes recorded yet.</div>`;
+}
+
+async function loadTyreLifecycle() {
+  const assetId = Number(document.getElementById("tyreAsset")?.value || 0);
+  const panel = document.getElementById("tyreLifecyclePanel");
+  if (!assetId) {
+    if (panel) panel.style.display = "none";
+    return;
+  }
+  try {
+    const res = await fetch(`${API}/maintenance/tyre-inspections/lifecycle?asset_id=${assetId}`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load tyre lifecycle");
+    renderTyreLifecyclePanel(data);
+    prefillTyreFormFromLifecycle(data);
+  } catch {
+    if (panel) panel.style.display = "none";
+  }
+}
+
+function prefillTyreFormFromLifecycle(data) {
+  const positions = Array.isArray(data?.positions) ? data.positions : [];
+  const byKey = new Map(positions.map((p) => [String(p.position_key || "").toLowerCase(), p]));
+  TYRE_POSITIONS.forEach((p) => {
+    const row = byKey.get(String(p.key).toLowerCase());
+    if (!row) return;
+    const serialEl = document.getElementById(tyreInputId(p.key, "serial"));
+    const changedEl = document.getElementById(tyreInputId(p.key, "changed"));
+    const costEl = document.getElementById(tyreInputId(p.key, "cost"));
+    const treadEl = document.getElementById(tyreInputId(p.key, "tread"));
+    const pressureEl = document.getElementById(tyreInputId(p.key, "pressure"));
+    if (serialEl && !serialEl.value && row.serial_number) serialEl.value = row.serial_number;
+    if (changedEl && !changedEl.value && row.install_date) changedEl.value = row.install_date;
+    if (costEl && !costEl.value && row.tyre_cost > 0) costEl.value = Number(row.tyre_cost).toFixed(2);
+    if (treadEl && !treadEl.value && row.tread_depth != null) treadEl.value = Number(row.tread_depth);
+    if (pressureEl && !pressureEl.value && row.pressure != null) pressureEl.value = Number(row.pressure);
+  });
+}
+
 function initTyreLayout() {
   const grid = document.getElementById("tyreGrid");
   if (!grid) return;
@@ -3040,9 +3175,10 @@ function initTyreLayout() {
         <input id="${tyreInputId(p.key, "changed")}" type="date" />
       </label>
       <label>
-        Tyre cost
+        Tyre cost (this fitment)
         <input id="${tyreInputId(p.key, "cost")}" type="number" min="0" step="0.01" placeholder="Cost" />
       </label>
+      <div class="muted mini" id="${tyreInputId(p.key, "lifecycleHint")}"></div>
     </div>
   `).join("");
 }
@@ -3087,25 +3223,30 @@ function renderTyreList(rows) {
     <div class="item">
       <div class="title">${esc(r.asset_code || "-")} - ${esc(r.asset_name || "")}</div>
       <div class="meta">
-        Inspection ${esc(r.inspection_date || "-")} | Running hours ${Number(r.running_hours || 0).toFixed(1)} |
-        Tyre cost ${Number(r.total_tyre_cost || 0).toFixed(2)} | Cost per running hour <b>${Number(r.cost_per_running_hour || 0).toFixed(2)}</b>
+        Inspection ${esc(r.inspection_date || "-")} | Machine hours ${Number(r.running_hours || 0).toFixed(1)} |
+        Fleet tyre $/hr <b>${Number(r.cost_per_running_hour || 0).toFixed(4)}</b>
+        | Positions ${(Array.isArray(r.tyres) ? r.tyres : []).length}
       </div>
       <div style="overflow:auto; margin-top:8px;">
-        <table class="gridTable" style="min-width:840px;">
+        <table class="gridTable" style="min-width:980px;">
           <thead>
             <tr>
-              <th>Position</th><th>Pressure</th><th>Tread depth</th><th>Serial</th><th>Last changed</th><th>Tyre cost</th>
+              <th>Position</th><th>Status</th><th>Pressure</th><th>Tread</th><th>Serial</th>
+              <th>Installed</th><th>Hrs on tyre</th><th>Cost</th><th>$/hr</th>
             </tr>
           </thead>
           <tbody>
             ${(Array.isArray(r.tyres) ? r.tyres : []).map((t) => `
               <tr>
                 <td>${esc(t.position_label || "-")}</td>
+                <td>${tyreStatusBadge(t.lifecycle_status)}</td>
                 <td>${t.pressure == null ? "-" : Number(t.pressure).toFixed(1)}</td>
                 <td>${t.tread_depth == null ? "-" : Number(t.tread_depth).toFixed(1)}</td>
                 <td>${esc(t.serial_number || "-")}</td>
-                <td>${esc(t.last_changed_date || "-")}</td>
+                <td>${esc(t.install_date || t.last_changed_date || "-")}</td>
+                <td>${t.hours_on_tyre == null ? "-" : Number(t.hours_on_tyre).toFixed(1)}</td>
                 <td>${Number(t.tyre_cost || 0).toFixed(2)}</td>
+                <td>${t.cost_per_hour == null ? "-" : Number(t.cost_per_hour).toFixed(4)}</td>
               </tr>
             `).join("")}
           </tbody>
@@ -3201,9 +3342,11 @@ async function saveTyreInspection() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to save tyre inspection");
     await loadTyreInspections();
+    await loadTyreLifecycle();
+    const alertCount = Array.isArray(data.alerts) ? data.alerts.length : 0;
     if (msg) {
       msg.className = "message-success";
-      msg.textContent = `Saved. Total tyre cost ${Number(data.total_tyre_cost || total_tyre_cost).toFixed(2)} | Cost per running hour ${Number(data.cost_per_running_hour || cost_per_running_hour).toFixed(4)}.`;
+      msg.textContent = `Saved. Fleet tyre $/hr ${Number(data.cost_per_running_hour || 0).toFixed(4)}${alertCount ? ` · ${alertCount} end-of-life flag(s)` : ""}.`;
     }
   } catch (e) {
     if (msg) {
@@ -6892,6 +7035,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("openWeeklyForumPdfBtn")?.addEventListener("click", () => openWeeklyForumPdf(false));
   document.getElementById("downloadWeeklyForumPdfBtn")?.addEventListener("click", () => openWeeklyForumPdf(true));
   document.getElementById("tyrePullLiveHoursBtn")?.addEventListener("click", () => pullTyreLiveHours());
+  document.getElementById("tyreAsset")?.addEventListener("change", () => {
+    loadTyreLifecycle().catch(() => {});
+  });
   document.getElementById("saveTyreInspectionBtn")?.addEventListener("click", () => saveTyreInspection());
   document.getElementById("loadTyreInspectionsBtn")?.addEventListener("click", () => loadTyreInspections());
   document.getElementById("tyreFilterAsset")?.addEventListener("change", () => loadTyreInspections());
