@@ -519,6 +519,8 @@ function renderStandardizedInsightDashboards(data) {
   const totalDowntimeIncidents = downtimeRows.reduce((sum, r) => sum + Number(r?.incidents || 0), 0);
   const totalSuggestedPartsQty = partRows.reduce((sum, r) => sum + Number(r?.suggested_qty || 0), 0);
   const totalPartsGapQty = partRows.reduce((sum, r) => sum + Number(r?.gap_qty || 0), 0);
+  const totalUpcomingCost = Number(data?.parts_planning?.total_upcoming_cost || 0);
+  const needsManualCount = Number(data?.parts_planning?.needs_manual_input_count || 0);
 
   const topCostAsset = costRows[0];
   const topDowntimeComponent = downtimeRows[0];
@@ -566,6 +568,8 @@ function renderStandardizedInsightDashboards(data) {
       </div>
       <div class="kpi-big-value">${fmt1(totalSuggestedPartsQty)}</div>
       <div class="kpi-meta">Suggested parts quantity (${Number(partRows.length || 0)} SKU suggestions)</div>
+      <div class="kpi-meta" style="margin-top:6px;">Upcoming service forecast: ${fmtMoney(totalUpcomingCost)}</div>
+      ${needsManualCount > 0 ? `<div class="kpi-meta" style="margin-top:6px;">${needsManualCount} service(s) need manual cost input</div>` : ""}
       <div class="kpi-progress">
         <div class="kpi-progress-bar ${gapSeverityClass}" style="width:${gapPct.toFixed(1)}%;"></div>
       </div>
@@ -576,6 +580,215 @@ function renderStandardizedInsightDashboards(data) {
       </div>
     </div>
   `;
+}
+
+function populateInsightsPlanSelect(forecastRows) {
+  const sel = document.getElementById("insightsInputPlan");
+  if (!sel) return;
+  const rows = Array.isArray(forecastRows) ? forecastRows : [];
+  sel.innerHTML = `<option value="">Select plan...</option>${rows.map((r) => {
+    const pid = Number(r.plan_id || 0);
+    const label = `${r.asset_code || "-"} | ${r.service_name || "-"} (${Number(r.remaining_hours || 0).toFixed(0)}h)`;
+    return `<option value="${pid}">${escBackfill(label)}</option>`;
+  }).join("")}`;
+}
+
+function getInsightsPartByCode(code) {
+  return getWfPartByCode(code);
+}
+
+function refreshInsightsDraftEditor() {
+  const body = document.getElementById("insightsDraftBody");
+  if (!body) return;
+  body.innerHTML = insightsDraftItems.length
+    ? insightsRowsTable(
+      ["Type", "Part", "Qty", "Unit $", "Line $", ""],
+      insightsDraftItems.map((it, idx) => [
+        it.type || "part",
+        `${it.part_code || "-"}${it.part_name ? ` - ${it.part_name}` : ""}`,
+        Number(it.qty || 0).toFixed(2),
+        fmtMoney(it.unit_cost || 0),
+        fmtMoney(it.line_cost || 0),
+        { __html: `<button type="button" data-insights-remove-item="${idx}">Remove</button>` },
+      ]),
+    )
+    : `<small class="muted">No manual parts/oil lines yet.</small>`;
+}
+
+function hydrateInsightsDraftFromSaved(planId) {
+  const row = insightsInputsCache.find((r) => Number(r.plan_id || 0) === Number(planId || 0));
+  const notesEl = document.getElementById("insightsInputNotes");
+  const laborEl = document.getElementById("insightsInputLabor");
+  if (!row) {
+    insightsDraftItems = [];
+    if (notesEl) notesEl.value = "";
+    if (laborEl) laborEl.value = "0";
+    refreshInsightsDraftEditor();
+    return;
+  }
+  if (notesEl) notesEl.value = String(row.notes || "");
+  if (laborEl) laborEl.value = String(Number(row.labor_total || 0));
+  let items = [];
+  try {
+    const parsed = JSON.parse(String(row.items_json || "[]"));
+    if (Array.isArray(parsed)) items = parsed;
+  } catch {}
+  insightsDraftItems = items.map((it) => {
+    const part = getInsightsPartByCode(it.part_code);
+    const qty = Math.max(0, Number(it.qty || 0));
+    const unit = Number(part?.latest_unit_cost || 0);
+    return {
+      type: String(it.type || "part").toLowerCase() === "oil" ? "oil" : "part",
+      part_code: String(it.part_code || "").trim(),
+      part_name: String(part?.part_name || ""),
+      qty,
+      unit_cost: unit,
+      on_hand: Number(part?.on_hand || 0),
+      line_cost: qty * unit,
+    };
+  }).filter((x) => x.part_code && x.qty > 0);
+  refreshInsightsDraftEditor();
+}
+
+function addInsightsDraftItem() {
+  const msg = document.getElementById("insightsInputMsg");
+  const type = String(document.getElementById("insightsItemType")?.value || "part").toLowerCase() === "oil" ? "oil" : "part";
+  const part_code = String(document.getElementById("insightsItemCode")?.value || "").trim();
+  const qty = Math.max(0, Number(document.getElementById("insightsItemQty")?.value || 0));
+  if (!part_code || qty <= 0) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = "Select a part code and enter a quantity greater than 0.";
+    }
+    return;
+  }
+  const part = getInsightsPartByCode(part_code);
+  if (!part) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = "Part code not found in Stores list.";
+    }
+    return;
+  }
+  insightsDraftItems.push({
+    type,
+    part_code: String(part.part_code || "").trim(),
+    part_name: String(part.part_name || ""),
+    qty,
+    unit_cost: Number(part.latest_unit_cost || 0),
+    on_hand: Number(part.on_hand || 0),
+    line_cost: qty * Number(part.latest_unit_cost || 0),
+  });
+  const codeEl = document.getElementById("insightsItemCode");
+  const qtyEl = document.getElementById("insightsItemQty");
+  if (codeEl) codeEl.value = "";
+  if (qtyEl) qtyEl.value = "0";
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = "Item added.";
+  }
+  refreshInsightsDraftEditor();
+}
+
+let insightsManualUiBound = false;
+function bindInsightsManualForecastUi() {
+  const host = document.getElementById("insightsParts");
+  if (!host || insightsManualUiBound) return;
+  insightsManualUiBound = true;
+  host.addEventListener("change", (evt) => {
+    if (evt.target?.id === "insightsInputPlan") {
+      hydrateInsightsDraftFromSaved(Number(evt.target?.value || 0));
+    }
+  });
+  host.addEventListener("click", (evt) => {
+    if (evt.target?.closest?.("#insightsAddItemBtn")) {
+      addInsightsDraftItem();
+      return;
+    }
+    if (evt.target?.closest?.("#insightsSaveInputBtn")) {
+      saveInsightsForecastInput();
+      return;
+    }
+    const btn = evt.target?.closest?.("button[data-insights-remove-item]");
+    if (!btn) return;
+    const idx = Number(btn.getAttribute("data-insights-remove-item") || -1);
+    if (idx < 0 || idx >= insightsDraftItems.length) return;
+    insightsDraftItems.splice(idx, 1);
+    refreshInsightsDraftEditor();
+  });
+}
+
+async function loadInsightsPartsCatalog() {
+  if (wfPartsCache.length) {
+    refreshInsightsPartsDatalist();
+    return;
+  }
+  await loadWeeklyForumParts();
+  refreshInsightsPartsDatalist();
+}
+
+function refreshInsightsPartsDatalist() {
+  const list = document.getElementById("insightsPartsList");
+  if (!list) return;
+  list.innerHTML = wfPartsCache.map((p) => {
+    const code = String(p.part_code || "").trim();
+    const name = String(p.part_name || "").trim();
+    return `<option value="${escBackfill(code)}">${escBackfill(name)}</option>`;
+  }).join("");
+}
+
+async function loadInsightsForecastInputs() {
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-forum/forecast-inputs`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load saved templates");
+    insightsInputsCache = Array.isArray(data.rows) ? data.rows : [];
+    const planNow = Number(document.getElementById("insightsInputPlan")?.value || 0);
+    if (planNow) hydrateInsightsDraftFromSaved(planNow);
+  } catch {
+    insightsInputsCache = [];
+  }
+}
+
+async function saveInsightsForecastInput() {
+  const msg = document.getElementById("insightsInputMsg");
+  const plan_id = Number(document.getElementById("insightsInputPlan")?.value || 0);
+  const notes = String(document.getElementById("insightsInputNotes")?.value || "").trim();
+  const labor_total = Math.max(0, Number(document.getElementById("insightsInputLabor")?.value || 0));
+  const items = insightsDraftItems.map((x) => ({
+    type: x.type === "oil" ? "oil" : "part",
+    part_code: String(x.part_code || "").trim(),
+    qty: Math.max(0, Number(x.qty || 0)),
+  })).filter((x) => x.part_code && x.qty > 0);
+  if (!msg) return;
+  if (!plan_id) {
+    msg.className = "message-error";
+    msg.textContent = "Select an upcoming service plan first.";
+    return;
+  }
+  if (!items.length && labor_total <= 0) {
+    msg.className = "message-error";
+    msg.textContent = "Add at least one part/oil line or enter a labor total.";
+    return;
+  }
+  msg.className = "muted";
+  msg.textContent = "Saving service cost template...";
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-forum/forecast-inputs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan_id, items, labor_total, notes: notes || null }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save template");
+    msg.className = "message-success";
+    msg.textContent = "Template saved. Refresh insights to update forecast totals.";
+    await loadInsightsForecastInputs();
+    await loadMaintenanceInsights();
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = e.message || String(e);
+  }
 }
 
 function renderMaintenanceInsights(data) {
@@ -607,19 +820,90 @@ function renderMaintenanceInsights(data) {
   `;
 
   const partRows = Array.isArray(data?.parts_planning?.suggestions) ? data.parts_planning.suggestions : [];
+  const forecastRows = Array.isArray(data?.parts_planning?.upcoming_cost_forecasts) ? data.parts_planning.upcoming_cost_forecasts : [];
+  insightsForecastCache = forecastRows;
   partsEl.innerHTML = `
-    <div class="muted">Upcoming service count: ${Number(data?.parts_planning?.upcoming_service_count || 0)}</div>
+    <div class="muted">
+      Upcoming services in horizon: ${Number(data?.parts_planning?.upcoming_service_count || 0)}
+      | Forecast total: ${fmtMoney(data?.parts_planning?.total_upcoming_cost || 0)}
+      ${Number(data?.parts_planning?.needs_manual_input_count || 0) > 0
+        ? ` | <span class="message-error">${Number(data.parts_planning.needs_manual_input_count)} need manual cost input</span>`
+        : ""}
+    </div>
+    <h5 style="margin:12px 0 6px;">Upcoming maintenance cost by equipment</h5>
     ${insightsRowsTable(
-      ["Part", "Suggested Qty", "On Hand", "Gap", "Linked Services"],
+      ["Asset", "Service", "Remaining Hrs", "Status", "Kit $", "Labor $", "Total $", "Source"],
+      forecastRows.slice(0, 15).map((r) => [
+        `${r.asset_code || "-"}${r.asset_name ? ` - ${r.asset_name}` : ""}`,
+        r.service_name || "-",
+        Number(r.remaining_hours || 0).toFixed(1),
+        r.status || "-",
+        fmtMoney(r?.forecast?.est_service_kit_cost || 0),
+        fmtMoney(r?.forecast?.est_labor_cost || 0),
+        fmtMoney(r?.forecast?.est_total_cost || 0),
+        String(r?.forecast?.cost_source || "-").replace(/_/g, " "),
+      ])
+    )}
+    <h5 style="margin:14px 0 6px;">Parts demand (from prior service history)</h5>
+    ${insightsRowsTable(
+      ["Part", "Suggested Qty", "Est Cost", "On Hand", "Gap", "Linked Services"],
       partRows.slice(0, 12).map((r) => [
         r.part_name || "-",
         Number(r.suggested_qty || 0).toFixed(1),
+        fmtMoney(r.est_cost || 0),
         Number(r.on_hand || 0).toFixed(1),
         Number(r.gap_qty || 0).toFixed(1),
         Array.isArray(r.linked_services) ? r.linked_services.join(", ") : "-",
       ])
     )}
+    <hr class="hr-soft" style="margin:14px 0;" />
+    <h5 style="margin:0 0 8px;">Manual service cost template (saved for next events)</h5>
+    <small class="muted" style="display:block; margin-bottom:8px;">
+      Use when no closed service history exists for a plan. Parts priced from Stores; labor is a flat total for the job.
+    </small>
+    <div class="row stack-10">
+      <label>
+        Upcoming service plan
+        <select id="insightsInputPlan"></select>
+      </label>
+      <label>
+        Total labor ($)
+        <input id="insightsInputLabor" type="number" min="0" step="0.01" value="0" />
+      </label>
+    </div>
+    <div class="row stack-10">
+      <label>
+        Type
+        <select id="insightsItemType">
+          <option value="oil">Oil</option>
+          <option value="part">Part</option>
+        </select>
+      </label>
+      <label style="flex:1;">
+        Store part code
+        <input id="insightsItemCode" list="insightsPartsList" placeholder="Search part code or name" />
+      </label>
+      <label>
+        Qty
+        <input id="insightsItemQty" type="number" min="0" step="0.1" value="0" />
+      </label>
+      <button type="button" id="insightsAddItemBtn">Add item</button>
+    </div>
+    <datalist id="insightsPartsList"></datalist>
+    <div id="insightsDraftBody" style="margin-top:8px;"></div>
+    <div class="row stack-10" style="margin-top:8px;">
+      <label style="flex:1;">
+        Notes
+        <input id="insightsInputNotes" placeholder="Optional notes for this service template" />
+      </label>
+      <button type="button" id="insightsSaveInputBtn">Save template</button>
+    </div>
+    <div id="insightsInputMsg" class="muted" style="margin-top:6px;"></div>
   `;
+  populateInsightsPlanSelect(forecastRows);
+  bindInsightsManualForecastUi();
+  loadInsightsForecastInputs().catch(() => {});
+  loadInsightsPartsCatalog().catch(() => {});
 
   const compRows = Array.isArray(data?.downtime?.by_component) ? data.downtime.by_component : [];
   const teamRows = Array.isArray(data?.downtime?.by_team) ? data.downtime.by_team : [];
@@ -3912,6 +4196,9 @@ let wfUpcomingCache = [];
 let wfInputsCache = [];
 let wfPartsCache = [];
 let wfDraftItems = [];
+let insightsForecastCache = [];
+let insightsDraftItems = [];
+let insightsInputsCache = [];
 function wfPlanLabel(r) {
   return `${String(r.asset_code || "-")} - ${String(r.asset_name || "-")} | ${String(r.service_name || "-")} (Plan ${Number(r.plan_id || 0)})`;
 }
@@ -4471,9 +4758,13 @@ function hydrateWfDraftFromSaved(planId) {
   const row = wfInputsCache.find((r) => Number(r.plan_id || 0) === Number(planId || 0));
   if (!row) {
     wfDraftItems = [];
+    const laborEl = document.getElementById("wfInputLabor");
+    if (laborEl) laborEl.value = "0";
     refreshWfDraftEditor();
     return;
   }
+  const laborEl = document.getElementById("wfInputLabor");
+  if (laborEl) laborEl.value = String(Number(row.labor_total || 0));
   let items = [];
   try {
     const parsed = JSON.parse(String(row.items_json || "[]"));
@@ -5558,6 +5849,7 @@ async function saveWeeklyForumInput() {
   const msg = document.getElementById("wfInputMsg");
   const plan_id = Number(document.getElementById("wfInputPlan")?.value || 0);
   const notes = String(document.getElementById("wfInputNotes")?.value || "").trim();
+  const labor_total = Math.max(0, Number(document.getElementById("wfInputLabor")?.value || 0));
   const items = wfDraftItems.map((x) => ({
     type: x.type === "oil" ? "oil" : "part",
     part_code: String(x.part_code || "").trim(),
@@ -5569,9 +5861,9 @@ async function saveWeeklyForumInput() {
     msg.textContent = "Select an upcoming service plan first.";
     return;
   }
-  if (!items.length) {
+  if (!items.length && labor_total <= 0) {
     msg.className = "message-error";
-    msg.textContent = "Enter at least one oil or part line: part_code,qty";
+    msg.textContent = "Enter at least one oil or part line, or a labor total.";
     return;
   }
   msg.className = "muted";
@@ -5580,7 +5872,7 @@ async function saveWeeklyForumInput() {
     const res = await fetch(`${API}/maintenance/weekly-forum/forecast-inputs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan_id, items, notes: notes || null }),
+      body: JSON.stringify({ plan_id, items, labor_total, notes: notes || null }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to save input");
