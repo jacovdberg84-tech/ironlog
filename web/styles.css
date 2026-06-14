@@ -6338,3 +6338,66 @@ body.uc-qr-locked #ucAsset {
   color: #64748b;
   font-size: 12px;
 }
+
+/* Dashboard — Cartrack fleet table */
+#tab-dash .cartrack-fleet-host {
+  margin-top: 4px;
+  width: 100%;
+}
+#tab-dash .cartrack-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+#tab-dash .cartrack-fleet-table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+#tab-dash .cartrack-fleet-table th {
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 700;
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 2px solid #e2e8f0;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+#tab-dash .cartrack-fleet-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+#tab-dash .cartrack-fleet-table tbody tr:nth-child(even) {
+  background: #fafbfc;
+}
+#tab-dash .cartrack-row--alert {
+  background: #fef2f2 !important;
+}
+#tab-dash .cartrack-vehicle-code {
+  font-weight: 700;
+  color: #047857;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+#tab-dash .cartrack-col-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+#tab-dash .cartrack-col-status {
+  text-align: center;
+}
+#tab-dash .cartrack-col-sync {
+  font-size: 11px;
+  white-space: nowrap;
+}
+#tab-dash .cartrack-empty {
+  padding: 16px;
+  text-align: center;
+  border: 1px dashed #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
