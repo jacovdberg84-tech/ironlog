@@ -1,7 +1,7 @@
 // IRONLOG/api/utils/pdfGenerator.js
 import PDFDocument from "pdfkit";
-import fs from "node:fs";
-import path from "node:path";
+import { db } from "../db/client.js";
+import { getPdfReportSite } from "./reportSettings.js";
 
 const DEFAULT_MARGINS = { top: 56, bottom: 52, left: 70, right: 70 };
 const BRAND = {
@@ -44,8 +44,10 @@ export function drawHeaderFooter(doc, opts = {}) {
     subtitle = "Daily Report",
     rightText = "",
     showPageNumbers = true,
+    siteName = "",
   } = opts;
   const displayTitle = String(title || "").trim() || "IRONLOG";
+  const siteLabel = String(siteName || "").trim();
 
   // Important: header/footer drawing must NOT move the main content cursor.
   // PDFKit's text() updates doc.y, so we snapshot and restore it.
@@ -59,7 +61,7 @@ export function drawHeaderFooter(doc, opts = {}) {
   doc.save();
 
   // Header background bar (subtle)
-  const barH = 32;
+  const barH = siteLabel ? 44 : 32;
   doc
     .rect(left, top - 38, right - left, barH)
     .fillOpacity(1)
@@ -72,13 +74,21 @@ export function drawHeaderFooter(doc, opts = {}) {
     .fillColor(BRAND.primary)
     .font("Helvetica-Bold")
     .fontSize(14)
-    .text(displayTitle, left + 10, top - 32, { width: (right - left) * 0.55 });
+    .text(displayTitle, left + 10, top - (siteLabel ? 36 : 32), { width: (right - left) * 0.55 });
 
   doc
     .fillColor(BRAND.muted)
     .font("Helvetica")
     .fontSize(10)
-    .text(subtitle, left + 10, top - 16, { width: (right - left) * 0.55 });
+    .text(subtitle, left + 10, top - (siteLabel ? 22 : 16), { width: (right - left) * 0.55 });
+
+  if (siteLabel) {
+    doc
+      .fillColor(BRAND.muted)
+      .font("Helvetica-Bold")
+      .fontSize(9)
+      .text(`Site: ${siteLabel}`, left + 10, top - 10, { width: (right - left) * 0.55 });
+  }
 
   // Right text (e.g. Date: YYYY-MM-DD)
   if (rightText) {
@@ -149,12 +159,22 @@ export function buildPdfBuffer(buildFn, opts = {}) {
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
+    let siteName = String(opts.siteName || "").trim();
+    if (!siteName) {
+      try {
+        siteName = getPdfReportSite(opts.db || db).site_name;
+      } catch {
+        siteName = "";
+      }
+    }
+
     // Header/footer options (drawn after content to avoid PDFKit page churn)
     const headerOpts = {
       title: opts.title || "IRONLOG",
       subtitle: opts.subtitle || "Daily Report",
       rightText: opts.rightText || "",
       showPageNumbers: opts.showPageNumbers !== false,
+      siteName,
     };
 
     buildFn(doc);
@@ -176,24 +196,10 @@ export function buildPdfBuffer(buildFn, opts = {}) {
 }
 
 /**
- * Logo (optional)
+ * Logo disabled — reports use text header with site name instead.
  */
-export function tryDrawLogo(doc, logoPath) {
-  if (!logoPath) return;
-  try {
-    let resolved = logoPath;
-    if (!fs.existsSync(resolved)) {
-      const fallback = path.resolve(process.cwd(), "../branding/logo.png");
-      if (fs.existsSync(fallback)) resolved = fallback;
-    }
-    if (fs.existsSync(resolved)) {
-      const x = doc.page.margins.left + 8;
-      const y = doc.page.margins.top - 34;
-      doc.image(resolved, x, y, { width: 90 });
-    }
-  } catch {
-    // ignore logo failures
-  }
+export function tryDrawLogo(_doc, _logoPath) {
+  // intentionally no-op
 }
 
 /**

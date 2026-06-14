@@ -2394,6 +2394,65 @@ async function testSmtpSettings() {
   }
 }
 
+async function loadPdfReportSettings() {
+  const out = qs("pdfReportSettingsResult");
+  try {
+    const data = await fetchJson(`${API}/api/reports/pdf-settings`);
+    const sites = Array.isArray(data?.sites) ? data.sites : [];
+    const sel = qs("pdfReportSiteCode");
+    if (sel) {
+      const current = String(data?.site_code || "");
+      sel.innerHTML = `<option value="">Custom / manual site name</option>${sites.map((s) =>
+        `<option value="${escapeHtml(String(s.site_code || ""))}">${escapeHtml(String(s.site_name || s.site_code || ""))}</option>`
+      ).join("")}`;
+      sel.value = current && Array.from(sel.options).some((o) => o.value === current) ? current : "";
+    }
+    if (qs("pdfReportSiteName")) qs("pdfReportSiteName").value = String(data?.site_name || "");
+    if (out) {
+      out.textContent = data?.site_name
+        ? `Current PDF site: ${data.site_name}${data.site_code ? ` (${data.site_code})` : ""}`
+        : "No PDF site configured yet.";
+    }
+    setStatus("PDF report site loaded.");
+  } catch (e) {
+    if (out) out.textContent = String(e.message || e);
+    setStatus("PDF report site load failed.");
+  }
+}
+
+async function savePdfReportSettings() {
+  const out = qs("pdfReportSettingsResult");
+  const site_code = String(qs("pdfReportSiteCode")?.value || "").trim();
+  let site_name = String(qs("pdfReportSiteName")?.value || "").trim();
+  if (site_code && !site_name) {
+    const opt = qs("pdfReportSiteCode")?.selectedOptions?.[0];
+    site_name = String(opt?.textContent || site_code).trim();
+  }
+  if (!site_name && !site_code) return alert("Enter a site name or choose a registered site.");
+  setStatus("Saving PDF report site…");
+  try {
+    const data = await fetchJson(`${API}/api/reports/pdf-settings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ site_code, site_name }),
+    });
+    if (qs("pdfReportSiteName")) qs("pdfReportSiteName").value = String(data?.site_name || site_name);
+    if (out) out.textContent = `Saved. Reports will show: Site: ${data?.site_name || site_name}`;
+    setStatus("PDF report site saved.");
+  } catch (e) {
+    if (out) out.textContent = String(e.message || e);
+    setStatus("PDF report site save failed.");
+  }
+}
+
+async function onPdfReportSiteCodeChange() {
+  const code = String(qs("pdfReportSiteCode")?.value || "").trim();
+  if (!code) return;
+  const opt = qs("pdfReportSiteCode")?.selectedOptions?.[0];
+  const name = String(opt?.textContent || code).trim();
+  if (qs("pdfReportSiteName")) qs("pdfReportSiteName").value = name;
+}
+
 async function sendSubscriptionNowFromAdmin() {
   const out = qs("smtpSettingsResult");
   const id = Number(qs("smtpSubscriptionId")?.value || 0);
@@ -13232,6 +13291,13 @@ async function init() {
   qs("testSmtpSettingsBtn")?.addEventListener("click", () =>
     testSmtpSettings().catch((e) => setStatus("SMTP test error: " + e.message))
   );
+  qs("loadPdfReportSettingsBtn")?.addEventListener("click", () =>
+    loadPdfReportSettings().catch((e) => setStatus("PDF site load error: " + e.message))
+  );
+  qs("savePdfReportSettingsBtn")?.addEventListener("click", () =>
+    savePdfReportSettings().catch((e) => setStatus("PDF site save error: " + e.message))
+  );
+  qs("pdfReportSiteCode")?.addEventListener("change", () => onPdfReportSiteCodeChange());
   qs("sendSubscriptionNowBtn")?.addEventListener("click", () =>
     sendSubscriptionNowFromAdmin().catch((e) => setStatus("Subscription send error: " + e.message))
   );
@@ -13811,6 +13877,7 @@ async function init() {
     loadAuditLogs().catch(() => {});
     loadApprovalRequests().catch(() => {});
     loadSmtpSettings().catch(() => {});
+    loadPdfReportSettings().catch(() => {});
     loadBackupFiles().catch(() => {});
   }
   loadCodePickers().catch(() => {});
