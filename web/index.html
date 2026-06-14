@@ -5337,8 +5337,8 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
               </div>
               <div>
-                <h3>PDF Report Site</h3>
-                <p class="muted small">Site name shown on PDF report headers (work orders, inspections, maintenance packs, etc.). Logos are not used on PDFs.</p>
+                <h3>PDF Report Branding</h3>
+                <p class="muted small">Company and site names shown on PDF report headers instead of IRONLOG. Logos are not used on PDFs.</p>
               </div>
             </div>
             <div class="action-buttons">
@@ -5349,6 +5349,18 @@
             </div>
           </div>
           <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Pick registered company (optional)</label>
+                <select id="pdfReportCompanyCode" class="w-full">
+                  <option value="">Custom / manual company name</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Company name on reports</label>
+                <input id="pdfReportCompanyName" class="w-full" placeholder="e.g. Acme Mining Ltd" />
+              </div>
+            </div>
             <div class="form-row">
               <div class="form-field">
                 <label>Pick registered site (optional)</label>
@@ -5362,7 +5374,7 @@
               </div>
             </div>
             <div class="action-buttons">
-              <button id="savePdfReportSettingsBtn" class="btn btn-primary">Save PDF Site</button>
+              <button id="savePdfReportSettingsBtn" class="btn btn-primary">Save PDF Branding</button>
             </div>
             <pre class="output" id="pdfReportSettingsResult"></pre>
           </div>

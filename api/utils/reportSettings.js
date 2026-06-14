@@ -26,31 +26,74 @@ export function setReportSetting(db, key, value) {
   `).run(String(key || ""), String(value ?? "").trim());
 }
 
-export function getPdfReportSite(db) {
-  ensureReportSettingsSchema(db);
-  const site_code = getReportSetting(db, "pdf_site_code");
-  let site_name = getReportSetting(db, "pdf_site_name");
-  if (!site_name && site_code) {
-    try {
-      const row = db.prepare(`
-        SELECT site_name
-        FROM site_profiles
-        WHERE site_code = ? AND COALESCE(active, 1) = 1
-        LIMIT 1
-      `).get(site_code);
-      if (row?.site_name) site_name = String(row.site_name).trim();
-    } catch {
-      // site_profiles may not exist on older DBs
-    }
-    if (!site_name) site_name = site_code;
+function lookupCompanyName(db, company_code) {
+  if (!company_code) return "";
+  try {
+    const row = db.prepare(`
+      SELECT company_name
+      FROM company_profiles
+      WHERE company_code = ? AND COALESCE(active, 1) = 1
+      LIMIT 1
+    `).get(company_code);
+    return row?.company_name ? String(row.company_name).trim() : "";
+  } catch {
+    return "";
   }
-  return { site_code, site_name };
 }
 
+function lookupSiteName(db, site_code) {
+  if (!site_code) return "";
+  try {
+    const row = db.prepare(`
+      SELECT site_name
+      FROM site_profiles
+      WHERE site_code = ? AND COALESCE(active, 1) = 1
+      LIMIT 1
+    `).get(site_code);
+    return row?.site_name ? String(row.site_name).trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+export function getPdfReportBranding(db) {
+  ensureReportSettingsSchema(db);
+  const company_code = getReportSetting(db, "pdf_company_code");
+  const site_code = getReportSetting(db, "pdf_site_code");
+  let company_name = getReportSetting(db, "pdf_company_name");
+  let site_name = getReportSetting(db, "pdf_site_name");
+  if (!company_name && company_code) {
+    company_name = lookupCompanyName(db, company_code) || company_code;
+  }
+  if (!site_name && site_code) {
+    site_name = lookupSiteName(db, site_code) || site_code;
+  }
+  return { company_code, company_name, site_code, site_name };
+}
+
+/** @deprecated use getPdfReportBranding */
+export function getPdfReportSite(db) {
+  const b = getPdfReportBranding(db);
+  return { site_code: b.site_code, site_name: b.site_name };
+}
+
+export function savePdfReportBranding(db, payload = {}) {
+  if (payload.company_code !== undefined) {
+    setReportSetting(db, "pdf_company_code", String(payload.company_code || "").trim());
+  }
+  if (payload.company_name !== undefined) {
+    setReportSetting(db, "pdf_company_name", String(payload.company_name || "").trim());
+  }
+  if (payload.site_code !== undefined) {
+    setReportSetting(db, "pdf_site_code", String(payload.site_code || "").trim());
+  }
+  if (payload.site_name !== undefined) {
+    setReportSetting(db, "pdf_site_name", String(payload.site_name || "").trim());
+  }
+  return getPdfReportBranding(db);
+}
+
+/** @deprecated use savePdfReportBranding */
 export function savePdfReportSite(db, { site_code, site_name }) {
-  const code = String(site_code || "").trim();
-  const name = String(site_name || "").trim();
-  setReportSetting(db, "pdf_site_code", code);
-  setReportSetting(db, "pdf_site_name", name);
-  return getPdfReportSite(db);
+  return savePdfReportBranding(db, { site_code, site_name });
 }

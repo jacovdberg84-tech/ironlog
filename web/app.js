@@ -2394,54 +2394,107 @@ async function testSmtpSettings() {
   }
 }
 
+let pdfReportSitesCache = [];
+
 async function loadPdfReportSettings() {
   const out = qs("pdfReportSettingsResult");
   try {
     const data = await fetchJson(`${API}/api/reports/pdf-settings`);
-    const sites = Array.isArray(data?.sites) ? data.sites : [];
-    const sel = qs("pdfReportSiteCode");
-    if (sel) {
-      const current = String(data?.site_code || "");
-      sel.innerHTML = `<option value="">Custom / manual site name</option>${sites.map((s) =>
+    pdfReportSitesCache = Array.isArray(data?.sites) ? data.sites : [];
+    const companies = Array.isArray(data?.companies) ? data.companies : [];
+    const companySel = qs("pdfReportCompanyCode");
+    if (companySel) {
+      const currentCompany = String(data?.company_code || "");
+      companySel.innerHTML = `<option value="">Custom / manual company name</option>${companies.map((c) =>
+        `<option value="${escapeHtml(String(c.company_code || ""))}">${escapeHtml(String(c.company_name || c.company_code || ""))}</option>`
+      ).join("")}`;
+      companySel.value = currentCompany && Array.from(companySel.options).some((o) => o.value === currentCompany)
+        ? currentCompany
+        : "";
+    }
+    if (qs("pdfReportCompanyName")) qs("pdfReportCompanyName").value = String(data?.company_name || "");
+    const siteSel = qs("pdfReportSiteCode");
+    if (siteSel) {
+      const currentSite = String(data?.site_code || "");
+      const companyFilter = String(data?.company_code || companySel?.value || "").trim();
+      const sites = companyFilter
+        ? pdfReportSitesCache.filter((s) => String(s.company_code || "") === companyFilter)
+        : pdfReportSitesCache;
+      siteSel.innerHTML = `<option value="">Custom / manual site name</option>${sites.map((s) =>
         `<option value="${escapeHtml(String(s.site_code || ""))}">${escapeHtml(String(s.site_name || s.site_code || ""))}</option>`
       ).join("")}`;
-      sel.value = current && Array.from(sel.options).some((o) => o.value === current) ? current : "";
+      siteSel.value = currentSite && Array.from(siteSel.options).some((o) => o.value === currentSite) ? currentSite : "";
     }
     if (qs("pdfReportSiteName")) qs("pdfReportSiteName").value = String(data?.site_name || "");
-    if (out) {
-      out.textContent = data?.site_name
-        ? `Current PDF site: ${data.site_name}${data.site_code ? ` (${data.site_code})` : ""}`
-        : "No PDF site configured yet.";
-    }
-    setStatus("PDF report site loaded.");
+    const parts = [];
+    if (data?.company_name) parts.push(`Company: ${data.company_name}`);
+    if (data?.site_name) parts.push(`Site: ${data.site_name}`);
+    if (out) out.textContent = parts.length ? `Current PDF header — ${parts.join(" · ")}` : "No PDF branding configured yet.";
+    setStatus("PDF report branding loaded.");
   } catch (e) {
     if (out) out.textContent = String(e.message || e);
-    setStatus("PDF report site load failed.");
+    setStatus("PDF report branding load failed.");
   }
 }
 
 async function savePdfReportSettings() {
   const out = qs("pdfReportSettingsResult");
+  const company_code = String(qs("pdfReportCompanyCode")?.value || "").trim();
+  let company_name = String(qs("pdfReportCompanyName")?.value || "").trim();
   const site_code = String(qs("pdfReportSiteCode")?.value || "").trim();
   let site_name = String(qs("pdfReportSiteName")?.value || "").trim();
+  if (company_code && !company_name) {
+    const opt = qs("pdfReportCompanyCode")?.selectedOptions?.[0];
+    company_name = String(opt?.textContent || company_code).trim();
+  }
   if (site_code && !site_name) {
     const opt = qs("pdfReportSiteCode")?.selectedOptions?.[0];
     site_name = String(opt?.textContent || site_code).trim();
   }
-  if (!site_name && !site_code) return alert("Enter a site name or choose a registered site.");
-  setStatus("Saving PDF report site…");
+  if (!company_name && !company_code && !site_name && !site_code) {
+    return alert("Enter a company name and/or site name.");
+  }
+  setStatus("Saving PDF report branding…");
   try {
     const data = await fetchJson(`${API}/api/reports/pdf-settings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ site_code, site_name }),
+      body: JSON.stringify({ company_code, company_name, site_code, site_name }),
     });
+    if (qs("pdfReportCompanyName")) qs("pdfReportCompanyName").value = String(data?.company_name || company_name);
     if (qs("pdfReportSiteName")) qs("pdfReportSiteName").value = String(data?.site_name || site_name);
-    if (out) out.textContent = `Saved. Reports will show: Site: ${data?.site_name || site_name}`;
-    setStatus("PDF report site saved.");
+    const parts = [];
+    if (data?.company_name || company_name) parts.push(data?.company_name || company_name);
+    if (data?.site_name || site_name) parts.push(`Site: ${data?.site_name || site_name}`);
+    if (out) out.textContent = parts.length ? `Saved. PDF header will show: ${parts.join(" · ")}` : "Saved.";
+    setStatus("PDF report branding saved.");
   } catch (e) {
     if (out) out.textContent = String(e.message || e);
-    setStatus("PDF report site save failed.");
+    setStatus("PDF report branding save failed.");
+  }
+}
+
+function onPdfReportCompanyCodeChange() {
+  const code = String(qs("pdfReportCompanyCode")?.value || "").trim();
+  if (code) {
+    const opt = qs("pdfReportCompanyCode")?.selectedOptions?.[0];
+    const name = String(opt?.textContent || code).trim();
+    if (qs("pdfReportCompanyName")) qs("pdfReportCompanyName").value = name;
+  }
+  const siteSel = qs("pdfReportSiteCode");
+  if (!siteSel) return;
+  const currentSite = String(siteSel.value || "");
+  const sites = code
+    ? pdfReportSitesCache.filter((s) => String(s.company_code || "") === code)
+    : pdfReportSitesCache;
+  siteSel.innerHTML = `<option value="">Custom / manual site name</option>${sites.map((s) =>
+    `<option value="${escapeHtml(String(s.site_code || ""))}">${escapeHtml(String(s.site_name || s.site_code || ""))}</option>`
+  ).join("")}`;
+  if (currentSite && Array.from(siteSel.options).some((o) => o.value === currentSite)) {
+    siteSel.value = currentSite;
+  } else {
+    siteSel.value = "";
+    if (qs("pdfReportSiteName")) qs("pdfReportSiteName").value = "";
   }
 }
 
@@ -13298,6 +13351,7 @@ async function init() {
     savePdfReportSettings().catch((e) => setStatus("PDF site save error: " + e.message))
   );
   qs("pdfReportSiteCode")?.addEventListener("change", () => onPdfReportSiteCodeChange());
+  qs("pdfReportCompanyCode")?.addEventListener("change", () => onPdfReportCompanyCodeChange());
   qs("sendSubscriptionNowBtn")?.addEventListener("click", () =>
     sendSubscriptionNowFromAdmin().catch((e) => setStatus("Subscription send error: " + e.message))
   );

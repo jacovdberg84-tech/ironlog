@@ -1,9 +1,9 @@
 // IRONLOG/api/utils/pdfGenerator.js
 import PDFDocument from "pdfkit";
 import { db } from "../db/client.js";
-import { getPdfReportSite } from "./reportSettings.js";
+import { getPdfReportBranding } from "./reportSettings.js";
 
-const DEFAULT_MARGINS = { top: 56, bottom: 52, left: 70, right: 70 };
+const DEFAULT_MARGINS = { top: 72, bottom: 52, left: 70, right: 70 };
 const BRAND = {
   primary: "#0b3a7e",
   primarySoft: "#dbeafe",
@@ -40,70 +40,72 @@ export function ensurePageSpace(doc, neededHeight = 60) {
  */
 export function drawHeaderFooter(doc, opts = {}) {
   const {
-    title = "IRONLOG",
-    subtitle = "Daily Report",
+    title = "",
+    subtitle = "Report",
     rightText = "",
     showPageNumbers = true,
     siteName = "",
   } = opts;
-  const displayTitle = String(title || "").trim() || "IRONLOG";
+  const displayTitle = String(title || "").trim() || "Report";
   const siteLabel = String(siteName || "").trim();
 
-  // Important: header/footer drawing must NOT move the main content cursor.
-  // PDFKit's text() updates doc.y, so we snapshot and restore it.
   const savedY = doc.y;
-
   const left = doc.page.margins.left;
   const right = doc.page.width - doc.page.margins.right;
-  const top = doc.page.margins.top;
+  const width = right - left;
+  const marginTop = doc.page.margins.top;
 
-  // HEADER
+  const titleSize = 14;
+  const subtitleSize = 10;
+  const siteSize = 9;
+  const lineGap = 5;
+  const padX = 8;
+  const barTop = 12;
+
   doc.save();
 
-  // Header background bar (subtle)
-  const barH = siteLabel ? 44 : 32;
+  const titleBlockH = titleSize + lineGap + subtitleSize + lineGap + (siteLabel ? siteSize + lineGap : 0);
+  const barBottom = 18 + titleBlockH + 6;
   doc
-    .rect(left, top - 38, right - left, barH)
+    .rect(left, barTop, width, barBottom - barTop)
     .fillOpacity(1)
     .fill(BRAND.primarySoft);
 
-  doc.fillOpacity(1);
-
-  // Title left
+  let textY = 18;
   doc
     .fillColor(BRAND.primary)
     .font("Helvetica-Bold")
-    .fontSize(14)
-    .text(displayTitle, left + 10, top - (siteLabel ? 36 : 32), { width: (right - left) * 0.55 });
+    .fontSize(titleSize)
+    .text(displayTitle, left + padX, textY, { width: width * 0.62, lineBreak: false });
+  textY += titleSize + lineGap;
 
   doc
     .fillColor(BRAND.muted)
     .font("Helvetica")
-    .fontSize(10)
-    .text(subtitle, left + 10, top - (siteLabel ? 22 : 16), { width: (right - left) * 0.55 });
+    .fontSize(subtitleSize)
+    .text(subtitle, left + padX, textY, { width: width * 0.62, lineBreak: false });
+  textY += subtitleSize + lineGap;
 
   if (siteLabel) {
     doc
-      .fillColor(BRAND.muted)
       .font("Helvetica-Bold")
-      .fontSize(9)
-      .text(`Site: ${siteLabel}`, left + 10, top - 10, { width: (right - left) * 0.55 });
+      .fontSize(siteSize)
+      .text(`Site: ${siteLabel}`, left + padX, textY, { width: width * 0.62, lineBreak: false });
+    textY += siteSize + lineGap;
   }
 
-  // Right text (e.g. Date: YYYY-MM-DD)
   if (rightText) {
     doc
-      .fillColor("#333333")
       .fillColor(BRAND.muted)
       .font("Helvetica")
-      .fontSize(10)
-      .text(rightText, left, top - 24, { width: right - left - 10, align: "right" });
+      .fontSize(subtitleSize)
+      .text(rightText, left + padX, 20, { width: width - padX * 2, align: "right", lineBreak: false });
   }
 
-  // Divider line
+  const dividerY = Math.max(textY + 8, marginTop - 2);
   doc
-    .moveTo(left, top - 6)
-    .lineTo(right, top - 6)
+    .moveTo(left, dividerY)
+    .lineTo(right, dividerY)
     .lineWidth(1)
     .strokeOpacity(1)
     .stroke(BRAND.line);
@@ -138,8 +140,8 @@ export function drawHeaderFooter(doc, opts = {}) {
 
   doc.restore();
 
-  // Restore cursor and keep it below header
-  doc.y = Math.max(savedY, doc.page.margins.top + 6);
+  // Restore cursor below header band
+  doc.y = Math.max(savedY, dividerY + 10);
 }
 
 /**
@@ -159,19 +161,21 @@ export function buildPdfBuffer(buildFn, opts = {}) {
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    let siteName = String(opts.siteName || "").trim();
-    if (!siteName) {
-      try {
-        siteName = getPdfReportSite(opts.db || db).site_name;
-      } catch {
-        siteName = "";
-      }
+    let branding = { company_name: "", site_name: "" };
+    try {
+      branding = getPdfReportBranding(opts.db || db);
+    } catch {
+      branding = { company_name: "", site_name: "" };
     }
 
-    // Header/footer options (drawn after content to avoid PDFKit page churn)
+    const companyName = String(opts.companyName || branding.company_name || "").trim();
+    const siteName = String(opts.siteName || branding.site_name || "").trim();
+    const rawTitle = String(opts.title || "").trim();
+    const headerTitle = companyName || (rawTitle && rawTitle.toUpperCase() !== "IRONLOG" ? rawTitle : "IRONLOG");
+
     const headerOpts = {
-      title: opts.title || "IRONLOG",
-      subtitle: opts.subtitle || "Daily Report",
+      title: headerTitle,
+      subtitle: opts.subtitle || "Report",
       rightText: opts.rightText || "",
       showPageNumbers: opts.showPageNumbers !== false,
       siteName,
@@ -206,9 +210,9 @@ export function tryDrawLogo(_doc, _logoPath) {
  * Section title
  */
 export function sectionTitle(doc, text) {
-  ensurePageSpace(doc, 40);
+  ensurePageSpace(doc, 44);
 
-  doc.moveDown(0.4);
+  doc.moveDown(0.6);
   doc.font("Helvetica-Bold").fontSize(12).fillColor(BRAND.primary);
   doc.text(text, doc.page.margins.left, doc.y, { width: contentWidth(doc) });
 

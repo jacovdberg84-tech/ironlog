@@ -25,7 +25,7 @@ import {
   cleanupTempPdfImages,
 } from "../utils/imagePdf.js";
 import { resolveStorageAbs as resolveStorageAbsUtil, getDataRoot, normalizeStorageRel } from "../utils/storagePaths.js";
-import { getPdfReportSite, savePdfReportSite } from "../utils/reportSettings.js";
+import { getPdfReportBranding, savePdfReportBranding } from "../utils/reportSettings.js";
 
 let maintenanceMasterSchedulerStarted = false;
 let reportSubscriptionsSchedulerStarted = false;
@@ -1777,8 +1777,9 @@ export default async function reportsRoutes(app) {
 
   app.get("/pdf-settings", async (req, reply) => {
     if (!requireAdmin(req, reply)) return;
-    const site = getPdfReportSite(db);
+    const branding = getPdfReportBranding(db);
     let sites = [];
+    let companies = [];
     try {
       sites = db.prepare(`
         SELECT site_code, site_name, company_code
@@ -1790,17 +1791,30 @@ export default async function reportsRoutes(app) {
     } catch {
       sites = [];
     }
-    return reply.send({ ok: true, ...site, sites });
+    try {
+      companies = db.prepare(`
+        SELECT company_code, company_name
+        FROM company_profiles
+        WHERE COALESCE(active, 1) = 1
+        ORDER BY company_name ASC
+        LIMIT 200
+      `).all();
+    } catch {
+      companies = [];
+    }
+    return reply.send({ ok: true, ...branding, sites, companies });
   });
 
   app.post("/pdf-settings", async (req, reply) => {
     if (!requireAdmin(req, reply)) return;
+    const company_code = String(req.body?.company_code || "").trim();
+    const company_name = String(req.body?.company_name || "").trim();
     const site_code = String(req.body?.site_code || "").trim();
     const site_name = String(req.body?.site_name || "").trim();
-    if (!site_name && !site_code) {
-      return reply.code(400).send({ ok: false, error: "Enter a site name or choose a site" });
+    if (!company_name && !company_code && !site_name && !site_code) {
+      return reply.code(400).send({ ok: false, error: "Enter a company name and/or site name" });
     }
-    const saved = savePdfReportSite(db, { site_code, site_name });
+    const saved = savePdfReportBranding(db, { company_code, company_name, site_code, site_name });
     return reply.send({ ok: true, ...saved });
   });
 
