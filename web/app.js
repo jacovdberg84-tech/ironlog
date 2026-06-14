@@ -12,9 +12,6 @@ const TOKEN_KEY = "ironlog_auth_token";
 const TABS_OVERRIDE_KEY = "ironlog_allowed_tabs";
 const SLA_OPEN_SAME_TAB_KEY = "ironlog_sla_open_same_tab";
 const LOC_DEFAULT_PREFIX = "ironlog_default_location_";
-const MAINT_LOCK_KEY = "ironlog_maintenance_access_ok";
-const MAINT_LOCK_USER = "BJ van den Berg";
-const MAINT_LOCK_PASSWORD = "0mhliac789";
 const MAINT_CHILD_TABS = new Set(["Breakdowns", "ironmind"]);
 /** Production site nav — only tabs in active use (telematics pilot + go-live). */
 const PRODUCTION_SITE_TABS = [
@@ -106,9 +103,8 @@ function initSidebar() {
     const taskPriority = String(item.dataset.taskPriority || "").trim();
     const activeKey = String(item.dataset.activeKey || "").trim();
 
-    // Check maintenance gate
-    if (isMaintenanceChildTab(tab) && !hasMaintenanceAccessGate()) {
-      maintenanceAccessGate();
+    if (tab === "maintenance") {
+      location.href = "maintenance.html";
       return;
     }
 
@@ -168,27 +164,6 @@ function updateSidebarActiveState(activeTab) {
   if (siteDisplay) siteDisplay.textContent = getSessionSite();
 }
 
-function maintenanceAccessGate() {
-  const alreadyOk = sessionStorage.getItem(MAINT_LOCK_KEY) === "1";
-  if (alreadyOk) {
-    location.href = "maintenance.html";
-    return;
-  }
-  const user = String(window.prompt("Maintenance username:") || "").trim();
-  const pass = String(window.prompt("Maintenance password:") || "");
-  if (user === MAINT_LOCK_USER && pass === MAINT_LOCK_PASSWORD) {
-    sessionStorage.setItem(MAINT_LOCK_KEY, "1");
-    location.href = "maintenance.html";
-    return;
-  }
-  alert("Invalid maintenance credentials.");
-}
-window.maintenanceAccessGate = maintenanceAccessGate;
-
-function hasMaintenanceAccessGate() {
-  return sessionStorage.getItem(MAINT_LOCK_KEY) === "1";
-}
-
 function isMaintenanceChildTab(tabKey) {
   return MAINT_CHILD_TABS.has(String(tabKey || "").trim());
 }
@@ -196,8 +171,7 @@ function isMaintenanceChildTab(tabKey) {
 function isAllowedDashboardTab(tabKey, allowed) {
   const k = String(tabKey || "").trim();
   if (!k) return false;
-  if (allowed.has(k)) return true;
-  return isMaintenanceChildTab(k) && hasMaintenanceAccessGate();
+  return allowed.has(k);
 }
 
 function isBareChildTabEmbed() {
@@ -208,10 +182,6 @@ function applyBareChildTabView() {
   if (!isBareChildTabEmbed()) return false;
   const tab = String(new URLSearchParams(window.location.search).get("tab") || "Breakdowns").trim();
   if (!tab || !isMaintenanceChildTab(tab)) return false;
-  if (!hasMaintenanceAccessGate()) {
-    location.href = "maintenance.html";
-    return true;
-  }
   document.body.classList.add("bare-child-tab");
   document.querySelector(".sidebar")?.style.setProperty("display", "none");
   document.getElementById("sidebarOverlay")?.style.setProperty("display", "none");
@@ -229,7 +199,6 @@ function resolveInitialTabFromUrl() {
   if (isBareChildTabEmbed()) return;
   const urlTab = String(new URLSearchParams(window.location.search).get("tab") || "").trim();
   if (!urlTab || !document.getElementById(`tab-${urlTab}`)) return;
-  if (isMaintenanceChildTab(urlTab) && !hasMaintenanceAccessGate()) return;
   const allowed = new Set(getEffectiveAllowedTabs());
   if (!isAllowedDashboardTab(urlTab, allowed)) return;
   switchTab(urlTab);
@@ -6965,8 +6934,7 @@ async function archiveLegalDoc(id, active) {
 function switchTab(key) {
   const k = String(key || "").trim();
   if (!k) return;
-  if (isMaintenanceChildTab(k) && !hasMaintenanceAccessGate()) {
-    alert("Open this section from Maintenance.");
+  if (k === "maintenance") {
     location.href = "maintenance.html";
     return;
   }

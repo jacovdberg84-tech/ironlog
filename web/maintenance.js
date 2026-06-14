@@ -12,9 +12,6 @@ let reportBuilderMeta = [];
 let reportBuilderTemplates = [];
 let reportSubscriptionEditId = 0;
 let reportSubscriptionsCache = [];
-const MAINT_LOCK_KEY = "ironlog_maintenance_access_ok";
-const MAINT_LOCK_USER = "BJ van den Berg";
-const MAINT_LOCK_PASSWORD = "0mhliac789";
 const TYRE_POSITIONS = [
   { key: "front_left", label: "Front Left" },
   { key: "front_right", label: "Front Right" },
@@ -23,20 +20,6 @@ const TYRE_POSITIONS = [
   { key: "rear_right_inner", label: "Rear Right Inner" },
   { key: "rear_right_outer", label: "Rear Right Outer" },
 ];
-
-function ensureMaintenanceAccess() {
-  if (sessionStorage.getItem(MAINT_LOCK_KEY) === "1") return true;
-  const user = String(window.prompt("Maintenance username:") || "").trim();
-  const pass = String(window.prompt("Maintenance password:") || "");
-  const ok = user === MAINT_LOCK_USER && pass === MAINT_LOCK_PASSWORD;
-  if (ok) {
-    sessionStorage.setItem(MAINT_LOCK_KEY, "1");
-    return true;
-  }
-  alert("Access denied.");
-  location.href = "index.html";
-  return false;
-}
 
 function initMaintSidebar() {
   const sidebar = document.getElementById("sidebar");
@@ -5902,7 +5885,6 @@ function initMaintDarkMode() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  if (!ensureMaintenanceAccess()) return;
   console.log("Maintenance UI loaded");
 
   // Dark mode toggle
