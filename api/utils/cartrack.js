@@ -225,6 +225,39 @@ function pick(obj, keys) {
   return null;
 }
 
+function extractCartrackLocation(row) {
+  const loc = row?.location && typeof row.location === "object" ? row.location : null;
+  const lat = Number(
+    pick(row, ["latitude", "lat", "gps_latitude"])
+    ?? pick(loc, ["latitude", "lat", "gps_latitude"])
+  );
+  const lng = Number(
+    pick(row, ["longitude", "lng", "lon", "gps_longitude"])
+    ?? pick(loc, ["longitude", "lng", "lon", "gps_longitude"])
+  );
+  return {
+    latitude: Number.isFinite(lat) ? lat : null,
+    longitude: Number.isFinite(lng) ? lng : null,
+    position_description: String(pick(loc, ["position_description", "description"]) || ""),
+    location_updated: String(pick(loc, ["updated"]) || ""),
+  };
+}
+
+function pickIgnitionOn(row) {
+  const v = pick(row, ["ignition", "ignition_on", "ignition_status"]);
+  if (v === true || v === 1 || v === "1") return 1;
+  const s = String(v ?? "").toLowerCase();
+  if (s === "on" || s === "true") return 1;
+  return 0;
+}
+
+function normalizeCartrackOdometerKm(row) {
+  const raw = Number(pick(row, ["odometer", "odometer_km", "mileage"]));
+  if (!Number.isFinite(raw) || raw <= 0) return null;
+  // Cartrack MZ returns odometer in metres — convert to km.
+  return raw >= 10000 ? raw / 1000 : raw;
+}
+
 export async function cartrackApiGet(path, query = {}) {
   const creds = getCartrackCredentials();
   if (!creds) {
@@ -289,21 +322,23 @@ function normalizeStatusRow(row) {
   );
   const vehicleName = String(pick(row, ["vehicle_name", "name", "description"]) || "");
   const assetCode = resolveAssetCode(registration, vehicleName);
-  const lat = Number(pick(row, ["latitude", "lat", "gps_latitude"]));
-  const lng = Number(pick(row, ["longitude", "lng", "lon", "gps_longitude"]));
+  const gps = extractCartrackLocation(row);
+  const displayName = vehicleName || gps.position_description || "";
   return {
     registration,
     asset_code: assetCode,
     vehicle_id: String(pick(row, ["vehicle_id", "id"]) || ""),
-    vehicle_name: vehicleName,
-    ignition_on: ["on", "1", 1, true].includes(pick(row, ["ignition", "ignition_on", "ignition_status"]))
-      ? 1
-      : 0,
-    speed_kmh: Number(pick(row, ["speed", "speed_kmh", "gps_speed"]) || 0),
-    latitude: Number.isFinite(lat) ? lat : null,
-    longitude: Number.isFinite(lng) ? lng : null,
-    odometer_km: Number(pick(row, ["odometer", "odometer_km", "mileage"]) || 0) || null,
-    last_event_at: String(pick(row, ["last_update", "updated_at", "event_time", "timestamp"]) || ""),
+    vehicle_name: displayName,
+    ignition_on: pickIgnitionOn(row),
+    speed_kmh: Number(pick(row, ["speed", "speed_kmh", "gps_speed", "road_speed"]) || 0),
+    latitude: gps.latitude,
+    longitude: gps.longitude,
+    odometer_km: normalizeCartrackOdometerKm(row),
+    last_event_at: String(
+      pick(row, ["event_ts", "last_update", "updated_at", "event_time", "timestamp"])
+      || gps.location_updated
+      || ""
+    ),
     status_json: JSON.stringify(row),
   };
 }
@@ -318,6 +353,7 @@ function normalizeEventRow(row) {
   const speed = Number(pick(row, ["speed", "speed_kmh", "actual_speed"]) || 0);
   const limit = Number(pick(row, ["speed_limit", "speed_limit_kmh", "limit"]) || 0);
   const isSpeeding = SPEED_EVENT_RE.test(`${eventType} ${eventLabel}`) || (limit > 0 && speed > limit);
+  const gps = extractCartrackLocation(row);
   const eventId = String(
     pick(row, ["event_id", "id", "uuid"]) || `${registration}|${eventTime}|${eventType}|${speed}`
   );
@@ -330,8 +366,8 @@ function normalizeEventRow(row) {
     event_time: eventTime,
     speed_kmh: Number.isFinite(speed) ? speed : null,
     speed_limit_kmh: Number.isFinite(limit) && limit > 0 ? limit : null,
-    latitude: Number(pick(row, ["latitude", "lat"]) || 0) || null,
-    longitude: Number(pick(row, ["longitude", "lng"]) || 0) || null,
+    latitude: gps.latitude,
+    longitude: gps.longitude,
     driver_name: String(pick(row, ["driver_name", "driver"]) || ""),
     description: eventLabel,
     is_speeding: isSpeeding ? 1 : 0,
