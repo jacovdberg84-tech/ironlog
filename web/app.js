@@ -87,11 +87,17 @@ function initSidebar() {
   sidebar.addEventListener("click", (e) => {
     const item = e.target?.closest?.(".nav-item");
     if (!item || !sidebar.contains(item)) return;
+    const href = String(item.getAttribute("href") || "").trim();
     const tab = item.dataset.tab;
-    if (!tab) {
-      const href = String(item.getAttribute("href") || "").trim();
-      if (href && href !== "#") {
+    const isExternalPage = href && href !== "#" && /\.html(?:[?#]|$)/i.test(href);
+    if (!tab || isExternalPage) {
+      if (isExternalPage) {
+        e.preventDefault();
         location.href = href;
+        if (window.innerWidth <= 1024) {
+          sidebar.classList.remove("mobile-open");
+          overlay?.classList.remove("active");
+        }
       }
       return;
     }
@@ -102,11 +108,6 @@ function initSidebar() {
     const taskStatus = String(item.dataset.taskStatus || "").trim();
     const taskPriority = String(item.dataset.taskPriority || "").trim();
     const activeKey = String(item.dataset.activeKey || "").trim();
-
-    if (tab === "maintenance") {
-      location.href = "maintenance.html";
-      return;
-    }
 
     switchTab(tab);
     if (tab === "tasks" && taskView) {
@@ -912,15 +913,17 @@ function applyRoleVisibility() {
   if (sidebar) {
     sidebar.querySelectorAll(".nav-item").forEach((item) => {
       const tab = item.dataset.tab;
-      if (!tab) return;
+      const navKey = item.dataset.nav || tab;
+      if (!navKey) return;
       if (tab === "admin") {
         item.style.display = roles.some((r) => ["admin", "supervisor"].includes(r)) ? "" : "none";
         return;
       }
-      if (tab === "maintenance") {
+      if (navKey === "maintenance") {
         item.style.display = allowed.has("maintenance") ? "" : "none";
         return;
       }
+      if (!tab) return;
       item.style.display = isAllowedDashboardTab(tab, allowed) ? "" : "none";
     });
     
