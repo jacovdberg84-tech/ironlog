@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import ExcelJS from "exceljs";
-import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
+import { buildPdfBuffer, ensurePageSpace, sectionTitle, table } from "../utils/pdfGenerator.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import {
   resolveMachinePrestartProfile,
@@ -591,19 +591,34 @@ function drawWeeklyInspectionCalendarPdfGrid(doc, data) {
   const margin = doc.page.margins;
   const contentW = doc.page.width - margin.left - margin.right;
   const colW = contentW / 7;
-  const rowCount = Math.max(1, weeks.length);
-  const availableH = doc.page.height - margin.bottom - doc.y - 24;
-  const cellH = Math.max(48, Math.min(78, availableH / rowCount));
+  const lineH = 7;
   const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  let y = doc.y + 4;
 
-  dayNames.forEach((label, i) => {
-    doc.font("Helvetica-Bold").fontSize(8).fillColor("#64748b");
-    doc.text(label, margin.left + i * colW + 3, y, { width: colW - 6, align: "center" });
-  });
-  y += 14;
+  const drawDayHeaders = (y) => {
+    dayNames.forEach((label, i) => {
+      doc.font("Helvetica-Bold").fontSize(8).fillColor("#64748b");
+      doc.text(label, margin.left + i * colW + 3, y, { width: colW - 6, align: "center" });
+    });
+    return y + 14;
+  };
+
+  let y = drawDayHeaders(doc.y + 4);
 
   for (const row of weeks) {
+    let maxSlots = 0;
+    for (let i = 0; i < 7; i += 1) {
+      const cell = row?.[i] || {};
+      if (cell?.in_month && cell?.date) {
+        maxSlots = Math.max(maxSlots, Array.isArray(cell.slots) ? cell.slots.length : 0);
+      }
+    }
+    const cellH = Math.max(36, 14 + maxSlots * lineH + 4);
+    ensurePageSpace(doc, cellH + 10);
+    if (doc.y + cellH + 10 > doc.page.height - margin.bottom) {
+      doc.addPage();
+      y = drawDayHeaders(margin.top + 8);
+    }
+
     for (let i = 0; i < 7; i += 1) {
       const cell = row?.[i] || {};
       const x = margin.left + i * colW;
@@ -623,24 +638,20 @@ function drawWeeklyInspectionCalendarPdfGrid(doc, data) {
       doc.text(String(cell.day || ""), x + 4, y + 4, { width: colW - 8 });
       const slots = Array.isArray(cell.slots) ? cell.slots : [];
       let lineY = y + 16;
-      const maxLines = Math.max(2, Math.floor((cellH - 18) / 9));
-      for (const slot of slots.slice(0, maxLines)) {
+      for (const slot of slots) {
         const meta = wiPdfSlotStatusTag(slot.status);
-        doc.font("Helvetica").fontSize(7).fillColor(meta.color);
+        doc.font("Helvetica").fontSize(6.5).fillColor(meta.color);
         doc.text(
           `${meta.tag} ${String(slot.asset_code || "-")} ${Number(slot.est_minutes || 30)}m`,
           x + 3,
           lineY,
           { width: colW - 8, lineBreak: false },
         );
-        lineY += 9;
-      }
-      if (slots.length > maxLines) {
-        doc.font("Helvetica").fontSize(6).fillColor("#94a3b8");
-        doc.text(`+${slots.length - maxLines} more`, x + 3, lineY, { width: colW - 8 });
+        lineY += lineH;
       }
     }
     y += cellH + 2;
+    doc.y = y;
   }
   doc.y = y + 6;
 }

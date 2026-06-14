@@ -3215,7 +3215,6 @@ async function saveTyreInspection() {
 
 let wiCalendarCache = null;
 let wiSelectedDate = "";
-const WI_MAX_CHIPS_VISIBLE = 3;
 
 function wiTodayYmd() {
   return new Date().toISOString().slice(0, 10);
@@ -3540,9 +3539,7 @@ function renderWeeklyInspectionCalendar(data) {
         return `<div class="wi-month-cell wi-month-cell--pad"></div>`;
       }
       const slots = Array.isArray(cell.slots) ? cell.slots : [];
-      const visible = slots.slice(0, WI_MAX_CHIPS_VISIBLE);
-      const hiddenCount = Math.max(0, slots.length - visible.length);
-      const chips = visible.map((slot) => `
+      const chips = slots.map((slot) => `
         <button
           type="button"
           class="wi-slot-chip ${wiSlotChipClassForDate(slot.status, cell.date)}"
@@ -3551,9 +3548,6 @@ function renderWeeklyInspectionCalendar(data) {
           title="${esc(wiStatusLabel(slot.status))}"
         >${esc(slot.asset_code)}</button>
       `).join("");
-      const moreLink = hiddenCount
-        ? `<button type="button" class="wi-month-more" data-wi-open-day="${esc(cell.date)}">+${hiddenCount} more</button>`
-        : "";
       const todayCls = cell.is_today ? " wi-month-cell--today" : "";
       const selectedCls = String(cell.date) === wiSelectedDate ? " wi-month-cell--selected" : "";
       const nonCompliantCls = wiDayHasNonCompliance(cell.date, slots) ? " wi-month-cell--noncompliant" : "";
@@ -3565,7 +3559,7 @@ function renderWeeklyInspectionCalendar(data) {
           data-wi-open-day="${esc(cell.date)}"
         >
           <div class="wi-month-daynum">${Number(cell.day || 0)}</div>
-          <div class="wi-month-chips">${chips}${moreLink}</div>
+          <div class="wi-month-chips">${chips}</div>
         </div>
       `;
     }).join("");

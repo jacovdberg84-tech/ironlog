@@ -5599,6 +5599,7 @@ body.bare-child-tab #mainContent > .card.stack-12 {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 6px;
+  align-items: stretch;
 }
 
 .wi-month-dow {
@@ -5611,6 +5612,7 @@ body.bare-child-tab #mainContent > .card.stack-12 {
 
 .wi-month-cell {
   min-height: 110px;
+  height: 100%;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   background: #fff;
@@ -5792,7 +5794,7 @@ body.bare-child-tab #mainContent > .card.stack-12 {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  overflow: hidden;
+  flex: 1;
 }
 
 .wi-slot-chip {
