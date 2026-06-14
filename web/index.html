@@ -4372,10 +4372,32 @@
             <div id="clMachineFields" class="hidden">
               <div class="form-row">
                 <div class="form-field">
-                  <label>SMU / meter (hours, optional)</label>
+                  <label>Previous SMU (hours)</label>
+                  <div id="clPrevSmu" class="w-full" style="padding:10px 0;font-weight:600;">—</div>
+                  <p class="muted small" id="clPrevSmuHint">From prior daily closing or last pre-start (not today&apos;s mistaken entry).</p>
+                </div>
+                <div class="form-field">
+                  <label>Current SMU / meter (hours, optional)</label>
                   <input id="clSmuHours" type="number" step="0.1" min="0" class="w-full" placeholder="e.g. 4521.5" />
                 </div>
               </div>
+              <details id="clMachineSupervisorPanel" class="hidden" style="margin-top:12px;">
+                <summary style="cursor:pointer;font-weight:600;">Supervisor: correct wrong hours / daily input</summary>
+                <div class="form-row" style="margin-top:10px;">
+                  <div class="form-field">
+                    <label>Correct closing hours</label>
+                    <input id="clCorrectClosingHours" type="number" step="0.1" min="0" class="w-full" placeholder="e.g. 4521.5" />
+                  </div>
+                  <div class="form-field">
+                    <label>Opening hours (optional)</label>
+                    <input id="clCorrectOpeningHours" type="number" step="0.1" min="0" class="w-full" placeholder="Auto from prior day if blank" />
+                  </div>
+                  <div class="form-field form-field-action">
+                    <button type="button" id="clApplyHoursCorrection" class="btn btn-secondary">Apply correction</button>
+                  </div>
+                </div>
+                <p class="muted small">Fixes the pre-start record and daily input for the selected check date. Use when wrong SMU/hours were entered.</p>
+              </details>
             </div>
             <div class="form-row">
               <div class="form-field">

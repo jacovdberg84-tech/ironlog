@@ -145,6 +145,52 @@ const TEMPLATES = {
       },
     ],
   },
+  fuel_truck: {
+    id: "fuel_truck",
+    title: "Fuel truck pre-start",
+    sections: [
+      {
+        id: "fluids",
+        title: "Fluids & fuel systems",
+        items: [
+          { key: "engine_oil_ok", label: "Engine oil level OK" },
+          { key: "coolant_ok", label: "Coolant level OK" },
+          { key: "hydraulic_oil_ok", label: "Hydraulic oil OK (if applicable)" },
+          { key: "fuel_tank_ok", label: "Product tank level OK" },
+          { key: "no_fuel_leaks_ok", label: "No fuel, oil, or hydraulic leaks" },
+        ],
+      },
+      {
+        id: "dispense",
+        title: "Dispensing equipment",
+        items: [
+          { key: "hoses_nozzles_ok", label: "Hoses, reels & nozzles OK (no damage/leaks)" },
+          { key: "meters_pumps_ok", label: "Meters / pumps OK" },
+          { key: "bonding_earthing_ok", label: "Bonding & earthing OK" },
+          { key: "spill_kit_ok", label: "Spill kit present & accessible" },
+        ],
+      },
+      {
+        id: "machine",
+        title: "Vehicle",
+        items: [
+          { key: "tyre_condition_ok", label: "Tyres — pressure & damage OK" },
+          { key: "brakes_steering_ok", label: "Brakes & steering OK" },
+          { key: "lights_beacon_ok", label: "Lights & beacon OK" },
+        ],
+      },
+      {
+        id: "safety",
+        title: "Safety",
+        items: [
+          { key: "fire_extinguisher_ok", label: "Fire extinguisher present & charged" },
+          { key: "horn_reversing_ok", label: "Horn & reversing alarm OK" },
+          { key: "seat_belt_ok", label: "Seat belt OK" },
+          { key: "signage_ok", label: "Hazchem / no smoking signage OK" },
+        ],
+      },
+    ],
+  },
   grader: {
     id: "grader",
     title: "Grader pre-start",
@@ -407,7 +453,8 @@ const CRUSHER_ASSET_CODES = new Set(["CR01AM", "CR02AM", "CR03AM", "CR04AM", "CR
 const MOBILE_SCREEN_ASSET_CODES = new Set(["FIN694"]);
 
 /** Explicit site equipment codes for daily pre-start checklists. */
-const DOZER_ASSET_CODES = new Set(["DR01AM"]);
+const FUEL_TRUCK_ASSET_CODES = new Set(["DR01AM"]);
+const DOZER_ASSET_CODES = new Set([]);
 const WHEEL_LOADER_ASSET_CODES = new Set(["FL01AM", "FL03AM"]);
 const BACKHOE_LOADER_ASSET_CODES = new Set(["B01AM"]);
 const GENERATOR_ASSET_CODES = new Set([
@@ -425,7 +472,8 @@ function resolveProfileByAssetCode(assetCode) {
   if (CRUSHER_ASSET_CODES.has(code) || /^CR0[1-9]AM$/.test(code)) return "crusher";
   if (MOBILE_SCREEN_ASSET_CODES.has(code)) return "mobile_screen";
   if (GENERATOR_ASSET_CODES.has(code) || /^GS0[1-9]AM$/.test(code)) return "generator";
-  if (DOZER_ASSET_CODES.has(code) || /^DR\d+AM$/.test(code)) return "dozer";
+  if (FUEL_TRUCK_ASSET_CODES.has(code)) return "fuel_truck";
+  if (DOZER_ASSET_CODES.has(code)) return "dozer";
   if (WHEEL_LOADER_ASSET_CODES.has(code) || /^FL\d+AM$/.test(code)) return "wheel_loader";
   if (BACKHOE_LOADER_ASSET_CODES.has(code) || /^B0[1-9]AM$/.test(code)) return "backhoe_loader";
   return null;
@@ -450,6 +498,7 @@ export function resolveMachinePrestartProfile(category, assetName = "", assetCod
   if (/(motor\s*grader|\bgrader\b)/.test(hay)) return "grader";
   if (/(haul\s*truck|rigid\s*dump|articulated\s*dump|\badt\b|dump\s*truck)/.test(hay)) return "haul_truck";
   if (/(mobile\s*crane|pick\s*and\s*carry|\bcrane\b)/.test(hay)) return "mobile_crane";
+  if (/(fuel\s*truck|fuel\s*bowser|bowser|refuel|tanker)/.test(hay)) return "fuel_truck";
   return null;
 }
 

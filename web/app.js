@@ -2599,6 +2599,7 @@ let clSelectedKind = "";
 let clSelectedProfileId = "";
 let clCurrentCheckId = 0;
 let clPreviousKm = null;
+let clPreviousSmu = null;
 let clPendingAssetCode = String(
   new URLSearchParams(window.location.search).get("asset_code") || ""
 )
@@ -2644,11 +2645,20 @@ function clShowSyncState(sync) {
   }
   const mode = String(sync.mode || "updated");
   const action = mode === "inserted" ? "created" : "updated";
-  el.textContent =
-    `Synced to Daily Input (${action}) — ${String(sync.work_date || "")}: ` +
-    `open ${Number(sync.opening_km || 0).toFixed(1)} km, ` +
-    `close ${Number(sync.closing_km || 0).toFixed(1)} km, ` +
-    `run ${Number(sync.run_km || 0).toFixed(1)} km.`;
+  const workDate = String(sync.work_date || "");
+  if (sync.unit === "hours" || sync.opening_hours != null || sync.closing_hours != null) {
+    el.textContent =
+      `Synced to Daily Input (${action}) — ${workDate}: ` +
+      `open ${Number(sync.opening_hours || 0).toFixed(1)} hrs, ` +
+      `close ${Number(sync.closing_hours || 0).toFixed(1)} hrs, ` +
+      `run ${Number(sync.run_hours || 0).toFixed(1)} hrs.`;
+  } else {
+    el.textContent =
+      `Synced to Daily Input (${action}) — ${workDate}: ` +
+      `open ${Number(sync.opening_km || 0).toFixed(1)} km, ` +
+      `close ${Number(sync.closing_km || 0).toFixed(1)} km, ` +
+      `run ${Number(sync.run_km || 0).toFixed(1)} km.`;
+  }
   el.classList.remove("hidden");
 }
 
@@ -2892,15 +2902,20 @@ async function selectChecklistAsset(assetCode) {
     qs("clLdvFields")?.classList.add("hidden");
     qs("clMachineFields")?.classList.remove("hidden");
     updateClLdvSupervisorPanel();
+    updateClMachineSupervisorPanel();
     const data = await fetchJson(
       `${API}/api/maintenance/machine-prestart/context?asset_code=${encodeURIComponent(code)}&check_date=${encodeURIComponent(clCheckDate())}`
     );
     const asset = data?.asset || {};
     const template = data?.template || {};
+    clPreviousSmu = data?.previous_smu_hours == null ? null : Number(data.previous_smu_hours);
     if (qs("clFormTitle")) qs("clFormTitle").textContent = String(template.title || "Machine pre-start");
     if (qs("clFormSubtitle")) qs("clFormSubtitle").textContent = `${code} — ${asset.asset_name || ""}`;
     if (qs("clFormMeta")) {
       qs("clFormMeta").innerHTML = `<span class="pill blue">${escapeHtml(code)}</span><span class="pill">${escapeHtml(String(data?.profile_id || ""))}</span><span class="pill">${escapeHtml(clCheckDate())}</span>`;
+    }
+    if (qs("clPrevSmu")) {
+      qs("clPrevSmu").textContent = clPreviousSmu == null ? "—" : `${clPreviousSmu.toFixed(1)} hrs`;
     }
     const existing = data?.existing_check || null;
     clCurrentCheckId = Number(existing?.id || 0);
@@ -2968,6 +2983,9 @@ async function submitChecklistForm() {
     if (smuRaw) {
       const smu = Number(smuRaw);
       if (!Number.isFinite(smu) || smu < 0) throw new Error("SMU hours must be a valid number ≥ 0.");
+      if (clPreviousSmu != null && smu < clPreviousSmu) {
+        throw new Error(`SMU cannot be less than previous hours (${clPreviousSmu.toFixed(1)}).`);
+      }
       smu_hours = smu;
     }
     const data = await fetchJson(`${API}/api/maintenance/machine-prestart`, {
@@ -2983,6 +3001,7 @@ async function submitChecklistForm() {
       }),
     });
     clCurrentCheckId = Number(data?.id || 0);
+    clShowSyncState(data?.daily_input_sync || null);
     clSetFormMsg(data?.message || "Machine pre-start saved.", true);
   }
 
@@ -2998,14 +3017,51 @@ async function submitChecklistForm() {
   loadClHistory().catch(() => {});
 }
 
-function canCorrectLdvKm() {
+function canCorrectChecklistMeter() {
   return getSessionRoles().some((r) => ["admin", "supervisor", "plant_manager", "site_manager"].includes(r));
 }
 
 function updateClLdvSupervisorPanel() {
   const panel = qs("clLdvSupervisorPanel");
   if (!panel) return;
-  panel.classList.toggle("hidden", !canCorrectLdvKm() || clSelectedKind !== "ldv");
+  panel.classList.toggle("hidden", !canCorrectChecklistMeter() || clSelectedKind !== "ldv");
+}
+
+function updateClMachineSupervisorPanel() {
+  const panel = qs("clMachineSupervisorPanel");
+  if (!panel) return;
+  panel.classList.toggle("hidden", !canCorrectChecklistMeter() || clSelectedKind !== "machine");
+}
+
+async function applyMachineHoursCorrection() {
+  if (!clSelectedAssetCode) return alert("Select a machine asset first.");
+  const closing_hours = Number(String(qs("clCorrectClosingHours")?.value || "").trim());
+  if (!Number.isFinite(closing_hours) || closing_hours < 0) return alert("Enter the correct closing hours.");
+  const openingRaw = String(qs("clCorrectOpeningHours")?.value || "").trim();
+  const body = {
+    asset_code: clSelectedAssetCode,
+    work_date: clCheckDate(),
+    closing_hours,
+    notes: `Corrected via Checklists tab by ${getSessionUser() || "supervisor"}`,
+  };
+  if (openingRaw) body.opening_hours = Number(openingRaw);
+  setStatus("Applying hours correction…");
+  const data = await fetchJson(`${API}/api/maintenance/machine-prestart/hours-correction`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  if (qs("clSmuHours")) qs("clSmuHours").value = String(data.closing_hours ?? closing_hours);
+  if (qs("clPrevSmu")) {
+    qs("clPrevSmu").textContent =
+      data.opening_hours != null ? `${Number(data.opening_hours).toFixed(1)} hrs` : "—";
+  }
+  clSetFormMsg(data.message || "Hours corrected.", true);
+  setStatus(`Hours corrected for ${clSelectedAssetCode} ✅`);
+  await loadChecklistHub();
+  renderClHubSections(clHubData);
+  await selectChecklistAsset(clSelectedAssetCode).catch(() => {});
+  loadClHistory().catch(() => {});
 }
 
 async function applyLdvKmCorrection() {
@@ -3070,6 +3126,7 @@ function clCheckModeLabel(mode) {
       dozer: "Dozer",
       wheel_loader: "Wheel loader",
       haul_truck: "Haul truck",
+      fuel_truck: "Fuel truck",
       grader: "Grader",
       mobile_crane: "Mobile crane",
       crusher: "Crusher",
@@ -3248,6 +3305,9 @@ function initChecklistTab() {
   qs("clHistDownloadRangePdf")?.addEventListener("click", () => clOpenRangePdf(true));
   qs("clApplyKmCorrection")?.addEventListener("click", () =>
     applyLdvKmCorrection().catch((e) => clSetFormMsg(String(e.message || e), false))
+  );
+  qs("clApplyHoursCorrection")?.addEventListener("click", () =>
+    applyMachineHoursCorrection().catch((e) => clSetFormMsg(String(e.message || e), false))
   );
 }
 

@@ -8054,6 +8054,28 @@ export default async function maintenanceRoutes(app) {
     return /^V(0[1-9]|1[0-5])AM$/i.test(String(assetCode || "").trim());
   }
 
+  function getMachinePrestartCheckRow(assetId, checkDate, mode) {
+    const primary = db.prepare(`
+      SELECT id, check_date, odometer_km, smu_hours, inspector_name, notes, checklist_json, check_mode
+      FROM vehicle_ldv_checks
+      WHERE asset_id = ?
+        AND check_date = ?
+        AND check_mode = ?
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(assetId, checkDate, mode);
+    if (primary) return primary;
+    return db.prepare(`
+      SELECT id, check_date, odometer_km, smu_hours, inspector_name, notes, checklist_json, check_mode
+      FROM vehicle_ldv_checks
+      WHERE asset_id = ?
+        AND check_date = ?
+        AND check_mode LIKE 'machine_prestart_%'
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(assetId, checkDate);
+  }
+
   function checklistRowStatus(checklistJson, normalizeFn) {
     if (!checklistJson) return { status: "pending", check_id: null };
     try {
@@ -8168,6 +8190,228 @@ export default async function maintenanceRoutes(app) {
       closing_km: Number(odometer.toFixed(1)),
       run_km: Number(runDelta.toFixed(1)),
     };
+  }
+
+  function getLatestMachineSmuHours(assetId, checkDate, opts = {}) {
+    if (!assetId || !isDate(checkDate)) return null;
+    const excludeCheckId = Number(opts.excludeCheckId || 0) || 0;
+
+    let fromDaily = null;
+    const dailySql = hasColumn("daily_hours", "input_unit")
+      ? `
+        SELECT closing_hours
+        FROM daily_hours
+        WHERE asset_id = ?
+          AND work_date < ?
+          AND closing_hours IS NOT NULL
+          AND LOWER(COALESCE(NULLIF(TRIM(input_unit), ''), 'hours')) != 'km'
+        ORDER BY work_date DESC, id DESC
+        LIMIT 1
+      `
+      : `
+        SELECT closing_hours
+        FROM daily_hours
+        WHERE asset_id = ?
+          AND work_date < ?
+          AND closing_hours IS NOT NULL
+        ORDER BY work_date DESC, id DESC
+        LIMIT 1
+      `;
+    const dailyRow = db.prepare(dailySql).get(assetId, checkDate);
+    if (dailyRow?.closing_hours != null) {
+      const n = Number(dailyRow.closing_hours);
+      if (Number.isFinite(n) && n >= 0) fromDaily = n;
+    }
+
+    const priorChecks = db.prepare(`
+      SELECT id, smu_hours, check_date
+      FROM vehicle_ldv_checks
+      WHERE asset_id = ?
+        AND smu_hours IS NOT NULL
+        AND check_date < ?
+        AND check_mode LIKE 'machine_prestart_%'
+      ORDER BY check_date DESC, id DESC
+      LIMIT 8
+    `).all(assetId, checkDate);
+
+    const priorSmu = priorChecks
+      .map((r) => Number(r.smu_hours))
+      .filter((v) => Number.isFinite(v) && v >= 0);
+
+    if (fromDaily != null) {
+      const trustedPrestart = priorSmu.filter((v) => v >= fromDaily * 0.98);
+      const pool = [fromDaily, ...trustedPrestart];
+      return Math.max(...pool);
+    }
+
+    if (priorSmu.length) return Math.max(...priorSmu);
+
+    if (excludeCheckId > 0) {
+      const sameDay = db.prepare(`
+        SELECT smu_hours
+        FROM vehicle_ldv_checks
+        WHERE asset_id = ?
+          AND check_date = ?
+          AND id != ?
+          AND smu_hours IS NOT NULL
+          AND check_mode LIKE 'machine_prestart_%'
+        ORDER BY id DESC
+        LIMIT 1
+      `).get(assetId, checkDate, excludeCheckId);
+      if (sameDay?.smu_hours != null) {
+        const n = Number(sameDay.smu_hours);
+        if (Number.isFinite(n) && n >= 0) return n;
+      }
+    }
+
+    return null;
+  }
+
+  function syncMachinePrestartToDailyHours(assetId, checkDate, smuHours, inspectorName, previousSmuHours) {
+    if (!assetId || !isDate(checkDate) || !Number.isFinite(Number(smuHours))) return { synced: false };
+    const closing = Number(smuHours);
+    const existing = db.prepare(`
+      SELECT id, scheduled_hours, opening_hours, closing_hours, hours_run, is_used, operator, notes
+      FROM daily_hours
+      WHERE asset_id = ?
+        AND work_date = ?
+      LIMIT 1
+    `).get(assetId, checkDate);
+
+    const opening = resolveLdvOpeningKm(
+      assetId,
+      checkDate,
+      closing,
+      previousSmuHours,
+      existing?.opening_hours
+    );
+    const runDelta = Math.max(0, closing - opening);
+
+    const nextNotes = (() => {
+      const base = String(existing?.notes || "").trim();
+      const tag = "Machine pre-start SMU captured via checklist";
+      if (!base) return tag;
+      return base.includes(tag) ? base : `${base} | ${tag}`;
+    })();
+
+    const hasInputUnit = hasColumn("daily_hours", "input_unit");
+    if (existing?.id) {
+      if (hasInputUnit) {
+        db.prepare(`
+          UPDATE daily_hours
+          SET
+            opening_hours = ?,
+            closing_hours = ?,
+            hours_run = ?,
+            input_unit = 'hours',
+            operator = COALESCE(NULLIF(operator, ''), ?),
+            notes = ?
+          WHERE id = ?
+        `).run(opening, closing, runDelta, inspectorName || null, nextNotes, Number(existing.id));
+      } else {
+        db.prepare(`
+          UPDATE daily_hours
+          SET
+            opening_hours = ?,
+            closing_hours = ?,
+            hours_run = ?,
+            operator = COALESCE(NULLIF(operator, ''), ?),
+            notes = ?
+          WHERE id = ?
+        `).run(opening, closing, runDelta, inspectorName || null, nextNotes, Number(existing.id));
+      }
+    } else if (hasInputUnit) {
+      db.prepare(`
+        INSERT INTO daily_hours (
+          asset_id, work_date, scheduled_hours, opening_hours, closing_hours,
+          hours_run, input_unit, is_used, operator, notes
+        )
+        VALUES (?, ?, 0, ?, ?, ?, 'hours', 1, ?, ?)
+        ON CONFLICT(asset_id, work_date) DO UPDATE SET
+          opening_hours = excluded.opening_hours,
+          closing_hours = excluded.closing_hours,
+          hours_run = excluded.hours_run,
+          input_unit = 'hours',
+          operator = COALESCE(NULLIF(daily_hours.operator, ''), excluded.operator),
+          notes = COALESCE(NULLIF(daily_hours.notes, ''), excluded.notes)
+      `).run(assetId, checkDate, opening, closing, runDelta, inspectorName || null, nextNotes);
+    } else {
+      db.prepare(`
+        INSERT INTO daily_hours (
+          asset_id, work_date, scheduled_hours, opening_hours, closing_hours,
+          hours_run, is_used, operator, notes
+        )
+        VALUES (?, ?, 0, ?, ?, ?, 1, ?, ?)
+        ON CONFLICT(asset_id, work_date) DO UPDATE SET
+          opening_hours = excluded.opening_hours,
+          closing_hours = excluded.closing_hours,
+          hours_run = excluded.hours_run,
+          operator = COALESCE(NULLIF(daily_hours.operator, ''), excluded.operator),
+          notes = COALESCE(NULLIF(daily_hours.notes, ''), excluded.notes)
+      `).run(assetId, checkDate, opening, closing, runDelta, inspectorName || null, nextNotes);
+    }
+
+    if (hasInputUnit) {
+      db.prepare(`
+        INSERT INTO asset_input_units (asset_id, input_unit, updated_at)
+        VALUES (?, 'hours', datetime('now'))
+        ON CONFLICT(asset_id) DO UPDATE SET input_unit = 'hours', updated_at = datetime('now')
+      `).run(assetId);
+    }
+
+    return {
+      synced: true,
+      unit: "hours",
+      mode: existing?.id ? "updated" : "inserted",
+      work_date: checkDate,
+      opening_hours: Number(opening.toFixed(1)),
+      closing_hours: Number(closing.toFixed(1)),
+      run_hours: Number(runDelta.toFixed(1)),
+    };
+  }
+
+  function upsertMachineDailyHoursCorrection(assetId, workDate, openingHours, closingHours, inspectorName, correctionNote) {
+    const runHours = Math.max(0, closingHours - openingHours);
+    const hasInputUnit = hasColumn("daily_hours", "input_unit");
+    const dailyNote = `Supervisor hours correction | ${correctionNote}`;
+    if (hasInputUnit) {
+      db.prepare(`
+        INSERT INTO daily_hours (
+          asset_id, work_date, scheduled_hours, opening_hours, closing_hours,
+          hours_run, input_unit, is_used, operator, notes
+        )
+        VALUES (?, ?, 0, ?, ?, ?, 'hours', 1, ?, ?)
+        ON CONFLICT(asset_id, work_date) DO UPDATE SET
+          opening_hours = excluded.opening_hours,
+          closing_hours = excluded.closing_hours,
+          hours_run = excluded.hours_run,
+          input_unit = 'hours',
+          is_used = 1,
+          operator = excluded.operator,
+          notes = excluded.notes
+      `).run(assetId, workDate, openingHours, closingHours, runHours, inspectorName, dailyNote);
+      db.prepare(`
+        INSERT INTO asset_input_units (asset_id, input_unit, updated_at)
+        VALUES (?, 'hours', datetime('now'))
+        ON CONFLICT(asset_id) DO UPDATE SET input_unit = 'hours', updated_at = datetime('now')
+      `).run(assetId);
+    } else {
+      db.prepare(`
+        INSERT INTO daily_hours (
+          asset_id, work_date, scheduled_hours, opening_hours, closing_hours,
+          hours_run, is_used, operator, notes
+        )
+        VALUES (?, ?, 0, ?, ?, ?, 1, ?, ?)
+        ON CONFLICT(asset_id, work_date) DO UPDATE SET
+          opening_hours = excluded.opening_hours,
+          closing_hours = excluded.closing_hours,
+          hours_run = excluded.hours_run,
+          is_used = 1,
+          operator = excluded.operator,
+          notes = excluded.notes
+      `).run(assetId, workDate, openingHours, closingHours, runHours, inspectorName, dailyNote);
+    }
+    return runHours;
   }
 
   app.get("/vehicle-ldv-checks", async (req, reply) => {
@@ -8328,15 +8572,7 @@ export default async function maintenanceRoutes(app) {
         if (!profileId) continue;
         const mode = machinePrestartCheckMode(profileId);
         if (!mode) continue;
-        const row = db.prepare(`
-          SELECT id, checklist_json
-          FROM vehicle_ldv_checks
-          WHERE asset_id = ?
-            AND check_date = ?
-            AND check_mode = ?
-          ORDER BY id DESC
-          LIMIT 1
-        `).get(assetId, check_date, mode);
+        const row = getMachinePrestartCheckRow(assetId, check_date, mode);
         const st = row
           ? {
               ...checklistRowStatus(row.checklist_json, (parsed) =>
@@ -8756,15 +8992,11 @@ export default async function maintenanceRoutes(app) {
       const mode = machinePrestartCheckMode(profileId);
       if (!template || !mode) return reply.code(500).send({ ok: false, error: "Template resolution failed" });
 
-      const existing = db.prepare(`
-        SELECT id, check_date, odometer_km, smu_hours, inspector_name, notes, checklist_json
-        FROM vehicle_ldv_checks
-        WHERE asset_id = ?
-          AND check_date = ?
-          AND check_mode = ?
-        ORDER BY id DESC
-        LIMIT 1
-      `).get(Number(asset.id), check_date, mode);
+      const existing = getMachinePrestartCheckRow(Number(asset.id), check_date, mode);
+
+      const previous_smu_hours = getLatestMachineSmuHours(Number(asset.id), check_date, {
+        excludeCheckId: existing?.id ? Number(existing.id) : 0,
+      });
 
       let checklist = normalizeMachinePrestartChecklist(profileId, {});
       if (existing?.checklist_json) {
@@ -8788,6 +9020,9 @@ export default async function maintenanceRoutes(app) {
           category: String(asset.category || ""),
         },
         check_date,
+        previous_smu_hours,
+        previous_smu_source:
+          previous_smu_hours != null ? "daily_hours_or_prior_prestart" : null,
         existing_check: existing
           ? {
               id: Number(existing.id),
@@ -8855,15 +9090,7 @@ export default async function maintenanceRoutes(app) {
 
       const checklistJson = JSON.stringify(checklistToJsonObject(checklist));
 
-      const existing = db.prepare(`
-        SELECT id
-        FROM vehicle_ldv_checks
-        WHERE asset_id = ?
-          AND check_date = ?
-          AND check_mode = ?
-        ORDER BY id DESC
-        LIMIT 1
-      `).get(Number(asset.id), check_date, mode);
+      const existing = getMachinePrestartCheckRow(Number(asset.id), check_date, mode);
 
       let checkId = 0;
       if (existing?.id) {
@@ -8902,6 +9129,20 @@ export default async function maintenanceRoutes(app) {
         checkId = Number(ins.lastInsertRowid);
       }
 
+      let dailySync = { synced: false };
+      if (smu_hours != null) {
+        const previousSmu = getLatestMachineSmuHours(Number(asset.id), check_date, {
+          excludeCheckId: checkId,
+        });
+        dailySync = syncMachinePrestartToDailyHours(
+          Number(asset.id),
+          check_date,
+          smu_hours,
+          inspector_name,
+          previousSmu
+        );
+      }
+
       return reply.send({
         ok: true,
         id: checkId,
@@ -8910,7 +9151,140 @@ export default async function maintenanceRoutes(app) {
         profile_id: profileId,
         check_mode: mode,
         smu_hours,
+        daily_input_sync: dailySync,
         message: "Machine pre-start saved to IRONLOG.",
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  // POST /api/maintenance/machine-prestart/hours-correction — fix wrong SMU + daily hours (supervisor)
+  app.post("/machine-prestart/hours-correction", async (req, reply) => {
+    try {
+      if (!requireMaintenanceRoles(req, reply, ["admin", "supervisor", "plant_manager", "site_manager"])) return;
+
+      const asset_code = String(req.body?.asset_code || "").trim().toUpperCase();
+      const work_date = String(req.body?.work_date || req.body?.check_date || "").trim()
+        || new Date().toISOString().slice(0, 10);
+      const closing_hours = Number(
+        req.body?.closing_hours ?? req.body?.correct_smu_hours ?? req.body?.smu_hours
+      );
+      const opening_hours_raw = req.body?.opening_hours;
+      const inspector_name = String(req.body?.inspector_name || "Supervisor correction").trim() || "Supervisor correction";
+      const correction_note = String(req.body?.notes || "Supervisor hours correction").trim() || "Supervisor hours correction";
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+
+      if (!asset_code) return reply.code(400).send({ ok: false, error: "asset_code is required" });
+      if (!isDate(work_date)) return reply.code(400).send({ ok: false, error: "work_date must be YYYY-MM-DD" });
+      if (!Number.isFinite(closing_hours) || closing_hours < 0) {
+        return reply.code(400).send({ ok: false, error: "closing_hours must be a valid number >= 0" });
+      }
+
+      const asset = db.prepare(`
+        SELECT id, asset_code, asset_name, category
+        FROM assets
+        WHERE UPPER(asset_code) = UPPER(?)
+        LIMIT 1
+      `).get(asset_code);
+      if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
+
+      const profileId = resolveMachinePrestartProfile(asset.category, asset.asset_name, asset.asset_code);
+      if (!profileId) {
+        return reply.code(400).send({ ok: false, error: "No machine pre-start template for this asset." });
+      }
+      const mode = machinePrestartCheckMode(profileId);
+      if (!mode) return reply.code(500).send({ ok: false, error: "Template resolution failed" });
+
+      const assetId = Number(asset.id);
+      const existing = getMachinePrestartCheckRow(assetId, work_date, mode);
+
+      let checkId = Number(existing?.id || 0);
+      const previousSmu = getLatestMachineSmuHours(assetId, work_date, {
+        excludeCheckId: checkId,
+      });
+      const opening_hours =
+        opening_hours_raw != null && String(opening_hours_raw).trim() !== ""
+          ? Number(opening_hours_raw)
+          : previousSmu;
+      if (!Number.isFinite(opening_hours) || opening_hours < 0) {
+        return reply.code(400).send({
+          ok: false,
+          error: "opening_hours could not be resolved — pass opening_hours explicitly",
+        });
+      }
+      if (closing_hours < opening_hours) {
+        return reply.code(400).send({
+          ok: false,
+          error: `Closing hours (${closing_hours}) cannot be less than opening hours (${opening_hours}).`,
+          previous_smu_hours: previousSmu,
+          opening_hours,
+        });
+      }
+
+      const checklistJsonOut = (() => {
+        if (existing?.checklist_json && String(existing.checklist_json).trim()) {
+          return String(existing.checklist_json);
+        }
+        const checklist = normalizeMachinePrestartChecklist(
+          profileId,
+          Object.fromEntries(
+            normalizeMachinePrestartChecklist(profileId, {}).map((c) => [c.key, true])
+          )
+        );
+        return JSON.stringify(checklistToJsonObject(checklist));
+      })();
+
+      if (checkId > 0) {
+        db.prepare(`
+          UPDATE vehicle_ldv_checks
+          SET smu_hours = ?, inspector_name = ?, notes = ?, checklist_json = COALESCE(NULLIF(checklist_json, ''), ?),
+              check_mode = ?, updated_at = datetime('now')
+          WHERE id = ?
+        `).run(closing_hours, inspector_name, correction_note, checklistJsonOut, mode, checkId);
+      } else {
+        const ins = db.prepare(`
+          INSERT INTO vehicle_ldv_checks (
+            asset_id, uuid, site_code, check_date, vehicle_registration, odometer_km,
+            inspector_name, notes, check_mode, checklist_json, smu_hours, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          assetId,
+          crypto.randomUUID(),
+          site_code,
+          work_date,
+          String(asset.asset_code || ""),
+          inspector_name,
+          correction_note,
+          mode,
+          checklistJsonOut,
+          closing_hours
+        );
+        checkId = Number(ins.lastInsertRowid);
+      }
+
+      const run_hours = upsertMachineDailyHoursCorrection(
+        assetId,
+        work_date,
+        opening_hours,
+        closing_hours,
+        inspector_name,
+        correction_note
+      );
+
+      return reply.send({
+        ok: true,
+        asset_code,
+        work_date,
+        check_id: checkId,
+        profile_id: profileId,
+        opening_hours: Number(opening_hours.toFixed(1)),
+        closing_hours: Number(closing_hours.toFixed(1)),
+        run_hours: Number(run_hours.toFixed(1)),
+        previous_smu_hours: previousSmu == null ? null : Number(previousSmu.toFixed(1)),
+        message: `Hours corrected for ${asset_code} on ${work_date}.`,
       });
     } catch (err) {
       req.log.error(err);
