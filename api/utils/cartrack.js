@@ -409,6 +409,32 @@ export async function syncCartrackFleetStatus() {
   return { synced: count };
 }
 
+export function enrichCartrackLiveRow(row, speedRegs = new Set()) {
+  const lat = Number(row.latitude);
+  const lng = Number(row.longitude);
+  const hasGps = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
+  const code = row.asset_code || row.registration;
+  let raw = {};
+  try {
+    raw = JSON.parse(row.status_json || "{}");
+  } catch {
+    raw = {};
+  }
+  const roadLimit = Number(raw.road_speed);
+  const speed = Number(row.speed_kmh ?? raw.speed ?? 0);
+  const overLimit = Number.isFinite(roadLimit) && roadLimit > 0 && speed > roadLimit;
+  const fuelPct = raw.fuel?.precentage_left ?? raw.fuel?.percentage_left;
+  return {
+    ...row,
+    has_gps: hasGps,
+    is_speeding: speedRegs.has(row.registration) || speedRegs.has(code) || overLimit,
+    is_idling: raw.idling === true,
+    road_speed_limit: Number.isFinite(roadLimit) && roadLimit > 0 ? roadLimit : null,
+    rpm: Number(raw.rpm) || null,
+    fuel_pct: fuelPct != null && Number.isFinite(Number(fuelPct)) ? Number(fuelPct) : null,
+  };
+}
+
 function cartrackTimestampRange(startDate, endDate) {
   const start = String(startDate || "").slice(0, 10);
   const end = String(endDate || start).slice(0, 10);

@@ -14,6 +14,7 @@ import {
   runCartrackMorningJob,
   sendCartrackMorningEmail,
   cartrackApiGet,
+  enrichCartrackLiveRow,
 } from "../utils/cartrack.js";
 import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
 
@@ -104,17 +105,7 @@ export default async function cartrackRoutes(app) {
       limit: 200,
     });
     const speedRegs = new Set(speedingToday.map((e) => e.registration || e.asset_code));
-    const positioned = fleet.map((v) => {
-      const lat = Number(v.latitude);
-      const lng = Number(v.longitude);
-      const hasGps = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
-      const code = v.asset_code || v.registration;
-      return {
-        ...v,
-        has_gps: hasGps,
-        is_speeding: speedRegs.has(v.registration) || speedRegs.has(code),
-      };
-    });
+    const positioned = fleet.map((v) => enrichCartrackLiveRow(v, speedRegs));
     const live = positioned.filter((v) => Number(v.ignition_on) === 1).length;
     return reply.send({
       ok: true,

@@ -125,6 +125,30 @@
     </div>
   </div>
 
+  <!-- Cartrack live GPS speed floater — visible on every tab when fleet is configured -->
+  <div id="cartrackSpeedFloat" class="cartrack-speed-float is-collapsed hidden" aria-live="polite">
+    <button type="button" id="cartrackSpeedFloatTab" class="cartrack-speed-float-tab" title="Live GPS speeds">
+      <span class="cartrack-speed-float-tab-icon" aria-hidden="true">📍</span>
+      <span class="cartrack-speed-float-tab-label">GPS</span>
+      <span id="cartrackSpeedFloatBadge" class="cartrack-speed-float-badge">0</span>
+    </button>
+    <div class="cartrack-speed-float-panel">
+      <div class="cartrack-speed-float-head">
+        <div>
+          <strong>Live GPS speeds</strong>
+          <div id="cartrackSpeedFloatUpdated" class="muted mini">—</div>
+        </div>
+        <div class="cartrack-speed-float-actions">
+          <button type="button" id="cartrackSpeedFloatRefreshBtn" class="btn btn-secondary btn-sm">Refresh</button>
+          <button type="button" id="cartrackSpeedFloatMapBtn" class="btn btn-primary btn-sm">Map</button>
+          <button type="button" id="cartrackSpeedFloatMinBtn" class="cartrack-speed-float-min" aria-label="Minimize">−</button>
+        </div>
+      </div>
+      <div id="cartrackSpeedFloatList" class="cartrack-speed-float-list"></div>
+      <p class="cartrack-speed-float-foot muted mini">Cartrack GPS fleet — not machine FSC telematics</p>
+    </div>
+  </div>
+
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-content">
       <div class="nav-section">
@@ -6580,6 +6604,6 @@
 
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="./app.js?v=14"></script>
+  <script src="./app.js?v=15"></script>
 </body>
 </html>

@@ -4272,6 +4272,7 @@ async function syncCartrackNow() {
     body: JSON.stringify({ start_date: today, end_date: today }),
   });
   await loadCartrackFleet();
+  refreshCartrackSpeedFloat({ refresh: false }).catch(() => {});
   setStatus("Cartrack sync complete ✅");
 }
 
@@ -4643,6 +4644,126 @@ function initCartrackTrackingTab() {
     if (!btn) return;
     focusCartrackVehicle(btn.getAttribute("data-cartrack-key"));
   });
+}
+
+const CARTRACK_SPEED_FLOAT_POLL_MS = 60000;
+let cartrackSpeedFloatPollTimer = null;
+let cartrackSpeedFloatFleet = [];
+
+function setCartrackSpeedFloatExpanded(expanded) {
+  const root = qs("cartrackSpeedFloat");
+  if (!root) return;
+  root.classList.toggle("is-collapsed", !expanded);
+  root.classList.toggle("is-expanded", expanded);
+}
+
+function renderCartrackSpeedFloatList(fleet) {
+  const host = qs("cartrackSpeedFloatList");
+  if (!host) return;
+  const rows = [...(fleet || [])].sort((a, b) => {
+    const sa = Number(a.speed_kmh || 0);
+    const sb = Number(b.speed_kmh || 0);
+    if (sb !== sa) return sb - sa;
+    return Number(b.ignition_on) - Number(a.ignition_on);
+  });
+  if (!rows.length) {
+    host.innerHTML = `<div class="cartrack-speed-float-empty muted small">No Cartrack vehicles synced.</div>`;
+    return;
+  }
+  host.innerHTML = rows
+    .map((v) => {
+      const label = cartrackVehicleLabel(v);
+      const spd = Number(v.speed_kmh || 0);
+      const ign = Number(v.ignition_on) === 1;
+      const limit = v.road_speed_limit != null ? Number(v.road_speed_limit) : null;
+      const cls = [
+        "cartrack-speed-float-row",
+        v.is_speeding ? "cartrack-speed-float-row--alert" : "",
+        ign ? "cartrack-speed-float-row--live" : "",
+      ].filter(Boolean).join(" ");
+      const extras = [];
+      if (ign) extras.push("IGN");
+      if (v.is_idling) extras.push("Idle");
+      if (limit) extras.push(`Limit ${limit}`);
+      if (v.rpm) extras.push(`${Math.round(v.rpm)} rpm`);
+      if (v.fuel_pct != null) extras.push(`Fuel ${Math.round(v.fuel_pct)}%`);
+      return `<div class="${cls}">
+        <span class="cartrack-speed-float-code">${escapeHtml(label)}</span>
+        <span class="cartrack-speed-float-spd">${spd.toFixed(0)}<small> km/h</small></span>
+        <span class="cartrack-speed-float-meta">${escapeHtml(extras.join(" · ") || v.registration || "")}</span>
+      </div>`;
+    })
+    .join("");
+}
+
+function updateCartrackSpeedFloat(data) {
+  const root = qs("cartrackSpeedFloat");
+  const badge = qs("cartrackSpeedFloatBadge");
+  const updated = qs("cartrackSpeedFloatUpdated");
+  if (!root) return;
+
+  const allowed = getEffectiveAllowedTabs();
+  if (!allowed.includes("cartrack") && !allowed.includes("dash")) {
+    root.classList.add("hidden");
+    return;
+  }
+
+  const fleet = Array.isArray(data?.fleet) ? data.fleet : [];
+  cartrackSpeedFloatFleet = fleet;
+  if (!data?.configured || !fleet.length) {
+    root.classList.add("hidden");
+    return;
+  }
+
+  root.classList.remove("hidden");
+  const moving = fleet.filter((v) => Number(v.speed_kmh || 0) > 3 || Number(v.ignition_on) === 1).length;
+  const speeding = fleet.filter((v) => v.is_speeding).length;
+  if (badge) {
+    badge.textContent = String(moving);
+    badge.classList.toggle("cartrack-speed-float-badge--alert", speeding > 0);
+  }
+  if (updated) {
+    const sync = String(data?.summary?.last_sync || "").slice(11, 16) || "—";
+    updated.textContent = `${fleet.length} vehicles · ${moving} active · updated ${sync}`;
+  }
+  renderCartrackSpeedFloatList(fleet);
+}
+
+async function refreshCartrackSpeedFloat({ refresh = true } = {}) {
+  const allowed = getEffectiveAllowedTabs();
+  if (!allowed.includes("cartrack") && !allowed.includes("dash")) return;
+  try {
+    const q = refresh ? "refresh=1" : "refresh=0";
+    const data = await fetchJson(`${API}/api/cartrack/live?${q}`);
+    updateCartrackSpeedFloat(data);
+  } catch (_) {
+    /* silent */
+  }
+}
+
+function initCartrackSpeedFloat() {
+  const root = qs("cartrackSpeedFloat");
+  if (!root) return;
+
+  qs("cartrackSpeedFloatTab")?.addEventListener("click", () => {
+    const expanded = root.classList.contains("is-expanded");
+    setCartrackSpeedFloatExpanded(!expanded);
+    if (!expanded) refreshCartrackSpeedFloat({ refresh: true }).catch(() => {});
+  });
+  qs("cartrackSpeedFloatMinBtn")?.addEventListener("click", () => setCartrackSpeedFloatExpanded(false));
+  qs("cartrackSpeedFloatMapBtn")?.addEventListener("click", () => {
+    switchTab("cartrack");
+    loadCartrackTrackingTab({ refresh: true }).catch(() => {});
+  });
+  qs("cartrackSpeedFloatRefreshBtn")?.addEventListener("click", () =>
+    refreshCartrackSpeedFloat({ refresh: true }).catch(() => {})
+  );
+
+  refreshCartrackSpeedFloat({ refresh: true }).catch(() => {});
+  if (cartrackSpeedFloatPollTimer) clearInterval(cartrackSpeedFloatPollTimer);
+  cartrackSpeedFloatPollTimer = setInterval(() => {
+    refreshCartrackSpeedFloat({ refresh: true }).catch(() => {});
+  }, CARTRACK_SPEED_FLOAT_POLL_MS);
 }
 
 async function loadDashboard() {
@@ -13376,6 +13497,7 @@ async function init() {
   initReportCardCollapsible();
   initTasks();
   initTelematicsFaultBanner();
+  initCartrackSpeedFloat();
   applyRoleVisibility();
   if (!isBareChildTabEmbed()) {
     resolveInitialTabFromUrl();
