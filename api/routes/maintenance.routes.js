@@ -2491,7 +2491,6 @@ export default async function maintenanceRoutes(app) {
         }
       }
       const laborRate = Number(costSettings.labor_cost_per_hour_default || 35);
-      const fuelDefault = Number(costSettings.fuel_cost_per_liter_default || 1.5);
       const lubeDefault = Number(costSettings.lube_cost_per_qty_default || 4.0);
 
       const smCols = hasTable("stock_movements")
@@ -2528,7 +2527,6 @@ export default async function maintenanceRoutes(app) {
             wo_labor_cost: 0,
             labor_cost: 0,
             parts_cost: 0,
-            fuel_cost: 0,
             lube_cost: 0,
             outsourced_cost: 0,
             total_cost: 0,
@@ -2621,26 +2619,6 @@ export default async function maintenanceRoutes(app) {
         }
       }
 
-      if (hasTable("fuel_logs")) {
-        const hasFuelUnit = hasColumn("fuel_logs", "unit_cost_per_liter");
-        const fuelRows = db.prepare(`
-          SELECT
-            a.id AS asset_id,
-            a.asset_code,
-            a.asset_name,
-            COALESCE(SUM(fl.liters * COALESCE(${hasFuelUnit ? "fl.unit_cost_per_liter" : "NULL"}, a.fuel_cost_per_liter, ?)), 0) AS fuel_cost
-          FROM fuel_logs fl
-          JOIN assets a ON a.id = fl.asset_id
-          WHERE fl.log_date BETWEEN DATE(?) AND DATE(?)
-          GROUP BY a.id
-        `).all(fuelDefault, startDate, endDate);
-        for (const r of fuelRows) {
-          const row = ensureCostRow(r.asset_id, r.asset_code, r.asset_name);
-          if (!row) continue;
-          row.fuel_cost = Number(r.fuel_cost || 0);
-        }
-      }
-
       if (hasTable("oil_logs")) {
         const hasOilUnit = hasColumn("oil_logs", "unit_cost");
         const lubeRows = db.prepare(`
@@ -2685,17 +2663,15 @@ export default async function maintenanceRoutes(app) {
           const downLabor = Number(row.downtime_labor_cost || 0);
           const labor = woLabor + downLabor;
           const parts = Number(row.parts_cost || 0);
-          const fuel = Number(row.fuel_cost || 0);
           const lube = Number(row.lube_cost || 0);
           const outsourced = Number(row.outsourced_cost || 0);
-          const total = labor + parts + fuel + lube + outsourced;
+          const total = labor + parts + lube + outsourced;
           return {
             ...row,
             labor_cost: Number(labor.toFixed(2)),
             wo_labor_cost: Number(woLabor.toFixed(2)),
             downtime_labor_cost: Number(downLabor.toFixed(2)),
             parts_cost: Number(parts.toFixed(2)),
-            fuel_cost: Number(fuel.toFixed(2)),
             lube_cost: Number(lube.toFixed(2)),
             outsourced_cost: Number(outsourced.toFixed(2)),
             total_cost: Number(total.toFixed(2)),
@@ -3075,7 +3051,6 @@ export default async function maintenanceRoutes(app) {
         { header: "WO Labor", key: "wo_labor_cost", width: 12 },
         { header: "Downtime Labor", key: "downtime_labor_cost", width: 14 },
         { header: "Parts Cost", key: "parts_cost", width: 12 },
-        { header: "Fuel Cost", key: "fuel_cost", width: 12 },
         { header: "Lube Cost", key: "lube_cost", width: 12 },
         { header: "Total Cost", key: "total_cost", width: 12 },
       ];

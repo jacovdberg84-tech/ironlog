@@ -539,6 +539,7 @@ function renderStandardizedInsightDashboards(data) {
       </div>
       <div class="kpi-big-value">${fmtMoney(totalMaintenanceCost)}</div>
       <div class="kpi-meta">Total maintenance spend (${Number(costRows.length || 0)} assets)</div>
+      <div class="kpi-meta" style="margin-top:6px;">Labor, parts, lube, and outsourced — excludes fuel (running cost)</div>
       <div class="kpi-meta" style="margin-top:6px;">Parts consumption cost: ${fmtMoney(totalPartsCost)}</div>
       <div class="kpi-meta" style="margin-top:6px;">
         Top cost asset:
@@ -653,14 +654,13 @@ function renderMaintenanceInsights(data) {
     ? `<div class="muted mini" style="margin:0 0 8px;">Labor includes work-order hours and downtime at ${fmtMoney(laborRate)}/hr from cost settings.</div>`
     : "";
   costEl.innerHTML = `${laborHint}${insightsRowsTable(
-    ["Asset", "Jobs", "Down Hrs", "Labor", "Parts", "Fuel", "Lube", "Total"],
+    ["Asset", "Jobs", "Down Hrs", "Labor", "Parts", "Lube", "Total"],
     costRows.slice(0, 15).map((r) => [
       `${r.asset_code || "-"} - ${r.asset_name || "-"}`,
       Number(r.service_jobs || 0),
       Number(r.downtime_hours || 0).toFixed(2),
       Number(r.labor_cost || 0).toFixed(2),
       Number(r.parts_cost || 0).toFixed(2),
-      Number(r.fuel_cost || 0).toFixed(2),
       Number(r.lube_cost || 0).toFixed(2),
       Number(r.total_cost || 0).toFixed(2),
     ])
