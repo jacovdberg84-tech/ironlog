@@ -53,6 +53,18 @@ function addDaysYmd(ymd, days) {
   return d.toISOString().slice(0, 10);
 }
 
+function listDaysInclusiveYmd(start, end) {
+  const out = [];
+  let cur = String(start || "").trim();
+  const endDay = String(end || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cur) || !/^\d{4}-\d{2}-\d{2}$/.test(endDay)) return out;
+  while (cur <= endDay) {
+    out.push(cur);
+    cur = addDaysYmd(cur, 1);
+  }
+  return out;
+}
+
 function mondayOfWeekYmd(ymd) {
   const d = new Date(`${String(ymd).trim()}T12:00:00`);
   const dow = d.getDay();
@@ -1980,6 +1992,207 @@ export default async function maintenanceRoutes(app) {
     }
   });
 
+  /**
+   * Downtime for Maintenance Insights: sum daily breakdown_downtime_logs in range,
+   * impute missing days for open/in-progress breakdowns, then legacy header fallback.
+   */
+  function buildMaintenanceInsightsDowntime(startDate, endDate, opts = {}) {
+    const scheduledFallback = Math.max(1, Number(opts.scheduledFallback || 10));
+    const empty = { by_component: [], by_team: [], downtime_daily: [], by_asset: new Map(), total_hours: 0 };
+    if (!hasTable("breakdowns")) return empty;
+
+    const canReadDowntimeLogs = hasTable("breakdown_downtime_logs");
+    const woAssignedCol = hasColumn("work_orders", "assigned_artisan_name")
+      ? "assigned_artisan_name"
+      : (hasColumn("work_orders", "artisan_name") ? "artisan_name" : "");
+    const breakdownDateExpr = hasColumn("breakdowns", "breakdown_date")
+      ? "b.breakdown_date"
+      : "DATE(COALESCE(b.created_at, b.updated_at))";
+    const teamExpr = woAssignedCol
+      ? `COALESCE(NULLIF(TRIM(wo.${woAssignedCol}), ''), 'Unassigned')`
+      : `'Unassigned'`;
+
+    const componentMap = new Map();
+    const teamMap = new Map();
+    const dailyMap = new Map();
+    const assetMap = new Map();
+    const loggedBreakdownDays = new Set();
+    let totalHours = 0;
+
+    const titleCase = (s) => String(s || "uncategorized").replace(/\b\w/g, (m) => m.toUpperCase());
+
+    const addHours = (breakdownId, componentKey, team, day, hours, assetId = 0) => {
+      const hrs = Number(hours || 0);
+      const bid = Number(breakdownId || 0);
+      if (!Number.isFinite(hrs) || hrs <= 0 || !bid) return;
+      totalHours += hrs;
+
+      const ck = String(componentKey || "uncategorized").trim().toLowerCase() || "uncategorized";
+      const comp = componentMap.get(ck) || { component_key: ck, incidents: new Set(), hours: 0 };
+      comp.incidents.add(bid);
+      comp.hours += hrs;
+      componentMap.set(ck, comp);
+
+      const tk = String(team || "Unassigned").trim() || "Unassigned";
+      const tm = teamMap.get(tk) || { team: tk, incidents: new Set(), hours: 0 };
+      tm.incidents.add(bid);
+      tm.hours += hrs;
+      teamMap.set(tk, tm);
+
+      if (day) dailyMap.set(day, Number(dailyMap.get(day) || 0) + hrs);
+
+      const aid = Number(assetId || 0);
+      if (aid > 0) {
+        const ar = assetMap.get(aid) || { asset_id: aid, downtime_hours: 0 };
+        ar.downtime_hours += hrs;
+        assetMap.set(aid, ar);
+      }
+    };
+
+    if (canReadDowntimeLogs) {
+      const logRows = db.prepare(`
+        SELECT
+          b.id AS breakdown_id,
+          b.asset_id,
+          LOWER(TRIM(COALESCE(b.component, 'uncategorized'))) AS component_key,
+          ${teamExpr} AS team,
+          DATE(l.log_date) AS log_date,
+          COALESCE(l.hours_down, 0) AS hours_down
+        FROM breakdown_downtime_logs l
+        JOIN breakdowns b ON b.id = l.breakdown_id
+        LEFT JOIN work_orders wo ON wo.id = b.primary_work_order_id
+        WHERE DATE(l.log_date) BETWEEN DATE(?) AND DATE(?)
+          AND COALESCE(l.hours_down, 0) > 0
+      `).all(startDate, endDate);
+      for (const r of logRows) {
+        loggedBreakdownDays.add(`${Number(r.breakdown_id || 0)}|${String(r.log_date || "")}`);
+        addHours(
+          r.breakdown_id,
+          r.component_key,
+          r.team,
+          r.log_date,
+          r.hours_down,
+          r.asset_id,
+        );
+      }
+    }
+
+    const todayYmd = new Date().toISOString().slice(0, 10);
+    const imputeEndDay = endDate < todayYmd ? endDate : todayYmd;
+    const days = listDaysInclusiveYmd(startDate, imputeEndDay);
+    const getScheduledForAssetDay = hasTable("daily_hours")
+      ? db.prepare(`
+          SELECT scheduled_hours, is_used, hours_run
+          FROM daily_hours
+          WHERE asset_id = ? AND work_date = ?
+          LIMIT 1
+        `)
+      : null;
+    const getLogForBreakdownDay = canReadDowntimeLogs
+      ? db.prepare(`
+          SELECT hours_down
+          FROM breakdown_downtime_logs
+          WHERE breakdown_id = ? AND log_date = ? AND COALESCE(hours_down, 0) > 0
+          LIMIT 1
+        `)
+      : null;
+
+    const openRows = db.prepare(`
+      SELECT
+        b.id AS breakdown_id,
+        b.asset_id,
+        LOWER(TRIM(COALESCE(b.component, 'uncategorized'))) AS component_key,
+        DATE(COALESCE(${breakdownDateExpr}, b.created_at)) AS breakdown_day,
+        ${teamExpr} AS team
+      FROM breakdowns b
+      LEFT JOIN work_orders wo ON wo.id = b.primary_work_order_id
+      WHERE b.status = 'OPEN'
+        AND (wo.id IS NULL OR LOWER(TRIM(COALESCE(wo.status, ''))) NOT IN ('completed', 'approved', 'closed'))
+        AND DATE(COALESCE(${breakdownDateExpr}, b.created_at)) <= DATE(?)
+    `).all(imputeEndDay);
+
+    for (const br of openRows) {
+      const bid = Number(br.breakdown_id || 0);
+      const aid = Number(br.asset_id || 0);
+      if (!bid || !aid) continue;
+      const breakdownDay = String(br.breakdown_day || startDate);
+      for (const day of days) {
+        if (day < breakdownDay || day < startDate) continue;
+        const logKey = `${bid}|${day}`;
+        if (loggedBreakdownDays.has(logKey)) continue;
+        if (getLogForBreakdownDay?.get(bid, day)) continue;
+
+        const dh = getScheduledForAssetDay?.get(aid, day);
+        const rowScheduled = Number(dh?.scheduled_hours);
+        const isUsed = Number(dh?.is_used ?? 1);
+        const runHours = Number(dh?.hours_run || 0);
+        let impute = scheduledFallback;
+        if (Number.isFinite(rowScheduled) && rowScheduled > 0) {
+          impute = rowScheduled;
+        } else if (isUsed !== 1 && runHours <= 0) {
+          impute = scheduledFallback;
+        }
+        addHours(bid, br.component_key, br.team, day, impute, aid);
+      }
+    }
+
+    if (totalHours <= 0) {
+      const dtCol = breakdownDowntimeColumnName();
+      if (dtCol) {
+        const fallbackRows = db.prepare(`
+          SELECT
+            b.id AS breakdown_id,
+            b.asset_id,
+            LOWER(TRIM(COALESCE(b.component, 'uncategorized'))) AS component_key,
+            ${teamExpr} AS team,
+            DATE(COALESCE(${breakdownDateExpr}, b.created_at)) AS breakdown_day,
+            COALESCE(b.${dtCol}, 0) AS downtime_hours
+          FROM breakdowns b
+          LEFT JOIN work_orders wo ON wo.id = b.primary_work_order_id
+          WHERE DATE(COALESCE(${breakdownDateExpr}, b.created_at)) BETWEEN DATE(?) AND DATE(?)
+            AND COALESCE(b.${dtCol}, 0) > 0
+        `).all(startDate, endDate);
+        for (const r of fallbackRows) {
+          addHours(
+            r.breakdown_id,
+            r.component_key,
+            r.team,
+            r.breakdown_day,
+            r.downtime_hours,
+            r.asset_id,
+          );
+        }
+      }
+    }
+
+    return {
+      by_component: [...componentMap.values()]
+        .map((r) => ({
+          component: titleCase(r.component_key),
+          incidents: r.incidents.size,
+          downtime_hours: Number(r.hours.toFixed(2)),
+        }))
+        .sort((a, b) => Number(b.downtime_hours || 0) - Number(a.downtime_hours || 0))
+        .slice(0, 20),
+      by_team: [...teamMap.values()]
+        .map((r) => ({
+          team: r.team,
+          incidents: r.incidents.size,
+          downtime_hours: Number(r.hours.toFixed(2)),
+        }))
+        .sort((a, b) => Number(b.downtime_hours || 0) - Number(a.downtime_hours || 0))
+        .slice(0, 20),
+      downtime_daily: listDaysInclusiveYmd(startDate, endDate)
+        .map((day) => ({
+          day,
+          downtime_hours: Number(Number(dailyMap.get(day) || 0).toFixed(2)),
+        }))
+        .filter((r) => r.downtime_hours > 0),
+      by_asset: assetMap,
+      total_hours: Number(totalHours.toFixed(2)),
+    };
+  }
+
   // =====================================================
   // MAINTENANCE INSIGHTS (High-Impact analytics starter)
   // GET /api/maintenance/insights?start=YYYY-MM-DD&end=YYYY-MM-DD&near_due_hours=50
@@ -2204,66 +2417,11 @@ export default async function maintenanceRoutes(app) {
         suggestions: partsDemand,
       };
 
-      const canReadBreakdowns = hasTable("breakdowns");
-      const canReadDowntimeLogs = hasTable("breakdown_downtime_logs");
-      const woAssignedCol = hasColumn("work_orders", "assigned_artisan_name")
-        ? "assigned_artisan_name"
-        : (hasColumn("work_orders", "artisan_name") ? "artisan_name" : "");
-      const breakdownDateExpr = hasColumn("breakdowns", "breakdown_date") ? "b.breakdown_date" : "b.created_at";
-      const breakdownDowntimeCol = hasColumn("breakdowns", "downtime_hours")
-        ? "downtime_hours"
-        : (hasColumn("breakdowns", "downtime_total_hours") ? "downtime_total_hours" : "");
-      const breakdownDowntimeExpr = breakdownDowntimeCol ? `COALESCE(b.${breakdownDowntimeCol}, 0)` : "0";
-      const downtimeByComponent = canReadBreakdowns
-        ? db.prepare(`
-            SELECT
-              LOWER(TRIM(COALESCE(b.component, 'uncategorized'))) AS component_key,
-              COUNT(DISTINCT b.id) AS incidents,
-              ${canReadDowntimeLogs ? "COALESCE(SUM(COALESCE(dl.hours_down, 0)), 0)" : "0"} AS downtime_logged,
-              COALESCE(SUM(${breakdownDowntimeExpr}), 0) AS downtime_base
-            FROM breakdowns b
-            ${canReadDowntimeLogs
-              ? `LEFT JOIN breakdown_downtime_logs dl ON dl.breakdown_id = b.id
-          AND DATE(dl.log_date) BETWEEN DATE(?) AND DATE(?)`
-              : ""}
-            WHERE DATE(COALESCE(${breakdownDateExpr}, b.created_at)) BETWEEN DATE(?) AND DATE(?)
-            GROUP BY component_key
-          `).all(...(canReadDowntimeLogs ? [startDate, endDate, startDate, endDate] : [startDate, endDate]))
-            .map((r) => {
-              const d = Number(r.downtime_logged || 0) > 0 ? Number(r.downtime_logged || 0) : Number(r.downtime_base || 0);
-              return {
-                component: String(r.component_key || "uncategorized").replace(/\b\w/g, (m) => m.toUpperCase()),
-                incidents: Number(r.incidents || 0),
-                downtime_hours: Number(d.toFixed(2)),
-              };
-            })
-            .sort((a, b) => Number(b.downtime_hours || 0) - Number(a.downtime_hours || 0))
-            .slice(0, 20)
-        : [];
-      const downtimeByTeam = canReadBreakdowns
-        ? db.prepare(`
-            SELECT
-              ${woAssignedCol
-                ? `COALESCE(NULLIF(TRIM(wo.${woAssignedCol}), ''), 'Unassigned')`
-                : `'Unassigned'`} AS team,
-              COUNT(DISTINCT b.id) AS incidents,
-              COALESCE(SUM(${breakdownDowntimeExpr}), 0) AS downtime_hours
-            FROM breakdowns b
-            LEFT JOIN work_orders wo ON wo.id = b.primary_work_order_id
-            WHERE DATE(COALESCE(${breakdownDateExpr}, b.created_at)) BETWEEN DATE(?) AND DATE(?)
-            GROUP BY team
-          `).all(startDate, endDate)
-            .map((r) => ({
-              team: String(r.team || "Unassigned"),
-              incidents: Number(r.incidents || 0),
-              downtime_hours: Number(Number(r.downtime_hours || 0).toFixed(2)),
-            }))
-            .sort((a, b) => Number(b.downtime_hours || 0) - Number(a.downtime_hours || 0))
-            .slice(0, 20)
-        : [];
+      const insightsDowntime = buildMaintenanceInsightsDowntime(startDate, endDate, { scheduledFallback: 10 });
       const downtime = {
-        by_component: downtimeByComponent,
-        by_team: downtimeByTeam,
+        by_component: insightsDowntime.by_component,
+        by_team: insightsDowntime.by_team,
+        total_hours: insightsDowntime.total_hours,
       };
 
       const woHasOpenedAt = hasColumn("work_orders", "opened_at");
@@ -2409,26 +2567,16 @@ export default async function maintenanceRoutes(app) {
         }
       }
 
-      if (hasTable("breakdown_downtime_logs") && hasTable("breakdowns")) {
-        const downRows = db.prepare(`
-          SELECT
-            a.id AS asset_id,
-            a.asset_code,
-            a.asset_name,
-            COALESCE(SUM(COALESCE(l.hours_down, 0)), 0) AS downtime_hours
-          FROM breakdown_downtime_logs l
-          JOIN breakdowns b ON b.id = l.breakdown_id
-          JOIN assets a ON a.id = b.asset_id
-          WHERE DATE(l.log_date) BETWEEN DATE(?) AND DATE(?)
-          GROUP BY a.id
-        `).all(startDate, endDate);
-        for (const r of downRows) {
-          const row = ensureCostRow(r.asset_id, r.asset_code, r.asset_name);
-          if (!row) continue;
-          const hrs = Number(r.downtime_hours || 0);
-          row.downtime_hours = Number(hrs.toFixed(2));
-          row.downtime_labor_cost = Number((hrs * laborRate).toFixed(2));
-        }
+      for (const [assetId, downRow] of insightsDowntime.by_asset.entries()) {
+        const asset =
+          activeAssets.find((a) => Number(a.id || 0) === Number(assetId))
+          || db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE id = ? LIMIT 1`).get(assetId)
+          || {};
+        const row = ensureCostRow(assetId, asset.asset_code, asset.asset_name);
+        if (!row) continue;
+        const hrs = Number(downRow.downtime_hours || 0);
+        row.downtime_hours = Number(hrs.toFixed(2));
+        row.downtime_labor_cost = Number((hrs * laborRate).toFixed(2));
       }
 
       if (hasTable("stock_movements") && hasTable("parts")) {
@@ -2561,20 +2709,7 @@ export default async function maintenanceRoutes(app) {
         )
         .sort((a, b) => Number(b.total_cost || 0) - Number(a.total_cost || 0));
 
-      const downtimeTrend = canReadBreakdowns
-        ? db.prepare(`
-            SELECT
-              DATE(COALESCE(${breakdownDateExpr}, b.created_at)) AS day,
-              COALESCE(SUM(${breakdownDowntimeExpr}), 0) AS downtime_hours
-            FROM breakdowns b
-            WHERE DATE(COALESCE(${breakdownDateExpr}, b.created_at)) BETWEEN DATE(?) AND DATE(?)
-            GROUP BY day
-            ORDER BY day ASC
-          `).all(startDate, endDate).map((r) => ({
-            day: String(r.day || ""),
-            downtime_hours: Number(Number(r.downtime_hours || 0).toFixed(2)),
-          }))
-        : [];
+      const downtimeTrend = insightsDowntime.downtime_daily;
       const woLaborTrend = hasTable("work_orders")
         ? db.prepare(`
             SELECT
