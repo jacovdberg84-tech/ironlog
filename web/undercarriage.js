@@ -209,24 +209,128 @@
     };
   }
 
-  function fillMeasurements(rows) {
-    const list = Array.isArray(rows) ? rows : [];
+  function fillWearLimits(limits, { overwrite = true } = {}) {
+    const list = Array.isArray(limits) ? limits : [];
     const byKey = new Map(list.map((r) => [String(r.key || "").toLowerCase(), r]));
     for (const row of ucSchema) {
       const src = byKey.get(String(row.key).toLowerCase()) || {};
-      const meas = document.getElementById(ucInputId(row.key, "measurement"));
       const base = document.getElementById(ucInputId(row.key, "base"));
       const limit = document.getElementById(ucInputId(row.key, "limit"));
-      if (meas) meas.value = src.measurement ?? "";
-      if (base) base.value = src.base ?? "";
-      if (limit) limit.value = src.wear_limit ?? "";
+      if (base && (overwrite || !String(base.value || "").trim())) {
+        base.value = src.base ?? "";
+      }
+      if (limit && (overwrite || !String(limit.value || "").trim())) {
+        limit.value = src.wear_limit ?? "";
+      }
       renderWearPreview(row.key, row);
     }
   }
 
-  function fillFromLatest(data) {
+  function collectWearLimits() {
+    return ucSchema.map((p) => ({
+      key: p.key,
+      base: ucReadNumber(ucInputId(p.key, "base")),
+      wear_limit: ucReadNumber(ucInputId(p.key, "limit")),
+    }));
+  }
+
+  function updateWearProfileSummary(profile) {
+    const el = document.getElementById("ucWearProfileSummary");
+    if (!el) return;
+    if (!profile?.limits?.length) {
+      el.textContent = "No saved wear limits for this machine yet.";
+      return;
+    }
+    const count = Number(profile.configured_count || 0);
+    const updated = profile.updated_at ? String(profile.updated_at).slice(0, 16).replace("T", " ") : "—";
+    el.textContent = `${count} component limit(s) saved · last updated ${updated}${profile.source ? ` · source: ${profile.source}` : ""}`;
+  }
+
+  async function loadWearProfileForAsset(assetId) {
+    const msg = document.getElementById("ucWearProfileMsg");
+    if (!assetId) {
+      updateWearProfileSummary(null);
+      return null;
+    }
+    try {
+      const res = await fetch(`${API}/maintenance/undercarriage-inspections/wear-profile?asset_id=${assetId}`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load wear profile");
+      const profile = data.profile || null;
+      if (profile?.limits?.length) fillWearLimits(profile.limits, { overwrite: true });
+      updateWearProfileSummary(profile);
+      if (msg && profile?.configured_count) {
+        msg.textContent = `Loaded ${profile.configured_count} saved limit(s) for this machine.`;
+      } else if (msg) msg.textContent = "";
+      return profile;
+    } catch (e) {
+      if (msg) msg.textContent = `Wear limits load failed: ${e.message || e}`;
+      updateWearProfileSummary(null);
+      return null;
+    }
+  }
+
+  async function saveWearProfile() {
+    const msg = document.getElementById("ucWearProfileMsg");
+    const asset_id = Number(document.getElementById("ucAsset")?.value || 0);
+    if (!asset_id) {
+      if (msg) msg.textContent = "Select a machine first.";
+      return;
+    }
+    if (msg) msg.textContent = "Saving wear limits…";
+    try {
+      const res = await fetch(`${API}/maintenance/undercarriage-inspections/wear-profile`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          asset_id,
+          limits: collectWearLimits(),
+          source: "manual",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Save failed");
+      updateWearProfileSummary(data.profile);
+      const count = Number(data.profile?.configured_count || 0);
+      if (msg) msg.textContent = `Wear limits saved for ${data.asset_code || "machine"} (${count} components).`;
+    } catch (e) {
+      if (msg) msg.textContent = `Save failed: ${e.message || e}`;
+    }
+  }
+
+  async function importWearLimitsFromLatest() {
+    const msg = document.getElementById("ucWearProfileMsg");
+    const asset_id = Number(document.getElementById("ucAsset")?.value || 0);
+    if (!asset_id) {
+      if (msg) msg.textContent = "Select a machine first.";
+      return;
+    }
+    if (msg) msg.textContent = "Importing from latest inspection…";
+    try {
+      const res = await fetch(`${API}/maintenance/undercarriage-inspections/wear-profile/import-latest`, {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ asset_id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Import failed");
+      if (data.profile?.limits) fillWearLimits(data.profile.limits, { overwrite: true });
+      updateWearProfileSummary(data.profile);
+      if (msg) msg.textContent = `Imported limits from latest inspection for ${data.asset_code || "machine"}.`;
+    } catch (e) {
+      if (msg) msg.textContent = `Import failed: ${e.message || e}`;
+    }
+  }
+
+  function fillLatestMetaAndMeasurements(data) {
     if (!data) return;
-    fillMeasurements(data.measurements || []);
+    const byKey = new Map((data.measurements || []).map((r) => [String(r.key || "").toLowerCase(), r]));
+    for (const row of ucSchema) {
+      const src = byKey.get(String(row.key).toLowerCase()) || {};
+      const meas = document.getElementById(ucInputId(row.key, "measurement"));
+      if (meas) meas.value = src.measurement ?? "";
+      renderWearPreview(row.key, row);
+    }
     const sag = data.track_sag || {};
     for (const p of ucTrackSagPoints) {
       const el = document.getElementById(`uc_sag_${p}`);
@@ -250,12 +354,55 @@
       const el = document.getElementById(id);
       if (el && val != null && String(el.value || "").trim() === "") el.value = val;
     }
-    // Prefill base/limit from previous; clear measurements for new reading
+  }
+
+  function fillMeasurements(rows) {
+    const list = Array.isArray(rows) ? rows : [];
+    const byKey = new Map(list.map((r) => [String(r.key || "").toLowerCase(), r]));
     for (const row of ucSchema) {
+      const src = byKey.get(String(row.key).toLowerCase()) || {};
+      const meas = document.getElementById(ucInputId(row.key, "measurement"));
+      const base = document.getElementById(ucInputId(row.key, "base"));
+      const limit = document.getElementById(ucInputId(row.key, "limit"));
+      if (meas) meas.value = src.measurement ?? "";
+      if (base) base.value = src.base ?? "";
+      if (limit) limit.value = src.wear_limit ?? "";
+      renderWearPreview(row.key, row);
+    }
+  }
+
+  function fillFromLatest(data) {
+    if (!data) return;
+    fillLatestMetaAndMeasurements(data);
+    // Legacy fallback: if no wear profile, use base/limit from previous inspection
+    const byKey = new Map((data.measurements || []).map((r) => [String(r.key || "").toLowerCase(), r]));
+    for (const row of ucSchema) {
+      const src = byKey.get(String(row.key).toLowerCase()) || {};
+      const base = document.getElementById(ucInputId(row.key, "base"));
+      const limit = document.getElementById(ucInputId(row.key, "limit"));
+      if (base && !String(base.value || "").trim() && src.base != null) base.value = src.base;
+      if (limit && !String(limit.value || "").trim() && src.wear_limit != null) limit.value = src.wear_limit;
       const meas = document.getElementById(ucInputId(row.key, "measurement"));
       if (meas) meas.value = "";
       renderWearPreview(row.key, row);
     }
+  }
+
+  async function loadAssetUndercarriageContext(assetId) {
+    if (!assetId) return null;
+    const profile = await loadWearProfileForAsset(assetId);
+    if (ucMobileMode) showMobileLimitsBanner(profile);
+    try {
+      const res = await fetch(`${API}/maintenance/undercarriage-inspections/latest?asset_id=${assetId}`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load previous inspection");
+      fillLatestMetaAndMeasurements(data.row);
+    } catch {}
+    return profile;
+  }
+
+  async function loadLatestForAsset(assetId) {
+    await loadAssetUndercarriageContext(assetId);
   }
 
   async function loadTemplate() {
@@ -267,16 +414,6 @@
     ucTrackSagPoints = Array.isArray(data.track_sag_points) ? data.track_sag_points : ucTrackSagPoints;
     ucWearBands = Array.isArray(data.wear_bands) ? data.wear_bands : [];
     renderForm();
-  }
-
-  async function loadLatestForAsset(assetId) {
-    if (!assetId) return;
-    try {
-      const res = await fetch(`${API}/maintenance/undercarriage-inspections/latest?asset_id=${assetId}`, { headers: authHeaders() });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load previous inspection");
-      fillFromLatest(data.row);
-    } catch {}
   }
 
   async function pullLiveSmu() {
@@ -378,6 +515,7 @@
       measurements: collectMeasurements(),
       track_sag: collectTrackSag(),
       checklist: collectChecklist(),
+      update_wear_profile: document.getElementById("ucUpdateWearProfileOnSave")?.checked !== false,
     };
     try {
       const res = await fetch(`${API}/maintenance/undercarriage-inspections`, {
@@ -395,6 +533,7 @@
       }
       if (data.pdf_url) window.open(data.pdf_url, "_blank");
       loadSavedList();
+      loadWearProfileForAsset(asset_id);
     } catch (e) {
       if (msg) msg.textContent = `Save failed: ${e.message || e}`;
     }
@@ -567,9 +706,23 @@
     pullLiveSmu().catch(() => {});
   }
 
+  function showMobileLimitsBanner(profile) {
+    const banner = document.getElementById("ucMobileLimitsBanner");
+    if (!banner) return;
+    if (profile?.configured_count) {
+      banner.style.display = "block";
+      banner.textContent = `${profile.configured_count} saved wear limit(s) loaded — enter measurements only.`;
+    } else {
+      banner.style.display = "block";
+      banner.textContent = "No saved wear limits yet — ask workshop to set up limits in Maintenance.";
+    }
+  }
+
   async function initUndercarriage(opts = {}) {
     ucMobileMode = Boolean(opts.mobile);
     document.body.classList.toggle("uc-mobile-mode", ucMobileMode);
+    const profilePanel = document.getElementById("ucWearProfilePanel");
+    if (profilePanel) profilePanel.style.display = ucMobileMode ? "none" : "";
 
     const dateEl = document.getElementById("ucInspectionDate");
     if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
@@ -600,8 +753,10 @@
 
   function bindUndercarriageEvents() {
     document.getElementById("ucAsset")?.addEventListener("change", (evt) => {
-      loadLatestForAsset(Number(evt.target?.value || 0));
+      loadAssetUndercarriageContext(Number(evt.target?.value || 0));
     });
+    document.getElementById("ucSaveWearProfileBtn")?.addEventListener("click", () => saveWearProfile());
+    document.getElementById("ucImportWearLimitsBtn")?.addEventListener("click", () => importWearLimitsFromLatest());
     document.getElementById("ucPullSmuBtn")?.addEventListener("click", () => pullLiveSmu());
     document.getElementById("ucSaveBtn")?.addEventListener("click", () => saveInspection());
     document.getElementById("ucLoadSavedBtn")?.addEventListener("click", () => loadSavedList());

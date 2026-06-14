@@ -24,6 +24,9 @@ import {
   normalizeUndercarriageChecklist,
   normalizeUndercarriageMeasurements,
   normalizeUndercarriageTrackSag,
+  normalizeUndercarriageWearLimits,
+  applyWearLimitsToMeasurements,
+  countConfiguredWearLimits,
   summarizeUndercarriageInspection,
   undercarriageWearBand,
   UNDERCARRIAGE_CHECKLIST_ITEMS,
@@ -1558,6 +1561,21 @@ export default async function maintenanceRoutes(app) {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE RESTRICT
+    )
+  `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS undercarriage_wear_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      asset_id INTEGER NOT NULL,
+      site_code TEXT NOT NULL DEFAULT 'main',
+      limits_json TEXT NOT NULL DEFAULT '[]',
+      source TEXT,
+      notes TEXT,
+      updated_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(asset_id, site_code),
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
     )
   `).run();
 
@@ -7166,7 +7184,22 @@ export default async function maintenanceRoutes(app) {
     excludeId = 0,
   }) {
     const schema = buildUndercarriageComponentSchema();
-    const normalized = normalizeUndercarriageMeasurements(rawMeasurements, schema);
+    const profile = getUndercarriageWearProfileRow(asset_id, site_code);
+    let normalized = normalizeUndercarriageMeasurements(rawMeasurements, schema);
+    if (profile?.limits?.length) {
+      const limitsByKey = new Map(
+        profile.limits.map((r) => [String(r.key || "").toLowerCase(), r]),
+      );
+      normalized = normalized.map((row) => {
+        const lim = limitsByKey.get(String(row.key || "").toLowerCase());
+        if (!lim) return row;
+        return {
+          ...row,
+          base: row.base ?? lim.base,
+          wear_limit: row.wear_limit ?? lim.wear_limit,
+        };
+      });
+    }
     const prev = getPreviousUndercarriageInspection(asset_id, site_code, inspection_date, excludeId);
     const prevMap = new Map();
     if (prev) {
@@ -7179,6 +7212,86 @@ export default async function maintenanceRoutes(app) {
       currentHours: smu,
       previousRow: prevMap.get(String(row.key || "").toLowerCase()) || null,
     }));
+  }
+
+  function parseUndercarriageWearProfileRow(row) {
+    if (!row) return null;
+    let limits = [];
+    try { limits = JSON.parse(String(row.limits_json || "[]")); } catch {}
+    const schema = buildUndercarriageComponentSchema();
+    return {
+      ...row,
+      limits: normalizeUndercarriageWearLimits(limits, schema),
+      configured_count: countConfiguredWearLimits(normalizeUndercarriageWearLimits(limits, schema)),
+    };
+  }
+
+  function getUndercarriageWearProfileRow(assetId, siteCode) {
+    const row = db.prepare(`
+      SELECT *
+      FROM undercarriage_wear_profiles
+      WHERE asset_id = ?
+        AND LOWER(TRIM(COALESCE(site_code, 'main'))) = LOWER(TRIM(?))
+      LIMIT 1
+    `).get(Number(assetId), String(siteCode || "main"));
+    return parseUndercarriageWearProfileRow(row);
+  }
+
+  function saveUndercarriageWearProfile({
+    asset_id,
+    site_code,
+    limits,
+    source = "manual",
+    notes = null,
+    updated_by = null,
+  }) {
+    const schema = buildUndercarriageComponentSchema();
+    const normalized = normalizeUndercarriageWearLimits(limits, schema);
+    db.prepare(`
+      INSERT INTO undercarriage_wear_profiles (
+        asset_id, site_code, limits_json, source, notes, updated_by, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(asset_id, site_code) DO UPDATE SET
+        limits_json = excluded.limits_json,
+        source = excluded.source,
+        notes = COALESCE(excluded.notes, undercarriage_wear_profiles.notes),
+        updated_by = excluded.updated_by,
+        updated_at = datetime('now')
+    `).run(
+      Number(asset_id),
+      String(site_code || "main"),
+      JSON.stringify(normalized),
+      String(source || "manual"),
+      notes,
+      updated_by,
+    );
+    return getUndercarriageWearProfileRow(asset_id, site_code);
+  }
+
+  function importUndercarriageWearProfileFromLatest(assetId, siteCode, updatedBy = null) {
+    const latest = db.prepare(`
+      SELECT measurements_json
+      FROM undercarriage_inspections
+      WHERE asset_id = ?
+        AND LOWER(TRIM(COALESCE(site_code, 'main'))) = LOWER(TRIM(?))
+      ORDER BY inspection_date DESC, id DESC
+      LIMIT 1
+    `).get(Number(assetId), String(siteCode || "main"));
+    if (!latest) return null;
+    let measurements = [];
+    try { measurements = JSON.parse(String(latest.measurements_json || "[]")); } catch {}
+    const limits = measurements.map((m) => ({
+      key: m.key,
+      base: m.base,
+      wear_limit: m.wear_limit,
+    }));
+    return saveUndercarriageWearProfile({
+      asset_id: assetId,
+      site_code: siteCode,
+      limits,
+      source: "import_latest_inspection",
+      updated_by: updatedBy,
+    });
   }
 
   function undercarriageWearArgb(bandKey) {
@@ -7201,6 +7314,76 @@ export default async function maintenanceRoutes(app) {
       track_sag_points: UNDERCARRIAGE_TRACK_SAG_POINTS,
       wear_bands: UNDERCARRIAGE_WEAR_BANDS,
     });
+  });
+
+  app.get("/undercarriage-inspections/wear-profile", async (req, reply) => {
+    try {
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const assetId = Number(req.query?.asset_id || 0);
+      if (!assetId) return reply.code(400).send({ ok: false, error: "asset_id is required" });
+      const asset = db.prepare(`SELECT id, asset_code, asset_name, category FROM assets WHERE id = ?`).get(assetId);
+      if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
+      const profile = getUndercarriageWearProfileRow(assetId, site_code);
+      return reply.send({
+        ok: true,
+        asset,
+        profile,
+        has_profile: Boolean(profile?.configured_count),
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.put("/undercarriage-inspections/wear-profile", async (req, reply) => {
+    try {
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const asset_id = Number(req.body?.asset_id || 0);
+      if (!asset_id) return reply.code(400).send({ ok: false, error: "asset_id is required" });
+      const asset = db.prepare(`SELECT id, asset_code FROM assets WHERE id = ?`).get(asset_id);
+      if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
+      const updated_by = String(req.headers?.["x-user-name"] || req.body?.updated_by || "").trim() || null;
+      const profile = saveUndercarriageWearProfile({
+        asset_id,
+        site_code,
+        limits: req.body?.limits,
+        source: String(req.body?.source || "manual").trim(),
+        notes: String(req.body?.notes || "").trim() || null,
+        updated_by,
+      });
+      return reply.send({
+        ok: true,
+        asset_code: asset.asset_code,
+        profile,
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.post("/undercarriage-inspections/wear-profile/import-latest", async (req, reply) => {
+    try {
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const asset_id = Number(req.body?.asset_id || req.query?.asset_id || 0);
+      if (!asset_id) return reply.code(400).send({ ok: false, error: "asset_id is required" });
+      const asset = db.prepare(`SELECT id, asset_code FROM assets WHERE id = ?`).get(asset_id);
+      if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
+      const updated_by = String(req.headers?.["x-user-name"] || "").trim() || null;
+      const profile = importUndercarriageWearProfileFromLatest(asset_id, site_code, updated_by);
+      if (!profile) {
+        return reply.code(404).send({ ok: false, error: "No previous inspection found to import limits from" });
+      }
+      return reply.send({
+        ok: true,
+        asset_code: asset.asset_code,
+        profile,
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
   });
 
   app.get("/undercarriage-inspections/latest", async (req, reply) => {
@@ -7324,6 +7507,22 @@ export default async function maintenanceRoutes(app) {
         JSON.stringify(summary),
         String(req.body?.notes || checklist.comments || "").trim() || null,
       );
+
+      const updateWearProfile = req.body?.update_wear_profile !== false;
+      if (updateWearProfile) {
+        const limits = measurements.map((m) => ({
+          key: m.key,
+          base: m.base,
+          wear_limit: m.wear_limit,
+        }));
+        saveUndercarriageWearProfile({
+          asset_id,
+          site_code,
+          limits,
+          source: "inspection_save",
+          updated_by: String(req.body?.inspector_name || req.headers?.["x-user-name"] || "").trim() || null,
+        });
+      }
 
       return reply.send({
         ok: true,

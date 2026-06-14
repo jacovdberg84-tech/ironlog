@@ -805,6 +805,22 @@
           </div>
         </details>
 
+        <details class="uc-group uc-wear-profile-panel" id="ucWearProfilePanel">
+          <summary>Wear limits database (per machine)</summary>
+          <div class="uc-group-body">
+            <p class="muted mini" style="margin:0 0 10px;">
+              Set <b>base</b> and <b>wear limit</b> once per machine. Saved limits pre-fill every inspection and QR scan — techs only enter measurements in the field.
+            </p>
+            <div class="row stack-10" style="flex-wrap:wrap; align-items:center;">
+              <button type="button" id="ucSaveWearProfileBtn" class="btn-primary">Save limits for selected machine</button>
+              <button type="button" id="ucImportWearLimitsBtn">Import from latest inspection</button>
+              <label class="mini"><input id="ucUpdateWearProfileOnSave" type="checkbox" checked /> Update saved limits when saving inspection</label>
+            </div>
+            <div id="ucWearProfileMsg" class="muted mini" style="margin-top:8px;"></div>
+            <div id="ucWearProfileSummary" class="muted mini"></div>
+          </div>
+        </details>
+
         <div id="ucFormMount" class="uc-form-mount"></div>
 
         <div class="uc-save-bar">
@@ -1737,7 +1753,7 @@
 
   </div>
 
-  <script src="./undercarriage.js?v=2"></script>
+  <script src="./undercarriage.js?v=3"></script>
   <script src="./maintenance.js?v=33"></script>
 </body>
 </html>

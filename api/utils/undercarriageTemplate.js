@@ -187,6 +187,51 @@ export function normalizeUndercarriageMeasurements(raw, schemaRows = null) {
   });
 }
 
+export function normalizeUndercarriageWearLimits(raw, schemaRows = null) {
+  const schema = Array.isArray(schemaRows) && schemaRows.length
+    ? schemaRows
+    : buildUndercarriageComponentSchema();
+  const input = Array.isArray(raw) ? raw : [];
+  const inputByKey = new Map(input.map((r) => [String(r?.key || r?.component_key || "").toLowerCase(), r]));
+
+  return schema.map((schemaRow) => {
+    const key = String(schemaRow.key || "").toLowerCase();
+    const src = inputByKey.get(key) || {};
+    return {
+      key,
+      group: schemaRow.group,
+      label: schemaRow.label,
+      side: schemaRow.side,
+      wear_direction: schemaRow.wear_direction || "down",
+      base: undercarriageOptionalNumber(src.base),
+      wear_limit: undercarriageOptionalNumber(src.wear_limit),
+    };
+  });
+}
+
+export function applyWearLimitsToMeasurements(rawMeasurements, wearLimits, schemaRows = null) {
+  const limitsByKey = new Map(
+    normalizeUndercarriageWearLimits(wearLimits, schemaRows).map((r) => [String(r.key || "").toLowerCase(), r]),
+  );
+  const input = Array.isArray(rawMeasurements) ? rawMeasurements : [];
+  return input.map((row) => {
+    const key = String(row?.key || row?.component_key || "").toLowerCase();
+    const limitRow = limitsByKey.get(key);
+    if (!limitRow) return row;
+    const out = { ...row };
+    if (undercarriageOptionalNumber(out.base) == null && limitRow.base != null) out.base = limitRow.base;
+    if (undercarriageOptionalNumber(out.wear_limit) == null && limitRow.wear_limit != null) {
+      out.wear_limit = limitRow.wear_limit;
+    }
+    return out;
+  });
+}
+
+export function countConfiguredWearLimits(limits) {
+  const rows = Array.isArray(limits) ? limits : [];
+  return rows.filter((r) => r.base != null && r.wear_limit != null).length;
+}
+
 export function normalizeUndercarriageTrackSag(raw) {
   const out = {};
   for (const pt of UNDERCARRIAGE_TRACK_SAG_POINTS) {

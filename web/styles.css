@@ -6092,3 +6092,6 @@ body.uc-qr-locked #ucAsset {
   opacity: 0.85;
   pointer-events: none;
 }
+.uc-wear-profile-panel summary {
+  color: #0b3a7e;
+}
