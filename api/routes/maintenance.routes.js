@@ -18,6 +18,18 @@ import {
 } from "../utils/machinePrestartTemplates.js";
 import { normalizeUploadedPhoto } from "../utils/imagePdf.js";
 import { resolveStorageAbs as resolveStorageAbsPath, getDataRoot } from "../utils/storagePaths.js";
+import {
+  buildUndercarriageComponentSchema,
+  enrichUndercarriageMeasurement,
+  normalizeUndercarriageChecklist,
+  normalizeUndercarriageMeasurements,
+  normalizeUndercarriageTrackSag,
+  summarizeUndercarriageInspection,
+  undercarriageWearBand,
+  UNDERCARRIAGE_CHECKLIST_ITEMS,
+  UNDERCARRIAGE_TRACK_SAG_POINTS,
+  UNDERCARRIAGE_WEAR_BANDS,
+} from "../utils/undercarriageTemplate.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -1510,6 +1522,38 @@ export default async function maintenanceRoutes(app) {
       total_tyre_cost REAL NOT NULL DEFAULT 0,
       cost_per_running_hour REAL NOT NULL DEFAULT 0,
       tyres_json TEXT NOT NULL DEFAULT '[]',
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE RESTRICT
+    )
+  `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS undercarriage_inspections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      asset_id INTEGER NOT NULL,
+      uuid TEXT UNIQUE,
+      site_code TEXT DEFAULT 'main',
+      inspection_date TEXT NOT NULL,
+      inspector_name TEXT,
+      smu REAL,
+      job_no TEXT,
+      site_name TEXT,
+      planner TEXT,
+      serial_no TEXT,
+      unit_assembly TEXT,
+      model TEXT,
+      yard_no TEXT,
+      work_order_no TEXT,
+      component_group TEXT,
+      group_id TEXT,
+      component_serial_no TEXT,
+      part_no TEXT,
+      cost_center TEXT,
+      measurements_json TEXT NOT NULL DEFAULT '[]',
+      track_sag_json TEXT NOT NULL DEFAULT '{}',
+      checklist_json TEXT NOT NULL DEFAULT '{}',
+      summary_json TEXT NOT NULL DEFAULT '{}',
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -7066,6 +7110,476 @@ export default async function maintenanceRoutes(app) {
         `${isDownload ? "attachment" : "inline"}; filename="IRONLOG_Tyre_Survey_${monthLabel}.pdf"`,
       );
       return reply.send(pdf);
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // =====================================================
+  // UNDERCARRIAGE INSPECTIONS
+  // =====================================================
+  function parseUndercarriageInspectionRow(row) {
+    if (!row) return null;
+    let measurements = [];
+    let track_sag = {};
+    let checklist = {};
+    let summary = {};
+    try { measurements = JSON.parse(String(row.measurements_json || "[]")); } catch {}
+    try { track_sag = JSON.parse(String(row.track_sag_json || "{}")); } catch {}
+    try { checklist = JSON.parse(String(row.checklist_json || "{}")); } catch {}
+    try { summary = JSON.parse(String(row.summary_json || "{}")); } catch {}
+    return {
+      ...row,
+      smu: row.smu == null ? null : Number(row.smu),
+      measurements,
+      track_sag,
+      checklist,
+      summary,
+    };
+  }
+
+  function getPreviousUndercarriageInspection(assetId, siteCode, beforeDate, excludeId = 0) {
+    const params = [Number(assetId), String(siteCode || "main"), String(beforeDate || "")];
+    let excludeSql = "";
+    if (Number(excludeId) > 0) {
+      excludeSql = " AND id <> ?";
+      params.push(Number(excludeId));
+    }
+    return db.prepare(`
+      SELECT *
+      FROM undercarriage_inspections
+      WHERE asset_id = ?
+        AND LOWER(TRIM(COALESCE(site_code, 'main'))) = LOWER(TRIM(?))
+        AND inspection_date <= ?
+        ${excludeSql}
+      ORDER BY inspection_date DESC, id DESC
+      LIMIT 1
+    `).get(...params);
+  }
+
+  function buildUndercarriageMeasurementsForSave(rawMeasurements, {
+    asset_id,
+    site_code,
+    inspection_date,
+    smu,
+    excludeId = 0,
+  }) {
+    const schema = buildUndercarriageComponentSchema();
+    const normalized = normalizeUndercarriageMeasurements(rawMeasurements, schema);
+    const prev = getPreviousUndercarriageInspection(asset_id, site_code, inspection_date, excludeId);
+    const prevMap = new Map();
+    if (prev) {
+      const prevRows = normalizeUndercarriageMeasurements(JSON.parse(String(prev.measurements_json || "[]")), schema);
+      for (const p of prevRows) {
+        prevMap.set(String(p.key || "").toLowerCase(), { ...p, inspection_hours: prev.smu });
+      }
+    }
+    return normalized.map((row) => enrichUndercarriageMeasurement(row, {
+      currentHours: smu,
+      previousRow: prevMap.get(String(row.key || "").toLowerCase()) || null,
+    }));
+  }
+
+  function undercarriageWearArgb(bandKey) {
+    const hit = UNDERCARRIAGE_WEAR_BANDS.find((b) => b.key === bandKey);
+    return hit?.argb || null;
+  }
+
+  function formatUndercarriageAuditDate(ymd) {
+    if (!isDate(String(ymd || ""))) return String(ymd || "");
+    const d = new Date(`${String(ymd).trim()}T12:00:00`);
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return `${String(d.getDate()).padStart(2, "0")}-${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+  }
+
+  app.get("/undercarriage-inspections/template", async (_req, reply) => {
+    return reply.send({
+      ok: true,
+      components: buildUndercarriageComponentSchema(),
+      checklist_items: UNDERCARRIAGE_CHECKLIST_ITEMS,
+      track_sag_points: UNDERCARRIAGE_TRACK_SAG_POINTS,
+      wear_bands: UNDERCARRIAGE_WEAR_BANDS,
+    });
+  });
+
+  app.get("/undercarriage-inspections/latest", async (req, reply) => {
+    try {
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const assetId = Number(req.query?.asset_id || 0);
+      if (!assetId) return reply.code(400).send({ ok: false, error: "asset_id is required" });
+      const row = db.prepare(`
+        SELECT ui.*, a.asset_code, a.asset_name, a.category
+        FROM undercarriage_inspections ui
+        JOIN assets a ON a.id = ui.asset_id
+        WHERE ui.asset_id = ?
+          AND LOWER(TRIM(COALESCE(ui.site_code, 'main'))) = LOWER(TRIM(?))
+        ORDER BY ui.inspection_date DESC, ui.id DESC
+        LIMIT 1
+      `).get(assetId, site_code);
+      if (!row) return reply.send({ ok: true, row: null });
+      return reply.send({ ok: true, row: parseUndercarriageInspectionRow(row) });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.get("/undercarriage-inspections", async (req, reply) => {
+    try {
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const assetId = Number(req.query?.asset_id || 0);
+      const start = String(req.query?.start || "").trim();
+      const end = String(req.query?.end || "").trim();
+      const params = [site_code];
+      const where = ["LOWER(TRIM(COALESCE(ui.site_code, 'main'))) = LOWER(TRIM(?))"];
+      if (assetId > 0) {
+        where.push("ui.asset_id = ?");
+        params.push(assetId);
+      }
+      if (isDate(start)) {
+        where.push("ui.inspection_date >= ?");
+        params.push(start);
+      }
+      if (isDate(end)) {
+        where.push("ui.inspection_date <= ?");
+        params.push(end);
+      }
+      const rows = db.prepare(`
+        SELECT ui.*, a.asset_code, a.asset_name, a.category
+        FROM undercarriage_inspections ui
+        JOIN assets a ON a.id = ui.asset_id
+        WHERE ${where.join(" AND ")}
+        ORDER BY ui.inspection_date DESC, ui.id DESC
+        LIMIT 200
+      `).all(...params);
+      return reply.send({
+        ok: true,
+        rows: rows.map((r) => parseUndercarriageInspectionRow(r)),
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.post("/undercarriage-inspections", async (req, reply) => {
+    try {
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const asset_id = Number(req.body?.asset_id || 0);
+      const inspection_date = String(req.body?.inspection_date || "").trim() || new Date().toISOString().slice(0, 10);
+      if (!asset_id) return reply.code(400).send({ ok: false, error: "asset_id is required" });
+      if (!isDate(inspection_date)) return reply.code(400).send({ ok: false, error: "inspection_date must be YYYY-MM-DD" });
+      const asset = db.prepare(`SELECT id, asset_code, asset_name, category FROM assets WHERE id = ?`).get(asset_id);
+      if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
+
+      const smuRaw = req.body?.smu ?? req.body?.running_hours;
+      const smu = smuRaw == null || smuRaw === "" ? null : Number(smuRaw);
+      if (smu != null && (!Number.isFinite(smu) || smu < 0)) {
+        return reply.code(400).send({ ok: false, error: "smu must be a positive number" });
+      }
+
+      const measurements = buildUndercarriageMeasurementsForSave(req.body?.measurements, {
+        asset_id,
+        site_code,
+        inspection_date,
+        smu,
+      });
+      const track_sag = normalizeUndercarriageTrackSag(req.body?.track_sag || {});
+      const checklist = normalizeUndercarriageChecklist(req.body?.checklist || {});
+      const summary = summarizeUndercarriageInspection(measurements);
+      const branding = getPdfReportBranding(db);
+
+      const ins = db.prepare(`
+        INSERT INTO undercarriage_inspections (
+          asset_id, uuid, site_code, inspection_date, inspector_name, smu,
+          job_no, site_name, planner, serial_no, unit_assembly, model, yard_no,
+          work_order_no, component_group, group_id, component_serial_no, part_no,
+          cost_center, measurements_json, track_sag_json, checklist_json, summary_json,
+          notes, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `).run(
+        asset_id,
+        crypto.randomUUID(),
+        site_code,
+        inspection_date,
+        String(req.body?.inspector_name || "").trim() || null,
+        smu,
+        String(req.body?.job_no || "").trim() || null,
+        String(req.body?.site_name || branding.site_name || "").trim() || null,
+        String(req.body?.planner || "").trim() || null,
+        String(req.body?.serial_no || "").trim() || null,
+        String(req.body?.unit_assembly || "").trim() || null,
+        String(req.body?.model || req.body?.machine_model || asset.category || "").trim() || null,
+        String(req.body?.yard_no || "").trim() || null,
+        String(req.body?.work_order_no || "").trim() || null,
+        String(req.body?.component_group || "").trim() || null,
+        String(req.body?.group_id || "").trim() || null,
+        String(req.body?.component_serial_no || "").trim() || null,
+        String(req.body?.part_no || "").trim() || null,
+        String(req.body?.cost_center || "").trim() || null,
+        JSON.stringify(measurements),
+        JSON.stringify(track_sag),
+        JSON.stringify(checklist),
+        JSON.stringify(summary),
+        String(req.body?.notes || checklist.comments || "").trim() || null,
+      );
+
+      return reply.send({
+        ok: true,
+        id: Number(ins.lastInsertRowid),
+        asset_code: asset.asset_code,
+        summary,
+        measurements,
+        track_sag,
+        checklist,
+        pdf_url: `/api/maintenance/undercarriage-inspections/${Number(ins.lastInsertRowid)}.pdf`,
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  function drawUndercarriageInspectionPdf(doc, insp, branding) {
+    const siteName = branding?.site_name || "";
+    doc.y = pdfBodyTop(doc, { siteName });
+    doc.font("Helvetica-Bold").fontSize(11).fillColor("#0f172a");
+    doc.text("Undercarriage Report");
+    doc.moveDown(0.25);
+    doc.font("Helvetica").fontSize(9).fillColor("#334155");
+    doc.text(
+      `Date: ${formatUndercarriageAuditDate(insp.inspection_date)}   Machine: ${insp.asset_code || "-"}   SMU: ${insp.smu ?? "-"}   Site: ${insp.site_name || siteName || "-"}`,
+    );
+    doc.text(
+      `Serial: ${insp.serial_no || "-"}   Model: ${insp.model || insp.category || "-"}   Inspector: ${insp.inspector_name || "-"}   Job: ${insp.job_no || "-"}`,
+    );
+    if (insp.summary?.worst_component) {
+      doc.moveDown(0.15);
+      doc.fillColor("#b45309");
+      doc.text(`Highest wear: ${insp.summary.worst_component} — ${Number(insp.summary.worst_wear_pct || 0).toFixed(1)}%`);
+      doc.fillColor("#334155");
+    }
+    doc.moveDown(0.35);
+
+    const cols = [
+      { key: "component", label: "Component", width: 0.18 },
+      { key: "side", label: "Side", width: 0.05 },
+      { key: "measurement", label: "Meas", width: 0.07 },
+      { key: "base", label: "Base", width: 0.07 },
+      { key: "wear_limit", label: "Limit", width: 0.07 },
+      { key: "wear_pct", label: "% Wear", width: 0.08 },
+      { key: "life_hrs", label: "Life hrs", width: 0.08 },
+      { key: "usage_pct", label: "Usage %", width: 0.08 },
+    ];
+    const rows = (insp.measurements || []).filter((m) => m.measurement != null || m.base != null).map((m) => ({
+      component: m.label || m.key,
+      side: m.side || "-",
+      measurement: m.measurement == null ? "-" : Number(m.measurement).toFixed(1),
+      base: m.base == null ? "-" : Number(m.base).toFixed(1),
+      wear_limit: m.wear_limit == null ? "-" : Number(m.wear_limit).toFixed(1),
+      wear_pct: m.wear_pct == null ? "-" : `${Number(m.wear_pct).toFixed(1)}%`,
+      life_hrs: m.life_expectancy_hours == null ? "-" : String(m.life_expectancy_hours),
+      usage_pct: m.wear_usage_pct == null ? "-" : `${Number(m.wear_usage_pct).toFixed(1)}%`,
+    }));
+    table(doc, cols, rows, { fontSize: 7 });
+
+    const sag = insp.track_sag || {};
+    const sagVals = UNDERCARRIAGE_TRACK_SAG_POINTS.map((p) => `${p}:${sag[p] ?? "-"}mm`).join("  ");
+    ensurePageSpace(doc, 48);
+    doc.moveDown(0.35);
+    doc.font("Helvetica-Bold").fontSize(9).text("Track sag (mm)");
+    doc.font("Helvetica").fontSize(8).text(sagVals || "—");
+
+    ensurePageSpace(doc, 60);
+    doc.moveDown(0.35);
+    doc.font("Helvetica-Bold").fontSize(9).text("Condition checklist");
+    doc.font("Helvetica").fontSize(8);
+    for (const item of UNDERCARRIAGE_CHECKLIST_ITEMS) {
+      const st = insp.checklist?.items?.[item.key] || {};
+      doc.text(`${item.label}: LH ${st.lh ? "Yes" : "No"}   RH ${st.rh ? "Yes" : "No"}`);
+    }
+    doc.text(`General condition: ${insp.checklist?.general_condition || "-"}`);
+    if (insp.checklist?.comments || insp.notes) {
+      doc.moveDown(0.2);
+      doc.text(`Comments: ${insp.checklist?.comments || insp.notes}`);
+    }
+
+    doc.moveDown(0.35);
+    doc.fontSize(7).fillColor("#64748b");
+    doc.text("Wear bands: Green 0–75% | Yellow 76–100% | Orange 101–120% | Red >120%");
+  }
+
+  app.get("/undercarriage-inspections/:id.pdf", async (req, reply) => {
+    try {
+      const id = Number(req.params?.id || 0);
+      if (!id) return reply.code(400).send({ ok: false, error: "invalid id" });
+      const isDownload = String(req.query?.download || "").trim() === "1";
+      const row = db.prepare(`
+        SELECT ui.*, a.asset_code, a.asset_name, a.category
+        FROM undercarriage_inspections ui
+        JOIN assets a ON a.id = ui.asset_id
+        WHERE ui.id = ?
+        LIMIT 1
+      `).get(id);
+      if (!row) return reply.code(404).send({ ok: false, error: "Inspection not found" });
+      const insp = parseUndercarriageInspectionRow(row);
+      const branding = getPdfReportBranding(db);
+      const pdf = await buildPdfBuffer(
+        (doc) => drawUndercarriageInspectionPdf(doc, insp, branding),
+        {
+          title: "IRONLOG",
+          subtitle: "Undercarriage Report",
+          rightText: insp.asset_code || "",
+          showPageNumbers: true,
+          layout: "landscape",
+        },
+      );
+      reply.header("Content-Type", "application/pdf");
+      reply.header("Cache-Control", "no-store");
+      reply.header(
+        "Content-Disposition",
+        `${isDownload ? "attachment" : "inline"}; filename="IRONLOG_Undercarriage_${insp.asset_code || "report"}_${insp.inspection_date || id}.pdf"`,
+      );
+      return reply.send(pdf);
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  async function buildUndercarriageXlsxBuffer(inspRows) {
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "IRONLOG";
+    wb.created = new Date();
+    const ws = wb.addWorksheet("Undercarriage");
+    const headerFont = { bold: true };
+    const blueFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFADD8E6" } };
+    const yellowFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
+
+    ws.getCell(1, 1).value = "UNDERCARRIAGE REPORT";
+    ws.getCell(1, 1).font = { bold: true, size: 14 };
+    ws.getCell(2, 1).value = "Colour: Green 0-75% | Yellow 76-100% | Orange 101-120% | Red >120%";
+
+    let rowNum = 4;
+    for (const insp of inspRows) {
+      const meta1 = ws.getRow(rowNum++);
+      meta1.getCell(1).value = "Date of Audit";
+      meta1.getCell(1).font = headerFont;
+      meta1.getCell(2).value = formatUndercarriageAuditDate(insp.inspection_date);
+      meta1.getCell(3).value = "Machine";
+      meta1.getCell(3).font = headerFont;
+      meta1.getCell(4).value = insp.asset_code || "";
+      meta1.getCell(5).value = "SMU";
+      meta1.getCell(5).font = headerFont;
+      meta1.getCell(6).value = insp.smu ?? "";
+
+      const meta2 = ws.getRow(rowNum++);
+      meta2.getCell(1).value = "Serial No.";
+      meta2.getCell(1).font = headerFont;
+      meta2.getCell(2).value = insp.serial_no || "";
+      meta2.getCell(3).value = "Model";
+      meta2.getCell(3).font = headerFont;
+      meta2.getCell(4).value = insp.model || insp.category || "";
+      meta2.getCell(5).value = "Site";
+      meta2.getCell(5).font = headerFont;
+      meta2.getCell(6).value = insp.site_name || "";
+
+      const yellow = ws.getRow(rowNum++);
+      for (let c = 1; c <= 12; c += 1) yellow.getCell(c).fill = yellowFill;
+
+      const headers = [
+        "Component", "Side", "Measurement", "Base", "Wear Limit", "% Wear",
+        "Wear usage %", "Life expectancy (hrs)", "Wear rate %/hr",
+      ];
+      const hdr = ws.getRow(rowNum++);
+      headers.forEach((label, idx) => {
+        const cell = hdr.getCell(idx + 1);
+        cell.value = label;
+        cell.font = headerFont;
+        cell.fill = blueFill;
+      });
+
+      for (const m of insp.measurements || []) {
+        if (m.measurement == null && m.base == null && m.wear_limit == null) continue;
+        const dataRow = ws.getRow(rowNum++);
+        dataRow.getCell(1).value = m.label || m.key;
+        dataRow.getCell(2).value = m.side || "";
+        dataRow.getCell(3).value = m.measurement ?? "";
+        dataRow.getCell(4).value = m.base ?? "";
+        dataRow.getCell(5).value = m.wear_limit ?? "";
+        dataRow.getCell(6).value = m.wear_pct ?? "";
+        dataRow.getCell(7).value = m.wear_usage_pct ?? "";
+        dataRow.getCell(8).value = m.life_expectancy_hours ?? "";
+        dataRow.getCell(9).value = m.wear_rate_pct_per_hour ?? "";
+        const argb = undercarriageWearArgb(m.wear_band);
+        if (argb) {
+          dataRow.getCell(6).fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
+        }
+      }
+      rowNum += 1;
+    }
+
+    ws.columns = [
+      { width: 22 }, { width: 8 }, { width: 12 }, { width: 10 }, { width: 12 },
+      { width: 10 }, { width: 12 }, { width: 18 }, { width: 14 },
+    ];
+    return wb.xlsx.writeBuffer();
+  }
+
+  app.get("/undercarriage-inspections/report.xlsx", async (req, reply) => {
+    try {
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const inspectionId = Number(req.query?.inspection_id || req.query?.id || 0);
+      const assetId = Number(req.query?.asset_id || 0);
+      const month = String(req.query?.month || "").trim();
+      let rows = [];
+
+      if (inspectionId > 0) {
+        const one = db.prepare(`
+          SELECT ui.*, a.asset_code, a.asset_name, a.category
+          FROM undercarriage_inspections ui
+          JOIN assets a ON a.id = ui.asset_id
+          WHERE ui.id = ?
+          LIMIT 1
+        `).get(inspectionId);
+        if (!one) return reply.code(404).send({ ok: false, error: "Inspection not found" });
+        rows = [parseUndercarriageInspectionRow(one)];
+      } else {
+        const params = [site_code];
+        const where = ["LOWER(TRIM(COALESCE(ui.site_code, 'main'))) = LOWER(TRIM(?))"];
+        if (assetId > 0) {
+          where.push("ui.asset_id = ?");
+          params.push(assetId);
+        }
+        if (isMonth(month)) {
+          const bounds = monthBoundsYmd(month);
+          if (bounds) {
+            where.push("ui.inspection_date >= ?");
+            where.push("ui.inspection_date <= ?");
+            params.push(bounds.start, bounds.end);
+          }
+        }
+        const raw = db.prepare(`
+          SELECT ui.*, a.asset_code, a.asset_name, a.category
+          FROM undercarriage_inspections ui
+          JOIN assets a ON a.id = ui.asset_id
+          WHERE ${where.join(" AND ")}
+          ORDER BY a.asset_code ASC, ui.inspection_date DESC, ui.id DESC
+        `).all(...params);
+        rows = raw.map((r) => parseUndercarriageInspectionRow(r));
+      }
+
+      if (!rows.length) return reply.code(404).send({ ok: false, error: "No inspections found for export" });
+      const buf = await buildUndercarriageXlsxBuffer(rows);
+      const suffix = inspectionId > 0
+        ? `_${rows[0]?.asset_code || "report"}_${rows[0]?.inspection_date || inspectionId}`
+        : (isMonth(month) ? `_${month}` : "");
+      reply
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header("Cache-Control", "no-store")
+        .header("Content-Disposition", `attachment; filename="IRONLOG_Undercarriage${suffix}.xlsx"`)
+        .send(Buffer.from(buf));
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message || String(err) });

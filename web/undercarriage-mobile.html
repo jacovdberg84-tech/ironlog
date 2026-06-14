@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b3a7e" />
+  <title>IRONLOG — Undercarriage Inspection</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body class="uc-mobile-mode uc-mobile-page">
+  <header class="uc-mobile-header">
+    <a href="./maintenance.html" class="uc-mobile-back">← Maintenance</a>
+    <h1>Undercarriage</h1>
+    <p class="muted mini">Field inspection — works offline after first load when cached.</p>
+  </header>
+
+  <main class="uc-mobile-main card stack-24">
+    <div class="row stack-10" style="flex-wrap:wrap;">
+      <label style="flex:1 1 100%;">Machine<select id="ucAsset" class="w-full"></select></label>
+      <label>Date<input id="ucInspectionDate" type="date" /></label>
+      <label>SMU<input id="ucSmu" type="number" step="0.1" min="0" inputmode="decimal" class="w-120" /></label>
+      <button type="button" id="ucPullSmuBtn">Live hrs</button>
+    </div>
+    <label>Inspector<input id="ucInspector" type="text" placeholder="Your name" /></label>
+    <div id="ucSmuMeta" class="muted mini"></div>
+
+    <details class="uc-group">
+      <summary>Job details (optional)</summary>
+      <div class="uc-group-body uc-meta-grid">
+        <label>Serial<input id="ucSerialNo" type="text" /></label>
+        <label>Model<input id="ucModel" type="text" /></label>
+        <label>Job<input id="ucJobNo" type="text" /></label>
+        <label>Planner<input id="ucPlanner" type="text" /></label>
+      </div>
+    </details>
+
+    <div id="ucFormMount"></div>
+    <div id="ucMsg" class="muted"></div>
+  </main>
+
+  <footer class="uc-mobile-footer">
+    <button type="button" id="ucSaveBtn" class="btn-primary uc-mobile-save">Save inspection</button>
+  </footer>
+
+  <script src="./undercarriage.js?v=1"></script>
+  <script>
+    (async function () {
+      const params = new URLSearchParams(location.search);
+      const assetCode = params.get("asset_code") || "";
+      try {
+        const res = await fetch("/api/assets?include_archived=0");
+        const data = await res.json();
+        const rows = Array.isArray(data) ? data : [];
+        const sel = document.getElementById("ucAsset");
+        if (sel) {
+          sel.innerHTML = `<option value="">Select machine</option>` + rows
+            .filter((a) => Number(a.active ?? 1) !== 0 && Number(a.archived ?? 0) === 0)
+            .map((a) => `<option value="${Number(a.id)}">${a.asset_code} - ${a.asset_name || ""}</option>`)
+            .join("");
+          if (assetCode) {
+            const opt = Array.from(sel.options).find((o) => o.textContent.startsWith(assetCode));
+            if (opt) sel.value = opt.value;
+          }
+        }
+      } catch {}
+      if (window.bindUndercarriageEvents) window.bindUndercarriageEvents();
+      if (window.initUndercarriage) {
+        await window.initUndercarriage({ mobile: true, assetCode });
+      }
+    })();
+  </script>
+</body>
+</html>

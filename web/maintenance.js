@@ -109,6 +109,7 @@ function viewForSection(section) {
     "artisan-inspections": "ai",
     "weekly-forum": "wf",
     "tyre-inspections": "tyre",
+    "undercarriage-inspections": "uc",
     "weekly-inspections": "wi",
     "asset-kpi": "kpi",
     "reliability": "rel",
@@ -159,6 +160,7 @@ function scrollToSection(section) {
           "ai": "artisanInspectionsSection",
           "wf": "weeklyForumSection",
           "tyre": "tyreInspectionsSection",
+          "uc": "undercarriageInspectionsSection",
           "wi": "weeklyInspectionSection",
           "kpi": "assetKpiSection",
           "rel": "reliabilitySection",
@@ -197,6 +199,9 @@ function refreshTopViewData(view) {
     case "tyre":
       loadTyreInspections();
       loadTyreLifecycle().catch(() => {});
+      break;
+    case "uc":
+      if (typeof window.initUndercarriage === "function") window.initUndercarriage();
       break;
     case "wi":
       loadWeeklyInspectionCalendar().catch(() => {});
@@ -2479,6 +2484,7 @@ function setTopView(view, section = "") {
   const ai = document.getElementById("artisanInspectionsSection");
   const wf = document.getElementById("weeklyForumSection");
   const tyre = document.getElementById("tyreInspectionsSection");
+  const uc = document.getElementById("undercarriageInspectionsSection");
   const wi = document.getElementById("weeklyInspectionSection");
   const kpi = document.getElementById("assetKpiSection");
   const rel = document.getElementById("reliabilitySection");
@@ -2494,6 +2500,7 @@ function setTopView(view, section = "") {
   if (ai) ai.style.display = "none";
   if (wf) wf.style.display = "none";
   if (tyre) tyre.style.display = "none";
+  if (uc) uc.style.display = "none";
   if (wi) wi.style.display = "none";
   if (kpi) kpi.style.display = "none";
   if (rel) rel.style.display = "none";
@@ -2520,6 +2527,9 @@ function setTopView(view, section = "") {
       break;
     case "tyre":
       if (tyre) tyre.style.display = "block";
+      break;
+    case "uc":
+      if (uc) uc.style.display = "block";
       break;
     case "wi":
       if (wi) wi.style.display = "block";
@@ -2565,6 +2575,9 @@ function setTopView(view, section = "") {
           break;
         case "tyre":
           isActive = navSection === "tyre-inspections";
+          break;
+        case "uc":
+          isActive = navSection === "undercarriage-inspections";
           break;
         case "wi":
           isActive = navSection === "weekly-inspections";
@@ -2981,6 +2994,8 @@ async function loadAssetsForInspection() {
   const drF = document.getElementById("drFilterAsset");
   const tyreA = document.getElementById("tyreAsset");
   const tyreF = document.getElementById("tyreFilterAsset");
+  const ucA = document.getElementById("ucAsset");
+  const ucF = document.getElementById("ucFilterAsset");
   const wiA = document.getElementById("wiAssetSelect");
   if (!selA || !selF) return;
   try {
@@ -3000,6 +3015,8 @@ async function loadAssetsForInspection() {
     if (drF) drF.innerHTML = `<option value="">All assets</option>${opts}`;
     if (tyreA) tyreA.innerHTML = `<option value="">Select asset</option>${opts}`;
     if (tyreF) tyreF.innerHTML = `<option value="">All assets</option>${opts}`;
+    if (ucA) ucA.innerHTML = `<option value="">Select asset</option>${opts}`;
+    if (ucF) ucF.innerHTML = `<option value="">All assets</option>${opts}`;
     if (wiA) wiA.innerHTML = `<option value="">Select asset</option>${opts}`;
   } catch (e) {
     selA.innerHTML = `<option value="">Assets load failed</option>`;
@@ -3010,6 +3027,8 @@ async function loadAssetsForInspection() {
     if (drF) drF.innerHTML = `<option value="">Assets load failed</option>`;
     if (tyreA) tyreA.innerHTML = `<option value="">Assets load failed</option>`;
     if (tyreF) tyreF.innerHTML = `<option value="">Assets load failed</option>`;
+    if (ucA) ucA.innerHTML = `<option value="">Assets load failed</option>`;
+    if (ucF) ucF.innerHTML = `<option value="">Assets load failed</option>`;
     if (wiA) wiA.innerHTML = `<option value="">Assets load failed</option>`;
   }
 }
@@ -7180,6 +7199,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const tyreSurveyMonthEl = document.getElementById("tyreSurveyMonth");
   if (tyreSurveyMonthEl && !tyreSurveyMonthEl.value) tyreSurveyMonthEl.value = new Date().toISOString().slice(0, 7);
   loadTyreInspections();
+  if (typeof window.bindUndercarriageEvents === "function") window.bindUndercarriageEvents();
   document.getElementById("wfActionBody")?.addEventListener("change", (evt) => {
     const sel = evt.target?.closest?.("select[data-wf-action-status]");
     if (!sel) return;

@@ -12560,6 +12560,7 @@ function pillForType(t) {
   if (t === "damage_report") return "<span class='pill red'>DMG</span>";
   if (t === "tyre_change") return "<span class='pill orange'>TY CHG</span>";
   if (t === "tyre_inspection") return "<span class='pill blue'>TY INSP</span>";
+  if (t === "undercarriage_inspection") return "<span class='pill' style='background:#334155;color:#fff;'>UC</span>";
   if (t === "work_order") return "<span class='pill blue'>WO</span>";
   if (t === "ops_slip") return "<span class='pill' style='background:#5b21b6;color:#fff;'>OPS</span>";
   return "<span class='pill'>EV</span>";
@@ -12616,6 +12617,7 @@ async function loadAssetHistory() {
       <div class="pill red">Damage Reports: ${Number(counts.damage_reports || 0)}</div>
       <div class="pill orange">Tyre Changes: ${Number(counts.tyre_changes || 0)}</div>
       <div class="pill blue">Tyre Inspections: ${Number(counts.tyre_inspections || 0)}</div>
+      <div class="pill" style="background:#334155;color:#fff;">Undercarriage: ${Number(counts.undercarriage_inspections || 0)}</div>
       <div class="pill green">Fuel logs: ${Number(counts.fuel_logs || 0)}</div>
       <div class="pill" style="background:#0d9488;color:#fff;">Lube logs: ${Number(counts.lube_logs || 0)}</div>
       <div class="pill blue">Inspections: ${Number(counts.inspections || 0)}</div>
@@ -12683,6 +12685,14 @@ async function loadAssetHistory() {
           }${
             ev.details?.tread_depth != null ? `<br><small>Tread: ${ev.details.tread_depth}</small>` : ""
           }${ev.details?.notes ? `<br><small>${ev.details.notes}</small>` : ""}${photoBlock}`
+        : ev.type === "undercarriage_inspection"
+        ? `<br><small>SMU: ${ev.details?.smu ?? "-"} | Max wear: ${ev.details?.worst_wear_pct ?? "-"}%${
+            ev.details?.worst_component ? ` (${ev.details.worst_component})` : ""
+          }</small>${
+            ev.details?.pdf_url
+              ? `<br><small><a href="${ev.details.pdf_url}" target="_blank" rel="noopener">Open PDF</a></small>`
+              : ""
+          }${ev.details?.notes ? `<br><small>${ev.details.notes}</small>` : ""}`
         : ev.type === "ops_slip"
         ? formatOpsSlipHistoryExtra(ev)
         : ev.type === "fuel"

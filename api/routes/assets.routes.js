@@ -1328,6 +1328,44 @@ export default async function assetRoutes(app) {
       }
     }
 
+    // ---- UNDERCARRIAGE INSPECTIONS
+    let undercarriageEvents = [];
+    if (hasTable("undercarriage_inspections")) {
+      const ucF = dateFilter("ui.inspection_date");
+      undercarriageEvents = db.prepare(`
+        SELECT
+          ui.id,
+          ui.inspection_date AS date,
+          ui.inspector_name,
+          ui.smu,
+          ui.summary_json,
+          ui.notes
+        FROM undercarriage_inspections ui
+        WHERE ui.asset_id = ? ${ucF.sql}
+        ORDER BY ui.inspection_date DESC, ui.id DESC
+        LIMIT 200
+      `).all(asset.id, ...ucF.params).map((row) => {
+        let summary = {};
+        try { summary = JSON.parse(String(row.summary_json || "{}")); } catch {}
+        const worst = summary.worst_wear_pct != null ? Number(summary.worst_wear_pct).toFixed(1) : null;
+        return {
+          type: "undercarriage_inspection",
+          date: row.date,
+          title: `Undercarriage inspection${worst != null ? ` — max wear ${worst}%` : ""}`,
+          work_order_id: null,
+          details: {
+            inspection_id: row.id,
+            inspector_name: row.inspector_name || null,
+            smu: row.smu != null ? Number(row.smu) : null,
+            worst_wear_pct: summary.worst_wear_pct ?? null,
+            worst_component: summary.worst_component || null,
+            notes: row.notes || null,
+            pdf_url: `/api/maintenance/undercarriage-inspections/${row.id}.pdf`,
+          },
+        };
+      });
+    }
+
     // ---- OIL TOTALS (qty + optional cost)
     const oilF = dateFilter("o.log_date");
     const hasOilTotalCost = hasColumn("oil_logs", "total_cost");
@@ -1398,6 +1436,7 @@ export default async function assetRoutes(app) {
       ...fuelEvents,
       ...lubeEvents,
       ...inspectionEvents,
+      ...undercarriageEvents,
     ].sort((a, b) =>
       String(b.date).localeCompare(String(a.date))
     );
@@ -1417,6 +1456,7 @@ export default async function assetRoutes(app) {
         fuel_logs: fuelEvents.length,
         lube_logs: lubeEvents.length,
         inspections: inspectionEvents.length,
+        undercarriage_inspections: undercarriageEvents.length,
         events_total: history.length,
       },
       totals: {

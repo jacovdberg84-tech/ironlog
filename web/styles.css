@@ -5932,3 +5932,131 @@ body.bare-child-tab #mainContent > .card.stack-12 {
     display: none !important;
   }
 }
+
+/* Undercarriage inspections — mobile-friendly field form */
+.uc-shell { position: relative; }
+.uc-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.uc-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.uc-wear-chip {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.uc-group {
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  background: #fff;
+}
+.uc-group > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 12px 14px;
+  list-style: none;
+}
+.uc-group > summary::-webkit-details-marker { display: none; }
+.uc-group-body {
+  padding: 0 14px 14px;
+  border-top: 1px solid #eef2ff;
+}
+.uc-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+.uc-measure-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) repeat(3, minmax(72px, 1fr)) minmax(110px, 1fr);
+  gap: 8px;
+  align-items: end;
+  padding: 10px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+.uc-measure-label strong { display: block; }
+.uc-num-input {
+  width: 100%;
+  min-height: 40px;
+  font-size: 16px;
+}
+.uc-track-sag-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(64px, 1fr));
+  gap: 10px;
+}
+.uc-check-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #f8fafc;
+}
+.uc-check-label { font-weight: 500; }
+.uc-save-bar {
+  position: sticky;
+  bottom: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.2), #fff 35%);
+  padding: 12px 0 4px;
+  z-index: 5;
+}
+.uc-form-mount { margin-top: 8px; }
+
+body.uc-mobile-mode .uc-measure-row {
+  grid-template-columns: 1fr 1fr;
+}
+body.uc-mobile-mode .uc-measure-label {
+  grid-column: 1 / -1;
+}
+body.uc-mobile-mode .uc-wear-preview {
+  grid-column: 1 / -1;
+}
+body.uc-mobile-mode .uc-meta-grid {
+  grid-template-columns: 1fr;
+}
+body.uc-mobile-page {
+  margin: 0;
+  background: #f8fafc;
+}
+.uc-mobile-header {
+  padding: 14px 16px 8px;
+  background: #0b3a7e;
+  color: #fff;
+}
+.uc-mobile-header h1 {
+  margin: 6px 0 0;
+  font-size: 1.35rem;
+}
+.uc-mobile-back {
+  color: #dbeafe;
+  text-decoration: none;
+  font-size: 14px;
+}
+.uc-mobile-main {
+  margin: 12px;
+  padding: 14px;
+}
+.uc-mobile-footer {
+  position: sticky;
+  bottom: 0;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: #fff;
+  border-top: 1px solid #e2e8f0;
+}
+.uc-mobile-save {
+  width: 100%;
+  min-height: 48px;
+  font-size: 16px;
+}
