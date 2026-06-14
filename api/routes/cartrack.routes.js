@@ -83,6 +83,57 @@ export default async function cartrackRoutes(app) {
     }
   });
 
+  app.get("/live", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "site_manager", "operator", "artisan", "stores"])) return;
+    const refresh = String(req.query?.refresh || "1").trim() !== "0";
+    let syncError = null;
+    if (refresh) {
+      try {
+        await syncCartrackFleetStatus();
+      } catch (err) {
+        syncError = String(err.message || err);
+      }
+    }
+    const settings = getCartrackPublicSettings();
+    const fleet = listCartrackFleetFromDb();
+    const today = new Date().toISOString().slice(0, 10);
+    const speedingToday = listCartrackEventsFromDb({
+      startDate: today,
+      endDate: today,
+      speedingOnly: true,
+      limit: 200,
+    });
+    const speedRegs = new Set(speedingToday.map((e) => e.registration || e.asset_code));
+    const positioned = fleet.map((v) => {
+      const lat = Number(v.latitude);
+      const lng = Number(v.longitude);
+      const hasGps = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
+      const code = v.asset_code || v.registration;
+      return {
+        ...v,
+        has_gps: hasGps,
+        is_speeding: speedRegs.has(v.registration) || speedRegs.has(code),
+      };
+    });
+    const live = positioned.filter((v) => Number(v.ignition_on) === 1).length;
+    return reply.send({
+      ok: true,
+      configured: settings.configured,
+      base_url: settings.base_url,
+      refreshed: refresh && !syncError,
+      sync_error: syncError,
+      summary: {
+        total_vehicles: fleet.length,
+        with_gps: positioned.filter((v) => v.has_gps).length,
+        ignition_on: live,
+        speeding_today: speedingToday.length,
+        last_sync: fleet[0]?.synced_at || null,
+      },
+      fleet: positioned,
+      speeding_today: speedingToday,
+    });
+  });
+
   app.get("/fleet", async (req, reply) => {
     if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "site_manager", "operator", "artisan", "stores"])) return;
     const settings = getCartrackPublicSettings();

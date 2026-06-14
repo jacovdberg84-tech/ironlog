@@ -20,6 +20,7 @@ const PRODUCTION_SITE_TABS = [
   "maintenance",
   "assets",
   "telematics",
+  "cartrack",
   "workshop",
   "fuel",
   "lube",
@@ -815,19 +816,20 @@ async function openAuthedPdf(url) {
 
 function getRoleAllowedTabs(role) {
   const r = String(role || "").toLowerCase();
-  if (r === "operator") return ["dash", "daily", "workshop", "fuel", "lube", "legal", "operations", "ironmind", "docs", "vehicle", "tasks", "telematics"];
-  if (r === "artisan") return ["dash", "maintenance", "Breakdowns", "workshop", "reports", "fuel", "lube", "legal", "operations", "dispatch", "ironmind", "docs", "vehicle", "tasks", "telematics"];
-  if (r === "stores") return ["dash", "maintenance", "stock", "workshop", "uploads", "reports", "finance", "legal", "procurement", "operations", "dispatch", "quality", "ironmind", "docs", "vehicle", "tasks", "telematics"];
+  if (r === "operator") return ["dash", "daily", "workshop", "fuel", "lube", "legal", "operations", "ironmind", "docs", "vehicle", "tasks", "telematics", "cartrack"];
+  if (r === "artisan") return ["dash", "maintenance", "Breakdowns", "workshop", "reports", "fuel", "lube", "legal", "operations", "dispatch", "ironmind", "docs", "vehicle", "tasks", "telematics", "cartrack"];
+  if (r === "stores") return ["dash", "maintenance", "stock", "workshop", "uploads", "reports", "finance", "legal", "procurement", "operations", "dispatch", "quality", "ironmind", "docs", "vehicle", "tasks", "telematics", "cartrack"];
   if (r === "procurement") return ["dash", "stock", "workshop", "reports", "finance", "procurement", "operations", "quality", "docs", "tasks"];
-  if (r === "plant_manager") return ["dash", "daily", "assets", "telematics", "workshop", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
-  if (r === "site_manager") return ["dash", "daily", "assets", "telematics", "workshop", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
+  if (r === "plant_manager") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
+  if (r === "site_manager") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
   if (r === "executive") return ["dash", "workshop", "reports", "finance", "operations", "quality", "audit", "docs", "tasks"];
-  if (r === "supervisor") return ["dash", "daily", "assets", "telematics", "workshop", "maintenance", "fuel", "lube", "stock", "legal", "uploads", "reports", "finance", "enterprise", "exec", "Breakdowns", "approvals", "procurement", "operations", "dispatch", "quality", "audit", "ironmind", "docs", "vehicle", "tasks"];
+  if (r === "supervisor") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "legal", "uploads", "reports", "finance", "enterprise", "exec", "Breakdowns", "approvals", "procurement", "operations", "dispatch", "quality", "audit", "ironmind", "docs", "vehicle", "tasks"];
   return [
     "dash",
     "daily",
     "assets",
     "telematics",
+    "cartrack",
     "workshop",
     "maintenance",
     "fuel",
@@ -4377,6 +4379,272 @@ async function initCartrackAdminPanel() {
   await loadCartrackAdminSettings().catch(() => {});
 }
 
+const CARTRACK_TRACK_POLL_MS = 45000;
+const CARTRACK_MAP_DEFAULT = { lat: -18.665695, lng: 35.529562, zoom: 6 };
+let cartrackLeafletPromise = null;
+let cartrackMap = null;
+let cartrackMarkers = new Map();
+let cartrackTrackPollTimer = null;
+let cartrackTrackFleetCache = [];
+
+function ensureLeafletLoaded() {
+  if (window.L) return Promise.resolve();
+  if (cartrackLeafletPromise) return cartrackLeafletPromise;
+  cartrackLeafletPromise = new Promise((resolve, reject) => {
+    if (!document.querySelector('link[data-leaflet-css]')) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      link.setAttribute("data-leaflet-css", "1");
+      document.head.appendChild(link);
+    }
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Could not load map library"));
+    document.head.appendChild(script);
+  });
+  return cartrackLeafletPromise;
+}
+
+function cartrackMarkerColor(v) {
+  if (v.is_speeding) return "#dc2626";
+  if (Number(v.ignition_on) === 1) return "#16a34a";
+  return "#64748b";
+}
+
+function cartrackVehicleKey(v) {
+  return String(v.registration || v.asset_code || "").trim();
+}
+
+function cartrackVehicleLabel(v) {
+  return String(v.asset_code || v.registration || "—");
+}
+
+function buildCartrackPopupHtml(v) {
+  const ign = Number(v.ignition_on) === 1 ? "ON" : "OFF";
+  const spd = Number(v.speed_kmh || 0).toFixed(0);
+  const odo = v.odometer_km != null ? `${Number(v.odometer_km).toFixed(0)} km` : "—";
+  const when = String(v.last_event_at || v.synced_at || "").slice(0, 16) || "—";
+  const lat = Number(v.latitude);
+  const lng = Number(v.longitude);
+  const mapsUrl = Number.isFinite(lat) && Number.isFinite(lng)
+    ? `https://www.google.com/maps?q=${lat},${lng}`
+    : "";
+  return `
+    <div class="cartrack-popup">
+      <strong>${escapeHtml(cartrackVehicleLabel(v))}</strong>
+      <div>${escapeHtml(v.vehicle_name || v.registration || "")}</div>
+      <div>Speed: <b>${spd}</b> km/h · Ignition: <b>${ign}</b></div>
+      <div>Odometer: ${escapeHtml(odo)}</div>
+      <div class="muted">Last: ${escapeHtml(when)}</div>
+      ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" rel="noopener noreferrer">Open in Maps</a>` : ""}
+    </div>
+  `;
+}
+
+function ensureCartrackMap() {
+  const host = qs("cartrackMap");
+  if (!host || !window.L) return null;
+  if (cartrackMap) {
+    cartrackMap.invalidateSize();
+    return cartrackMap;
+  }
+  cartrackMap = window.L.map(host, { zoomControl: true }).setView(
+    [CARTRACK_MAP_DEFAULT.lat, CARTRACK_MAP_DEFAULT.lng],
+    CARTRACK_MAP_DEFAULT.zoom
+  );
+  window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(cartrackMap);
+  return cartrackMap;
+}
+
+function fitCartrackMapToFleet(fleet) {
+  if (!cartrackMap || !window.L) return;
+  const pts = (fleet || [])
+    .filter((v) => v.has_gps)
+    .map((v) => [Number(v.latitude), Number(v.longitude)]);
+  if (!pts.length) {
+    cartrackMap.setView([CARTRACK_MAP_DEFAULT.lat, CARTRACK_MAP_DEFAULT.lng], CARTRACK_MAP_DEFAULT.zoom);
+    return;
+  }
+  if (pts.length === 1) {
+    cartrackMap.setView(pts[0], 14);
+    return;
+  }
+  cartrackMap.fitBounds(window.L.latLngBounds(pts), { padding: [40, 40], maxZoom: 14 });
+}
+
+function updateCartrackMapMarkers(fleet) {
+  const map = ensureCartrackMap();
+  if (!map || !window.L) return;
+  const seen = new Set();
+  for (const v of fleet || []) {
+    const key = cartrackVehicleKey(v);
+    if (!key) continue;
+    seen.add(key);
+    if (!v.has_gps) {
+      const old = cartrackMarkers.get(key);
+      if (old) {
+        map.removeLayer(old);
+        cartrackMarkers.delete(key);
+      }
+      continue;
+    }
+    const lat = Number(v.latitude);
+    const lng = Number(v.longitude);
+    const color = cartrackMarkerColor(v);
+    let marker = cartrackMarkers.get(key);
+    const icon = window.L.divIcon({
+      className: "cartrack-map-marker-wrap",
+      html: `<span class="cartrack-map-marker" style="background:${color}"></span>`,
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
+    });
+    if (!marker) {
+      marker = window.L.marker([lat, lng], { icon }).addTo(map);
+      cartrackMarkers.set(key, marker);
+    } else {
+      marker.setLatLng([lat, lng]);
+      marker.setIcon(icon);
+    }
+    marker.bindPopup(buildCartrackPopupHtml(v));
+    marker._cartrackVehicle = v;
+  }
+  for (const [key, marker] of cartrackMarkers.entries()) {
+    if (!seen.has(key)) {
+      map.removeLayer(marker);
+      cartrackMarkers.delete(key);
+    }
+  }
+}
+
+function renderCartrackTrackList(fleet, filterText = "") {
+  const host = qs("cartrackTrackList");
+  if (!host) return;
+  const q = String(filterText || "").trim().toLowerCase();
+  const rows = (fleet || []).filter((v) => {
+    if (!q) return true;
+    const hay = `${v.asset_code || ""} ${v.registration || ""} ${v.vehicle_name || ""}`.toLowerCase();
+    return hay.includes(q);
+  });
+  if (!rows.length) {
+    host.innerHTML = `<div class="cartrack-track-empty muted small">${q ? "No vehicles match your search." : "No vehicles synced yet. Use Refresh now or sync from the dashboard."}</div>`;
+    return;
+  }
+  host.innerHTML = rows
+    .map((v) => {
+      const key = cartrackVehicleKey(v);
+      const label = cartrackVehicleLabel(v);
+      const ign = Number(v.ignition_on) === 1;
+      const spd = Number(v.speed_kmh || 0).toFixed(0);
+      const cls = [
+        "cartrack-track-item",
+        v.is_speeding ? "cartrack-track-item--alert" : "",
+        !v.has_gps ? "cartrack-track-item--nogps" : "",
+      ].filter(Boolean).join(" ");
+      return `<button type="button" class="${cls}" data-cartrack-key="${escapeHtml(key)}">
+        <span class="cartrack-track-item-code">${escapeHtml(label)}</span>
+        <span class="cartrack-track-item-meta">${escapeHtml(v.vehicle_name || v.registration || "—")}</span>
+        <span class="cartrack-track-item-stats">
+          ${ign ? '<span class="pill green">ON</span>' : '<span class="pill">OFF</span>'}
+          <span>${spd} km/h</span>
+          ${v.is_speeding ? '<span class="pill red">Speeding</span>' : ""}
+          ${!v.has_gps ? '<span class="pill">No GPS</span>' : ""}
+        </span>
+      </button>`;
+    })
+    .join("");
+}
+
+function focusCartrackVehicle(key) {
+  const marker = cartrackMarkers.get(String(key || ""));
+  if (!marker || !cartrackMap) return;
+  cartrackMap.setView(marker.getLatLng(), Math.max(cartrackMap.getZoom(), 14));
+  marker.openPopup();
+  qs("cartrackTrackList")?.querySelectorAll(".cartrack-track-item").forEach((el) => {
+    el.classList.toggle("active", el.getAttribute("data-cartrack-key") === key);
+  });
+}
+
+function setCartrackMapStatus(text) {
+  const el = qs("cartrackMapStatus");
+  if (el) el.textContent = String(text || "");
+}
+
+function stopCartrackTrackPolling() {
+  if (cartrackTrackPollTimer) {
+    clearInterval(cartrackTrackPollTimer);
+    cartrackTrackPollTimer = null;
+  }
+}
+
+function startCartrackTrackPolling() {
+  stopCartrackTrackPolling();
+  if (!qs("cartrackAutoRefresh")?.checked) return;
+  cartrackTrackPollTimer = setInterval(() => {
+    if (document.querySelector("#tab-cartrack.show")) {
+      loadCartrackTrackingTab({ refresh: true, quiet: true }).catch(() => {});
+    }
+  }, CARTRACK_TRACK_POLL_MS);
+}
+
+async function loadCartrackTrackingTab({ refresh = true, quiet = false } = {}) {
+  if (!qs("tab-cartrack")) return;
+  if (!quiet) setStatus("Loading fleet map…");
+  setCartrackMapStatus("Loading positions…");
+  try {
+    await ensureLeafletLoaded();
+    ensureCartrackMap();
+    const q = refresh ? "refresh=1" : "refresh=0";
+    const data = await fetchJson(`${API}/api/cartrack/live?${q}`);
+    const fleet = data?.fleet || [];
+    cartrackTrackFleetCache = fleet;
+    const s = data?.summary || {};
+    setText("cartrackTrackKpiTotal", Number(s.total_vehicles || 0));
+    setText("cartrackTrackKpiGps", Number(s.with_gps || 0));
+    setText("cartrackTrackKpiLive", Number(s.ignition_on || 0));
+    setText("cartrackTrackKpiSpeeding", Number(s.speeding_today || 0));
+    setText("cartrackTrackKpiSync", String(s.last_sync || "—").slice(0, 16) || "—");
+    const search = qs("cartrackTrackSearch")?.value || "";
+    renderCartrackTrackList(fleet, search);
+    updateCartrackMapMarkers(fleet);
+    if (!cartrackMap?._cartrackFittedOnce && fleet.some((v) => v.has_gps)) {
+      fitCartrackMapToFleet(fleet);
+      cartrackMap._cartrackFittedOnce = true;
+    }
+    const statusBits = [];
+    if (!data.configured) statusBits.push("Cartrack not configured");
+    else statusBits.push(`${Number(s.with_gps || 0)} on map`);
+    if (data.sync_error) statusBits.push(`sync: ${data.sync_error}`);
+    setCartrackMapStatus(statusBits.join(" · ") || "Ready");
+    if (!quiet) setStatus(`Fleet map updated — ${Number(s.with_gps || 0)} vehicle(s) with GPS.`);
+    startCartrackTrackPolling();
+  } catch (e) {
+    setCartrackMapStatus(String(e.message || e));
+    if (!quiet) setStatus(`Fleet map error: ${e.message || e}`);
+  }
+}
+
+function initCartrackTrackingTab() {
+  qs("cartrackTrackRefreshBtn")?.addEventListener("click", () =>
+    loadCartrackTrackingTab({ refresh: true }).catch((e) => setStatus(String(e.message || e)))
+  );
+  qs("cartrackTrackFitBtn")?.addEventListener("click", () => fitCartrackMapToFleet(cartrackTrackFleetCache));
+  qs("cartrackOpenMapBtn")?.addEventListener("click", () => switchTab("cartrack"));
+  qs("cartrackAutoRefresh")?.addEventListener("change", () => startCartrackTrackPolling());
+  qs("cartrackTrackSearch")?.addEventListener("input", (e) => {
+    renderCartrackTrackList(cartrackTrackFleetCache, e.target?.value || "");
+  });
+  qs("cartrackTrackList")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-cartrack-key]");
+    if (!btn) return;
+    focusCartrackVehicle(btn.getAttribute("data-cartrack-key"));
+  });
+}
+
 async function loadDashboard() {
   const dateEl = qs("date");
   const scheduledEl = qs("scheduled");
@@ -7309,6 +7577,12 @@ function switchTab(key) {
   if (k === "telematics") {
     loadTelematicsTab().catch(() => {});
   }
+  if (k === "cartrack") {
+    loadCartrackTrackingTab({ refresh: true }).catch(() => {});
+    setTimeout(() => cartrackMap?.invalidateSize?.(), 120);
+  } else {
+    stopCartrackTrackPolling();
+  }
   try {
     if (typeof window.updateIronmindHelpFabContext === "function") window.updateIronmindHelpFabContext();
   } catch (_) {}
@@ -7342,6 +7616,7 @@ const IRONLOG_HELP_OPENERS = {
   audit: "Need help with the audit trail?",
   vehicle: "Need help with daily checklists?",
   telematics: "Need help with telematics units and faults?",
+  cartrack: "Need help with live Cartrack fleet tracking?",
   admin: "Need help with user admin?",
   docs: "Need help with AI documents?",
   ironmind:
@@ -14038,6 +14313,7 @@ async function init() {
   initSafetyAdminPanel().catch(() => {});
   initTelematicsAdminPanel().catch(() => {});
   initCartrackAdminPanel().catch(() => {});
+  initCartrackTrackingTab();
 
   qs("cartrackSaveSettingsBtn")?.addEventListener("click", () =>
     saveCartrackAdminSettings().catch((e) => setCartrackAdminResult(String(e.message || e), false))
