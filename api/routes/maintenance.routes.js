@@ -585,14 +585,45 @@ function wiPdfSlotStatusTag(status) {
   return { tag: "PEN", color: "#475569" };
 }
 
+function wiPdfMonthTitle(ym) {
+  const parts = String(ym || "").trim().split("-");
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (!y || !m) return String(ym || "");
+  return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+function wiPdfBodyBottom(doc) {
+  return doc.page.height - doc.page.margins.bottom - 28;
+}
+
+function wiPdfAddLandscapePage(doc) {
+  doc.addPage({
+    size: doc.page.size || "A4",
+    layout: "landscape",
+    margins: doc.page.margins,
+  });
+}
+
 function drawWeeklyInspectionCalendarPdfGrid(doc, data) {
   const weeks = Array.isArray(data?.calendar_weeks) ? data.calendar_weeks : [];
-  if (!weeks.length) return;
+  if (!weeks.length) {
+    doc.font("Helvetica").fontSize(10).fillColor("#64748b").text("No calendar data for this month.");
+    return;
+  }
   const margin = doc.page.margins;
   const contentW = doc.page.width - margin.left - margin.right;
   const colW = contentW / 7;
   const lineH = 7;
   const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const monthLabel = String(data?.month || "");
+
+  const drawMonthCaption = (y) => {
+    if (!monthLabel) return y;
+    doc.font("Helvetica-Bold").fontSize(12).fillColor("#0f172a");
+    doc.text(wiPdfMonthTitle(monthLabel), margin.left, y, { width: contentW, align: "center" });
+    return y + 18;
+  };
 
   const drawDayHeaders = (y) => {
     dayNames.forEach((label, i) => {
@@ -602,7 +633,8 @@ function drawWeeklyInspectionCalendarPdfGrid(doc, data) {
     return y + 14;
   };
 
-  let y = drawDayHeaders(doc.y + 4);
+  let y = drawMonthCaption(doc.y + 2);
+  y = drawDayHeaders(y);
 
   for (const row of weeks) {
     let maxSlots = 0;
@@ -612,11 +644,13 @@ function drawWeeklyInspectionCalendarPdfGrid(doc, data) {
         maxSlots = Math.max(maxSlots, Array.isArray(cell.slots) ? cell.slots.length : 0);
       }
     }
-    const cellH = Math.max(36, 14 + maxSlots * lineH + 4);
-    ensurePageSpace(doc, cellH + 10);
-    if (doc.y + cellH + 10 > doc.page.height - margin.bottom) {
-      doc.addPage();
-      y = drawDayHeaders(margin.top + 8);
+    const cellH = Math.max(38, 14 + maxSlots * lineH + 6);
+
+    if (y + cellH > wiPdfBodyBottom(doc)) {
+      wiPdfAddLandscapePage(doc);
+      y = margin.top + 4;
+      y = drawMonthCaption(y);
+      y = drawDayHeaders(y);
     }
 
     for (let i = 0; i < 7; i += 1) {
@@ -650,10 +684,9 @@ function drawWeeklyInspectionCalendarPdfGrid(doc, data) {
         lineY += lineH;
       }
     }
-    y += cellH + 2;
-    doc.y = y;
+    y += cellH + 3;
   }
-  doc.y = y + 6;
+  doc.y = y + 8;
 }
 
 function updateWeeklyInspectionSlotStatus({ slot_id, asset_id, planned_date, status, inspector_name }) {
@@ -5070,35 +5103,38 @@ export default async function maintenanceRoutes(app) {
       const monthLabel = String(data.month || "");
       const pdf = await buildPdfBuffer(
         (doc) => {
-          sectionTitle(doc, "Summary");
+          doc.y = doc.page.margins.top;
           doc.font("Helvetica").fontSize(10).fillColor("#334155");
           doc.text(
-            `Released: ${Number(compliance.done_count ?? 0)} / ${Number(compliance.total_slots ?? 0)} · Not released (overdue): ${Number(compliance.not_released_count ?? 0)}`,
-            { lineGap: 2 },
+            `Released: ${Number(compliance.done_count ?? 0)} / ${Number(compliance.total_slots ?? 0)} · Overdue: ${Number(compliance.not_released_count ?? 0)} · Planned: ${wiFormatMinutesPdf(compliance.est_minutes_total || 0)}`,
+            doc.page.margins.left,
+            doc.y,
+            { width: doc.page.width - doc.page.margins.left - doc.page.margins.right },
           );
-          doc.moveDown(0.35);
-          sectionTitle(doc, "Calendar view");
+          doc.moveDown(0.55);
           drawWeeklyInspectionCalendarPdfGrid(doc, data);
-          if (rosterAssets.length) {
-            doc.moveDown(0.2);
-            sectionTitle(doc, "Workshop roster");
-            doc.font("Helvetica").fontSize(8).fillColor("#334155");
-            doc.text(
-              rosterAssets
-                .map((a) => `${String(a.asset_code || "-")} (${Number(a.est_minutes || 30)} min default)`)
-                .join("  ·  "),
-              { lineGap: 2 },
-            );
-          }
-          if (weeklyGaps.length) {
-            doc.moveDown(0.35);
-            sectionTitle(doc, "Missing weekly workshop visit");
-            doc.fontSize(8).fillColor("#b45309");
-            const gapLines = weeklyGaps.slice(0, 40).map((g) =>
-              `${String(g.asset_code || "-")} — week ${String(g.week_start || "").slice(5)} to ${String(g.week_end || "").slice(5)}`,
-            );
-            doc.text(gapLines.join("\n"), { lineGap: 2 });
-            if (weeklyGaps.length > 40) doc.text(`…and ${weeklyGaps.length - 40} more`, { lineGap: 2 });
+          if (rosterAssets.length || weeklyGaps.length) {
+            ensurePageSpace(doc, 60);
+            if (rosterAssets.length) {
+              sectionTitle(doc, "Workshop roster");
+              doc.font("Helvetica").fontSize(8).fillColor("#334155");
+              doc.text(
+                rosterAssets
+                  .map((a) => `${String(a.asset_code || "-")} (${Number(a.est_minutes || 30)} min default)`)
+                  .join("  ·  "),
+                { lineGap: 2 },
+              );
+            }
+            if (weeklyGaps.length) {
+              doc.moveDown(0.35);
+              sectionTitle(doc, "Missing weekly workshop visit");
+              doc.fontSize(8).fillColor("#b45309");
+              const gapLines = weeklyGaps.slice(0, 40).map((g) =>
+                `${String(g.asset_code || "-")} — week ${String(g.week_start || "").slice(5)} to ${String(g.week_end || "").slice(5)}`,
+              );
+              doc.text(gapLines.join("\n"), { lineGap: 2 });
+              if (weeklyGaps.length > 40) doc.text(`…and ${weeklyGaps.length - 40} more`, { lineGap: 2 });
+            }
           }
           doc.moveDown(0.35);
           doc.fontSize(8).fillColor("#64748b");
@@ -5113,6 +5149,7 @@ export default async function maintenanceRoutes(app) {
         },
       );
       reply.header("Content-Type", "application/pdf");
+      reply.header("Cache-Control", "no-store");
       reply.header(
         "Content-Disposition",
         `${isDownload ? "attachment" : "inline"}; filename="IRONLOG_Workshop_Inspections_${monthLabel || "calendar"}.pdf"`

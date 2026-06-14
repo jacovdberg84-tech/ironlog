@@ -3813,18 +3813,25 @@ async function clearWeeklyInspectionRoster() {
   }
 }
 
-async function openWeeklyInspectionPdf(download = false) {
+async function fetchWeeklyInspectionPdfBlob() {
   const q = new URLSearchParams();
   q.set("month", wiCurrentMonth());
-  if (download) q.set("download", "1");
-  const url = `${API}/maintenance/weekly-inspections.pdf?${q.toString()}`;
+  q.set("_", String(Date.now()));
+  const res = await fetch(`${API}/maintenance/weekly-inspections.pdf?${q.toString()}`, {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(txt || `PDF request failed (${res.status})`);
+  }
+  return res.blob();
+}
+
+async function openWeeklyInspectionPdf(download = false) {
   try {
-    const res = await fetch(url, { headers: authHeaders() });
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(txt || `PDF request failed (${res.status})`);
-    }
-    const blob = await res.blob();
+    wiSetMsg("Generating PDF...");
+    const blob = await fetchWeeklyInspectionPdfBlob();
     const blobUrl = URL.createObjectURL(blob);
     if (download) {
       const a = document.createElement("a");
@@ -3834,21 +3841,54 @@ async function openWeeklyInspectionPdf(download = false) {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
+      wiSetMsg("PDF downloaded.");
       return;
     }
     window.open(blobUrl, "_blank");
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+    wiSetMsg("PDF opened.");
   } catch (e) {
     wiSetMsg(`PDF error: ${e.message || e}`, true);
   }
 }
 
-function printWeeklyInspectionCalendar() {
-  document.body.classList.add("wi-print-mode");
-  const cleanup = () => document.body.classList.remove("wi-print-mode");
-  window.addEventListener("afterprint", cleanup, { once: true });
-  window.print();
-  setTimeout(cleanup, 2000);
+async function printWeeklyInspectionCalendar() {
+  let blobUrl = "";
+  let iframe = null;
+  try {
+    wiSetMsg("Preparing branded PDF for print...");
+    const blob = await fetchWeeklyInspectionPdfBlob();
+    blobUrl = URL.createObjectURL(blob);
+    iframe = document.createElement("iframe");
+    iframe.setAttribute("title", "Workshop inspection print preview");
+    iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+    iframe.src = blobUrl;
+    document.body.appendChild(iframe);
+    iframe.onload = () => {
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+          wiSetMsg("Print dialog opened (landscape PDF with company branding).");
+        } catch (e) {
+          window.open(blobUrl, "_blank");
+          wiSetMsg("Opened PDF in a new tab — use the browser print button there.", true);
+        }
+      }, 400);
+    };
+    window.addEventListener("afterprint", () => {
+      iframe?.remove();
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    }, { once: true });
+    setTimeout(() => {
+      iframe?.remove();
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    }, 120000);
+  } catch (e) {
+    iframe?.remove();
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+    wiSetMsg(`Print failed: ${e.message || e}`, true);
+  }
 }
 
 async function saveManagerInspection() {
