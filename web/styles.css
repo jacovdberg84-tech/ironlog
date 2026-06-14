@@ -6158,3 +6158,183 @@ body.uc-qr-locked #ucAsset {
 .uc-wear-profile-panel summary {
   color: #0b3a7e;
 }
+
+/* Stores tab — full-width inventory table */
+#tab-stock .stores-inventory-host,
+#tab-stock .stores-movements-host {
+  margin-top: 14px;
+  width: 100%;
+}
+#tab-stock .stores-inventory-scroll {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+#tab-stock .stores-movements-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+}
+#tab-stock .stores-inventory-table {
+  width: 100%;
+  min-width: 880px;
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: fixed;
+}
+#tab-stock .stores-inventory-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+  color: #334155;
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-bottom: 2px solid #cbd5e1;
+  padding: 11px 12px;
+  white-space: nowrap;
+}
+#tab-stock .stores-inventory-table tbody td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+  line-height: 1.35;
+}
+#tab-stock .stores-inventory-table tbody tr:nth-child(even) {
+  background: #fafbfc;
+}
+#tab-stock .stores-inventory-table tbody tr:hover {
+  background: #f0f7ff;
+}
+#tab-stock .stores-inv-row--low {
+  background: #fef2f2 !important;
+}
+#tab-stock .stores-inv-row--low:hover {
+  background: #fee2e2 !important;
+}
+#tab-stock .stores-inv-row--critical {
+  box-shadow: inset 3px 0 0 #f59e0b;
+}
+#tab-stock .stores-inv-col-flag {
+  width: 36px;
+  text-align: center;
+}
+#tab-stock .stores-inv-col-code {
+  width: 120px;
+}
+#tab-stock .stores-inv-col-desc {
+  width: auto;
+  min-width: 200px;
+}
+#tab-stock .stores-inv-col-num {
+  width: 96px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+#tab-stock .stores-inv-col-value {
+  font-weight: 600;
+  color: #0f172a;
+}
+#tab-stock .stores-inv-col-status {
+  width: 88px;
+  text-align: center;
+}
+#tab-stock .stores-inv-code {
+  font-weight: 700;
+  color: #0b3a7e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+#tab-stock .stores-inv-col-desc {
+  color: #475569;
+}
+#tab-stock .stores-inv-flag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #dc2626;
+  color: #fff;
+  font-weight: 800;
+  font-size: 12px;
+  line-height: 1;
+}
+#tab-stock .stores-inv-flag--clear {
+  background: transparent;
+  color: transparent;
+}
+#tab-stock .stores-inv-status {
+  display: inline-block;
+  min-width: 52px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+#tab-stock .stores-inv-status--low {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+#tab-stock .stores-inv-status--watch {
+  background: #ffedd5;
+  color: #c2410c;
+  border: 1px solid #fed7aa;
+}
+#tab-stock .stores-inv-status--ok {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+#tab-stock .stores-inventory-foot {
+  margin-top: 8px;
+  text-align: right;
+}
+#tab-stock .stores-inventory-empty {
+  padding: 24px 16px;
+  text-align: center;
+  border: 1px dashed #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+#tab-stock .stores-mv-col-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+#tab-stock .stores-mv-qty--in {
+  color: #047857;
+}
+#tab-stock .stores-mv-qty--out {
+  color: #b91c1c;
+}
+#tab-stock .stores-mv-col-code {
+  width: 110px;
+}
+#tab-stock .stores-mv-col-date {
+  width: 130px;
+  white-space: nowrap;
+  color: #64748b;
+  font-size: 12px;
+}
+#tab-stock .stores-mv-col-type {
+  width: 100px;
+  text-transform: capitalize;
+}
+#tab-stock .stores-mv-col-loc {
+  width: 90px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+#tab-stock .stores-mv-col-ref {
+  color: #64748b;
+  font-size: 12px;
+}

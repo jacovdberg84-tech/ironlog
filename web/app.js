@@ -6245,6 +6245,136 @@ loadStockMonitor = async function() {
 
 let stockPageData = { rows: [], recent: [], summary: null };
 
+function filterStockDisplayRows(rows) {
+  const q = (qs("spFilter")?.value || "").trim().toLowerCase();
+  const arr = Array.isArray(rows) ? rows : [];
+  if (!q) return arr;
+  return arr.filter(
+    (r) =>
+      String(r.part_code || "").toLowerCase().includes(q) ||
+      String(r.part_name || "").toLowerCase().includes(q)
+  );
+}
+
+function renderStockInventoryTable(rows) {
+  const host = qs("spList");
+  if (!host) return;
+  if (!rows.length) {
+    host.innerHTML = `<div class="stores-inventory-empty muted small">No parts found for current filter.</div>`;
+    return;
+  }
+
+  const bodyRows = rows
+    .map((r) => {
+      const onHand = Number(r.on_hand || 0);
+      const min = Number(r.min_stock || 0);
+      const unit = Number(r.unit_cost || 0);
+      const value = Number(r.stock_value ?? onHand * unit);
+      const below = Boolean(r.below_min);
+      const critical = Boolean(r.critical);
+      const rowCls = [
+        "stores-inv-row",
+        below ? "stores-inv-row--low" : "",
+        critical && !below ? "stores-inv-row--critical" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const status = below
+        ? `<span class="stores-inv-status stores-inv-status--low">Low</span>`
+        : critical
+          ? `<span class="stores-inv-status stores-inv-status--watch">Critical</span>`
+          : `<span class="stores-inv-status stores-inv-status--ok">OK</span>`;
+      const flag = below
+        ? `<span class="stores-inv-flag" title="Below minimum stock">!</span>`
+        : `<span class="stores-inv-flag stores-inv-flag--clear" aria-hidden="true"></span>`;
+
+      return `<tr class="${rowCls}">
+        <td class="stores-inv-col-flag">${flag}</td>
+        <td class="stores-inv-col-code"><span class="stores-inv-code">${escapeHtml(r.part_code || "")}</span></td>
+        <td class="stores-inv-col-desc">${escapeHtml(r.part_name || "—")}</td>
+        <td class="stores-inv-col-num">${onHand.toFixed(1)}</td>
+        <td class="stores-inv-col-num">${min.toFixed(1)}</td>
+        <td class="stores-inv-col-num">$${unit.toFixed(2)}</td>
+        <td class="stores-inv-col-num stores-inv-col-value">$${value.toFixed(2)}</td>
+        <td class="stores-inv-col-status">${status}</td>
+      </tr>`;
+    })
+    .join("");
+
+  host.innerHTML = `
+    <div class="stores-inventory-scroll">
+      <table class="stores-inventory-table">
+        <thead>
+          <tr>
+            <th class="stores-inv-col-flag" scope="col" title="Reorder needed">!</th>
+            <th class="stores-inv-col-code" scope="col">Part code</th>
+            <th class="stores-inv-col-desc" scope="col">Description</th>
+            <th class="stores-inv-col-num" scope="col">On hand</th>
+            <th class="stores-inv-col-num" scope="col">Min stock</th>
+            <th class="stores-inv-col-num" scope="col">Unit price</th>
+            <th class="stores-inv-col-num" scope="col">Stock value</th>
+            <th class="stores-inv-col-status" scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>
+    <div class="stores-inventory-foot muted small">${rows.length} item${rows.length === 1 ? "" : "s"} shown</div>
+  `;
+}
+
+function renderStockRecentTable(recent) {
+  const host = qs("spRecent");
+  if (!host) return;
+  const rows = Array.isArray(recent) ? recent : [];
+  if (!rows.length) {
+    host.innerHTML = `<div class="stores-inventory-empty muted small">No stock movements yet.</div>`;
+    return;
+  }
+
+  const bodyRows = rows
+    .map((r) => {
+      const qty = Number(r.quantity || 0);
+      const qtyCls = qty >= 0 ? "stores-mv-qty--in" : "stores-mv-qty--out";
+      return `<tr>
+        <td class="stores-mv-col-date">${escapeHtml(String(r.created_at || "").slice(0, 16))}</td>
+        <td class="stores-mv-col-code"><span class="stores-inv-code">${escapeHtml(r.part_code || "")}</span></td>
+        <td class="stores-mv-col-desc">${escapeHtml(r.part_name || "—")}</td>
+        <td class="stores-mv-col-num ${qtyCls}">${qty >= 0 ? "+" : ""}${qty.toFixed(1)}</td>
+        <td class="stores-mv-col-type">${escapeHtml(r.movement_type || "—")}</td>
+        <td class="stores-mv-col-loc">${escapeHtml(r.location_code || "NO-LOC")}</td>
+        <td class="stores-mv-col-ref">${escapeHtml(r.reference || "—")}</td>
+      </tr>`;
+    })
+    .join("");
+
+  host.innerHTML = `
+    <div class="stores-inventory-scroll stores-movements-scroll">
+      <table class="stores-inventory-table stores-movements-table">
+        <thead>
+          <tr>
+            <th scope="col">Date</th>
+            <th scope="col">Part code</th>
+            <th scope="col">Description</th>
+            <th class="stores-inv-col-num" scope="col">Qty</th>
+            <th scope="col">Type</th>
+            <th scope="col">Location</th>
+            <th scope="col">Reference</th>
+          </tr>
+        </thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function refreshStockInventoryDisplay() {
+  const onlyLow = Boolean(qs("spOnlyLow")?.checked);
+  let baseRows = filterStockDisplayRows(stockPageData.rows);
+  if (onlyLow) baseRows = baseRows.filter((r) => Boolean(r.below_min));
+  renderStockInventoryTable(sortStockRows(baseRows));
+}
+
 function sortStockRows(rows) {
   const mode = (qs("spSort")?.value || "critical_then_low").trim();
   const arr = Array.isArray(rows) ? [...rows] : [];
@@ -6293,51 +6423,8 @@ async function loadStockOnHandPage() {
   setText("spTotalOnHand", Number(data.summary?.total_on_hand || 0).toFixed(1));
   setText("spTotalValue", `$${Number(data.summary?.total_stock_value || 0).toFixed(2)}`);
 
-  const list = qs("spList");
-  if (list) {
-    list.innerHTML = "";
-    const onlyLow = Boolean(qs("spOnlyLow")?.checked);
-    const baseRows = onlyLow
-      ? stockPageData.rows.filter((r) => Boolean(r.below_min))
-      : stockPageData.rows;
-    const sortedRows = sortStockRows(baseRows);
-    sortedRows.forEach((r) => {
-      const tone = r.below_min
-        ? "border-left:4px solid #b04747;background:rgba(176,71,71,0.08);"
-        : r.critical
-        ? "border-left:4px solid #b08947;background:rgba(176,137,71,0.08);"
-        : "";
-      list.appendChild(
-        item(
-          `<div style="${tone}padding-left:8px;">` +
-          `<b>${r.part_code}</b> – ${Number(r.on_hand || 0).toFixed(1)} on hand ${
-            r.below_min ? "<span class='pill red'>LOW</span>" : ""
-          }${r.critical ? " <span class='pill orange'>CRITICAL</span>" : ""}` +
-          `<br><small>${r.part_name || ""} | Min: ${Number(r.min_stock || 0).toFixed(1)} | Unit: $${Number(r.unit_cost || 0).toFixed(2)} | Value: $${Number(r.stock_value || 0).toFixed(2)}</small>` +
-          `</div>`
-        )
-      );
-    });
-    if (!sortedRows.length) {
-      list.appendChild(item("<small>No parts found for current filter.</small>"));
-    }
-  }
-
-  const recent = qs("spRecent");
-  if (recent) {
-    recent.innerHTML = "";
-    stockPageData.recent.forEach((r) => {
-      recent.appendChild(
-        item(
-          `<b>${r.part_code}</b> – ${Number(r.quantity || 0).toFixed(1)} (${r.movement_type})` +
-          `<br><small>${r.created_at || ""} | ${r.location_code || "NO-LOC"} | ${r.reference || "-"}</small>`
-        )
-      );
-    });
-    if (!stockPageData.recent.length) {
-      recent.appendChild(item("<small>No stock movements yet.</small>"));
-    }
-  }
+  refreshStockInventoryDisplay();
+  renderStockRecentTable(stockPageData.recent);
 
   setStatus("Stock on hand ready.");
 }
@@ -13344,12 +13431,11 @@ async function init() {
   qs("spLoad")?.addEventListener("click", () =>
     loadStockOnHandPage().catch((e) => setStatus("Stock on hand error: " + e.message))
   );
-  qs("spSort")?.addEventListener("change", () =>
-    loadStockOnHandPage().catch((e) => setStatus("Stock on hand error: " + e.message))
-  );
-  qs("spOnlyLow")?.addEventListener("change", () =>
-    loadStockOnHandPage().catch((e) => setStatus("Stock on hand error: " + e.message))
-  );
+  qs("spSort")?.addEventListener("change", () => refreshStockInventoryDisplay());
+  qs("spOnlyLow")?.addEventListener("change", () => refreshStockInventoryDisplay());
+  qs("spFilter")?.addEventListener("input", () => {
+    if (stockPageData.rows.length) refreshStockInventoryDisplay();
+  });
   qs("spExportCsv")?.addEventListener("click", exportStockOnHandCsv);
   qs("spOpenPdf")?.addEventListener("click", openStockOnHandPdf);
   qs("smrLoad")?.addEventListener("click", () =>

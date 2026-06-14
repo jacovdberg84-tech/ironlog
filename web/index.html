@@ -1784,7 +1784,7 @@
             <div class="form-row">
               <div class="form-field">
                 <label>Filter</label>
-                <input id="spFilter" class="w-full" placeholder="Filter part code..." />
+                <input id="spFilter" class="w-full" placeholder="Search part code or description..." />
               </div>
               <div class="form-field">
                 <label>Sort By</label>
@@ -1826,12 +1826,12 @@
                 Open PDF
               </button>
             </div>
-            <div class="list" id="spList" style="margin-top: 12px;"></div>
+            <div id="spList" class="stores-inventory-host"></div>
             <div class="info-note" style="margin-top: 16px;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
               <span>Recent Stock Movements</span>
             </div>
-            <div class="list" id="spRecent"></div>
+            <div id="spRecent" class="stores-movements-host"></div>
           </div>
         </div>
 
@@ -6453,6 +6453,6 @@
 
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="./app.js?v=11"></script>
+  <script src="./app.js?v=12"></script>
 </body>
 </html>
