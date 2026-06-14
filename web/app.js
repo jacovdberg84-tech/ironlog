@@ -8120,18 +8120,30 @@ async function loadBoSlipSavedList() {
       return;
     }
     rows.slice(0, 40).forEach((r) => {
-      const label = escapeHtml(String(r.slip_type || "").replace(/_/g, " "));
-      list.appendChild(
-        item(
-          `<b>#${r.id}</b> <span class="pill blue">${label}</span> ${escapeHtml(r.asset_code || "")} · ${escapeHtml(r.report_date || "")}<br/>` +
-            `<button type="button" class="bo-slip-pdf" data-id="${Number(r.id)}">Open PDF</button>`
-        )
-      );
+      list.appendChild(renderBoSlipSavedRow(r));
     });
   } catch (e) {
     list.innerHTML = "";
     list.appendChild(item(`<span class="message-error">${escapeHtml(e.message || String(e))}</span>`));
   }
+}
+
+function renderBoSlipSavedRow(r) {
+  const el = document.createElement("div");
+  el.className = "bo-slip-row";
+  const label = escapeHtml(String(r.slip_type || "").replace(/_/g, " "));
+  el.innerHTML = `
+    <div class="bo-slip-row-main">
+      <span class="bo-slip-id">#${Number(r.id)}</span>
+      <span class="pill blue">${label}</span>
+      <span class="bo-slip-asset">${escapeHtml(r.asset_code || "—")}</span>
+      <span class="bo-slip-date">${escapeHtml(r.report_date || "")}</span>
+    </div>
+    <div class="bo-slip-row-actions">
+      <button type="button" class="bo-slip-pdf btn btn-secondary btn-sm" data-id="${Number(r.id)}">Open PDF</button>
+    </div>
+  `;
+  return el;
 }
 
 function openBoSlipPdf(id) {
