@@ -6,6 +6,36 @@
   let ucWearBands = [];
   let ucMobileMode = false;
 
+  const UC_ASSET_BASE = "./assets/undercarriage";
+  const UC_GROUP_DIAGRAMS = {
+    bushings: { src: `${UC_ASSET_BASE}/bushings-links.svg`, alt: "Bushings, links and pins diagram" },
+    links: { src: `${UC_ASSET_BASE}/bushings-links.svg`, alt: "Link height diagram" },
+    pins: { src: `${UC_ASSET_BASE}/bushings-links.svg`, alt: "Pin wear diagram" },
+    track_shoe: { src: `${UC_ASSET_BASE}/track-shoe.svg`, alt: "Track shoe diagram" },
+    carrier_rollers: { src: `${UC_ASSET_BASE}/carrier-rollers.svg`, alt: "Carrier roller positions X Y Z T" },
+    track_rollers: { src: `${UC_ASSET_BASE}/track-rollers.svg`, alt: "Track rollers 1 to 12" },
+    grouser_height: { src: `${UC_ASSET_BASE}/track-shoe.svg`, alt: "Grouser height diagram" },
+    track_sag: { src: `${UC_ASSET_BASE}/track-sag.svg`, alt: "Track sag measurement points A B C D" },
+    overview: { src: `${UC_ASSET_BASE}/overview.svg`, alt: "Undercarriage overview" },
+  };
+
+  function ucDiagramImg(groupKey, { compact = false } = {}) {
+    const meta = UC_GROUP_DIAGRAMS[groupKey];
+    if (!meta?.src) return "";
+    const cls = compact ? "uc-diagram-img uc-diagram-img-compact" : "uc-diagram-img";
+    return `<img class="${cls}" src="${esc(meta.src)}" alt="${esc(meta.alt)}" loading="lazy" />`;
+  }
+
+  function ucRollerBadge(row) {
+    if (row.roller_id) {
+      return `<span class="uc-roller-badge" title="Carrier roller ${esc(row.roller_id)}">${esc(row.roller_id)}</span>`;
+    }
+    if (row.roller_num != null) {
+      return `<span class="uc-roller-badge uc-roller-num" title="Track roller ${row.roller_num}">${esc(String(row.roller_num))}</span>`;
+    }
+    return "";
+  }
+
   function esc(v) {
     return String(v == null ? "" : v)
       .replaceAll("&", "&amp;")
@@ -103,9 +133,11 @@
 
   function renderMeasurementRow(row) {
     const key = row.key;
+    const badge = ucRollerBadge(row);
     return `
-      <div class="uc-measure-row" data-uc-key="${esc(key)}">
+      <div class="uc-measure-row" data-uc-key="${esc(key)}" data-uc-group="${esc(row.group || "")}">
         <div class="uc-measure-label">
+          ${badge}
           <strong>${esc(row.label)}</strong>
           <span class="muted mini">${esc(row.side)}</span>
         </div>
@@ -117,12 +149,26 @@
     `;
   }
 
+  function renderGroupDiagram(groupKey) {
+    const meta = UC_GROUP_DIAGRAMS[groupKey];
+    if (!meta) return "";
+    return `
+      <div class="uc-group-diagram">
+        ${ucDiagramImg(groupKey)}
+        <p class="muted mini uc-diagram-caption">${esc(meta.alt)}</p>
+      </div>
+    `;
+  }
+
   function renderForm() {
     const mount = document.getElementById("ucFormMount");
     if (!mount || !ucSchema.length) return;
 
     const groups = ucGroups();
     mount.innerHTML = `
+      <div class="uc-overview-diagram">
+        ${ucDiagramImg("overview")}
+      </div>
       <div class="uc-legend">
         <span class="uc-wear-chip" style="background:#22c55e">0–75% Good</span>
         <span class="uc-wear-chip" style="background:#eab308;color:#1e293b">76–100%</span>
@@ -133,16 +179,20 @@
         <details class="uc-group" open="${g.key === "bushings" ? "open" : ""}">
           <summary>${esc(g.label)}</summary>
           <div class="uc-group-body">
+            ${renderGroupDiagram(g.key)}
             ${g.rows.map((r) => renderMeasurementRow(r)).join("")}
           </div>
         </details>
       `).join("")}
       <details class="uc-group">
         <summary>Track sag (mm)</summary>
-        <div class="uc-group-body uc-track-sag-grid">
+        <div class="uc-group-body">
+          ${renderGroupDiagram("track_sag")}
+          <div class="uc-track-sag-grid">
           ${ucTrackSagPoints.map((p) => `
             <label>${esc(p)}<input id="uc_sag_${p}" type="number" step="0.1" inputmode="decimal" class="uc-num-input" /></label>
           `).join("")}
+          </div>
         </div>
       </details>
       <details class="uc-group">

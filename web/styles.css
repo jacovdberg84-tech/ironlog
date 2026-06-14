@@ -5985,6 +5985,12 @@ body.bare-child-tab #mainContent > .card.stack-12 {
   padding: 10px 0;
   border-bottom: 1px solid #f1f5f9;
 }
+.uc-measure-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: flex-end;
+}
 .uc-measure-label strong { display: block; }
 .uc-num-input {
   width: 100%;
@@ -6036,13 +6042,58 @@ body.uc-mobile-page {
   color: #fff;
 }
 .uc-mobile-header h1 {
-  margin: 6px 0 0;
+  margin: 0 0 4px;
   font-size: 1.35rem;
 }
-.uc-mobile-back {
-  color: #dbeafe;
-  text-decoration: none;
-  font-size: 14px;
+.uc-overview-diagram,
+.uc-group-diagram {
+  margin-bottom: 12px;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  text-align: center;
+}
+.uc-diagram-img {
+  display: block;
+  width: 100%;
+  max-width: 520px;
+  height: auto;
+  margin: 0 auto;
+}
+.uc-diagram-overview {
+  max-width: 640px;
+}
+.uc-diagram-caption {
+  margin: 6px 0 0;
+}
+.uc-roller-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  margin-bottom: 4px;
+  border-radius: 999px;
+  background: #0b3a7e;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.uc-roller-badge.uc-roller-num {
+  background: #334155;
+  min-width: 32px;
+}
+body.uc-mobile-mode .uc-diagram-img {
+  max-width: 100%;
+}
+body.uc-mobile-mode .uc-group-diagram {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
 }
 .uc-mobile-main {
   margin: 12px;
