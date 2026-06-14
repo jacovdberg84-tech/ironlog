@@ -6139,6 +6139,180 @@ export default async function maintenanceRoutes(app) {
     return Number.isFinite(hours) && hours >= 0 ? hours : null;
   }
 
+  const TYRE_SURVEY_POSITIONS = [
+    { key: "front_left", code: "LF", order: 1 },
+    { key: "front_right", code: "RF", order: 2 },
+    { key: "rear_right_inner", code: "RM", order: 3 },
+    { key: "rear_right_outer", code: "RR", order: 4 },
+    { key: "rear_left_outer", code: "LR", order: 5 },
+    { key: "rear_left_inner", code: "LM", order: 6 },
+  ];
+
+  function tyreSurveyPositionCode(positionKey) {
+    const key = String(positionKey || "").trim().toLowerCase();
+    const hit = TYRE_SURVEY_POSITIONS.find((p) => p.key === key);
+    if (hit) return hit.code;
+    const fromRow = String(key || "").trim().toUpperCase();
+    return fromRow || "-";
+  }
+
+  function tyreEffectiveTreadDepth(tyreRow) {
+    const outer = tyreRow?.rtd_outer ?? tyreRow?.tread_depth;
+    const tread = outer == null ? null : Number(outer);
+    return Number.isFinite(tread) ? tread : null;
+  }
+
+  function tyreOptionalNumber(raw) {
+    if (raw === "" || raw == null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function formatTyreSurveyDescription(tyreRow) {
+    const desc = String(tyreRow?.tyre_description || "").trim();
+    if (desc) return desc;
+    return [tyreRow?.tyre_make, tyreRow?.brand_number].map((x) => String(x || "").trim()).filter(Boolean).join(" ");
+  }
+
+  function monthBoundsYmd(month) {
+    const m = String(month || "").trim();
+    if (!isMonth(m)) return null;
+    const [y, mo] = m.split("-").map(Number);
+    const lastDay = new Date(y, mo, 0).getDate();
+    return {
+      start: `${m}-01`,
+      end: `${m}-${String(lastDay).padStart(2, "0")}`,
+    };
+  }
+
+  function formatSurveyAuditDate(ymd) {
+    if (!isDate(String(ymd || ""))) return String(ymd || "");
+    const d = new Date(`${String(ymd).trim()}T12:00:00`);
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return `${String(d.getDate()).padStart(2, "0")}-${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+  }
+
+  function buildTyreSurveyPositionRow(surveyPos, tyreRow, installRow, runningHours) {
+    const otd = tyreOptionalNumber(tyreRow?.original_tread_depth);
+    const rtdOuter = tyreOptionalNumber(tyreRow?.rtd_outer ?? tyreRow?.tread_depth);
+    const rtdInner = tyreOptionalNumber(tyreRow?.rtd_inner);
+    const installHours = tyreOptionalNumber(installRow?.install_running_hours ?? tyreRow?.install_running_hours);
+    const running = Number(runningHours || 0);
+    const hoursOnTyre = installHours == null
+      ? tyreOptionalNumber(tyreRow?.hours_on_tyre)
+      : Math.max(0, running - installHours);
+    const purchasePrice = Number(tyreRow?.tyre_cost || installRow?.tyre_cost || 0);
+    let tdUsed = null;
+    if (otd != null && rtdOuter != null && otd >= rtdOuter) tdUsed = Number((otd - rtdOuter).toFixed(2));
+    const tdPctUsed = tdUsed != null && otd > 0 ? Number(((tdUsed / otd) * 100).toFixed(1)) : null;
+    const rtdPctLeft = rtdOuter != null && otd > 0 ? Number(((rtdOuter / otd) * 100).toFixed(1)) : null;
+    const hourPerMm = tdUsed > 0 && hoursOnTyre != null ? Number((hoursOnTyre / tdUsed).toFixed(1)) : null;
+    let costPerHour = tyreOptionalNumber(tyreRow?.cost_per_hour);
+    if (costPerHour == null && hoursOnTyre > 0 && purchasePrice > 0) {
+      costPerHour = Number((purchasePrice / hoursOnTyre).toFixed(4));
+    }
+    return {
+      position: surveyPos.code,
+      serial_number: tyreRow?.serial_number || installRow?.serial_number || null,
+      brand_number: tyreRow?.brand_number || null,
+      tyre_make: tyreRow?.tyre_make || null,
+      tyre_description: formatTyreSurveyDescription(tyreRow),
+      pressure_recommended: tyreOptionalNumber(tyreRow?.pressure_recommended),
+      pressure_cold: tyreOptionalNumber(tyreRow?.pressure),
+      pressure_hot: tyreOptionalNumber(tyreRow?.pressure_hot),
+      purchase_price: purchasePrice > 0 ? purchasePrice : null,
+      hours_fitted: installHours,
+      otd,
+      rtd_outer: rtdOuter,
+      rtd_inner: rtdInner,
+      td_used: tdUsed,
+      td_pct_used: tdPctUsed,
+      rtd_pct_left: rtdPctLeft,
+      hour_per_mm: hourPerMm,
+      cost_per_hour: costPerHour,
+    };
+  }
+
+  function buildTyreMonthlySurveyData(month, siteCode) {
+    ensureTyreLifecycleSchema();
+    const bounds = monthBoundsYmd(month);
+    if (!bounds) throw new Error("month must be YYYY-MM");
+
+    const site_code = String(siteCode || "main").trim().toLowerCase() || "main";
+    const branding = getPdfReportBranding(db);
+    const project = String(getReportSetting(db, "tyre_survey_project", branding.site_code || site_code)).trim().toUpperCase();
+    const country = String(getReportSetting(db, "tyre_survey_country", "Mozambique")).trim() || "Mozambique";
+
+    const rows = db.prepare(`
+      SELECT
+        ti.id,
+        ti.asset_id,
+        ti.inspection_date,
+        ti.running_hours,
+        ti.tyres_json,
+        a.asset_code,
+        a.asset_name,
+        a.category
+      FROM tyre_inspections ti
+      JOIN assets a ON a.id = ti.asset_id
+      WHERE LOWER(TRIM(COALESCE(ti.site_code, 'main'))) = LOWER(TRIM(?))
+        AND ti.inspection_date >= ?
+        AND ti.inspection_date <= ?
+      ORDER BY a.asset_code ASC, ti.inspection_date DESC, ti.id DESC
+    `).all(site_code, bounds.start, bounds.end);
+
+    const latestByAsset = new Map();
+    for (const row of rows) {
+      if (!latestByAsset.has(row.asset_id)) latestByAsset.set(row.asset_id, row);
+    }
+
+    const installStmt = db.prepare(`
+      SELECT position_key, serial_number, install_running_hours, tyre_cost
+      FROM tyre_installs
+      WHERE asset_id = ?
+        AND LOWER(TRIM(COALESCE(site_code, 'main'))) = LOWER(TRIM(?))
+        AND LOWER(TRIM(COALESCE(status, 'active'))) = 'active'
+    `);
+
+    const machines = [];
+    for (const insp of latestByAsset.values()) {
+      let tyresRaw = [];
+      try {
+        tyresRaw = normalizeTyreRows(JSON.parse(String(insp.tyres_json || "[]")));
+      } catch {}
+      const tyreByKey = new Map(tyresRaw.map((t) => [String(t.position_key || "").toLowerCase(), t]));
+      const installByKey = new Map(
+        installStmt.all(Number(insp.asset_id), site_code).map((i) => [String(i.position_key || "").toLowerCase(), i]),
+      );
+      const positions = TYRE_SURVEY_POSITIONS.map((surveyPos) => {
+        const tyreRow = tyreByKey.get(surveyPos.key) || {};
+        const installRow = installByKey.get(surveyPos.key) || null;
+        return buildTyreSurveyPositionRow(surveyPos, tyreRow, installRow, insp.running_hours);
+      });
+      machines.push({
+        audit_date: insp.inspection_date,
+        audit_date_label: formatSurveyAuditDate(insp.inspection_date),
+        project,
+        country,
+        machine_number: insp.asset_code,
+        machine_name: insp.asset_name,
+        insp_hrs: Number(Number(insp.running_hours || 0).toFixed(1)),
+        machine_type: String(insp.category || "").trim(),
+        positions,
+      });
+    }
+
+    return {
+      month,
+      period: bounds,
+      project,
+      country,
+      site_code,
+      branding,
+      machines,
+    };
+  }
+
   function evaluateTyreTreadStatus(treadDepth, thresholds) {
     const tread = treadDepth == null ? null : Number(treadDepth);
     if (!Number.isFinite(tread)) {
@@ -6329,7 +6503,7 @@ export default async function maintenanceRoutes(app) {
     const cost_per_hour = hours_on_tyre > 0 && tyre_cost > 0
       ? Number((tyre_cost / hours_on_tyre).toFixed(4))
       : null;
-    const treadEval = evaluateTyreTreadStatus(tyreRow?.tread_depth, thresholds);
+    const treadEval = evaluateTyreTreadStatus(tyreEffectiveTreadDepth(tyreRow), thresholds);
 
     return {
       ...tyreRow,
@@ -6391,7 +6565,7 @@ export default async function maintenanceRoutes(app) {
       const cost_per_hour = hours_on_tyre > 0 && tyre_cost > 0
         ? Number((tyre_cost / hours_on_tyre).toFixed(4))
         : null;
-      const treadEval = evaluateTyreTreadStatus(latestRow.tread_depth, thresholds);
+      const treadEval = evaluateTyreTreadStatus(tyreEffectiveTreadDepth(latestRow), thresholds);
       return {
         install_id: Number(inst.id),
         position_key: inst.position_key,
@@ -6403,7 +6577,10 @@ export default async function maintenanceRoutes(app) {
         hours_on_tyre: Number(hours_on_tyre.toFixed(1)),
         cost_per_hour,
         pressure: latestRow.pressure ?? null,
-        tread_depth: latestRow.tread_depth ?? null,
+        tread_depth: latestRow.tread_depth ?? latestRow.rtd_outer ?? null,
+        rtd_outer: latestRow.rtd_outer ?? latestRow.tread_depth ?? null,
+        rtd_inner: latestRow.rtd_inner ?? null,
+        tyre_make: latestRow.tyre_make ?? null,
         lifecycle_status: treadEval.lifecycle_status,
         tread_alert: treadEval.tread_alert,
         last_inspection_date: latest?.inspection_date || null,
@@ -6471,21 +6648,42 @@ export default async function maintenanceRoutes(app) {
       .map((x) => {
         const position_key = String(x?.position_key || "").trim().toLowerCase();
         const position_label = String(x?.position_label || "").trim();
-        const pressureRaw = x?.pressure;
-        const treadRaw = x?.tread_depth;
-        const costRaw = x?.tyre_cost;
-        const pressure = pressureRaw === "" || pressureRaw == null ? null : Number(pressureRaw);
-        const tread_depth = treadRaw === "" || treadRaw == null ? null : Number(treadRaw);
-        const tyre_cost = costRaw === "" || costRaw == null ? 0 : Number(costRaw);
-        return {
+        const pressure = tyreOptionalNumber(x?.pressure);
+        const pressure_recommended = tyreOptionalNumber(x?.pressure_recommended);
+        const pressure_hot = tyreOptionalNumber(x?.pressure_hot);
+        const rtd_outer = tyreOptionalNumber(x?.rtd_outer ?? x?.tread_depth);
+        const rtd_inner = tyreOptionalNumber(x?.rtd_inner);
+        const original_tread_depth = tyreOptionalNumber(x?.original_tread_depth);
+        const tread_depth = rtd_outer;
+        const tyre_cost = tyreOptionalNumber(x?.tyre_cost) ?? 0;
+        const row = {
           position_key,
           position_label: position_label || position_key,
-          pressure: Number.isFinite(pressure) ? pressure : null,
-          tread_depth: Number.isFinite(tread_depth) ? tread_depth : null,
+          survey_code: String(x?.survey_code || tyreSurveyPositionCode(position_key)).trim().toUpperCase(),
+          tyre_make: String(x?.tyre_make || "").trim() || null,
+          brand_number: String(x?.brand_number || "").trim() || null,
+          tyre_description: String(x?.tyre_description || "").trim() || null,
+          pressure,
+          pressure_recommended,
+          pressure_hot,
+          original_tread_depth,
+          rtd_outer,
+          rtd_inner,
+          tread_depth,
           serial_number: String(x?.serial_number || "").trim() || null,
           last_changed_date: isDate(String(x?.last_changed_date || "").trim()) ? String(x.last_changed_date).trim() : null,
           tyre_cost: Number.isFinite(tyre_cost) && tyre_cost > 0 ? tyre_cost : 0,
         };
+        if (x?.install_id != null) row.install_id = Number(x.install_id);
+        if (x?.install_date) row.install_date = String(x.install_date);
+        if (x?.install_running_hours != null) row.install_running_hours = Number(x.install_running_hours);
+        if (x?.hours_on_tyre != null) row.hours_on_tyre = Number(x.hours_on_tyre);
+        if (x?.cost_per_hour != null) row.cost_per_hour = Number(x.cost_per_hour);
+        if (x?.lifecycle_status) row.lifecycle_status = String(x.lifecycle_status);
+        if (x?.tread_alert) row.tread_alert = String(x.tread_alert);
+        if (x?.change_detected != null) row.change_detected = Boolean(x.change_detected);
+        if (x?.change_reason) row.change_reason = String(x.change_reason);
+        return row;
       })
       .filter((x) => x.position_key);
   }
@@ -6637,6 +6835,237 @@ export default async function maintenanceRoutes(app) {
         alerts,
         thresholds,
       });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  const TYRE_SURVEY_TABLE_HEADERS = [
+    "Position",
+    "Serial Number",
+    "Brand Number",
+    "Tyre Description",
+    "Pressure Recom",
+    "Pressure Cold",
+    "Pressure Hot",
+    "Purchase Price",
+    "Hours tyre was fitted",
+    "OTD (mm)",
+    "RTD Outer (mm)",
+    "RTD Inner (mm)",
+    "TD Used (mm)",
+    "TD % Used",
+    "RTD % Left",
+    "Hour per (mm)",
+    "Cost ($) per Hour",
+  ];
+
+  function surveyCellValue(v) {
+    if (v == null || v === "") return "";
+    return v;
+  }
+
+  function appendTyreSurveyMachineBlock(ws, machine, startRow) {
+    const yellowFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
+    const blueFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFADD8E6" } };
+    const headerFont = { bold: true };
+    let r = startRow;
+
+    const metaRow1 = ws.getRow(r++);
+    metaRow1.getCell(1).value = "Date of Audit";
+    metaRow1.getCell(1).font = headerFont;
+    metaRow1.getCell(2).value = machine.audit_date_label || machine.audit_date || "";
+    metaRow1.getCell(3).value = "Project";
+    metaRow1.getCell(3).font = headerFont;
+    metaRow1.getCell(4).value = machine.project || "";
+    metaRow1.getCell(5).value = "Country";
+    metaRow1.getCell(5).font = headerFont;
+    metaRow1.getCell(6).value = machine.country || "";
+
+    const metaRow2 = ws.getRow(r++);
+    metaRow2.getCell(1).value = "Machine Number";
+    metaRow2.getCell(1).font = headerFont;
+    metaRow2.getCell(2).value = machine.machine_number || "";
+    metaRow2.getCell(3).value = "Insp Hrs";
+    metaRow2.getCell(3).font = headerFont;
+    metaRow2.getCell(4).value = machine.insp_hrs ?? "";
+    metaRow2.getCell(5).value = "Machine Type";
+    metaRow2.getCell(5).font = headerFont;
+    metaRow2.getCell(6).value = machine.machine_type || "";
+
+    const yellowRow = ws.getRow(r++);
+    for (let c = 1; c <= TYRE_SURVEY_TABLE_HEADERS.length; c += 1) {
+      yellowRow.getCell(c).fill = yellowFill;
+    }
+
+    const tableHeaderRow = ws.getRow(r++);
+    TYRE_SURVEY_TABLE_HEADERS.forEach((label, idx) => {
+      const cell = tableHeaderRow.getCell(idx + 1);
+      cell.value = label;
+      cell.font = headerFont;
+      cell.fill = blueFill;
+    });
+
+    for (const pos of machine.positions || []) {
+      const dataRow = ws.getRow(r++);
+      const values = [
+        pos.position,
+        pos.serial_number,
+        pos.brand_number,
+        pos.tyre_description,
+        pos.pressure_recommended,
+        pos.pressure_cold,
+        pos.pressure_hot,
+        pos.purchase_price,
+        pos.hours_fitted,
+        pos.otd,
+        pos.rtd_outer,
+        pos.rtd_inner,
+        pos.td_used,
+        pos.td_pct_used,
+        pos.rtd_pct_left,
+        pos.hour_per_mm,
+        pos.cost_per_hour,
+      ];
+      values.forEach((val, idx) => {
+        dataRow.getCell(idx + 1).value = surveyCellValue(val);
+      });
+    }
+
+    return r + 1;
+  }
+
+  async function buildTyreSurveyXlsxBuffer(data) {
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "IRONLOG";
+    wb.created = new Date();
+    const ws = wb.addWorksheet("Monthly Survey");
+    ws.columns = TYRE_SURVEY_TABLE_HEADERS.map((h) => ({ width: Math.max(12, Math.min(28, h.length + 2)) }));
+
+    ws.getCell(1, 1).value = "Monthly Tyre Survey Report";
+    ws.getCell(1, 1).font = { bold: true, size: 14 };
+    ws.getCell(2, 1).value = `Period: ${data.month}`;
+    ws.getCell(3, 1).value = `Project: ${data.project || ""}   Country: ${data.country || ""}`;
+
+    let row = 5;
+    if (!data.machines?.length) {
+      ws.getCell(row, 1).value = "No tyre inspections found for this month.";
+    } else {
+      for (const machine of data.machines) {
+        row = appendTyreSurveyMachineBlock(ws, machine, row);
+      }
+    }
+
+    return wb.xlsx.writeBuffer();
+  }
+
+  function drawTyreSurveyPdfMachine(doc, machine, siteName) {
+    const bottomY = pdfBodyBottom(doc);
+    const needed = 140 + (machine.positions?.length || 0) * 14;
+    if (doc.y + needed > bottomY) {
+      doc.addPage({ layout: "landscape" });
+      doc.y = pdfBodyTop(doc, { siteName });
+    }
+
+    doc.font("Helvetica-Bold").fontSize(10).fillColor("#0f172a");
+    doc.text(
+      `Date of Audit: ${machine.audit_date_label || machine.audit_date || "-"}   Project: ${machine.project || "-"}   Country: ${machine.country || "-"}`,
+    );
+    doc.moveDown(0.2);
+    doc.text(
+      `Machine: ${machine.machine_number || "-"}   Insp Hrs: ${machine.insp_hrs ?? "-"}   Type: ${machine.machine_type || "-"}`,
+    );
+    doc.moveDown(0.35);
+
+    const cols = [
+      { key: "position", label: "Pos", width: 28 },
+      { key: "serial_number", label: "Serial", width: 52 },
+      { key: "brand_number", label: "Brand", width: 40 },
+      { key: "tyre_description", label: "Description", width: 72 },
+      { key: "pressure_cold", label: "Cold", width: 32 },
+      { key: "rtd_outer", label: "RTD out", width: 36 },
+      { key: "rtd_inner", label: "RTD in", width: 36 },
+      { key: "td_used", label: "TD used", width: 36 },
+      { key: "td_pct_used", label: "TD %", width: 32 },
+      { key: "cost_per_hour", label: "$/hr", width: 36 },
+    ];
+    const rows = (machine.positions || []).map((p) => ({
+      position: p.position || "-",
+      serial_number: p.serial_number || "-",
+      brand_number: p.brand_number || "-",
+      tyre_description: p.tyre_description || p.tyre_make || "-",
+      pressure_cold: p.pressure_cold == null ? "-" : String(p.pressure_cold),
+      rtd_outer: p.rtd_outer == null ? "-" : Number(p.rtd_outer).toFixed(1),
+      rtd_inner: p.rtd_inner == null ? "-" : Number(p.rtd_inner).toFixed(1),
+      td_used: p.td_used == null ? "-" : Number(p.td_used).toFixed(1),
+      td_pct_used: p.td_pct_used == null ? "-" : `${Number(p.td_pct_used).toFixed(1)}%`,
+      cost_per_hour: p.cost_per_hour == null ? "-" : Number(p.cost_per_hour).toFixed(4),
+    }));
+    table(doc, cols, rows, { fontSize: 7 });
+    doc.moveDown(0.6);
+  }
+
+  app.get("/tyre-inspections/survey.xlsx", async (req, reply) => {
+    try {
+      const month = String(req.query?.month || "").trim() || new Date().toISOString().slice(0, 7);
+      if (!isMonth(month)) return reply.code(400).send({ ok: false, error: "month must be YYYY-MM" });
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const data = buildTyreMonthlySurveyData(month, site_code);
+      const buf = await buildTyreSurveyXlsxBuffer(data);
+      reply
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header("Cache-Control", "no-store")
+        .header("Content-Disposition", `attachment; filename="IRONLOG_Tyre_Survey_${month}.xlsx"`)
+        .send(Buffer.from(buf));
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.get("/tyre-inspections/survey.pdf", async (req, reply) => {
+    try {
+      const month = String(req.query?.month || "").trim() || new Date().toISOString().slice(0, 7);
+      if (!isMonth(month)) return reply.code(400).send({ ok: false, error: "month must be YYYY-MM" });
+      const isDownload = String(req.query?.download || "").trim() === "1";
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const data = buildTyreMonthlySurveyData(month, site_code);
+      const branding = data.branding || getPdfReportBranding(db);
+      const monthLabel = String(data.month || "");
+
+      const pdf = await buildPdfBuffer(
+        (doc) => {
+          doc.y = pdfBodyTop(doc, { siteName: branding.site_name });
+          doc.font("Helvetica").fontSize(10).fillColor("#334155");
+          doc.text(
+            `Project: ${data.project || "-"}   Country: ${data.country || "-"}   Machines: ${data.machines?.length || 0}`,
+          );
+          doc.moveDown(0.5);
+          if (!data.machines?.length) {
+            doc.text("No tyre inspections found for this month.");
+            return;
+          }
+          for (const machine of data.machines) {
+            drawTyreSurveyPdfMachine(doc, machine, branding.site_name);
+          }
+        },
+        {
+          title: "IRONLOG",
+          subtitle: "Monthly Tyre Survey Report",
+          rightText: monthLabel,
+          showPageNumbers: true,
+          layout: "landscape",
+        },
+      );
+
+      reply.header("Content-Type", "application/pdf");
+      reply.header("Cache-Control", "no-store");
+      reply.header(
+        "Content-Disposition",
+        `${isDownload ? "attachment" : "inline"}; filename="IRONLOG_Tyre_Survey_${monthLabel}.pdf"`,
+      );
+      return reply.send(pdf);
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message || String(err) });

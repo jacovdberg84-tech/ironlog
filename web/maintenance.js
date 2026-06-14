@@ -13,12 +13,12 @@ let reportBuilderTemplates = [];
 let reportSubscriptionEditId = 0;
 let reportSubscriptionsCache = [];
 const TYRE_POSITIONS = [
-  { key: "front_left", label: "Front Left" },
-  { key: "front_right", label: "Front Right" },
-  { key: "rear_left_outer", label: "Rear Left Outer" },
-  { key: "rear_left_inner", label: "Rear Left Inner" },
-  { key: "rear_right_inner", label: "Rear Right Inner" },
-  { key: "rear_right_outer", label: "Rear Right Outer" },
+  { key: "front_left", label: "Front Left", surveyCode: "LF", surveyOrder: 1 },
+  { key: "front_right", label: "Front Right", surveyCode: "RF", surveyOrder: 2 },
+  { key: "rear_right_inner", label: "Rear Right Inner", surveyCode: "RM", surveyOrder: 3 },
+  { key: "rear_right_outer", label: "Rear Right Outer", surveyCode: "RR", surveyOrder: 4 },
+  { key: "rear_left_outer", label: "Rear Left Outer", surveyCode: "LR", surveyOrder: 5 },
+  { key: "rear_left_inner", label: "Rear Left Inner", surveyCode: "LM", surveyOrder: 6 },
 ];
 
 function initMaintSidebar() {
@@ -3142,7 +3142,7 @@ function prefillTyreFormFromLifecycle(data) {
     const serialEl = document.getElementById(tyreInputId(p.key, "serial"));
     const changedEl = document.getElementById(tyreInputId(p.key, "changed"));
     const costEl = document.getElementById(tyreInputId(p.key, "cost"));
-    const treadEl = document.getElementById(tyreInputId(p.key, "tread"));
+    const treadEl = document.getElementById(tyreInputId(p.key, "rtd_outer"));
     const pressureEl = document.getElementById(tyreInputId(p.key, "pressure"));
     if (serialEl && !serialEl.value && row.serial_number) serialEl.value = row.serial_number;
     if (changedEl && !changedEl.value && row.install_date) changedEl.value = row.install_date;
@@ -3156,46 +3156,52 @@ function initTyreLayout() {
   const grid = document.getElementById("tyreGrid");
   if (!grid) return;
   grid.innerHTML = TYRE_POSITIONS.map((p) => `
-    <div class="card" style="padding:10px;">
-      <div style="font-weight:600; margin-bottom:8px;">${esc(p.label)}</div>
-      <label>
-        Pressure
-        <input id="${tyreInputId(p.key, "pressure")}" type="number" min="0" step="0.1" placeholder="kPa / PSI" />
-      </label>
-      <label>
-        Tread depth
-        <input id="${tyreInputId(p.key, "tread")}" type="number" min="0" step="0.1" placeholder="mm" />
-      </label>
-      <label>
-        Serial number
-        <input id="${tyreInputId(p.key, "serial")}" type="text" placeholder="Serial" />
-      </label>
-      <label>
-        Date last changed
-        <input id="${tyreInputId(p.key, "changed")}" type="date" />
-      </label>
-      <label>
-        Tyre cost (this fitment)
-        <input id="${tyreInputId(p.key, "cost")}" type="number" min="0" step="0.01" placeholder="Cost" />
-      </label>
-      <div class="muted mini" id="${tyreInputId(p.key, "lifecycleHint")}"></div>
+    <div class="card tyre-pos-card" style="padding:10px;">
+      <div style="font-weight:600; margin-bottom:8px;">${esc(p.label)} <span class="muted mini">(${esc(p.surveyCode)})</span></div>
+      <div class="form-grid" style="grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px;">
+        <label>Tyre make<input id="${tyreInputId(p.key, "make")}" type="text" placeholder="e.g. Michelin" /></label>
+        <label>Brand / size<input id="${tyreInputId(p.key, "brand")}" type="text" placeholder="e.g. 23.5R25" /></label>
+        <label>Description<input id="${tyreInputId(p.key, "desc")}" type="text" placeholder="Model / pattern" /></label>
+        <label>Serial number<input id="${tyreInputId(p.key, "serial")}" type="text" placeholder="Serial" /></label>
+        <label>Pressure cold<input id="${tyreInputId(p.key, "pressure")}" type="number" min="0" step="0.1" placeholder="kPa" /></label>
+        <label>Pressure recom.<input id="${tyreInputId(p.key, "pressure_recom")}" type="number" min="0" step="0.1" placeholder="kPa" /></label>
+        <label>Pressure hot<input id="${tyreInputId(p.key, "pressure_hot")}" type="number" min="0" step="0.1" placeholder="kPa" /></label>
+        <label>OTD (mm)<input id="${tyreInputId(p.key, "otd")}" type="number" min="0" step="0.1" placeholder="Original tread" /></label>
+        <label>RTD outer (mm)<input id="${tyreInputId(p.key, "rtd_outer")}" type="number" min="0" step="0.1" placeholder="Outer RTD" /></label>
+        <label>RTD inner (mm)<input id="${tyreInputId(p.key, "rtd_inner")}" type="number" min="0" step="0.1" placeholder="Inner RTD" /></label>
+        <label>Date last changed<input id="${tyreInputId(p.key, "changed")}" type="date" /></label>
+        <label>Purchase price<input id="${tyreInputId(p.key, "cost")}" type="number" min="0" step="0.01" placeholder="Cost" /></label>
+      </div>
     </div>
   `).join("");
 }
 
+function tyreReadOptionalNumber(id) {
+  const raw = String(document.getElementById(id)?.value || "").trim();
+  if (raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 function collectTyrePositionRows() {
   return TYRE_POSITIONS.map((p) => {
-    const pressureRaw = String(document.getElementById(tyreInputId(p.key, "pressure"))?.value || "").trim();
-    const treadRaw = String(document.getElementById(tyreInputId(p.key, "tread"))?.value || "").trim();
-    const costRaw = String(document.getElementById(tyreInputId(p.key, "cost"))?.value || "").trim();
-    const pressure = pressureRaw === "" ? null : Number(pressureRaw);
-    const tread_depth = treadRaw === "" ? null : Number(treadRaw);
-    const tyre_cost = costRaw === "" ? 0 : Number(costRaw);
+    const tyre_cost = Number(document.getElementById(tyreInputId(p.key, "cost"))?.value || 0) || 0;
+    const rtd_outer = tyreReadOptionalNumber(tyreInputId(p.key, "rtd_outer"));
+    const rtd_inner = tyreReadOptionalNumber(tyreInputId(p.key, "rtd_inner"));
     return {
       position_key: p.key,
       position_label: p.label,
-      pressure,
-      tread_depth,
+      survey_code: p.surveyCode,
+      tyre_make: String(document.getElementById(tyreInputId(p.key, "make"))?.value || "").trim(),
+      brand_number: String(document.getElementById(tyreInputId(p.key, "brand"))?.value || "").trim(),
+      tyre_description: String(document.getElementById(tyreInputId(p.key, "desc"))?.value || "").trim(),
+      pressure: tyreReadOptionalNumber(tyreInputId(p.key, "pressure")),
+      pressure_recommended: tyreReadOptionalNumber(tyreInputId(p.key, "pressure_recom")),
+      pressure_hot: tyreReadOptionalNumber(tyreInputId(p.key, "pressure_hot")),
+      original_tread_depth: tyreReadOptionalNumber(tyreInputId(p.key, "otd")),
+      rtd_outer,
+      rtd_inner,
+      tread_depth: rtd_outer,
       serial_number: String(document.getElementById(tyreInputId(p.key, "serial"))?.value || "").trim(),
       last_changed_date: String(document.getElementById(tyreInputId(p.key, "changed"))?.value || "").trim(),
       tyre_cost,
@@ -3205,11 +3211,51 @@ function collectTyrePositionRows() {
 
 function clearTyreForm() {
   TYRE_POSITIONS.forEach((p) => {
-    ["pressure", "tread", "serial", "changed", "cost"].forEach((field) => {
+    ["make", "brand", "desc", "pressure", "pressure_recom", "pressure_hot", "otd", "rtd_outer", "rtd_inner", "serial", "changed", "cost"].forEach((field) => {
       const el = document.getElementById(tyreInputId(p.key, field));
       if (el) el.value = "";
     });
   });
+}
+
+function tyreSurveyMonth() {
+  const raw = String(document.getElementById("tyreSurveyMonth")?.value || "").trim();
+  if (/^\d{4}-\d{2}$/.test(raw)) return raw;
+  return new Date().toISOString().slice(0, 7);
+}
+
+async function openTyreSurveyExport(kind) {
+  const msg = document.getElementById("tyreMsg");
+  const month = tyreSurveyMonth();
+  const q = new URLSearchParams();
+  q.set("month", month);
+  const path = kind === "xlsx"
+    ? `${API}/maintenance/tyre-inspections/survey.xlsx?${q.toString()}`
+    : `${API}/maintenance/tyre-inspections/survey.pdf?${q.toString()}`;
+  if (msg) msg.textContent = `Generating survey ${kind.toUpperCase()}...`;
+  try {
+    const res = await fetch(path, { headers: authHeaders(), cache: "no-store" });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(txt || `Survey ${kind} failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    if (kind === "xlsx") {
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `IRONLOG_Tyre_Survey_${month}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } else {
+      window.open(blobUrl, "_blank");
+    }
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
+    if (msg) msg.textContent = `Survey ${kind.toUpperCase()} ready for ${month}.`;
+  } catch (e) {
+    if (msg) msg.textContent = `Survey export failed: ${e.message || e}`;
+  }
 }
 
 function renderTyreList(rows) {
@@ -3231,7 +3277,7 @@ function renderTyreList(rows) {
         <table class="gridTable" style="min-width:980px;">
           <thead>
             <tr>
-              <th>Position</th><th>Status</th><th>Pressure</th><th>Tread</th><th>Serial</th>
+              <th>Position</th><th>Make</th><th>Status</th><th>Pressure</th><th>RTD out/in</th><th>Serial</th>
               <th>Installed</th><th>Hrs on tyre</th><th>Cost</th><th>$/hr</th>
             </tr>
           </thead>
@@ -3239,9 +3285,10 @@ function renderTyreList(rows) {
             ${(Array.isArray(r.tyres) ? r.tyres : []).map((t) => `
               <tr>
                 <td>${esc(t.position_label || "-")}</td>
+                <td>${esc(t.tyre_make || "-")}</td>
                 <td>${tyreStatusBadge(t.lifecycle_status)}</td>
-                <td>${t.pressure == null ? "-" : Number(t.pressure).toFixed(1)}</td>
-                <td>${t.tread_depth == null ? "-" : Number(t.tread_depth).toFixed(1)}</td>
+                <td>${t.pressure == null ? "-" : Number(t.pressure).toFixed(0)}</td>
+                <td>${t.rtd_outer == null && t.rtd_inner == null ? "-" : `${t.rtd_outer == null ? "-" : Number(t.rtd_outer).toFixed(1)} / ${t.rtd_inner == null ? "-" : Number(t.rtd_inner).toFixed(1)}`}</td>
                 <td>${esc(t.serial_number || "-")}</td>
                 <td>${esc(t.install_date || t.last_changed_date || "-")}</td>
                 <td>${t.hours_on_tyre == null ? "-" : Number(t.hours_on_tyre).toFixed(1)}</td>
@@ -7042,6 +7089,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("loadTyreInspectionsBtn")?.addEventListener("click", () => loadTyreInspections());
   document.getElementById("tyreFilterAsset")?.addEventListener("change", () => loadTyreInspections());
   document.getElementById("tyreClearFormBtn")?.addEventListener("click", () => clearTyreForm());
+  document.getElementById("tyreSurveyPdfBtn")?.addEventListener("click", () => openTyreSurveyExport("pdf"));
+  document.getElementById("tyreSurveyXlsxBtn")?.addEventListener("click", () => openTyreSurveyExport("xlsx"));
   const wiMonth = document.getElementById("wiMonth");
   if (wiMonth && !wiMonth.value) wiMonth.value = new Date().toISOString().slice(0, 7);
   document.getElementById("wiPrevMonthBtn")?.addEventListener("click", () => {
@@ -7128,6 +7177,8 @@ document.addEventListener("DOMContentLoaded", () => {
   initTyreLayout();
   const tyreDate = document.getElementById("tyreInspectionDate");
   if (tyreDate && !tyreDate.value) tyreDate.value = new Date().toISOString().slice(0, 10);
+  const tyreSurveyMonthEl = document.getElementById("tyreSurveyMonth");
+  if (tyreSurveyMonthEl && !tyreSurveyMonthEl.value) tyreSurveyMonthEl.value = new Date().toISOString().slice(0, 7);
   loadTyreInspections();
   document.getElementById("wfActionBody")?.addEventListener("change", (evt) => {
     const sel = evt.target?.closest?.("select[data-wf-action-status]");

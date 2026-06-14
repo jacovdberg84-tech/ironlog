@@ -737,6 +737,22 @@
         <div id="tyreMsg" class="muted"></div>
 
         <hr class="hr-soft" />
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
+          <h3 style="margin:0;">Monthly Tyre Survey Report</h3>
+          <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
+            <label>
+              Month
+              <input id="tyreSurveyMonth" type="month" />
+            </label>
+            <button type="button" id="tyreSurveyPdfBtn">Survey PDF</button>
+            <button type="button" id="tyreSurveyXlsxBtn">Survey XLSX</button>
+          </div>
+        </div>
+        <p class="muted mini" style="margin:0 0 12px;">
+          Monthly survey layout per machine (latest inspection in month). Includes make, tread wear, and cost per hour.
+        </p>
+
+        <hr class="hr-soft" />
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
           <h3 style="margin:0;">Saved Tyre Inspections</h3>
         </div>
@@ -1634,6 +1650,6 @@
 
   </div>
 
-  <script src="./maintenance.js?v=31"></script>
+  <script src="./maintenance.js?v=32"></script>
 </body>
 </html>
