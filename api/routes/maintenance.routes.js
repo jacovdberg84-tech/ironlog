@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import ExcelJS from "exceljs";
-import { buildPdfBuffer, ensurePageSpace, pdfBodyTop, sectionTitle, table } from "../utils/pdfGenerator.js";
+import { buildPdfBuffer, ensurePageSpace, pdfBodyBottom, pdfBodyTop, sectionTitle, table } from "../utils/pdfGenerator.js";
 import { getPdfReportBranding } from "../utils/reportSettings.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import {
@@ -594,16 +594,19 @@ function wiPdfMonthTitle(ym) {
   return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
 
-function wiPdfBodyBottom(doc) {
-  return doc.page.height - doc.page.margins.bottom - 28;
-}
-
 function wiPdfAddLandscapePage(doc) {
   doc.addPage({
     size: doc.page.size || "A4",
     layout: "landscape",
     margins: doc.page.margins,
   });
+}
+
+function wiEnsureBodySpace(doc, neededHeight, siteName) {
+  if (doc.y + neededHeight > pdfBodyBottom(doc)) {
+    wiPdfAddLandscapePage(doc);
+    doc.y = pdfBodyTop(doc, { siteName });
+  }
 }
 
 function drawWeeklyInspectionCalendarPdfGrid(doc, data, opts = {}) {
@@ -649,7 +652,7 @@ function drawWeeklyInspectionCalendarPdfGrid(doc, data, opts = {}) {
     }
     const cellH = Math.max(38, 14 + maxSlots * lineH + 6);
 
-    if (y + cellH > wiPdfBodyBottom(doc)) {
+    if (y + cellH > pdfBodyBottom(doc)) {
       wiPdfAddLandscapePage(doc);
       y = bodyTop() + 4;
       y = drawMonthCaption(y);
@@ -689,7 +692,7 @@ function drawWeeklyInspectionCalendarPdfGrid(doc, data, opts = {}) {
     }
     y += cellH + 3;
   }
-  doc.y = y + 8;
+  doc.y = Math.min(y + 8, pdfBodyBottom(doc) - 4);
 }
 
 function updateWeeklyInspectionSlotStatus({ slot_id, asset_id, planned_date, status, inspector_name }) {
@@ -5117,8 +5120,8 @@ export default async function maintenanceRoutes(app) {
           );
           doc.moveDown(0.55);
           drawWeeklyInspectionCalendarPdfGrid(doc, data, { siteName: branding.site_name });
+          wiEnsureBodySpace(doc, 36, branding.site_name);
           if (rosterAssets.length || weeklyGaps.length) {
-            ensurePageSpace(doc, 60);
             if (rosterAssets.length) {
               sectionTitle(doc, "Workshop roster");
               doc.font("Helvetica").fontSize(8).fillColor("#334155");
@@ -5130,6 +5133,7 @@ export default async function maintenanceRoutes(app) {
               );
             }
             if (weeklyGaps.length) {
+              wiEnsureBodySpace(doc, 48, branding.site_name);
               doc.moveDown(0.35);
               sectionTitle(doc, "Missing weekly workshop visit");
               doc.fontSize(8).fillColor("#b45309");
@@ -5140,6 +5144,7 @@ export default async function maintenanceRoutes(app) {
               if (weeklyGaps.length > 40) doc.text(`…and ${weeklyGaps.length - 40} more`, { lineGap: 2 });
             }
           }
+          wiEnsureBodySpace(doc, 20, branding.site_name);
           doc.moveDown(0.35);
           doc.fontSize(8).fillColor("#64748b");
           doc.text("Legend: REL = released  |  SKIP = skipped  |  PEN = pending");

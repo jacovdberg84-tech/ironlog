@@ -31,6 +31,12 @@ export function pdfBodyTop(doc, opts = {}) {
   return dividerY + 14;
 }
 
+/** Max Y for body content — above the footer divider and generated timestamp. */
+export function pdfBodyBottom(doc) {
+  const footerY = doc.page.height - doc.page.margins.bottom - 16;
+  return footerY - 24;
+}
+
 function nowStamp() {
   // stable, readable timestamp in report footer
   const d = new Date();
@@ -44,7 +50,7 @@ function nowStamp() {
  * Ensures there's space for "neededHeight" on the page. If not, adds a new page.
  */
 export function ensurePageSpace(doc, neededHeight = 60) {
-  const bottomY = doc.page.height - doc.page.margins.bottom;
+  const bottomY = pdfBodyBottom(doc);
   if (doc.y + neededHeight > bottomY) doc.addPage();
 }
 
