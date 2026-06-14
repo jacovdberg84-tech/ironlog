@@ -5067,11 +5067,11 @@ export default async function maintenanceRoutes(app) {
       const compliance = data.compliance || {};
       const rosterAssets = Array.isArray(data.assets) ? data.assets : [];
       const weeklyGaps = Array.isArray(compliance.weekly_gaps) ? compliance.weekly_gaps : [];
+      const monthLabel = String(data.month || "");
       const pdf = await buildPdfBuffer(
         (doc) => {
-          sectionTitle(doc, "Workshop Inspection Calendar");
+          sectionTitle(doc, "Summary");
           doc.font("Helvetica").fontSize(10).fillColor("#334155");
-          doc.text(`Month: ${String(data.month || "")}`, { lineGap: 2 });
           doc.text(
             `Released: ${Number(compliance.done_count ?? 0)} / ${Number(compliance.total_slots ?? 0)} · Not released (overdue): ${Number(compliance.not_released_count ?? 0)}`,
             { lineGap: 2 },
@@ -5104,12 +5104,18 @@ export default async function maintenanceRoutes(app) {
           doc.fontSize(8).fillColor("#64748b");
           doc.text("Legend: REL = released  |  SKIP = skipped  |  PEN = pending");
         },
-        { title: "AML Workshop Inspections", subtitle: String(data.month || ""), layout: "landscape" },
+        {
+          title: "IRONLOG",
+          subtitle: "Workshop Inspection Calendar",
+          rightText: monthLabel,
+          showPageNumbers: true,
+          layout: "landscape",
+        },
       );
       reply.header("Content-Type", "application/pdf");
       reply.header(
         "Content-Disposition",
-        `${isDownload ? "attachment" : "inline"}; filename="AML_Weekly_Inspections_${String(data.month || "calendar")}.pdf"`
+        `${isDownload ? "attachment" : "inline"}; filename="IRONLOG_Workshop_Inspections_${monthLabel || "calendar"}.pdf"`
       );
       return reply.send(pdf);
     } catch (err) {

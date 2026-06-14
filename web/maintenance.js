@@ -3829,7 +3829,7 @@ async function openWeeklyInspectionPdf(download = false) {
     if (download) {
       const a = document.createElement("a");
       a.href = blobUrl;
-      a.download = `workshop-inspections-${wiCurrentMonth()}.pdf`;
+      a.download = `IRONLOG_Workshop_Inspections-${wiCurrentMonth()}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
