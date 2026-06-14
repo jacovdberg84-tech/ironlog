@@ -61,7 +61,11 @@
       </div>
 
       <div class="card">
-        <h4>Operational slip reports (PDF)</h4>
+        <div class="section-head-row">
+          <h4>Operational slip reports (PDF)</h4>
+          <button type="button" class="sectionToggleBtn" data-section-body="boSlipBody" data-storage-key="ironlog_section_bo_slip">Hide</button>
+        </div>
+        <div id="boSlipBody" class="section-collapsible">
         <p class="muted">
           Generate PDF slips for hose failures, G.E.T., components, and tyres. Part codes pull description and unit cost from Stores when the part exists.
         </p>
@@ -163,26 +167,39 @@
 
         <div class="list" id="boSlipSavedList" style="margin-top:12px;"></div>
         <pre class="output" id="boSlipResult"></pre>
+        </div>
       </div>
 
-      <h4>Create Breakdown</h4>
-      <div class="row">
-        <input id="bAsset" list="assetCodeOptions" placeholder="Asset code (e.g. A300AM)" />
-        <input id="bDesc" class="minw-260" placeholder="Description" />
-        <label class="chk">Date <input id="bDate" type="date" /></label>
-        <input id="bDown" class="w-110" type="number" step="0.5" min="0" max="24" value="0" />
-        <label class="chk">
-          <input id="bCrit" type="checkbox" />
-          Critical
-        </label>
-        <button type="button" id="makeBreakdown">Create</button>
+      <div class="card">
+        <div class="section-head-row">
+          <h4>Create breakdown</h4>
+          <button type="button" class="sectionToggleBtn" data-section-body="boCreateBody" data-storage-key="ironlog_section_bo_create">Hide</button>
+        </div>
+        <div id="boCreateBody" class="section-collapsible">
+        <div class="row">
+          <input id="bAsset" list="assetCodeOptions" placeholder="Asset code (e.g. A300AM)" />
+          <input id="bDesc" class="minw-260" placeholder="Description" />
+          <label class="chk">Date <input id="bDate" type="date" /></label>
+          <input id="bDown" class="w-110" type="number" step="0.5" min="0" max="24" value="0" />
+          <label class="chk">
+            <input id="bCrit" type="checkbox" />
+            Critical
+          </label>
+          <button type="button" id="makeBreakdown">Create</button>
+        </div>
+        <pre class="output" id="breakdownResult"></pre>
+        </div>
       </div>
-      <pre class="output" id="breakdownResult"></pre>
 
-      <h4>Short breakdown (quick log)</h4>
-      <p class="muted">
-        One closed repair: downtime is written to breakdown logs. Parts issue to the linked work order; oils go to the oil log for the asset.
-      </p>
+      <div class="card">
+        <div class="section-head-row">
+          <h4>Short breakdown (quick log)</h4>
+          <button type="button" class="sectionToggleBtn" data-section-body="boShortBody" data-storage-key="ironlog_section_bo_short">Hide</button>
+        </div>
+        <div id="boShortBody" class="section-collapsible">
+        <p class="muted">
+          One closed repair: downtime is written to breakdown logs. Parts issue to the linked work order; oils go to the oil log for the asset.
+        </p>
       <div class="row">
         <button type="button" id="boPullLiveHours">Pull live meter (uses asset + event date)</button>
         <span class="muted" id="boLiveHoursHint"></span>
@@ -216,6 +233,8 @@
         <button type="button" id="sqSubmit">Log short breakdown</button>
       </div>
       <pre class="output" id="shortBreakdownResult"></pre>
+      </div>
+      </div>
 
       <h4>Issue Part to Work Order</h4>
       <div class="row">
