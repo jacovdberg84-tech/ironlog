@@ -1018,6 +1018,209 @@ function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
     .sort((a, b) => Number(a.remaining_hours || 0) - Number(b.remaining_hours || 0));
 }
 
+function ensureBreakdownRepairLaborSchema(dbConn) {
+  dbConn.prepare(`
+    CREATE TABLE IF NOT EXISTS breakdown_repair_labor (
+      breakdown_id INTEGER PRIMARY KEY,
+      labor_hours REAL NOT NULL DEFAULT 0,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (breakdown_id) REFERENCES breakdowns(id) ON DELETE CASCADE
+    )
+  `).run();
+}
+
+/**
+ * Breakdown incidents in [start,end]: machine downtime vs actual repair labor (not downtime × labor rate).
+ */
+function buildInsightsBreakdownLaborIncidents(dbConn, startDate, endDate, opts = {}) {
+  ensureBreakdownRepairLaborSchema(dbConn);
+  const scheduledFallback = Math.max(1, Number(opts.scheduledFallback || 10));
+  const laborRate = Math.max(0, Number(opts.laborRate || 35));
+  const empty = {
+    incidents: [],
+    by_asset: new Map(),
+    totals: { downtime_hours: 0, repair_labor_hours: 0, repair_labor_cost: 0, needs_input_count: 0 },
+  };
+  if (!dbHasTable(dbConn, "breakdowns")) return empty;
+
+  const incidentMap = new Map();
+  const upsertIncident = (base, downtimeDelta) => {
+    const bid = Number(base.breakdown_id || 0);
+    if (!bid || !Number.isFinite(downtimeDelta) || downtimeDelta <= 0) return;
+    const cur = incidentMap.get(bid) || {
+      breakdown_id: bid,
+      asset_id: Number(base.asset_id || 0),
+      asset_code: String(base.asset_code || ""),
+      asset_name: String(base.asset_name || ""),
+      description: String(base.description || ""),
+      status: String(base.status || ""),
+      primary_work_order_id: Number(base.primary_work_order_id || 0) || null,
+      downtime_hours: 0,
+    };
+    cur.downtime_hours = Number(cur.downtime_hours || 0) + downtimeDelta;
+    incidentMap.set(bid, cur);
+  };
+
+  if (dbHasTable(dbConn, "breakdown_downtime_logs")) {
+    for (const r of dbConn.prepare(`
+      SELECT
+        b.id AS breakdown_id,
+        b.asset_id,
+        a.asset_code,
+        a.asset_name,
+        b.description,
+        b.status,
+        b.primary_work_order_id,
+        COALESCE(SUM(l.hours_down), 0) AS downtime_hours
+      FROM breakdown_downtime_logs l
+      JOIN breakdowns b ON b.id = l.breakdown_id
+      JOIN assets a ON a.id = b.asset_id
+      WHERE DATE(l.log_date) BETWEEN DATE(?) AND DATE(?)
+      GROUP BY b.id
+      HAVING downtime_hours > 0
+    `).all(startDate, endDate)) {
+      upsertIncident(r, Number(r.downtime_hours || 0));
+    }
+  }
+
+  const todayYmd = new Date().toISOString().slice(0, 10);
+  const imputeEnd = endDate < todayYmd ? endDate : todayYmd;
+  const days = listDaysInclusiveYmd(startDate, imputeEnd);
+  const getLogForBreakdownDay = dbHasTable(dbConn, "breakdown_downtime_logs")
+    ? dbConn.prepare(`
+        SELECT 1 FROM breakdown_downtime_logs
+        WHERE breakdown_id = ? AND log_date = ? AND COALESCE(hours_down, 0) > 0
+        LIMIT 1
+      `)
+    : null;
+  const getScheduledForAssetDay = dbHasTable(dbConn, "daily_hours")
+    ? dbConn.prepare(`
+        SELECT scheduled_hours FROM daily_hours
+        WHERE asset_id = ? AND work_date = ?
+        LIMIT 1
+      `)
+    : null;
+  const breakdownDateExpr = dbHasColumn(dbConn, "breakdowns", "breakdown_date")
+    ? "b.breakdown_date"
+    : "DATE(COALESCE(b.created_at, b.updated_at))";
+
+  for (const br of dbConn.prepare(`
+    SELECT
+      b.id AS breakdown_id,
+      b.asset_id,
+      a.asset_code,
+      a.asset_name,
+      b.description,
+      b.status,
+      b.primary_work_order_id,
+      DATE(COALESCE(${breakdownDateExpr}, b.created_at)) AS breakdown_day
+    FROM breakdowns b
+    JOIN assets a ON a.id = b.asset_id
+    LEFT JOIN work_orders wo ON wo.id = b.primary_work_order_id
+    WHERE b.status = 'OPEN'
+      AND (wo.id IS NULL OR LOWER(TRIM(COALESCE(wo.status, ''))) NOT IN ('completed', 'approved', 'closed'))
+      AND DATE(COALESCE(${breakdownDateExpr}, b.created_at)) <= DATE(?)
+  `).all(imputeEnd)) {
+    const breakdownDay = String(br.breakdown_day || startDate);
+    let imputed = 0;
+    for (const day of days) {
+      if (day < breakdownDay || day < startDate) continue;
+      if (getLogForBreakdownDay?.get(Number(br.breakdown_id || 0), day)) continue;
+      const sched = Number(getScheduledForAssetDay?.get(Number(br.asset_id || 0), day)?.scheduled_hours || 0);
+      imputed += sched > 0 ? sched : scheduledFallback;
+    }
+    if (imputed > 0) upsertIncident(br, imputed);
+  }
+
+  const manualByBreakdown = new Map(
+    dbConn.prepare(`SELECT breakdown_id, labor_hours, notes FROM breakdown_repair_labor`).all()
+      .map((r) => [Number(r.breakdown_id || 0), r]),
+  );
+  const getWo = dbHasTable(dbConn, "work_orders")
+    ? dbConn.prepare(`
+        SELECT id, labor_hours, labor_rate_per_hour
+        FROM work_orders
+        WHERE id = ?
+        LIMIT 1
+      `)
+    : null;
+
+  const incidents = [];
+  const byAsset = new Map();
+  for (const inc of incidentMap.values()) {
+    const bid = Number(inc.breakdown_id || 0);
+    const downtimeHours = Number(Number(inc.downtime_hours || 0).toFixed(2));
+    if (downtimeHours <= 0) continue;
+
+    const manual = manualByBreakdown.get(bid);
+    const wo = inc.primary_work_order_id && getWo ? getWo.get(inc.primary_work_order_id) : null;
+    const manualLabor = Math.max(0, Number(manual?.labor_hours || 0));
+    const woLabor = Math.max(0, Number(wo?.labor_hours || 0));
+    let actualLabor = 0;
+    let laborSource = "none";
+    if (manualLabor > 0) {
+      actualLabor = manualLabor;
+      laborSource = "manual";
+    } else if (woLabor > 0) {
+      actualLabor = woLabor;
+      laborSource = "work_order";
+    }
+    const rate = Number(wo?.labor_rate_per_hour) > 0 ? Number(wo.labor_rate_per_hour) : laborRate;
+    const repairLaborCost = Number((actualLabor * rate).toFixed(2));
+    const needsLaborInput = downtimeHours > 0 && actualLabor <= 0;
+
+    const row = {
+      breakdown_id: bid,
+      asset_id: Number(inc.asset_id || 0),
+      asset_code: inc.asset_code,
+      asset_name: inc.asset_name,
+      description: inc.description,
+      status: inc.status,
+      downtime_hours: downtimeHours,
+      actual_labor_hours: Number(actualLabor.toFixed(2)),
+      labor_rate: Number(rate.toFixed(2)),
+      repair_labor_cost: repairLaborCost,
+      labor_source: laborSource,
+      needs_labor_input: needsLaborInput,
+      labor_notes: String(manual?.notes || ""),
+    };
+    incidents.push(row);
+
+    const aid = Number(inc.asset_id || 0);
+    if (aid > 0) {
+      const ar = byAsset.get(aid) || {
+        asset_id: aid,
+        downtime_hours: 0,
+        repair_labor_hours: 0,
+        repair_labor_cost: 0,
+      };
+      ar.downtime_hours += downtimeHours;
+      ar.repair_labor_hours += actualLabor;
+      ar.repair_labor_cost += repairLaborCost;
+      byAsset.set(aid, ar);
+    }
+  }
+
+  incidents.sort((a, b) => Number(b.downtime_hours || 0) - Number(a.downtime_hours || 0));
+
+  const totals = incidents.reduce(
+    (t, r) => ({
+      downtime_hours: t.downtime_hours + Number(r.downtime_hours || 0),
+      repair_labor_hours: t.repair_labor_hours + Number(r.actual_labor_hours || 0),
+      repair_labor_cost: t.repair_labor_cost + Number(r.repair_labor_cost || 0),
+      needs_input_count: t.needs_input_count + (r.needs_labor_input ? 1 : 0),
+    }),
+    { downtime_hours: 0, repair_labor_hours: 0, repair_labor_cost: 0, needs_input_count: 0 },
+  );
+  totals.downtime_hours = Number(totals.downtime_hours.toFixed(2));
+  totals.repair_labor_hours = Number(totals.repair_labor_hours.toFixed(2));
+  totals.repair_labor_cost = Number(totals.repair_labor_cost.toFixed(2));
+
+  return { incidents, by_asset: byAsset, totals };
+}
+
 export default async function maintenanceRoutes(app) {
   ensureAuditTable(db);
   const dataRoot = getDataRoot();
@@ -2704,13 +2907,6 @@ export default async function maintenanceRoutes(app) {
         upcoming_cost_forecasts: upcomingCostForecasts.slice(0, 40),
       };
 
-      const insightsDowntime = buildMaintenanceInsightsDowntime(startDate, endDate, { scheduledFallback: 10 });
-      const downtime = {
-        by_component: insightsDowntime.by_component,
-        by_team: insightsDowntime.by_team,
-        total_hours: insightsDowntime.total_hours,
-      };
-
       const woHasOpenedAt = hasColumn("work_orders", "opened_at");
       const woHasUpdatedAt = hasColumn("work_orders", "updated_at");
       const woHasAssignedAt = hasColumn("work_orders", "assigned_at");
@@ -2780,6 +2976,21 @@ export default async function maintenanceRoutes(app) {
       const laborRate = Number(costSettings.labor_cost_per_hour_default || 35);
       const lubeDefault = Number(costSettings.lube_cost_per_qty_default || 4.0);
 
+      const insightsDowntime = buildMaintenanceInsightsDowntime(startDate, endDate, { scheduledFallback: 10 });
+      const breakdownLabor = buildInsightsBreakdownLaborIncidents(db, startDate, endDate, {
+        scheduledFallback: 10,
+        laborRate,
+      });
+      const downtime = {
+        by_component: insightsDowntime.by_component,
+        by_team: insightsDowntime.by_team,
+        total_hours: insightsDowntime.total_hours,
+        labor: {
+          incidents: breakdownLabor.incidents.slice(0, 50),
+          totals: breakdownLabor.totals,
+        },
+      };
+
       const smCols = hasTable("stock_movements")
         ? db.prepare(`PRAGMA table_info(stock_movements)`).all()
         : [];
@@ -2809,8 +3020,9 @@ export default async function maintenanceRoutes(app) {
             asset_name: String(assetName || ""),
             service_jobs: 0,
             downtime_hours: 0,
+            repair_labor_hours: 0,
             wo_labor_hours: 0,
-            downtime_labor_cost: 0,
+            repair_labor_cost: 0,
             wo_labor_cost: 0,
             labor_cost: 0,
             parts_cost: 0,
@@ -2836,7 +3048,8 @@ export default async function maintenanceRoutes(app) {
             COALESCE(SUM(COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, ?)), 0) AS wo_labor_cost
           FROM work_orders w
           JOIN assets a ON a.id = w.asset_id
-          WHERE DATE(COALESCE(w.completed_at, w.closed_at, w.opened_at, w.updated_at)) BETWEEN DATE(?) AND DATE(?)
+          WHERE LOWER(COALESCE(w.source, '')) = 'service'
+            AND DATE(COALESCE(w.completed_at, w.closed_at, w.opened_at, w.updated_at)) BETWEEN DATE(?) AND DATE(?)
             AND (
               w.status IN ('completed', 'approved', 'closed')
               OR COALESCE(w.labor_hours, 0) > 0
@@ -2859,9 +3072,18 @@ export default async function maintenanceRoutes(app) {
           || {};
         const row = ensureCostRow(assetId, asset.asset_code, asset.asset_name);
         if (!row) continue;
-        const hrs = Number(downRow.downtime_hours || 0);
-        row.downtime_hours = Number(hrs.toFixed(2));
-        row.downtime_labor_cost = Number((hrs * laborRate).toFixed(2));
+        row.downtime_hours = Number(Number(downRow.downtime_hours || 0).toFixed(2));
+      }
+
+      for (const [assetId, labRow] of breakdownLabor.by_asset.entries()) {
+        const asset =
+          activeAssets.find((a) => Number(a.id || 0) === Number(assetId))
+          || db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE id = ? LIMIT 1`).get(assetId)
+          || {};
+        const row = ensureCostRow(assetId, asset.asset_code, asset.asset_name);
+        if (!row) continue;
+        row.repair_labor_hours = Number(Number(labRow.repair_labor_hours || 0).toFixed(2));
+        row.repair_labor_cost = Number(Number(labRow.repair_labor_cost || 0).toFixed(2));
       }
 
       if (hasTable("stock_movements") && hasTable("parts")) {
@@ -2947,8 +3169,8 @@ export default async function maintenanceRoutes(app) {
       const maintenanceCost = Array.from(costByAsset.values())
         .map((row) => {
           const woLabor = Number(row.wo_labor_cost || 0);
-          const downLabor = Number(row.downtime_labor_cost || 0);
-          const labor = woLabor + downLabor;
+          const repairLabor = Number(row.repair_labor_cost || 0);
+          const labor = woLabor + repairLabor;
           const parts = Number(row.parts_cost || 0);
           const lube = Number(row.lube_cost || 0);
           const outsourced = Number(row.outsourced_cost || 0);
@@ -2957,7 +3179,8 @@ export default async function maintenanceRoutes(app) {
             ...row,
             labor_cost: Number(labor.toFixed(2)),
             wo_labor_cost: Number(woLabor.toFixed(2)),
-            downtime_labor_cost: Number(downLabor.toFixed(2)),
+            repair_labor_cost: Number(repairLabor.toFixed(2)),
+            repair_labor_hours: Number(Number(row.repair_labor_hours || 0).toFixed(2)),
             parts_cost: Number(parts.toFixed(2)),
             lube_cost: Number(lube.toFixed(2)),
             outsourced_cost: Number(outsourced.toFixed(2)),
@@ -2984,31 +3207,10 @@ export default async function maintenanceRoutes(app) {
             ORDER BY day ASC
           `).all(laborRate, startDate, endDate)
         : [];
-      const downLaborTrend =
-        hasTable("breakdown_downtime_logs")
-          ? db.prepare(`
-              SELECT
-                DATE(l.log_date) AS day,
-                COALESCE(SUM(COALESCE(l.hours_down, 0) * ?), 0) AS labor_cost
-              FROM breakdown_downtime_logs l
-              WHERE DATE(l.log_date) BETWEEN DATE(?) AND DATE(?)
-              GROUP BY day
-              ORDER BY day ASC
-            `).all(laborRate, startDate, endDate)
-          : [];
-      const laborTrendMap = new Map();
-      for (const r of [...woLaborTrend, ...downLaborTrend]) {
-        const day = String(r.day || "");
-        if (!day) continue;
-        const cur = Number(laborTrendMap.get(day) || 0);
-        laborTrendMap.set(day, cur + Number(r.labor_cost || 0));
-      }
-      const costTrend = [...laborTrendMap.entries()]
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([day, labor_cost]) => ({
-          day,
-          labor_cost: Number(Number(labor_cost || 0).toFixed(2)),
-        }));
+      const costTrend = (woLaborTrend || []).map((r) => ({
+        day: String(r.day || ""),
+        labor_cost: Number(Number(r.labor_cost || 0).toFixed(2)),
+      }));
 
       return reply.send({
         ok: true,
@@ -3030,6 +3232,47 @@ export default async function maintenanceRoutes(app) {
           downtime_daily: downtimeTrend,
           labor_daily: costTrend,
         },
+      });
+    } catch (e) {
+      req.log.error(e);
+      return reply.code(500).send({ ok: false, error: e.message || String(e) });
+    }
+  });
+
+  // POST /api/maintenance/breakdowns/:id/repair-labor
+  // Body: { labor_hours, notes? } — actual technician hours (not machine downtime hours)
+  app.post("/breakdowns/:id/repair-labor", async (req, reply) => {
+    try {
+      ensureBreakdownRepairLaborSchema(db);
+      const breakdownId = Number(req.params?.id || 0);
+      const labor_hours = Math.max(0, Number(req.body?.labor_hours || 0));
+      const notes = String(req.body?.notes || "").trim() || null;
+      if (!breakdownId) return reply.code(400).send({ ok: false, error: "breakdown id is required" });
+
+      const breakdown = db.prepare(`
+        SELECT b.id, b.asset_id, a.asset_code, a.asset_name
+        FROM breakdowns b
+        JOIN assets a ON a.id = b.asset_id
+        WHERE b.id = ?
+        LIMIT 1
+      `).get(breakdownId);
+      if (!breakdown) return reply.code(404).send({ ok: false, error: "breakdown not found" });
+
+      db.prepare(`
+        INSERT INTO breakdown_repair_labor (breakdown_id, labor_hours, notes, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(breakdown_id) DO UPDATE SET
+          labor_hours = excluded.labor_hours,
+          notes = excluded.notes,
+          updated_at = datetime('now')
+      `).run(breakdownId, labor_hours, notes);
+
+      return reply.send({
+        ok: true,
+        breakdown_id: breakdownId,
+        asset_code: breakdown.asset_code,
+        labor_hours: Number(labor_hours.toFixed(2)),
+        notes,
       });
     } catch (e) {
       req.log.error(e);
@@ -3360,15 +3603,39 @@ export default async function maintenanceRoutes(app) {
         { header: "Asset Code", key: "asset_code", width: 14 },
         { header: "Asset Name", key: "asset_name", width: 28 },
         { header: "Service Jobs", key: "service_jobs", width: 12 },
-        { header: "Downtime Hrs", key: "downtime_hours", width: 12 },
-        { header: "Labor Cost", key: "labor_cost", width: 12 },
-        { header: "WO Labor", key: "wo_labor_cost", width: 12 },
-        { header: "Downtime Labor", key: "downtime_labor_cost", width: 14 },
+        { header: "Down Hrs", key: "downtime_hours", width: 12 },
+        { header: "Repair Labor Hrs", key: "repair_labor_hours", width: 16 },
+        { header: "WO Labor $", key: "wo_labor_cost", width: 12 },
+        { header: "Repair Labor $", key: "repair_labor_cost", width: 14 },
+        { header: "Total Labor $", key: "labor_cost", width: 12 },
         { header: "Parts Cost", key: "parts_cost", width: 12 },
         { header: "Lube Cost", key: "lube_cost", width: 12 },
         { header: "Total Cost", key: "total_cost", width: 12 },
       ];
       wsCost.addRows(Array.isArray(data?.maintenance_cost) ? data.maintenance_cost : []);
+
+      const wsRepairLabor = wb.addWorksheet("Breakdown Repair Labor");
+      wsRepairLabor.columns = [
+        { header: "Asset Code", key: "asset_code", width: 14 },
+        { header: "Asset Name", key: "asset_name", width: 24 },
+        { header: "Breakdown ID", key: "breakdown_id", width: 12 },
+        { header: "Status", key: "status", width: 12 },
+        { header: "Down Hrs", key: "downtime_hours", width: 12 },
+        { header: "Repair Labor Hrs", key: "actual_labor_hours", width: 16 },
+        { header: "Labor Rate", key: "labor_rate", width: 12 },
+        { header: "Repair Labor $", key: "repair_labor_cost", width: 14 },
+        { header: "Source", key: "labor_source", width: 12 },
+        { header: "Needs Input", key: "needs_labor_input", width: 12 },
+        { header: "Notes", key: "labor_notes", width: 28 },
+      ];
+      wsRepairLabor.addRows(
+        Array.isArray(data?.downtime?.labor?.incidents)
+          ? data.downtime.labor.incidents.map((r) => ({
+              ...r,
+              needs_labor_input: r.needs_labor_input ? "yes" : "no",
+            }))
+          : [],
+      );
 
       const wsTrends = wb.addWorksheet("Trends");
       wsTrends.columns = [
@@ -3477,22 +3744,52 @@ export default async function maintenanceRoutes(app) {
           [0.65, 0.35]
         );
 
+        sectionTitle(doc, "Breakdown Downtime vs Repair Labor");
+        const laborIncidents = Array.isArray(data?.downtime?.labor?.incidents) ? data.downtime.labor.incidents : [];
+        const laborTotals = data?.downtime?.labor?.totals || {};
+        table(
+          doc,
+          ["Metric", "Value"],
+          [
+            { Metric: "Machine downtime hours", Value: Number(laborTotals.downtime_hours || 0).toFixed(2) },
+            { Metric: "Actual repair labor hours", Value: Number(laborTotals.repair_labor_hours || 0).toFixed(2) },
+            { Metric: "Repair labor cost", Value: Number(laborTotals.repair_labor_cost || 0).toFixed(2) },
+            { Metric: "Incidents needing labor input", Value: String(laborTotals.needs_input_count || 0) },
+          ],
+          [0.55, 0.45]
+        );
+        table(
+          doc,
+          ["Asset", "Down Hrs", "Repair Hrs", "Repair $", "Source"],
+          laborIncidents.length
+            ? laborIncidents.slice(0, 20).map((r) => ({
+                Asset: `${String(r.asset_code || "-")} - ${String(r.asset_name || "-")}`,
+                "Down Hrs": Number(r.downtime_hours || 0).toFixed(2),
+                "Repair Hrs": Number(r.actual_labor_hours || 0).toFixed(2),
+                "Repair $": Number(r.repair_labor_cost || 0).toFixed(2),
+                Source: String(r.labor_source || "-"),
+              }))
+            : [{ Asset: "No breakdown labor in period", "Down Hrs": "-", "Repair Hrs": "-", "Repair $": "-", Source: "-" }],
+          [0.38, 0.14, 0.14, 0.14, 0.2]
+        );
+
         sectionTitle(doc, "Top Maintenance Cost Per Machine");
         const costs = Array.isArray(data?.maintenance_cost) ? data.maintenance_cost : [];
         table(
           doc,
-          ["Asset", "Jobs", "Labor", "Parts", "Lube", "Total"],
+          ["Asset", "Jobs", "Down Hrs", "Repair Hrs", "Labor", "Parts", "Total"],
           costs.length
             ? costs.slice(0, 20).map((r) => ({
                 Asset: `${String(r.asset_code || "-")} - ${String(r.asset_name || "-")}`,
                 Jobs: Number(r.service_jobs || 0),
+                "Down Hrs": Number(r.downtime_hours || 0).toFixed(2),
+                "Repair Hrs": Number(r.repair_labor_hours || 0).toFixed(2),
                 Labor: Number(r.labor_cost || 0).toFixed(2),
                 Parts: Number(r.parts_cost || 0).toFixed(2),
-                Lube: Number(r.lube_cost || 0).toFixed(2),
                 Total: Number(r.total_cost || 0).toFixed(2),
               }))
-            : [{ Asset: "No costs in period", Jobs: "-", Labor: "-", Parts: "-", Lube: "-", Total: "-" }],
-          [0.38, 0.08, 0.13, 0.13, 0.13, 0.15]
+            : [{ Asset: "No costs in period", Jobs: "-", "Down Hrs": "-", "Repair Hrs": "-", Labor: "-", Parts: "-", Total: "-" }],
+          [0.32, 0.08, 0.1, 0.1, 0.13, 0.13, 0.14]
         );
       }, {
         title: "IRONLOG",

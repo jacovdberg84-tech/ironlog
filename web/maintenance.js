@@ -515,7 +515,12 @@ function renderStandardizedInsightDashboards(data) {
 
   const totalMaintenanceCost = costRows.reduce((sum, r) => sum + Number(r?.total_cost || 0), 0);
   const totalPartsCost = costRows.reduce((sum, r) => sum + Number(r?.parts_cost || 0), 0);
-  const totalDowntimeHours = downtimeRows.reduce((sum, r) => sum + Number(r?.downtime_hours || 0), 0);
+  const totalDowntimeHours = Number(data?.downtime?.total_hours || 0)
+    || downtimeRows.reduce((sum, r) => sum + Number(r?.downtime_hours || 0), 0);
+  const laborTotals = data?.downtime?.labor?.totals || {};
+  const repairLaborHours = Number(laborTotals.repair_labor_hours || 0);
+  const repairLaborCost = Number(laborTotals.repair_labor_cost || 0);
+  const needsLaborInputCount = Number(laborTotals.needs_input_count || 0);
   const totalDowntimeIncidents = downtimeRows.reduce((sum, r) => sum + Number(r?.incidents || 0), 0);
   const totalSuggestedPartsQty = partRows.reduce((sum, r) => sum + Number(r?.suggested_qty || 0), 0);
   const totalPartsGapQty = partRows.reduce((sum, r) => sum + Number(r?.gap_qty || 0), 0);
@@ -554,7 +559,11 @@ function renderStandardizedInsightDashboards(data) {
         <div class="kpi-title">Downtime Dashboard</div>
       </div>
       <div class="kpi-big-value">${fmt1(totalDowntimeHours)}</div>
-      <div class="kpi-meta">Total downtime hours (${Number(totalDowntimeIncidents || 0)} incidents)</div>
+      <div class="kpi-meta">Total machine downtime hours (${Number(totalDowntimeIncidents || 0)} incidents)</div>
+      <div class="kpi-meta" style="margin-top:6px;">Actual repair labor: ${fmt1(repairLaborHours)} hrs (${fmtMoney(repairLaborCost)})</div>
+      ${needsLaborInputCount > 0
+        ? `<div class="kpi-meta message-error" style="margin-top:6px;">${needsLaborInputCount} breakdown(s) need repair labor hours</div>`
+        : ""}
       <div class="kpi-meta" style="margin-top:6px;">
         Top component:
         ${topDowntimeComponent ? `${escBackfill(topDowntimeComponent.component || "-")} (${fmt1(topDowntimeComponent.downtime_hours)}h)` : "N/A"}
@@ -691,6 +700,8 @@ function addInsightsDraftItem() {
 }
 
 let insightsManualUiBound = false;
+let insightsRepairLaborUiBound = false;
+let insightsRepairLaborCache = [];
 function bindInsightsManualForecastUi() {
   const host = document.getElementById("insightsParts");
   if (!host || insightsManualUiBound) return;
@@ -747,6 +758,60 @@ async function loadInsightsForecastInputs() {
     if (planNow) hydrateInsightsDraftFromSaved(planNow);
   } catch {
     insightsInputsCache = [];
+  }
+}
+
+function bindInsightsRepairLaborUi() {
+  const host = document.getElementById("insightsDowntime");
+  if (!host || insightsRepairLaborUiBound) return;
+  insightsRepairLaborUiBound = true;
+  host.addEventListener("change", (evt) => {
+    if (evt.target?.id !== "insightsRepairLaborBreakdown") return;
+    const bid = Number(evt.target?.value || 0);
+    const inc = insightsRepairLaborCache.find((r) => Number(r.breakdown_id || 0) === bid);
+    const laborEl = document.getElementById("insightsRepairLaborHours");
+    const notesEl = document.getElementById("insightsRepairLaborNotes");
+    if (laborEl) laborEl.value = inc ? Number(inc.actual_labor_hours || 0) : 0;
+    if (notesEl) notesEl.value = inc ? String(inc.labor_notes || "") : "";
+  });
+  host.addEventListener("click", (evt) => {
+    if (!evt.target?.closest?.("#insightsSaveRepairLaborBtn")) return;
+    saveBreakdownRepairLabor();
+  });
+}
+
+async function saveBreakdownRepairLabor() {
+  const msg = document.getElementById("insightsRepairLaborMsg");
+  const breakdown_id = Number(document.getElementById("insightsRepairLaborBreakdown")?.value || 0);
+  const labor_hours = Math.max(0, Number(document.getElementById("insightsRepairLaborHours")?.value || 0));
+  const notes = String(document.getElementById("insightsRepairLaborNotes")?.value || "").trim();
+  if (!msg) return;
+  if (!breakdown_id) {
+    msg.className = "message-error";
+    msg.textContent = "Select a breakdown incident first.";
+    return;
+  }
+  if (labor_hours <= 0) {
+    msg.className = "message-error";
+    msg.textContent = "Enter actual repair labor hours (technician time, not machine downtime).";
+    return;
+  }
+  msg.className = "muted";
+  msg.textContent = "Saving repair labor...";
+  try {
+    const res = await fetch(`${API}/maintenance/breakdowns/${breakdown_id}/repair-labor`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ labor_hours, notes: notes || null }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save repair labor");
+    msg.className = "message-success";
+    msg.textContent = `Saved ${Number(data.labor_hours || labor_hours).toFixed(2)} repair labor hrs for ${data.asset_code || "breakdown"}.`;
+    await loadMaintenanceInsights();
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = e.message || String(e);
   }
 }
 
@@ -907,18 +972,75 @@ function renderMaintenanceInsights(data) {
 
   const compRows = Array.isArray(data?.downtime?.by_component) ? data.downtime.by_component : [];
   const teamRows = Array.isArray(data?.downtime?.by_team) ? data.downtime.by_team : [];
+  const laborIncidents = Array.isArray(data?.downtime?.labor?.incidents) ? data.downtime.labor.incidents : [];
+  const laborTotals = data?.downtime?.labor?.totals || {};
+  insightsRepairLaborCache = laborIncidents;
+  const laborRate = Number(data?.range?.labor_cost_per_hour || 0);
+  const needsLaborCount = Number(laborTotals.needs_input_count || 0);
+  const laborIncidentOptions = laborIncidents.map((r) => {
+    const label = `#${r.breakdown_id} ${r.asset_code || "-"} — down ${Number(r.downtime_hours || 0).toFixed(1)}h`;
+    return `<option value="${Number(r.breakdown_id || 0)}">${escBackfill(label)}</option>`;
+  }).join("");
   downtimeEl.innerHTML = `
-    <div class="muted">Top components and teams by downtime impact.</div>
+    <div class="muted">
+      Machine down: ${Number(laborTotals.downtime_hours || 0).toFixed(2)} hrs
+      | Actual repair labor: ${Number(laborTotals.repair_labor_hours || 0).toFixed(2)} hrs (${fmtMoney(laborTotals.repair_labor_cost || 0)})
+      ${needsLaborCount > 0 ? ` | <span class="message-error">${needsLaborCount} need labor input</span>` : ""}
+    </div>
+    <small class="muted" style="display:block; margin:6px 0 10px;">
+      Downtime is machine-not-available time. Repair labor is technician hours actually spent — they are not the same (e.g. 200h down may be 12h repair labor).
+    </small>
+    <h5 style="margin:0 0 6px;">Breakdown downtime vs repair labor</h5>
+    ${insightsRowsTable(
+      ["Asset", "Breakdown", "Down Hrs", "Repair Hrs", "Repair $", "Source", "Status"],
+      laborIncidents.slice(0, 15).map((r) => [
+        `${r.asset_code || "-"}${r.asset_name ? ` - ${r.asset_name}` : ""}`,
+        `#${r.breakdown_id}${r.description ? ` — ${String(r.description).slice(0, 40)}` : ""}`,
+        Number(r.downtime_hours || 0).toFixed(2),
+        r.needs_labor_input
+          ? { __html: `<span class="message-error">${Number(r.actual_labor_hours || 0).toFixed(2)}</span>` }
+          : Number(r.actual_labor_hours || 0).toFixed(2),
+        fmtMoney(r.repair_labor_cost || 0),
+        String(r.labor_source || "-").replace(/_/g, " "),
+        r.status || "-",
+      ])
+    )}
+    <hr class="hr-soft" style="margin:14px 0;" />
+    <h5 style="margin:0 0 8px;">Enter actual repair labor hours</h5>
+    <div class="row stack-10">
+      <label style="flex:1;">
+        Breakdown incident
+        <select id="insightsRepairLaborBreakdown">
+          <option value="">Select breakdown...</option>
+          ${laborIncidentOptions}
+        </select>
+      </label>
+      <label>
+        Repair labor (hrs)
+        <input id="insightsRepairLaborHours" type="number" min="0" step="0.25" value="0" />
+      </label>
+      <label style="flex:1;">
+        Notes
+        <input id="insightsRepairLaborNotes" placeholder="Optional — e.g. 2 techs × 6 hrs" />
+      </label>
+      <button type="button" id="insightsSaveRepairLaborBtn">Save labor</button>
+    </div>
+    <div id="insightsRepairLaborMsg" class="muted" style="margin-top:6px;">
+      ${laborRate > 0 ? `Default labor rate when WO rate missing: ${fmtMoney(laborRate)}/hr.` : ""}
+    </div>
+    <h5 style="margin:14px 0 6px;">By component</h5>
     ${insightsRowsTable(
       ["Component", "Incidents", "Downtime Hrs"],
       compRows.slice(0, 8).map((r) => [r.component || "-", Number(r.incidents || 0), Number(r.downtime_hours || 0).toFixed(2)])
     )}
     <div style="margin-top:10px;"></div>
+    <h5 style="margin:0 0 6px;">By team</h5>
     ${insightsRowsTable(
       ["Team", "Incidents", "Downtime Hrs"],
       teamRows.slice(0, 8).map((r) => [r.team || "-", Number(r.incidents || 0), Number(r.downtime_hours || 0).toFixed(2)])
     )}
   `;
+  bindInsightsRepairLaborUi();
 
   const s = data?.sla || {};
   slaEl.innerHTML = insightsRowsTable(
@@ -933,20 +1055,22 @@ function renderMaintenanceInsights(data) {
   );
 
   const costRows = Array.isArray(data?.maintenance_cost) ? data.maintenance_cost : [];
-  const laborRate = Number(data?.range?.labor_cost_per_hour || 0);
-  const laborHint = laborRate > 0
-    ? `<div class="muted mini" style="margin:0 0 8px;">Labor includes work-order hours and downtime at ${fmtMoney(laborRate)}/hr from cost settings.</div>`
-    : "";
+  const costLaborRate = Number(data?.range?.labor_cost_per_hour || 0);
+  const laborHint = costLaborRate > 0
+    ? `<div class="muted mini" style="margin:0 0 8px;">Labor = service WO hours + actual breakdown repair hours (not machine downtime). Default repair rate ${fmtMoney(costLaborRate)}/hr when WO rate is missing. Fuel excluded.</div>`
+    : `<div class="muted mini" style="margin:0 0 8px;">Labor = service WO hours + actual breakdown repair hours (not machine downtime). Fuel excluded.</div>`;
   costEl.innerHTML = `${laborHint}${insightsRowsTable(
-    ["Asset", "Jobs", "Down Hrs", "Labor", "Parts", "Lube", "Total"],
+    ["Asset", "Jobs", "Down Hrs", "Repair Hrs", "WO Labor", "Repair Labor", "Parts", "Lube", "Total"],
     costRows.slice(0, 15).map((r) => [
       `${r.asset_code || "-"} - ${r.asset_name || "-"}`,
       Number(r.service_jobs || 0),
       Number(r.downtime_hours || 0).toFixed(2),
-      Number(r.labor_cost || 0).toFixed(2),
-      Number(r.parts_cost || 0).toFixed(2),
-      Number(r.lube_cost || 0).toFixed(2),
-      Number(r.total_cost || 0).toFixed(2),
+      Number(r.repair_labor_hours || 0).toFixed(2),
+      fmtMoney(r.wo_labor_cost || 0),
+      fmtMoney(r.repair_labor_cost || 0),
+      fmtMoney(r.parts_cost || 0),
+      fmtMoney(r.lube_cost || 0),
+      fmtMoney(r.total_cost || 0),
     ])
   )}`;
 
