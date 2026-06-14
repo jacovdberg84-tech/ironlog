@@ -17,6 +17,20 @@ function contentWidth(doc) {
   return doc.page.width - doc.page.margins.left - doc.page.margins.right;
 }
 
+/** Y coordinate for body content — below the branded header divider line. */
+export function pdfBodyTop(doc, opts = {}) {
+  const marginTop = doc.page.margins.top;
+  const siteLabel = String(opts.siteName || "").trim();
+  const titleSize = 14;
+  const subtitleSize = 10;
+  const siteSize = 9;
+  const lineGap = 5;
+  let textY = 18 + titleSize + lineGap + subtitleSize + lineGap;
+  if (siteLabel) textY += siteSize + lineGap;
+  const dividerY = Math.max(textY + 8, marginTop - 2);
+  return dividerY + 14;
+}
+
 function nowStamp() {
   // stable, readable timestamp in report footer
   const d = new Date();

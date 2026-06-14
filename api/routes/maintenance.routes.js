@@ -5,7 +5,8 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import ExcelJS from "exceljs";
-import { buildPdfBuffer, ensurePageSpace, sectionTitle, table } from "../utils/pdfGenerator.js";
+import { buildPdfBuffer, ensurePageSpace, pdfBodyTop, sectionTitle, table } from "../utils/pdfGenerator.js";
+import { getPdfReportBranding } from "../utils/reportSettings.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import {
   resolveMachinePrestartProfile,
@@ -605,7 +606,9 @@ function wiPdfAddLandscapePage(doc) {
   });
 }
 
-function drawWeeklyInspectionCalendarPdfGrid(doc, data) {
+function drawWeeklyInspectionCalendarPdfGrid(doc, data, opts = {}) {
+  const siteName = String(opts.siteName || "");
+  const bodyTop = () => pdfBodyTop(doc, { siteName });
   const weeks = Array.isArray(data?.calendar_weeks) ? data.calendar_weeks : [];
   if (!weeks.length) {
     doc.font("Helvetica").fontSize(10).fillColor("#64748b").text("No calendar data for this month.");
@@ -648,7 +651,7 @@ function drawWeeklyInspectionCalendarPdfGrid(doc, data) {
 
     if (y + cellH > wiPdfBodyBottom(doc)) {
       wiPdfAddLandscapePage(doc);
-      y = margin.top + 4;
+      y = bodyTop() + 4;
       y = drawMonthCaption(y);
       y = drawDayHeaders(y);
     }
@@ -5101,9 +5104,10 @@ export default async function maintenanceRoutes(app) {
       const rosterAssets = Array.isArray(data.assets) ? data.assets : [];
       const weeklyGaps = Array.isArray(compliance.weekly_gaps) ? compliance.weekly_gaps : [];
       const monthLabel = String(data.month || "");
+      const branding = getPdfReportBranding(db);
       const pdf = await buildPdfBuffer(
         (doc) => {
-          doc.y = doc.page.margins.top;
+          doc.y = pdfBodyTop(doc, { siteName: branding.site_name });
           doc.font("Helvetica").fontSize(10).fillColor("#334155");
           doc.text(
             `Released: ${Number(compliance.done_count ?? 0)} / ${Number(compliance.total_slots ?? 0)} · Overdue: ${Number(compliance.not_released_count ?? 0)} · Planned: ${wiFormatMinutesPdf(compliance.est_minutes_total || 0)}`,
@@ -5112,7 +5116,7 @@ export default async function maintenanceRoutes(app) {
             { width: doc.page.width - doc.page.margins.left - doc.page.margins.right },
           );
           doc.moveDown(0.55);
-          drawWeeklyInspectionCalendarPdfGrid(doc, data);
+          drawWeeklyInspectionCalendarPdfGrid(doc, data, { siteName: branding.site_name });
           if (rosterAssets.length || weeklyGaps.length) {
             ensurePageSpace(doc, 60);
             if (rosterAssets.length) {
