@@ -10,6 +10,7 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { runIronmindAutoScheduler } from "./utils/ironmind.js";
+import { runCartrackAutoScheduler } from "./utils/cartrack.js";
 import { startDbAutoBackup } from "./db/autoBackup.js";
 
 // Load api/.env first, then cwd .env for any missing keys (override off by default).
@@ -101,6 +102,7 @@ try {
   process.once("SIGINT", stopDbAutoBackup);
   process.once("SIGTERM", stopDbAutoBackup);
   await runIronmindAutoScheduler(app.log);
+  runCartrackAutoScheduler(app.log);
   app.log.info(`IRONLOG API running on http://${HOST}:${effectivePort}`);
   app.log.info(`IRONLOG UI  running on http://${HOST}:${effectivePort}/web/index.html`);
 } catch (err) {
