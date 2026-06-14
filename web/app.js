@@ -4192,6 +4192,191 @@ async function loadTelematicsFleet() {
   }
 }
 
+function renderCartrackFleetTable(fleet, speedingToday) {
+  const host = qs("cartrackFleetHost");
+  if (!host) return;
+  if (!fleet?.length) {
+    host.innerHTML = `<div class="cartrack-empty muted small">No Cartrack vehicles synced yet. If Test connection succeeds but shows 0 vehicles, ask Cartrack to assign your fleet to the API user. Then click Sync now.</div>`;
+    return;
+  }
+  const speedMap = new Map();
+  (speedingToday || []).forEach((e) => {
+    const k = e.asset_code || e.registration;
+    speedMap.set(k, (speedMap.get(k) || 0) + 1);
+  });
+  const rows = fleet
+    .map((v) => {
+      const code = v.asset_code || v.registration || "—";
+      const ign = Number(v.ignition_on) === 1;
+      const spd = Number(v.speed_kmh || 0);
+      const speedEvents = speedMap.get(code) || speedMap.get(v.registration) || 0;
+      const rowCls = speedEvents > 0 ? "cartrack-row--alert" : "";
+      return `<tr class="${rowCls}">
+        <td><span class="cartrack-vehicle-code">${escapeHtml(code)}</span></td>
+        <td>${escapeHtml(v.vehicle_name || v.registration || "—")}</td>
+        <td class="cartrack-col-num">${spd.toFixed(0)}</td>
+        <td class="cartrack-col-status">${ign ? '<span class="pill green">ON</span>' : '<span class="pill">OFF</span>'}</td>
+        <td class="cartrack-col-num">${speedEvents ? `<span class="pill red">${speedEvents}</span>` : "—"}</td>
+        <td class="cartrack-col-sync muted">${escapeHtml(String(v.synced_at || "").slice(0, 16))}</td>
+      </tr>`;
+    })
+    .join("");
+  host.innerHTML = `
+    <div class="cartrack-table-scroll">
+      <table class="cartrack-fleet-table">
+        <thead>
+          <tr>
+            <th>Vehicle</th>
+            <th>Name / reg</th>
+            <th class="cartrack-col-num">Speed</th>
+            <th>Ignition</th>
+            <th class="cartrack-col-num">Speeding</th>
+            <th>Synced</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function loadCartrackFleet() {
+  const host = qs("cartrackFleetHost");
+  const hint = qs("cartrackFleetHint");
+  if (!host) return;
+  try {
+    const data = await fetchJson(`${API}/api/cartrack/fleet`);
+    const s = data?.summary || {};
+    setText("cartrackKpiTotal", Number(s.total_vehicles || 0));
+    setText("cartrackKpiLive", Number(s.ignition_on || 0));
+    setText("cartrackKpiSpeeding", Number(s.speeding_today || 0));
+    if (hint) {
+      hint.textContent = data.configured
+        ? `Cartrack connected (${data.base_url || "MZ"}). Last sync: ${s.last_sync || "—"}`
+        : "Cartrack not configured — add API credentials in User Admin → Cartrack.";
+    }
+    renderCartrackFleetTable(data.fleet || [], data.speeding_today || []);
+  } catch (e) {
+    host.innerHTML = `<div class="cartrack-empty muted small">Cartrack: ${escapeHtml(e.message || String(e))}</div>`;
+  }
+}
+
+async function syncCartrackNow() {
+  setStatus("Syncing Cartrack fleet…");
+  const today = todayLocalYmd();
+  await fetchJson(`${API}/api/cartrack/sync`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ start_date: today, end_date: today }),
+  });
+  await loadCartrackFleet();
+  setStatus("Cartrack sync complete ✅");
+}
+
+function yesterdayYmd() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function openCartrackMorningPdf() {
+  const date = yesterdayYmd();
+  window.open(`${API}/api/cartrack/morning-report.pdf?date=${encodeURIComponent(date)}`, "_blank");
+}
+
+async function emailCartrackMorningReport() {
+  const date = yesterdayYmd();
+  setStatus("Sending Cartrack morning report…");
+  const data = await fetchJson(`${API}/api/cartrack/morning-report/send`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ date }),
+  });
+  setStatus(`Cartrack report emailed (${data.summary?.total_speeding_events ?? 0} events) ✅`);
+}
+
+function setCartrackAdminResult(text, ok) {
+  const el = qs("cartrackAdminResult");
+  if (!el) return;
+  el.textContent = String(text || "");
+  el.style.color = ok === true ? "#15803d" : ok === false ? "#b91c1c" : "";
+}
+
+async function loadCartrackAdminSettings() {
+  if (!qs("adminCartrackCard")) return;
+  try {
+    const data = await fetchJson(`${API}/api/cartrack/settings`);
+    const s = data?.settings || {};
+    if (qs("cartrackBaseUrl")) qs("cartrackBaseUrl").value = s.base_url || "";
+    if (qs("cartrackUsername")) qs("cartrackUsername").value = s.username || "";
+    if (qs("cartrackMorningRecipients")) qs("cartrackMorningRecipients").value = s.morning_recipients || "";
+    if (qs("cartrackMorningEnabled")) qs("cartrackMorningEnabled").checked = s.morning_enabled !== false;
+    const [hh, mm] = String(s.morning_time || "06:00").split(":");
+    if (qs("cartrackMorningHour")) qs("cartrackMorningHour").value = hh || "6";
+    if (qs("cartrackMorningMinute")) qs("cartrackMorningMinute").value = mm || "0";
+    setCartrackAdminResult(
+      s.configured ? `Configured (${s.source}). Updated ${s.updated_at || "—"}.` : "Not configured yet.",
+      s.configured ? true : null
+    );
+  } catch (e) {
+    setCartrackAdminResult(String(e.message || e), false);
+  }
+}
+
+async function saveCartrackAdminSettings() {
+  setCartrackAdminResult("Saving…", null);
+  const body = {
+    base_url: qs("cartrackBaseUrl")?.value,
+    username: qs("cartrackUsername")?.value,
+    morning_recipients: qs("cartrackMorningRecipients")?.value,
+    morning_enabled: Boolean(qs("cartrackMorningEnabled")?.checked),
+    morning_hour: Number(qs("cartrackMorningHour")?.value || 6),
+    morning_minute: Number(qs("cartrackMorningMinute")?.value || 0),
+  };
+  const pass = String(qs("cartrackPassword")?.value || "").trim();
+  if (pass) body.password = pass;
+  const data = await fetchJson(`${API}/api/cartrack/settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  if (qs("cartrackPassword")) qs("cartrackPassword").value = "";
+  setCartrackAdminResult("Cartrack settings saved.", true);
+  loadCartrackFleet().catch(() => {});
+  return data;
+}
+
+async function testCartrackConnection() {
+  setCartrackAdminResult("Testing connection…", null);
+  try {
+    const data = await fetchJson(`${API}/api/cartrack/test-connection`, { method: "POST" });
+    setCartrackAdminResult(data.message || "Connected.", true);
+  } catch (e) {
+    setCartrackAdminResult(String(e.message || e), false);
+  }
+}
+
+async function runCartrackMorningNow() {
+  setCartrackAdminResult("Running morning report…", null);
+  try {
+    const data = await fetchJson(`${API}/api/cartrack/morning-report/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ send_email: true }),
+    });
+    const n = data?.summary?.total_speeding_events ?? 0;
+    setCartrackAdminResult(`Report for ${data.report_date}: ${n} speeding event(s).${data.emailed ? " Emailed." : ""}`, true);
+    loadCartrackFleet().catch(() => {});
+  } catch (e) {
+    setCartrackAdminResult(String(e.message || e), false);
+  }
+}
+
+async function initCartrackAdminPanel() {
+  if (!qs("adminCartrackCard")) return;
+  await loadCartrackAdminSettings().catch(() => {});
+}
+
 async function loadDashboard() {
   const dateEl = qs("date");
   const scheduledEl = qs("scheduled");
@@ -4212,9 +4397,11 @@ async function loadDashboard() {
   setSkeleton("lubeList", 2);
   if (isDashSectionVisible("dashStockMonitorCard")) setSkeleton("stockMonitorList", 2);
   setSkeleton("telematicsFleetList", 2);
+  setSkeleton("cartrackFleetHost", 2);
 
   const data = await fetchJson(`${API}/api/dashboard?date=${date}&scheduled=${scheduled}`);
   loadTelematicsFleet().catch(() => {});
+  loadCartrackFleet().catch(() => {});
 
   const sqDateEl = qs("sqDate");
   if (sqDateEl && !sqDateEl.value) sqDateEl.value = date;
@@ -13850,6 +14037,18 @@ async function init() {
   );
   initSafetyAdminPanel().catch(() => {});
   initTelematicsAdminPanel().catch(() => {});
+  initCartrackAdminPanel().catch(() => {});
+
+  qs("cartrackSaveSettingsBtn")?.addEventListener("click", () =>
+    saveCartrackAdminSettings().catch((e) => setCartrackAdminResult(String(e.message || e), false))
+  );
+  qs("cartrackTestBtn")?.addEventListener("click", () => testCartrackConnection().catch(() => {}));
+  qs("cartrackRunMorningBtn")?.addEventListener("click", () => runCartrackMorningNow().catch(() => {}));
+  qs("cartrackSyncBtn")?.addEventListener("click", () => syncCartrackNow().catch((e) => setStatus(String(e.message || e))));
+  qs("cartrackMorningPdfBtn")?.addEventListener("click", openCartrackMorningPdf);
+  qs("cartrackMorningEmailBtn")?.addEventListener("click", () =>
+    emailCartrackMorningReport().catch((e) => setStatus(String(e.message || e)))
+  );
 
   qs("telemSaveDeviceBtn")?.addEventListener("click", () =>
     saveTelematicsDevice().catch((e) => setTelemAdminResult(String(e.message || e)))

@@ -415,6 +415,25 @@
             <p class="muted small">Top reasons by hours + incidents</p>
           </div>
 
+          <div class="dash-card" id="cartrackFleetCard">
+            <div class="dash-card-header">
+              <h3>Cartrack Fleet</h3>
+              <span class="dash-card-badge" id="cartrackFleetBadge">Mozambique</span>
+            </div>
+            <div class="kpi-pills" id="cartrackKpiPills" style="margin-bottom:8px;">
+              <span class="kpi-pill kpi-pill-blue"><strong>Tracked:</strong> <span id="cartrackKpiTotal">0</span></span>
+              <span class="kpi-pill kpi-pill-green"><strong>Ignition on:</strong> <span id="cartrackKpiLive">0</span></span>
+              <span class="kpi-pill kpi-pill-red"><strong>Speeding today:</strong> <span id="cartrackKpiSpeeding">0</span></span>
+            </div>
+            <div class="action-buttons" style="margin-bottom:8px;">
+              <button type="button" id="cartrackSyncBtn" class="btn btn-secondary btn-sm">Sync now</button>
+              <button type="button" id="cartrackMorningPdfBtn" class="btn btn-secondary btn-sm">Yesterday PDF</button>
+              <button type="button" id="cartrackMorningEmailBtn" class="btn btn-secondary btn-sm">Email report</button>
+            </div>
+            <div id="cartrackFleetHost" class="cartrack-fleet-host"></div>
+            <p class="muted small" id="cartrackFleetHint">Live GPS from Cartrack. Configure API in User Admin → Cartrack.</p>
+          </div>
+
           <div class="dash-card" id="telematicsFleetCard">
             <div class="dash-card-header">
               <h3>Live Telematics</h3>
@@ -4952,6 +4971,67 @@
           </div>
         </div>
 
+        <!-- Cartrack GPS (Mozambique) -->
+        <div class="dash-card collapsible full-width" data-collapsed="true" id="adminCartrackCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #ecfdf5; color: #047857;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+              </div>
+              <div>
+                <h3>Cartrack GPS (Mozambique)</h3>
+                <p class="muted small">Fleet API credentials, morning speeding report time, and email recipients.</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row" style="flex-wrap:wrap;">
+              <div class="form-field" style="flex:1 1 280px;">
+                <label>API base URL</label>
+                <input id="cartrackBaseUrl" class="w-full" placeholder="https://fleetapi-mz.cartrack.com/rest" />
+                <p class="muted mini">API host is <code>fleetapi-mz</code> — not the Fleetweb login URL (<code>fleetweb-mz.cartrack.com</code>).</p>
+              </div>
+              <div class="form-field" style="flex:1 1 200px;">
+                <label>Username</label>
+                <input id="cartrackUsername" class="w-full" autocomplete="off" />
+              </div>
+              <div class="form-field" style="flex:1 1 200px;">
+                <label>API password</label>
+                <input id="cartrackPassword" type="password" class="w-full" placeholder="Leave blank to keep existing" autocomplete="new-password" />
+              </div>
+            </div>
+            <div class="form-row" style="flex-wrap:wrap;">
+              <div class="form-field" style="flex:1 1 240px;">
+                <label>Morning report recipients (comma-separated emails)</label>
+                <input id="cartrackMorningRecipients" class="w-full" placeholder="supervisor@company.com, gm@company.com" />
+              </div>
+              <div class="form-field">
+                <label>Morning report hour (0–23)</label>
+                <input id="cartrackMorningHour" type="number" min="0" max="23" class="w-full" value="6" />
+              </div>
+              <div class="form-field">
+                <label>Minute</label>
+                <input id="cartrackMorningMinute" type="number" min="0" max="59" class="w-full" value="0" />
+              </div>
+              <div class="form-field form-field-action">
+                <label class="checkbox-label" style="margin-top:24px;">
+                  <input id="cartrackMorningEnabled" type="checkbox" checked />
+                  <span>Auto morning report</span>
+                </label>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button type="button" id="cartrackSaveSettingsBtn" class="btn btn-primary btn-sm">Save Cartrack</button>
+              <button type="button" id="cartrackTestBtn" class="btn btn-secondary btn-sm">Test connection</button>
+              <button type="button" id="cartrackRunMorningBtn" class="btn btn-secondary btn-sm">Run morning report now</button>
+            </div>
+            <pre class="output" id="cartrackAdminResult"></pre>
+          </div>
+        </div>
+
         <!-- Safety equipment register + checklist templates -->
         <div class="dash-card collapsible full-width" data-collapsed="true" id="adminSafetyCard">
           <div class="dash-card-header">
@@ -6453,6 +6533,6 @@
 
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="./app.js?v=12"></script>
+  <script src="./app.js?v=13"></script>
 </body>
 </html>
