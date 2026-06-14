@@ -3805,6 +3805,11 @@ async function clearWeeklyInspectionRoster() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to clear roster");
     closeWiDayPanel();
+    wiCalendarCache = { ...wiCalendarCache, assets: [], calendar_weeks: [], compliance: { ...wiCalendarCache?.compliance, weekly_gaps: [], day_agenda: [], total_slots: 0, done_count: 0 } };
+    const assetList = document.getElementById("wiAssetList");
+    if (assetList) {
+      assetList.innerHTML = `<div class="empty">No equipment on the workshop roster yet. Add machines above, then click calendar days to schedule them.</div>`;
+    }
     await loadWeeklyInspectionCalendar();
     wiSetMsg(
       `Roster cleared (${Number(data.roster_cleared || 0)} item${Number(data.roster_cleared || 0) === 1 ? "" : "s"}${Number(data.slots_cleared || 0) ? `, ${Number(data.slots_cleared)} calendar visit${Number(data.slots_cleared) === 1 ? "" : "s"} removed` : ""}).`,

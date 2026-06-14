@@ -559,20 +559,90 @@ function copyWeeklyInspectionDay(from_date, to_date) {
 
 function clearWeeklyInspectionRoster({ clear_slots = true } = {}) {
   ensureWeeklyInspectionSchema();
-  const rosterResult = db.prepare(`
-    UPDATE weekly_inspection_assets
-    SET active = 0, updated_at = datetime('now')
-    WHERE COALESCE(active, 1) = 1
-  `).run();
+  const roster_cleared = Number(
+    db.prepare(`SELECT COUNT(*) AS c FROM weekly_inspection_assets WHERE COALESCE(active, 1) = 1`).get()?.c || 0,
+  );
+  db.prepare(`DELETE FROM weekly_inspection_assets`).run();
   let slots_cleared = 0;
   if (clear_slots) {
     slots_cleared = Number(db.prepare(`SELECT COUNT(*) AS c FROM weekly_inspection_slots`).get()?.c || 0);
     db.prepare(`DELETE FROM weekly_inspection_slots`).run();
+    // Prevent legacy week-plan rows from repopulating the calendar after a clear.
+    if (db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='weekly_inspection_week_plan'`).get()) {
+      db.prepare(`DELETE FROM weekly_inspection_week_plan`).run();
+    }
+    if (db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='weekly_inspection_entries'`).get()) {
+      db.prepare(`DELETE FROM weekly_inspection_entries`).run();
+    }
   }
-  return {
-    roster_cleared: Number(rosterResult.changes || 0),
-    slots_cleared,
-  };
+  return { roster_cleared, slots_cleared };
+}
+
+function wiPdfSlotStatusTag(status) {
+  const st = String(status || "pending").toLowerCase();
+  if (st === "done") return { tag: "REL", color: "#15803d" };
+  if (st === "skipped") return { tag: "SKIP", color: "#a16207" };
+  return { tag: "PEN", color: "#475569" };
+}
+
+function drawWeeklyInspectionCalendarPdfGrid(doc, data) {
+  const weeks = Array.isArray(data?.calendar_weeks) ? data.calendar_weeks : [];
+  if (!weeks.length) return;
+  const margin = doc.page.margins;
+  const contentW = doc.page.width - margin.left - margin.right;
+  const colW = contentW / 7;
+  const rowCount = Math.max(1, weeks.length);
+  const availableH = doc.page.height - margin.bottom - doc.y - 24;
+  const cellH = Math.max(48, Math.min(78, availableH / rowCount));
+  const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  let y = doc.y + 4;
+
+  dayNames.forEach((label, i) => {
+    doc.font("Helvetica-Bold").fontSize(8).fillColor("#64748b");
+    doc.text(label, margin.left + i * colW + 3, y, { width: colW - 6, align: "center" });
+  });
+  y += 14;
+
+  for (const row of weeks) {
+    for (let i = 0; i < 7; i += 1) {
+      const cell = row?.[i] || {};
+      const x = margin.left + i * colW;
+      const inMonth = Boolean(cell?.in_month && cell?.date);
+      if (!inMonth) {
+        doc.save();
+        doc.fillColor("#f8fafc").rect(x, y, colW - 2, cellH).fill();
+        doc.strokeColor("#e2e8f0").lineWidth(0.75).rect(x, y, colW - 2, cellH).stroke();
+        doc.restore();
+        continue;
+      }
+      doc.save();
+      doc.fillColor("#ffffff").rect(x, y, colW - 2, cellH).fill();
+      doc.strokeColor("#cbd5e1").lineWidth(0.75).rect(x, y, colW - 2, cellH).stroke();
+      doc.restore();
+      doc.font("Helvetica-Bold").fontSize(9).fillColor("#0f172a");
+      doc.text(String(cell.day || ""), x + 4, y + 4, { width: colW - 8 });
+      const slots = Array.isArray(cell.slots) ? cell.slots : [];
+      let lineY = y + 16;
+      const maxLines = Math.max(2, Math.floor((cellH - 18) / 9));
+      for (const slot of slots.slice(0, maxLines)) {
+        const meta = wiPdfSlotStatusTag(slot.status);
+        doc.font("Helvetica").fontSize(7).fillColor(meta.color);
+        doc.text(
+          `${meta.tag} ${String(slot.asset_code || "-")} ${Number(slot.est_minutes || 30)}m`,
+          x + 3,
+          lineY,
+          { width: colW - 8, lineBreak: false },
+        );
+        lineY += 9;
+      }
+      if (slots.length > maxLines) {
+        doc.font("Helvetica").fontSize(6).fillColor("#94a3b8");
+        doc.text(`+${slots.length - maxLines} more`, x + 3, lineY, { width: colW - 8 });
+      }
+    }
+    y += cellH + 2;
+  }
+  doc.y = y + 6;
 }
 
 function updateWeeklyInspectionSlotStatus({ slot_id, asset_id, planned_date, status, inspector_name }) {
@@ -4984,7 +5054,7 @@ export default async function maintenanceRoutes(app) {
       const data = buildWeeklyInspectionCalendarData(req.query || {});
       const isDownload = String(req.query?.download || "").trim() === "1";
       const compliance = data.compliance || {};
-      const dayAgenda = Array.isArray(compliance.day_agenda) ? compliance.day_agenda : [];
+      const rosterAssets = Array.isArray(data.assets) ? data.assets : [];
       const weeklyGaps = Array.isArray(compliance.weekly_gaps) ? compliance.weekly_gaps : [];
       const pdf = await buildPdfBuffer(
         (doc) => {
@@ -4993,42 +5063,37 @@ export default async function maintenanceRoutes(app) {
           doc.text(`Month: ${String(data.month || "")}`, { lineGap: 2 });
           doc.text(
             `Released: ${Number(compliance.done_count ?? 0)} / ${Number(compliance.total_slots ?? 0)} · Not released (overdue): ${Number(compliance.not_released_count ?? 0)}`,
-            { lineGap: 2 }
+            { lineGap: 2 },
           );
-          doc.moveDown(0.5);
-          sectionTitle(doc, "Daily schedule");
-          doc.font("Helvetica").fontSize(9).fillColor("#334155");
-          if (!dayAgenda.length) {
-            doc.text("No inspections scheduled this month.", { lineGap: 2 });
-          } else {
-            for (const day of dayAgenda) {
-              const items = Array.isArray(day.items) ? day.items : [];
-              doc.text(`${formatWiDayTitleYmd(day.date)} — ${wiFormatMinutesPdf(day.est_minutes)} planned`, { lineGap: 1 });
-              const line = items.map((it) => {
-                const st = String(it.status || "pending").toUpperCase();
-                const tag = st === "DONE" ? "REL" : st === "SKIPPED" ? "SKIP" : "PEN";
-                return `${String(it.asset_code || "-")} ${tag} ${Number(it.est_minutes || 0)}m`;
-              }).join("  |  ");
-              doc.fontSize(8).fillColor("#475569").text(line || "—", { lineGap: 2 });
-              doc.fontSize(9).fillColor("#334155");
-              doc.moveDown(0.2);
-            }
+          doc.moveDown(0.35);
+          sectionTitle(doc, "Calendar view");
+          drawWeeklyInspectionCalendarPdfGrid(doc, data);
+          if (rosterAssets.length) {
+            doc.moveDown(0.2);
+            sectionTitle(doc, "Workshop roster");
+            doc.font("Helvetica").fontSize(8).fillColor("#334155");
+            doc.text(
+              rosterAssets
+                .map((a) => `${String(a.asset_code || "-")} (${Number(a.est_minutes || 30)} min default)`)
+                .join("  ·  "),
+              { lineGap: 2 },
+            );
           }
           if (weeklyGaps.length) {
-            doc.moveDown(0.4);
+            doc.moveDown(0.35);
             sectionTitle(doc, "Missing weekly workshop visit");
             doc.fontSize(8).fillColor("#b45309");
             const gapLines = weeklyGaps.slice(0, 40).map((g) =>
-              `${String(g.asset_code || "-")} — week ${String(g.week_start || "").slice(5)} to ${String(g.week_end || "").slice(5)}`
+              `${String(g.asset_code || "-")} — week ${String(g.week_start || "").slice(5)} to ${String(g.week_end || "").slice(5)}`,
             );
             doc.text(gapLines.join("\n"), { lineGap: 2 });
             if (weeklyGaps.length > 40) doc.text(`…and ${weeklyGaps.length - 40} more`, { lineGap: 2 });
           }
           doc.moveDown(0.35);
-          doc.fontSize(9).fillColor("#64748b");
+          doc.fontSize(8).fillColor("#64748b");
           doc.text("Legend: REL = released  |  SKIP = skipped  |  PEN = pending");
         },
-        { title: "AML Workshop Inspections", subtitle: String(data.month || "") }
+        { title: "AML Workshop Inspections", subtitle: String(data.month || ""), layout: "landscape" },
       );
       reply.header("Content-Type", "application/pdf");
       reply.header(
