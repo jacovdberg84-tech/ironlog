@@ -1,18 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 200" role="img" aria-label="Carrier roller positions">
   <rect width="480" height="200" fill="#f8fafc"/>
-  <text x="240" y="20" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="#0f172a">Carrier rollers  top view</text>
+  <text x="240" y="20" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="#0f172a">Carrier rollers - top view</text>
   <rect x="120" y="40" width="240" height="100" rx="6" fill="#e2e8f0" stroke="#64748b" stroke-width="1.5"/>
   <text x="240" y="92" text-anchor="middle" font-size="10" fill="#475569">Machine body</text>
-  <!-- LH track -->
   <rect x="40" y="55" width="70" height="70" rx="4" fill="#cbd5e1" stroke="#475569"/>
   <circle cx="75" cy="75" r="14" fill="#64748b"/><text x="75" y="79" text-anchor="middle" font-size="11" fill="#fff" font-weight="700">X</text>
   <circle cx="75" cy="105" r="14" fill="#64748b"/><text x="75" y="109" text-anchor="middle" font-size="11" fill="#fff" font-weight="700">Y</text>
   <text x="75" y="145" text-anchor="middle" font-size="10" fill="#0b3a7e" font-weight="700">LH</text>
-  <!-- RH track -->
   <rect x="370" y="55" width="70" height="70" rx="4" fill="#cbd5e1" stroke="#475569"/>
   <circle cx="405" cy="75" r="14" fill="#64748b"/><text x="405" y="79" text-anchor="middle" font-size="11" fill="#fff" font-weight="700">Z</text>
   <circle cx="405" cy="105" r="14" fill="#64748b"/><text x="405" y="109" text-anchor="middle" font-size="11" fill="#fff" font-weight="700">T</text>
   <text x="405" y="145" text-anchor="middle" font-size="10" fill="#0b3a7e" font-weight="700">RH</text>
-  <text x="240" y="175" text-anchor="middle" font-size="9" fill="#64748b">Measure diameter at each carrier roller  LH X/Y · RH Z/T</text>
-  <text x="240" y="190" text-anchor="middle" font-size="8" fill="#64748b">Wear down: % = (Base  Meas) / (Base  Limit) × 100</text>
+  <text x="240" y="175" text-anchor="middle" font-size="9" fill="#64748b">Measure diameter at each carrier roller - LH X/Y, RH Z/T</text>
+  <text x="240" y="190" text-anchor="middle" font-size="8" fill="#64748b">Wear down: % = (Base - Meas) / (Base - Limit) x 100</text>
 </svg>

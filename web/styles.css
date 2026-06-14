@@ -6054,6 +6054,17 @@ body.uc-mobile-page {
   background: #fff;
   text-align: center;
 }
+.uc-diagram-wrap {
+  display: block;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+}
+.uc-diagram-wrap svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
 .uc-diagram-img {
   display: block;
   width: 100%;
@@ -6085,6 +6096,7 @@ body.uc-mobile-page {
   background: #334155;
   min-width: 32px;
 }
+body.uc-mobile-mode .uc-diagram-wrap svg,
 body.uc-mobile-mode .uc-diagram-img {
   max-width: 100%;
 }

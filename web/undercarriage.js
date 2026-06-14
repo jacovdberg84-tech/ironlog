@@ -6,24 +6,31 @@
   let ucWearBands = [];
   let ucMobileMode = false;
 
-  const UC_ASSET_BASE = "./assets/undercarriage";
   const UC_GROUP_DIAGRAMS = {
-    bushings: { src: `${UC_ASSET_BASE}/bushings-links.svg`, alt: "Bushings, links and pins diagram" },
-    links: { src: `${UC_ASSET_BASE}/bushings-links.svg`, alt: "Link height diagram" },
-    pins: { src: `${UC_ASSET_BASE}/bushings-links.svg`, alt: "Pin wear diagram" },
-    track_shoe: { src: `${UC_ASSET_BASE}/track-shoe.svg`, alt: "Track shoe diagram" },
-    carrier_rollers: { src: `${UC_ASSET_BASE}/carrier-rollers.svg`, alt: "Carrier roller positions X Y Z T" },
-    track_rollers: { src: `${UC_ASSET_BASE}/track-rollers.svg`, alt: "Track rollers 1 to 12" },
-    grouser_height: { src: `${UC_ASSET_BASE}/track-shoe.svg`, alt: "Grouser height diagram" },
-    track_sag: { src: `${UC_ASSET_BASE}/track-sag.svg`, alt: "Track sag measurement points A B C D" },
-    overview: { src: `${UC_ASSET_BASE}/overview.svg`, alt: "Undercarriage overview" },
+    bushings: { svgKey: "bushings_links", alt: "Bushings, links and pins diagram" },
+    links: { svgKey: "bushings_links", alt: "Link height diagram" },
+    pins: { svgKey: "bushings_links", alt: "Pin wear diagram" },
+    track_shoe: { svgKey: "track_shoe", alt: "Track shoe diagram" },
+    carrier_rollers: { svgKey: "carrier_rollers", alt: "Carrier roller positions X Y Z T" },
+    track_rollers: { svgKey: "track_rollers", alt: "Track rollers 1 to 12" },
+    grouser_height: { svgKey: "track_shoe", alt: "Grouser height diagram" },
+    track_sag: { svgKey: "track_sag", alt: "Track sag measurement points A B C D" },
+    overview: { svgKey: "overview", alt: "Undercarriage overview" },
   };
 
   function ucDiagramImg(groupKey, { compact = false } = {}) {
     const meta = UC_GROUP_DIAGRAMS[groupKey];
-    if (!meta?.src) return "";
-    const cls = compact ? "uc-diagram-img uc-diagram-img-compact" : "uc-diagram-img";
-    return `<img class="${cls}" src="${esc(meta.src)}" alt="${esc(meta.alt)}" loading="lazy" />`;
+    if (!meta) return "";
+    const svgKey = meta.svgKey || groupKey;
+    const svg = (typeof window !== "undefined" && window.UC_DIAGRAM_SVG)
+      ? window.UC_DIAGRAM_SVG[svgKey]
+      : null;
+    const cls = compact ? "uc-diagram-wrap uc-diagram-wrap-compact" : "uc-diagram-wrap";
+    if (svg) {
+      return `<div class="${cls}" role="img" aria-label="${esc(meta.alt)}">${svg}</div>`;
+    }
+    const src = `/web/assets/undercarriage/${svgKey.replace(/_/g, "-")}.svg`;
+    return `<img class="uc-diagram-img" src="${esc(src)}" alt="${esc(meta.alt)}" loading="lazy" />`;
   }
 
   function ucRollerBadge(row) {
