@@ -6060,3 +6060,35 @@ body.uc-mobile-page {
   min-height: 48px;
   font-size: 16px;
 }
+.uc-qr-panel {
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  padding: 14px;
+  background: #f8fafc;
+}
+.uc-qr-preview-wrap {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.uc-qr-preview-wrap img {
+  width: 180px;
+  height: 180px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+}
+.uc-qr-scan-banner {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.25);
+  font-size: 14px;
+}
+body.uc-qr-locked #ucAsset {
+  opacity: 0.85;
+  pointer-events: none;
+}

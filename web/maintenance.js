@@ -2996,6 +2996,7 @@ async function loadAssetsForInspection() {
   const tyreF = document.getElementById("tyreFilterAsset");
   const ucA = document.getElementById("ucAsset");
   const ucF = document.getElementById("ucFilterAsset");
+  const ucQr = document.getElementById("ucQrAsset");
   const wiA = document.getElementById("wiAssetSelect");
   if (!selA || !selF) return;
   try {
@@ -3017,6 +3018,7 @@ async function loadAssetsForInspection() {
     if (tyreF) tyreF.innerHTML = `<option value="">All assets</option>${opts}`;
     if (ucA) ucA.innerHTML = `<option value="">Select asset</option>${opts}`;
     if (ucF) ucF.innerHTML = `<option value="">All assets</option>${opts}`;
+    if (ucQr) ucQr.innerHTML = `<option value="">Select asset</option>${opts}`;
     if (wiA) wiA.innerHTML = `<option value="">Select asset</option>${opts}`;
   } catch (e) {
     selA.innerHTML = `<option value="">Assets load failed</option>`;
@@ -3029,6 +3031,7 @@ async function loadAssetsForInspection() {
     if (tyreF) tyreF.innerHTML = `<option value="">Assets load failed</option>`;
     if (ucA) ucA.innerHTML = `<option value="">Assets load failed</option>`;
     if (ucF) ucF.innerHTML = `<option value="">Assets load failed</option>`;
+    if (ucQr) ucQr.innerHTML = `<option value="">Assets load failed</option>`;
     if (wiA) wiA.innerHTML = `<option value="">Assets load failed</option>`;
   }
 }

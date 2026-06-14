@@ -415,6 +415,158 @@
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
 
+  function assetCodeFromSelect(selectEl) {
+    if (!selectEl) return "";
+    const opt = selectEl.options[selectEl.selectedIndex];
+    if (!opt) return "";
+    return String(opt.textContent || "").split(" - ")[0].trim();
+  }
+
+  async function buildUndercarriageQrImageData(assetCode) {
+    const code = String(assetCode || "").trim();
+    if (!code) throw new Error("Select a machine first.");
+    const res = await fetch(`${API}/assets/${encodeURIComponent(code)}/undercarriage-qr-profile/refresh`, {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "QR generation failed");
+    const scanValue = String(data?.qr_payload?.scan_url || "").trim();
+    if (!scanValue) throw new Error("No scan URL generated.");
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=${encodeURIComponent(scanValue)}`;
+    return { qrUrl, qrText: String(data.qr_text || ""), scanValue, payload: data.qr_payload || {} };
+  }
+
+  function openUndercarriageQrLabelSheet(labels) {
+    const safeLabels = Array.isArray(labels) ? labels.filter((l) => l?.qrUrl && l?.code) : [];
+    if (!safeLabels.length) throw new Error("No QR labels to print.");
+    const cols = 4;
+    const qrSizeMm = 32;
+    const cellMm = 48;
+    const gapMm = 4;
+    const win = window.open("", "_blank", "width=1100,height=800");
+    if (!win) {
+      alert("Pop-up blocked. Allow pop-ups and try again.");
+      return;
+    }
+    const cells = safeLabels.map((l) => `
+      <div class="cell">
+        <img src="${l.qrUrl}" alt="${esc(l.code)} QR" />
+        <div class="code">${esc(l.code)}</div>
+        <div class="sub">Undercarriage inspection</div>
+      </div>
+    `).join("");
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>IRONLOG Undercarriage QR Labels</title>
+      <style>
+        @page { size: A4 portrait; margin: 8mm; }
+        body { margin: 0; font-family: Arial, sans-serif; color: #111; }
+        .sheet { padding: 8mm; }
+        .head { margin-bottom: 6mm; font-size: 12px; }
+        .grid { display: grid; grid-template-columns: repeat(${cols}, 1fr); gap: ${gapMm}mm; }
+        .cell { border: 1px solid #bbb; border-radius: 4px; padding: 3mm 2mm; text-align: center; min-height: ${cellMm}mm; break-inside: avoid; }
+        .cell img { width: ${qrSizeMm}mm; height: ${qrSizeMm}mm; display: block; margin: 0 auto 2mm; }
+        .code { font-size: 11px; font-weight: 700; }
+        .sub { font-size: 9px; color: #475569; margin-top: 2px; }
+      </style></head><body>
+      <div class="sheet">
+        <div class="head">IRONLOG Undercarriage QR Labels | ${safeLabels.length} label(s) | Stick near track frame</div>
+        <div class="grid">${cells}</div>
+      </div>
+      <script>window.onload = () => { window.focus(); window.print(); };</script>
+      </body></html>`);
+    win.document.close();
+  }
+
+  async function previewUndercarriageQr() {
+    const code = assetCodeFromSelect(document.getElementById("ucQrAsset")) || assetCodeFromSelect(document.getElementById("ucAsset"));
+    const msg = document.getElementById("ucQrMsg");
+    const img = document.getElementById("ucQrPreview");
+    const meta = document.getElementById("ucQrMeta");
+    if (!code) {
+      if (msg) msg.textContent = "Select a machine for the QR label.";
+      return;
+    }
+    if (msg) msg.textContent = "Generating QR…";
+    try {
+      const { qrUrl, qrText, scanValue, payload } = await buildUndercarriageQrImageData(code);
+      if (img) {
+        img.src = qrUrl;
+        img.style.display = "block";
+      }
+      if (meta) {
+        meta.innerHTML = `
+          <div><b>${esc(code)}</b> — opens inspection for this machine only</div>
+          <div class="muted mini" style="margin-top:4px; word-break:break-all;">${esc(scanValue)}</div>
+          <div class="muted mini" style="margin-top:4px;">SMU ${payload?.meter?.current_hours ?? "—"}h · Last UC ${esc(payload?.undercarriage?.last_inspection_date || "none")}</div>
+        `;
+      }
+      if (msg) msg.textContent = "QR ready — print or download and attach near the undercarriage.";
+    } catch (e) {
+      if (msg) msg.textContent = `QR failed: ${e.message || e}`;
+    }
+  }
+
+  async function downloadUndercarriageQrPng() {
+    const code = assetCodeFromSelect(document.getElementById("ucQrAsset")) || assetCodeFromSelect(document.getElementById("ucAsset"));
+    if (!code) return alert("Select a machine first.");
+    const { qrUrl } = await buildUndercarriageQrImageData(code);
+    const response = await fetch(qrUrl);
+    if (!response.ok) throw new Error("QR image fetch failed");
+    const blob = await response.blob();
+    const objUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objUrl;
+    a.download = `${code}_undercarriage_qr.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objUrl);
+  }
+
+  async function printUndercarriageQrSheet(allAssets = false) {
+    let codes = [];
+    if (allAssets) {
+      const sel = document.getElementById("ucQrAsset") || document.getElementById("ucAsset");
+      codes = Array.from(sel?.options || [])
+        .map((o) => String(o.textContent || "").split(" - ")[0].trim())
+        .filter((c) => c && c !== "Select asset" && c !== "All assets");
+    } else {
+      const code = assetCodeFromSelect(document.getElementById("ucQrAsset")) || assetCodeFromSelect(document.getElementById("ucAsset"));
+      if (code) codes = [code];
+    }
+    if (!codes.length) return alert("No machines selected.");
+    const labels = [];
+    for (const code of codes) {
+      try {
+        const { qrUrl } = await buildUndercarriageQrImageData(code);
+        labels.push({ code, qrUrl });
+        await new Promise((r) => setTimeout(r, 80));
+      } catch {}
+    }
+    if (!labels.length) throw new Error("Could not generate any QR labels.");
+    openUndercarriageQrLabelSheet(labels);
+  }
+
+  function lockAssetFromQr(assetCode) {
+    const banner = document.getElementById("ucQrScanBanner");
+    const sel = document.getElementById("ucAsset");
+    const code = String(assetCode || "").trim().toUpperCase();
+    if (!code || !sel) return;
+    const opt = Array.from(sel.options).find((o) => String(o.textContent || "").toUpperCase().startsWith(code));
+    if (opt) {
+      sel.value = opt.value;
+      sel.disabled = true;
+      document.body.classList.add("uc-qr-locked");
+    }
+    if (banner) {
+      banner.style.display = "block";
+      banner.innerHTML = `<strong>${esc(code)}</strong> — undercarriage inspection (this machine only)`;
+    }
+    loadLatestForAsset(Number(sel?.value || 0));
+    pullLiveSmu().catch(() => {});
+  }
+
   async function initUndercarriage(opts = {}) {
     ucMobileMode = Boolean(opts.mobile);
     document.body.classList.toggle("uc-mobile-mode", ucMobileMode);
@@ -435,15 +587,15 @@
     const assetFromUrl = String(opts.assetId || opts.assetCode || "").trim();
     if (assetFromUrl && document.getElementById("ucAsset")) {
       const sel = document.getElementById("ucAsset");
-      if (/^\d+$/.test(assetFromUrl)) sel.value = assetFromUrl;
-      else {
-        const opt = Array.from(sel.options).find((o) => o.textContent.startsWith(assetFromUrl));
-        if (opt) sel.value = opt.value;
+      if (/^\d+$/.test(assetFromUrl)) {
+        sel.value = assetFromUrl;
+        loadLatestForAsset(Number(assetFromUrl));
+      } else {
+        lockAssetFromQr(assetFromUrl);
       }
-      loadLatestForAsset(Number(sel.value || 0));
     }
 
-    loadSavedList();
+    if (!opts.mobile) loadSavedList();
   }
 
   function bindUndercarriageEvents() {
@@ -459,6 +611,11 @@
       if (!btn) return;
       exportXlsx(Number(btn.getAttribute("data-uc-xlsx") || 0)).catch((e) => alert(e.message));
     });
+    document.getElementById("ucQrPreviewBtn")?.addEventListener("click", () => previewUndercarriageQr().catch((e) => alert(e.message)));
+    document.getElementById("ucQrDownloadBtn")?.addEventListener("click", () => downloadUndercarriageQrPng().catch((e) => alert(e.message)));
+    document.getElementById("ucQrPrintBtn")?.addEventListener("click", () => printUndercarriageQrSheet(false).catch((e) => alert(e.message)));
+    document.getElementById("ucQrPrintAllBtn")?.addEventListener("click", () => printUndercarriageQrSheet(true).catch((e) => alert(e.message)));
+    document.getElementById("ucQrAsset")?.addEventListener("change", () => previewUndercarriageQr().catch(() => {}));
   }
 
   window.initUndercarriage = initUndercarriage;

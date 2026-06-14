@@ -104,6 +104,12 @@
     const openWoBtn = qs("openWoBtn");
     if (openWoBtn) openWoBtn.href = `./asset-qr-detail.html?view=workorders&asset_code=${encodeURIComponent(assetCode)}`;
 
+    const openUndercarriageBtn = qs("openUndercarriageBtn");
+    if (openUndercarriageBtn) {
+      openUndercarriageBtn.style.display = "inline-block";
+      openUndercarriageBtn.href = `./undercarriage-mobile.html?asset_code=${encodeURIComponent(assetCode)}`;
+    }
+
     const isLdv = /^V(0[1-9]|1[0-5])AM$/i.test(assetCode);
     const mp = payload?.machine_prestart;
     const hasMachineChecklist = Boolean(mp?.profile_id) && !isLdv;

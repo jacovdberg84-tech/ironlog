@@ -37,6 +37,15 @@ export default async function assetRoutes(app) {
       FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
     )
   `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS asset_undercarriage_qr_profiles (
+      asset_id INTEGER PRIMARY KEY,
+      qr_payload TEXT NOT NULL,
+      qr_text TEXT NOT NULL,
+      generated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    )
+  `).run();
 
   /* =========================
      PREPARED STATEMENTS
@@ -68,6 +77,19 @@ export default async function assetRoutes(app) {
   `);
   const upsertQrProfile = db.prepare(`
     INSERT INTO asset_qr_profiles (asset_id, qr_payload, qr_text, generated_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT(asset_id) DO UPDATE SET
+      qr_payload = excluded.qr_payload,
+      qr_text = excluded.qr_text,
+      generated_at = datetime('now')
+  `);
+  const getStoredUndercarriageQrProfile = db.prepare(`
+    SELECT qr_payload, qr_text, generated_at
+    FROM asset_undercarriage_qr_profiles
+    WHERE asset_id = ?
+  `);
+  const upsertUndercarriageQrProfile = db.prepare(`
+    INSERT INTO asset_undercarriage_qr_profiles (asset_id, qr_payload, qr_text, generated_at)
     VALUES (?, ?, ?, datetime('now'))
     ON CONFLICT(asset_id) DO UPDATE SET
       qr_payload = excluded.qr_payload,
@@ -634,6 +656,63 @@ export default async function assetRoutes(app) {
     return { profile, qrText };
   }
 
+  function buildUndercarriageQrProfile(asset, req) {
+    const meter = getAssetCurrentHoursInfo(asset.id);
+    const currentHours = Number(Number(meter.hours || 0).toFixed(1));
+    const origin = resolveWebOrigin(req);
+    const targetPath = `/web/undercarriage-mobile.html?asset_code=${encodeURIComponent(asset.asset_code)}`;
+    const scan_url = origin ? `${origin}${targetPath}` : targetPath;
+
+    let lastInspectionDate = null;
+    let worstWearPct = null;
+    if (hasTable("undercarriage_inspections")) {
+      const last = db.prepare(`
+        SELECT inspection_date, summary_json
+        FROM undercarriage_inspections
+        WHERE asset_id = ?
+        ORDER BY inspection_date DESC, id DESC
+        LIMIT 1
+      `).get(asset.id);
+      if (last) {
+        lastInspectionDate = String(last.inspection_date || "").trim() || null;
+        try {
+          const summary = JSON.parse(String(last.summary_json || "{}"));
+          worstWearPct = summary?.worst_wear_pct ?? null;
+        } catch {}
+      }
+    }
+
+    const profile = {
+      purpose: "undercarriage_inspection",
+      generated_at: new Date().toISOString(),
+      asset: {
+        asset_code: asset.asset_code,
+        asset_name: asset.asset_name || null,
+        category: asset.category || null,
+      },
+      scan_url,
+      meter: {
+        current_hours: currentHours,
+        source: meter.source || "unknown",
+      },
+      undercarriage: {
+        last_inspection_date: lastInspectionDate,
+        worst_wear_pct: worstWearPct != null ? Number(Number(worstWearPct).toFixed(1)) : null,
+      },
+    };
+
+    const wearText = worstWearPct != null ? `${Number(worstWearPct).toFixed(1)}% max wear` : "No prior inspection";
+    const qrText = [
+      `IRONLOG UNDERCARRIAGE — ${asset.asset_code}`,
+      `Scan to open inspection for this machine only`,
+      `Scan URL: ${scan_url}`,
+      `SMU: ${currentHours}h`,
+      `Last UC inspection: ${lastInspectionDate || "None"} (${wearText})`,
+    ].join("\n");
+
+    return { profile, qrText };
+  }
+
   app.get("/:asset_code/qr-profile", async (req, reply) => {
     const asset_code = String(req.params.asset_code || "").trim();
     if (!asset_code) return reply.code(400).send({ error: "Asset code is required" });
@@ -674,6 +753,50 @@ export default async function assetRoutes(app) {
 
     const built = buildQrProfile(asset, req);
     upsertQrProfile.run(asset.id, JSON.stringify(built.profile), built.qrText);
+
+    return {
+      ok: true,
+      asset_code: asset.asset_code,
+      qr_payload: built.profile,
+      qr_text: built.qrText,
+    };
+  });
+
+  app.get("/:asset_code/undercarriage-qr-profile", async (req, reply) => {
+    const asset_code = String(req.params.asset_code || "").trim();
+    if (!asset_code) return reply.code(400).send({ error: "Asset code is required" });
+    const asset = getAssetByCode.get(asset_code);
+    if (!asset) return reply.code(404).send({ error: "Asset not found" });
+
+    const stored = getStoredUndercarriageQrProfile.get(asset.id);
+    let storedPayload = null;
+    if (stored?.qr_payload) {
+      try {
+        storedPayload = JSON.parse(String(stored.qr_payload || "{}"));
+      } catch {
+        storedPayload = null;
+      }
+    }
+    const live = buildUndercarriageQrProfile(asset, req);
+    return {
+      ok: true,
+      asset_code: asset.asset_code,
+      stored: storedPayload
+        ? { qr_payload: storedPayload, qr_text: stored.qr_text, generated_at: stored.generated_at }
+        : null,
+      live_preview: live.profile,
+      live_qr_text: live.qrText,
+    };
+  });
+
+  app.post("/:asset_code/undercarriage-qr-profile/refresh", async (req, reply) => {
+    const asset_code = String(req.params.asset_code || "").trim();
+    if (!asset_code) return reply.code(400).send({ error: "Asset code is required" });
+    const asset = getAssetByCode.get(asset_code);
+    if (!asset) return reply.code(404).send({ error: "Asset not found" });
+
+    const built = buildUndercarriageQrProfile(asset, req);
+    upsertUndercarriageQrProfile.run(asset.id, JSON.stringify(built.profile), built.qrText);
 
     return {
       ok: true,

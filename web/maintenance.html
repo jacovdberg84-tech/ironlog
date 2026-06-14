@@ -813,6 +813,27 @@
         </div>
 
         <hr class="hr-soft" />
+        <div class="uc-qr-panel">
+          <h3 style="margin:0 0 8px;">Undercarriage QR labels</h3>
+          <p class="muted mini" style="margin:0 0 12px;">
+            Each machine gets its own QR code. Scanning opens the inspection form for <b>that machine only</b> — separate from the general asset QR on the cab.
+            Print, laminate, and stick near the track frame.
+          </p>
+          <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
+            <label>Machine for QR<select id="ucQrAsset" class="w-220"></select></label>
+            <button type="button" id="ucQrPreviewBtn">Generate QR</button>
+            <button type="button" id="ucQrDownloadBtn">Download PNG</button>
+            <button type="button" id="ucQrPrintBtn">Print label</button>
+            <button type="button" id="ucQrPrintAllBtn">Print all machines</button>
+          </div>
+          <div id="ucQrMsg" class="muted mini" style="margin-top:8px;"></div>
+          <div class="uc-qr-preview-wrap">
+            <img id="ucQrPreview" alt="Undercarriage QR preview" style="display:none;" />
+            <div id="ucQrMeta" class="muted mini"></div>
+          </div>
+        </div>
+
+        <hr class="hr-soft" />
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
           <h3 style="margin:0;">Reports</h3>
           <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
@@ -1716,7 +1737,7 @@
 
   </div>
 
-  <script src="./undercarriage.js?v=1"></script>
+  <script src="./undercarriage.js?v=2"></script>
   <script src="./maintenance.js?v=33"></script>
 </body>
 </html>
