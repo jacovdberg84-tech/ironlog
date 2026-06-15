@@ -461,7 +461,7 @@
               <button type="button" id="cartrackMorningEmailBtn" class="btn btn-secondary btn-sm">Email report</button>
             </div>
             <div id="cartrackFleetHost" class="cartrack-fleet-host"></div>
-            <p class="muted small" id="cartrackFleetHint">Live GPS from Cartrack. Configure API in User Admin → Cartrack.</p>
+            <p class="muted small" id="cartrackFleetHint">Live GPS from Cartrack. Speed alerts use your IRONLOG threshold (default 100 km/h). Configure in User Admin → Cartrack.</p>
           </div>
 
           <div class="dash-card" id="telematicsFleetCard">
@@ -5087,6 +5087,11 @@
                 <label>Minute</label>
                 <input id="cartrackMorningMinute" type="number" min="0" max="59" class="w-full" value="0" />
               </div>
+              <div class="form-field">
+                <label>Speed alert (km/h)</label>
+                <input id="cartrackSpeedAlertKmh" type="number" min="20" max="300" step="1" class="w-full" value="100" />
+                <p class="muted mini">IRONLOG logs speeding from live GPS at this speed. Cartrack’s own events are usually 160+ km/h only.</p>
+              </div>
               <div class="form-field form-field-action">
                 <label class="checkbox-label" style="margin-top:24px;">
                   <input id="cartrackMorningEnabled" type="checkbox" checked />
@@ -6621,6 +6626,6 @@
 
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="./app.js?v=17"></script>
+  <script src="./app.js?v=18"></script>
 </body>
 </html>

@@ -61,6 +61,7 @@ export default async function cartrackRoutes(app) {
       morning_enabled: req.body?.morning_enabled,
       morning_hour: req.body?.morning_hour,
       morning_minute: req.body?.morning_minute,
+      speed_alert_kmh: req.body?.speed_alert_kmh,
       updated_by,
     });
     return reply.send({ ok: true, settings });
@@ -199,6 +200,7 @@ export default async function cartrackRoutes(app) {
       const pdf = await buildPdfBuffer((doc) => {
         sectionTitle(doc, `Cartrack speeding report — ${date}`);
         doc.fontSize(10).fillColor("#334155");
+        doc.text(`Alert threshold: ${summary.speed_alert_kmh ?? 100} km/h (IRONLOG live GPS — Cartrack API events are typically 160+ km/h only)`);
         doc.text(`Total events: ${summary.total_speeding_events} · Vehicles: ${summary.vehicles_with_speeding}`);
         doc.moveDown(0.5);
         const columns = [

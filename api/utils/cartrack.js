@@ -108,11 +108,25 @@ export function ensureCartrackTables() {
       UNIQUE(report_date)
     )
   `).run();
+  try {
+    db.prepare(`ALTER TABLE cartrack_settings ADD COLUMN speed_alert_kmh INTEGER NOT NULL DEFAULT 100`).run();
+  } catch {
+    /* column exists */
+  }
 }
 
 function settingsRow() {
   ensureCartrackTables();
   return db.prepare(`SELECT * FROM cartrack_settings WHERE id = 1`).get();
+}
+
+export function getCartrackSpeedAlertKmh() {
+  const row = settingsRow() || {};
+  const fromDb = Number(row.speed_alert_kmh);
+  if (Number.isFinite(fromDb) && fromDb > 0) return Math.round(fromDb);
+  const fromEnv = Number(process.env.CARTRACK_SPEED_ALERT_KMH);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return Math.round(fromEnv);
+  return 100;
 }
 
 export function getCartrackPublicSettings() {
@@ -130,22 +144,37 @@ export function getCartrackPublicSettings() {
     morning_enabled: Number(row.morning_enabled ?? 1) === 1,
     morning_time: `${String(row.morning_hour ?? 6).padStart(2, "0")}:${String(row.morning_minute ?? 0).padStart(2, "0")}`,
     morning_recipients: String(row.morning_recipients || process.env.CARTRACK_MORNING_RECIPIENTS || "").trim(),
+    speed_alert_kmh: getCartrackSpeedAlertKmh(),
     updated_at: row.updated_at || null,
     updated_by: row.updated_by || null,
   };
 }
 
-export function saveCartrackSettings({ base_url, username, password, morning_recipients, morning_enabled, morning_hour, morning_minute, updated_by }) {
+export function saveCartrackSettings({
+  base_url,
+  username,
+  password,
+  morning_recipients,
+  morning_enabled,
+  morning_hour,
+  morning_minute,
+  speed_alert_kmh,
+  updated_by,
+}) {
   ensureCartrackTables();
   const existing = settingsRow() || {};
   const nextPassEnc = (() => {
     if (password != null && String(password).trim() !== "") return encryptSecret(String(password).trim());
     return String(existing.password_enc || "");
   })();
+  const alertKmh = speed_alert_kmh != null
+    ? Math.max(20, Math.min(300, Math.round(Number(speed_alert_kmh) || 100)))
+    : Math.max(20, Math.min(300, Number(existing.speed_alert_kmh ?? getCartrackSpeedAlertKmh())));
   db.prepare(`
     UPDATE cartrack_settings
     SET base_url = ?, username = ?, password_enc = ?,
         morning_recipients = ?, morning_enabled = ?, morning_hour = ?, morning_minute = ?,
+        speed_alert_kmh = ?,
         updated_by = ?, updated_at = datetime('now')
     WHERE id = 1
   `).run(
@@ -156,6 +185,7 @@ export function saveCartrackSettings({ base_url, username, password, morning_rec
     morning_enabled === false || String(morning_enabled) === "0" ? 0 : 1,
     Math.max(0, Math.min(23, Number(morning_hour ?? existing.morning_hour ?? 6))),
     Math.max(0, Math.min(59, Number(morning_minute ?? existing.morning_minute ?? 0))),
+    alertKmh,
     String(updated_by || "admin").trim()
   );
   return getCartrackPublicSettings();
@@ -375,6 +405,62 @@ function normalizeEventRow(row) {
   };
 }
 
+function cartrackEventInsertStmt() {
+  return db.prepare(`
+    INSERT INTO cartrack_events (
+      event_id, registration, asset_code, event_type, event_type_label, event_time,
+      speed_kmh, speed_limit_kmh, latitude, longitude, driver_name, description,
+      is_speeding, payload_json
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(event_id) DO UPDATE SET
+      asset_code = excluded.asset_code,
+      event_type_label = excluded.event_type_label,
+      speed_kmh = excluded.speed_kmh,
+      speed_limit_kmh = excluded.speed_limit_kmh,
+      is_speeding = excluded.is_speeding,
+      payload_json = excluded.payload_json
+  `);
+}
+
+function normalizeCartrackEventTime(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return new Date().toISOString().replace("T", " ").slice(0, 19);
+  return s.replace("T", " ").slice(0, 19);
+}
+
+/** Log speed ≥ threshold from live GPS snapshots (Cartrack events API only reports ~160+ km/h). */
+export function recordFleetSpeedAlerts(snapshots, thresholdKmh = getCartrackSpeedAlertKmh()) {
+  const threshold = Math.max(20, Number(thresholdKmh) || 100);
+  const ins = cartrackEventInsertStmt();
+  let logged = 0;
+  for (const n of snapshots || []) {
+    const speed = Number(n.speed_kmh || 0);
+    if (!n.registration || !Number.isFinite(speed) || speed < threshold) continue;
+    const eventTime = normalizeCartrackEventTime(n.last_event_at || n.synced_at);
+    const minuteKey = eventTime.replace(/:\d{2}$/, ":00");
+    const eventId = `ironlog_speed|${n.registration}|${minuteKey}`;
+    ins.run(
+      eventId,
+      n.registration,
+      n.asset_code,
+      "ironlog_speed_alert",
+      `Speed ≥ ${threshold} km/h`,
+      eventTime,
+      speed,
+      threshold,
+      n.latitude,
+      n.longitude,
+      "",
+      `IRONLOG speed alert — ${speed.toFixed(0)} km/h (limit ${threshold} km/h)`,
+      1,
+      JSON.stringify({ source: "ironlog_gps_threshold", threshold_kmh: threshold, synced_at: n.synced_at || null })
+    );
+    logged += 1;
+  }
+  return { logged, threshold_kmh: threshold };
+}
+
 export async function syncCartrackFleetStatus() {
   const rows = await fetchAllPages("vehicles/status");
   const upsert = db.prepare(`
@@ -397,6 +483,7 @@ export async function syncCartrackFleetStatus() {
       synced_at = datetime('now')
   `);
   let count = 0;
+  const normalized = [];
   for (const raw of rows) {
     const n = normalizeStatusRow(raw);
     if (!n.registration) continue;
@@ -404,9 +491,11 @@ export async function syncCartrackFleetStatus() {
       n.registration, n.asset_code, n.vehicle_id, n.vehicle_name, n.ignition_on, n.speed_kmh,
       n.latitude, n.longitude, n.odometer_km, n.last_event_at, n.status_json
     );
+    normalized.push({ ...n, synced_at: new Date().toISOString().replace("T", " ").slice(0, 19) });
     count += 1;
   }
-  return { synced: count };
+  const alerts = recordFleetSpeedAlerts(normalized);
+  return { synced: count, speed_alerts_logged: alerts.logged, speed_alert_kmh: alerts.threshold_kmh };
 }
 
 export function enrichCartrackLiveRow(row, speedRegs = new Set()) {
@@ -414,6 +503,7 @@ export function enrichCartrackLiveRow(row, speedRegs = new Set()) {
   const lng = Number(row.longitude);
   const hasGps = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
   const code = row.asset_code || row.registration;
+  const alertKmh = getCartrackSpeedAlertKmh();
   let raw = {};
   try {
     raw = JSON.parse(row.status_json || "{}");
@@ -423,11 +513,13 @@ export function enrichCartrackLiveRow(row, speedRegs = new Set()) {
   const roadLimit = Number(raw.road_speed);
   const speed = Number(row.speed_kmh ?? raw.speed ?? 0);
   const overLimit = Number.isFinite(roadLimit) && roadLimit > 0 && speed > roadLimit;
+  const overThreshold = Number.isFinite(speed) && speed >= alertKmh;
   const fuelPct = raw.fuel?.precentage_left ?? raw.fuel?.percentage_left;
   return {
     ...row,
     has_gps: hasGps,
-    is_speeding: speedRegs.has(row.registration) || speedRegs.has(code) || overLimit,
+    is_speeding: speedRegs.has(row.registration) || speedRegs.has(code) || overLimit || overThreshold,
+    speed_alert_kmh: alertKmh,
     is_idling: raw.idling === true,
     road_speed_limit: Number.isFinite(roadLimit) && roadLimit > 0 ? roadLimit : null,
     rpm: Number(raw.rpm) || null,
@@ -493,26 +585,17 @@ export async function syncCartrackEvents({ startDate, endDate }) {
   const start = String(startDate || "").slice(0, 10);
   const end = String(endDate || start).slice(0, 10);
   const rows = await fetchCartrackEvents(start, end);
-  const ins = db.prepare(`
-    INSERT INTO cartrack_events (
-      event_id, registration, asset_code, event_type, event_type_label, event_time,
-      speed_kmh, speed_limit_kmh, latitude, longitude, driver_name, description,
-      is_speeding, payload_json
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(event_id) DO UPDATE SET
-      asset_code = excluded.asset_code,
-      event_type_label = excluded.event_type_label,
-      speed_kmh = excluded.speed_kmh,
-      speed_limit_kmh = excluded.speed_limit_kmh,
-      is_speeding = excluded.is_speeding,
-      payload_json = excluded.payload_json
-  `);
+  const ins = cartrackEventInsertStmt();
+  const threshold = getCartrackSpeedAlertKmh();
   let count = 0;
   let speeding = 0;
   for (const raw of rows) {
     const n = normalizeEventRow(raw);
     if (!n.registration || !n.event_time) continue;
+    if (!n.is_speeding && Number(n.speed_kmh || 0) >= threshold) {
+      n.is_speeding = 1;
+      n.speed_limit_kmh = n.speed_limit_kmh || threshold;
+    }
     ins.run(
       n.event_id, n.registration, n.asset_code, n.event_type, n.event_type_label, n.event_time,
       n.speed_kmh, n.speed_limit_kmh, n.latitude, n.longitude, n.driver_name, n.description,
@@ -537,9 +620,13 @@ export function listCartrackEventsFromDb({ startDate, endDate, speedingOnly = fa
   const start = String(startDate || "").slice(0, 10);
   const end = String(endDate || start).slice(0, 10);
   const lim = Math.max(1, Math.min(500, Number(limit) || 200));
+  const threshold = getCartrackSpeedAlertKmh();
   const where = ["date(event_time) >= date(?)", "date(event_time) <= date(?)"];
   const params = [start, end];
-  if (speedingOnly) where.push("is_speeding = 1");
+  if (speedingOnly) {
+    where.push("(is_speeding = 1 OR speed_kmh >= ?)");
+    params.push(threshold);
+  }
   return db.prepare(`
     SELECT id, event_id, registration, asset_code, event_type, event_type_label, event_time,
            speed_kmh, speed_limit_kmh, driver_name, description, is_speeding
@@ -552,6 +639,7 @@ export function listCartrackEventsFromDb({ startDate, endDate, speedingOnly = fa
 
 export function buildMorningSpeedingReport(reportDate) {
   const date = String(reportDate || "").slice(0, 10);
+  const threshold = getCartrackSpeedAlertKmh();
   const events = listCartrackEventsFromDb({ startDate: date, endDate: date, speedingOnly: true, limit: 500 });
   const byVehicle = new Map();
   for (const e of events) {
@@ -567,6 +655,7 @@ export function buildMorningSpeedingReport(reportDate) {
   const vehicles = Array.from(byVehicle.values()).sort((a, b) => b.count - a.count);
   const summary = {
     report_date: date,
+    speed_alert_kmh: threshold,
     total_speeding_events: events.length,
     vehicles_with_speeding: vehicles.length,
     vehicles,
@@ -585,6 +674,7 @@ export function formatMorningReportText(summary) {
   const lines = [];
   lines.push(`IRONLOG — Cartrack speeding report`);
   lines.push(`Date: ${summary.report_date}`);
+  lines.push(`Alert threshold: ${summary.speed_alert_kmh ?? getCartrackSpeedAlertKmh()} km/h (from live GPS — Cartrack API events are typically 160+ km/h only)`);
   lines.push(`Total speeding events: ${summary.total_speeding_events}`);
   lines.push(`Vehicles involved: ${summary.vehicles_with_speeding}`);
   lines.push("");
@@ -674,6 +764,16 @@ export async function runCartrackMorningJob({ reportDate, sendEmail = true, log 
 
 export async function runCartrackAutoScheduler(log = console) {
   ensureCartrackTables();
+  const creds = getCartrackCredentials();
+  if (creds) {
+    const fleetPollMs = Math.max(60_000, Number(process.env.CARTRACK_FLEET_POLL_MS || 5 * 60 * 1000));
+    setInterval(() => {
+      syncCartrackFleetStatus().catch((err) => {
+        log.warn?.(`[cartrack] fleet speed poll failed: ${err?.message || err}`);
+      });
+    }, fleetPollMs);
+    log.info?.(`[cartrack] fleet speed poll every ${Math.round(fleetPollMs / 1000)}s (threshold ${getCartrackSpeedAlertKmh()} km/h)`);
+  }
   const enabled = String(process.env.CARTRACK_MORNING_ENABLED || "1").trim().toLowerCase();
   if (["0", "false", "no", "off"].includes(enabled)) {
     log.info?.("[cartrack] morning scheduler disabled");

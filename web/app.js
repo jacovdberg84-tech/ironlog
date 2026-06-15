@@ -4379,6 +4379,7 @@ async function loadCartrackAdminSettings() {
     const [hh, mm] = String(s.morning_time || "06:00").split(":");
     if (qs("cartrackMorningHour")) qs("cartrackMorningHour").value = hh || "6";
     if (qs("cartrackMorningMinute")) qs("cartrackMorningMinute").value = mm || "0";
+    if (qs("cartrackSpeedAlertKmh")) qs("cartrackSpeedAlertKmh").value = String(s.speed_alert_kmh ?? 100);
     setCartrackAdminResult(
       s.configured ? `Configured (${s.source}). Updated ${s.updated_at || "—"}.` : "Not configured yet.",
       s.configured ? true : null
@@ -4397,6 +4398,7 @@ async function saveCartrackAdminSettings() {
     morning_enabled: Boolean(qs("cartrackMorningEnabled")?.checked),
     morning_hour: Number(qs("cartrackMorningHour")?.value || 6),
     morning_minute: Number(qs("cartrackMorningMinute")?.value || 0),
+    speed_alert_kmh: Number(qs("cartrackSpeedAlertKmh")?.value || 100),
   };
   const pass = String(qs("cartrackPassword")?.value || "").trim();
   if (pass) body.password = pass;
@@ -4747,6 +4749,7 @@ function renderCartrackSpeedFloatList(fleet) {
       if (ign) extras.push("IGN");
       if (v.is_idling) extras.push("Idle");
       if (limit) extras.push(`Limit ${limit}`);
+      else if (v.speed_alert_kmh) extras.push(`Alert ≥${v.speed_alert_kmh}`);
       if (v.rpm) extras.push(`${Math.round(v.rpm)} rpm`);
       if (v.fuel_pct != null) extras.push(`Fuel ${Math.round(v.fuel_pct)}%`);
       return `<div class="${cls}">
