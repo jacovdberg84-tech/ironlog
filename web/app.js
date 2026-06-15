@@ -2694,7 +2694,17 @@ function clSetFormMsg(text, ok) {
 function clShowSyncState(sync) {
   const el = qs("clSyncState");
   if (!el) return;
-  if (!sync || sync.synced !== true) {
+  if (!sync) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    return;
+  }
+  if (sync.skipped && sync.reason === "unusual_km") {
+    el.textContent = String(sync.message || "Pre-start saved. Daily input not updated — unusual KM.");
+    el.classList.remove("hidden");
+    return;
+  }
+  if (sync.synced !== true) {
     el.classList.add("hidden");
     el.textContent = "";
     return;
@@ -3009,6 +3019,16 @@ async function selectChecklistAsset(assetCode) {
   setStatus(`Checklist loaded for ${code}`);
 }
 
+function clKmLooksUnusual(odometerKm, previousKm) {
+  const odo = Number(odometerKm);
+  const prev = previousKm == null ? null : Number(previousKm);
+  if (!Number.isFinite(odo) || odo < 0) return false;
+  if (prev != null && Number.isFinite(prev) && odo < prev) return true;
+  if (odo > 500000) return true;
+  if (prev != null && Number.isFinite(prev) && odo > prev * 1.25 + 500) return true;
+  return false;
+}
+
 async function submitChecklistForm() {
   if (!clSelectedAssetCode) return alert("Select an asset from the checklist sections first.");
   clSetFormMsg("", null);
@@ -3022,8 +3042,12 @@ async function submitChecklistForm() {
     if (!odoRaw) throw new Error("Enter current odometer KM.");
     const odometer_km = Number(odoRaw);
     if (!Number.isFinite(odometer_km) || odometer_km < 0) throw new Error("Odometer must be a valid number ≥ 0.");
-    if (clPreviousKm != null && odometer_km < clPreviousKm) {
-      throw new Error(`Odometer cannot be less than previous KM (${clPreviousKm.toFixed(1)}).`);
+    if (clKmLooksUnusual(odometer_km, clPreviousKm)) {
+      const prevTxt = clPreviousKm == null ? "the previous reading" : `${clPreviousKm.toFixed(1)} km`;
+      const ok = window.confirm(
+        `KM ${odometer_km.toFixed(1)} looks unusual compared with ${prevTxt}. Submit pre-start anyway? Daily input will not be updated until a supervisor reviews.`
+      );
+      if (!ok) return;
     }
     const data = await fetchJson(`${API}/api/maintenance/vehicle-ldv-checks/prestart`, {
       method: "POST",
@@ -3043,7 +3067,7 @@ async function submitChecklistForm() {
       qs("clPrevKm").textContent = clPreviousKm == null ? "—" : `${clPreviousKm.toFixed(1)} km`;
     }
     clShowSyncState(data?.daily_input_sync || null);
-    clSetFormMsg(data?.message || "LDV pre-start saved.", true);
+    clSetFormMsg(data?.message || "LDV pre-start saved.", data?.km_review_needed ? false : true);
   } else {
     const smuRaw = String(qs("clSmuHours")?.value || "").trim();
     let smu_hours = null;

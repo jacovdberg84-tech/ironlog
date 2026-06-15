@@ -8302,9 +8302,29 @@ export default async function maintenanceRoutes(app) {
     }
   }
 
-  function syncLdvPrestartToDailyHours(assetId, checkDate, odometerKm, inspectorName, previousOdometerKm) {
+  function syncLdvPrestartToDailyHours(assetId, checkDate, odometerKm, inspectorName, previousOdometerKm, opts = {}) {
     if (!assetId || !isDate(checkDate) || !Number.isFinite(Number(odometerKm))) return { synced: false };
     const odometer = Number(odometerKm);
+    const previous =
+      previousOdometerKm != null && Number.isFinite(Number(previousOdometerKm))
+        ? Number(previousOdometerKm)
+        : null;
+    const unusual =
+      Boolean(opts.unusual_km) ||
+      (previous != null && odometer < previous) ||
+      isLdvOdometerOutlier(odometer, previous);
+
+    if (unusual) {
+      return {
+        synced: false,
+        skipped: true,
+        reason: "unusual_km",
+        work_date: checkDate,
+        message:
+          "Pre-start KM saved. Daily input was not updated because the reading looks unusual — a supervisor can correct it.",
+      };
+    }
+
     const existing = db.prepare(`
       SELECT id, scheduled_hours, opening_hours, closing_hours, hours_run, is_used, operator, notes
       FROM daily_hours
@@ -8927,13 +8947,9 @@ export default async function maintenanceRoutes(app) {
         getLatestLdvOdometerKm(Number(asset.id), check_date, {
           excludeCheckId: existing?.id ? Number(existing.id) : 0,
         });
-      if (previousOdometer != null && odometer_km < previousOdometer) {
-        return reply.code(400).send({
-          ok: false,
-          error: `Odometer cannot move backwards (previous ${previousOdometer.toFixed(1)} km).`,
-          previous_odometer_km: Number(previousOdometer.toFixed(1)),
-        });
-      }
+      const kmReviewNeeded =
+        (previousOdometer != null && odometer_km < previousOdometer) ||
+        isLdvOdometerOutlier(odometer_km, previousOdometer);
 
       const checklist = normalizeLdvPrestartChecklist(checklistObj);
       const failed = checklist.filter((c) => !c.ok);
@@ -8950,6 +8966,8 @@ export default async function maintenanceRoutes(app) {
           return acc;
         }, {})
       );
+      const reviewNote = kmReviewNeeded ? "KM flagged for supervisor review" : null;
+      const mergedNotes = [notes, reviewNote].filter(Boolean).join(" | ") || null;
 
       let checkId = 0;
       if (existing?.id) {
@@ -8959,7 +8977,7 @@ export default async function maintenanceRoutes(app) {
           check_date,
           odometer_km,
           inspector_name,
-          notes,
+          mergedNotes,
           checklistJson
         );
       } else {
@@ -8976,7 +8994,7 @@ export default async function maintenanceRoutes(app) {
           String(asset.asset_code || ""),
           odometer_km,
           inspector_name,
-          notes,
+          mergedNotes,
           checklistJson
         );
         checkId = Number(ins.lastInsertRowid);
@@ -8987,7 +9005,8 @@ export default async function maintenanceRoutes(app) {
         check_date,
         odometer_km,
         inspector_name,
-        previousOdometer
+        previousOdometer,
+        { unusual_km: kmReviewNeeded }
       );
 
       return reply.send({
@@ -8997,8 +9016,11 @@ export default async function maintenanceRoutes(app) {
         check_date,
         odometer_km: Number(odometer_km.toFixed(1)),
         previous_odometer_km: previousOdometer == null ? null : Number(previousOdometer.toFixed(1)),
+        km_review_needed: kmReviewNeeded,
         daily_input_sync: dailySync || { synced: false },
-        message: "Pre-start captured. KM reading saved to IRONLOG.",
+        message: kmReviewNeeded
+          ? "Pre-start saved. KM looks unusual — daily input not updated until a supervisor reviews."
+          : "Pre-start captured. KM reading saved to IRONLOG.",
       });
     } catch (err) {
       req.log.error(err);

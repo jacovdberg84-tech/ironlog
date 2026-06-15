@@ -134,7 +134,15 @@
     const odometer = Number(odometerRaw);
     if (!Number.isFinite(odometer) || odometer < 0) throw new Error("Odometer must be a valid number >= 0.");
     if (previousKm != null && odometer < previousKm) {
-      throw new Error(`Odometer cannot be less than previous KM (${previousKm.toFixed(1)}).`);
+      const ok = window.confirm(
+        `KM ${odometer.toFixed(1)} is less than previous (${previousKm.toFixed(1)}). Submit pre-start anyway?`
+      );
+      if (!ok) return;
+    } else if (odometer > 500000 || (previousKm != null && odometer > previousKm * 1.25 + 500)) {
+      const ok = window.confirm(
+        `KM ${odometer.toFixed(1)} looks unusually high. Submit pre-start anyway?`
+      );
+      if (!ok) return;
     }
 
     const checklist = readChecklist();
@@ -164,7 +172,7 @@
       openPdfBtn.href = `/api/reports/vehicle-ldv-check/${encodeURIComponent(String(currentCheckId))}.pdf`;
     }
     showSyncState(data?.daily_input_sync || null);
-    msg("Pre-start submitted successfully. KM saved to IRONLOG.", "ok");
+    msg(data?.message || "Pre-start submitted successfully. KM saved to IRONLOG.", data?.km_review_needed ? "err" : "ok");
   }
 
   async function uploadPhoto() {
