@@ -262,8 +262,6 @@ export default async function cartrackRoutes(app) {
       const pdf = await buildPdfBuffer((doc) => {
         sectionTitle(doc, `GPS fleet speeding report — ${date}`);
         doc.fontSize(10).fillColor("#334155");
-        doc.text(`Cartrack alert: ${summary.speed_alert_kmh ?? 100} km/h · Unitech Afungi site: 60 km/h`);
-        doc.text(`IRONLOG logs speeding from live GPS sync (not only Cartrack’s 160+ km/h API events).`);
         doc.text(`Total events: ${summary.total_speeding_events} · Vehicles: ${summary.vehicles_with_speeding}`);
         doc.moveDown(0.5);
         if (!rows.length) {
