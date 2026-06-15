@@ -8054,6 +8054,77 @@ export default async function maintenanceRoutes(app) {
     return /^V(0[1-9]|1[0-5])AM$/i.test(String(assetCode || "").trim());
   }
 
+  function ldvPrestartModeSql(column = "check_mode") {
+    return `LOWER(TRIM(COALESCE(${column}, 'ldv_general'))) = 'prestart'`;
+  }
+
+  function getLdvPrestartCheckRow(assetId, checkDate) {
+    if (!assetId || !isDate(checkDate)) return null;
+    return db.prepare(`
+      SELECT id, check_date, odometer_km, inspector_name, notes, checklist_json, check_mode, updated_at
+      FROM vehicle_ldv_checks
+      WHERE asset_id = ?
+        AND check_date = ?
+        AND ${ldvPrestartModeSql("check_mode")}
+      ORDER BY datetime(updated_at) DESC, id DESC
+      LIMIT 1
+    `).get(assetId, checkDate);
+  }
+
+  function getPriorLdvPrestartOdometerKm(assetId, checkDate) {
+    if (!assetId || !isDate(checkDate)) return null;
+    const row = db.prepare(`
+      SELECT odometer_km
+      FROM vehicle_ldv_checks
+      WHERE asset_id = ?
+        AND check_date < ?
+        AND odometer_km IS NOT NULL
+        AND ${ldvPrestartModeSql("check_mode")}
+      ORDER BY check_date DESC, id DESC
+      LIMIT 1
+    `).get(assetId, checkDate);
+    if (row?.odometer_km == null) return null;
+    const n = Number(row.odometer_km);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  }
+
+  function resolveLdvCorrectionOpeningKm(assetId, workDate, closingKm, excludeCheckId, explicitOpening) {
+    if (explicitOpening != null && String(explicitOpening).trim() !== "") {
+      const n = Number(explicitOpening);
+      if (Number.isFinite(n) && n >= 0) return n;
+    }
+    const closing = Number(closingKm);
+    if (!Number.isFinite(closing) || closing < 0) return null;
+
+    const priorPrestart = getPriorLdvPrestartOdometerKm(assetId, workDate);
+    if (priorPrestart != null && closing >= priorPrestart) return priorPrestart;
+
+    if (hasColumn("daily_hours", "input_unit")) {
+      const dailyRow = db.prepare(`
+        SELECT closing_hours
+        FROM daily_hours
+        WHERE asset_id = ?
+          AND work_date < ?
+          AND LOWER(COALESCE(NULLIF(TRIM(input_unit), ''), 'hours')) = 'km'
+          AND closing_hours IS NOT NULL
+        ORDER BY work_date DESC, id DESC
+        LIMIT 1
+      `).get(assetId, workDate);
+      if (dailyRow?.closing_hours != null) {
+        const n = Number(dailyRow.closing_hours);
+        if (Number.isFinite(n) && n >= 0 && closing >= n) return n;
+      }
+    }
+
+    const pooled = getLatestLdvOdometerKm(assetId, workDate, {
+      excludeCheckId: Number(excludeCheckId || 0) || 0,
+    });
+    if (pooled != null && closing >= pooled) return pooled;
+
+    // Supervisor correction: allow fixing a bad same-day entry without a valid prior baseline.
+    return closing;
+  }
+
   function getMachinePrestartCheckRow(assetId, checkDate, mode) {
     const primary = db.prepare(`
       SELECT id, check_date, odometer_km, smu_hours, inspector_name, notes, checklist_json, check_mode
@@ -8540,21 +8611,11 @@ export default async function maintenanceRoutes(app) {
         });
       }
 
-      const ldvCheckStmt = db.prepare(`
-        SELECT id, checklist_json
-        FROM vehicle_ldv_checks
-        WHERE asset_id = ?
-          AND check_date = ?
-          AND COALESCE(check_mode, 'ldv_general') = 'prestart'
-        ORDER BY id DESC
-        LIMIT 1
-      `);
-
       for (const a of assets) {
         const assetId = Number(a.id);
         const code = String(a.asset_code || "");
         if (isLdvPrestartAssetCode(code)) {
-          const row = ldvCheckStmt.get(assetId, check_date);
+          const row = getLdvPrestartCheckRow(assetId, check_date);
           const st = row
             ? { ...checklistRowStatus(row.checklist_json, normalizeLdvPrestartChecklist), check_id: Number(row.id) }
             : { status: "pending", check_id: null };
@@ -8634,15 +8695,7 @@ export default async function maintenanceRoutes(app) {
       `).get(asset_code);
       if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
 
-      const existing = db.prepare(`
-        SELECT id, check_date, odometer_km, inspector_name, notes, checklist_json
-        FROM vehicle_ldv_checks
-        WHERE asset_id = ?
-          AND check_date = ?
-          AND COALESCE(check_mode, 'ldv_general') = 'prestart'
-        ORDER BY id DESC
-        LIMIT 1
-      `).get(Number(asset.id), check_date);
+      const existing = getLdvPrestartCheckRow(Number(asset.id), check_date);
 
       const previous_odometer_km = getLatestLdvOdometerKm(Number(asset.id), check_date, {
         excludeCheckId: existing?.id ? Number(existing.id) : 0,
@@ -8714,15 +8767,7 @@ export default async function maintenanceRoutes(app) {
       `).get(asset_code);
       if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
 
-      const existing = db.prepare(`
-        SELECT id
-        FROM vehicle_ldv_checks
-        WHERE asset_id = ?
-          AND check_date = ?
-          AND COALESCE(check_mode, 'ldv_general') = 'prestart'
-        ORDER BY id DESC
-        LIMIT 1
-      `).get(Number(asset.id), check_date);
+      const existing = getLdvPrestartCheckRow(Number(asset.id), check_date);
 
       const previousOdometer = getLatestLdvOdometerKm(Number(asset.id), check_date, {
         excludeCheckId: existing?.id ? Number(existing.id) : 0,
@@ -8838,31 +8883,30 @@ export default async function maintenanceRoutes(app) {
       if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
 
       const assetId = Number(asset.id);
-      const existing = db.prepare(`
-        SELECT id, checklist_json FROM vehicle_ldv_checks
-        WHERE asset_id = ? AND check_date = ? AND COALESCE(check_mode, 'ldv_general') = 'prestart'
-        ORDER BY id DESC LIMIT 1
-      `).get(assetId, work_date);
+      const existing = getLdvPrestartCheckRow(assetId, work_date);
 
       let checkId = Number(existing?.id || 0);
-      const previousOdometer = getLatestLdvOdometerKm(assetId, work_date, {
-        excludeCheckId: checkId,
-      });
-      const opening_km =
-        opening_km_raw != null && String(opening_km_raw).trim() !== ""
-          ? Number(opening_km_raw)
-          : previousOdometer;
+      const opening_km = resolveLdvCorrectionOpeningKm(
+        assetId,
+        work_date,
+        closing_km,
+        checkId,
+        opening_km_raw
+      );
       if (!Number.isFinite(opening_km) || opening_km < 0) {
         return reply.code(400).send({ ok: false, error: "opening_km could not be resolved — pass opening_km explicitly" });
       }
       if (closing_km < opening_km) {
         return reply.code(400).send({
           ok: false,
-          error: `Closing KM (${closing_km}) cannot be less than opening KM (${opening_km}).`,
-          previous_odometer_km: previousOdometer,
+          error: `Closing KM (${closing_km}) cannot be less than opening KM (${opening_km}). Enter opening KM manually if needed.`,
           opening_km,
         });
       }
+
+      const previousOdometer = getLatestLdvOdometerKm(assetId, work_date, {
+        excludeCheckId: checkId,
+      });
 
       const checklistJsonOut = (() => {
         if (existing?.checklist_json && String(existing.checklist_json).trim()) {
@@ -8881,8 +8925,10 @@ export default async function maintenanceRoutes(app) {
           UPDATE vehicle_ldv_checks
           SET odometer_km = ?, inspector_name = ?, notes = ?, check_mode = 'prestart',
               checklist_json = COALESCE(NULLIF(checklist_json, ''), ?), updated_at = datetime('now')
-          WHERE id = ?
-        `).run(closing_km, inspector_name, correction_note, checklistJsonOut, checkId);
+          WHERE asset_id = ?
+            AND check_date = ?
+            AND ${ldvPrestartModeSql("check_mode")}
+        `).run(closing_km, inspector_name, correction_note, checklistJsonOut, assetId, work_date);
       } else {
         const ins = db.prepare(`
           INSERT INTO vehicle_ldv_checks (
@@ -8903,6 +8949,9 @@ export default async function maintenanceRoutes(app) {
         );
         checkId = Number(ins.lastInsertRowid);
       }
+
+      const canonical = getLdvPrestartCheckRow(assetId, work_date);
+      if (canonical?.id) checkId = Number(canonical.id);
 
       const run_km = Math.max(0, closing_km - opening_km);
       const hasInputUnit = hasColumn("daily_hours", "input_unit");
@@ -8948,6 +8997,10 @@ export default async function maintenanceRoutes(app) {
         `).run(assetId);
       }
 
+      const priorBaseline =
+        getPriorLdvPrestartOdometerKm(assetId, work_date) ??
+        (previousOdometer != null ? previousOdometer : null);
+
       return reply.send({
         ok: true,
         asset_code,
@@ -8956,7 +9009,7 @@ export default async function maintenanceRoutes(app) {
         opening_km: Number(opening_km.toFixed(1)),
         closing_km: Number(closing_km.toFixed(1)),
         run_km: Number(run_km.toFixed(1)),
-        previous_odometer_km: previousOdometer == null ? null : Number(previousOdometer.toFixed(1)),
+        previous_odometer_km: priorBaseline == null ? null : Number(priorBaseline.toFixed(1)),
         message: `KM corrected for ${asset_code} on ${work_date}.`,
       });
     } catch (err) {

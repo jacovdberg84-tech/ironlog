@@ -2946,6 +2946,9 @@ async function selectChecklistAsset(assetCode) {
     if (qs("clPrevKm")) {
       qs("clPrevKm").textContent = clPreviousKm == null ? "—" : `${clPreviousKm.toFixed(1)} km`;
     }
+    if (qs("clCorrectOpeningKm")) {
+      qs("clCorrectOpeningKm").value = clPreviousKm != null ? String(clPreviousKm) : "";
+    }
     const existing = data?.existing_prestart || null;
     clCurrentCheckId = Number(existing?.id || 0);
     if (qs("clOdometer")) qs("clOdometer").value = existing?.odometer_km != null ? String(existing.odometer_km) : "";
@@ -3137,11 +3140,18 @@ async function applyLdvKmCorrection() {
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body),
   });
-  if (qs("clOdometer")) qs("clOdometer").value = String(data.closing_km ?? closing_km);
+  const correctedKm = Number(data.closing_km ?? closing_km);
+  clPreviousKm = data.previous_odometer_km != null ? Number(data.previous_odometer_km) : clPreviousKm;
+  if (qs("clOdometer")) qs("clOdometer").value = String(correctedKm);
   if (qs("clPrevKm")) {
     qs("clPrevKm").textContent =
-      data.opening_km != null ? `${Number(data.opening_km).toFixed(1)} km` : "—";
+      clPreviousKm == null ? "—" : `${clPreviousKm.toFixed(1)} km`;
   }
+  if (qs("clCorrectClosingKm")) qs("clCorrectClosingKm").value = "";
+  if (qs("clCorrectOpeningKm")) {
+    qs("clCorrectOpeningKm").value = data.opening_km != null ? String(data.opening_km) : "";
+  }
+  clCurrentCheckId = Number(data.check_id || clCurrentCheckId || 0);
   clSetFormMsg(data.message || "KM corrected.", true);
   setStatus(`KM corrected for ${clSelectedAssetCode} ✅`);
   await loadChecklistHub();
