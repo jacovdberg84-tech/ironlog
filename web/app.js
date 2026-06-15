@@ -4294,11 +4294,53 @@ async function loadTelematicsFleet() {
   }
 }
 
-function renderCartrackFleetTable(fleet, speedingToday) {
+let cartrackDashboardFleetCache = { fleet: [], speedingToday: [] };
+
+function isGpsFleetVehicleInUse(v) {
+  if (!v?.has_gps) return false;
+  if (v.is_speeding) return true;
+  if (v.gps_source === "unitech") {
+    if (v.position_stale) return false;
+    return Number(v.speed_kmh || 0) > 0;
+  }
+  return Number(v.ignition_on) === 1;
+}
+
+function renderCartrackFleetIgnitionCell(v) {
+  if (v.gps_source === "unitech") {
+    const spd = Number(v.speed_kmh || 0);
+    if (spd > 0) return '<span class="pill pill-green">Moving</span>';
+    return '<span class="pill">Idle</span>';
+  }
+  const ign = Number(v.ignition_on) === 1;
+  return ign ? '<span class="pill pill-green">ON</span>' : '<span class="pill">OFF</span>';
+}
+
+function renderCartrackFleetTable(fleet, speedingToday, { showAll = false } = {}) {
   const host = qs("cartrackFleetHost");
   if (!host) return;
-  if (!fleet?.length) {
-    host.innerHTML = `<div class="cartrack-empty muted small">No Cartrack vehicles synced yet. If Test connection succeeds but shows 0 vehicles, ask Cartrack to assign your fleet to the API user. Then click Sync now.</div>`;
+  const all = Array.isArray(fleet) ? fleet : [];
+  if (!all.length) {
+    host.innerHTML = `<div class="cartrack-empty muted small">No GPS vehicles synced yet. If Test connection succeeds but shows 0 vehicles, ask Cartrack to assign your fleet to the API user. Then click Sync now.</div>`;
+    return;
+  }
+  const inUse = all.filter(isGpsFleetVehicleInUse);
+  const display = (showAll ? all : inUse).slice().sort((a, b) => {
+    if (Boolean(b.is_speeding) !== Boolean(a.is_speeding)) {
+      return Number(b.is_speeding) - Number(a.is_speeding);
+    }
+    return Number(b.speed_kmh || 0) - Number(a.speed_kmh || 0);
+  });
+  const note = qs("cartrackDashFleetFilterNote");
+  if (note) {
+    note.textContent = showAll
+      ? `Showing all ${all.length} tracked vehicle(s).`
+      : inUse.length
+        ? `Showing ${inUse.length} in use (ignition on / moving). ${all.length - inUse.length} parked — open Fleet Track for full list.`
+        : `No vehicles in use right now. Tick “Show all” or open Fleet Track for the full list.`;
+  }
+  if (!display.length) {
+    host.innerHTML = `<div class="cartrack-empty muted small">No vehicles in use right now (${all.length} tracked, ignition off / stationary). Tick <strong>Show all tracked vehicles</strong> above or open <strong>Fleet Track</strong> for the full list.</div>`;
     return;
   }
   const speedMap = new Map();
@@ -4306,11 +4348,10 @@ function renderCartrackFleetTable(fleet, speedingToday) {
     const k = e.asset_code || e.registration;
     speedMap.set(k, (speedMap.get(k) || 0) + 1);
   });
-  const rows = fleet
+  const rows = display
     .map((v) => {
       const code = cartrackVehicleLabel(v);
       const sub = cartrackVehicleSubLabel(v);
-      const ign = Number(v.ignition_on) === 1;
       const spd = Number(v.speed_kmh || 0);
       const speedEvents = speedMap.get(v.asset_code) || speedMap.get(v.registration) || speedMap.get(code) || 0;
       const rowCls = speedEvents > 0 ? "cartrack-row--alert" : "";
@@ -4322,7 +4363,7 @@ function renderCartrackFleetTable(fleet, speedingToday) {
         </td>
         <td>${cartrackSourcePillHtml(v)} ${escapeHtml(v.vehicle_name || v.registration || "—")}</td>
         <td class="cartrack-col-num">${spd.toFixed(0)}</td>
-        <td class="cartrack-col-status">${ign ? '<span class="pill pill-green">ON</span>' : '<span class="pill">OFF</span>'}</td>
+        <td class="cartrack-col-status">${renderCartrackFleetIgnitionCell(v)}</td>
         <td class="cartrack-col-battery">${batteryPills || '<span class="muted">—</span>'}</td>
         <td class="cartrack-col-num">${speedEvents ? `<span class="pill pill-red">${speedEvents}</span>` : "—"}</td>
         <td class="cartrack-col-sync muted">${escapeHtml(String(v.synced_at || "").slice(0, 16))}</td>
@@ -4356,6 +4397,10 @@ async function loadCartrackFleet() {
   try {
     const data = await fetchJson(`${API}/api/cartrack/fleet`);
     const s = data?.summary || {};
+    cartrackDashboardFleetCache = {
+      fleet: data.fleet || [],
+      speedingToday: data.speeding_today || [],
+    };
     setText("cartrackKpiTotal", Number(s.total_vehicles || 0));
     setText("cartrackKpiLive", Number(s.ignition_on || 0));
     setText("cartrackKpiSpeeding", Number(s.speeding_today || 0));
@@ -4370,9 +4415,12 @@ async function loadCartrackFleet() {
       } else {
         parts.push("GPS not configured — add credentials in User Admin → GPS fleet.");
       }
+      parts.push("Dashboard table: in use only unless Show all is ticked.");
       hint.textContent = parts.join(" · ");
     }
-    renderCartrackFleetTable(data.fleet || [], data.speeding_today || []);
+    renderCartrackFleetTable(data.fleet || [], data.speeding_today || [], {
+      showAll: Boolean(qs("cartrackDashShowAll")?.checked),
+    });
   } catch (e) {
     host.innerHTML = `<div class="cartrack-empty muted small">Cartrack: ${escapeHtml(e.message || String(e))}</div>`;
   }
@@ -14933,6 +14981,13 @@ async function init() {
     prefillGpsVehicleLinkForm(btn.getAttribute("data-gps-link-prefill"), btn.getAttribute("data-gps-link-source"));
   });
   qs("cartrackSyncBtn")?.addEventListener("click", () => syncCartrackNow().catch((e) => setStatus(String(e.message || e))));
+  qs("cartrackDashShowAll")?.addEventListener("change", () => {
+    renderCartrackFleetTable(
+      cartrackDashboardFleetCache.fleet,
+      cartrackDashboardFleetCache.speedingToday,
+      { showAll: Boolean(qs("cartrackDashShowAll")?.checked) }
+    );
+  });
   qs("cartrackMorningPdfBtn")?.addEventListener("click", () =>
     openCartrackMorningPdf().catch((e) => setStatus(String(e.message || e)))
   );

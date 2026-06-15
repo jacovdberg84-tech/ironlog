@@ -6487,6 +6487,18 @@ body.uc-qr-locked #ucAsset {
 }
 
 /* Dashboard — Cartrack fleet table */
+#tab-dash .cartrack-dash-fleet-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+#tab-dash .cartrack-dash-fleet-toggle {
+  font-size: 13px;
+  margin: 0;
+}
 #tab-dash .cartrack-fleet-host {
   margin-top: 4px;
   width: 100%;

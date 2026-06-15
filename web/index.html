@@ -460,8 +460,15 @@
               <button type="button" id="cartrackMorningPdfBtn" class="btn btn-secondary btn-sm">Yesterday PDF</button>
               <button type="button" id="cartrackMorningEmailBtn" class="btn btn-secondary btn-sm">Email report</button>
             </div>
+            <div class="cartrack-dash-fleet-toolbar">
+              <label class="checkbox-label cartrack-dash-fleet-toggle">
+                <input type="checkbox" id="cartrackDashShowAll" />
+                <span>Show all tracked vehicles</span>
+              </label>
+              <span class="muted mini" id="cartrackDashFleetFilterNote">In use only on dashboard — full fleet on Fleet Track.</span>
+            </div>
             <div id="cartrackFleetHost" class="cartrack-fleet-host"></div>
-            <p class="muted small" id="cartrackFleetHint">Live GPS from Cartrack + Unitech (Afungi). Speed alerts use your IRONLOG threshold (default 100 km/h). Configure in User Admin → GPS fleet.</p>
+            <p class="muted small" id="cartrackFleetHint">Dashboard shows vehicles in use by default (ignition on or moving). Full fleet on Fleet Track. Unitech Afungi max 60 km/h.</p>
           </div>
 
           <div class="dash-card" id="telematicsFleetCard">
@@ -6722,6 +6729,6 @@
 
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="./app.js?v=27"></script>
+  <script src="./app.js?v=28"></script>
 </body>
 </html>
