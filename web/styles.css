@@ -6567,6 +6567,63 @@ body.uc-qr-locked #ucAsset {
   border-radius: 8px;
   background: #f8fafc;
 }
+#tab-dash .cartrack-speed-report-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+#tab-dash .cartrack-speed-report-date-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.cartrack-speed-report-date {
+  font-size: 13px;
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+}
+#tab-dash .cartrack-speeding-events-panel,
+.cartrack-track-speeding-panel {
+  margin-top: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fafbfc;
+  padding: 8px 10px;
+}
+.cartrack-speeding-events-summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+  color: #334155;
+  user-select: none;
+}
+.cartrack-speeding-events-count {
+  color: #b91c1c;
+  font-weight: 700;
+}
+.cartrack-speeding-events-host {
+  margin-top: 8px;
+}
+.cartrack-speeding-events-foot {
+  margin: 6px 0 0;
+}
+.cartrack-track-speed-report-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+#tab-dash #cartrackKpiSpeeding {
+  cursor: pointer;
+}
+#tab-dash .kpi-pill-red:has(#cartrackKpiSpeeding) {
+  cursor: pointer;
+}
 
 /* Fleet Track — live Cartrack map */
 #tab-cartrack .cartrack-track-toolbar {

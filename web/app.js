@@ -4421,6 +4421,7 @@ async function loadCartrackFleet() {
     renderCartrackFleetTable(data.fleet || [], data.speeding_today || [], {
       showAll: Boolean(qs("cartrackDashShowAll")?.checked),
     });
+    loadCartrackSpeedingEvents(todayLocalYmd(), { useCache: true }).catch(() => {});
   } catch (e) {
     host.innerHTML = `<div class="cartrack-empty muted small">Cartrack: ${escapeHtml(e.message || String(e))}</div>`;
   }
@@ -4435,6 +4436,7 @@ async function syncCartrackNow() {
     body: JSON.stringify({ start_date: today, end_date: today }),
   });
   await loadCartrackFleet();
+  loadCartrackSpeedingEvents(todayLocalYmd(), { useCache: true }).catch(() => {});
   refreshCartrackSpeedFloat({ refresh: false }).catch(() => {});
   setStatus("Cartrack sync complete ✅");
 }
@@ -4448,26 +4450,130 @@ function yesterdayYmd() {
   return `${y}-${m}-${day}`;
 }
 
-async function openCartrackMorningPdf() {
-  const date = yesterdayYmd();
-  setStatus(`Opening Cartrack speeding PDF for ${date}…`);
-  try {
-    await openAuthedPdf(`${API}/api/cartrack/morning-report.pdf?date=${encodeURIComponent(date)}`);
-    setStatus(`Cartrack PDF opened (${date})`);
-  } catch (e) {
-    setStatus(`Cartrack PDF error: ${e.message || e}`);
+function getCartrackSpeedReportDate() {
+  const el = qs("cartrackSpeedReportDate") || qs("cartrackTrackSpeedReportDate");
+  const v = String(el?.value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  return todayLocalYmd();
+}
+
+function initCartrackSpeedReportDates() {
+  const today = todayLocalYmd();
+  for (const id of ["cartrackSpeedReportDate", "cartrackTrackSpeedReportDate"]) {
+    const el = qs(id);
+    if (el && !el.value) el.value = today;
   }
 }
 
-async function emailCartrackMorningReport() {
-  const date = yesterdayYmd();
-  setStatus("Sending Cartrack morning report…");
+function syncCartrackSpeedReportDateInputs(date) {
+  const d = String(date || getCartrackSpeedReportDate()).slice(0, 10);
+  for (const id of ["cartrackSpeedReportDate", "cartrackTrackSpeedReportDate"]) {
+    const el = qs(id);
+    if (el) el.value = d;
+  }
+  return d;
+}
+
+function renderCartrackSpeedingEventsTable(host, events, date) {
+  if (!host) return;
+  if (!events.length) {
+    host.innerHTML = `<div class="cartrack-empty muted small">No speeding events recorded for ${escapeHtml(date)}. Events appear when GPS sync detects speed over the limit (Cartrack ≥ alert threshold, Unitech &gt; 60 km/h).</div>`;
+    return;
+  }
+  const rows = events
+    .map((e) => {
+      const vehicle = e.asset_code || e.registration || "—";
+      const reg = e.registration && e.registration !== vehicle ? e.registration : "";
+      const time = String(e.event_time || "").slice(0, 16);
+      const speed = e.speed_kmh != null ? `${Number(e.speed_kmh).toFixed(0)} km/h` : "—";
+      const limit = e.speed_limit_kmh != null ? `${Number(e.speed_limit_kmh).toFixed(0)} km/h` : "—";
+      const type = e.event_type_label || e.event_type || "";
+      return `<tr>
+        <td class="cartrack-col-sync">${escapeHtml(time)}</td>
+        <td>
+          <span class="cartrack-vehicle-code">${escapeHtml(vehicle)}</span>
+          ${reg ? `<div class="muted mini">${escapeHtml(reg)}</div>` : ""}
+        </td>
+        <td class="cartrack-col-num">${escapeHtml(speed)}</td>
+        <td class="cartrack-col-num">${escapeHtml(limit)}</td>
+        <td class="muted mini">${escapeHtml(type)}</td>
+      </tr>`;
+    })
+    .join("");
+  host.innerHTML = `
+    <div class="cartrack-table-scroll">
+      <table class="cartrack-fleet-table cartrack-speeding-events-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Vehicle</th>
+            <th class="cartrack-col-num">Speed</th>
+            <th class="cartrack-col-num">Limit</th>
+            <th>Type</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <p class="muted mini cartrack-speeding-events-foot">${events.length} event(s) on ${escapeHtml(date)} — click <strong>Speeding PDF</strong> for a printable report.</p>
+  `;
+}
+
+async function loadCartrackSpeedingEvents(date, {
+  hostId = "cartrackSpeedingEventsHost",
+  countId = "cartrackSpeedingEventsCount",
+  panelId = "cartrackSpeedingEventsPanel",
+  useCache = true,
+} = {}) {
+  const host = qs(hostId);
+  if (!host) return [];
+  const reportDate = syncCartrackSpeedReportDateInputs(date);
+  const cached = useCache && reportDate === todayLocalYmd() ? cartrackDashboardFleetCache.speedingToday : null;
+  try {
+    const events = cached?.length
+      ? cached
+      : (await fetchJson(
+          `${API}/api/cartrack/events?start=${encodeURIComponent(reportDate)}&end=${encodeURIComponent(reportDate)}&speeding_only=1`
+        ))?.rows || [];
+    renderCartrackSpeedingEventsTable(host, events, reportDate);
+    const countEl = qs(countId);
+    if (countEl) countEl.textContent = events.length ? `(${events.length})` : "";
+    const panel = qs(panelId);
+    if (panel && events.length) panel.open = true;
+    return events;
+  } catch (e) {
+    host.innerHTML = `<div class="cartrack-empty muted small">Could not load speeding log: ${escapeHtml(e.message || String(e))}</div>`;
+    return [];
+  }
+}
+
+function openCartrackSpeedingEventsPanel() {
+  const panel = qs("cartrackSpeedingEventsPanel");
+  if (!panel) return;
+  panel.open = true;
+  panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function openCartrackMorningPdf(date) {
+  const reportDate = syncCartrackSpeedReportDateInputs(date);
+  setStatus(`Opening speeding PDF for ${reportDate}…`);
+  try {
+    await openAuthedPdf(`${API}/api/cartrack/morning-report.pdf?date=${encodeURIComponent(reportDate)}`);
+    setStatus(`Speeding PDF opened (${reportDate})`);
+  } catch (e) {
+    setStatus(`Speeding PDF error: ${e.message || e}`);
+  }
+}
+
+async function emailCartrackMorningReport(date) {
+  const reportDate = syncCartrackSpeedReportDateInputs(date);
+  setStatus(`Sending speeding report for ${reportDate}…`);
   const data = await fetchJson(`${API}/api/cartrack/morning-report/send`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ date }),
+    body: JSON.stringify({ date: reportDate }),
   });
-  setStatus(`Cartrack report emailed (${data.summary?.total_speeding_events ?? 0} events) ✅`);
+  setStatus(`Speeding report emailed (${data.summary?.total_speeding_events ?? 0} events) ✅`);
 }
 
 function setCartrackAdminResult(text, ok) {
@@ -5128,6 +5234,12 @@ async function loadCartrackTrackingTab({ refresh = true, quiet = false } = {}) {
     setCartrackMapStatus(statusBits.join(" · ") || "Ready");
     if (!quiet) setStatus(`Fleet map updated — ${Number(s.with_gps || 0)} vehicle(s) with GPS.`);
     startCartrackTrackPolling();
+    loadCartrackSpeedingEvents(getCartrackSpeedReportDate(), {
+      hostId: "cartrackTrackSpeedingEventsHost",
+      countId: "cartrackTrackSpeedingEventsCount",
+      panelId: "cartrackTrackSpeedingEventsPanel",
+      useCache: getCartrackSpeedReportDate() === todayLocalYmd(),
+    }).catch(() => {});
   } catch (e) {
     setCartrackMapStatus(String(e.message || e));
     if (!quiet) setStatus(`Fleet map error: ${e.message || e}`);
@@ -14994,6 +15106,26 @@ async function init() {
   qs("cartrackMorningEmailBtn")?.addEventListener("click", () =>
     emailCartrackMorningReport().catch((e) => setStatus(String(e.message || e)))
   );
+  qs("cartrackTrackMorningPdfBtn")?.addEventListener("click", () =>
+    openCartrackMorningPdf().catch((e) => setStatus(String(e.message || e)))
+  );
+  const onCartrackSpeedReportDateChange = (e) => {
+    const d = syncCartrackSpeedReportDateInputs(e.target?.value);
+    loadCartrackSpeedingEvents(d, { useCache: d === todayLocalYmd() }).catch(() => {});
+    loadCartrackSpeedingEvents(d, {
+      hostId: "cartrackTrackSpeedingEventsHost",
+      countId: "cartrackTrackSpeedingEventsCount",
+      panelId: "cartrackTrackSpeedingEventsPanel",
+      useCache: d === todayLocalYmd(),
+    }).catch(() => {});
+  };
+  qs("cartrackSpeedReportDate")?.addEventListener("change", onCartrackSpeedReportDateChange);
+  qs("cartrackTrackSpeedReportDate")?.addEventListener("change", onCartrackSpeedReportDateChange);
+  qs("cartrackKpiSpeeding")?.closest(".kpi-pill")?.addEventListener("click", () => {
+    openCartrackSpeedingEventsPanel();
+    loadCartrackSpeedingEvents(todayLocalYmd(), { useCache: true }).catch(() => {});
+  });
+  initCartrackSpeedReportDates();
 
   qs("telemSaveDeviceBtn")?.addEventListener("click", () =>
     saveTelematicsDevice().catch((e) => setTelemAdminResult(String(e.message || e)))

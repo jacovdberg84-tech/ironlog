@@ -681,6 +681,39 @@ export function listCartrackEventsFromDb({ startDate, endDate, speedingOnly = fa
   `).all(...params, lim);
 }
 
+export function inferSpeedEventSource(event) {
+  const limit = Number(event?.speed_limit_kmh);
+  const unitechSite = 60;
+  if (String(event?.event_type || "") === "ironlog_speed_alert") {
+    if (limit === unitechSite || limit === unitechSite + 1) return "Unitech";
+    return "Cartrack";
+  }
+  if (/unitech|gpsgate|afungi/i.test(String(event?.description || event?.event_type_label || ""))) {
+    return "Unitech";
+  }
+  return "Cartrack";
+}
+
+export function buildSpeedingReportPdfContent(summary) {
+  const columns = [
+    { key: "time", label: "Time", width: 72 },
+    { key: "vehicle", label: "Vehicle", width: 52 },
+    { key: "speed", label: "Speed", width: 36 },
+    { key: "limit", label: "Limit", width: 36 },
+    { key: "source", label: "Source", width: 44 },
+    { key: "type", label: "Type", width: 68 },
+  ];
+  const rows = (summary.events || []).slice(0, 120).map((e) => ({
+    time: String(e.event_time || "").slice(0, 16),
+    vehicle: e.asset_code || e.registration || "",
+    speed: e.speed_kmh != null ? `${Number(e.speed_kmh).toFixed(0)}` : "—",
+    limit: e.speed_limit_kmh != null ? `${Number(e.speed_limit_kmh).toFixed(0)}` : "—",
+    source: inferSpeedEventSource(e),
+    type: e.event_type_label || e.event_type || "",
+  }));
+  return { columns, rows };
+}
+
 export function buildMorningSpeedingReport(reportDate) {
   const date = String(reportDate || "").slice(0, 10);
   const threshold = getCartrackSpeedAlertKmh();
