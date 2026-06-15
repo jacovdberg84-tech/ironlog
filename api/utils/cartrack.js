@@ -515,6 +515,9 @@ export function enrichCartrackLiveRow(row, speedRegs = new Set()) {
   const overLimit = Number.isFinite(roadLimit) && roadLimit > 0 && speed > roadLimit;
   const overThreshold = Number.isFinite(speed) && speed >= alertKmh;
   const fuelPct = raw.fuel?.precentage_left ?? raw.fuel?.percentage_left;
+  const tcu = Number(raw.tcu_percentage);
+  const vext = Number(raw.vext);
+  const evBatt = raw.electric?.battery_percentage_left;
   return {
     ...row,
     has_gps: hasGps,
@@ -524,6 +527,10 @@ export function enrichCartrackLiveRow(row, speedRegs = new Set()) {
     road_speed_limit: Number.isFinite(roadLimit) && roadLimit > 0 ? roadLimit : null,
     rpm: Number(raw.rpm) || null,
     fuel_pct: fuelPct != null && Number.isFinite(Number(fuelPct)) ? Number(fuelPct) : null,
+    tracker_battery_pct: Number.isFinite(tcu) ? tcu : null,
+    supply_voltage_v: Number.isFinite(vext) ? vext : null,
+    ev_battery_pct: evBatt != null && Number.isFinite(Number(evBatt)) ? Number(evBatt) : null,
+    charging_status: String(raw.electric?.charging_status || "").trim() || null,
   };
 }
 

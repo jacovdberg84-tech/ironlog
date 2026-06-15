@@ -4486,6 +4486,25 @@ function cartrackVehicleLabel(v) {
   return String(v.asset_code || v.registration || "—");
 }
 
+function formatCartrackTelemetryLine(v) {
+  const parts = [];
+  if (v.ev_battery_pct != null) parts.push(`EV batt ${Math.round(v.ev_battery_pct)}%`);
+  if (v.tracker_battery_pct != null) parts.push(`Tracker ${Math.round(v.tracker_battery_pct)}%`);
+  if (v.supply_voltage_v != null) parts.push(`${Number(v.supply_voltage_v).toFixed(1)} V`);
+  if (v.fuel_pct != null) parts.push(`Fuel ${Math.round(v.fuel_pct)}%`);
+  if (v.charging_status) parts.push(String(v.charging_status));
+  return parts.join(" · ");
+}
+
+function cartrackBatteryLow(v) {
+  const tracker = Number(v.tracker_battery_pct);
+  if (Number.isFinite(tracker) && tracker > 0 && tracker < 25) return true;
+  const volts = Number(v.supply_voltage_v);
+  if (!Number.isFinite(volts) || volts <= 0) return false;
+  if (volts < 24) return volts < 11.5;
+  return volts < 22;
+}
+
 function buildCartrackPopupHtml(v) {
   const ign = Number(v.ignition_on) === 1 ? "ON" : "OFF";
   const spd = Number(v.speed_kmh || 0).toFixed(0);
@@ -4496,12 +4515,15 @@ function buildCartrackPopupHtml(v) {
   const mapsUrl = Number.isFinite(lat) && Number.isFinite(lng)
     ? `https://www.google.com/maps?q=${lat},${lng}`
     : "";
+  const telemetry = formatCartrackTelemetryLine(v);
+  const battLow = cartrackBatteryLow(v);
   return `
     <div class="cartrack-popup">
       <strong>${escapeHtml(cartrackVehicleLabel(v))}</strong>
       <div>${escapeHtml(v.vehicle_name || v.registration || "")}</div>
       <div>Speed: <b>${spd}</b> km/h · Ignition: <b>${ign}</b></div>
       <div>Odometer: ${escapeHtml(odo)}</div>
+      ${telemetry ? `<div class="${battLow ? "cartrack-batt-low" : ""}">Battery / power: <b>${escapeHtml(telemetry)}</b></div>` : ""}
       <div class="muted">Last: ${escapeHtml(when)}</div>
       ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" rel="noopener noreferrer">Open in Maps</a>` : ""}
     </div>
@@ -4605,10 +4627,13 @@ function renderCartrackTrackList(fleet, filterText = "") {
       const label = cartrackVehicleLabel(v);
       const ign = Number(v.ignition_on) === 1;
       const spd = Number(v.speed_kmh || 0).toFixed(0);
+      const telemetry = formatCartrackTelemetryLine(v);
+      const battLow = cartrackBatteryLow(v);
       const cls = [
         "cartrack-track-item",
         v.is_speeding ? "cartrack-track-item--alert" : "",
         !v.has_gps ? "cartrack-track-item--nogps" : "",
+        battLow ? "cartrack-track-item--battlow" : "",
       ].filter(Boolean).join(" ");
       return `<button type="button" class="${cls}" data-cartrack-key="${escapeHtml(key)}">
         <span class="cartrack-track-item-code">${escapeHtml(label)}</span>
@@ -4618,6 +4643,7 @@ function renderCartrackTrackList(fleet, filterText = "") {
           <span>${spd} km/h</span>
           ${v.is_speeding ? '<span class="pill red">Speeding</span>' : ""}
           ${!v.has_gps ? '<span class="pill">No GPS</span>' : ""}
+          ${telemetry ? `<span class="${battLow ? "pill red" : "pill"}">${escapeHtml(telemetry)}</span>` : ""}
         </span>
       </button>`;
     })
@@ -4750,9 +4776,13 @@ function renderCartrackSpeedFloatList(fleet) {
       if (v.is_idling) extras.push("Idle");
       if (limit) extras.push(`Limit ${limit}`);
       else if (v.speed_alert_kmh) extras.push(`Alert ≥${v.speed_alert_kmh}`);
-      if (v.rpm) extras.push(`${Math.round(v.rpm)} rpm`);
-      if (v.fuel_pct != null) extras.push(`Fuel ${Math.round(v.fuel_pct)}%`);
-      return `<div class="${cls}">
+      const telemetry = formatCartrackTelemetryLine(v);
+      if (telemetry) extras.push(telemetry);
+      else {
+        if (v.rpm) extras.push(`${Math.round(v.rpm)} rpm`);
+      }
+      const battLow = cartrackBatteryLow(v);
+      return `<div class="${cls}${battLow ? " cartrack-speed-float-row--battlow" : ""}">
         <span class="cartrack-speed-float-code">${escapeHtml(label)}</span>
         <span class="cartrack-speed-float-spd">${spd.toFixed(0)}<small> km/h</small></span>
         <span class="cartrack-speed-float-meta">${escapeHtml(extras.join(" · ") || v.registration || "")}</span>

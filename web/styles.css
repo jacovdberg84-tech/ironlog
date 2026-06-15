@@ -6632,9 +6632,25 @@ body.uc-qr-locked #ucAsset {
   border-color: #047857;
   background: #ecfdf5;
 }
+#tab-cartrack .cartrack-track-item--live {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
 #tab-cartrack .cartrack-track-item--alert {
   border-color: #fecaca;
   background: #fef2f2;
+}
+#tab-cartrack .cartrack-track-item--battlow {
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+.cartrack-popup .cartrack-batt-low {
+  color: #b45309;
+  font-weight: 600;
+}
+.cartrack-speed-float-row--battlow {
+  border-color: #fcd34d !important;
+  background: #fffbeb !important;
 }
 #tab-cartrack .cartrack-track-item-code {
   font-weight: 700;
