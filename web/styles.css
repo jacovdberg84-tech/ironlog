@@ -6647,6 +6647,26 @@ body.uc-qr-locked #ucAsset {
   border-color: #fecaca;
   background: #fef2f2;
 }
+#tab-cartrack .cartrack-track-item--unitech {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+#tab-cartrack .cartrack-track-item--stale {
+  border-color: #fcd34d;
+}
+.cartrack-source-pill {
+  font-size: 10px;
+  vertical-align: middle;
+}
+.cartrack-stale-note {
+  color: #b45309;
+  font-size: 11px;
+  font-weight: 600;
+}
+#tab-dash .cartrack-col-battery .cartrack-source-pill,
+#tab-cartrack .cartrack-source-pill {
+  margin-right: 4px;
+}
 #tab-cartrack .cartrack-track-item--battlow {
   border-color: #fcd34d;
   background: #fffbeb;

@@ -563,6 +563,8 @@ export function enrichCartrackLiveRow(row, speedRegs = new Set()) {
   const charging_status = parsed.charging_status || String(raw.electric?.charging_status || "").trim() || null;
   return {
     ...row,
+    gps_source: "cartrack",
+    gps_provider: "Cartrack",
     has_gps: hasGps,
     is_speeding: speedRegs.has(row.registration) || speedRegs.has(code) || overLimit || overThreshold,
     speed_alert_kmh: alertKmh,

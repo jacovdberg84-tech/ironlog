@@ -145,7 +145,7 @@
         </div>
       </div>
       <div id="cartrackSpeedFloatList" class="cartrack-speed-float-list"></div>
-      <p class="cartrack-speed-float-foot muted mini">Cartrack GPS fleet — not machine FSC telematics</p>
+      <p class="cartrack-speed-float-foot muted mini">Cartrack + Unitech GPS — not machine FSC telematics</p>
     </div>
   </div>
 
@@ -461,7 +461,7 @@
               <button type="button" id="cartrackMorningEmailBtn" class="btn btn-secondary btn-sm">Email report</button>
             </div>
             <div id="cartrackFleetHost" class="cartrack-fleet-host"></div>
-            <p class="muted small" id="cartrackFleetHint">Live GPS from Cartrack. Speed alerts use your IRONLOG threshold (default 100 km/h). Configure in User Admin → Cartrack.</p>
+            <p class="muted small" id="cartrackFleetHint">Live GPS from Cartrack + Unitech (Afungi). Speed alerts use your IRONLOG threshold (default 100 km/h). Configure in User Admin → GPS fleet.</p>
           </div>
 
           <div class="dash-card" id="telematicsFleetCard">
@@ -1496,7 +1496,7 @@
       <div class="section-header">
         <div class="section-header-left">
           <h2>Fleet Track</h2>
-          <p class="muted">Live GPS positions from Cartrack — refreshes automatically every 45 seconds</p>
+          <p class="muted">Live GPS — Cartrack road fleet + Unitech Afungi site (orange markers). Auto-refresh every 45 seconds.</p>
         </div>
         <div class="section-header-right cartrack-track-toolbar">
           <label class="cartrack-auto-refresh">
@@ -5108,6 +5108,48 @@
           </div>
         </div>
 
+        <!-- Unitech Moz (GpsGate KML) — Afungi site -->
+        <div class="dash-card collapsible full-width" data-collapsed="true" id="adminUnitechCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fff7ed; color: #ea580c;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+              </div>
+              <div>
+                <h3>Unitech Moz — Afungi KML feed</h3>
+                <p class="muted small">GpsGate KML URL for site vehicles inside Afungi. Shown on Fleet Track with orange markers.</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row" style="flex-wrap:wrap;">
+              <div class="form-field" style="flex:1 1 420px;">
+                <label>KML feed URL</label>
+                <input id="unitechKmlFeedUrl" class="w-full" placeholder="https://unitechmoz.gpsgate.com/comGpsGate/rpc/KmlFeed/v.1/feed?..." autocomplete="off" />
+                <p class="muted mini">Paste the full URL from Unitech/GpsGate. Leave blank to keep the saved URL. The URL contains a private token — treat it like a password.</p>
+              </div>
+              <div class="form-field" style="flex:1 1 200px;">
+                <label>Map label</label>
+                <input id="unitechFeedLabel" class="w-full" value="Afungi (Unitech)" />
+              </div>
+              <div class="form-field form-field-action">
+                <label class="checkbox-label" style="margin-top:24px;">
+                  <input id="unitechEnabled" type="checkbox" checked />
+                  <span>Enable Unitech feed</span>
+                </label>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button type="button" id="unitechSaveSettingsBtn" class="btn btn-primary btn-sm">Save Unitech</button>
+              <button type="button" id="unitechTestBtn" class="btn btn-secondary btn-sm">Test KML feed</button>
+            </div>
+            <pre class="output" id="unitechAdminResult"></pre>
+          </div>
+        </div>
+
         <!-- Safety equipment register + checklist templates -->
         <div class="dash-card collapsible full-width" data-collapsed="true" id="adminSafetyCard">
           <div class="dash-card-header">
@@ -6626,6 +6668,6 @@
 
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="./app.js?v=21"></script>
+  <script src="./app.js?v=22"></script>
 </body>
 </html>

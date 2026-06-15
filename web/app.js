@@ -4269,7 +4269,7 @@ function renderCartrackFleetTable(fleet, speedingToday) {
       const batteryPills = renderCartrackBatteryPillsHtml(v);
       return `<tr class="${rowCls}">
         <td><span class="cartrack-vehicle-code">${escapeHtml(code)}</span></td>
-        <td>${escapeHtml(v.vehicle_name || v.registration || "—")}</td>
+        <td>${cartrackSourcePillHtml(v)} ${escapeHtml(v.vehicle_name || v.registration || "—")}</td>
         <td class="cartrack-col-num">${spd.toFixed(0)}</td>
         <td class="cartrack-col-status">${ign ? '<span class="pill pill-green">ON</span>' : '<span class="pill">OFF</span>'}</td>
         <td class="cartrack-col-battery">${batteryPills || '<span class="muted">—</span>'}</td>
@@ -4309,9 +4309,17 @@ async function loadCartrackFleet() {
     setText("cartrackKpiLive", Number(s.ignition_on || 0));
     setText("cartrackKpiSpeeding", Number(s.speeding_today || 0));
     if (hint) {
-      hint.textContent = data.configured
-        ? `Cartrack connected (${data.base_url || "MZ"}). Last sync: ${s.last_sync || "—"}`
-        : "Cartrack not configured — add API credentials in User Admin → Cartrack.";
+      const ct = Number(s.cartrack_vehicles ?? s.total_vehicles ?? 0);
+      const ut = Number(s.unitech_vehicles || 0);
+      const parts = [];
+      if (data.configured) {
+        parts.push(`GPS connected (${data.base_url || "MZ"})`);
+        if (ut) parts.push(`${ut} Unitech Afungi`);
+        parts.push(`Last sync: ${s.last_sync || "—"}`);
+      } else {
+        parts.push("GPS not configured — add credentials in User Admin → GPS fleet.");
+      }
+      hint.textContent = parts.join(" · ");
     }
     renderCartrackFleetTable(data.fleet || [], data.speeding_today || []);
   } catch (e) {
@@ -4445,6 +4453,61 @@ async function runCartrackMorningNow() {
 async function initCartrackAdminPanel() {
   if (!qs("adminCartrackCard")) return;
   await loadCartrackAdminSettings().catch(() => {});
+  await loadUnitechAdminSettings().catch(() => {});
+}
+
+function setUnitechAdminResult(text, ok = null) {
+  const el = qs("unitechAdminResult");
+  if (!el) return;
+  el.textContent = String(text || "");
+  el.style.color = ok === true ? "#15803d" : ok === false ? "#b91c1c" : "";
+}
+
+async function loadUnitechAdminSettings() {
+  if (!qs("adminUnitechCard")) return;
+  try {
+    const data = await fetchJson(`${API}/api/unitech/settings`);
+    const s = data?.settings || {};
+    if (qs("unitechFeedLabel")) qs("unitechFeedLabel").value = s.feed_label || "Afungi (Unitech)";
+    if (qs("unitechEnabled")) qs("unitechEnabled").checked = s.enabled !== false;
+    setUnitechAdminResult(
+      s.configured
+        ? `Configured (${s.source}). KML URL saved. Updated ${s.updated_at || "—"}.`
+        : "Paste your Unitech GpsGate KML feed URL and save.",
+      s.configured ? true : null
+    );
+  } catch (e) {
+    setUnitechAdminResult(String(e.message || e), false);
+  }
+}
+
+async function saveUnitechAdminSettings() {
+  setUnitechAdminResult("Saving…", null);
+  const body = {
+    feed_label: qs("unitechFeedLabel")?.value,
+    enabled: Boolean(qs("unitechEnabled")?.checked),
+  };
+  const url = String(qs("unitechKmlFeedUrl")?.value || "").trim();
+  if (url) body.kml_feed_url = url;
+  const data = await fetchJson(`${API}/api/unitech/settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  if (qs("unitechKmlFeedUrl")) qs("unitechKmlFeedUrl").value = "";
+  setUnitechAdminResult("Unitech settings saved.", true);
+  loadCartrackFleet().catch(() => {});
+  return data;
+}
+
+async function testUnitechConnection() {
+  setUnitechAdminResult("Testing KML feed…", null);
+  try {
+    const data = await fetchJson(`${API}/api/unitech/test-connection`, { method: "POST" });
+    setUnitechAdminResult(data.message || "Connected.", true);
+  } catch (e) {
+    setUnitechAdminResult(String(e.message || e), false);
+  }
 }
 
 const CARTRACK_TRACK_POLL_MS = 45000;
@@ -4477,12 +4540,28 @@ function ensureLeafletLoaded() {
 
 function cartrackMarkerColor(v) {
   if (v.is_speeding) return "#dc2626";
+  if (v.gps_source === "unitech") {
+    if (v.position_stale) return "#a16207";
+    return "#ea580c";
+  }
   if (Number(v.ignition_on) === 1) return "#16a34a";
   return "#64748b";
 }
 
 function cartrackVehicleKey(v) {
-  return String(v.registration || v.asset_code || "").trim();
+  const id = String(v.registration || v.asset_code || "").trim();
+  if (!id) return "";
+  return v.gps_source === "unitech" ? `unitech:${id}` : id;
+}
+
+function cartrackSourcePillHtml(v) {
+  if (v.gps_source === "unitech") {
+    return `<span class="pill pill-orange cartrack-source-pill">${escapeHtml(v.gps_provider || "Unitech")}</span>`;
+  }
+  if (v.gps_source === "cartrack") {
+    return `<span class="pill pill-blue cartrack-source-pill">Cartrack</span>`;
+  }
+  return "";
 }
 
 function cartrackVehicleLabel(v) {
@@ -4534,7 +4613,10 @@ function cartrackBatteryLow(v) {
 }
 
 function buildCartrackPopupHtml(v) {
-  const ign = Number(v.ignition_on) === 1 ? "ON" : "OFF";
+  const isUnitech = v.gps_source === "unitech";
+  const ign = isUnitech
+    ? "—"
+    : (Number(v.ignition_on) === 1 ? "ON" : "OFF");
   const spd = Number(v.speed_kmh || 0).toFixed(0);
   const odo = v.odometer_km != null ? `${Number(v.odometer_km).toFixed(0)} km` : "—";
   const when = String(v.last_event_at || v.synced_at || "").slice(0, 16) || "—";
@@ -4546,13 +4628,17 @@ function buildCartrackPopupHtml(v) {
   const telemetry = formatCartrackTelemetryLine(v);
   const battLow = cartrackBatteryLow(v);
   const batteryPills = renderCartrackBatteryPillsHtml(v);
+  const staleNote = v.position_stale
+    ? `<div class="cartrack-stale-note">Position may be stale (${Number(v.position_age_days || 0).toFixed(0)} day(s) old)</div>`
+    : "";
   return `
     <div class="cartrack-popup">
       <strong>${escapeHtml(cartrackVehicleLabel(v))}</strong>
-      <div>${escapeHtml(v.vehicle_name || v.registration || "")}</div>
-      <div>Speed: <b>${spd}</b> km/h · Ignition: <b>${ign}</b></div>
-      <div>Odometer: ${escapeHtml(odo)}</div>
+      <div>${cartrackSourcePillHtml(v)} ${escapeHtml(v.vehicle_name || v.registration || "")}</div>
+      <div>Speed: <b>${spd}</b> km/h${isUnitech ? "" : ` · Ignition: <b>${ign}</b>`}</div>
+      ${isUnitech ? "" : `<div>Odometer: ${escapeHtml(odo)}</div>`}
       ${batteryPills ? `<div class="cartrack-track-item-battery ${battLow ? "cartrack-batt-low" : ""}">${batteryPills}</div>` : telemetry ? `<div class="${battLow ? "cartrack-batt-low" : ""}">Battery / power: <b>${escapeHtml(telemetry)}</b></div>` : ""}
+      ${staleNote}
       <div class="muted">Last: ${escapeHtml(when)}</div>
       ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" rel="noopener noreferrer">Open in Maps</a>` : ""}
     </div>
@@ -4663,15 +4749,21 @@ function renderCartrackTrackList(fleet, filterText = "") {
         v.is_speeding ? "cartrack-track-item--alert" : "",
         !v.has_gps ? "cartrack-track-item--nogps" : "",
         battLow ? "cartrack-track-item--battlow" : "",
+        v.position_stale ? "cartrack-track-item--stale" : "",
+        v.gps_source === "unitech" ? "cartrack-track-item--unitech" : "",
       ].filter(Boolean).join(" ");
+      const ignPill = v.gps_source === "unitech"
+        ? ""
+        : (ign ? '<span class="pill pill-green">ON</span>' : '<span class="pill">OFF</span>');
       return `<button type="button" class="${cls}" data-cartrack-key="${escapeHtml(key)}">
         <span class="cartrack-track-item-code">${escapeHtml(label)}</span>
-        <span class="cartrack-track-item-meta">${escapeHtml(v.vehicle_name || v.registration || "—")}</span>
+        <span class="cartrack-track-item-meta">${cartrackSourcePillHtml(v)} ${escapeHtml(v.vehicle_name || v.registration || "—")}</span>
         <span class="cartrack-track-item-stats">
-          ${ign ? '<span class="pill pill-green">ON</span>' : '<span class="pill">OFF</span>'}
+          ${ignPill}
           <span>${spd} km/h</span>
           ${v.is_speeding ? '<span class="pill pill-red">Speeding</span>' : ""}
           ${!v.has_gps ? '<span class="pill">No GPS</span>' : ""}
+          ${v.position_stale ? '<span class="pill pill-orange">Stale GPS</span>' : ""}
         </span>
         ${batteryPills ? `<span class="cartrack-track-item-battery">${batteryPills}</span>` : ""}
       </button>`;
@@ -4727,7 +4819,10 @@ async function loadCartrackTrackingTab({ refresh = true, quiet = false } = {}) {
     setText("cartrackTrackKpiGps", Number(s.with_gps || 0));
     setText("cartrackTrackKpiLive", Number(s.ignition_on || 0));
     setText("cartrackTrackKpiSpeeding", Number(s.speeding_today || 0));
-    setText("cartrackTrackKpiSync", String(s.last_sync || "—").slice(0, 16) || "—");
+    const syncBits = [String(s.last_sync || "—").slice(0, 16) || "—"];
+    if (Number(s.unitech_vehicles || 0) > 0) syncBits.push(`${s.unitech_vehicles} Unitech`);
+    if (Number(s.cartrack_vehicles || 0) > 0) syncBits.push(`${s.cartrack_vehicles} Cartrack`);
+    setText("cartrackTrackKpiSync", syncBits.join(" · "));
     const search = qs("cartrackTrackSearch")?.value || "";
     renderCartrackTrackList(fleet, search);
     updateCartrackMapMarkers(fleet);
@@ -14575,6 +14670,10 @@ async function init() {
   );
   qs("cartrackTestBtn")?.addEventListener("click", () => testCartrackConnection().catch(() => {}));
   qs("cartrackRunMorningBtn")?.addEventListener("click", () => runCartrackMorningNow().catch(() => {}));
+  qs("unitechSaveSettingsBtn")?.addEventListener("click", () =>
+    saveUnitechAdminSettings().catch((e) => setUnitechAdminResult(String(e.message || e), false))
+  );
+  qs("unitechTestBtn")?.addEventListener("click", () => testUnitechConnection().catch(() => {}));
   qs("cartrackSyncBtn")?.addEventListener("click", () => syncCartrackNow().catch((e) => setStatus(String(e.message || e))));
   qs("cartrackMorningPdfBtn")?.addEventListener("click", () =>
     openCartrackMorningPdf().catch((e) => setStatus(String(e.message || e)))

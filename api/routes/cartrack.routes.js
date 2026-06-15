@@ -17,6 +17,18 @@ import {
   enrichCartrackLiveRow,
 } from "../utils/cartrack.js";
 import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
+import {
+  getUnitechPublicSettings,
+  syncUnitechFleetStatus,
+  listUnitechFleetFromDb,
+  enrichUnitechLiveRow,
+} from "../utils/unitech.js";
+
+function mergeGpsFleet({ cartrackRows, unitechRows, speedRegs }) {
+  const cartrackFleet = cartrackRows.map((v) => enrichCartrackLiveRow(v, speedRegs));
+  const unitechFleet = unitechRows.map((v) => enrichUnitechLiveRow(v, speedRegs));
+  return [...cartrackFleet, ...unitechFleet];
+}
 
 function getRoles(req) {
   const many = String(req.headers["x-user-roles"] || "")
@@ -89,15 +101,26 @@ export default async function cartrackRoutes(app) {
     if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "site_manager", "operator", "artisan", "stores"])) return;
     const refresh = String(req.query?.refresh || "1").trim() !== "0";
     let syncError = null;
+    let unitechSyncError = null;
     if (refresh) {
       try {
         await syncCartrackFleetStatus();
       } catch (err) {
         syncError = String(err.message || err);
       }
+      const unitechSettings = getUnitechPublicSettings();
+      if (unitechSettings.configured && unitechSettings.enabled) {
+        try {
+          await syncUnitechFleetStatus();
+        } catch (err) {
+          unitechSyncError = String(err.message || err);
+        }
+      }
     }
     const settings = getCartrackPublicSettings();
+    const unitechSettings = getUnitechPublicSettings();
     const fleet = listCartrackFleetFromDb();
+    const unitechFleet = listUnitechFleetFromDb();
     const today = new Date().toISOString().slice(0, 10);
     const speedingToday = listCartrackEventsFromDb({
       startDate: today,
@@ -106,20 +129,28 @@ export default async function cartrackRoutes(app) {
       limit: 200,
     });
     const speedRegs = new Set(speedingToday.map((e) => e.registration || e.asset_code));
-    const positioned = fleet.map((v) => enrichCartrackLiveRow(v, speedRegs));
+    const positioned = mergeGpsFleet({ cartrackRows: fleet, unitechRows: unitechFleet, speedRegs });
     const live = positioned.filter((v) => Number(v.ignition_on) === 1).length;
+    const syncTimes = [
+      fleet[0]?.synced_at,
+      unitechFleet[0]?.synced_at,
+    ].filter(Boolean).sort().reverse();
     return reply.send({
       ok: true,
-      configured: settings.configured,
+      configured: settings.configured || unitechSettings.configured,
       base_url: settings.base_url,
-      refreshed: refresh && !syncError,
+      refreshed: refresh && !syncError && !unitechSyncError,
       sync_error: syncError,
+      unitech_sync_error: unitechSyncError,
+      unitech: unitechSettings,
       summary: {
-        total_vehicles: fleet.length,
+        total_vehicles: positioned.length,
+        cartrack_vehicles: fleet.length,
+        unitech_vehicles: unitechFleet.length,
         with_gps: positioned.filter((v) => v.has_gps).length,
         ignition_on: live,
         speeding_today: speedingToday.length,
-        last_sync: fleet[0]?.synced_at || null,
+        last_sync: syncTimes[0] || null,
       },
       fleet: positioned,
       speeding_today: speedingToday,
@@ -129,7 +160,9 @@ export default async function cartrackRoutes(app) {
   app.get("/fleet", async (req, reply) => {
     if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "site_manager", "operator", "artisan", "stores"])) return;
     const settings = getCartrackPublicSettings();
+    const unitechSettings = getUnitechPublicSettings();
     const fleet = listCartrackFleetFromDb();
+    const unitechFleet = listUnitechFleetFromDb();
     const today = new Date().toISOString().slice(0, 10);
     const speedingToday = listCartrackEventsFromDb({
       startDate: today,
@@ -138,17 +171,24 @@ export default async function cartrackRoutes(app) {
       limit: 50,
     });
     const speedRegs = new Set(speedingToday.map((e) => e.registration || e.asset_code));
-    const enriched = fleet.map((v) => enrichCartrackLiveRow(v, speedRegs));
+    const enriched = mergeGpsFleet({ cartrackRows: fleet, unitechRows: unitechFleet, speedRegs });
     const live = enriched.filter((v) => Number(v.ignition_on) === 1).length;
+    const syncTimes = [
+      fleet[0]?.synced_at,
+      unitechFleet[0]?.synced_at,
+    ].filter(Boolean).sort().reverse();
     return reply.send({
       ok: true,
-      configured: settings.configured,
+      configured: settings.configured || unitechSettings.configured,
       base_url: settings.base_url,
+      unitech: unitechSettings,
       summary: {
         total_vehicles: enriched.length,
+        cartrack_vehicles: fleet.length,
+        unitech_vehicles: unitechFleet.length,
         ignition_on: live,
         speeding_today: speedingToday.length,
-        last_sync: enriched[0]?.synced_at || null,
+        last_sync: syncTimes[0] || null,
       },
       fleet: enriched,
       speeding_today: speedingToday,
@@ -159,10 +199,19 @@ export default async function cartrackRoutes(app) {
     if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "site_manager"])) return;
     try {
       const status = await syncCartrackFleetStatus();
+      let unitech = null;
+      const unitechSettings = getUnitechPublicSettings();
+      if (unitechSettings.configured && unitechSettings.enabled) {
+        try {
+          unitech = await syncUnitechFleetStatus();
+        } catch (err) {
+          unitech = { error: String(err.message || err) };
+        }
+      }
       const start = String(req.body?.start_date || req.query?.start_date || new Date().toISOString().slice(0, 10));
       const end = String(req.body?.end_date || req.query?.end_date || start);
       const events = await syncCartrackEvents({ startDate: start, endDate: end });
-      return reply.send({ ok: true, status, events });
+      return reply.send({ ok: true, status, unitech, events });
     } catch (err) {
       return reply.code(502).send({ ok: false, error: String(err.message || err) });
     }
