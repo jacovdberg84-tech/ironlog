@@ -194,25 +194,43 @@ export default async function cartrackRoutes(app) {
     if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "site_manager"])) return;
     const date = String(req.query?.date || "").trim();
     if (!isDate(date)) return reply.code(400).send({ error: "date must be YYYY-MM-DD" });
-    const summary = buildMorningSpeedingReport(date);
-    const pdf = await buildPdfBuffer((doc) => {
-      sectionTitle(doc, `Cartrack speeding report — ${date}`);
-      doc.fontSize(10).fillColor("#334155");
-      doc.text(`Total events: ${summary.total_speeding_events} · Vehicles: ${summary.vehicles_with_speeding}`);
-      doc.moveDown(0.5);
-      const rows = (summary.events || []).slice(0, 80).map((e) => [
-        String(e.event_time || "").slice(0, 16),
-        e.asset_code || e.registration || "",
-        e.speed_kmh != null ? `${Number(e.speed_kmh).toFixed(0)}` : "—",
-        e.speed_limit_kmh != null ? `${Number(e.speed_limit_kmh).toFixed(0)}` : "—",
-        e.driver_name || "",
-        e.event_type_label || e.event_type || "",
-      ]);
-      table(doc, ["Time", "Vehicle", "Speed", "Limit", "Driver", "Type"], rows, { fontSize: 8 });
-    }, { title: "Cartrack Speeding Report", layout: "landscape" });
-    reply.header("Content-Type", "application/pdf");
-    reply.header("Content-Disposition", `inline; filename="cartrack_speeding_${date}.pdf"`);
-    return reply.send(pdf);
+    try {
+      const summary = buildMorningSpeedingReport(date);
+      const pdf = await buildPdfBuffer((doc) => {
+        sectionTitle(doc, `Cartrack speeding report — ${date}`);
+        doc.fontSize(10).fillColor("#334155");
+        doc.text(`Total events: ${summary.total_speeding_events} · Vehicles: ${summary.vehicles_with_speeding}`);
+        doc.moveDown(0.5);
+        const columns = [
+          { key: "time", label: "Time", width: 72 },
+          { key: "vehicle", label: "Vehicle", width: 56 },
+          { key: "speed", label: "Speed", width: 36 },
+          { key: "limit", label: "Limit", width: 36 },
+          { key: "driver", label: "Driver", width: 56 },
+          { key: "type", label: "Type", width: 72 },
+        ];
+        const rows = (summary.events || []).slice(0, 80).map((e) => ({
+          time: String(e.event_time || "").slice(0, 16),
+          vehicle: e.asset_code || e.registration || "",
+          speed: e.speed_kmh != null ? `${Number(e.speed_kmh).toFixed(0)}` : "—",
+          limit: e.speed_limit_kmh != null ? `${Number(e.speed_limit_kmh).toFixed(0)}` : "—",
+          driver: e.driver_name || "",
+          type: e.event_type_label || e.event_type || "",
+        }));
+        if (!rows.length) {
+          doc.fontSize(10).fillColor("#64748b");
+          doc.text("No speeding events recorded for this date.");
+          return;
+        }
+        table(doc, columns, rows, { fontSize: 8, compact: true });
+      }, { title: "Cartrack Speeding Report", layout: "landscape" });
+      reply.header("Content-Type", "application/pdf");
+      reply.header("Content-Disposition", `inline; filename="cartrack_speeding_${date}.pdf"`);
+      return reply.send(pdf);
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: String(err.message || err) });
+    }
   });
 
   app.post("/morning-report/send", async (req, reply) => {

@@ -4332,12 +4332,21 @@ async function syncCartrackNow() {
 function yesterdayYmd() {
   const d = new Date();
   d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-function openCartrackMorningPdf() {
+async function openCartrackMorningPdf() {
   const date = yesterdayYmd();
-  window.open(`${API}/api/cartrack/morning-report.pdf?date=${encodeURIComponent(date)}`, "_blank");
+  setStatus(`Opening Cartrack speeding PDF for ${date}…`);
+  try {
+    await openAuthedPdf(`${API}/api/cartrack/morning-report.pdf?date=${encodeURIComponent(date)}`);
+    setStatus(`Cartrack PDF opened (${date})`);
+  } catch (e) {
+    setStatus(`Cartrack PDF error: ${e.message || e}`);
+  }
 }
 
 async function emailCartrackMorningReport() {
@@ -14509,7 +14518,9 @@ async function init() {
   qs("cartrackTestBtn")?.addEventListener("click", () => testCartrackConnection().catch(() => {}));
   qs("cartrackRunMorningBtn")?.addEventListener("click", () => runCartrackMorningNow().catch(() => {}));
   qs("cartrackSyncBtn")?.addEventListener("click", () => syncCartrackNow().catch((e) => setStatus(String(e.message || e))));
-  qs("cartrackMorningPdfBtn")?.addEventListener("click", openCartrackMorningPdf);
+  qs("cartrackMorningPdfBtn")?.addEventListener("click", () =>
+    openCartrackMorningPdf().catch((e) => setStatus(String(e.message || e)))
+  );
   qs("cartrackMorningEmailBtn")?.addEventListener("click", () =>
     emailCartrackMorningReport().catch((e) => setStatus(String(e.message || e)))
   );
