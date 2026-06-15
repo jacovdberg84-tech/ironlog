@@ -113,6 +113,17 @@ export function ensureCartrackTables() {
   } catch {
     /* column exists */
   }
+  for (const col of [
+    "ALTER TABLE cartrack_vehicle_snapshots ADD COLUMN tracker_battery_pct REAL",
+    "ALTER TABLE cartrack_vehicle_snapshots ADD COLUMN supply_voltage_v REAL",
+    "ALTER TABLE cartrack_vehicle_snapshots ADD COLUMN ev_battery_pct REAL",
+  ]) {
+    try {
+      db.prepare(col).run();
+    } catch {
+      /* column exists */
+    }
+  }
 }
 
 function settingsRow() {
@@ -346,6 +357,29 @@ async function fetchAllPages(path, query = {}, maxPages = 20) {
   return all;
 }
 
+function extractCartrackTelemetry(raw) {
+  let row = raw;
+  if (typeof raw === "string") {
+    try {
+      row = JSON.parse(raw);
+    } catch {
+      row = {};
+    }
+  }
+  if (!row || typeof row !== "object") row = {};
+  const tcu = Number(row.tcu_percentage);
+  const vext = Number(row.vext);
+  const evBatt = row.electric?.battery_percentage_left;
+  const fuelPct = row.fuel?.precentage_left ?? row.fuel?.percentage_left;
+  return {
+    tracker_battery_pct: Number.isFinite(tcu) ? tcu : null,
+    supply_voltage_v: Number.isFinite(vext) ? vext : null,
+    ev_battery_pct: evBatt != null && Number.isFinite(Number(evBatt)) ? Number(evBatt) : null,
+    fuel_pct: fuelPct != null && Number.isFinite(Number(fuelPct)) ? Number(fuelPct) : null,
+    charging_status: String(row.electric?.charging_status || "").trim() || null,
+  };
+}
+
 function normalizeStatusRow(row) {
   const registration = normalizeRegistration(
     pick(row, ["registration", "vehicle_registration", "reg", "license_plate", "plate_number"])
@@ -354,6 +388,7 @@ function normalizeStatusRow(row) {
   const assetCode = resolveAssetCode(registration, vehicleName);
   const gps = extractCartrackLocation(row);
   const displayName = vehicleName || gps.position_description || "";
+  const telemetry = extractCartrackTelemetry(row);
   return {
     registration,
     asset_code: assetCode,
@@ -370,6 +405,7 @@ function normalizeStatusRow(row) {
       || ""
     ),
     status_json: JSON.stringify(row),
+    ...telemetry,
   };
 }
 
@@ -466,9 +502,10 @@ export async function syncCartrackFleetStatus() {
   const upsert = db.prepare(`
     INSERT INTO cartrack_vehicle_snapshots (
       registration, asset_code, vehicle_id, vehicle_name, ignition_on, speed_kmh,
-      latitude, longitude, odometer_km, last_event_at, status_json, synced_at
+      latitude, longitude, odometer_km, last_event_at, status_json,
+      tracker_battery_pct, supply_voltage_v, ev_battery_pct, synced_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(registration) DO UPDATE SET
       asset_code = excluded.asset_code,
       vehicle_id = excluded.vehicle_id,
@@ -480,6 +517,9 @@ export async function syncCartrackFleetStatus() {
       odometer_km = excluded.odometer_km,
       last_event_at = excluded.last_event_at,
       status_json = excluded.status_json,
+      tracker_battery_pct = excluded.tracker_battery_pct,
+      supply_voltage_v = excluded.supply_voltage_v,
+      ev_battery_pct = excluded.ev_battery_pct,
       synced_at = datetime('now')
   `);
   let count = 0;
@@ -489,7 +529,8 @@ export async function syncCartrackFleetStatus() {
     if (!n.registration) continue;
     upsert.run(
       n.registration, n.asset_code, n.vehicle_id, n.vehicle_name, n.ignition_on, n.speed_kmh,
-      n.latitude, n.longitude, n.odometer_km, n.last_event_at, n.status_json
+      n.latitude, n.longitude, n.odometer_km, n.last_event_at, n.status_json,
+      n.tracker_battery_pct, n.supply_voltage_v, n.ev_battery_pct
     );
     normalized.push({ ...n, synced_at: new Date().toISOString().replace("T", " ").slice(0, 19) });
     count += 1;
@@ -504,6 +545,11 @@ export function enrichCartrackLiveRow(row, speedRegs = new Set()) {
   const hasGps = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
   const code = row.asset_code || row.registration;
   const alertKmh = getCartrackSpeedAlertKmh();
+  const parsed = row.status_json ? extractCartrackTelemetry(row.status_json) : {};
+  const tracker_battery_pct = row.tracker_battery_pct ?? parsed.tracker_battery_pct;
+  const supply_voltage_v = row.supply_voltage_v ?? parsed.supply_voltage_v;
+  const ev_battery_pct = row.ev_battery_pct ?? parsed.ev_battery_pct;
+  const fuel_pct = parsed.fuel_pct;
   let raw = {};
   try {
     raw = JSON.parse(row.status_json || "{}");
@@ -514,10 +560,7 @@ export function enrichCartrackLiveRow(row, speedRegs = new Set()) {
   const speed = Number(row.speed_kmh ?? raw.speed ?? 0);
   const overLimit = Number.isFinite(roadLimit) && roadLimit > 0 && speed > roadLimit;
   const overThreshold = Number.isFinite(speed) && speed >= alertKmh;
-  const fuelPct = raw.fuel?.precentage_left ?? raw.fuel?.percentage_left;
-  const tcu = Number(raw.tcu_percentage);
-  const vext = Number(raw.vext);
-  const evBatt = raw.electric?.battery_percentage_left;
+  const charging_status = parsed.charging_status || String(raw.electric?.charging_status || "").trim() || null;
   return {
     ...row,
     has_gps: hasGps,
@@ -526,11 +569,17 @@ export function enrichCartrackLiveRow(row, speedRegs = new Set()) {
     is_idling: raw.idling === true,
     road_speed_limit: Number.isFinite(roadLimit) && roadLimit > 0 ? roadLimit : null,
     rpm: Number(raw.rpm) || null,
-    fuel_pct: fuelPct != null && Number.isFinite(Number(fuelPct)) ? Number(fuelPct) : null,
-    tracker_battery_pct: Number.isFinite(tcu) ? tcu : null,
-    supply_voltage_v: Number.isFinite(vext) ? vext : null,
-    ev_battery_pct: evBatt != null && Number.isFinite(Number(evBatt)) ? Number(evBatt) : null,
-    charging_status: String(raw.electric?.charging_status || "").trim() || null,
+    fuel_pct: fuel_pct != null && Number.isFinite(Number(fuel_pct)) ? Number(fuel_pct) : null,
+    tracker_battery_pct: tracker_battery_pct != null && Number.isFinite(Number(tracker_battery_pct))
+      ? Number(tracker_battery_pct)
+      : null,
+    supply_voltage_v: supply_voltage_v != null && Number.isFinite(Number(supply_voltage_v))
+      ? Number(supply_voltage_v)
+      : null,
+    ev_battery_pct: ev_battery_pct != null && Number.isFinite(Number(ev_battery_pct))
+      ? Number(ev_battery_pct)
+      : null,
+    charging_status,
   };
 }
 
@@ -617,7 +666,8 @@ export async function syncCartrackEvents({ startDate, endDate }) {
 export function listCartrackFleetFromDb() {
   return db.prepare(`
     SELECT registration, asset_code, vehicle_id, vehicle_name, ignition_on, speed_kmh,
-           latitude, longitude, odometer_km, last_event_at, synced_at
+           latitude, longitude, odometer_km, last_event_at, synced_at, status_json,
+           tracker_battery_pct, supply_voltage_v, ev_battery_pct
     FROM cartrack_vehicle_snapshots
     ORDER BY asset_code ASC, registration ASC
   `).all();

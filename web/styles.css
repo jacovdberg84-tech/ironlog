@@ -6534,6 +6534,13 @@ body.uc-qr-locked #ucAsset {
 #tab-dash .cartrack-col-status {
   text-align: center;
 }
+#tab-dash .cartrack-col-battery {
+  min-width: 140px;
+}
+#tab-dash .cartrack-col-battery .cartrack-batt-pill {
+  font-size: 11px;
+  margin: 2px 4px 2px 0;
+}
 #tab-dash .cartrack-col-sync {
   font-size: 11px;
   white-space: nowrap;
@@ -6667,6 +6674,32 @@ body.uc-qr-locked #ucAsset {
   gap: 6px;
   align-items: center;
   font-size: 12px;
+  margin-top: 4px;
+}
+#tab-cartrack .cartrack-track-item-battery,
+.cartrack-popup .cartrack-track-item-battery,
+.cartrack-speed-float-battery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  margin-top: 6px;
+  grid-column: 1 / -1;
+}
+#tab-cartrack .cartrack-batt-pill,
+.cartrack-speed-float-battery .cartrack-batt-pill {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.cartrack-speed-float-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto auto;
+  gap: 0 8px;
+}
+.cartrack-speed-float-battery {
   margin-top: 4px;
 }
 #tab-cartrack .cartrack-track-empty {

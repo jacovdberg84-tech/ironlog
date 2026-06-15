@@ -137,18 +137,20 @@ export default async function cartrackRoutes(app) {
       speedingOnly: true,
       limit: 50,
     });
-    const live = fleet.filter((v) => Number(v.ignition_on) === 1).length;
+    const speedRegs = new Set(speedingToday.map((e) => e.registration || e.asset_code));
+    const enriched = fleet.map((v) => enrichCartrackLiveRow(v, speedRegs));
+    const live = enriched.filter((v) => Number(v.ignition_on) === 1).length;
     return reply.send({
       ok: true,
       configured: settings.configured,
       base_url: settings.base_url,
       summary: {
-        total_vehicles: fleet.length,
+        total_vehicles: enriched.length,
         ignition_on: live,
         speeding_today: speedingToday.length,
-        last_sync: fleet[0]?.synced_at || null,
+        last_sync: enriched[0]?.synced_at || null,
       },
-      fleet,
+      fleet: enriched,
       speeding_today: speedingToday,
     });
   });
