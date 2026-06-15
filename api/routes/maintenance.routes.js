@@ -7973,6 +7973,144 @@ export default async function maintenanceRoutes(app) {
     }));
   }
 
+  function isLdvOdometerOutlier(km, referenceKm = null) {
+    const n = Number(km);
+    if (!Number.isFinite(n) || n < 0) return true;
+    if (n > 500000) return true;
+    const ref = Number(referenceKm);
+    if (Number.isFinite(ref) && ref >= 0 && n > ref * 1.25 + 500) return true;
+    return false;
+  }
+
+  function getSanitizedLdvBaselineKm(assetId, checkDate, opts = {}) {
+    if (!assetId || !isDate(checkDate)) return null;
+    const excludeCheckId = Number(opts.excludeCheckId || 0) || 0;
+
+    const priorPrestart = getPriorLdvPrestartOdometerKm(assetId, checkDate);
+    if (priorPrestart != null && !isLdvOdometerOutlier(priorPrestart)) return priorPrestart;
+
+    if (hasColumn("daily_hours", "input_unit")) {
+      const dailyRows = db.prepare(`
+        SELECT closing_hours
+        FROM daily_hours
+        WHERE asset_id = ?
+          AND work_date < ?
+          AND LOWER(COALESCE(NULLIF(TRIM(input_unit), ''), 'hours')) = 'km'
+          AND closing_hours IS NOT NULL
+        ORDER BY work_date DESC, id DESC
+        LIMIT 6
+      `).all(assetId, checkDate);
+      for (const row of dailyRows) {
+        const n = Number(row.closing_hours);
+        if (Number.isFinite(n) && n >= 0 && !isLdvOdometerOutlier(n, priorPrestart)) return n;
+      }
+    }
+
+    const priorChecks = db.prepare(`
+      SELECT odometer_km
+      FROM vehicle_ldv_checks
+      WHERE asset_id = ?
+        AND odometer_km IS NOT NULL
+        AND check_date < ?
+        AND ${ldvPrestartModeSql("check_mode")}
+        ${excludeCheckId > 0 ? "AND id != ?" : ""}
+      ORDER BY check_date DESC, id DESC
+      LIMIT 12
+    `).all(...(excludeCheckId > 0 ? [assetId, checkDate, excludeCheckId] : [assetId, checkDate]));
+
+    const sane = priorChecks
+      .map((r) => Number(r.odometer_km))
+      .filter((v) => Number.isFinite(v) && v >= 0 && !isLdvOdometerOutlier(v, priorPrestart));
+    if (sane.length) return Math.max(...sane);
+
+    return priorPrestart != null && !isLdvOdometerOutlier(priorPrestart) ? priorPrestart : null;
+  }
+
+  function purgeLdvPoisonedKmBaselines(assetId, workDate, trustedClosingKm) {
+    if (!assetId || !isDate(workDate) || !Number.isFinite(Number(trustedClosingKm))) {
+      return { daily_rows: 0, check_rows: 0 };
+    }
+    const trusted = Number(trustedClosingKm);
+    let dailyRows = 0;
+    let checkRows = 0;
+
+    if (hasColumn("daily_hours", "input_unit")) {
+      const badDaily = db.prepare(`
+        SELECT id, closing_hours, notes
+        FROM daily_hours
+        WHERE asset_id = ?
+          AND LOWER(COALESCE(NULLIF(TRIM(input_unit), ''), 'hours')) = 'km'
+          AND closing_hours IS NOT NULL
+          AND (
+            closing_hours > 500000
+            OR closing_hours > ?
+          )
+      `).all(assetId, trusted * 1.25 + 500);
+      const updDaily = db.prepare(`
+        UPDATE daily_hours
+        SET closing_hours = ?, hours_run = ?,
+            notes = TRIM(COALESCE(notes, '') || ' | Supervisor baseline KM purge')
+        WHERE id = ?
+      `);
+      for (const row of badDaily) {
+        const full = db
+          .prepare(`SELECT opening_hours, work_date FROM daily_hours WHERE id = ?`)
+          .get(row.id);
+        const open = Number(full?.opening_hours);
+        let newClose;
+        let newRun;
+        if (Number.isFinite(open) && open >= 0 && !isLdvOdometerOutlier(open, trusted)) {
+          newClose = open;
+          newRun = 0;
+        } else if (String(full?.work_date || "") === String(workDate)) {
+          newClose = trusted;
+          newRun = 0;
+        } else {
+          newClose = Number.isFinite(open) && open >= 0 ? open : trusted;
+          newRun = 0;
+        }
+        updDaily.run(newClose, newRun, Number(row.id));
+        dailyRows += 1;
+      }
+    }
+
+    const badChecks = db.prepare(`
+      SELECT id, odometer_km
+      FROM vehicle_ldv_checks
+      WHERE asset_id = ?
+        AND odometer_km IS NOT NULL
+        AND (
+          odometer_km > 500000
+          OR odometer_km > ?
+        )
+        AND NOT (check_date = ? AND ${ldvPrestartModeSql("check_mode")})
+    `).all(assetId, trusted * 1.25 + 500, workDate);
+
+    const nullCheck = db.prepare(`
+      UPDATE vehicle_ldv_checks
+      SET odometer_km = NULL, notes = COALESCE(notes, '') || ' | Supervisor baseline KM purge', updated_at = datetime('now')
+      WHERE id = ?
+    `);
+    for (const row of badChecks) {
+      nullCheck.run(Number(row.id));
+      checkRows += 1;
+    }
+
+    return { daily_rows: dailyRows, check_rows: checkRows };
+  }
+
+  function applyLdvKmToAllChecksForDate(assetId, workDate, closingKm, inspectorName, notes, checklistJson) {
+    const closing = Number(closingKm);
+    const checklistJsonOut = String(checklistJson || "");
+    db.prepare(`
+      UPDATE vehicle_ldv_checks
+      SET odometer_km = ?, inspector_name = ?, notes = ?, check_mode = 'prestart',
+          checklist_json = COALESCE(NULLIF(checklist_json, ''), ?), updated_at = datetime('now')
+      WHERE asset_id = ? AND check_date = ?
+    `).run(closing, inspectorName, notes, checklistJsonOut, assetId, workDate);
+    return getLdvPrestartCheckRow(assetId, workDate);
+  }
+
   function getLatestLdvOdometerKm(assetId, checkDate, opts = {}) {
     if (!assetId || !isDate(checkDate)) return null;
     const excludeCheckId = Number(opts.excludeCheckId || 0) || 0;
@@ -8089,18 +8227,28 @@ export default async function maintenanceRoutes(app) {
   }
 
   function resolveLdvCorrectionOpeningKm(assetId, workDate, closingKm, excludeCheckId, explicitOpening) {
-    if (explicitOpening != null && String(explicitOpening).trim() !== "") {
-      const n = Number(explicitOpening);
-      if (Number.isFinite(n) && n >= 0) return n;
-    }
     const closing = Number(closingKm);
     if (!Number.isFinite(closing) || closing < 0) return null;
 
+    if (explicitOpening != null && String(explicitOpening).trim() !== "") {
+      const n = Number(explicitOpening);
+      if (Number.isFinite(n) && n >= 0 && n <= closing && !isLdvOdometerOutlier(n, closing)) {
+        return n;
+      }
+    }
+
+    const sanitized = getSanitizedLdvBaselineKm(assetId, workDate, {
+      excludeCheckId: Number(excludeCheckId || 0) || 0,
+    });
+    if (sanitized != null && closing >= sanitized) return sanitized;
+
     const priorPrestart = getPriorLdvPrestartOdometerKm(assetId, workDate);
-    if (priorPrestart != null && closing >= priorPrestart) return priorPrestart;
+    if (priorPrestart != null && !isLdvOdometerOutlier(priorPrestart, closing) && closing >= priorPrestart) {
+      return priorPrestart;
+    }
 
     if (hasColumn("daily_hours", "input_unit")) {
-      const dailyRow = db.prepare(`
+      const dailyRows = db.prepare(`
         SELECT closing_hours
         FROM daily_hours
         WHERE asset_id = ?
@@ -8108,20 +8256,14 @@ export default async function maintenanceRoutes(app) {
           AND LOWER(COALESCE(NULLIF(TRIM(input_unit), ''), 'hours')) = 'km'
           AND closing_hours IS NOT NULL
         ORDER BY work_date DESC, id DESC
-        LIMIT 1
-      `).get(assetId, workDate);
-      if (dailyRow?.closing_hours != null) {
-        const n = Number(dailyRow.closing_hours);
-        if (Number.isFinite(n) && n >= 0 && closing >= n) return n;
+        LIMIT 6
+      `).all(assetId, workDate);
+      for (const row of dailyRows) {
+        const n = Number(row.closing_hours);
+        if (Number.isFinite(n) && n >= 0 && !isLdvOdometerOutlier(n, closing) && closing >= n) return n;
       }
     }
 
-    const pooled = getLatestLdvOdometerKm(assetId, workDate, {
-      excludeCheckId: Number(excludeCheckId || 0) || 0,
-    });
-    if (pooled != null && closing >= pooled) return pooled;
-
-    // Supervisor correction: allow fixing a bad same-day entry without a valid prior baseline.
     return closing;
   }
 
@@ -8697,9 +8839,16 @@ export default async function maintenanceRoutes(app) {
 
       const existing = getLdvPrestartCheckRow(Number(asset.id), check_date);
 
-      const previous_odometer_km = getLatestLdvOdometerKm(Number(asset.id), check_date, {
+      const raw_previous_odometer_km = getLatestLdvOdometerKm(Number(asset.id), check_date, {
         excludeCheckId: existing?.id ? Number(existing.id) : 0,
       });
+      const previous_odometer_km = getSanitizedLdvBaselineKm(Number(asset.id), check_date, {
+        excludeCheckId: existing?.id ? Number(existing.id) : 0,
+      });
+      const baseline_poisoned =
+        raw_previous_odometer_km != null &&
+        previous_odometer_km != null &&
+        Math.abs(Number(raw_previous_odometer_km) - Number(previous_odometer_km)) > 1;
 
       let checklist = normalizeLdvPrestartChecklist({});
       if (existing?.checklist_json) {
@@ -8721,8 +8870,10 @@ export default async function maintenanceRoutes(app) {
         },
         check_date,
         previous_odometer_km,
+        raw_previous_odometer_km,
+        baseline_poisoned,
         previous_odometer_source:
-          previous_odometer_km != null ? "daily_hours_or_prior_prestart" : null,
+          previous_odometer_km != null ? "sanitized_prior_prestart_or_daily" : null,
         existing_prestart: existing
           ? {
               id: Number(existing.id),
@@ -8769,9 +8920,13 @@ export default async function maintenanceRoutes(app) {
 
       const existing = getLdvPrestartCheckRow(Number(asset.id), check_date);
 
-      const previousOdometer = getLatestLdvOdometerKm(Number(asset.id), check_date, {
-        excludeCheckId: existing?.id ? Number(existing.id) : 0,
-      });
+      const previousOdometer =
+        getSanitizedLdvBaselineKm(Number(asset.id), check_date, {
+          excludeCheckId: existing?.id ? Number(existing.id) : 0,
+        }) ??
+        getLatestLdvOdometerKm(Number(asset.id), check_date, {
+          excludeCheckId: existing?.id ? Number(existing.id) : 0,
+        });
       if (previousOdometer != null && odometer_km < previousOdometer) {
         return reply.code(400).send({
           ok: false,
@@ -8799,17 +8954,14 @@ export default async function maintenanceRoutes(app) {
       let checkId = 0;
       if (existing?.id) {
         checkId = Number(existing.id);
-        db.prepare(`
-          UPDATE vehicle_ldv_checks
-          SET
-            odometer_km = ?,
-            inspector_name = ?,
-            notes = ?,
-            check_mode = 'prestart',
-            checklist_json = ?,
-            updated_at = datetime('now')
-          WHERE id = ?
-        `).run(odometer_km, inspector_name, notes, checklistJson, checkId);
+        applyLdvKmToAllChecksForDate(
+          Number(asset.id),
+          check_date,
+          odometer_km,
+          inspector_name,
+          notes,
+          checklistJson
+        );
       } else {
         const ins = db.prepare(`
           INSERT INTO vehicle_ldv_checks (
@@ -8920,15 +9072,25 @@ export default async function maintenanceRoutes(app) {
         );
       })();
 
-      if (checkId > 0) {
-        db.prepare(`
-          UPDATE vehicle_ldv_checks
-          SET odometer_km = ?, inspector_name = ?, notes = ?, check_mode = 'prestart',
-              checklist_json = COALESCE(NULLIF(checklist_json, ''), ?), updated_at = datetime('now')
-          WHERE asset_id = ?
-            AND check_date = ?
-            AND ${ldvPrestartModeSql("check_mode")}
-        `).run(closing_km, inspector_name, correction_note, checklistJsonOut, assetId, work_date);
+      const purged = purgeLdvPoisonedKmBaselines(assetId, work_date, closing_km);
+
+      const hasAnyCheckRow = Boolean(
+        db.prepare(`SELECT id FROM vehicle_ldv_checks WHERE asset_id = ? AND check_date = ? LIMIT 1`).get(
+          assetId,
+          work_date
+        )
+      );
+
+      let canonical;
+      if (hasAnyCheckRow) {
+        canonical = applyLdvKmToAllChecksForDate(
+          assetId,
+          work_date,
+          closing_km,
+          inspector_name,
+          correction_note,
+          checklistJsonOut
+        );
       } else {
         const ins = db.prepare(`
           INSERT INTO vehicle_ldv_checks (
@@ -8947,11 +9109,9 @@ export default async function maintenanceRoutes(app) {
           correction_note,
           checklistJsonOut
         );
-        checkId = Number(ins.lastInsertRowid);
+        canonical = getLdvPrestartCheckRow(assetId, work_date) || { id: Number(ins.lastInsertRowid) };
       }
-
-      const canonical = getLdvPrestartCheckRow(assetId, work_date);
-      if (canonical?.id) checkId = Number(canonical.id);
+      checkId = Number(canonical?.id || checkId || 0);
 
       const run_km = Math.max(0, closing_km - opening_km);
       const hasInputUnit = hasColumn("daily_hours", "input_unit");
@@ -8998,6 +9158,7 @@ export default async function maintenanceRoutes(app) {
       }
 
       const priorBaseline =
+        getSanitizedLdvBaselineKm(assetId, work_date, { excludeCheckId: checkId }) ??
         getPriorLdvPrestartOdometerKm(assetId, work_date) ??
         (previousOdometer != null ? previousOdometer : null);
 
@@ -9010,6 +9171,7 @@ export default async function maintenanceRoutes(app) {
         closing_km: Number(closing_km.toFixed(1)),
         run_km: Number(run_km.toFixed(1)),
         previous_odometer_km: priorBaseline == null ? null : Number(priorBaseline.toFixed(1)),
+        purged_baselines: purged,
         message: `KM corrected for ${asset_code} on ${work_date}.`,
       });
     } catch (err) {

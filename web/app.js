@@ -2648,6 +2648,7 @@ async function executeBackupRestoreNow() {
 
 /** Daily checklists — LDV + machine pre-start + safety (QR mirror) */
 let clHubData = null;
+let clPoisonedBaselineNote = "";
 let clSafetyHubData = null;
 let clSelectedAssetCode = "";
 let clSelectedKind = "";
@@ -2947,7 +2948,13 @@ async function selectChecklistAsset(assetCode) {
       qs("clPrevKm").textContent = clPreviousKm == null ? "—" : `${clPreviousKm.toFixed(1)} km`;
     }
     if (qs("clCorrectOpeningKm")) {
-      qs("clCorrectOpeningKm").value = clPreviousKm != null ? String(clPreviousKm) : "";
+      qs("clCorrectOpeningKm").value = "";
+      qs("clCorrectOpeningKm").placeholder = "Leave blank — auto from last good reading";
+    }
+    if (data?.baseline_poisoned && Number(data?.raw_previous_odometer_km) > 0) {
+      clPoisonedBaselineNote = `Bad prior KM (${Number(data.raw_previous_odometer_km).toFixed(1)}) ignored — use Supervisor correction if today's reading is wrong.`;
+    } else {
+      clPoisonedBaselineNote = "";
     }
     const existing = data?.existing_prestart || null;
     clCurrentCheckId = Number(existing?.id || 0);
@@ -2955,7 +2962,9 @@ async function selectChecklistAsset(assetCode) {
     if (qs("clInspector")) qs("clInspector").value = existing?.inspector_name || getSessionUser() || "";
     if (qs("clNotes")) qs("clNotes").value = existing?.notes || "";
     renderClLdvChecklist(existing?.checklist || []);
-    clSetFormMsg(existing ? "Pre-start exists for this date — update if needed." : "", existing ? true : null);
+    const baseMsg = existing ? "Pre-start exists for this date — update if needed." : "";
+    const msg = [clPoisonedBaselineNote, baseMsg].filter(Boolean).join(" ");
+    clSetFormMsg(msg, clPoisonedBaselineNote ? false : existing ? true : null);
   } else {
     qs("clLdvFields")?.classList.add("hidden");
     qs("clMachineFields")?.classList.remove("hidden");
@@ -3152,7 +3161,11 @@ async function applyLdvKmCorrection() {
     qs("clCorrectOpeningKm").value = data.opening_km != null ? String(data.opening_km) : "";
   }
   clCurrentCheckId = Number(data.check_id || clCurrentCheckId || 0);
-  clSetFormMsg(data.message || "KM corrected.", true);
+  const purgeNote =
+    data?.purged_baselines?.daily_rows || data?.purged_baselines?.check_rows
+      ? ` Cleared ${Number(data.purged_baselines.daily_rows || 0)} bad daily row(s) and ${Number(data.purged_baselines.check_rows || 0)} stray check row(s).`
+      : "";
+  clSetFormMsg((data.message || "KM corrected.") + purgeNote, true);
   setStatus(`KM corrected for ${clSelectedAssetCode} ✅`);
   await loadChecklistHub();
   renderClHubSections(clHubData);
