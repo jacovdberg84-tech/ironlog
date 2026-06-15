@@ -4558,7 +4558,9 @@ async function openCartrackMorningPdf(date) {
   const reportDate = syncCartrackSpeedReportDateInputs(date);
   setStatus(`Opening speeding PDF for ${reportDate}…`);
   try {
-    await openAuthedPdf(`${API}/api/cartrack/morning-report.pdf?date=${encodeURIComponent(reportDate)}`);
+    await openAuthedPdf(
+      `${API}/api/cartrack/morning-report.pdf?date=${encodeURIComponent(reportDate)}&_=${Date.now()}`
+    );
     setStatus(`Speeding PDF opened (${reportDate})`);
   } catch (e) {
     setStatus(`Speeding PDF error: ${e.message || e}`);

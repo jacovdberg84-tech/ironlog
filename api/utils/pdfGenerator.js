@@ -299,7 +299,37 @@ export function kvGrid(doc, items, cols = 2) {
  * ]
  *
  * rows = [{asset:"A300AM", hours: 9.5}, ...]
+ *
+ * Column width: use fractions 0–1 (e.g. 0.18 = 18% of table width).
+ * Legacy reports may pass point-style weights (e.g. 72, 52); those are normalized to fit.
  */
+function resolveTableColumnWidths(columns, totalWidth) {
+  const raw = columns.map((c) => Math.max(0, Number(c.width ?? 0)));
+  const sum = raw.reduce((a, b) => a + b, 0);
+  const max = Math.max(...raw, 0);
+
+  let weights;
+  if (!sum) {
+    weights = columns.map(() => 1 / Math.max(1, columns.length));
+  } else if (max > 1 || sum > 1.01) {
+    // Legacy point weights (72, 52, …) — scale to page width.
+    weights = raw.map((n) => n / sum);
+  } else {
+    // Fractions (0.14, 0.1, …) — normalize so columns always fill the row.
+    weights = raw.map((n) => n / sum);
+  }
+
+  const colAbs = columns.map((c, i) => ({
+    ...c,
+    absW: Math.floor(weights[i] * totalWidth),
+    align: c.align || "left",
+  }));
+
+  const used = colAbs.slice(0, -1).reduce((s, c) => s + c.absW, 0);
+  colAbs[colAbs.length - 1].absW = Math.max(40, totalWidth - used);
+  return colAbs;
+}
+
 export function table(doc, columns, rows, opts = {}) {
   const left = doc.page.margins.left;
   const right = doc.page.width - doc.page.margins.right;
@@ -313,16 +343,7 @@ export function table(doc, columns, rows, opts = {}) {
   const rowPadY = opts.rowPadY ?? (compactAuto ? 3 : 4);
   const headerPadY = opts.headerPadY ?? (compactAuto ? 4 : 5);
 
-  // compute absolute column widths
-  const colAbs = columns.map((c) => ({
-    ...c,
-    absW: Math.floor((c.width ?? 0) * w),
-    align: c.align || "left",
-  }));
-
-  // last column: take remainder so we perfectly fill width
-  const used = colAbs.slice(0, -1).reduce((s, c) => s + c.absW, 0);
-  colAbs[colAbs.length - 1].absW = Math.max(60, w - used);
+  const colAbs = resolveTableColumnWidths(columns, w);
 
   const headerH = headerFontSize + headerPadY * 2;
   const rowH = fontSize + rowPadY * 2;
