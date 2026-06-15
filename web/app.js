@@ -4877,7 +4877,7 @@ function buildCartrackPopupHtml(v) {
     <div class="cartrack-popup">
       <strong>${escapeHtml(cartrackVehicleLabel(v))}</strong>
       <div>${cartrackSourcePillHtml(v)} ${escapeHtml(cartrackVehicleSubLabel(v) || v.vehicle_name || v.registration || "")}</div>
-      <div>Speed: <b>${spd}</b> km/h${isUnitech ? "" : ` · Ignition: <b>${ign}</b>`}</div>
+      <div>Speed: <b>${spd}</b> km/h${isUnitech && v.road_speed_limit != null ? ` · Site max <b>${Number(v.road_speed_limit)}</b> km/h` : ""}${isUnitech ? "" : ` · Ignition: <b>${ign}</b>`}</div>
       ${isUnitech ? "" : `<div>Odometer: ${escapeHtml(odo)}</div>`}
       ${batteryPills ? `<div class="cartrack-track-item-battery ${battLow ? "cartrack-batt-low" : ""}">${batteryPills}</div>` : telemetry ? `<div class="${battLow ? "cartrack-batt-low" : ""}">Battery / power: <b>${escapeHtml(telemetry)}</b></div>` : ""}
       ${staleNote}
@@ -5142,7 +5142,8 @@ function renderCartrackSpeedFloatList(fleet) {
       const extras = [];
       if (ign) extras.push("IGN");
       if (v.is_idling) extras.push("Idle");
-      if (limit) extras.push(`Limit ${limit}`);
+      if (v.gps_source === "unitech" && limit) extras.push(`Max ${limit} km/h`);
+      else if (limit) extras.push(`Limit ${limit}`);
       else if (v.speed_alert_kmh) extras.push(`Alert ≥${v.speed_alert_kmh}`);
       const batteryPills = renderCartrackBatteryPillsHtml(v);
       const battLow = cartrackBatteryLow(v);

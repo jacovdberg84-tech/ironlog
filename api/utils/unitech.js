@@ -2,7 +2,7 @@
 
 import crypto from "node:crypto";
 import { db } from "../db/client.js";
-import { getCartrackSpeedAlertKmh } from "./cartrack.js";
+import { recordFleetSpeedAlerts } from "./cartrack.js";
 import {
   normalizeGpsRegistration,
   resolveGpsAssetCode,
@@ -94,6 +94,20 @@ function parseSpeedKmh(raw) {
   if (!m) return 0;
   const n = Number(m[1]);
   return Number.isFinite(n) ? n : 0;
+}
+
+/** Afungi site vehicles — max driving speed (km/h). Override with UNITECH_MAX_SPEED_KMH. */
+export function getUnitechSpeedLimitKmh() {
+  const n = Number(process.env.UNITECH_MAX_SPEED_KMH || 60);
+  if (!Number.isFinite(n) || n <= 0) return 60;
+  return Math.max(20, Math.min(120, Math.round(n)));
+}
+
+export function isUnitechSpeeding(speedKmh, limitKmh = getUnitechSpeedLimitKmh()) {
+  const speed = Number(speedKmh || 0);
+  const limit = Number(limitKmh);
+  if (!Number.isFinite(speed) || !Number.isFinite(limit)) return false;
+  return speed > limit;
 }
 
 export function ensureUnitechTables() {
@@ -325,7 +339,15 @@ export async function syncUnitechFleetStatus() {
     );
     count += 1;
   }
-  return { synced: count, feed_label: getUnitechPublicSettings().feed_label };
+  const fleet = listUnitechFleetFromDb();
+  const limitKmh = getUnitechSpeedLimitKmh();
+  const alerts = recordFleetSpeedAlerts(fleet, limitKmh + 1);
+  return {
+    synced: count,
+    feed_label: getUnitechPublicSettings().feed_label,
+    speed_limit_kmh: limitKmh,
+    speed_alerts_logged: alerts.logged,
+  };
 }
 
 export function listUnitechFleetFromDb() {
@@ -343,11 +365,11 @@ export function enrichUnitechLiveRow(row, speedRegs = new Set()) {
   const lng = Number(row.longitude);
   const hasGps = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
   const code = row.asset_code || row.registration;
-  const alertKmh = getCartrackSpeedAlertKmh();
+  const limitKmh = getUnitechSpeedLimitKmh();
   const speed = Number(row.speed_kmh || 0);
   const positionAgeDays = Number(row.position_age_days);
   const positionStale = Number.isFinite(positionAgeDays) && positionAgeDays >= 1;
-  const overThreshold = Number.isFinite(speed) && speed >= alertKmh;
+  const overSiteLimit = isUnitechSpeeding(speed, limitKmh);
   return {
     ...row,
     gps_source: "unitech",
@@ -355,10 +377,10 @@ export function enrichUnitechLiveRow(row, speedRegs = new Set()) {
     ignition_on: null,
     odometer_km: null,
     has_gps: hasGps,
-    is_speeding: speedRegs.has(row.registration) || speedRegs.has(code) || overThreshold,
-    speed_alert_kmh: alertKmh,
+    is_speeding: speedRegs.has(row.registration) || speedRegs.has(code) || overSiteLimit,
+    speed_alert_kmh: limitKmh,
     is_idling: false,
-    road_speed_limit: null,
+    road_speed_limit: limitKmh,
     position_stale: positionStale,
     position_age_days: Number.isFinite(positionAgeDays) ? positionAgeDays : null,
     bearing: row.bearing != null ? Number(row.bearing) : null,
