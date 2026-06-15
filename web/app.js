@@ -4261,14 +4261,18 @@ function renderCartrackFleetTable(fleet, speedingToday) {
   });
   const rows = fleet
     .map((v) => {
-      const code = v.asset_code || v.registration || "—";
+      const code = cartrackVehicleLabel(v);
+      const sub = cartrackVehicleSubLabel(v);
       const ign = Number(v.ignition_on) === 1;
       const spd = Number(v.speed_kmh || 0);
-      const speedEvents = speedMap.get(code) || speedMap.get(v.registration) || 0;
+      const speedEvents = speedMap.get(v.asset_code) || speedMap.get(v.registration) || speedMap.get(code) || 0;
       const rowCls = speedEvents > 0 ? "cartrack-row--alert" : "";
       const batteryPills = renderCartrackBatteryPillsHtml(v);
       return `<tr class="${rowCls}">
-        <td><span class="cartrack-vehicle-code">${escapeHtml(code)}</span></td>
+        <td>
+          <span class="cartrack-vehicle-code">${escapeHtml(code)}</span>
+          ${sub ? `<div class="muted mini">${escapeHtml(sub)}</div>` : ""}
+        </td>
         <td>${cartrackSourcePillHtml(v)} ${escapeHtml(v.vehicle_name || v.registration || "—")}</td>
         <td class="cartrack-col-num">${spd.toFixed(0)}</td>
         <td class="cartrack-col-status">${ign ? '<span class="pill pill-green">ON</span>' : '<span class="pill">OFF</span>'}</td>
@@ -4454,6 +4458,180 @@ async function initCartrackAdminPanel() {
   if (!qs("adminCartrackCard")) return;
   await loadCartrackAdminSettings().catch(() => {});
   await loadUnitechAdminSettings().catch(() => {});
+  await loadGpsVehicleLinksAdmin().catch(() => {});
+}
+
+function setGpsVehicleLinksResult(text, ok = null) {
+  const el = qs("gpsVehicleLinksResult");
+  if (!el) return;
+  el.textContent = String(text || "");
+  el.style.color = ok === true ? "#15803d" : ok === false ? "#b91c1c" : "";
+}
+
+async function ensureGpsLinkAssetDatalist() {
+  const datalist = qs("gpsLinkAssetCodeList");
+  if (!datalist || datalist.dataset.loaded === "1") return;
+  try {
+    const assets = await fetchJson(`${API}/api/assets?include_archived=0`);
+    const rows = Array.isArray(assets) ? assets : assets?.assets || [];
+    datalist.innerHTML = rows
+      .map((a) => {
+        const code = String(a.asset_code || "").trim();
+        const name = String(a.asset_name || "").trim();
+        if (!code) return "";
+        return `<option value="${escapeHtml(code)}">${escapeHtml(name ? `${code} — ${name}` : code)}</option>`;
+      })
+      .join("");
+    datalist.dataset.loaded = "1";
+  } catch {
+    /* optional */
+  }
+}
+
+function renderGpsVehicleLinksTable(links) {
+  const host = qs("gpsVehicleLinksList");
+  if (!host) return;
+  if (!links?.length) {
+    host.innerHTML = `<div class="muted small">No mappings yet. Add one above or link from the suggestions list.</div>`;
+    return;
+  }
+  host.innerHTML = `
+    <div class="cartrack-table-scroll">
+      <table class="cartrack-fleet-table">
+        <thead>
+          <tr>
+            <th>Registration</th>
+            <th>Fleet code</th>
+            <th>Source</th>
+            <th>Notes</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${links.map((l) => `<tr>
+            <td><code>${escapeHtml(l.registration)}</code></td>
+            <td><strong>${escapeHtml(l.asset_code)}</strong></td>
+            <td>${escapeHtml(l.gps_source || "any")}</td>
+            <td class="muted">${escapeHtml(l.notes || "—")}</td>
+            <td><button type="button" class="btn btn-secondary btn-sm" data-gps-link-delete="${escapeHtml(l.registration)}">Remove</button></td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderGpsVehicleLinkSuggestions(suggestions) {
+  const host = qs("gpsVehicleLinkSuggestions");
+  if (!host) return;
+  if (!suggestions?.length) {
+    host.innerHTML = `<div class="muted small">All synced vehicles are mapped or already match a fleet code.</div>`;
+    return;
+  }
+  host.innerHTML = `
+    <div class="cartrack-table-scroll">
+      <table class="cartrack-fleet-table">
+        <thead>
+          <tr>
+            <th>Registration</th>
+            <th>Current label</th>
+            <th>Source</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${suggestions.map((s) => `<tr>
+            <td><code>${escapeHtml(s.registration)}</code></td>
+            <td>${escapeHtml(s.current_label || s.registration)}</td>
+            <td>${escapeHtml(s.gps_source || "—")}</td>
+            <td><button type="button" class="btn btn-primary btn-sm" data-gps-link-prefill="${escapeHtml(s.registration)}" data-gps-link-source="${escapeHtml(s.gps_source || "any")}">Link</button></td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function loadGpsVehicleLinksAdmin() {
+  if (!qs("adminGpsVehicleLinksCard")) return;
+  await ensureGpsLinkAssetDatalist();
+  try {
+    const data = await fetchJson(`${API}/api/cartrack/vehicle-links`);
+    renderGpsVehicleLinksTable(data?.links || []);
+    renderGpsVehicleLinkSuggestions(data?.suggestions || []);
+    setGpsVehicleLinksResult(
+      `${(data?.links || []).length} mapping(s), ${(data?.suggestions || []).length} unmapped vehicle(s).`,
+      true
+    );
+  } catch (e) {
+    setGpsVehicleLinksResult(String(e.message || e), false);
+  }
+}
+
+async function saveGpsVehicleLink() {
+  const registration = String(qs("gpsLinkRegistration")?.value || "").trim();
+  const asset_code = String(qs("gpsLinkAssetCode")?.value || "").trim();
+  if (!registration || !asset_code) {
+    setGpsVehicleLinksResult("Registration and fleet code are required.", false);
+    return;
+  }
+  setGpsVehicleLinksResult("Saving…", null);
+  try {
+    const data = await fetchJson(`${API}/api/cartrack/vehicle-links`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        registration,
+        asset_code,
+        gps_source: qs("gpsLinkSource")?.value || "any",
+        notes: qs("gpsLinkNotes")?.value || "",
+      }),
+    });
+    setGpsVehicleLinksResult(`Saved ${data.link?.registration} → ${data.link?.asset_code}. Fleet updated.`, true);
+    if (qs("gpsLinkRegistration")) qs("gpsLinkRegistration").value = "";
+    if (qs("gpsLinkAssetCode")) qs("gpsLinkAssetCode").value = "";
+    if (qs("gpsLinkNotes")) qs("gpsLinkNotes").value = "";
+    await loadGpsVehicleLinksAdmin();
+    loadCartrackFleet().catch(() => {});
+    refreshCartrackSpeedFloat({ refresh: false }).catch(() => {});
+  } catch (e) {
+    setGpsVehicleLinksResult(String(e.message || e), false);
+  }
+}
+
+async function deleteGpsVehicleLink(registration) {
+  const reg = String(registration || "").trim();
+  if (!reg) return;
+  setGpsVehicleLinksResult("Removing…", null);
+  try {
+    await fetchJson(`${API}/api/cartrack/vehicle-links/${encodeURIComponent(reg)}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    setGpsVehicleLinksResult(`Removed mapping for ${reg}.`, true);
+    await loadGpsVehicleLinksAdmin();
+    loadCartrackFleet().catch(() => {});
+  } catch (e) {
+    setGpsVehicleLinksResult(String(e.message || e), false);
+  }
+}
+
+async function applyGpsVehicleLinks() {
+  setGpsVehicleLinksResult("Re-applying mappings…", null);
+  try {
+    const data = await fetchJson(`${API}/api/cartrack/vehicle-links/apply`, { method: "POST" });
+    setGpsVehicleLinksResult(`Mappings re-applied to ${data.applied?.updated ?? 0} snapshot row(s).`, true);
+    loadCartrackFleet().catch(() => {});
+    refreshCartrackSpeedFloat({ refresh: false }).catch(() => {});
+  } catch (e) {
+    setGpsVehicleLinksResult(String(e.message || e), false);
+  }
+}
+
+function prefillGpsVehicleLinkForm(registration, gpsSource) {
+  if (qs("gpsLinkRegistration")) qs("gpsLinkRegistration").value = registration || "";
+  if (qs("gpsLinkSource") && gpsSource) qs("gpsLinkSource").value = gpsSource;
+  qs("gpsLinkAssetCode")?.focus();
 }
 
 function setUnitechAdminResult(text, ok = null) {
@@ -4564,8 +4742,25 @@ function cartrackSourcePillHtml(v) {
   return "";
 }
 
+function normalizeGpsRegLabel(reg) {
+  return String(reg || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+
 function cartrackVehicleLabel(v) {
-  return String(v.asset_code || v.registration || "—");
+  const fleet = String(v.asset_code || "").trim();
+  const reg = String(v.registration || "").trim();
+  if (fleet) return fleet;
+  return reg || "—";
+}
+
+function cartrackVehicleSubLabel(v) {
+  const fleet = String(v.asset_code || "").trim();
+  const reg = String(v.registration || "").trim();
+  const name = String(v.vehicle_name || "").trim();
+  if (fleet && reg && normalizeGpsRegLabel(fleet) !== normalizeGpsRegLabel(reg)) {
+    return reg;
+  }
+  return name || reg || "";
 }
 
 function formatCartrackTelemetryLine(v) {
@@ -4634,7 +4829,7 @@ function buildCartrackPopupHtml(v) {
   return `
     <div class="cartrack-popup">
       <strong>${escapeHtml(cartrackVehicleLabel(v))}</strong>
-      <div>${cartrackSourcePillHtml(v)} ${escapeHtml(v.vehicle_name || v.registration || "")}</div>
+      <div>${cartrackSourcePillHtml(v)} ${escapeHtml(cartrackVehicleSubLabel(v) || v.vehicle_name || v.registration || "")}</div>
       <div>Speed: <b>${spd}</b> km/h${isUnitech ? "" : ` · Ignition: <b>${ign}</b>`}</div>
       ${isUnitech ? "" : `<div>Odometer: ${escapeHtml(odo)}</div>`}
       ${batteryPills ? `<div class="cartrack-track-item-battery ${battLow ? "cartrack-batt-low" : ""}">${batteryPills}</div>` : telemetry ? `<div class="${battLow ? "cartrack-batt-low" : ""}">Battery / power: <b>${escapeHtml(telemetry)}</b></div>` : ""}
@@ -4740,6 +4935,7 @@ function renderCartrackTrackList(fleet, filterText = "") {
     .map((v) => {
       const key = cartrackVehicleKey(v);
       const label = cartrackVehicleLabel(v);
+      const sub = cartrackVehicleSubLabel(v);
       const ign = Number(v.ignition_on) === 1;
       const spd = Number(v.speed_kmh || 0).toFixed(0);
       const batteryPills = renderCartrackBatteryPillsHtml(v);
@@ -4757,7 +4953,7 @@ function renderCartrackTrackList(fleet, filterText = "") {
         : (ign ? '<span class="pill pill-green">ON</span>' : '<span class="pill">OFF</span>');
       return `<button type="button" class="${cls}" data-cartrack-key="${escapeHtml(key)}">
         <span class="cartrack-track-item-code">${escapeHtml(label)}</span>
-        <span class="cartrack-track-item-meta">${cartrackSourcePillHtml(v)} ${escapeHtml(v.vehicle_name || v.registration || "—")}</span>
+        <span class="cartrack-track-item-meta">${cartrackSourcePillHtml(v)} ${escapeHtml(sub || v.vehicle_name || v.registration || "—")}</span>
         <span class="cartrack-track-item-stats">
           ${ignPill}
           <span>${spd} km/h</span>
@@ -4887,6 +5083,7 @@ function renderCartrackSpeedFloatList(fleet) {
   host.innerHTML = rows
     .map((v) => {
       const label = cartrackVehicleLabel(v);
+      const sub = cartrackVehicleSubLabel(v);
       const spd = Number(v.speed_kmh || 0);
       const ign = Number(v.ignition_on) === 1;
       const limit = v.road_speed_limit != null ? Number(v.road_speed_limit) : null;
@@ -4905,7 +5102,7 @@ function renderCartrackSpeedFloatList(fleet) {
       return `<div class="${cls}${battLow ? " cartrack-speed-float-row--battlow" : ""}">
         <span class="cartrack-speed-float-code">${escapeHtml(label)}</span>
         <span class="cartrack-speed-float-spd">${spd.toFixed(0)}<small> km/h</small></span>
-        ${batteryPills ? `<span class="cartrack-speed-float-battery">${batteryPills}</span>` : `<span class="cartrack-speed-float-meta">${escapeHtml(extras.join(" · ") || v.registration || "")}</span>`}
+        ${batteryPills ? `<span class="cartrack-speed-float-battery">${batteryPills}</span>` : `<span class="cartrack-speed-float-meta">${escapeHtml(extras.join(" · ") || sub || v.registration || "")}</span>`}
       </div>`;
     })
     .join("");
@@ -14674,6 +14871,19 @@ async function init() {
     saveUnitechAdminSettings().catch((e) => setUnitechAdminResult(String(e.message || e), false))
   );
   qs("unitechTestBtn")?.addEventListener("click", () => testUnitechConnection().catch(() => {}));
+  qs("gpsLinkSaveBtn")?.addEventListener("click", () => saveGpsVehicleLink().catch(() => {}));
+  qs("gpsLinkRefreshBtn")?.addEventListener("click", () => loadGpsVehicleLinksAdmin().catch(() => {}));
+  qs("gpsLinkApplyBtn")?.addEventListener("click", () => applyGpsVehicleLinks().catch(() => {}));
+  qs("gpsVehicleLinksList")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-gps-link-delete]");
+    if (!btn) return;
+    deleteGpsVehicleLink(btn.getAttribute("data-gps-link-delete")).catch(() => {});
+  });
+  qs("gpsVehicleLinkSuggestions")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-gps-link-prefill]");
+    if (!btn) return;
+    prefillGpsVehicleLinkForm(btn.getAttribute("data-gps-link-prefill"), btn.getAttribute("data-gps-link-source"));
+  });
   qs("cartrackSyncBtn")?.addEventListener("click", () => syncCartrackNow().catch((e) => setStatus(String(e.message || e))));
   qs("cartrackMorningPdfBtn")?.addEventListener("click", () =>
     openCartrackMorningPdf().catch((e) => setStatus(String(e.message || e)))

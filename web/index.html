@@ -5150,6 +5150,60 @@
           </div>
         </div>
 
+        <!-- GPS registration → fleet number mapping -->
+        <div class="dash-card collapsible full-width" data-collapsed="true" id="adminGpsVehicleLinksCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13" rx="2"></rect><path d="M16 8h4l3 5v3h-7V8z"></path><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+              </div>
+              <div>
+                <h3>GPS fleet number mapping</h3>
+                <p class="muted small">Link GPS registrations (e.g. AJM753MP) to IRONLOG asset codes (e.g. V05AM) so Fleet Track shows fleet numbers.</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row" style="flex-wrap:wrap;">
+              <div class="form-field" style="flex:1 1 180px;">
+                <label>Registration</label>
+                <input id="gpsLinkRegistration" class="w-full" placeholder="AJM753MP" autocomplete="off" />
+              </div>
+              <div class="form-field" style="flex:1 1 160px;">
+                <label>Fleet / asset code</label>
+                <input id="gpsLinkAssetCode" class="w-full" list="gpsLinkAssetCodeList" placeholder="V05AM" autocomplete="off" />
+                <datalist id="gpsLinkAssetCodeList"></datalist>
+              </div>
+              <div class="form-field" style="flex:1 1 120px;">
+                <label>Source</label>
+                <select id="gpsLinkSource" class="w-full">
+                  <option value="any">Any</option>
+                  <option value="cartrack">Cartrack</option>
+                  <option value="unitech">Unitech</option>
+                </select>
+              </div>
+              <div class="form-field" style="flex:2 1 220px;">
+                <label>Notes (optional)</label>
+                <input id="gpsLinkNotes" class="w-full" placeholder="Afungi site pickup" />
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button type="button" id="gpsLinkSaveBtn" class="btn btn-primary btn-sm">Save mapping</button>
+              <button type="button" id="gpsLinkRefreshBtn" class="btn btn-secondary btn-sm">Refresh list</button>
+              <button type="button" id="gpsLinkApplyBtn" class="btn btn-secondary btn-sm">Re-apply to fleet</button>
+            </div>
+            <h4 style="margin:16px 0 8px;">Saved mappings</h4>
+            <div id="gpsVehicleLinksList" class="list muted small">Loading…</div>
+            <h4 style="margin:16px 0 8px;">Unmapped vehicles</h4>
+            <p class="muted mini" style="margin:0 0 8px;">Vehicles from Cartrack/Unitech that still show only a registration. Click Link to pre-fill the form.</p>
+            <div id="gpsVehicleLinkSuggestions" class="list muted small">Loading…</div>
+            <pre class="output" id="gpsVehicleLinksResult"></pre>
+          </div>
+        </div>
+
         <!-- Safety equipment register + checklist templates -->
         <div class="dash-card collapsible full-width" data-collapsed="true" id="adminSafetyCard">
           <div class="dash-card-header">
@@ -6668,6 +6722,6 @@
 
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="./app.js?v=22"></script>
+  <script src="./app.js?v=23"></script>
 </body>
 </html>

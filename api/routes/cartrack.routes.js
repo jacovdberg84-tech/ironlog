@@ -23,6 +23,14 @@ import {
   listUnitechFleetFromDb,
   enrichUnitechLiveRow,
 } from "../utils/unitech.js";
+import {
+  ensureGpsVehicleLinkTables,
+  listGpsVehicleLinks,
+  upsertGpsVehicleLink,
+  deleteGpsVehicleLink,
+  listGpsFleetMappingSuggestions,
+  applyGpsVehicleLinksToSnapshots,
+} from "../utils/gpsVehicleLinks.js";
 
 function mergeGpsFleet({ cartrackRows, unitechRows, speedRegs }) {
   const cartrackFleet = cartrackRows.map((v) => enrichCartrackLiveRow(v, speedRegs));
@@ -56,6 +64,7 @@ async function emailMorningReport(summary, recipients) {
 
 export default async function cartrackRoutes(app) {
   ensureCartrackTables();
+  ensureGpsVehicleLinkTables();
 
   app.get("/settings", async (req, reply) => {
     if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "site_manager"])) return;
@@ -334,5 +343,46 @@ export default async function cartrackRoutes(app) {
     } catch (err) {
       return reply.code(502).send({ ok: false, error: String(err.message || err) });
     }
+  });
+
+  app.get("/vehicle-links", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "site_manager"])) return;
+    return reply.send({
+      ok: true,
+      links: listGpsVehicleLinks(),
+      suggestions: listGpsFleetMappingSuggestions(),
+    });
+  });
+
+  app.post("/vehicle-links", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    try {
+      const updated_by = String(req.headers["x-user-name"] || "admin").trim();
+      const link = upsertGpsVehicleLink({
+        registration: req.body?.registration,
+        asset_code: req.body?.asset_code,
+        gps_source: req.body?.gps_source,
+        vehicle_name: req.body?.vehicle_name,
+        notes: req.body?.notes,
+        updated_by,
+      });
+      const applied = applyGpsVehicleLinksToSnapshots();
+      return reply.send({ ok: true, link, applied });
+    } catch (err) {
+      return reply.code(400).send({ ok: false, error: String(err.message || err) });
+    }
+  });
+
+  app.delete("/vehicle-links/:registration", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    const result = deleteGpsVehicleLink(req.params?.registration);
+    applyGpsVehicleLinksToSnapshots();
+    return reply.send({ ok: true, ...result });
+  });
+
+  app.post("/vehicle-links/apply", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "site_manager"])) return;
+    const applied = applyGpsVehicleLinksToSnapshots();
+    return reply.send({ ok: true, applied });
   });
 }

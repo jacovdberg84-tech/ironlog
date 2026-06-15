@@ -3,6 +3,10 @@
 import crypto from "node:crypto";
 import { db } from "../db/client.js";
 import { getCartrackSpeedAlertKmh } from "./cartrack.js";
+import {
+  normalizeGpsRegistration,
+  resolveGpsAssetCode,
+} from "./gpsVehicleLinks.js";
 
 const GPSGATE_USERS_PATH = "https://unitechmoz.gpsgate.com/comGpsGate/rpc/KmlFeed/v.1/UsersInGroups";
 
@@ -39,7 +43,7 @@ function decryptSecret(cipherText) {
 }
 
 function normalizeRegistration(reg) {
-  return String(reg || "").trim().toUpperCase().replace(/\s+/g, "");
+  return normalizeGpsRegistration(reg);
 }
 
 function registrationFromName(name) {
@@ -52,26 +56,7 @@ function registrationFromName(name) {
 }
 
 function resolveAssetCode(registration, vehicleName = "") {
-  const reg = normalizeRegistration(registration);
-  if (!reg) return null;
-  const byCode = db.prepare(`
-    SELECT asset_code FROM assets
-    WHERE UPPER(REPLACE(asset_code, ' ', '')) = ?
-      AND archived = 0
-    LIMIT 1
-  `).get(reg);
-  if (byCode?.asset_code) return String(byCode.asset_code);
-  const hay = `${registration} ${vehicleName}`.trim();
-  if (!hay) return null;
-  const assets = db.prepare(`SELECT asset_code, asset_name FROM assets WHERE archived = 0`).all();
-  const low = hay.toLowerCase();
-  for (const a of assets) {
-    const code = String(a.asset_code || "");
-    const name = String(a.asset_name || "");
-    if (code && low.includes(code.toLowerCase())) return code;
-    if (name && low.includes(name.toLowerCase())) return code;
-  }
-  return reg;
+  return resolveGpsAssetCode(registration, vehicleName);
 }
 
 function decodeXmlEntities(s) {
