@@ -694,21 +694,26 @@ export function inferSpeedEventSource(event) {
   return "Cartrack";
 }
 
+export function formatSpeedEventVehicleLabel(event) {
+  const vehicle = String(event?.asset_code || event?.registration || "—").trim() || "—";
+  const reg = String(event?.registration || "").trim();
+  if (reg && reg !== vehicle) return `${vehicle}\n${reg}`;
+  return vehicle;
+}
+
 export function buildSpeedingReportPdfContent(summary) {
   const columns = [
-    { key: "time", label: "Time", width: 72 },
-    { key: "vehicle", label: "Vehicle", width: 52 },
-    { key: "speed", label: "Speed", width: 36 },
-    { key: "limit", label: "Limit", width: 36 },
-    { key: "source", label: "Source", width: 44 },
-    { key: "type", label: "Type", width: 68 },
+    { key: "time", label: "Time", width: 0.14 },
+    { key: "vehicle", label: "Vehicle", width: 0.14 },
+    { key: "speed", label: "Speed", width: 0.1, align: "right" },
+    { key: "limit", label: "Limit", width: 0.1, align: "right" },
+    { key: "type", label: "Type", width: 0.52 },
   ];
   const rows = (summary.events || []).slice(0, 120).map((e) => ({
     time: String(e.event_time || "").slice(0, 16),
-    vehicle: e.asset_code || e.registration || "",
-    speed: e.speed_kmh != null ? `${Number(e.speed_kmh).toFixed(0)}` : "—",
-    limit: e.speed_limit_kmh != null ? `${Number(e.speed_limit_kmh).toFixed(0)}` : "—",
-    source: inferSpeedEventSource(e),
+    vehicle: formatSpeedEventVehicleLabel(e),
+    speed: e.speed_kmh != null ? `${Number(e.speed_kmh).toFixed(0)} km/h` : "—",
+    limit: e.speed_limit_kmh != null ? `${Number(e.speed_limit_kmh).toFixed(0)} km/h` : "—",
     type: e.event_type_label || e.event_type || "",
   }));
   return { columns, rows };
