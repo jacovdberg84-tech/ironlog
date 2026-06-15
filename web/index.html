@@ -5112,7 +5112,7 @@
               </div>
               <div>
                 <h3>Safety equipment &amp; QR</h3>
-                <p class="muted small">Register fire extinguishers and other safety items. Customize checklists and print QR labels.</p>
+                <p class="muted small">Register safety items by category. Customize checklists and print QR labels.</p>
               </div>
             </div>
             <button class="report-card-toggle" aria-label="Toggle">
@@ -5120,8 +5120,25 @@
             </button>
           </div>
           <div class="report-card-body">
-            <h4 style="margin:0 0 8px;">Checklist template (site)</h4>
-            <p class="muted small" style="margin:0 0 8px;">Edit the fire extinguisher checklist items used when scanning QR labels.</p>
+            <h4 style="margin:0 0 8px;">Equipment categories</h4>
+            <p class="muted small" style="margin:0 0 8px;">Add types such as cutting equipment, gas, fire extinguisher — each category has its own QR checklist.</p>
+            <div class="form-row" style="flex-wrap:wrap; margin-bottom:8px;">
+              <div class="form-field" style="flex:1; min-width:200px;">
+                <label>Category name *</label>
+                <input id="safetyCategoryTitle" class="w-full" placeholder="e.g. Cutting equipment, Gas cylinders" />
+              </div>
+              <div class="form-field" style="min-width:180px;">
+                <label>Key (optional)</label>
+                <input id="safetyCategoryKey" class="w-full" placeholder="cutting_equipment" />
+              </div>
+              <div class="form-field form-field-action">
+                <button type="button" id="safetyCategoryAddBtn" class="btn btn-primary btn-sm">Add category</button>
+              </div>
+            </div>
+            <div id="safetyCategoriesList" class="list" style="margin-bottom:16px;"></div>
+
+            <h4 style="margin:0 0 8px;">Checklist template</h4>
+            <p class="muted small" style="margin:0 0 8px;">Edit checklist items for the selected category (used when scanning QR labels).</p>
             <div class="form-row" style="margin-bottom:8px;">
               <div class="form-field">
                 <label>Template</label>
@@ -5148,7 +5165,7 @@
                 <input id="safetyItemCode" class="w-full" placeholder="e.g. FE-WS-01" />
               </div>
               <div class="form-field">
-                <label>Type</label>
+                <label>Category</label>
                 <select id="safetyItemTemplate" class="w-full">
                   <option value="fire_extinguisher">Fire extinguisher</option>
                 </select>
@@ -6604,6 +6621,6 @@
 
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="./app.js?v=15"></script>
+  <script src="./app.js?v=16"></script>
 </body>
 </html>

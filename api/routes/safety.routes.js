@@ -6,6 +6,8 @@ import {
   parseTemplateItemsJson,
   buildChecklistFromTemplate,
   checklistStatus,
+  normalizeTemplateKey,
+  isValidTemplateKey,
 } from "../utils/safetyChecklistTemplates.js";
 import { buildSafetyRegisterPdf } from "../utils/safetyRegisterPdf.js";
 
@@ -236,15 +238,53 @@ export default async function safetyRoutes(app) {
         WHERE COALESCE(active, 1) = 1
         ORDER BY title ASC
       `).all();
+      const itemCounts = db.prepare(`
+        SELECT template_key, COUNT(*) AS item_count
+        FROM safety_equipment_items
+        WHERE COALESCE(active, 1) = 1
+        GROUP BY template_key
+      `).all();
+      const countByKey = Object.fromEntries(itemCounts.map((r) => [String(r.template_key), Number(r.item_count)]));
       const templates = rows.map((r) => ({
         id: Number(r.id),
         template_key: String(r.template_key),
         title: String(r.title),
         site_code: String(r.site_code),
         items: parseTemplateItemsJson(r.items_json),
+        item_count: countByKey[String(r.template_key)] || 0,
         updated_at: String(r.updated_at || ""),
       }));
       return reply.send({ ok: true, templates });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.post("/templates", async (req, reply) => {
+    try {
+      const title = String(req.body?.title || "").trim();
+      if (!title) return reply.code(400).send({ ok: false, error: "Category title is required" });
+      const template_key = normalizeTemplateKey(req.body?.template_key || title);
+      if (!isValidTemplateKey(template_key)) {
+        return reply.code(400).send({ ok: false, error: "Invalid category key — use letters, numbers, and underscores" });
+      }
+      const site_code = String(req.body?.site_code || "main").trim() || "main";
+      const existing = db.prepare(`
+        SELECT id FROM safety_checklist_templates WHERE template_key = ? AND site_code = ?
+      `).get(template_key, site_code);
+      if (existing) {
+        return reply.code(409).send({ ok: false, error: "A category with this key already exists" });
+      }
+      let items = normalizeTemplateItems(req.body?.items);
+      if (!items.length) {
+        items = [{ key: "condition_ok", label: "Equipment condition acceptable" }];
+      }
+      db.prepare(`
+        INSERT INTO safety_checklist_templates (template_key, title, items_json, site_code, active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 1, datetime('now'), datetime('now'))
+      `).run(template_key, title, JSON.stringify(items), site_code);
+      return reply.send({ ok: true, template: getTemplate(template_key, site_code) });
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message || String(err) });

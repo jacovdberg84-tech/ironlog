@@ -1785,10 +1785,11 @@ function renderSafetyTemplateEditor(items) {
   `).join("");
 }
 
-async function loadSafetyTemplatesSelect() {
+async function loadSafetyTemplatesSelect(preferredKey) {
   const data = await fetchJson(`${API}/api/safety/templates`);
   const templates = Array.isArray(data.templates) ? data.templates : [];
   const selects = ["safetyTplSelect", "safetyItemTemplate", "safetyPdfType"].map((id) => qs(id)).filter(Boolean);
+  const prevKey = String(preferredKey || qs("safetyTplSelect")?.value || "").trim();
   selects.forEach((sel) => {
     const keepAll = sel.id === "safetyPdfType";
     const opts = templates.map((t) =>
@@ -1797,8 +1798,57 @@ async function loadSafetyTemplatesSelect() {
     sel.innerHTML = keepAll
       ? `<option value="">All types</option>${opts.join("")}`
       : opts.join("");
+    if (prevKey && templates.some((t) => t.template_key === prevKey)) {
+      sel.value = prevKey;
+    }
   });
+  renderSafetyCategoriesList(templates);
   return templates;
+}
+
+function renderSafetyCategoriesList(templates) {
+  const host = qs("safetyCategoriesList");
+  if (!host) return;
+  const rows = Array.isArray(templates) ? templates : [];
+  if (!rows.length) {
+    host.innerHTML = `<div class="muted small">No categories yet — add one above.</div>`;
+    return;
+  }
+  host.innerHTML = rows
+    .map(
+      (t) => `
+    <div class="item safety-category-row" style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">
+      <div>
+        <strong>${escapeHtml(t.title || t.template_key)}</strong>
+        <div class="muted small"><code>${escapeHtml(t.template_key)}</code> · ${Number(t.item_count || 0)} item(s) · ${Number(t.items?.length || 0)} checklist row(s)</div>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" data-safety-edit-category="${escapeHtml(t.template_key)}">Edit checklist</button>
+    </div>`
+    )
+    .join("");
+}
+
+async function addSafetyCategory() {
+  const title = String(qs("safetyCategoryTitle")?.value || "").trim();
+  const template_key = String(qs("safetyCategoryKey")?.value || "").trim();
+  if (!title) return alert("Enter a category name (e.g. Cutting equipment).");
+  setStatus("Adding safety category…");
+  const body = { title };
+  if (template_key) body.template_key = template_key;
+  const data = await fetchJson(`${API}/api/safety/templates`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const key = String(data?.template?.template_key || template_key || "").trim();
+  if (qs("safetyCategoryTitle")) qs("safetyCategoryTitle").value = "";
+  if (qs("safetyCategoryKey")) qs("safetyCategoryKey").value = "";
+  await loadSafetyTemplatesSelect(key);
+  if (qs("safetyTplSelect") && key) qs("safetyTplSelect").value = key;
+  if (qs("safetyItemTemplate") && key) qs("safetyItemTemplate").value = key;
+  await loadSafetyTemplateEditor();
+  setSafetyAdminResult(`Added category "${title}" (${key || "saved"}). Edit checklist rows below.`);
+  setStatus("Safety category added.");
 }
 
 async function loadSafetyTemplateEditor() {
@@ -1828,6 +1878,7 @@ async function saveSafetyTemplateEditor() {
     body: JSON.stringify({ items }),
   });
   renderSafetyTemplateEditor(data?.template?.items || items);
+  await loadSafetyTemplatesSelect(key);
   setSafetyAdminResult(`Saved template ${key} (${items.length} rows).`);
   setStatus("Safety template saved.");
 }
@@ -1872,6 +1923,7 @@ async function addSafetyEquipmentItem() {
   if (qs("safetyItemName")) qs("safetyItemName").value = "";
   if (qs("safetyItemLocation")) qs("safetyItemLocation").value = "";
   await loadSafetyItemsList();
+  await loadSafetyTemplatesSelect(template_key);
   setSafetyAdminResult(`Added ${item_code.toUpperCase()}.`);
   setStatus("Safety item added.");
 }
@@ -1883,6 +1935,7 @@ async function removeSafetyEquipmentItem(id) {
   setStatus("Removing safety item…");
   await fetchJson(`${API}/api/safety/items/${rowId}`, { method: "DELETE" });
   await loadSafetyItemsList();
+  await loadSafetyTemplatesSelect();
   setStatus("Safety item removed.");
 }
 
@@ -1971,8 +2024,8 @@ async function initSafetyAdminPanel() {
   if (pdfDate && !pdfDate.value) pdfDate.value = new Date().toISOString().slice(0, 10);
   applySafetyQrSheetPreset();
   try {
-    await loadSafetyTemplatesSelect();
-    await loadSafetyTemplateEditor();
+  await loadSafetyTemplatesSelect();
+  await loadSafetyTemplateEditor();
     await loadSafetyItemsList();
   } catch (e) {
     setSafetyAdminResult(String(e.message || e));
@@ -14375,6 +14428,19 @@ async function init() {
   qs("safetyTplLoadBtn")?.addEventListener("click", () =>
     loadSafetyTemplateEditor().catch((e) => setStatus("Safety template error: " + e.message))
   );
+  qs("safetyTplSelect")?.addEventListener("change", () =>
+    loadSafetyTemplateEditor().catch(() => {})
+  );
+  qs("safetyCategoryAddBtn")?.addEventListener("click", () =>
+    addSafetyCategory().catch((e) => setStatus("Add category error: " + e.message))
+  );
+  qs("safetyCategoriesList")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-safety-edit-category]");
+    if (!btn) return;
+    const key = String(btn.getAttribute("data-safety-edit-category") || "").trim();
+    if (qs("safetyTplSelect")) qs("safetyTplSelect").value = key;
+    loadSafetyTemplateEditor().catch(() => {});
+  });
   qs("safetyTplSaveBtn")?.addEventListener("click", () =>
     saveSafetyTemplateEditor().catch((e) => setStatus("Safety template save error: " + e.message))
   );

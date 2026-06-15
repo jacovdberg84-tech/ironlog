@@ -17,6 +17,21 @@ export const DEFAULT_SAFETY_TEMPLATES = {
   },
 };
 
+/** Slug for template_key from a display name or explicit key. */
+export function normalizeTemplateKey(raw) {
+  const s = String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+  return s || "category";
+}
+
+export function isValidTemplateKey(key) {
+  return /^[a-z][a-z0-9_]{1,47}$/.test(String(key || ""));
+}
+
 export function normalizeTemplateItems(items) {
   const out = [];
   const seen = new Set();
