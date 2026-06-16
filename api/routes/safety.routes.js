@@ -10,6 +10,7 @@ import {
   isValidTemplateKey,
 } from "../utils/safetyChecklistTemplates.js";
 import { buildSafetyRegisterPdf } from "../utils/safetyRegisterPdf.js";
+import { buildPdfBuffer, sectionTitle, kvGrid, table } from "../utils/pdfGenerator.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -261,6 +262,15 @@ function loadSafetyRegisterGroups(templateKey, checkDate) {
   return groups;
 }
 
+function parseSafetyChecklist(raw) {
+  try {
+    const parsed = JSON.parse(String(raw || "[]"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 export default async function safetyRoutes(app) {
   ensureSafetySchema();
 
@@ -374,7 +384,21 @@ export default async function safetyRoutes(app) {
           i.active,
           i.created_at,
           i.updated_at,
-          t.title AS template_title
+          t.title AS template_title,
+          (
+            SELECT si.status
+            FROM safety_inspections si
+            WHERE si.item_id = i.id
+            ORDER BY si.inspection_date DESC, si.id DESC
+            LIMIT 1
+          ) AS latest_status,
+          (
+            SELECT si.inspection_date
+            FROM safety_inspections si
+            WHERE si.item_id = i.id
+            ORDER BY si.inspection_date DESC, si.id DESC
+            LIMIT 1
+          ) AS latest_inspection_date
         FROM safety_equipment_items i
         LEFT JOIN safety_checklist_templates t
           ON t.template_key = i.template_key AND t.site_code = i.site_code
@@ -696,6 +720,154 @@ export default async function safetyRoutes(app) {
         .header(
           "Content-Disposition",
           `${download ? "attachment" : "inline"}; filename="AML_Safety_${mode}_${slug}_${check_date}.pdf"`
+        )
+        .send(pdf);
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // GET /api/safety/inspections/report.pdf?start=YYYY-MM-DD&end=YYYY-MM-DD&item_codes=FE-01,FE-02&template_key=fire_extinguisher&download=1
+  app.get("/inspections/report.pdf", async (req, reply) => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const start = String(req.query?.start || "").trim() || today;
+      const end = String(req.query?.end || "").trim() || start;
+      const template_key = String(req.query?.template_key || "").trim();
+      const download = String(req.query?.download || "").trim() === "1";
+      if (!isDate(start) || !isDate(end)) {
+        return reply.code(400).send({ ok: false, error: "start/end must be YYYY-MM-DD" });
+      }
+
+      const codes = String(req.query?.item_codes || "")
+        .split(",")
+        .map((c) => normalizeItemCode(c))
+        .filter(Boolean);
+
+      const where = ["si.inspection_date >= ?", "si.inspection_date <= ?"];
+      const params = [start, end];
+      if (template_key) {
+        where.push("i.template_key = ?");
+        params.push(template_key);
+      }
+      if (codes.length) {
+        where.push(`i.item_code IN (${codes.map(() => "?").join(",")})`);
+        params.push(...codes);
+      }
+
+      const rows = db.prepare(`
+        SELECT
+          si.id,
+          si.inspection_date,
+          si.inspector_name,
+          si.status,
+          si.notes,
+          si.checklist_json,
+          i.item_code,
+          i.item_name,
+          i.location,
+          i.template_key,
+          t.title AS template_title
+        FROM safety_inspections si
+        JOIN safety_equipment_items i ON i.id = si.item_id
+        LEFT JOIN safety_checklist_templates t
+          ON t.template_key = i.template_key AND t.site_code = i.site_code
+        WHERE ${where.join(" AND ")}
+        ORDER BY si.inspection_date DESC, i.item_code ASC, si.id DESC
+        LIMIT 3000
+      `).all(...params);
+
+      const enriched = rows.map((r) => {
+        const checklist = parseSafetyChecklist(r.checklist_json);
+        const failures = checklist
+          .filter((x) => x && x.ok === false)
+          .map((x) => {
+            const label = String(x.label || x.key || "Item").trim();
+            const note = String(x.note || "").trim();
+            return note ? `${label}: ${note}` : label;
+          })
+          .filter(Boolean);
+        return {
+          ...r,
+          failures,
+          is_flagged: String(r.status || "").toLowerCase() === "fail" || failures.length > 0,
+        };
+      });
+
+      const flagged = enriched.filter((r) => r.is_flagged);
+      const passCount = enriched.filter((r) => String(r.status || "").toLowerCase() === "pass").length;
+      const attentionCount = enriched.filter((r) => String(r.status || "").toLowerCase() === "attention").length;
+      const failCount = enriched.filter((r) => String(r.status || "").toLowerCase() === "fail").length;
+      const itemCount = new Set(enriched.map((r) => String(r.item_code || ""))).size;
+
+      const pdf = await buildPdfBuffer((doc) => {
+        sectionTitle(doc, "Safety Equipment Inspection Report");
+        kvGrid(doc, [
+          { k: "Period", v: `${start} to ${end}` },
+          { k: "Equipment selected", v: codes.length ? String(codes.length) : "All" },
+          { k: "Inspection rows", v: String(enriched.length) },
+          { k: "Equipment covered", v: String(itemCount) },
+          { k: "Pass", v: String(passCount) },
+          { k: "Attention", v: String(attentionCount) },
+          { k: "Fail (flagged)", v: String(failCount) },
+          { k: "Total flagged", v: String(flagged.length) },
+        ], 2);
+
+        sectionTitle(doc, "Inspection Results");
+        table(
+          doc,
+          [
+            { key: "date", label: "Date", width: 0.1 },
+            { key: "equipment", label: "Equipment", width: 0.16 },
+            { key: "name", label: "Name / Location", width: 0.2 },
+            { key: "status", label: "Status", width: 0.1, align: "center" },
+            { key: "inspector", label: "Inspector", width: 0.12 },
+            { key: "finding", label: "Checklist findings", width: 0.32 },
+          ],
+          enriched.length
+            ? enriched.map((r) => {
+                const st = String(r.status || "pending").toLowerCase();
+                const statusLabel = r.is_flagged
+                  ? "FLAGGED"
+                  : st === "pass"
+                    ? "PASS"
+                    : st === "attention"
+                      ? "ATTENTION"
+                      : st.toUpperCase();
+                return {
+                  date: String(r.inspection_date || ""),
+                  equipment: String(r.item_code || "-"),
+                  name: `${String(r.item_name || "").trim() || "-"}${r.location ? ` (${String(r.location).trim()})` : ""}`,
+                  status: statusLabel,
+                  inspector: String(r.inspector_name || "-"),
+                  finding: r.failures.length
+                    ? r.failures.join(" | ")
+                    : (String(r.notes || "").trim() || "No failures recorded"),
+                };
+              })
+            : [{
+                date: "-",
+                equipment: "-",
+                name: "No inspections found for selected filter",
+                status: "-",
+                inspector: "-",
+                finding: "-",
+              }],
+          { fontSize: 8, compact: true }
+        );
+      }, {
+        title: "IRONLOG",
+        subtitle: "Safety Equipment Inspection Report",
+        rightText: `${start} to ${end}`,
+        showPageNumbers: true,
+      });
+
+      return reply
+        .header("Content-Type", "application/pdf")
+        .header(
+          "Content-Disposition",
+          `${download ? "attachment" : "inline"}; filename="AML_Safety_Inspection_Report_${start}_to_${end}.pdf"`
         )
         .send(pdf);
     } catch (err) {

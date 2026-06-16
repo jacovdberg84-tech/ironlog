@@ -5373,6 +5373,23 @@
               </div>
             </div>
 
+            <h4 style="margin:16px 0 8px;">Safety inspection report (PDF)</h4>
+            <p class="muted small" style="margin:0 0 8px;">Flagged failures are highlighted in this report. Select equipment from the register above, or print for all.</p>
+            <div class="form-row" style="flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
+              <div class="form-field">
+                <label>Start date</label>
+                <input id="safetyReportStartDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>End date</label>
+                <input id="safetyReportEndDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button type="button" id="safetyInspectionReportAllBtn" class="btn btn-secondary btn-sm">Print inspection report (all)</button>
+                <button type="button" id="safetyInspectionReportSelectedBtn" class="btn btn-secondary btn-sm">Print selected equipment report</button>
+              </div>
+            </div>
+
             <pre class="output" id="safetyAdminResult"></pre>
           </div>
         </div>
@@ -6752,6 +6769,6 @@
 
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="./app.js?v=31"></script>
+  <script src="./app.js?v=32"></script>
 </body>
 </html>

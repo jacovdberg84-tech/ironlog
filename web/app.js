@@ -1758,6 +1758,7 @@ async function saveAdminUser() {
 }
 
 let safetyTplItems = [];
+let safetyReportSelectedCodes = new Set();
 let lastSafetyQrUrl = "";
 
 function setSafetyAdminResult(text) {
@@ -1889,14 +1890,25 @@ async function loadSafetyItemsList() {
   const data = await fetchJson(`${API}/api/safety/items`);
   const rows = Array.isArray(data.items) ? data.items : [];
   if (!rows.length) {
+    safetyReportSelectedCodes = new Set();
     host.innerHTML = `<div class="muted small">No safety items registered yet.</div>`;
     return;
   }
+  const validCodes = new Set(rows.map((r) => String(r.item_code || "").trim().toUpperCase()).filter(Boolean));
+  safetyReportSelectedCodes = new Set([...safetyReportSelectedCodes].filter((c) => validCodes.has(c)));
   host.innerHTML = rows.map((r) => `
     <div class="item" style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">
       <div>
-        <strong>${escapeHtml(r.item_code)}</strong> — ${escapeHtml(r.item_name || r.template_title || "")}
-        <div class="muted small">${escapeHtml(r.template_title || r.template_key || "")}${r.location ? ` · ${escapeHtml(r.location)}` : ""}</div>
+        <label style="display:flex; align-items:flex-start; gap:8px;">
+          <input type="checkbox" data-safety-report-select="${escapeHtml(r.item_code)}" ${safetyReportSelectedCodes.has(String(r.item_code || "").trim().toUpperCase()) ? "checked" : ""} />
+          <span>
+            <strong>${escapeHtml(r.item_code)}</strong> — ${escapeHtml(r.item_name || r.template_title || "")}
+            <div class="muted small">
+              ${escapeHtml(r.template_title || r.template_key || "")}${r.location ? ` · ${escapeHtml(r.location)}` : ""}
+              ${String(r.latest_status || "").toLowerCase() === "fail" ? ` · <span class="pill pill-red">FLAGGED</span>` : ""}
+            </div>
+          </span>
+        </label>
       </div>
       <div class="row stack-10">
         <button type="button" class="btn btn-secondary btn-sm" data-safety-use-qr="${escapeHtml(r.item_code)}">QR</button>
@@ -2018,10 +2030,37 @@ async function openSafetyRegisterPdf(blank = false) {
   setStatus("Safety PDF opened.");
 }
 
+async function openSafetyInspectionReportPdf(selectedOnly = false) {
+  const start = String(qs("safetyReportStartDate")?.value || "").trim() || new Date().toISOString().slice(0, 10);
+  const end = String(qs("safetyReportEndDate")?.value || "").trim() || start;
+  const template_key = String(qs("safetyPdfType")?.value || "").trim();
+  const selectedCodes = [...safetyReportSelectedCodes];
+  if (selectedOnly && !selectedCodes.length) {
+    alert("Select at least one equipment item in the register list first.");
+    return;
+  }
+  const q = new URLSearchParams();
+  q.set("start", start);
+  q.set("end", end);
+  if (template_key) q.set("template_key", template_key);
+  if (selectedOnly && selectedCodes.length) q.set("item_codes", selectedCodes.join(","));
+  setStatus(selectedOnly ? "Opening selected safety inspection report PDF…" : "Opening safety inspection report PDF…");
+  await openAuthedPdf(`${API}/api/safety/inspections/report.pdf?${q.toString()}`);
+  setStatus("Safety inspection report opened.");
+}
+
 async function initSafetyAdminPanel() {
   if (!qs("adminSafetyCard")) return;
   const pdfDate = qs("safetyPdfDate");
   if (pdfDate && !pdfDate.value) pdfDate.value = new Date().toISOString().slice(0, 10);
+  const reportStart = qs("safetyReportStartDate");
+  const reportEnd = qs("safetyReportEndDate");
+  if (reportEnd && !reportEnd.value) reportEnd.value = new Date().toISOString().slice(0, 10);
+  if (reportStart && !reportStart.value) {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    reportStart.value = d.toISOString().slice(0, 10);
+  }
   applySafetyQrSheetPreset();
   try {
   await loadSafetyTemplatesSelect();
@@ -15047,6 +15086,14 @@ async function init() {
         .catch((err) => setStatus("Remove error: " + err.message));
     }
   });
+  qs("safetyItemsList")?.addEventListener("change", (e) => {
+    const chk = e.target.closest("input[data-safety-report-select]");
+    if (!chk) return;
+    const code = String(chk.getAttribute("data-safety-report-select") || "").trim().toUpperCase();
+    if (!code) return;
+    if (chk.checked) safetyReportSelectedCodes.add(code);
+    else safetyReportSelectedCodes.delete(code);
+  });
   qs("safetyQrGenerate")?.addEventListener("click", () =>
     generateSafetyQr().catch((e) => setStatus("Safety QR error: " + e.message))
   );
@@ -15066,6 +15113,12 @@ async function init() {
   );
   qs("safetyPdfBlankBtn")?.addEventListener("click", () =>
     openSafetyRegisterPdf(true).catch((e) => setStatus("Safety PDF error: " + e.message))
+  );
+  qs("safetyInspectionReportAllBtn")?.addEventListener("click", () =>
+    openSafetyInspectionReportPdf(false).catch((e) => setStatus("Safety report error: " + e.message))
+  );
+  qs("safetyInspectionReportSelectedBtn")?.addEventListener("click", () =>
+    openSafetyInspectionReportPdf(true).catch((e) => setStatus("Safety report error: " + e.message))
   );
   initSafetyAdminPanel().catch(() => {});
   initTelematicsAdminPanel().catch(() => {});
