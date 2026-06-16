@@ -32,6 +32,12 @@
   function getItemCodeFromUrl() {
     return String(new URL(window.location.href).searchParams.get("item_code") || "").trim().toUpperCase();
   }
+  function getAssetCodeFromUrl() {
+    return String(new URL(window.location.href).searchParams.get("asset_code") || "").trim().toUpperCase();
+  }
+  function getTemplateKeyFromUrl() {
+    return String(new URL(window.location.href).searchParams.get("template_key") || "").trim().toLowerCase();
+  }
   function todayYmd() {
     return new Date().toISOString().slice(0, 10);
   }
@@ -99,6 +105,10 @@
     msg("");
     const q = new URLSearchParams();
     q.set("item_code", currentItemCode);
+    const assetCode = getAssetCodeFromUrl();
+    const templateKey = getTemplateKeyFromUrl();
+    if (assetCode) q.set("asset_code", assetCode);
+    if (templateKey) q.set("template_key", templateKey);
     q.set("inspection_date", currentDate);
     const data = await fetchJson(`/api/safety/inspection-context?${q.toString()}`);
     const item = data?.item || {};

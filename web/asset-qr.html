@@ -61,6 +61,28 @@
     .status.standby { color: #fde68a; border-color: #78350f; background: rgba(120,53,15,0.25); }
     .status.unknown { color: #cbd5e1; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .inspect-tabs {
+      display: inline-flex;
+      gap: 8px;
+      margin-top: 8px;
+      margin-bottom: 4px;
+      flex-wrap: wrap;
+    }
+    .inspect-tab {
+      border: 1px solid var(--line);
+      background: #111827;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .inspect-tab.is-active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
     button, a.btn {
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -83,12 +105,16 @@
     <div class="card">
       <h1>Asset QR Detail</h1>
       <div class="muted" id="sub">Loading...</div>
+      <div class="inspect-tabs" id="inspectTabs">
+        <button type="button" class="inspect-tab is-active" id="tabPrestartBtn" data-qr-tab="prestart">Pre-start</button>
+        <button type="button" class="inspect-tab" id="tabFireBtn" data-qr-tab="fire">Fire extinguisher</button>
+      </div>
       <div class="actions">
         <a class="btn primary" id="openChecklistQrBtn" href="#" style="display:none;">Start daily checklist</a>
+        <a class="btn primary" id="openFireChecklistBtn" href="#" style="display:none;">Start fire extinguisher checklist</a>
         <button class="primary" id="refreshBtn">Refresh</button>
         <a class="btn" id="openPrestartBtn" href="#" style="display:none;">LDV Pre-Start</a>
         <a class="btn" id="openMachinePrestartBtn" href="#" style="display:none;">Machine Pre-Start</a>
-        <a class="btn" id="openAppChecklistBtn" href="#" style="display:none;">Open in IRONLOG app</a>
         <a class="btn" id="openInspectionsBtn" href="#">Inspections</a>
         <a class="btn primary" id="openUndercarriageBtn" href="#" style="display:none;">Undercarriage inspection</a>
         <a class="btn" id="openHistoryBtn" href="#">Service History</a>
@@ -110,7 +136,7 @@
     </div>
   </div>
 
-  <script src="/web/asset-qr.js?v=7"></script>
+  <script src="/web/asset-qr.js?v=8"></script>
   <script>
     (function () {
       try {

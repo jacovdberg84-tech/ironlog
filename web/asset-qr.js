@@ -15,6 +15,26 @@
     if (v === "standby") return "status standby";
     return "status unknown";
   }
+  function setInspectionTab(tab) {
+    const mode = tab === "fire" ? "fire" : "prestart";
+    document.querySelectorAll("[data-qr-tab]").forEach((el) => {
+      el.classList.toggle("is-active", el.getAttribute("data-qr-tab") === mode);
+    });
+    const prestartIds = ["openChecklistQrBtn", "openPrestartBtn", "openMachinePrestartBtn"];
+    const fireIds = ["openFireChecklistBtn"];
+    prestartIds.forEach((id) => {
+      const el = qs(id);
+      if (!el) return;
+      if (el.dataset.available !== "1") return;
+      el.style.display = mode === "prestart" ? "inline-block" : "none";
+    });
+    fireIds.forEach((id) => {
+      const el = qs(id);
+      if (!el) return;
+      if (el.dataset.available !== "1") return;
+      el.style.display = mode === "fire" ? "inline-block" : "none";
+    });
+  }
 
   function inferMakeModelFromAsset(payload) {
     const asset = payload?.asset || {};
@@ -115,12 +135,13 @@
     const hasMachineChecklist = Boolean(mp?.profile_id) && !isLdv;
     const ldvChecklistUrl = `./ldv-prestart.html?asset_code=${encodeURIComponent(assetCode)}`;
     const machineChecklistUrl = `./machine-prestart.html?asset_code=${encodeURIComponent(assetCode)}`;
-    const appChecklistUrl = `./index.html?tab=vehicle&asset_code=${encodeURIComponent(assetCode)}`;
+    const fireItemCode = `FE-${assetCode}`.toUpperCase();
+    const fireChecklistUrl = `./safety-inspection.html?item_code=${encodeURIComponent(fireItemCode)}&asset_code=${encodeURIComponent(assetCode)}&template_key=fire_extinguisher`;
 
     const openChecklistQrBtn = qs("openChecklistQrBtn");
     if (openChecklistQrBtn) {
       if (isLdv || hasMachineChecklist) {
-        openChecklistQrBtn.style.display = "inline-block";
+        openChecklistQrBtn.dataset.available = "1";
         openChecklistQrBtn.href = isLdv ? ldvChecklistUrl : machineChecklistUrl;
         openChecklistQrBtn.textContent = isLdv
           ? "Start LDV checklist"
@@ -128,6 +149,7 @@
             ? `Start ${String(mp.template_title)}`
             : "Start daily checklist";
       } else {
+        openChecklistQrBtn.dataset.available = "0";
         openChecklistQrBtn.style.display = "none";
         openChecklistQrBtn.href = "#";
       }
@@ -135,6 +157,7 @@
 
     const openPrestartBtn = qs("openPrestartBtn");
     if (openPrestartBtn) {
+      openPrestartBtn.dataset.available = isLdv ? "1" : "0";
       openPrestartBtn.style.display = isLdv ? "inline-block" : "none";
       openPrestartBtn.href = ldvChecklistUrl;
       openPrestartBtn.textContent = "LDV checklist (QR form)";
@@ -142,6 +165,7 @@
 
     const openMachinePrestartBtn = qs("openMachinePrestartBtn");
     if (openMachinePrestartBtn) {
+      openMachinePrestartBtn.dataset.available = hasMachineChecklist ? "1" : "0";
       openMachinePrestartBtn.style.display = hasMachineChecklist ? "inline-block" : "none";
       openMachinePrestartBtn.href = machineChecklistUrl;
       if (hasMachineChecklist && mp?.template_title) {
@@ -151,11 +175,12 @@
       }
     }
 
-    const openAppChecklistBtn = qs("openAppChecklistBtn");
-    if (openAppChecklistBtn) {
-      openAppChecklistBtn.style.display = isLdv || hasMachineChecklist ? "inline-block" : "none";
-      openAppChecklistBtn.href = appChecklistUrl;
+    const openFireChecklistBtn = qs("openFireChecklistBtn");
+    if (openFireChecklistBtn) {
+      openFireChecklistBtn.dataset.available = "1";
+      openFireChecklistBtn.href = fireChecklistUrl;
     }
+    setInspectionTab("prestart");
   }
 
   qs("refreshBtn")?.addEventListener("click", () => {
@@ -163,6 +188,8 @@
       setText("sub", `Error: ${e.message || e}`);
     });
   });
+  qs("tabPrestartBtn")?.addEventListener("click", () => setInspectionTab("prestart"));
+  qs("tabFireBtn")?.addEventListener("click", () => setInspectionTab("fire"));
 
   loadQrProfile().catch((e) => {
     setText("sub", `Error: ${e.message || e}`);

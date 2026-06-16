@@ -135,6 +135,40 @@ function getItemByCode(itemCode) {
   `).get(code);
 }
 
+function ensureAssetFireExtinguisherItem({ itemCode, assetCode, templateKey = "fire_extinguisher", siteCode = "main" }) {
+  const code = normalizeItemCode(itemCode);
+  const asset = db.prepare(`
+    SELECT asset_code, asset_name
+    FROM assets
+    WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?))
+    LIMIT 1
+  `).get(String(assetCode || "").trim());
+  if (!asset) return null;
+  const template = getTemplate(templateKey, siteCode);
+  if (!template) return null;
+
+  db.prepare(`
+    INSERT INTO safety_equipment_items (
+      item_code, template_key, item_name, location, notes, site_code, active, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))
+    ON CONFLICT(item_code) DO UPDATE SET
+      template_key = excluded.template_key,
+      item_name = COALESCE(NULLIF(safety_equipment_items.item_name, ''), excluded.item_name),
+      location = COALESCE(NULLIF(safety_equipment_items.location, ''), excluded.location),
+      site_code = excluded.site_code,
+      active = 1,
+      updated_at = datetime('now')
+  `).run(
+    code,
+    templateKey,
+    `Fire Extinguisher (${String(asset.asset_code || "").trim()})`,
+    String(asset.asset_name || "").trim() || "Asset-mounted",
+    "Auto-linked from asset QR pre-start flow",
+    siteCode
+  );
+  return getItemByCode(code);
+}
+
 function buildSafetyQrProfile(req, item) {
   const template = getTemplate(item.template_key, item.site_code);
   const origin = resolveWebOrigin(req);
@@ -473,10 +507,20 @@ export default async function safetyRoutes(app) {
   app.get("/inspection-context", async (req, reply) => {
     try {
       const item_code = normalizeItemCode(req.query?.item_code);
+      const asset_code = String(req.query?.asset_code || "").trim().toUpperCase();
+      const template_key = String(req.query?.template_key || "").trim().toLowerCase() || "fire_extinguisher";
       const inspection_date = String(req.query?.inspection_date || "").trim() || new Date().toISOString().slice(0, 10);
       if (!item_code) return reply.code(400).send({ ok: false, error: "item_code is required" });
       if (!isDate(inspection_date)) return reply.code(400).send({ ok: false, error: "inspection_date must be YYYY-MM-DD" });
-      const item = getItemByCode(item_code);
+      let item = getItemByCode(item_code);
+      if (!item && asset_code && template_key === "fire_extinguisher") {
+        item = ensureAssetFireExtinguisherItem({
+          itemCode: item_code,
+          assetCode: asset_code,
+          templateKey: "fire_extinguisher",
+          siteCode: "main",
+        });
+      }
       if (!item) return reply.code(404).send({ ok: false, error: "Safety item not found" });
       const template = getTemplate(item.template_key, item.site_code);
       if (!template) return reply.code(404).send({ ok: false, error: "Checklist template not found" });
