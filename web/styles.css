@@ -3283,20 +3283,29 @@ body.sidebar-collapsed .main-content {
 }
 
 .checklist-asset-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 112px);
+  gap: 10px;
 }
 
 .checklist-asset-chip {
   border: 1px solid var(--line, #e5e7eb);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: 4px;
+  padding: 8px 6px;
   background: var(--card);
   color: var(--ink);
   cursor: pointer;
-  text-align: left;
-  min-width: 120px;
+  width: 112px;
+  height: 112px;
+  min-width: 112px;
+  min-height: 112px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  text-align: center;
+  overflow: hidden;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -3323,13 +3332,36 @@ body.sidebar-collapsed .main-content {
 
 .checklist-asset-chip .chip-code {
   font-weight: 700;
-  font-size: 0.88rem;
+  font-size: 0.82rem;
+  line-height: 1.15;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checklist-asset-chip .chip-status {
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.checklist-asset-chip .chip-status .pill {
+  font-size: 0.6rem !important;
+  padding: 2px 5px;
+  line-height: 1.2;
 }
 
 .checklist-asset-chip .chip-name {
-  font-size: 0.72rem;
-  color: #64748b;
-  margin-top: 2px;
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-top: auto;
+  width: 100%;
+  line-height: 1.25;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
 }
 
 .checklist-form-meta {

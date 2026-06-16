@@ -2817,10 +2817,11 @@ function renderClAssetChip(asset, selectedCode) {
   if (asset.profile_id) btn.dataset.profileId = asset.profile_id;
   const pill =
     asset.status === "compliant"
-      ? "<span class='pill green' style='font-size:0.65rem;'>DONE</span>"
-      : "<span class='pill orange' style='font-size:0.65rem;'>PENDING</span>";
+      ? "<span class='pill green'>DONE</span>"
+      : "<span class='pill orange'>PENDING</span>";
   btn.innerHTML = `
-    <div class="chip-code">${escapeHtml(asset.asset_code)} ${pill}</div>
+    <div class="chip-code">${escapeHtml(asset.asset_code)}</div>
+    <div class="chip-status">${pill}</div>
     <div class="chip-name">${escapeHtml(asset.asset_name || "")}</div>
   `;
   return btn;
@@ -2872,17 +2873,18 @@ function renderClHubSections(data) {
       if (st === "compliant" || st === "done") btn.classList.add("compliant");
       if (st === "flagged") btn.classList.add("flagged");
       if (st === "attention") btn.classList.add("attention");
-      let pill = "<span class='pill orange' style='font-size:0.65rem;'>PENDING</span>";
+      let pill = "<span class='pill orange'>PENDING</span>";
       if (st === "compliant" || st === "done") {
-        pill = "<span class='pill green' style='font-size:0.65rem;'>DONE</span>";
+        pill = "<span class='pill green'>DONE</span>";
       } else if (st === "flagged") {
-        pill = "<span class='pill pill-red' style='font-size:0.65rem;'>FLAGGED</span>";
+        pill = "<span class='pill pill-red'>FLAGGED</span>";
       } else if (st === "attention") {
-        pill = "<span class='pill amber' style='font-size:0.65rem;'>ATTENTION</span>";
+        pill = "<span class='pill amber'>ATTENTION</span>";
       }
       btn.dataset.itemCode = String(it.item_code || "");
       btn.innerHTML = `
-        <div class="chip-code">${escapeHtml(it.item_code)} ${pill}</div>
+        <div class="chip-code">${escapeHtml(it.item_code)}</div>
+        <div class="chip-status">${pill}</div>
         <div class="chip-name">${escapeHtml(it.item_name || it.template_title || "")}${it.location ? ` · ${escapeHtml(it.location)}` : ""}</div>
       `;
       grid.appendChild(btn);
