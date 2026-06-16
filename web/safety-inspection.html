@@ -50,6 +50,7 @@
     button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
     .msg { margin-top: 8px; font-size: 14px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); }
     .msg.ok { background: rgba(22, 163, 74, 0.15); border-color: rgba(22, 163, 74, 0.55); color: #bbf7d0; }
+    .msg.warn { background: rgba(217, 119, 6, 0.2); border-color: rgba(217, 119, 6, 0.65); color: #fde68a; }
     .msg.err { background: rgba(220, 38, 38, 0.18); border-color: rgba(220, 38, 38, 0.6); color: #fecaca; }
   </style>
 </head>
@@ -58,6 +59,7 @@
     <div class="card">
       <h1 id="pageTitle">Safety Inspection</h1>
       <div id="sub" class="muted">Loading...</div>
+      <div id="offlineState" class="muted" style="margin-top:6px;"></div>
       <div class="actions">
         <button id="refreshBtn" type="button">Refresh</button>
       </div>
@@ -91,6 +93,6 @@
       <div id="msg"></div>
     </div>
   </div>
-  <script src="/web/safety-inspection.js?v=2"></script>
+  <script src="/web/safety-inspection.js?v=3"></script>
 </body>
 </html>
