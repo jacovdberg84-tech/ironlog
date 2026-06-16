@@ -4929,6 +4929,19 @@ export default async function reportsRoutes(app) {
         .replaceAll("_", " ")
         .replace(/\b\w/g, (m) => m.toUpperCase())
         .trim();
+    const parseChecklistOkStatus = (status) => {
+      if (status === true) return true;
+      if (status === false) return false;
+      if (typeof status === "number") {
+        if (status === 1) return true;
+        if (status === 0) return false;
+      }
+      const st = String(status || "").trim().toLowerCase();
+      if (!st) return null;
+      if (["ok", "pass", "passed", "true", "yes", "good"].includes(st)) return true;
+      if (["attention", "unsafe", "fail", "failed", "false", "no", "bad", "fault"].includes(st)) return false;
+      return null;
+    };
     const parseManagerChecklist = (rawChecklist, rawDetails) => {
       let checklistParsed = null;
       let detailsParsed = null;
@@ -5207,16 +5220,24 @@ export default async function reportsRoutes(app) {
         return checklistParsed.map((c) => ({
           key: String(c?.key || "").trim(),
           label: String(c?.label || c?.key || "").trim(),
-          ok: c?.ok === true ? true : c?.ok === false ? false : null,
-          note: String(c?.note || "").trim() || null,
+          ok: parseChecklistOkStatus(c?.ok),
+          note: String(c?.note || c?.comment || c?.notes || "").trim() || null,
         }));
       }
       if (checklistParsed && typeof checklistParsed === "object") {
         return Object.entries(checklistParsed).map(([key, status]) => {
-          const st = String(status || "").trim().toLowerCase();
-          const ok = st === "ok" ? true : (st === "attention" || st === "unsafe" || st === "fail" || st === "failed") ? false : null;
+          const statusObj = status && typeof status === "object" && !Array.isArray(status) ? status : null;
+          const ok = parseChecklistOkStatus(statusObj ? (statusObj.ok ?? statusObj.status ?? statusObj.value) : status);
           const detail = detailsParsed && typeof detailsParsed === "object" ? detailsParsed[key] : null;
-          const note = String(detail?.comment || detail?.note || detail?.notes || "").trim() || null;
+          const note = String(
+            statusObj?.note ||
+            statusObj?.comment ||
+            statusObj?.notes ||
+            detail?.comment ||
+            detail?.note ||
+            detail?.notes ||
+            ""
+          ).trim() || null;
           return { key, label: toChecklistLabel(key), ok, note };
         });
       }
