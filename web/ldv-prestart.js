@@ -1,4 +1,7 @@
 (function () {
+  const LDV_OFFLINE_QUEUE_KEY = "ironlog_ldv_prestart_offline_queue_v1";
+  const LDV_CONTEXT_CACHE_KEY = "ironlog_ldv_prestart_context_cache_v1";
+
   function qs(id) {
     return document.getElementById(id);
   }
@@ -14,8 +17,25 @@
       box.innerHTML = "";
       return;
     }
-    box.className = `msg ${type === "ok" ? "ok" : "err"}`;
+    box.className = `msg ${type === "ok" ? "ok" : type === "warn" ? "warn" : "err"}`;
     box.textContent = text;
+  }
+  function getJsonStore(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      const parsed = JSON.parse(raw);
+      return parsed == null ? fallback : parsed;
+    } catch {
+      return fallback;
+    }
+  }
+  function setJsonStore(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      /* ignore storage failures */
+    }
   }
   function showSyncState(sync) {
     const el = qs("syncState");
@@ -81,6 +101,49 @@
   let previousKm = null;
   let currentCheckId = 0;
 
+  function queueKey(payload) {
+    return `${String(payload.asset_code || "").toUpperCase()}::${String(payload.check_date || "")}`;
+  }
+  function getOfflineQueue() {
+    const rows = getJsonStore(LDV_OFFLINE_QUEUE_KEY, []);
+    return Array.isArray(rows) ? rows : [];
+  }
+  function saveOfflineQueue(rows) {
+    setJsonStore(LDV_OFFLINE_QUEUE_KEY, Array.isArray(rows) ? rows : []);
+  }
+  function upsertOfflineQueue(payload) {
+    const key = queueKey(payload);
+    const queue = getOfflineQueue().filter((x) => String(x?.key || "") !== key);
+    queue.push({ key, created_at: new Date().toISOString(), payload });
+    saveOfflineQueue(queue);
+    return queue.length;
+  }
+  function readContextCache(assetCode) {
+    const code = String(assetCode || "").trim().toUpperCase();
+    if (!code) return null;
+    const cache = getJsonStore(LDV_CONTEXT_CACHE_KEY, {});
+    if (!cache || typeof cache !== "object") return null;
+    return cache[code] || null;
+  }
+  function writeContextCache(assetCode, data) {
+    const code = String(assetCode || "").trim().toUpperCase();
+    if (!code || !data || typeof data !== "object") return;
+    const cache = getJsonStore(LDV_CONTEXT_CACHE_KEY, {});
+    if (!cache || typeof cache !== "object") return;
+    cache[code] = { cached_at: new Date().toISOString(), data };
+    setJsonStore(LDV_CONTEXT_CACHE_KEY, cache);
+  }
+  function refreshOfflineBanner() {
+    const el = qs("offlineState");
+    if (!el) return;
+    const queued = getOfflineQueue().length;
+    if (navigator.onLine) {
+      el.textContent = queued ? `Online. ${queued} pre-start submission(s) waiting to sync.` : "Online.";
+      return;
+    }
+    el.textContent = queued ? `Offline mode. ${queued} submission(s) queued.` : "Offline mode.";
+  }
+
   async function loadContext() {
     currentAssetCode = getAssetCodeFromUrl();
     if (!currentAssetCode) {
@@ -93,7 +156,16 @@
     const q = new URLSearchParams();
     q.set("asset_code", currentAssetCode);
     q.set("check_date", currentDate);
-    const data = await fetchJson(`/api/maintenance/vehicle-ldv-checks/prestart-context?${q.toString()}`);
+    let data = null;
+    try {
+      data = await fetchJson(`/api/maintenance/vehicle-ldv-checks/prestart-context?${q.toString()}`);
+      writeContextCache(currentAssetCode, data);
+    } catch (err) {
+      const cached = readContextCache(currentAssetCode);
+      if (!cached?.data) throw err;
+      data = cached.data;
+      msg(`Offline: showing cached pre-start context from ${String(cached.cached_at || "earlier")}.`, "warn");
+    }
     const asset = data?.asset || {};
     previousKm = data?.previous_odometer_km == null ? null : Number(data.previous_odometer_km);
 
@@ -125,6 +197,33 @@
 
     const openQrBtn = qs("openQrBtn");
     if (openQrBtn) openQrBtn.href = `./asset-qr.html?asset_code=${encodeURIComponent(currentAssetCode)}`;
+    refreshOfflineBanner();
+  }
+
+  async function syncOfflineQueue() {
+    if (!navigator.onLine) return;
+    const queue = getOfflineQueue();
+    if (!queue.length) return;
+    const remaining = [];
+    let sent = 0;
+    for (const row of queue) {
+      const payload = row?.payload || null;
+      if (!payload || typeof payload !== "object") continue;
+      try {
+        await fetchJson("/api/maintenance/vehicle-ldv-checks/prestart", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        sent += 1;
+      } catch {
+        remaining.push(row);
+      }
+    }
+    saveOfflineQueue(remaining);
+    refreshOfflineBanner();
+    if (sent > 0 && !remaining.length) msg(`Synced ${sent} queued LDV pre-start(s).`, "ok");
+    else if (sent > 0) msg(`Synced ${sent} queued LDV pre-start(s). ${remaining.length} still queued.`, "warn");
   }
 
   async function submitPrestart() {
@@ -157,6 +256,14 @@
       notes: String(qs("notes")?.value || "").trim(),
       checklist,
     };
+    if (!navigator.onLine) {
+      const queued = upsertOfflineQueue(body);
+      refreshOfflineBanner();
+      showSyncState(null);
+      msg(`Offline: pre-start saved on device. Queue size ${queued}. It will sync automatically.`, "warn");
+      return;
+    }
+
     const data = await fetchJson("/api/maintenance/vehicle-ldv-checks/prestart", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -173,6 +280,7 @@
     }
     showSyncState(data?.daily_input_sync || null);
     msg(data?.message || "Pre-start submitted successfully. KM saved to IRONLOG.", data?.km_review_needed ? "err" : "ok");
+    await syncOfflineQueue();
   }
 
   async function uploadPhoto() {
@@ -207,6 +315,13 @@
   qs("uploadPhotoBtn")?.addEventListener("click", () => {
     uploadPhoto().catch((e) => msg(String(e.message || e), "err"));
   });
+  window.addEventListener("online", () => {
+    refreshOfflineBanner();
+    syncOfflineQueue().catch(() => {});
+  });
+  window.addEventListener("offline", refreshOfflineBanner);
 
   loadContext().catch((e) => msg(String(e.message || e), "err"));
+  refreshOfflineBanner();
+  syncOfflineQueue().catch(() => {});
 })();

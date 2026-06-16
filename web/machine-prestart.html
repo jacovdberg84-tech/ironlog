@@ -153,6 +153,11 @@
       border-color: rgba(22, 163, 74, 0.55);
       color: #bbf7d0;
     }
+    .msg.warn {
+      background: rgba(217, 119, 6, 0.2);
+      border-color: rgba(217, 119, 6, 0.65);
+      color: #fde68a;
+    }
     .msg.err {
       background: rgba(220, 38, 38, 0.18);
       border-color: rgba(220, 38, 38, 0.6);
@@ -170,6 +175,7 @@
     <div class="card">
       <h1 id="pageTitle">Machine pre-start</h1>
       <div id="sub" class="muted">Loading...</div>
+      <div id="offlineState" class="muted" style="margin-top:6px;"></div>
       <div class="actions">
         <a class="btn" id="openQrBtn" href="#">Asset QR summary</a>
         <button id="refreshBtn" type="button">Refresh</button>
@@ -221,6 +227,6 @@
       <div id="msg"></div>
     </div>
   </div>
-  <script src="/web/machine-prestart.js?v=1"></script>
+  <script src="/web/machine-prestart.js?v=2"></script>
 </body>
 </html>
