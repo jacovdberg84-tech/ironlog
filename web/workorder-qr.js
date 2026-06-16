@@ -25,47 +25,97 @@
     return data || {};
   }
 
+  let currentStatus = "";
+  let assignedTechnician = "";
+
+  function isAssignedToMe() {
+    const me = getUser().trim().toLowerCase();
+    const assigned = String(assignedTechnician || "").trim().toLowerCase();
+    return Boolean(me && assigned && me === assigned);
+  }
+
+  function renderActions() {
+    const startBtn = qs("woStartBtn");
+    const completeBtn = qs("woCompleteBtn");
+    const notesWrap = qs("woNotesWrap");
+    const st = String(currentStatus || "").toLowerCase();
+    const role = getRole();
+    const mine = isAssignedToMe();
+
+    if (startBtn) startBtn.style.display = role === "artisan" && st === "assigned" && mine ? "inline-block" : "none";
+    if (completeBtn) completeBtn.style.display =
+      (role === "artisan" && st === "in_progress" && mine) || (["admin", "supervisor"].includes(role) && st === "in_progress")
+        ? "inline-block"
+        : "none";
+    if (notesWrap) notesWrap.style.display = completeBtn && completeBtn.style.display !== "none" ? "block" : "none";
+
+    const hint = qs("woActionHint");
+    if (!hint) return;
+    if (st === "assigned" && !mine && role === "artisan") {
+      hint.textContent = `This job is assigned to ${assignedTechnician || "another technician"}.`;
+      return;
+    }
+    if (st === "assigned" && mine) hint.textContent = "Tap Start job when you begin work.";
+    else if (st === "in_progress" && (mine || ["admin", "supervisor"].includes(role))) {
+      hint.textContent = "Add completion notes, then submit for supervisor approval.";
+    } else if (st === "completed") hint.textContent = "Job submitted. Waiting for supervisor approval.";
+    else if (st === "approved") hint.textContent = "Approved. Supervisor will close the work order.";
+    else hint.textContent = role === "artisan" ? "No technician action available for this status." : "";
+  }
+
   async function loadWoProfile() {
     const woId = getWoId();
     if (!woId) { setText("woQrSub", "Missing wo_id in QR URL."); return; }
     setText("woQrSub", `Loading WO #${woId}...`);
-    const data = await fetchJson(`/api/workorders/${woId}/qr-profile`, { headers: headers() });
-    const p = data?.live_preview || data?.stored?.qr_payload || {};
+    const detail = await fetchJson(`/api/workorders/${woId}`, { headers: headers() });
+    const wo = detail?.work_order || {};
+    const pAsset = detail?.work_order || {};
     setText("woQrSub", `Work order #${woId} loaded`);
-    setText("woId", String(p?.work_order?.id || woId));
-    const st = String(p?.work_order?.status || "-");
+    setText("woId", String(wo.id || woId));
+    currentStatus = String(wo.status || "");
+    assignedTechnician = String(wo.assigned_artisan_name || "");
     const stEl = qs("woStatus");
-    if (stEl) { stEl.textContent = st.toUpperCase(); stEl.className = statusClass(st); }
-    setText("woSource", String(p?.work_order?.source || "-"));
-    setText("woAsset", `${String(p?.asset?.asset_code || "-")} - ${String(p?.asset?.asset_name || "-")}`);
-    setText("woMakeModel", `${String(p?.asset?.make || "-")} / ${String(p?.asset?.model || "-")}`);
-    setText("woOpened", String(p?.work_order?.opened_at || "-"));
+    if (stEl) { stEl.textContent = currentStatus.toUpperCase() || "-"; stEl.className = statusClass(currentStatus); }
+    setText("woSource", String(wo.source || "-"));
+    setText("woAsset", `${String(wo.asset_code || "-")} - ${String(wo.asset_name || "-")}`);
+    setText("woMakeModel", `${String(pAsset.make || "-")} / ${String(pAsset.model || "-")}`);
+    setText("woOpened", String(wo.opened_at || "-"));
+    setText("woAssigned", assignedTechnician || "Unassigned");
+    if (qs("woArtisan")) qs("woArtisan").value = getUser();
+    renderActions();
   }
 
-  async function submitUpdate() {
+  async function startJob() {
     const woId = getWoId();
     if (!woId) return;
-    const nextStatus = String(qs("woNextStatus")?.value || "").trim().toLowerCase();
-    const notes = String(qs("woNotes")?.value || "").trim();
-    const artisan = String(qs("woArtisan")?.value || getUser()).trim();
-    setText("woActionMsg", "Submitting update...");
+    setText("woActionMsg", "Starting job...");
     await fetchJson(`/api/workorders/${woId}/status`, {
       method: "POST",
       headers: headers({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ status: nextStatus }),
+      body: JSON.stringify({ status: "in_progress", artisan_name: getUser() }),
     });
-    if (nextStatus === "completed") {
-      await fetchJson(`/api/workorders/${woId}/request-close`, {
-        method: "POST",
-        headers: headers({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ completion_notes: notes || null, artisan_name: artisan || null }),
-      });
-    }
-    setText("woActionMsg", `Update submitted: ${nextStatus}${nextStatus === "completed" ? " (approval requested)" : ""} ✅`);
+    setText("woActionMsg", "Job started.");
+    await loadWoProfile();
+  }
+
+  async function completeJob() {
+    const woId = getWoId();
+    if (!woId) return;
+    const notes = String(qs("woNotes")?.value || "").trim();
+    const artisan = String(qs("woArtisan")?.value || getUser()).trim();
+    if (!notes) throw new Error("Completion notes are required.");
+    setText("woActionMsg", "Submitting completion...");
+    await fetchJson(`/api/workorders/${woId}/status`, {
+      method: "POST",
+      headers: headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ status: "completed", completion_notes: notes, artisan_name: artisan }),
+    });
+    setText("woActionMsg", "Job marked complete. Waiting for supervisor approval.");
     await loadWoProfile();
   }
 
   qs("woQrRefresh")?.addEventListener("click", () => loadWoProfile().catch((e) => setText("woQrSub", `Error: ${e.message || e}`)));
-  qs("woSubmitUpdate")?.addEventListener("click", () => submitUpdate().catch((e) => setText("woActionMsg", `Error: ${e.message || e}`)));
+  qs("woStartBtn")?.addEventListener("click", () => startJob().catch((e) => setText("woActionMsg", `Error: ${e.message || e}`)));
+  qs("woCompleteBtn")?.addEventListener("click", () => completeJob().catch((e) => setText("woActionMsg", `Error: ${e.message || e}`)));
   loadWoProfile().catch((e) => setText("woQrSub", `Error: ${e.message || e}`));
 })();

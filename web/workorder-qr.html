@@ -42,35 +42,30 @@
         <div class="kv"><div class="k">Asset</div><div class="v" id="woAsset">-</div></div>
         <div class="kv"><div class="k">Make / Model</div><div class="v" id="woMakeModel">-</div></div>
         <div class="kv"><div class="k">Opened</div><div class="v" id="woOpened">-</div></div>
+        <div class="kv"><div class="k">Assigned technician</div><div class="v" id="woAssigned">-</div></div>
       </div>
     </div>
 
     <div class="card">
-      <h3 style="margin-top:0;">Artisan Update</h3>
+      <h3 style="margin-top:0;">Technician actions</h3>
       <div class="grid">
         <div class="kv">
-          <div class="k">Artisan Name</div>
-          <input id="woArtisan" placeholder="Artisan name" />
-        </div>
-        <div class="kv">
-          <div class="k">New Status</div>
-          <select id="woNextStatus">
-            <option value="assigned">assigned</option>
-            <option value="in_progress">in_progress</option>
-            <option value="completed">completed</option>
-          </select>
+          <div class="k">Technician sign-off</div>
+          <input id="woArtisan" placeholder="Your name" />
         </div>
       </div>
-      <div style="margin-top:10px;">
-        <div class="k">Completion / Work Notes</div>
+      <div id="woNotesWrap" style="margin-top:10px; display:none;">
+        <div class="k">Completion notes *</div>
         <textarea id="woNotes" rows="4" placeholder="Work done, defects found, follow-up needed..."></textarea>
       </div>
       <div class="row" style="margin-top:10px;">
-        <button id="woSubmitUpdate">Submit Update</button>
+        <button class="primary" id="woStartBtn" type="button" style="display:none;">Start job</button>
+        <button class="primary" id="woCompleteBtn" type="button" style="display:none;">Mark complete</button>
       </div>
+      <div id="woActionHint" class="k" style="margin-top:8px;"></div>
       <div id="woActionMsg" class="k" style="margin-top:8px;"></div>
     </div>
   </div>
-  <script src="/web/workorder-qr.js?v=1"></script>
+  <script src="/web/workorder-qr.js?v=2"></script>
 </body>
 </html>

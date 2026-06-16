@@ -118,6 +118,9 @@ export default async function workOrderRoutes(app) {
   ensureColumn("work_orders", "supervisor_signed_at", "supervisor_signed_at TEXT");
   ensureColumn("work_orders", "completed_at", "completed_at TEXT");
   ensureColumn("work_orders", "assigned_artisan_name", "assigned_artisan_name TEXT");
+  ensureColumn("work_orders", "assigned_at", "assigned_at TEXT");
+  ensureColumn("work_orders", "assigned_by", "assigned_by TEXT");
+  ensureColumn("work_orders", "started_at", "started_at TEXT");
   ensureColumn("work_orders", "shift", "shift TEXT");
   ensureColumn("work_orders", "priority", "priority TEXT");
   ensureColumn("work_orders", "due_date", "due_date TEXT");
@@ -365,6 +368,12 @@ export default async function workOrderRoutes(app) {
         w.source,
         w.reference_id,
         w.status,
+        w.assigned_artisan_name,
+        w.assigned_at,
+        w.started_at,
+        w.completed_at,
+        w.artisan_name,
+        w.supervisor_name,
         CASE
           WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(b.start_at), ''), NULLIF(TRIM(b.breakdown_date), ''), w.opened_at)
           ELSE w.opened_at
@@ -379,11 +388,61 @@ export default async function workOrderRoutes(app) {
       WHERE LOWER(TRIM(COALESCE(w.site_code, 'main'))) = ?
     `;
 
-    const rows = status
+    let rows = status
       ? db.prepare(baseSql + ` AND w.status = ? ORDER BY w.id DESC LIMIT 200`).all(siteCode, status)
       : db.prepare(baseSql + ` ORDER BY w.id DESC LIMIT 200`).all(siteCode);
 
+    const role = getRole(req);
+    const userName = String(req.headers["x-user-name"] || "").trim().toLowerCase();
+    if (role === "artisan" && userName) {
+      rows = rows.filter(
+        (r) => String(r.assigned_artisan_name || "").trim().toLowerCase() === userName
+      );
+    }
+
     return rows;
+  });
+
+  app.get("/technicians", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "artisan", "stores", "operator"])) return;
+    const names = new Set();
+    const rules = db.prepare(`
+      SELECT DISTINCT artisan_name
+      FROM wo_assignment_rules
+      WHERE active = 1 AND TRIM(COALESCE(artisan_name, '')) <> ''
+      ORDER BY artisan_name ASC
+    `).all();
+    for (const r of rules) names.add(String(r.artisan_name || "").trim());
+
+    if (hasTable("users")) {
+      const users = db.prepare(`
+        SELECT username, full_name, role, roles_json
+        FROM users
+        WHERE COALESCE(active, 1) = 1
+          AND (
+            LOWER(TRIM(COALESCE(role, ''))) = 'artisan'
+            OR LOWER(COALESCE(roles_json, '')) LIKE '%artisan%'
+          )
+      `).all();
+      for (const u of users) {
+        const label = String(u.full_name || u.username || "").trim();
+        if (label) names.add(label);
+      }
+    }
+
+    const assigned = db.prepare(`
+      SELECT DISTINCT assigned_artisan_name AS name
+      FROM work_orders
+      WHERE TRIM(COALESCE(assigned_artisan_name, '')) <> ''
+      ORDER BY assigned_artisan_name ASC
+      LIMIT 200
+    `).all();
+    for (const r of assigned) names.add(String(r.name || "").trim());
+
+    return {
+      ok: true,
+      technicians: [...names].filter(Boolean).sort((a, b) => a.localeCompare(b)),
+    };
   });
 
   app.get("/schedule/board", async (req) => {
@@ -611,6 +670,52 @@ export default async function workOrderRoutes(app) {
     return { ok: true, id };
   });
 
+  app.post("/:id/assign", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+
+    const assigned_artisan_name = String(req.body?.assigned_artisan_name || "").trim();
+    if (!assigned_artisan_name) {
+      return reply.code(400).send({ error: "assigned_artisan_name is required" });
+    }
+
+    const wo = db.prepare(`SELECT id, status, assigned_artisan_name FROM work_orders WHERE id = ?`).get(id);
+    if (!wo) return reply.code(404).send({ error: "work order not found" });
+
+    const status = String(wo.status || "").toLowerCase();
+    if (!["open", "assigned"].includes(status)) {
+      return reply.code(409).send({ error: "work order can only be assigned while open or already assigned" });
+    }
+
+    const assignedBy = String(req.headers["x-user-name"] || "supervisor").trim() || "supervisor";
+    db.prepare(`
+      UPDATE work_orders
+      SET
+        assigned_artisan_name = ?,
+        assigned_at = datetime('now'),
+        assigned_by = ?,
+        status = 'assigned'
+      WHERE id = ?
+    `).run(assigned_artisan_name, assignedBy, id);
+
+    writeAudit(db, req, {
+      module: "workorders",
+      action: "assign",
+      entity_type: "work_order",
+      entity_id: id,
+      payload: { assigned_artisan_name, assigned_by: assignedBy, from_status: status },
+    });
+
+    return reply.send({
+      ok: true,
+      id,
+      status: "assigned",
+      assigned_artisan_name,
+      assigned_by: assignedBy,
+    });
+  });
+
   app.post("/schedule/auto-assign", async (req, reply) => {
     if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
     const rules = db.prepare(`
@@ -827,7 +932,7 @@ export default async function workOrderRoutes(app) {
     }
 
     const wo = db.prepare(`
-      SELECT id, status
+      SELECT id, status, assigned_artisan_name, artisan_name
       FROM work_orders
       WHERE id = ?
     `).get(id);
@@ -860,18 +965,94 @@ export default async function workOrderRoutes(app) {
       });
     }
 
-    db.prepare(`
-      UPDATE work_orders
-      SET status = ?
-      WHERE id = ?
-    `).run(nextStatus, id);
+    const userName = String(req.headers["x-user-name"] || "").trim();
+    const assignedName = String(wo.assigned_artisan_name || "").trim();
+    if (role === "artisan") {
+      if (!assignedName) {
+        return reply.code(409).send({ error: "work order is not assigned to a technician yet" });
+      }
+      if (assignedName.toLowerCase() !== userName.toLowerCase()) {
+        return reply.code(403).send({ error: "this work order is assigned to another technician" });
+      }
+    }
+
+    const body = req.body || {};
+    const completion_notes =
+      body.completion_notes != null && String(body.completion_notes).trim() !== ""
+        ? String(body.completion_notes).trim()
+        : null;
+    const artisan_name =
+      body.artisan_name != null && String(body.artisan_name).trim() !== ""
+        ? String(body.artisan_name).trim()
+        : assignedName || userName || null;
+    const supervisor_name =
+      body.supervisor_name != null && String(body.supervisor_name).trim() !== ""
+        ? String(body.supervisor_name).trim()
+        : userName || null;
+
+    if (nextStatus === "in_progress" && !["assigned", "open"].includes(currentStatus)) {
+      return reply.code(409).send({ error: "work order must be assigned before starting" });
+    }
+    if (role === "artisan" && nextStatus === "in_progress" && currentStatus !== "assigned") {
+      return reply.code(409).send({ error: "technician can only start an assigned work order" });
+    }
+    if (nextStatus === "completed") {
+      if (!completion_notes) {
+        return reply.code(400).send({ error: "completion_notes is required when marking a job complete" });
+      }
+    }
+    if (nextStatus === "approved" && !["admin", "supervisor"].includes(role)) {
+      return reply.code(403).send({ error: "only a supervisor can approve completed work" });
+    }
+
+    if (nextStatus === "in_progress") {
+      db.prepare(`
+        UPDATE work_orders
+        SET
+          status = ?,
+          started_at = COALESCE(started_at, datetime('now')),
+          artisan_name = COALESCE(?, artisan_name, assigned_artisan_name)
+        WHERE id = ?
+      `).run(nextStatus, artisan_name, id);
+    } else if (nextStatus === "completed") {
+      db.prepare(`
+        UPDATE work_orders
+        SET
+          status = ?,
+          completed_at = datetime('now'),
+          completion_notes = COALESCE(?, completion_notes),
+          artisan_name = COALESCE(?, artisan_name, assigned_artisan_name),
+          artisan_signed_at = datetime('now')
+        WHERE id = ?
+      `).run(nextStatus, completion_notes, artisan_name, id);
+    } else if (nextStatus === "approved") {
+      db.prepare(`
+        UPDATE work_orders
+        SET
+          status = ?,
+          supervisor_name = COALESCE(?, supervisor_name),
+          supervisor_signed_at = datetime('now')
+        WHERE id = ?
+      `).run(nextStatus, supervisor_name, id);
+    } else {
+      db.prepare(`
+        UPDATE work_orders
+        SET status = ?
+        WHERE id = ?
+      `).run(nextStatus, id);
+    }
 
     writeAudit(db, req, {
       module: "workorders",
       action: "status_change",
       entity_type: "work_order",
       entity_id: id,
-      payload: { from: currentStatus, to: nextStatus },
+      payload: {
+        from: currentStatus,
+        to: nextStatus,
+        assigned_artisan_name: assignedName || null,
+        completion_notes: completion_notes || null,
+      },
     });
 
     return reply.send({ ok: true, id, from: currentStatus, status: nextStatus });

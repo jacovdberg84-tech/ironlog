@@ -1,8 +1,11 @@
 const API = "/api";
 let closingWorkOrderId = null;
 let closingWorkOrderSource = "";
+let assigningWorkOrderId = null;
+let completingWorkOrderId = null;
 let currentDetailWorkOrderId = null;
 let stockCatalogCache = [];
+let technicianOptions = [];
 const ROLE_KEY = "ironlog_session_role";
 const USER_KEY = "ironlog_session_user";
 
@@ -40,16 +43,54 @@ function canRoleClose(role) {
   return ["admin", "supervisor"].includes(String(role || "").toLowerCase());
 }
 
+function isSupervisorRole(role) {
+  return ["admin", "supervisor"].includes(String(role || "").toLowerCase());
+}
+
+function isArtisanRole(role) {
+  return String(role || "").toLowerCase() === "artisan";
+}
+
+function isAssignedToMe(wo) {
+  const me = getSessionUser().trim().toLowerCase();
+  const assigned = String(wo?.assigned_artisan_name || "").trim().toLowerCase();
+  return Boolean(me && assigned && me === assigned);
+}
+
+function workflowStepClass(current, step) {
+  const order = ["open", "assigned", "in_progress", "completed", "approved", "closed"];
+  const curIdx = order.indexOf(String(current || "").toLowerCase());
+  const stepIdx = order.indexOf(step);
+  if (curIdx < 0 || stepIdx < 0) return "pill";
+  if (curIdx > stepIdx) return "pill green";
+  if (curIdx === stepIdx) return "pill blue";
+  return "pill";
+}
+
+function workflowStepsHtml(wo) {
+  const s = String(wo?.status || "open").toLowerCase();
+  return `
+    <div class="row" style="gap:6px; flex-wrap:wrap; margin:8px 0;">
+      <span class="${workflowStepClass(s, "open")}" style="font-size:0.65rem;">Open</span>
+      <span class="${workflowStepClass(s, "assigned")}" style="font-size:0.65rem;">Assigned</span>
+      <span class="${workflowStepClass(s, "in_progress")}" style="font-size:0.65rem;">In progress</span>
+      <span class="${workflowStepClass(s, "completed")}" style="font-size:0.65rem;">Awaiting approval</span>
+      <span class="${workflowStepClass(s, "approved")}" style="font-size:0.65rem;">Approved</span>
+      <span class="${workflowStepClass(s, "closed")}" style="font-size:0.65rem;">Closed</span>
+    </div>
+  `;
+}
+
 function rolePermissionText(role) {
   const r = String(role || "").toLowerCase();
   if (r === "admin") {
     return "Admin: full control (status transitions, approvals, close, issue parts).";
   }
   if (r === "supervisor") {
-    return "Supervisor: full workflow control (assign/start/approve/close) and issue parts.";
+    return "Supervisor: assign a technician, approve completed jobs, then close work orders.";
   }
   if (r === "artisan") {
-    return "Artisan: execution flow only (start, complete, return to progress) and can request close approval. Cannot approve/close or issue parts.";
+    return "Technician: start assigned jobs, complete with notes, then wait for supervisor approval.";
   }
   if (r === "stores") {
     return "Stores: issue/allocate parts only. Cannot change work order statuses or close.";
@@ -96,34 +137,41 @@ function woPriority(status, openedAt) {
   return "P3";
 }
 
-function statusActionButtons(wo) {
+function workflowActionButtons(wo) {
   const role = getSessionRole();
   const s = String(wo?.status || "").toLowerCase();
   if (s === "closed") return "";
 
-  const map = {
-    open: [{ label: "Assign", to: "assigned" }, { label: "Start", to: "in_progress" }],
-    assigned: [{ label: "Start", to: "in_progress" }, { label: "Reopen", to: "open" }],
-    in_progress: [{ label: "Complete", to: "completed" }, { label: "Unassign", to: "assigned" }],
-    completed: [{ label: "Approve", to: "approved" }, { label: "Back To Progress", to: "in_progress" }],
-    approved: [{ label: "Reopen Completed", to: "completed" }],
-  };
+  const buttons = [];
+  if (isSupervisorRole(role) && ["open", "assigned"].includes(s)) {
+    buttons.push(`<button data-assign-id="${wo.id}" style="margin-top:8px;">Assign technician</button>`);
+  }
+  if (isSupervisorRole(role) && s === "open" && wo.assigned_artisan_name) {
+    buttons.push(`<button data-set-status-id="${wo.id}" data-set-status="in_progress" style="margin-top:8px;">Start job</button>`);
+  }
+  if (isArtisanRole(role) && s === "assigned" && isAssignedToMe(wo)) {
+    buttons.push(`<button data-set-status-id="${wo.id}" data-set-status="in_progress" style="margin-top:8px;">Start job</button>`);
+  }
+  if (isArtisanRole(role) && s === "in_progress" && isAssignedToMe(wo)) {
+    buttons.push(`<button data-complete-id="${wo.id}" style="margin-top:8px;">Mark complete</button>`);
+  }
+  if (isSupervisorRole(role) && s === "in_progress") {
+    buttons.push(`<button data-complete-id="${wo.id}" style="margin-top:8px;">Mark complete</button>`);
+  }
+  if (isSupervisorRole(role) && s === "completed") {
+    buttons.push(`<button data-approve-id="${wo.id}" style="margin-top:8px;">Approve job</button>`);
+  }
+  if (isSupervisorRole(role) && s === "approved") {
+    buttons.push(`<button data-close-id="${wo.id}" data-close-source="${String(wo.source || "").toLowerCase()}" style="margin-top:8px;">Close work order</button>`);
+  }
+  if (isArtisanRole(role) && ["completed", "approved"].includes(s) && isAssignedToMe(wo)) {
+    buttons.push(`<button data-request-close-id="${wo.id}" data-request-close-source="${String(wo.source || "").toLowerCase()}" style="margin-top:8px;">Request close approval</button>`);
+  }
 
-  const actions = (map[s] || []).filter((a) => canRoleTransition(role, s, a.to));
-  return actions
-    .map(
-      (a) =>
-        `<button data-set-status-id="${wo.id}" data-set-status="${a.to}" style="margin-top:8px;">${a.label}</button>`
-    )
-    .join("");
+  return buttons.join("");
 }
 
 function workOrderCard(wo) {
-  const role = getSessionRole();
-  const canClose = String(wo.status || "").toLowerCase() !== "closed" && canRoleClose(role);
-  const canRequestClose =
-    role === "artisan" &&
-    ["completed", "approved"].includes(String(wo.status || "").toLowerCase());
   const ageHours = woAgeHours(wo.opened_at);
   const p = woPriority(wo.status, wo.opened_at);
   const pClass = p === "P1" ? "pri-p1" : p === "P2" ? "pri-p2" : "pri-p3";
@@ -136,8 +184,10 @@ function workOrderCard(wo) {
       <div><strong>Opened:</strong> ${wo.opened_at || "-"}</div>
       <div><strong>Age:</strong> ${ageHours}h <span class="pill ${pClass}">${p}</span></div>
       <div><strong>Closed:</strong> ${wo.closed_at || "-"}</div>
+      <div><strong>Technician:</strong> ${wo.assigned_artisan_name || wo.artisan_name || "Unassigned"}</div>
+      ${workflowStepsHtml(wo)}
       <div class="${statusClass(wo.status)}">${String(wo.status || "unknown").toUpperCase()}</div>
-      ${statusActionButtons(wo)}
+      ${workflowActionButtons(wo)}
       <button data-pdf-id="${wo.id}" style="margin-top:8px;">Open PDF</button>
       <button data-pdf-download-id="${wo.id}" style="margin-top:8px;">Download PDF</button>
       <button data-view-id="${wo.id}" style="margin-top:8px;">View Detail</button>
@@ -145,8 +195,6 @@ function workOrderCard(wo) {
       <button data-wo-qr-print="${wo.id}" style="margin-top:8px;">Print WO QR</button>
       <button data-wo-qr-png="${wo.id}" style="margin-top:8px;">Download WO QR PNG</button>
       <button data-wo-qr-link="${wo.id}" style="margin-top:8px;">Copy WO Link</button>
-      ${canRequestClose ? `<button data-request-close-id="${wo.id}" data-request-close-source="${String(wo.source || "").toLowerCase()}" style="margin-top:8px;">Request Close Approval</button>` : ""}
-      ${canClose ? `<button data-close-id="${wo.id}" data-close-source="${String(wo.source || "").toLowerCase()}" style="margin-top:8px;">Close Work Order</button>` : ""}
     </div>
   `;
 }
@@ -374,8 +422,28 @@ function renderDetail(payload) {
           <div><strong>Source:</strong> ${sourceLabel(wo.source)}</div>
           <div><strong>Reference:</strong> ${wo.reference_id ?? "-"}</div>
           <div><strong>Status:</strong> ${String(wo.status || "").toUpperCase()}</div>
+          <div><strong>Assigned technician:</strong> ${wo.assigned_artisan_name || "Unassigned"}</div>
+          <div><strong>Assigned at:</strong> ${wo.assigned_at || "-"}</div>
+          <div><strong>Started:</strong> ${wo.started_at || "-"}</div>
+          <div><strong>Completed:</strong> ${wo.completed_at || "-"}</div>
+          <div><strong>Technician sign-off:</strong> ${wo.artisan_name || "-"}</div>
+          <div><strong>Supervisor sign-off:</strong> ${wo.supervisor_name || "-"}</div>
           <div><strong>Opened:</strong> ${wo.opened_at || "-"}</div>
           <div><strong>Closed:</strong> ${wo.closed_at || "-"}</div>
+          ${workflowStepsHtml(wo)}
+          ${isSupervisorRole(getSessionRole()) ? `
+            <div class="row" style="gap:8px; flex-wrap:wrap; margin-top:10px;">
+              <button type="button" data-assign-id="${wo.id}">Assign technician</button>
+              ${String(wo.status || "").toLowerCase() === "completed" ? `<button type="button" data-approve-id="${wo.id}">Approve job</button>` : ""}
+              ${String(wo.status || "").toLowerCase() === "approved" ? `<button type="button" data-close-id="${wo.id}" data-close-source="${String(wo.source || "").toLowerCase()}">Close work order</button>` : ""}
+            </div>
+          ` : ""}
+          ${isArtisanRole(getSessionRole()) && isAssignedToMe(wo) ? `
+            <div class="row" style="gap:8px; flex-wrap:wrap; margin-top:10px;">
+              ${String(wo.status || "").toLowerCase() === "assigned" ? `<button type="button" data-set-status-id="${wo.id}" data-set-status="in_progress">Start job</button>` : ""}
+              ${String(wo.status || "").toLowerCase() === "in_progress" ? `<button type="button" data-complete-id="${wo.id}">Mark complete</button>` : ""}
+            </div>
+          ` : ""}
         </div>
       </div>
 
@@ -691,7 +759,166 @@ async function issueToWorkOrder() {
   }
 }
 
-async function setWorkOrderStatus(id, status) {
+async function loadTechnicians() {
+  try {
+    const data = await fetchJson(`${API}/workorders/technicians`, { headers: authHeaders() });
+    technicianOptions = Array.isArray(data?.technicians) ? data.technicians : [];
+  } catch {
+    technicianOptions = [];
+  }
+  return technicianOptions;
+}
+
+function fillTechnicianSelect(selectEl, selectedName = "") {
+  if (!selectEl) return;
+  const selected = String(selectedName || "").trim();
+  const options = Array.isArray(technicianOptions) ? technicianOptions : [];
+  const merged = selected && !options.includes(selected) ? [selected, ...options] : options;
+  selectEl.innerHTML =
+    `<option value="">Select technician...</option>` +
+    merged.map((name) => {
+      const esc = String(name).replace(/"/g, "&quot;");
+      const sel = selected && selected.toLowerCase() === String(name).toLowerCase() ? " selected" : "";
+      return `<option value="${esc}"${sel}>${esc}</option>`;
+    }).join("");
+}
+
+function openAssignModal(id) {
+  const woId = Number(id || 0);
+  if (!woId) return;
+  assigningWorkOrderId = woId;
+  const modal = document.getElementById("woAssignModal");
+  const title = document.getElementById("woAssignModalTitle");
+  const select = document.getElementById("woAssignTechnician");
+  const manual = document.getElementById("woAssignTechnicianManual");
+  const msgEl = document.getElementById("woAssignModalMsg");
+  if (!modal || !title || !select) return;
+  title.textContent = `#${woId}`;
+  fillTechnicianSelect(select);
+  if (manual) manual.value = "";
+  if (msgEl) {
+    msgEl.className = "";
+    msgEl.textContent = "";
+  }
+  modal.style.display = "flex";
+}
+
+function closeAssignModal() {
+  assigningWorkOrderId = null;
+  const modal = document.getElementById("woAssignModal");
+  if (modal) modal.style.display = "none";
+}
+
+async function submitAssignWorkOrder() {
+  const woId = Number(assigningWorkOrderId || 0);
+  if (!woId) return;
+  const select = document.getElementById("woAssignTechnician");
+  const manual = document.getElementById("woAssignTechnicianManual");
+  const msgEl = document.getElementById("woAssignModalMsg");
+  const confirmBtn = document.getElementById("woAssignConfirmBtn");
+  const assigned_artisan_name =
+    String(manual?.value || "").trim() || String(select?.value || "").trim();
+  if (!assigned_artisan_name) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = "Select or type a technician name.";
+    }
+    return;
+  }
+  if (confirmBtn) confirmBtn.disabled = true;
+  if (msgEl) {
+    msgEl.className = "";
+    msgEl.textContent = "Assigning...";
+  }
+  try {
+    await fetchJson(`${API}/workorders/${woId}/assign`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ assigned_artisan_name }),
+    });
+    closeAssignModal();
+    await fetchWorkOrders();
+    await loadWorkOrderDetail(woId);
+  } catch (err) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = err.message || String(err);
+    }
+  } finally {
+    if (confirmBtn) confirmBtn.disabled = false;
+  }
+}
+
+function openCompleteModal(id) {
+  const woId = Number(id || 0);
+  if (!woId) return;
+  completingWorkOrderId = woId;
+  const modal = document.getElementById("woCompleteModal");
+  const title = document.getElementById("woCompleteModalTitle");
+  const notesEl = document.getElementById("woCompleteNotes");
+  const artisanEl = document.getElementById("woCompleteArtisan");
+  const msgEl = document.getElementById("woCompleteModalMsg");
+  if (!modal || !title || !notesEl || !artisanEl) return;
+  title.textContent = `#${woId}`;
+  notesEl.value = "";
+  artisanEl.value = getSessionUser();
+  if (msgEl) {
+    msgEl.className = "";
+    msgEl.textContent = "";
+  }
+  modal.style.display = "flex";
+}
+
+function closeCompleteModal() {
+  completingWorkOrderId = null;
+  const modal = document.getElementById("woCompleteModal");
+  if (modal) modal.style.display = "none";
+}
+
+async function submitCompleteWorkOrder() {
+  const woId = Number(completingWorkOrderId || 0);
+  if (!woId) return;
+  const notesEl = document.getElementById("woCompleteNotes");
+  const artisanEl = document.getElementById("woCompleteArtisan");
+  const msgEl = document.getElementById("woCompleteModalMsg");
+  const confirmBtn = document.getElementById("woCompleteConfirmBtn");
+  const completion_notes = String(notesEl?.value || "").trim();
+  const artisan_name = String(artisanEl?.value || getSessionUser()).trim();
+  if (!completion_notes) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = "Completion notes are required.";
+    }
+    return;
+  }
+  if (confirmBtn) confirmBtn.disabled = true;
+  if (msgEl) {
+    msgEl.className = "";
+    msgEl.textContent = "Submitting...";
+  }
+  try {
+    await setWorkOrderStatus(woId, "completed", { completion_notes, artisan_name });
+    closeCompleteModal();
+  } catch (err) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = err.message || String(err);
+    }
+  } finally {
+    if (confirmBtn) confirmBtn.disabled = false;
+  }
+}
+
+async function approveWorkOrder(id) {
+  const woId = Number(id || 0);
+  if (!woId) return;
+  const supervisor_name = getSessionUser();
+  const ok = window.confirm(`Approve completed work on WO #${woId}?`);
+  if (!ok) return;
+  await setWorkOrderStatus(woId, "approved", { supervisor_name });
+}
+
+async function setWorkOrderStatus(id, status, extraBody = {}) {
   const woId = Number(id || 0);
   const next = String(status || "").trim().toLowerCase();
   if (!woId || !next) return;
@@ -703,7 +930,7 @@ async function setWorkOrderStatus(id, status) {
         ...authHeaders(),
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ status: next })
+      body: JSON.stringify({ status: next, ...extraBody })
     });
     const data = await res.json();
     if (!res.ok) {
@@ -711,9 +938,11 @@ async function setWorkOrderStatus(id, status) {
     }
     await fetchWorkOrders();
     await loadWorkOrderDetail(woId);
+    return data;
   } catch (err) {
     console.error("Set status error:", err);
     alert(`Could not update status: ${err.message}`);
+    throw err;
   }
 }
 
@@ -778,6 +1007,9 @@ document.addEventListener("DOMContentLoaded", () => {
   if (!["admin", "supervisor"].includes(role) && awaitingApprovalBtn) {
     awaitingApprovalBtn.style.display = "none";
   }
+  if (isArtisanRole(role) && statusEl) {
+    statusEl.value = "";
+  }
 
   if (refreshBtn) refreshBtn.addEventListener("click", fetchWorkOrders);
   if (awaitingApprovalBtn && statusEl) {
@@ -793,6 +1025,10 @@ document.addEventListener("DOMContentLoaded", () => {
   if (requested && searchEl) searchEl.value = String(requested);
   if (closeConfirmBtn) closeConfirmBtn.addEventListener("click", submitCloseWorkOrder);
   if (closeCancelBtn) closeCancelBtn.addEventListener("click", closeCloseModal);
+  document.getElementById("woAssignConfirmBtn")?.addEventListener("click", () => submitAssignWorkOrder());
+  document.getElementById("woAssignCancelBtn")?.addEventListener("click", closeAssignModal);
+  document.getElementById("woCompleteConfirmBtn")?.addEventListener("click", () => submitCompleteWorkOrder());
+  document.getElementById("woCompleteCancelBtn")?.addEventListener("click", closeCompleteModal);
   if (closeModal) {
     closeModal.addEventListener("click", (evt) => {
       if (evt.target === closeModal) closeCloseModal();
@@ -819,6 +1055,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const id = target.getAttribute("data-close-id");
       const setStatusId = target.getAttribute("data-set-status-id");
       const setStatus = target.getAttribute("data-set-status");
+      const assignId = target.getAttribute("data-assign-id");
+      const completeId = target.getAttribute("data-complete-id");
+      const approveId = target.getAttribute("data-approve-id");
       const rowSource = target.getAttribute("data-close-source");
       const requestCloseId = target.getAttribute("data-request-close-id");
       const requestCloseSource = target.getAttribute("data-request-close-source");
@@ -839,7 +1078,23 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
       if (setStatusId && setStatus) {
-        setWorkOrderStatus(setStatusId, setStatus);
+        if (setStatus === "completed") {
+          openCompleteModal(setStatusId);
+        } else {
+          setWorkOrderStatus(setStatusId, setStatus).catch(() => {});
+        }
+        return;
+      }
+      if (assignId) {
+        openAssignModal(assignId);
+        return;
+      }
+      if (completeId) {
+        openCompleteModal(completeId);
+        return;
+      }
+      if (approveId) {
+        approveWorkOrder(approveId).catch((e) => alert(`Approve failed: ${e.message}`));
         return;
       }
       if (requestCloseId) {
@@ -870,10 +1125,35 @@ document.addEventListener("DOMContentLoaded", () => {
       const target = evt.target;
       if (!(target instanceof HTMLElement)) return;
       const issueId = target.getAttribute("data-wo-issue-id");
+      const assignId = target.getAttribute("data-assign-id");
+      const completeId = target.getAttribute("data-complete-id");
+      const approveId = target.getAttribute("data-approve-id");
+      const setStatusId = target.getAttribute("data-set-status-id");
+      const setStatus = target.getAttribute("data-set-status");
+      const closeId = target.getAttribute("data-close-id");
+      const closeSource = target.getAttribute("data-close-source");
       if (issueId) {
         currentDetailWorkOrderId = Number(issueId);
         issueToWorkOrder();
+        return;
       }
+      if (assignId) {
+        openAssignModal(assignId);
+        return;
+      }
+      if (completeId) {
+        openCompleteModal(completeId);
+        return;
+      }
+      if (approveId) {
+        approveWorkOrder(approveId).catch((e) => alert(`Approve failed: ${e.message}`));
+        return;
+      }
+      if (setStatusId && setStatus) {
+        setWorkOrderStatus(setStatusId, setStatus).catch(() => {});
+        return;
+      }
+      if (closeId) openCloseModalForRow(closeId, closeSource);
     });
     detailEl.addEventListener("input", (evt) => {
       const target = evt.target;
@@ -886,4 +1166,5 @@ document.addEventListener("DOMContentLoaded", () => {
 
   fetchWorkOrders();
   loadInspectionQuality();
+  loadTechnicians().catch(() => {});
 });
