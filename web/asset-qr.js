@@ -34,6 +34,8 @@
       if (el.dataset.available !== "1") return;
       el.style.display = mode === "fire" ? "inline-block" : "none";
     });
+    const trace = qs("fireTraceLabel");
+    if (trace) trace.style.display = mode === "fire" ? "block" : "none";
   }
 
   function inferMakeModelFromAsset(payload) {
@@ -180,6 +182,7 @@
       openFireChecklistBtn.dataset.available = "1";
       openFireChecklistBtn.href = fireChecklistUrl;
     }
+    setText("fireTraceCode", fireItemCode);
     setInspectionTab("prestart");
   }
 

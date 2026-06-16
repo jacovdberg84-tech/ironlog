@@ -83,6 +83,16 @@
       border-color: var(--accent);
       color: #fff;
     }
+    .fire-trace {
+      margin: 4px 0 2px;
+      font-size: 12px;
+      color: var(--muted);
+      display: none;
+    }
+    .fire-trace code {
+      color: #93c5fd;
+      font-weight: 700;
+    }
     button, a.btn {
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -109,6 +119,7 @@
         <button type="button" class="inspect-tab is-active" id="tabPrestartBtn" data-qr-tab="prestart">Pre-start</button>
         <button type="button" class="inspect-tab" id="tabFireBtn" data-qr-tab="fire">Fire extinguisher</button>
       </div>
+      <div class="fire-trace" id="fireTraceLabel">Traceability code: <code id="fireTraceCode">-</code></div>
       <div class="actions">
         <a class="btn primary" id="openChecklistQrBtn" href="#" style="display:none;">Start daily checklist</a>
         <a class="btn primary" id="openFireChecklistBtn" href="#" style="display:none;">Start fire extinguisher checklist</a>
