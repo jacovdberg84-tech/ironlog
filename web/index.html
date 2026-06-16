@@ -4897,6 +4897,34 @@
           </div>
         </div>
 
+        <!-- Offline queue monitor (this browser / shared device) -->
+        <div class="dash-card collapsible full-width" data-collapsed="false" id="adminOfflineQueueCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fff7ed; color: #c2410c;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+              </div>
+              <div>
+                <h3>Offline queue monitor</h3>
+                <p class="muted small">QR checklist submissions waiting to sync on this browser or shared device</p>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button type="button" id="offlineQueueRefreshBtn" class="btn btn-secondary btn-sm">Refresh</button>
+              <button type="button" id="offlineQueueSyncBtn" class="btn btn-primary btn-sm">Sync all now</button>
+              <button type="button" class="report-card-toggle" aria-label="Toggle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+              </button>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <p class="muted small" style="margin:0 0 10px;">Submissions are stored locally when offline. Open this panel on the phone or tablet that captured them, then sync when back on site Wi‑Fi.</p>
+            <div id="offlineQueueSummary" class="checklist-hub-summary" style="margin-bottom:10px;"></div>
+            <div id="offlineQueueList"></div>
+            <pre class="output" id="offlineQueueResult" style="margin-top:10px; max-height:72px;"></pre>
+          </div>
+        </div>
+
         <!-- Cost Setup (moved from Dashboard) -->
         <div class="dash-card collapsible full-width" data-collapsed="false" id="adminCostSetupCard">
           <div class="dash-card-header">
@@ -6769,6 +6797,6 @@
 
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="./app.js?v=34"></script>
+  <script src="./app.js?v=35"></script>
 </body>
 </html>

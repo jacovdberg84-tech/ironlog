@@ -4084,8 +4084,218 @@ function getQueuedHoursCount() {
   return queue.filter((q) => q.type === "HOURS").length;
 }
 
+const QR_OFFLINE_QUEUE_CONFIG = {
+  safety: {
+    storageKey: "ironlog_safety_offline_queue_v1",
+    label: "Safety inspection",
+    endpoint: "/api/safety/inspections",
+    codeField: "item_code",
+    dateField: "inspection_date",
+  },
+  ldv: {
+    storageKey: "ironlog_ldv_prestart_offline_queue_v1",
+    label: "LDV pre-start",
+    endpoint: "/api/maintenance/vehicle-ldv-checks/prestart",
+    codeField: "asset_code",
+    dateField: "check_date",
+  },
+  machine: {
+    storageKey: "ironlog_machine_prestart_offline_queue_v1",
+    label: "Machine pre-start",
+    endpoint: "/api/maintenance/machine-prestart",
+    codeField: "asset_code",
+    dateField: "check_date",
+  },
+};
+
+function readNamedOfflineQueue(storageKey) {
+  try {
+    const rows = JSON.parse(localStorage.getItem(storageKey) || "[]");
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveNamedOfflineQueue(storageKey, rows) {
+  localStorage.setItem(storageKey, JSON.stringify(Array.isArray(rows) ? rows : []));
+}
+
+function summarizeQrOfflineQueues() {
+  const groups = {};
+  const items = [];
+  for (const [type, cfg] of Object.entries(QR_OFFLINE_QUEUE_CONFIG)) {
+    const rows = readNamedOfflineQueue(cfg.storageKey);
+    groups[type] = rows.length;
+    for (const row of rows) {
+      const payload = row?.payload || {};
+      items.push({
+        type,
+        label: cfg.label,
+        key: String(row?.key || ""),
+        code: String(payload[cfg.codeField] || "-").toUpperCase(),
+        date: String(payload[cfg.dateField] || "-"),
+        queued_at: String(row?.created_at || ""),
+        inspector: String(payload.inspector_name || "").trim(),
+      });
+    }
+  }
+  items.sort((a, b) => String(b.queued_at).localeCompare(String(a.queued_at)));
+  return { groups, items };
+}
+
+function getTotalQueuedCount() {
+  const qr = summarizeQrOfflineQueues();
+  const qrTotal = Object.values(qr.groups).reduce((sum, n) => sum + Number(n || 0), 0);
+  return getQueuedHoursCount() + qrTotal;
+}
+
 function refreshNetBanner() {
-  setNetBanner("idle", getQueuedHoursCount());
+  setNetBanner("idle", getTotalQueuedCount());
+}
+
+function setOfflineQueueAdminResult(text) {
+  const pre = qs("offlineQueueResult");
+  if (pre) pre.textContent = String(text || "");
+}
+
+function renderOfflineQueueAdminPanel() {
+  const summaryHost = qs("offlineQueueSummary");
+  const listHost = qs("offlineQueueList");
+  if (!summaryHost || !listHost) return;
+
+  const hoursCount = getQueuedHoursCount();
+  const { groups, items } = summarizeQrOfflineQueues();
+  const total = hoursCount + items.length;
+  const online = navigator.onLine;
+
+  summaryHost.innerHTML = `
+    <span class="pill ${online ? "green" : "orange"}">${online ? "Online" : "Offline"}</span>
+    <span class="pill blue">Total queued: ${total}</span>
+    <span class="pill">Safety: ${Number(groups.safety || 0)}</span>
+    <span class="pill">LDV: ${Number(groups.ldv || 0)}</span>
+    <span class="pill">Machine: ${Number(groups.machine || 0)}</span>
+    <span class="pill">Daily hours: ${hoursCount}</span>
+  `;
+
+  if (!total) {
+    listHost.innerHTML = `<div class="muted small">No offline submissions on this device.</div>`;
+    return;
+  }
+
+  const rows = [];
+  if (hoursCount) {
+    const hoursItems = getQueue().filter((q) => q.type === "HOURS");
+    for (const row of hoursItems) {
+      const payload = row?.payload || {};
+      rows.push(`
+        <div class="item" style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; padding:8px 0; border-bottom:1px solid rgba(148,163,184,0.2);">
+          <div>
+            <strong>Daily hours</strong>
+            <div class="muted small">${escapeHtml(String(payload.asset_code || "-"))} · ${escapeHtml(String(payload.work_date || "-"))}</div>
+          </div>
+          <span class="pill orange" style="font-size:0.65rem;">QUEUED</span>
+        </div>
+      `);
+    }
+  }
+
+  for (const row of items) {
+    const when = row.queued_at ? new Date(row.queued_at).toLocaleString() : "—";
+    rows.push(`
+      <div class="item" style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; padding:8px 0; border-bottom:1px solid rgba(148,163,184,0.2);">
+        <div>
+          <strong>${escapeHtml(row.label)}</strong>
+          <div class="muted small">${escapeHtml(row.code)} · ${escapeHtml(row.date)}${row.inspector ? ` · ${escapeHtml(row.inspector)}` : ""}</div>
+          <div class="muted small">Queued: ${escapeHtml(when)}</div>
+        </div>
+        <span class="pill orange" style="font-size:0.65rem;">QUEUED</span>
+      </div>
+    `);
+  }
+
+  listHost.innerHTML = rows.join("");
+}
+
+async function syncQrOfflineQueue(type) {
+  const cfg = QR_OFFLINE_QUEUE_CONFIG[type];
+  if (!cfg) return { synced: 0, failed: 0, remaining: 0 };
+  const queue = readNamedOfflineQueue(cfg.storageKey);
+  if (!queue.length) return { synced: 0, failed: 0, remaining: 0 };
+
+  const remaining = [];
+  let synced = 0;
+  for (const row of queue) {
+    const payload = row?.payload || null;
+    if (!payload || typeof payload !== "object") continue;
+    try {
+      await fetchJson(`${API}${cfg.endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      synced += 1;
+    } catch {
+      remaining.push(row);
+    }
+  }
+  saveNamedOfflineQueue(cfg.storageKey, remaining);
+  return { synced, failed: queue.length - synced - remaining.length, remaining: remaining.length };
+}
+
+async function syncAllOfflineQueues() {
+  if (!navigator.onLine) {
+    return { ok: false, reason: "offline", synced: 0, remaining: getTotalQueuedCount() };
+  }
+
+  const totalBefore = getTotalQueuedCount();
+  if (!totalBefore) {
+    renderOfflineQueueAdminPanel();
+    refreshNetBanner();
+    return { ok: true, synced: 0, remaining: 0 };
+  }
+
+  setNetBanner("syncing", totalBefore);
+  setStatus(`Syncing offline queue (${totalBefore})...`);
+
+  let synced = 0;
+  const hoursResult = await syncOfflineHoursQueue({ quiet: true });
+  if (hoursResult?.synced) synced += Number(hoursResult.synced || 0);
+
+  for (const type of Object.keys(QR_OFFLINE_QUEUE_CONFIG)) {
+    const result = await syncQrOfflineQueue(type);
+    synced += Number(result.synced || 0);
+  }
+
+  const remaining = getTotalQueuedCount();
+  renderOfflineQueueAdminPanel();
+  refreshNetBanner();
+
+  if (remaining) {
+    setOfflineQueueAdminResult(`Sync finished: ${synced} sent, ${remaining} still queued.`);
+    setStatus(`Sync finished: ${synced} sent, ${remaining} still queued.`);
+    return { ok: false, synced, remaining };
+  }
+
+  setOfflineQueueAdminResult(`Sync finished: all ${synced} queued item(s) sent.`);
+  setStatus(`Sync finished: all ${synced} queued item(s) sent.`);
+  return { ok: true, synced, remaining: 0 };
+}
+
+function initOfflineQueueAdminPanel() {
+  if (!qs("adminOfflineQueueCard")) return;
+  renderOfflineQueueAdminPanel();
+  qs("offlineQueueRefreshBtn")?.addEventListener("click", () => {
+    renderOfflineQueueAdminPanel();
+    setOfflineQueueAdminResult("Queue list refreshed.");
+  });
+  qs("offlineQueueSyncBtn")?.addEventListener("click", () => {
+    syncAllOfflineQueues().catch((e) => {
+      setOfflineQueueAdminResult(String(e.message || e));
+      setStatus("Sync error: " + (e.message || e));
+      refreshNetBanner();
+    });
+  });
 }
 
 async function disableLegacyServiceWorkers() {
@@ -4130,15 +4340,18 @@ function queueHours(payload) {
   saveQueue(filtered);
 }
 
-async function syncOfflineHoursQueue() {
+async function syncOfflineHoursQueue(opts = {}) {
+  const quiet = Boolean(opts.quiet);
   if (!navigator.onLine) return { ok: false, reason: "offline" };
 
   const queue = getQueue();
   const hoursItems = queue.filter((q) => q.type === "HOURS");
   if (!hoursItems.length) return { ok: true, synced: 0 };
 
-  setNetBanner("syncing", hoursItems.length);
-  setStatus(`Syncing offline queue (${hoursItems.length})...`);
+  if (!quiet) {
+    setNetBanner("syncing", getTotalQueuedCount());
+    setStatus(`Syncing offline queue (${hoursItems.length})...`);
+  }
 
   const remaining = queue.filter((q) => q.type !== "HOURS");
   const failed = [];
@@ -4159,12 +4372,12 @@ async function syncOfflineHoursQueue() {
   saveQueue(remaining);
 
   if (failed.length) {
-    setStatus(`Sync finished: ${hoursItems.length - failed.length} ok, ${failed.length} failed.`);
+    if (!quiet) setStatus(`Sync finished: ${hoursItems.length - failed.length} ok, ${failed.length} failed.`);
     refreshNetBanner();
     return { ok: false, synced: hoursItems.length - failed.length, failed };
   }
 
-  setStatus("Sync finished: all queued hours synced ✅");
+  if (!quiet) setStatus("Sync finished: all queued hours synced ✅");
   refreshNetBanner();
   return { ok: true, synced: hoursItems.length };
 }
@@ -8386,6 +8599,9 @@ function switchTab(key) {
   if (k === "vehicle") {
     loadChecklistHub().catch(() => {});
     loadClHistory().catch(() => {});
+  }
+  if (k === "admin") {
+    renderOfflineQueueAdminPanel();
   }
   if (k === "telematics") {
     loadTelematicsTab().catch(() => {});
@@ -15158,6 +15374,7 @@ async function init() {
     openSafetyInspectionReportPdf(true).catch((e) => setStatus("Safety report error: " + e.message))
   );
   initSafetyAdminPanel().catch(() => {});
+  initOfflineQueueAdminPanel();
   initTelematicsAdminPanel().catch(() => {});
   initCartrackAdminPanel().catch(() => {});
   initCartrackTrackingTab();
@@ -15255,13 +15472,17 @@ async function init() {
 
   // Net banner
   refreshNetBanner();
-  window.addEventListener("offline", refreshNetBanner);
+  window.addEventListener("offline", () => {
+    refreshNetBanner();
+    renderOfflineQueueAdminPanel();
+  });
 
   window.addEventListener("online", async () => {
     refreshNetBanner();
-    if (getQueuedHoursCount() === 0) return;
+    renderOfflineQueueAdminPanel();
+    if (getTotalQueuedCount() === 0) return;
     try {
-      await syncOfflineHoursQueue();
+      await syncAllOfflineQueues();
     } catch (e) {
       setStatus("Sync error: " + (e.message || e));
       refreshNetBanner();
@@ -15271,7 +15492,7 @@ async function init() {
   qs("syncNow")?.addEventListener("click", async () => {
     if (!navigator.onLine) return alert("Still offline.");
     try {
-      await syncOfflineHoursQueue();
+      await syncAllOfflineQueues();
     } catch (e) {
       setStatus("Sync error: " + (e.message || e));
       refreshNetBanner();
