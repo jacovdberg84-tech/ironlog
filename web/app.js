@@ -2794,7 +2794,14 @@ function renderClHubSummary(data) {
   el.innerHTML = `
     <span class="pill blue">LDV: ${ldvDone}/${ldvTotal}</span>
     <span class="pill blue">Machines: ${macDone}/${macTotal}</span>
-    ${clSafetyHubData?.summary ? `<span class="pill blue">Safety: ${Number(clSafetyHubData.summary.compliant || 0)}/${Number(clSafetyHubData.summary.total || 0)}</span>` : ""}
+    ${clSafetyHubData?.summary ? (() => {
+      const s = clSafetyHubData.summary;
+      const done = Number(s.completed ?? s.compliant ?? 0);
+      const total = Number(s.total || 0);
+      const flagged = Number(s.flagged || 0);
+      const flaggedNote = flagged ? ` · ${flagged} flagged` : "";
+      return `<span class="pill blue">Safety: ${done}/${total} done${flaggedNote}</span>`;
+    })() : ""}
     <span class="pill">${escapeHtml(String(data?.check_date || clCheckDate()))}</span>
   `;
 }
@@ -2861,10 +2868,18 @@ function renderClHubSections(data) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "checklist-asset-chip checklist-safety-chip";
-      if (it.status === "compliant") btn.classList.add("compliant");
-      const pill = it.status === "compliant"
-        ? "<span class='pill green' style='font-size:0.65rem;'>DONE</span>"
-        : "<span class='pill orange' style='font-size:0.65rem;'>PENDING</span>";
+      const st = String(it.status || "pending").toLowerCase();
+      if (st === "compliant" || st === "done") btn.classList.add("compliant");
+      if (st === "flagged") btn.classList.add("flagged");
+      if (st === "attention") btn.classList.add("attention");
+      let pill = "<span class='pill orange' style='font-size:0.65rem;'>PENDING</span>";
+      if (st === "compliant" || st === "done") {
+        pill = "<span class='pill green' style='font-size:0.65rem;'>DONE</span>";
+      } else if (st === "flagged") {
+        pill = "<span class='pill pill-red' style='font-size:0.65rem;'>FLAGGED</span>";
+      } else if (st === "attention") {
+        pill = "<span class='pill amber' style='font-size:0.65rem;'>ATTENTION</span>";
+      }
       btn.dataset.itemCode = String(it.item_code || "");
       btn.innerHTML = `
         <div class="chip-code">${escapeHtml(it.item_code)} ${pill}</div>

@@ -3307,6 +3307,14 @@ body.sidebar-collapsed .main-content {
   border-color: rgba(22, 163, 74, 0.55);
 }
 
+.checklist-asset-chip.flagged {
+  border-color: rgba(185, 28, 28, 0.55);
+}
+
+.checklist-asset-chip.attention {
+  border-color: rgba(217, 119, 6, 0.55);
+}
+
 .checklist-asset-chip .chip-code {
   font-weight: 700;
   font-size: 0.88rem;

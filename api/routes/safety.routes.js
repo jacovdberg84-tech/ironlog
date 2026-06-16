@@ -550,13 +550,28 @@ export default async function safetyRoutes(app) {
         ORDER BY item_code ASC
       `).all();
       const out = [];
+      let completed = 0;
       let compliant = 0;
+      let flagged = 0;
       for (const item of items) {
         const tpl = getTemplate(item.template_key, item.site_code);
         const insp = latestInspectionForDate(Number(item.id), check_date);
-        const status = insp ? String(insp.status || "pending") : "pending";
-        const done = Boolean(insp && ["pass", "attention"].includes(status));
-        if (done) compliant += 1;
+        const inspection_status = insp ? String(insp.status || "pending").toLowerCase() : "pending";
+        let status = "pending";
+        if (insp) {
+          completed += 1;
+          if (inspection_status === "pass") {
+            status = "compliant";
+            compliant += 1;
+          } else if (inspection_status === "fail") {
+            status = "flagged";
+            flagged += 1;
+          } else if (inspection_status === "attention") {
+            status = "attention";
+          } else {
+            status = "done";
+          }
+        }
         out.push({
           item_id: Number(item.id),
           item_code: String(item.item_code),
@@ -564,9 +579,10 @@ export default async function safetyRoutes(app) {
           location: String(item.location || ""),
           template_key: String(item.template_key),
           template_title: String(tpl?.title || item.template_key),
-          status: done ? "compliant" : "pending",
-          inspection_status: status,
+          status,
+          inspection_status,
           inspection_id: insp ? Number(insp.id) : null,
+          inspection_date: insp ? String(insp.inspection_date || check_date) : null,
         });
       }
       return reply.send({
@@ -575,8 +591,10 @@ export default async function safetyRoutes(app) {
         items: out,
         summary: {
           total: out.length,
+          completed,
           compliant,
-          pending: Math.max(0, out.length - compliant),
+          flagged,
+          pending: Math.max(0, out.length - completed),
         },
       });
     } catch (err) {
