@@ -1911,6 +1911,7 @@ async function loadSafetyItemsList() {
         </label>
       </div>
       <div class="row stack-10">
+        <button type="button" class="btn btn-secondary btn-sm" data-safety-item-pdf="${escapeHtml(r.item_code)}" title="Individual inspection PDF">PDF</button>
         <button type="button" class="btn btn-secondary btn-sm" data-safety-use-qr="${escapeHtml(r.item_code)}">QR</button>
         <button type="button" class="btn btn-secondary btn-sm" data-safety-open-insp="${escapeHtml(r.item_code)}">Inspect</button>
         <button type="button" class="btn btn-secondary btn-sm" data-safety-remove-item="${Number(r.id)}">Remove</button>
@@ -2028,6 +2029,21 @@ async function openSafetyRegisterPdf(blank = false) {
   setStatus(blank ? "Opening blank safety sheet…" : "Opening safety register PDF…");
   await openAuthedPdf(`${API}/api/safety/register.pdf?${q.toString()}`);
   setStatus("Safety PDF opened.");
+}
+
+async function openSafetyItemInspectionPdf(itemCode) {
+  const code = String(itemCode || "").trim().toUpperCase();
+  if (!code) return;
+  const date =
+    String(qs("safetyReportEndDate")?.value || "").trim() ||
+    String(qs("safetyPdfDate")?.value || "").trim() ||
+    new Date().toISOString().slice(0, 10);
+  const q = new URLSearchParams();
+  q.set("item_code", code);
+  q.set("date", date);
+  setStatus(`Opening safety PDF for ${code}…`);
+  await openAuthedPdf(`${API}/api/safety/inspections/item.pdf?${q.toString()}`);
+  setStatus(`Safety PDF opened for ${code}.`);
 }
 
 async function openSafetyInspectionReportPdf(selectedOnly = false) {
@@ -15078,6 +15094,12 @@ async function init() {
     if (inspBtn) {
       const code = String(inspBtn.getAttribute("data-safety-open-insp") || "");
       if (code) window.open(`./safety-inspection.html?item_code=${encodeURIComponent(code)}`, "_blank");
+      return;
+    }
+    const pdfBtn = e.target.closest("button[data-safety-item-pdf]");
+    if (pdfBtn) {
+      openSafetyItemInspectionPdf(pdfBtn.getAttribute("data-safety-item-pdf"))
+        .catch((err) => setStatus("Safety PDF error: " + err.message));
       return;
     }
     const rmBtn = e.target.closest("button[data-safety-remove-item]");
