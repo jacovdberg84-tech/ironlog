@@ -5055,13 +5055,17 @@ export default async function reportsRoutes(app) {
           sectionTitle(doc, "Checklist");
           table(
             doc,
-            ["Component", "Status", "Note"],
+            [
+              { key: "component", label: "Component", width: 0.4 },
+              { key: "status", label: "Status", width: 0.15, align: "center" },
+              { key: "note", label: "Note", width: 0.45 },
+            ],
             checklist.map((c) => ({
-              Component: compactCell(String(c.label || c.key || "-"), 80),
-              Status: c.ok === true ? "OK" : c.ok === false ? "FAIL" : "N/A",
-              Note: compactCell(String(c.note || "-"), 150),
+              component: compactCell(String(c.label || c.key || "-"), 80),
+              status: c.ok === true ? "OK" : c.ok === false ? "FAIL" : "N/A",
+              note: compactCell(String(c.note || "-"), 150),
             })),
-            [0.35, 0.15, 0.5]
+            { fontSize: 9, compact: true }
           );
         }
 
@@ -5101,12 +5105,15 @@ export default async function reportsRoutes(app) {
         if (noteRows.length) {
           table(
             doc,
-            ["Component", "Notes"],
+            [
+              { key: "component", label: "Component", width: 0.3 },
+              { key: "notes", label: "Notes", width: 0.7 },
+            ],
             noteRows.map((n) => ({
-              Component: compactCell(n.component || "General", 80),
-              Notes: compactCell(n.note || "-", 180),
+              component: compactCell(n.component || "General", 80),
+              notes: compactCell(n.note || "-", 180),
             })),
-            [0.3, 0.7]
+            { fontSize: 9, compact: true }
           );
         } else {
           doc
