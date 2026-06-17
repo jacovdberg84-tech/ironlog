@@ -415,7 +415,10 @@
           <div id="insightsPredictive"></div>
         </div>
         <div class="card">
-          <h4 style="margin-top:0;">Parts Demand Planning</h4>
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+            <h4 style="margin:0;">Parts Demand Planning</h4>
+            <button id="downloadInsightsPartsXlsxBtn" type="button" class="btn btn-secondary btn-sm">Download Excel</button>
+          </div>
           <div id="insightsParts"></div>
         </div>
       </div>
@@ -430,7 +433,10 @@
         </div>
       </div>
       <div class="card">
-        <h4 style="margin-top:0;">Maintenance Cost per Machine</h4>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+          <h4 style="margin:0;">Maintenance Cost per Machine</h4>
+          <button id="downloadInsightsCostXlsxBtn" type="button" class="btn btn-secondary btn-sm">Download Excel</button>
+        </div>
         <div id="insightsCost"></div>
       </div>
       <div class="card">
@@ -1849,6 +1855,6 @@
 
   <script src="./undercarriage-diagrams.js?v=1"></script>
   <script src="./undercarriage.js?v=5"></script>
-  <script src="./maintenance.js?v=34"></script>
+  <script src="./maintenance.js?v=35"></script>
 </body>
 </html>

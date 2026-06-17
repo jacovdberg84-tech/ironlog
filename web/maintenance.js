@@ -1213,10 +1213,10 @@ function persistInsightsThresholds() {
   return payload;
 }
 
-function openMaintenanceInsightsXlsx() {
+function buildMaintenanceInsightsExportQuery() {
   const start = String(document.getElementById("insightsStart")?.value || "").trim();
   const end = String(document.getElementById("insightsEnd")?.value || "").trim();
-  if (!start || !end) return alert("Select insights start and end dates.");
+  if (!start || !end) throw new Error("Select insights start and end dates.");
   const t = persistInsightsThresholds();
   const q = new URLSearchParams();
   q.set("start", start);
@@ -1225,7 +1225,52 @@ function openMaintenanceInsightsXlsx() {
   q.set("predictive_horizon_hours", String(t.predictive_horizon_hours));
   q.set("checklist_fail_threshold", String(t.checklist_fail_threshold));
   q.set("fuel_variance_threshold", String(t.fuel_variance_threshold));
-  window.open(`${API}/maintenance/insights.xlsx?${q.toString()}`, "_blank");
+  return { start, end, q };
+}
+
+async function downloadMaintenanceInsightsXlsxFile(url, filename) {
+  const res = await fetch(url, { headers: authHeaders() });
+  if (!res.ok) {
+    let msg = await res.text().catch(() => "");
+    try {
+      const j = JSON.parse(msg);
+      msg = j.error || j.message || msg;
+    } catch {}
+    throw new Error(msg || `Export failed (${res.status})`);
+  }
+  const blob = await res.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(blobUrl);
+}
+
+async function openMaintenanceInsightsXlsx() {
+  const { start, end, q } = buildMaintenanceInsightsExportQuery();
+  await downloadMaintenanceInsightsXlsxFile(
+    `${API}/maintenance/insights.xlsx?${q.toString()}`,
+    `IRONLOG_Maintenance_Insights_${start}_to_${end}.xlsx`,
+  );
+}
+
+async function downloadInsightsPartsDemandXlsx() {
+  const { start, end, q } = buildMaintenanceInsightsExportQuery();
+  await downloadMaintenanceInsightsXlsxFile(
+    `${API}/maintenance/insights/parts-demand.xlsx?${q.toString()}`,
+    `IRONLOG_Parts_Demand_${start}_to_${end}.xlsx`,
+  );
+}
+
+async function downloadInsightsCostPerMachineXlsx() {
+  const { start, end, q } = buildMaintenanceInsightsExportQuery();
+  await downloadMaintenanceInsightsXlsxFile(
+    `${API}/maintenance/insights/cost-per-machine.xlsx?${q.toString()}`,
+    `IRONLOG_Maintenance_Cost_Per_Machine_${start}_to_${end}.xlsx`,
+  );
 }
 
 function openMaintenanceInsightsPdf(download = false) {
@@ -7277,7 +7322,15 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("loadInsightsBtn")?.addEventListener("click", () => loadMaintenanceInsights());
   document.getElementById("openInsightsPdfBtn")?.addEventListener("click", () => openMaintenanceInsightsPdf(false));
   document.getElementById("downloadInsightsPdfBtn")?.addEventListener("click", () => openMaintenanceInsightsPdf(true));
-  document.getElementById("downloadInsightsXlsxBtn")?.addEventListener("click", () => openMaintenanceInsightsXlsx());
+  document.getElementById("downloadInsightsXlsxBtn")?.addEventListener("click", () =>
+    openMaintenanceInsightsXlsx().catch((e) => alert(e.message || String(e)))
+  );
+  document.getElementById("downloadInsightsPartsXlsxBtn")?.addEventListener("click", () =>
+    downloadInsightsPartsDemandXlsx().catch((e) => alert(e.message || String(e)))
+  );
+  document.getElementById("downloadInsightsCostXlsxBtn")?.addEventListener("click", () =>
+    downloadInsightsCostPerMachineXlsx().catch((e) => alert(e.message || String(e)))
+  );
   document.getElementById("loadGovernanceSignalsBtn")?.addEventListener("click", () => loadGovernanceSignals());
   document.getElementById("reportBuilderRunBtn")?.addEventListener("click", () => runReportBuilderPreview());
   document.getElementById("reportBuilderExportXlsxBtn")?.addEventListener("click", () => exportReportBuilderXlsx());

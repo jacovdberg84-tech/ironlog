@@ -3868,6 +3868,170 @@ export default async function maintenanceRoutes(app) {
     }
   });
 
+  async function loadInsightsExportPayload(req) {
+    const q = new URLSearchParams();
+    const copy = (name, fallback = "") => {
+      const v = String(req.query?.[name] ?? fallback).trim();
+      if (v !== "") q.set(name, v);
+    };
+    copy("start");
+    copy("end");
+    copy("near_due_hours", "50");
+    copy("predictive_horizon_hours", "100");
+    copy("checklist_fail_threshold", "2");
+    copy("fuel_variance_threshold", "15");
+
+    const injected = await app.inject({
+      method: "GET",
+      url: `/api/maintenance/insights?${q.toString()}`,
+      headers: {
+        "x-user-name": String(req.headers?.["x-user-name"] || "system"),
+        "x-user-role": String(req.headers?.["x-user-role"] || "admin"),
+        "x-user-roles": String(req.headers?.["x-user-roles"] || "admin"),
+        "x-site-code": String(req.headers?.["x-site-code"] || "main"),
+      },
+    });
+    if (injected.statusCode >= 400) {
+      let payload = {};
+      try { payload = JSON.parse(String(injected.payload || "{}")); } catch {}
+      const err = new Error(payload?.error || "Failed to build insights export");
+      err.statusCode = injected.statusCode;
+      throw err;
+    }
+    return JSON.parse(String(injected.payload || "{}"));
+  }
+
+  function addInsightsExportSummarySheet(wb, data) {
+    const wsSummary = wb.addWorksheet("Summary");
+    wsSummary.columns = [{ header: "Field", key: "field", width: 34 }, { header: "Value", key: "value", width: 30 }];
+    wsSummary.addRows([
+      { field: "Start", value: data?.range?.start || "" },
+      { field: "End", value: data?.range?.end || "" },
+      { field: "Near Due Hours", value: Number(data?.range?.near_due_hours || 0) },
+      { field: "Predictive Horizon Hours", value: Number(data?.range?.predictive_horizon_hours || 0) },
+      { field: "Upcoming services", value: Number(data?.parts_planning?.upcoming_service_count || 0) },
+      { field: "Forecast total ($)", value: Number(data?.parts_planning?.total_upcoming_cost || 0) },
+      { field: "Needs manual input", value: Number(data?.parts_planning?.needs_manual_input_count || 0) },
+      { field: "Labor rate ($/hr)", value: Number(data?.range?.labor_cost_per_hour || 0) },
+    ]);
+    wsSummary.getRow(1).font = { bold: true };
+  }
+
+  function addInsightsPartsDemandSheets(wb, data) {
+    const wsUpcomingCost = wb.addWorksheet("Upcoming Service Costs");
+    wsUpcomingCost.columns = [
+      { header: "Asset Code", key: "asset_code", width: 14 },
+      { header: "Asset Name", key: "asset_name", width: 24 },
+      { header: "Service", key: "service_name", width: 20 },
+      { header: "Remaining Hrs", key: "remaining_hours", width: 14 },
+      { header: "Status", key: "status", width: 12 },
+      { header: "Kit Cost", key: "est_service_kit_cost", width: 12 },
+      { header: "Labor Cost", key: "est_labor_cost", width: 12 },
+      { header: "Total Cost", key: "est_total_cost", width: 12 },
+      { header: "Cost Source", key: "cost_source", width: 18 },
+      { header: "Needs Manual Input", key: "needs_manual_input", width: 16 },
+    ];
+    wsUpcomingCost.addRows(
+      (Array.isArray(data?.parts_planning?.upcoming_cost_forecasts) ? data.parts_planning.upcoming_cost_forecasts : []).map((r) => ({
+        asset_code: r.asset_code,
+        asset_name: r.asset_name,
+        service_name: r.service_name,
+        remaining_hours: Number(r.remaining_hours || 0),
+        status: r.status,
+        est_service_kit_cost: Number(r?.forecast?.est_service_kit_cost || 0),
+        est_labor_cost: Number(r?.forecast?.est_labor_cost || 0),
+        est_total_cost: Number(r?.forecast?.est_total_cost || 0),
+        cost_source: r?.forecast?.cost_source || "",
+        needs_manual_input: r.needs_manual_input ? "yes" : "no",
+      })),
+    );
+
+    const wsParts = wb.addWorksheet("Parts Demand");
+    wsParts.columns = [
+      { header: "Part", key: "part_name", width: 30 },
+      { header: "Suggested Qty", key: "suggested_qty", width: 14 },
+      { header: "Est Cost", key: "est_cost", width: 12 },
+      { header: "On Hand", key: "on_hand", width: 12 },
+      { header: "Gap Qty", key: "gap_qty", width: 12 },
+      { header: "Linked Services", key: "linked_services", width: 36 },
+    ];
+    wsParts.addRows((Array.isArray(data?.parts_planning?.suggestions) ? data.parts_planning.suggestions : []).map((r) => ({
+      ...r,
+      linked_services: Array.isArray(r?.linked_services) ? r.linked_services.join(", ") : "",
+    })));
+    wsUpcomingCost.getRow(1).font = { bold: true };
+    wsParts.getRow(1).font = { bold: true };
+  }
+
+  function addInsightsCostPerMachineSheet(wb, data) {
+    const wsCost = wb.addWorksheet("Cost Per Machine");
+    wsCost.columns = [
+      { header: "Asset Code", key: "asset_code", width: 14 },
+      { header: "Asset Name", key: "asset_name", width: 28 },
+      { header: "Service Jobs", key: "service_jobs", width: 12 },
+      { header: "Down Hrs", key: "downtime_hours", width: 12 },
+      { header: "Repair Labor Hrs", key: "repair_labor_hours", width: 16 },
+      { header: "WO Labor $", key: "wo_labor_cost", width: 12 },
+      { header: "Repair Labor $", key: "repair_labor_cost", width: 14 },
+      { header: "Total Labor $", key: "labor_cost", width: 12 },
+      { header: "Parts Cost", key: "parts_cost", width: 12 },
+      { header: "Lube Cost", key: "lube_cost", width: 12 },
+      { header: "Outsourced Cost", key: "outsourced_cost", width: 14 },
+      { header: "Total Cost", key: "total_cost", width: 12 },
+    ];
+    wsCost.addRows(Array.isArray(data?.maintenance_cost) ? data.maintenance_cost : []);
+    wsCost.getRow(1).font = { bold: true };
+    ["downtime_hours", "repair_labor_hours", "wo_labor_cost", "repair_labor_cost", "labor_cost", "parts_cost", "lube_cost", "outsourced_cost", "total_cost"].forEach((key) => {
+      wsCost.getColumn(key).numFmt = "#,##0.00";
+    });
+  }
+
+  // GET /api/maintenance/insights/parts-demand.xlsx
+  app.get("/insights/parts-demand.xlsx", async (req, reply) => {
+    try {
+      const data = await loadInsightsExportPayload(req);
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "IRONLOG";
+      wb.created = new Date();
+      addInsightsExportSummarySheet(wb, data);
+      addInsightsPartsDemandSheets(wb, data);
+      const buffer = await wb.xlsx.writeBuffer();
+      return reply
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header(
+          "Content-Disposition",
+          `attachment; filename="IRONLOG_Parts_Demand_${data?.range?.start || "start"}_to_${data?.range?.end || "end"}.xlsx"`,
+        )
+        .send(buffer);
+    } catch (e) {
+      req.log.error(e);
+      return reply.code(Number(e.statusCode || 500)).send({ ok: false, error: e.message || String(e) });
+    }
+  });
+
+  // GET /api/maintenance/insights/cost-per-machine.xlsx
+  app.get("/insights/cost-per-machine.xlsx", async (req, reply) => {
+    try {
+      const data = await loadInsightsExportPayload(req);
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "IRONLOG";
+      wb.created = new Date();
+      addInsightsExportSummarySheet(wb, data);
+      addInsightsCostPerMachineSheet(wb, data);
+      const buffer = await wb.xlsx.writeBuffer();
+      return reply
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header(
+          "Content-Disposition",
+          `attachment; filename="IRONLOG_Maintenance_Cost_Per_Machine_${data?.range?.start || "start"}_to_${data?.range?.end || "end"}.xlsx"`,
+        )
+        .send(buffer);
+    } catch (e) {
+      req.log.error(e);
+      return reply.code(Number(e.statusCode || 500)).send({ ok: false, error: e.message || String(e) });
+    }
+  });
+
   // GET /api/maintenance/insights.pdf?start=YYYY-MM-DD&end=YYYY-MM-DD&near_due_hours=50&download=1
   app.get("/insights.pdf", async (req, reply) => {
     try {
