@@ -1622,7 +1622,7 @@
               </div>
               <div>
                 <h3>Plant Hire &amp; Budget</h3>
-                <p class="muted small">Set contractor machine rates and your monthly plant hire budget for budget meetings</p>
+                <p class="muted small">Set contractor machine rates, your monthly operating expense budget, and plant hire income target for budget meetings</p>
               </div>
             </div>
             <button class="report-card-toggle" aria-label="Toggle">
@@ -1636,11 +1636,21 @@
                 <input id="plantHireBudgetMonth" type="month" class="w-full" />
               </div>
               <div class="form-field">
-                <label>Plant hire budget ($)</label>
-                <input id="plantHireBudgetAmount" type="number" step="0.01" min="0" class="w-full" placeholder="Monthly plant hire budget" />
+                <label>Operating expenses budget ($) — total for month</label>
+                <input id="operatingBudgetAmount" type="number" step="0.01" min="0" class="w-full" placeholder="All parts, labor, fuel, lube, downtime" />
               </div>
               <div class="form-field form-field-action">
-                <button id="savePlantHireBudget" type="button" class="btn btn-primary">Save monthly budget</button>
+                <button id="saveOperatingBudget" type="button" class="btn btn-primary">Save operating budget</button>
+              </div>
+            </div>
+            <p class="muted small" id="operatingBudgetStatus">—</p>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Plant hire income target ($)</label>
+                <input id="plantHireBudgetAmount" type="number" step="0.01" min="0" class="w-full" placeholder="Expected contractor plant income" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="savePlantHireBudget" type="button" class="btn btn-secondary">Save plant hire target</button>
               </div>
             </div>
             <p class="muted small" id="plantHireBudgetStatus">—</p>

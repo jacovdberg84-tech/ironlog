@@ -10,6 +10,7 @@ import {
   ensurePlantHireSchema,
 } from "../utils/plantHire.js";
 import { buildScheduledDowntimeCost } from "../utils/downtimeCosting.js";
+import { getMonthlyBudgetRow, getOperatingBudgetAmount, upsertMonthlyBudget } from "../utils/monthlyBudget.js";
 
 function getRole(req) {
   return String(req.headers["x-user-role"] || "admin").trim().toLowerCase();
@@ -768,24 +769,16 @@ export default async function financeRoutes(app) {
     const period = String(req.query?.period || "").trim();
     const site = String(req.query?.site_code || "").trim();
     if (!/^\d{4}-\d{2}$/.test(period)) return { ok: false, error: "period (YYYY-MM) required" };
-    const row = db.prepare(`
-      SELECT budget_amount, currency, notes, updated_at
-      FROM finance_budgets_monthly
-      WHERE period = ?
-        AND category = 'plant_hire'
-        AND COALESCE(site_code, '') = ?
-        AND COALESCE(cost_center_code, '') = ''
-        AND COALESCE(equipment_type, '') = ''
-      LIMIT 1
-    `).get(period, site);
+    const row = getMonthlyBudgetRow(db, period, "plant_hire", site);
     return {
       ok: true,
       period,
       site_code: site || null,
-      budget_amount: Number(row?.budget_amount || 0),
-      currency: row?.currency || "USD",
-      notes: row?.notes || null,
-      updated_at: row?.updated_at || null,
+      budget_amount: row.budget_amount,
+      currency: row.currency,
+      notes: row.notes,
+      updated_at: row.updated_at,
+      resolved_site_code: row.site_code,
     };
   });
 
@@ -798,18 +791,63 @@ export default async function financeRoutes(app) {
     const notes = req.body?.notes != null ? String(req.body.notes).trim() : null;
     if (!/^\d{4}-\d{2}$/.test(period)) return reply.code(400).send({ error: "period (YYYY-MM) required" });
     if (!Number.isFinite(amount) || amount < 0) return reply.code(400).send({ error: "budget_amount must be >= 0" });
-    db.prepare(`
-      INSERT INTO finance_budgets_monthly
-        (period, site_code, cost_center_code, equipment_type, category, budget_amount, currency, notes, created_by)
-      VALUES (?, ?, '', '', 'plant_hire', ?, 'USD', ?, ?)
-      ON CONFLICT(period, site_code, cost_center_code, equipment_type, category) DO UPDATE SET
-        budget_amount = excluded.budget_amount,
-        notes = excluded.notes,
-        updated_at = datetime('now')
-    `).run(period, site, amount, notes, getUser(req));
+    upsertMonthlyBudget(db, {
+      period,
+      site_code: site,
+      category: "plant_hire",
+      budget_amount: amount,
+      notes,
+      created_by: getUser(req),
+    });
     writeAudit(db, req, {
       module: "finance",
       action: "plant_hire_budget.upsert",
+      entity_type: "finance_budgets_monthly",
+      entity_id: period,
+      payload: { period, site_code: site, budget_amount: amount },
+    });
+    return { ok: true, period, site_code: site || null, budget_amount: Number(amount.toFixed(2)) };
+  });
+
+  // GET /api/finance/operating-budget?period=YYYY-MM&site_code=
+  app.get("/operating-budget", async (req) => {
+    const period = String(req.query?.period || "").trim();
+    const site = String(req.query?.site_code || "").trim();
+    if (!/^\d{4}-\d{2}$/.test(period)) return { ok: false, error: "period (YYYY-MM) required" };
+    const row = getOperatingBudgetAmount(db, period, site);
+    return {
+      ok: true,
+      period,
+      site_code: site || null,
+      budget_amount: row.budget_amount,
+      currency: "USD",
+      notes: null,
+      updated_at: null,
+      resolved_site_code: row.resolved_site_code,
+      source: row.source,
+    };
+  });
+
+  // POST /api/finance/operating-budget  { period, site_code?, budget_amount, notes? }
+  app.post("/operating-budget", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "finance", "executive"])) return;
+    const period = String(req.body?.period || "").trim();
+    const site = req.body?.site_code != null ? String(req.body.site_code).trim() : "";
+    const amount = Number(req.body?.budget_amount ?? 0);
+    const notes = req.body?.notes != null ? String(req.body.notes).trim() : null;
+    if (!/^\d{4}-\d{2}$/.test(period)) return reply.code(400).send({ error: "period (YYYY-MM) required" });
+    if (!Number.isFinite(amount) || amount < 0) return reply.code(400).send({ error: "budget_amount must be >= 0" });
+    upsertMonthlyBudget(db, {
+      period,
+      site_code: site,
+      category: "operating",
+      budget_amount: amount,
+      notes,
+      created_by: getUser(req),
+    });
+    writeAudit(db, req, {
+      module: "finance",
+      action: "operating_budget.upsert",
       entity_type: "finance_budgets_monthly",
       entity_id: period,
       payload: { period, site_code: site, budget_amount: amount },

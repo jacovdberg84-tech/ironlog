@@ -20,6 +20,7 @@ import { aggregateFuelBenchmarkByCategory } from "../utils/fuelBenchmarkAggregat
 import { fuelBenchmarkAssetsInRangeSql } from "../utils/fuelMetricMode.js";
 import { buildBudgetMeetingDocxBuffer } from "../utils/budgetMeetingDocx.js";
 import { buildScheduledDowntimeCost } from "../utils/downtimeCosting.js";
+import { getMonthlyBudgetRow, getOperatingBudgetAmount } from "../utils/monthlyBudget.js";
 import { buildPlantHireLines, prevMonth as hirePrevMonth } from "../utils/plantHire.js";
 import { fetchLubeMonthStockSnapshot } from "../utils/lubeMonthStock.js";
 import { getMachinePrestartTemplate } from "../utils/machinePrestartTemplates.js";
@@ -8689,14 +8690,13 @@ export default async function reportsRoutes(app) {
       }
     }
 
-    const siteQ = site_code ? `&site_code=${encodeURIComponent(site_code)}` : "";
-    const [currentBva, prevBva, currentActuals, prevActuals, plantBudget] = await Promise.all([
-      injectJson(`/api/finance/budgets-vs-actual?period=${encodeURIComponent(month)}&dimension=category${siteQ}`),
-      injectJson(`/api/finance/budgets-vs-actual?period=${encodeURIComponent(prevLabel)}&dimension=category${siteQ}`),
+    const [currentActuals, prevActuals, plantBudget] = await Promise.all([
       injectJson(`/api/finance/actuals-by-category?period=${encodeURIComponent(month)}`),
       injectJson(`/api/finance/actuals-by-category?period=${encodeURIComponent(prevLabel)}`),
       injectJson(`/api/finance/plant-hire-budget?period=${encodeURIComponent(month)}&site_code=${encodeURIComponent(site_code)}`),
     ]);
+
+    const operatingBudgetRow = getOperatingBudgetAmount(db, month, site_code);
 
     const hasStoresPartOrders = hasTable("stores_part_orders");
     const orderRows = hasStoresPartOrders
@@ -8757,8 +8757,7 @@ export default async function reportsRoutes(app) {
       periodLabel: month,
       prevPeriodLabel: prevLabel,
       siteCode: site_code,
-      currentBva: currentBva || { rows: [], total: {} },
-      prevBva: prevBva || { rows: [], total: {} },
+      operatingBudget: Number(operatingBudgetRow.budget_amount || 0),
       currentActuals: currentActuals || { rows: [], total: 0 },
       prevActuals: prevActuals || { rows: [], total: 0 },
       plantHireBudget: Number(plantBudget?.budget_amount || 0),
@@ -8777,6 +8776,7 @@ export default async function reportsRoutes(app) {
     reply
       .header("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
       .header("Content-Disposition", `attachment; filename="IRONLOG_Budget_Meeting_${month}.docx"`)
+      .header("Cache-Control", "no-store")
       .send(Buffer.from(buffer));
   });
 

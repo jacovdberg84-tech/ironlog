@@ -9525,7 +9525,11 @@ function downloadGMBudgetMeetingDocx() {
     return;
   }
   const site = encodeURIComponent(getSessionSite() || "main");
-  window.open(`${API}/api/reports/gm-budget-meeting.docx?month=${encodeURIComponent(month)}&site_code=${site}`, "_blank");
+  const ts = Date.now();
+  window.open(
+    `${API}/api/reports/gm-budget-meeting.docx?month=${encodeURIComponent(month)}&site_code=${site}&_ts=${ts}`,
+    "_blank",
+  );
   setStatus("Budget meeting Word export started.");
 }
 
@@ -14498,20 +14502,67 @@ async function loadPlantHirePanel() {
 
 async function loadPlantHireBudgetStatus() {
   const month = (qs("plantHireBudgetMonth")?.value || "").trim();
-  const status = qs("plantHireBudgetStatus");
-  if (!month || !status) return;
+  if (!month) return;
   const site = encodeURIComponent(getSessionSite() || "main");
+  const opStatus = qs("operatingBudgetStatus");
+  const phStatus = qs("plantHireBudgetStatus");
   try {
-    const res = await fetchJson(`${API}/api/finance/plant-hire-budget?period=${encodeURIComponent(month)}&site_code=${site}`);
-    const amt = Number(res?.budget_amount || 0);
-    if (qs("plantHireBudgetAmount") && document.activeElement !== qs("plantHireBudgetAmount")) {
-      qs("plantHireBudgetAmount").value = amt > 0 ? String(amt) : "";
+    const [opRes, phRes] = await Promise.all([
+      fetchJson(`${API}/api/finance/operating-budget?period=${encodeURIComponent(month)}&site_code=${site}`),
+      fetchJson(`${API}/api/finance/plant-hire-budget?period=${encodeURIComponent(month)}&site_code=${site}`),
+    ]);
+    const opAmt = Number(opRes?.budget_amount || 0);
+    const phAmt = Number(phRes?.budget_amount || 0);
+    if (qs("operatingBudgetAmount") && document.activeElement !== qs("operatingBudgetAmount")) {
+      qs("operatingBudgetAmount").value = opAmt > 0 ? String(opAmt) : "";
     }
-    status.textContent = amt > 0
-      ? `Saved plant hire budget for ${month}: ${fmtMoney(amt)}`
-      : `No plant hire budget saved for ${month} yet.`;
+    if (qs("plantHireBudgetAmount") && document.activeElement !== qs("plantHireBudgetAmount")) {
+      qs("plantHireBudgetAmount").value = phAmt > 0 ? String(phAmt) : "";
+    }
+    if (opStatus) {
+      let opText = opAmt > 0
+        ? `Saved operating budget for ${month}: ${fmtMoney(opAmt)} (one total for all expense categories)`
+        : `No operating budget saved for ${month} yet — enter your total monthly expenses above.`;
+      if (opAmt <= 0 && phAmt > 0) {
+        opText += ` If you entered total expenses under plant hire by mistake, copy that amount here and save.`;
+      }
+      opStatus.textContent = opText;
+    }
+    if (phStatus) {
+      phStatus.textContent = phAmt > 0
+        ? `Saved plant hire income target for ${month}: ${fmtMoney(phAmt)}`
+        : `No plant hire income target for ${month} (optional — contractor plant income only).`;
+    }
   } catch (e) {
-    status.textContent = String(e.message || e);
+    if (opStatus) opStatus.textContent = String(e.message || e);
+    if (phStatus) phStatus.textContent = String(e.message || e);
+  }
+}
+
+async function saveOperatingBudget() {
+  const period = (qs("plantHireBudgetMonth")?.value || "").trim();
+  const budget_amount = Number(qs("operatingBudgetAmount")?.value || 0);
+  if (!period) return alert("Select a budget month.");
+  if (!Number.isFinite(budget_amount) || budget_amount < 0) return alert("Enter a valid budget amount.");
+  setStatus("Saving operating budget...");
+  try {
+    const res = await fetchJson(`${API}/api/finance/operating-budget`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        period,
+        site_code: getSessionSite() || "main",
+        budget_amount,
+      }),
+    });
+    setStatus(`Operating budget saved for ${period}.`);
+    if (qs("operatingBudgetStatus")) {
+      qs("operatingBudgetStatus").textContent =
+        `Saved operating budget for ${period}: ${fmtMoney(res.budget_amount)} (one total for all expense categories)`;
+    }
+  } catch (e) {
+    setStatus("Operating budget save failed.");
+    alert(String(e.message || e));
   }
 }
 
@@ -14531,9 +14582,9 @@ async function savePlantHireBudget() {
         budget_amount,
       }),
     });
-    setStatus(`Plant hire budget saved for ${period}.`);
+    setStatus(`Plant hire income target saved for ${period}.`);
     if (qs("plantHireBudgetStatus")) {
-      qs("plantHireBudgetStatus").textContent = `Saved plant hire budget for ${period}: ${fmtMoney(res.budget_amount)}`;
+      qs("plantHireBudgetStatus").textContent = `Saved plant hire income target for ${period}: ${fmtMoney(res.budget_amount)}`;
     }
   } catch (e) {
     setStatus("Plant hire budget save failed.");
@@ -16127,6 +16178,9 @@ async function init() {
 
   qs("downloadAssetsCostCentersXlsx")?.addEventListener("click", () => downloadAssetsCostCentersXlsx());
 
+  qs("saveOperatingBudget")?.addEventListener("click", () =>
+    saveOperatingBudget().catch((e) => setStatus("Operating budget error: " + e.message))
+  );
   qs("savePlantHireBudget")?.addEventListener("click", () =>
     savePlantHireBudget().catch((e) => setStatus("Plant hire budget error: " + e.message))
   );
