@@ -67,11 +67,11 @@ export function buildScheduledDowntimeCost(db, period, opts = {}) {
       category,
       ${assetsHasSite ? "site_code" : "NULL AS site_code"},
       ${assetsHasCC ? "cost_center_code" : "NULL AS cost_center_code"},
-      ${assetsHasDownCost ? "COALESCE(downtime_cost_per_hour, ?)" : "?"} AS downtime_rate
+      ${assetsHasDownCost ? "COALESCE(downtime_cost_per_hour, ?)" : String(downtimeRateDefault)} AS downtime_rate
     FROM assets
     WHERE COALESCE(archived, 0) = 0
       AND active = 1
-  `).all(downtimeRateDefault, downtimeRateDefault);
+  `).all(...(assetsHasDownCost ? [downtimeRateDefault] : []));
 
   const assetById = new Map(assets.map((a) => [Number(a.id), a]));
 
@@ -95,11 +95,14 @@ export function buildScheduledDowntimeCost(db, period, opts = {}) {
     const woCols = db.prepare(`PRAGMA table_info(work_orders)`).all();
     const hasOpened = woCols.some((c) => String(c.name) === "opened_at");
     const hasCreated = woCols.some((c) => String(c.name) === "created_at");
-    const openExpr = hasOpened
-      ? "COALESCE(NULLIF(TRIM(w.opened_at), ''), w.created_at, datetime('now'))"
-      : hasCreated
-        ? "COALESCE(w.created_at, datetime('now'))"
-        : "datetime('now')";
+    let openExpr = "datetime('now')";
+    if (hasOpened && hasCreated) {
+      openExpr = "COALESCE(NULLIF(TRIM(w.opened_at), ''), w.created_at, datetime('now'))";
+    } else if (hasOpened) {
+      openExpr = "COALESCE(NULLIF(TRIM(w.opened_at), ''), datetime('now'))";
+    } else if (hasCreated) {
+      openExpr = "COALESCE(w.created_at, datetime('now'))";
+    }
 
     const woRows = db.prepare(`
       SELECT
