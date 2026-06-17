@@ -9,6 +9,7 @@ import {
   buildPlantHireFinanceRows,
   ensurePlantHireSchema,
 } from "../utils/plantHire.js";
+import { buildScheduledDowntimeCost } from "../utils/downtimeCosting.js";
 
 function getRole(req) {
   return String(req.headers["x-user-role"] || "admin").trim().toLowerCase();
@@ -646,23 +647,11 @@ export default async function financeRoutes(app) {
     }
 
     let downtimeRows = [];
-    if (hasTable("breakdown_downtime_logs") && hasTable("breakdowns") && hasTable("assets")) {
-      const downCostExpr = assetsHasDownCost
-        ? "COALESCE(a.downtime_cost_per_hour, ?)"
-        : "?";
-      downtimeRows = db.prepare(`
-        SELECT
-          COALESCE(a.category, '') AS equipment_type,
-          ${siteSql} AS site_code,
-          ${assetsHasCC ? "COALESCE(NULLIF(TRIM(a.cost_center_code), ''), ?)" : "?"} AS cost_center_code,
-          SUM(COALESCE(l.hours_down, 0) * ${downCostExpr}) AS amount
-        FROM breakdown_downtime_logs l
-        JOIN breakdowns b ON b.id = l.breakdown_id
-        JOIN assets a ON a.id = b.asset_id
-        WHERE l.log_date BETWEEN DATE(?) AND DATE(?)
-        GROUP BY 1, 2, 3
-      `).all(defaultCostCenter, downtimeDefault, start, end);
-    }
+    const scheduledDowntime = buildScheduledDowntimeCost(db, period, {
+      defaultScheduledHours: 10,
+      downtimeRateDefault,
+    });
+    downtimeRows = scheduledDowntime.financeRows;
 
     const out = new Map();
     const addRow = (rows, cat) => {

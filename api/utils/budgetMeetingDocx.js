@@ -58,21 +58,41 @@ function spacer() {
   return new Paragraph({ children: [new TextRun("")] });
 }
 
+const COST_CATS = ["parts", "labor", "fuel", "lube", "downtime"];
+
+function sumCats(map, cats) {
+  return cats.reduce((s, c) => s + Number(map.get(c) || 0), 0);
+}
+
+function buildBvaForCats(curActMap, curBvaMap, curBudMap, cats) {
+  const rows = cats.map((cat) => {
+    const row = curBvaMap.get(cat) || {};
+    const budget = Number(row.budget ?? curBudMap.get(cat) ?? 0);
+    const actual = Number(curActMap.get(cat) || row.actual || 0);
+    const variance = actual - budget;
+    const variancePct = budget > 0 ? (variance / budget) * 100 : null;
+    return [titleCaseCat(cat), money(budget), money(actual), money(variance), pct(variancePct)];
+  });
+  const budget = sumCats(
+    new Map(cats.map((c) => [c, Number((curBvaMap.get(c) || {}).budget ?? curBudMap.get(c) ?? 0)])),
+    cats,
+  );
+  const actual = sumCats(curActMap, cats);
+  const variance = actual - budget;
+  rows.push([
+    "TOTAL (operating costs)",
+    money(budget),
+    money(actual),
+    money(variance),
+    pct(budget > 0 ? (variance / budget) * 100 : null),
+  ]);
+  return { rows, budget, actual, variance };
+}
+
 /**
  * @param {object} data
- * @param {string} data.periodLabel
- * @param {string} data.prevPeriodLabel
- * @param {string} data.siteCode
- * @param {object} data.currentBva - budgets-vs-actual total + rows by category
- * @param {object} data.prevBva
- * @param {object} data.currentActuals - actuals-by-category
- * @param {object} data.prevActuals
- * @param {object} data.upcoming
- * @param {Array} data.plantHireLines
- * @param {number} data.plantHireBudget
  */
 export async function buildBudgetMeetingDocxBuffer(data) {
-  const cats = ["parts", "labor", "fuel", "lube", "downtime", "plant_hire"];
   const curActMap = new Map((data.currentActuals?.rows || []).map((r) => [r.category, r.amount]));
   const prevActMap = new Map((data.prevActuals?.rows || []).map((r) => [r.category, r.amount]));
   const curBudMap = new Map(
@@ -82,71 +102,101 @@ export async function buildBudgetMeetingDocxBuffer(data) {
     (data.currentBva?.rows || []).map((r) => [String(r.dimension_key || ""), r]),
   );
 
-  const momRows = cats.map((cat) => {
+  const plantIncome = Number(curActMap.get("plant_hire") || 0);
+  const plantBudget = Number(data.plantHireBudget || 0);
+  const plantVariance = plantIncome - plantBudget;
+
+  const momRows = COST_CATS.map((cat) => {
     const prev = Number(prevActMap.get(cat) || 0);
     const cur = Number(curActMap.get(cat) || 0);
     const chg = cur - prev;
     const chgPct = prev > 0 ? (chg / prev) * 100 : null;
     return [titleCaseCat(cat), money(prev), money(cur), money(chg), pct(chgPct)];
   });
-  const momTotalPrev = Number(data.prevActuals?.total || 0);
-  const momTotalCur = Number(data.currentActuals?.total || 0);
+  const momPrevTotal = sumCats(prevActMap, COST_CATS);
+  const momCurTotal = sumCats(curActMap, COST_CATS);
   momRows.push([
-    "TOTAL",
-    money(momTotalPrev),
-    money(momTotalCur),
-    money(momTotalCur - momTotalPrev),
-    pct(momTotalPrev > 0 ? ((momTotalCur - momTotalPrev) / momTotalPrev) * 100 : null),
+    "TOTAL (operating costs)",
+    money(momPrevTotal),
+    money(momCurTotal),
+    money(momCurTotal - momPrevTotal),
+    pct(momPrevTotal > 0 ? ((momCurTotal - momPrevTotal) / momPrevTotal) * 100 : null),
   ]);
 
-  const bvaRows = cats.map((cat) => {
-    const row = curBvaMap.get(cat) || {};
-    const budget = Number(row.budget ?? curBudMap.get(cat) ?? 0);
-    const actual = Number(curActMap.get(cat) || row.actual || 0);
-    const variance = actual - budget;
-    const variancePct = budget > 0 ? (variance / budget) * 100 : null;
-    return [titleCaseCat(cat), money(budget), money(actual), money(variance), pct(variancePct)];
-  });
-  const t = data.currentBva?.total || {};
-  bvaRows.push([
-    "TOTAL",
-    money(t.budget),
-    money(t.actual),
-    money(t.variance),
-    pct(t.budget > 0 ? (Number(t.variance || 0) / Number(t.budget || 1)) * 100 : null),
-  ]);
+  const bva = buildBvaForCats(curActMap, curBvaMap, curBudMap, COST_CATS);
 
   const plantHireRows = (data.plantHireLines || []).map((r) => [
     r.asset_code,
     r.asset_name || "",
     r.billing_mode === "hourly" ? "Hourly" : "Fixed / month",
     r.billing_mode === "hourly" ? Number(r.hours_run || 0).toFixed(1) : "—",
-    r.billing_mode === "hourly" ? money(r.rate) + "/hr" : money(r.rate) + "/mo",
+    r.billing_mode === "hourly" ? `${money(r.rate)}/hr` : `${money(r.rate)}/mo`,
     money(r.amount),
+  ]);
+
+  const downtimeRows = (data.downtimeDetail || []).map((r) => [
+    r.asset_code,
+    r.asset_name || "",
+    String(r.down_days || 0),
+    Number(r.downtime_hours || 0).toFixed(1),
+    `${money(r.downtime_rate)}/hr`,
+    money(r.downtime_cost),
   ]);
 
   const up = data.upcoming || {};
   const children = [
-    heading("Budget Meeting — Cost Summary"),
+    heading("Budget Meeting — Cost & Income Summary"),
     para(`Reporting month: ${data.periodLabel}  |  Previous month: ${data.prevPeriodLabel}  |  Site: ${data.siteCode}`),
     spacer(),
     heading("Executive Summary", HeadingLevel.HEADING_2),
     para(
-      `This month actual ${money(t.actual)} vs budget ${money(t.budget)} (variance ${money(t.variance)}). ` +
-        `Plant hire budget: ${money(data.plantHireBudget)} | Plant hire actual (computed): ${money(curActMap.get("plant_hire") || 0)}.`,
+      `Operating costs this month: ${money(bva.actual)} actual vs ${money(bva.budget)} budget ` +
+        `(variance ${money(bva.variance)}).`,
+    ),
+    para(
+      `Plant hire income: ${money(plantIncome)} actual vs ${money(plantBudget)} budget ` +
+        `(variance ${money(plantVariance)}). Plant charges are contractor income, not an operating cost.`,
+      true,
     ),
     para(
       `Upcoming: parts on order ${money(up.parts_on_order)} | in transit ${money(up.parts_in_transit)} | ` +
         `arrived ${money(up.parts_arrived)} | maintenance forecast ${money(up.maintenance_total)}.`,
-      true,
     ),
     spacer(),
-    heading("Last Month vs This Month (Actuals)", HeadingLevel.HEADING_2),
+    heading("Last Month vs This Month (Operating Costs)", HeadingLevel.HEADING_2),
+    para("Excludes plant hire income. Downtime uses scheduled daily hours on each down day × machine downtime rate."),
     docTable(["Category", data.prevPeriodLabel, data.periodLabel, "Change $", "Change %"], momRows),
     spacer(),
-    heading("This Month — Budget vs Actual", HeadingLevel.HEADING_2),
-    docTable(["Category", "Budget", "Actual", "Variance $", "Variance %"], bvaRows),
+    heading("This Month — Budget vs Actual (Operating Costs)", HeadingLevel.HEADING_2),
+    docTable(["Category", "Budget", "Actual", "Variance $", "Variance %"], bva.rows),
     spacer(),
+    heading("Downtime Cost Detail", HeadingLevel.HEADING_2),
+    para(
+      downtimeRows.length
+        ? "Each down day uses the scheduled hours from Daily Input for that date (e.g. 9 h × 10 days = 90 h). " +
+          "Down days include breakdown downtime logs and days covered by an open breakdown or assigned work order."
+        : "No scheduled-hours downtime cost calculated for this period.",
+    ),
+  ];
+
+  if (downtimeRows.length) {
+    children.push(
+      docTable(
+        ["Asset", "Name", "Down days", "Downtime hrs", "Rate", "Cost"],
+        downtimeRows,
+      ),
+      para(
+        `Downtime subtotal: ${money((data.downtimeDetail || []).reduce((s, r) => s + Number(r.downtime_cost || 0), 0))} ` +
+          `(${Number(data.downtimeTotalHours || 0).toFixed(1)} hours)`,
+        true,
+      ),
+      spacer(),
+    );
+  } else {
+    children.push(spacer());
+  }
+
+  children.push(
     heading("Upcoming Costs", HeadingLevel.HEADING_2),
     docTable(
       ["Item", "Amount"],
@@ -159,21 +209,21 @@ export async function buildBudgetMeetingDocxBuffer(data) {
       ],
     ),
     spacer(),
-    heading("Plant Hire — Rates & This Month Cost", HeadingLevel.HEADING_2),
+    heading("Plant Hire Income — Rates & This Month", HeadingLevel.HEADING_2),
     para(
       plantHireRows.length
-        ? "Hourly hire uses production hours logged in IRONLOG. Fixed monthly charges apply once per asset per month."
-        : "No plant hire costs calculated yet. Set hire rates under Assets → Plant Hire & Budget.",
+        ? "Contractor plant charges are income to your operation. Hourly hire uses production hours logged in IRONLOG."
+        : "No plant hire income calculated yet. Set hire rates under Assets → Plant Hire & Budget.",
     ),
-  ];
+  );
 
   if (plantHireRows.length) {
     children.push(
       docTable(
-        ["Asset", "Name", "Billing", "Hours", "Rate", "Month cost"],
+        ["Asset", "Name", "Billing", "Hours", "Rate", "Income"],
         plantHireRows,
       ),
-      para(`Plant hire subtotal: ${money((data.plantHireLines || []).reduce((s, r) => s + Number(r.amount || 0), 0))}`, true),
+      para(`Plant hire income subtotal: ${money(plantIncome)}`, true),
     );
   }
 

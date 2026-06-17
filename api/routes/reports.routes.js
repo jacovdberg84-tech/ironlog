@@ -19,6 +19,7 @@ import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
 import { aggregateFuelBenchmarkByCategory } from "../utils/fuelBenchmarkAggregate.js";
 import { fuelBenchmarkAssetsInRangeSql } from "../utils/fuelMetricMode.js";
 import { buildBudgetMeetingDocxBuffer } from "../utils/budgetMeetingDocx.js";
+import { buildScheduledDowntimeCost } from "../utils/downtimeCosting.js";
 import { buildPlantHireLines, prevMonth as hirePrevMonth } from "../utils/plantHire.js";
 import { fetchLubeMonthStockSnapshot } from "../utils/lubeMonthStock.js";
 import { getMachinePrestartTemplate } from "../utils/machinePrestartTemplates.js";
@@ -8745,6 +8746,12 @@ export default async function reportsRoutes(app) {
     const partsArrived = sumStatus("arrived");
     const upcomingTotal = partsOnOrder + partsInTransit + partsArrived + maintenanceTotal;
     const plantHireLines = buildPlantHireLines(db, month);
+    const downtimeCost = buildScheduledDowntimeCost(db, month, {
+      defaultScheduledHours: 10,
+      downtimeRateDefault: Number(
+        db.prepare(`SELECT value FROM cost_settings WHERE key = 'downtime_cost_per_hour_default' LIMIT 1`).get()?.value
+      ) || 120,
+    });
 
     const buffer = await buildBudgetMeetingDocxBuffer({
       periodLabel: month,
@@ -8756,6 +8763,8 @@ export default async function reportsRoutes(app) {
       prevActuals: prevActuals || { rows: [], total: 0 },
       plantHireBudget: Number(plantBudget?.budget_amount || 0),
       plantHireLines,
+      downtimeDetail: downtimeCost.detail,
+      downtimeTotalHours: downtimeCost.total_hours,
       upcoming: {
         parts_on_order: partsOnOrder,
         parts_in_transit: partsInTransit,
