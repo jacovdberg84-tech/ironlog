@@ -17,6 +17,11 @@ import {
   normalizeCostCenterCode,
   normalizeSiteCode,
 } from "../utils/costAllocation.js";
+import {
+  ensurePlantHireSchema,
+  listHireAssetsRegister,
+  normalizeHireBillingMode,
+} from "../utils/plantHire.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -29,6 +34,7 @@ function isLdvPrestartQrAsset(assetCode) {
 export default async function assetRoutes(app) {
   ensureMasterDataSchema();
   ensureCostAllocationSchema(db);
+  ensurePlantHireSchema(db);
   db.prepare(`
     CREATE TABLE IF NOT EXISTS asset_qr_profiles (
       asset_id INTEGER PRIMARY KEY,
@@ -203,6 +209,23 @@ export default async function assetRoutes(app) {
     });
 
     return { ok: true, cards };
+  });
+
+  // GET /api/assets/hire-register
+  app.get("/hire-register", async () => {
+    const rows = listHireAssetsRegister(db).map((r) => ({
+      asset_code: r.asset_code,
+      asset_name: r.asset_name,
+      category: r.category,
+      site_code: r.site_code,
+      cost_center_code: r.cost_center_code,
+      hire_billing_mode: r.hire_billing_mode || "",
+      hire_rate_per_hour: r.hire_rate_per_hour != null ? Number(r.hire_rate_per_hour) : null,
+      hire_fixed_monthly: r.hire_fixed_monthly != null ? Number(r.hire_fixed_monthly) : null,
+      active: Number(r.active),
+      archived: Number(r.archived),
+    }));
+    return { ok: true, rows };
   });
 
   // GET /api/assets/cost-centers.xlsx?include_archived=0|1
@@ -453,6 +476,30 @@ export default async function assetRoutes(app) {
       sets.push("asset_name = ?");
       args.push(name);
     }
+    if (body.hire_billing_mode !== undefined) {
+      sets.push("hire_billing_mode = ?");
+      args.push(normalizeHireBillingMode(body.hire_billing_mode) || null);
+    }
+    if (body.hire_rate_per_hour !== undefined) {
+      const v = body.hire_rate_per_hour === null || String(body.hire_rate_per_hour).trim() === ""
+        ? null
+        : Number(body.hire_rate_per_hour);
+      if (v != null && (!Number.isFinite(v) || v < 0)) {
+        return reply.code(400).send({ error: "hire_rate_per_hour must be >= 0" });
+      }
+      sets.push("hire_rate_per_hour = ?");
+      args.push(v);
+    }
+    if (body.hire_fixed_monthly !== undefined) {
+      const v = body.hire_fixed_monthly === null || String(body.hire_fixed_monthly).trim() === ""
+        ? null
+        : Number(body.hire_fixed_monthly);
+      if (v != null && (!Number.isFinite(v) || v < 0)) {
+        return reply.code(400).send({ error: "hire_fixed_monthly must be >= 0" });
+      }
+      sets.push("hire_fixed_monthly = ?");
+      args.push(v);
+    }
 
     if (body.cost_center_code !== undefined || body.department_code !== undefined) {
       const gov = validateAssetGovernanceOptional(siteCodeFromReq(req), {
@@ -476,7 +523,8 @@ export default async function assetRoutes(app) {
 
     const updated = db.prepare(`
       SELECT id, asset_code, asset_name, category, active, is_standby, archived,
-             department_code, cost_center_code, site_code, data_owner_username, created_at
+             department_code, cost_center_code, site_code, data_owner_username, created_at,
+             hire_billing_mode, hire_rate_per_hour, hire_fixed_monthly
       FROM assets WHERE asset_code = ?
     `).get(asset_code);
     return {

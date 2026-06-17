@@ -5,6 +5,10 @@
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { ensureCostAllocationSchema } from "../utils/costAllocation.js";
+import {
+  buildPlantHireFinanceRows,
+  ensurePlantHireSchema,
+} from "../utils/plantHire.js";
 
 function getRole(req) {
   return String(req.headers["x-user-role"] || "admin").trim().toLowerCase();
@@ -170,6 +174,7 @@ const KPI_DEFINITIONS = [
 export default async function financeRoutes(app) {
   ensureAuditTable(db);
   ensureCostAllocationSchema(db);
+  ensurePlantHireSchema(db);
 
   /* --- ensure tables owned by this module exist --- */
   db.prepare(`
@@ -682,6 +687,13 @@ export default async function financeRoutes(app) {
     addRow(fuelRows, "fuel");
     addRow(lubeRows, "lube");
     addRow(downtimeRows, "downtime");
+    const plantHire = buildPlantHireFinanceRows(db, period).map((r) => ({
+      site_code: r.site_code,
+      cost_center_code: r.cost_center_code,
+      equipment_type: r.equipment_type,
+      amount: r.actual_amount,
+    }));
+    addRow(plantHire, "plant_hire");
     return Array.from(out.values());
   }
 
@@ -743,6 +755,77 @@ export default async function financeRoutes(app) {
     `;
     const rows = db.prepare(sql).all(...args);
     return { ok: true, rows };
+  });
+
+  // GET /api/finance/actuals-by-category?period=YYYY-MM
+  app.get("/actuals-by-category", async (req, reply) => {
+    const period = String(req.query?.period || "").trim();
+    if (!/^\d{4}-\d{2}$/.test(period)) return reply.code(400).send({ error: "period (YYYY-MM) required" });
+    const actuals = buildMonthlyActuals(period);
+    const byCat = new Map();
+    for (const a of actuals) {
+      const cat = String(a.category || "other").toLowerCase();
+      byCat.set(cat, (byCat.get(cat) || 0) + Number(a.actual_amount || 0));
+    }
+    const rows = Array.from(byCat.entries())
+      .map(([category, amount]) => ({ category, amount: Number(amount.toFixed(2)) }))
+      .sort((a, b) => b.amount - a.amount);
+    const total = Number(rows.reduce((s, r) => s + r.amount, 0).toFixed(2));
+    return { ok: true, period, rows, total };
+  });
+
+  // GET /api/finance/plant-hire-budget?period=YYYY-MM&site_code=
+  app.get("/plant-hire-budget", async (req) => {
+    const period = String(req.query?.period || "").trim();
+    const site = String(req.query?.site_code || "").trim();
+    if (!/^\d{4}-\d{2}$/.test(period)) return { ok: false, error: "period (YYYY-MM) required" };
+    const row = db.prepare(`
+      SELECT budget_amount, currency, notes, updated_at
+      FROM finance_budgets_monthly
+      WHERE period = ?
+        AND category = 'plant_hire'
+        AND COALESCE(site_code, '') = ?
+        AND COALESCE(cost_center_code, '') = ''
+        AND COALESCE(equipment_type, '') = ''
+      LIMIT 1
+    `).get(period, site);
+    return {
+      ok: true,
+      period,
+      site_code: site || null,
+      budget_amount: Number(row?.budget_amount || 0),
+      currency: row?.currency || "USD",
+      notes: row?.notes || null,
+      updated_at: row?.updated_at || null,
+    };
+  });
+
+  // POST /api/finance/plant-hire-budget  { period, site_code?, budget_amount, notes? }
+  app.post("/plant-hire-budget", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "finance", "executive"])) return;
+    const period = String(req.body?.period || "").trim();
+    const site = req.body?.site_code != null ? String(req.body.site_code).trim() : "";
+    const amount = Number(req.body?.budget_amount ?? 0);
+    const notes = req.body?.notes != null ? String(req.body.notes).trim() : null;
+    if (!/^\d{4}-\d{2}$/.test(period)) return reply.code(400).send({ error: "period (YYYY-MM) required" });
+    if (!Number.isFinite(amount) || amount < 0) return reply.code(400).send({ error: "budget_amount must be >= 0" });
+    db.prepare(`
+      INSERT INTO finance_budgets_monthly
+        (period, site_code, cost_center_code, equipment_type, category, budget_amount, currency, notes, created_by)
+      VALUES (?, ?, '', '', 'plant_hire', ?, 'USD', ?, ?)
+      ON CONFLICT(period, site_code, cost_center_code, equipment_type, category) DO UPDATE SET
+        budget_amount = excluded.budget_amount,
+        notes = excluded.notes,
+        updated_at = datetime('now')
+    `).run(period, site, amount, notes, getUser(req));
+    writeAudit(db, req, {
+      module: "finance",
+      action: "plant_hire_budget.upsert",
+      entity_type: "finance_budgets_monthly",
+      entity_id: period,
+      payload: { period, site_code: site, budget_amount: amount },
+    });
+    return { ok: true, period, site_code: site || null, budget_amount: Number(amount.toFixed(2)) };
   });
 
   app.get("/site-allocation", async (req, reply) => {

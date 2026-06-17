@@ -18,6 +18,8 @@ import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fl
 import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
 import { aggregateFuelBenchmarkByCategory } from "../utils/fuelBenchmarkAggregate.js";
 import { fuelBenchmarkAssetsInRangeSql } from "../utils/fuelMetricMode.js";
+import { buildBudgetMeetingDocxBuffer } from "../utils/budgetMeetingDocx.js";
+import { buildPlantHireLines, prevMonth as hirePrevMonth } from "../utils/plantHire.js";
 import { fetchLubeMonthStockSnapshot } from "../utils/lubeMonthStock.js";
 import { getMachinePrestartTemplate } from "../utils/machinePrestartTemplates.js";
 import {
@@ -8652,6 +8654,120 @@ export default async function reportsRoutes(app) {
     reply
       .header("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation")
       .header("Content-Disposition", `attachment; filename="IRONLOG_GM_Upcoming_Costs_${label}.pptx"`)
+      .send(Buffer.from(buffer));
+  });
+
+  // GET /api/reports/gm-budget-meeting.docx?month=YYYY-MM&site_code=
+  app.get("/gm-budget-meeting.docx", async (req, reply) => {
+    const month = String(req.query?.month || "").trim();
+    if (!isMonth(month)) {
+      return reply.code(400).send({ error: "month (YYYY-MM) required" });
+    }
+    const siteCodeFromQuery = String(req.query?.site_code || "").trim().toLowerCase();
+    const siteCodeHeader = getSiteCode(req);
+    const site_code = siteCodeFromQuery || (siteCodeHeader === "default" ? "main" : siteCodeHeader);
+    const prevLabel = hirePrevMonth(month);
+    const period = monthRange(month);
+
+    async function injectJson(path) {
+      const injected = await app.inject({
+        method: "GET",
+        url: path,
+        headers: {
+          "x-user-name": String(req.headers?.["x-user-name"] || "system"),
+          "x-user-role": String(req.headers?.["x-user-role"] || "admin"),
+          "x-user-roles": String(req.headers?.["x-user-roles"] || "admin"),
+          "x-site-code": site_code,
+        },
+      });
+      if (injected.statusCode >= 400) return null;
+      try {
+        return JSON.parse(String(injected.payload || "{}"));
+      } catch {
+        return null;
+      }
+    }
+
+    const siteQ = site_code ? `&site_code=${encodeURIComponent(site_code)}` : "";
+    const [currentBva, prevBva, currentActuals, prevActuals, plantBudget] = await Promise.all([
+      injectJson(`/api/finance/budgets-vs-actual?period=${encodeURIComponent(month)}&dimension=category${siteQ}`),
+      injectJson(`/api/finance/budgets-vs-actual?period=${encodeURIComponent(prevLabel)}&dimension=category${siteQ}`),
+      injectJson(`/api/finance/actuals-by-category?period=${encodeURIComponent(month)}`),
+      injectJson(`/api/finance/actuals-by-category?period=${encodeURIComponent(prevLabel)}`),
+      injectJson(`/api/finance/plant-hire-budget?period=${encodeURIComponent(month)}&site_code=${encodeURIComponent(site_code)}`),
+    ]);
+
+    const hasStoresPartOrders = hasTable("stores_part_orders");
+    const orderRows = hasStoresPartOrders
+      ? db.prepare(`
+          SELECT qty, unit_cost, status
+          FROM stores_part_orders
+          WHERE LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+            AND DATE(order_date) BETWEEN DATE(?) AND DATE(?)
+        `).all(site_code, period.start, period.end)
+      : [];
+    const sumStatus = (status) =>
+      orderRows
+        .filter((r) => String(r.status || "").toLowerCase() === status)
+        .reduce((s, r) => s + Number(r.qty || 0) * Number(r.unit_cost || 0), 0);
+
+    const q = new URLSearchParams();
+    q.set("start", period.start);
+    q.set("end", period.end);
+    q.set("near_due_hours", "50");
+    q.set("predictive_horizon_hours", "100");
+    const insightsInjected = await app.inject({
+      method: "GET",
+      url: `/api/maintenance/insights?${q.toString()}`,
+      headers: {
+        "x-user-name": String(req.headers?.["x-user-name"] || "system"),
+        "x-user-role": String(req.headers?.["x-user-role"] || "admin"),
+        "x-user-roles": String(req.headers?.["x-user-roles"] || "admin"),
+        "x-site-code": site_code,
+      },
+    });
+    let maintenanceTotal = 0;
+    if (insightsInjected.statusCode < 400) {
+      try {
+        const insights = JSON.parse(String(insightsInjected.payload || "{}"));
+        const maintenanceRows = Array.isArray(insights?.parts_planning?.upcoming_cost_forecasts)
+          ? insights.parts_planning.upcoming_cost_forecasts
+          : [];
+        maintenanceTotal = maintenanceRows.reduce(
+          (s, r) => s + Number(r?.forecast?.est_total_cost || 0),
+          0,
+        );
+      } catch { /* ignore */ }
+    }
+
+    const partsOnOrder = sumStatus("on_order");
+    const partsInTransit = sumStatus("in_transit");
+    const partsArrived = sumStatus("arrived");
+    const upcomingTotal = partsOnOrder + partsInTransit + partsArrived + maintenanceTotal;
+    const plantHireLines = buildPlantHireLines(db, month);
+
+    const buffer = await buildBudgetMeetingDocxBuffer({
+      periodLabel: month,
+      prevPeriodLabel: prevLabel,
+      siteCode: site_code,
+      currentBva: currentBva || { rows: [], total: {} },
+      prevBva: prevBva || { rows: [], total: {} },
+      currentActuals: currentActuals || { rows: [], total: 0 },
+      prevActuals: prevActuals || { rows: [], total: 0 },
+      plantHireBudget: Number(plantBudget?.budget_amount || 0),
+      plantHireLines,
+      upcoming: {
+        parts_on_order: partsOnOrder,
+        parts_in_transit: partsInTransit,
+        parts_arrived: partsArrived,
+        maintenance_total: maintenanceTotal,
+        upcoming_total: upcomingTotal,
+      },
+    });
+
+    reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+      .header("Content-Disposition", `attachment; filename="IRONLOG_Budget_Meeting_${month}.docx"`)
       .send(Buffer.from(buffer));
   });
 

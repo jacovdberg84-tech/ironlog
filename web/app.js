@@ -9518,6 +9518,17 @@ function downloadGMUpcomingCostsPptx() {
   window.open(`${API}/api/reports/gm-upcoming-costs.pptx?${q}`, "_blank");
 }
 
+function downloadGMBudgetMeetingDocx() {
+  const month = (qs("costMonth")?.value || qs("plantHireBudgetMonth")?.value || "").trim();
+  if (!month) {
+    alert("Select a month on Reports (cost month) or Assets → Plant Hire budget month.");
+    return;
+  }
+  const site = encodeURIComponent(getSessionSite() || "main");
+  window.open(`${API}/api/reports/gm-budget-meeting.docx?month=${encodeURIComponent(month)}&site_code=${site}`, "_blank");
+  setStatus("Budget meeting Word export started.");
+}
+
 async function saveRainDay() {
   const rainDate = (qs("rainDayDate")?.value || "").trim();
   if (!rainDate) return alert("Pick a rain day first.");
@@ -14313,6 +14324,18 @@ async function saveContractorAsset() {
         body: JSON.stringify({ asset_code, utilization_mode: "km" }),
       }).catch(() => {});
     }
+    const hireMode = String(qs("caHireBilling")?.value || "").trim();
+    if (hireMode) {
+      await fetchJson(`${API}/api/assets/${encodeURIComponent(asset_code)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hire_billing_mode: hireMode,
+          hire_rate_per_hour: qs("caHireRateHour")?.value || null,
+          hire_fixed_monthly: qs("caHireFixedMonthly")?.value || null,
+        }),
+      }).catch(() => {});
+    }
     if (qs("caCode")) qs("caCode").value = "";
     if (qs("caName")) qs("caName").value = "";
     if (qs("caStandby")) qs("caStandby").checked = false;
@@ -14321,6 +14344,7 @@ async function saveContractorAsset() {
       loadAssetsFleet().catch(() => {}),
       loadCodePickers().catch(() => {}),
       loadDashboard().catch(() => {}),
+      loadPlantHirePanel().catch(() => {}),
     ]);
     await selectAssetCard(asset_code, { loadHistory: false, scroll: true }).catch(() => {});
   } catch (e) {
@@ -14410,6 +14434,140 @@ function downloadAssetsCostCentersXlsx() {
   setStatus("Asset cost center register export started.");
 }
 
+let plantHireRegisterCache = [];
+
+function fillPlantHireRateFields(row) {
+  if (qs("plantHireBillingMode")) {
+    qs("plantHireBillingMode").value = String(row?.hire_billing_mode || "");
+  }
+  if (qs("plantHireRateHour")) {
+    qs("plantHireRateHour").value =
+      row?.hire_rate_per_hour != null && row.hire_rate_per_hour !== "" ? String(row.hire_rate_per_hour) : "";
+  }
+  if (qs("plantHireFixedMonthly")) {
+    qs("plantHireFixedMonthly").value =
+      row?.hire_fixed_monthly != null && row.hire_fixed_monthly !== "" ? String(row.hire_fixed_monthly) : "";
+  }
+}
+
+function syncPlantHireAssetLabel(code) {
+  const label = qs("plantHireAssetLabel");
+  if (!label) return;
+  const c = String(code || "").trim();
+  if (!c) {
+    label.textContent = "—";
+    return;
+  }
+  const row = plantHireRegisterCache.find((r) => r.asset_code === c);
+  label.textContent = row ? `${c} — ${row.asset_name || ""}` : c;
+}
+
+async function loadPlantHirePanel() {
+  const monthEl = qs("plantHireBudgetMonth");
+  if (monthEl && !monthEl.value) {
+    monthEl.value = (qs("costMonth")?.value || "").trim() || new Date().toISOString().slice(0, 7);
+  }
+  try {
+    const data = await fetchJson(`${API}/api/assets/hire-register`);
+    plantHireRegisterCache = Array.isArray(data?.rows) ? data.rows : [];
+    const sel = qs("plantHireAssetSelect");
+    if (sel) {
+      const prev = String(sel.value || getSelectedAssetCode() || "");
+      sel.innerHTML = `<option value="">— Select hired asset —</option>`;
+      plantHireRegisterCache.forEach((r) => {
+        const opt = document.createElement("option");
+        opt.value = r.asset_code;
+        opt.textContent = `${r.asset_code} — ${r.asset_name || ""}`;
+        sel.appendChild(opt);
+      });
+      const pick = prev && plantHireRegisterCache.some((r) => r.asset_code === prev) ? prev : "";
+      if (pick) sel.value = pick;
+    }
+    const code = String(qs("plantHireAssetSelect")?.value || getSelectedAssetCode() || "").trim();
+    if (code) {
+      const row = plantHireRegisterCache.find((r) => r.asset_code === code);
+      fillPlantHireRateFields(row || {});
+      syncPlantHireAssetLabel(code);
+    }
+    await loadPlantHireBudgetStatus().catch(() => {});
+  } catch (e) {
+    const out = qs("plantHireRatesResult");
+    if (out) out.textContent = String(e.message || e);
+  }
+}
+
+async function loadPlantHireBudgetStatus() {
+  const month = (qs("plantHireBudgetMonth")?.value || "").trim();
+  const status = qs("plantHireBudgetStatus");
+  if (!month || !status) return;
+  const site = encodeURIComponent(getSessionSite() || "main");
+  try {
+    const res = await fetchJson(`${API}/api/finance/plant-hire-budget?period=${encodeURIComponent(month)}&site_code=${site}`);
+    const amt = Number(res?.budget_amount || 0);
+    if (qs("plantHireBudgetAmount") && document.activeElement !== qs("plantHireBudgetAmount")) {
+      qs("plantHireBudgetAmount").value = amt > 0 ? String(amt) : "";
+    }
+    status.textContent = amt > 0
+      ? `Saved plant hire budget for ${month}: ${fmtMoney(amt)}`
+      : `No plant hire budget saved for ${month} yet.`;
+  } catch (e) {
+    status.textContent = String(e.message || e);
+  }
+}
+
+async function savePlantHireBudget() {
+  const period = (qs("plantHireBudgetMonth")?.value || "").trim();
+  const budget_amount = Number(qs("plantHireBudgetAmount")?.value || 0);
+  if (!period) return alert("Select a budget month.");
+  if (!Number.isFinite(budget_amount) || budget_amount < 0) return alert("Enter a valid budget amount.");
+  setStatus("Saving plant hire budget...");
+  try {
+    const res = await fetchJson(`${API}/api/finance/plant-hire-budget`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        period,
+        site_code: getSessionSite() || "main",
+        budget_amount,
+      }),
+    });
+    setStatus(`Plant hire budget saved for ${period}.`);
+    if (qs("plantHireBudgetStatus")) {
+      qs("plantHireBudgetStatus").textContent = `Saved plant hire budget for ${period}: ${fmtMoney(res.budget_amount)}`;
+    }
+  } catch (e) {
+    setStatus("Plant hire budget save failed.");
+    alert(String(e.message || e));
+  }
+}
+
+async function savePlantHireRates() {
+  const asset_code = String(qs("plantHireAssetSelect")?.value || getSelectedAssetCode() || "").trim();
+  if (!asset_code) return alert("Select a hired asset first.");
+  const hire_billing_mode = String(qs("plantHireBillingMode")?.value || "").trim();
+  const payload = {
+    hire_billing_mode: hire_billing_mode || null,
+    hire_rate_per_hour: qs("plantHireRateHour")?.value || null,
+    hire_fixed_monthly: qs("plantHireFixedMonthly")?.value || null,
+  };
+  setStatus(`Saving hire rates for ${asset_code}...`);
+  try {
+    const res = await fetchJson(`${API}/api/assets/${encodeURIComponent(asset_code)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const out = qs("plantHireRatesResult");
+    if (out) out.textContent = JSON.stringify(res, null, 2);
+    setStatus(`Hire rates saved for ${asset_code}.`);
+    await loadPlantHirePanel().catch(() => {});
+  } catch (e) {
+    const out = qs("plantHireRatesResult");
+    if (out) out.textContent = String(e.message || e);
+    setStatus("Hire rates save failed.");
+  }
+}
+
 async function loadAssetsFleet() {
   const showArchived = !!qs("showArchived")?.checked;
   const url = `${API}/api/assets/fleet-summary?include_archived=${showArchived ? 1 : 0}`;
@@ -14422,6 +14580,7 @@ async function loadAssetsFleet() {
     assetsFleetCache = Array.isArray(data?.cards) ? data.cards : [];
     renderAssetFleetGrid(assetsFleetCache);
     await populateHistoryAssets().catch(() => {});
+    await loadPlantHirePanel().catch(() => {});
     if (assetsSelectedCode && !assetsFleetCache.some((c) => c.asset_code === assetsSelectedCode)) {
       assetsSelectedCode = "";
       qs("assetDetailPanel")?.classList.add("hidden");
@@ -14492,6 +14651,14 @@ async function selectAssetCard(asset_code, opts = {}) {
   syncAssetsArchiveLabel();
   renderAssetFleetGrid(assetsFleetCache);
   qs("assetDetailPanel")?.classList.remove("hidden");
+  if (qs("plantHireAssetSelect")) {
+    const row = plantHireRegisterCache.find((r) => r.asset_code === code);
+    if (row) {
+      qs("plantHireAssetSelect").value = code;
+      fillPlantHireRateFields(row);
+    }
+    syncPlantHireAssetLabel(code);
+  }
   ensureAssetHistoryDateRange();
   await loadAssetDetailHeader(code);
   if (opts.loadHistory !== false) {
@@ -15491,6 +15658,7 @@ async function init() {
   qs("downloadMaintenanceCostByEquipmentPdf")?.addEventListener("click", () => openMaintenanceCostByEquipmentPdf(true));
   qs("downloadMaintenanceExecutivePptx")?.addEventListener("click", downloadMaintenanceExecutivePptx);
   qs("downloadGMUpcomingCostsPptx")?.addEventListener("click", downloadGMUpcomingCostsPptx);
+  qs("downloadGMBudgetMeetingDocx")?.addEventListener("click", downloadGMBudgetMeetingDocx);
   qs("saveRainDayBtn")?.addEventListener("click", () => saveRainDay().catch((e) => setStatus("Rain day save error: " + e.message)));
   qs("removeRainDayBtn")?.addEventListener("click", () => removeRainDay().catch((e) => setStatus("Rain day remove error: " + e.message)));
   qs("loadRainDaysBtn")?.addEventListener("click", () => loadRainDays().catch((e) => setStatus("Rain day load error: " + e.message)));
@@ -15958,6 +16126,20 @@ async function init() {
   });
 
   qs("downloadAssetsCostCentersXlsx")?.addEventListener("click", () => downloadAssetsCostCentersXlsx());
+
+  qs("savePlantHireBudget")?.addEventListener("click", () =>
+    savePlantHireBudget().catch((e) => setStatus("Plant hire budget error: " + e.message))
+  );
+  qs("savePlantHireRates")?.addEventListener("click", () =>
+    savePlantHireRates().catch((e) => setStatus("Plant hire rates error: " + e.message))
+  );
+  qs("plantHireBudgetMonth")?.addEventListener("change", () => loadPlantHireBudgetStatus().catch(() => {}));
+  qs("plantHireAssetSelect")?.addEventListener("change", () => {
+    const code = String(qs("plantHireAssetSelect")?.value || "").trim();
+    const row = plantHireRegisterCache.find((r) => r.asset_code === code);
+    fillPlantHireRateFields(row || {});
+    syncPlantHireAssetLabel(code);
+  });
 
   qs("assetsFleetFilter")?.addEventListener("input", () => {
     renderAssetFleetGrid(assetsFleetCache);

@@ -1613,6 +1613,68 @@
           </div>
         </div>
 
+        <!-- Plant hire rates & monthly budget -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fef3c7; color: #b45309;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"></path></svg>
+              </div>
+              <div>
+                <h3>Plant Hire &amp; Budget</h3>
+                <p class="muted small">Set contractor machine rates and your monthly plant hire budget for budget meetings</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Budget month</label>
+                <input id="plantHireBudgetMonth" type="month" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Plant hire budget ($)</label>
+                <input id="plantHireBudgetAmount" type="number" step="0.01" min="0" class="w-full" placeholder="Monthly plant hire budget" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="savePlantHireBudget" type="button" class="btn btn-primary">Save monthly budget</button>
+              </div>
+            </div>
+            <p class="muted small" id="plantHireBudgetStatus">—</p>
+            <hr style="margin: 16px 0; border: none; border-top: 1px solid var(--border, #e5e7eb);" />
+            <p class="muted small">Selected fleet card: <strong id="plantHireAssetLabel">—</strong> (click a fleet card above, or pick below)</p>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Hired asset</label>
+                <select id="plantHireAssetSelect" class="w-full"></select>
+              </div>
+              <div class="form-field">
+                <label>Billing</label>
+                <select id="plantHireBillingMode" class="w-full">
+                  <option value="">Not billed / owned</option>
+                  <option value="hourly">Hourly rate</option>
+                  <option value="fixed_monthly">Fixed monthly price</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Rate per hour ($)</label>
+                <input id="plantHireRateHour" type="number" step="0.01" min="0" class="w-full" placeholder="e.g. 850" />
+              </div>
+              <div class="form-field">
+                <label>Fixed monthly ($)</label>
+                <input id="plantHireFixedMonthly" type="number" step="0.01" min="0" class="w-full" placeholder="e.g. 120000" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="savePlantHireRates" type="button" class="btn btn-secondary">Save hire rates</button>
+              </div>
+            </div>
+            <pre class="output" id="plantHireRatesResult"></pre>
+          </div>
+        </div>
+
         <!-- Selected asset detail + history -->
         <div id="assetDetailPanel" class="dash-card full-width hidden">
           <div class="dash-card-header">
@@ -1745,6 +1807,24 @@
                   <input id="caStandby" type="checkbox" />
                   <span>Standby Asset</span>
                 </label>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Hire billing</label>
+                <select id="caHireBilling" class="w-full">
+                  <option value="">Owned (no hire charge)</option>
+                  <option value="hourly">Hourly rate</option>
+                  <option value="fixed_monthly">Fixed monthly</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Rate / hour ($)</label>
+                <input id="caHireRateHour" type="number" step="0.01" min="0" class="w-full" placeholder="Optional" />
+              </div>
+              <div class="form-field">
+                <label>Fixed monthly ($)</label>
+                <input id="caHireFixedMonthly" type="number" step="0.01" min="0" class="w-full" placeholder="Optional" />
               </div>
               <div class="form-field form-field-action">
                 <button id="saveContractorAsset" class="btn btn-primary">
@@ -6153,6 +6233,7 @@
               <button id="downloadMaintenanceCostByEquipmentPdf" class="btn btn-secondary">Download PDF</button>
               <button id="downloadMaintenanceExecutivePptx" class="btn btn-accent">Executive PPTX</button>
               <button id="downloadGMUpcomingCostsPptx" class="btn btn-accent">GM Upcoming Costs PPTX</button>
+              <button id="downloadGMBudgetMeetingDocx" class="btn btn-accent">Budget Meeting Word</button>
             </div>
           </div>
         </div>
