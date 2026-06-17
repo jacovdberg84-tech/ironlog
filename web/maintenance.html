@@ -76,6 +76,10 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
           <span>Work Orders</span>
         </a>
+        <a href="#" class="nav-item" data-section="parts-to-order">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
+          <span>Parts to Order</span>
+        </a>
         <a href="#" class="nav-item" data-section="manager-inspections">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><polyline points="17 11 19 13 23 9"></polyline></svg>
           <span>Manager Inspections</span>
@@ -1190,6 +1194,96 @@
       </div>
     </div>
 
+    <!-- Parts to Order Section -->
+    <div id="partsToOrderSection" class="maint-section" style="display:none;">
+      <div class="card stack-24">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0;">Parts to Order</h3>
+        </div>
+        <p class="muted" style="margin-top:0;">Request parts needed for maintenance. Stores or supervisors can mark items as ordered when placed.</p>
+
+        <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
+          <label>
+            Asset (optional)
+            <select id="ptoAsset" class="w-200"></select>
+          </label>
+          <label>
+            Store part code
+            <input id="ptoPartCode" list="wfPartsList" placeholder="Search part code" class="w-200" />
+          </label>
+          <label style="flex:1; min-width:200px;">
+            Description
+            <input id="ptoPartName" placeholder="Part name or description" />
+          </label>
+          <label>
+            Qty
+            <input id="ptoQty" type="number" min="0.1" step="0.1" value="1" class="w-100" />
+          </label>
+          <label>
+            Urgency
+            <select id="ptoUrgency" class="w-140">
+              <option value="normal">Normal</option>
+              <option value="urgent">Urgent</option>
+              <option value="critical">Critical</option>
+            </select>
+          </label>
+          <label>
+            WO #
+            <input id="ptoWorkOrderId" type="number" min="0" step="1" placeholder="Optional" class="w-120" />
+          </label>
+        </div>
+        <label>
+          Notes
+          <textarea id="ptoNotes" rows="2" placeholder="Why needed, supplier preference, etc." style="width:100%;"></textarea>
+        </label>
+        <div class="row stack-10">
+          <button type="button" id="ptoSubmitBtn">Submit request</button>
+          <button type="button" id="ptoClearBtn" class="btn-secondary">Clear form</button>
+        </div>
+        <div id="ptoFormMsg" class="muted"></div>
+
+        <hr class="hr-soft" />
+        <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
+          <label>
+            Status filter
+            <select id="ptoFilterStatus" class="w-160">
+              <option value="">All open</option>
+              <option value="requested">Pending</option>
+              <option value="ordered">Ordered</option>
+              <option value="received">Received</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </label>
+          <label style="display:flex; align-items:center; gap:8px; margin-top:22px;">
+            <input id="ptoMineOnly" type="checkbox" />
+            My requests only
+          </label>
+          <button type="button" id="ptoRefreshBtn">Refresh list</button>
+        </div>
+        <div style="overflow:auto; margin-top:10px;">
+          <table class="gridTable" style="min-width:1100px;">
+            <thead>
+              <tr>
+                <th>Requested</th>
+                <th>Asset</th>
+                <th>Part</th>
+                <th style="text-align:right;">Qty</th>
+                <th>Urgency</th>
+                <th>WO #</th>
+                <th>Requested by</th>
+                <th>Status</th>
+                <th>Notes</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="ptoListBody">
+              <tr><td colspan="10" class="muted">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- Weekly Forum Section -->
     <div id="weeklyForumSection" class="maint-section" style="display:none;">
       <div class="card stack-24">
@@ -1755,6 +1849,6 @@
 
   <script src="./undercarriage-diagrams.js?v=1"></script>
   <script src="./undercarriage.js?v=5"></script>
-  <script src="./maintenance.js?v=33"></script>
+  <script src="./maintenance.js?v=34"></script>
 </body>
 </html>

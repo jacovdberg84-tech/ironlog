@@ -1473,6 +1473,28 @@ export default async function maintenanceRoutes(app) {
   `).run();
 
   db.prepare(`
+    CREATE TABLE IF NOT EXISTS maintenance_parts_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      site_code TEXT DEFAULT 'main',
+      asset_id INTEGER,
+      asset_code TEXT,
+      part_code TEXT,
+      part_name TEXT NOT NULL,
+      qty REAL NOT NULL DEFAULT 1,
+      urgency TEXT NOT NULL DEFAULT 'normal',
+      notes TEXT,
+      work_order_id INTEGER,
+      status TEXT NOT NULL DEFAULT 'requested',
+      requested_by TEXT NOT NULL,
+      ordered_by TEXT,
+      status_notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE SET NULL
+    )
+  `).run();
+
+  db.prepare(`
     CREATE TABLE IF NOT EXISTS manager_damage_report_photos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       damage_report_id INTEGER NOT NULL,
@@ -9895,6 +9917,200 @@ export default async function maintenanceRoutes(app) {
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  const PARTS_REQUEST_STATUSES = new Set(["requested", "ordered", "received", "cancelled"]);
+  const PARTS_REQUEST_URGENCY = new Set(["normal", "urgent", "critical"]);
+  const PARTS_REQUEST_MANAGERS = ["admin", "supervisor", "stores", "plant_manager", "site_manager", "workshop_manager"];
+
+  app.get("/parts-requests", async (req, reply) => {
+    try {
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const status = String(req.query?.status || "").trim().toLowerCase();
+      const mine = String(req.query?.mine || "").trim() === "1";
+      const userName = String(req.headers?.["x-user-name"] || "").trim();
+      const limitRaw = Number(req.query?.limit || 500);
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(2000, Math.trunc(limitRaw))) : 500;
+
+      const where = ["COALESCE(pr.site_code, 'main') = ?"];
+      const params = [site_code];
+      if (status && PARTS_REQUEST_STATUSES.has(status)) {
+        where.push("LOWER(COALESCE(pr.status, 'requested')) = ?");
+        params.push(status);
+      }
+      if (mine && userName) {
+        where.push("LOWER(COALESCE(pr.requested_by, '')) = ?");
+        params.push(userName.toLowerCase());
+      }
+
+      const rows = db.prepare(`
+        SELECT
+          pr.id,
+          pr.site_code,
+          pr.asset_id,
+          pr.asset_code,
+          pr.part_code,
+          pr.part_name,
+          pr.qty,
+          pr.urgency,
+          pr.notes,
+          pr.work_order_id,
+          pr.status,
+          pr.requested_by,
+          pr.ordered_by,
+          pr.status_notes,
+          pr.created_at,
+          pr.updated_at,
+          a.asset_name
+        FROM maintenance_parts_requests pr
+        LEFT JOIN assets a ON a.id = pr.asset_id
+        WHERE ${where.join(" AND ")}
+        ORDER BY
+          CASE LOWER(COALESCE(pr.status, 'requested'))
+            WHEN 'requested' THEN 0
+            WHEN 'ordered' THEN 1
+            WHEN 'received' THEN 2
+            ELSE 3
+          END ASC,
+          CASE LOWER(COALESCE(pr.urgency, 'normal'))
+            WHEN 'critical' THEN 0
+            WHEN 'urgent' THEN 1
+            ELSE 2
+          END ASC,
+          pr.created_at DESC,
+          pr.id DESC
+        LIMIT ${limit}
+      `).all(...params);
+      return reply.send({ ok: true, rows });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.post("/parts-requests", async (req, reply) => {
+    try {
+      const body = req.body || {};
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const requested_by = String(req.headers?.["x-user-name"] || body.requested_by || "system").trim() || "system";
+      const part_code = String(body.part_code || "").trim();
+      let part_name = String(body.part_name || "").trim();
+      const qty = Number(body.qty ?? 1);
+      const urgencyRaw = String(body.urgency || "normal").trim().toLowerCase();
+      const urgency = PARTS_REQUEST_URGENCY.has(urgencyRaw) ? urgencyRaw : "normal";
+      const notes = String(body.notes || "").trim();
+      const work_order_id = Number(body.work_order_id || 0) || null;
+      const asset_id = Number(body.asset_id || 0) || null;
+
+      if (!part_code && !part_name) {
+        return reply.code(400).send({ ok: false, error: "Part description or part code is required" });
+      }
+      if (!Number.isFinite(qty) || qty <= 0) {
+        return reply.code(400).send({ ok: false, error: "qty must be greater than zero" });
+      }
+
+      if (part_code && !part_name) {
+        const hit = db.prepare(`SELECT part_name FROM parts WHERE LOWER(part_code) = LOWER(?) LIMIT 1`).get(part_code);
+        if (hit?.part_name) part_name = String(hit.part_name).trim();
+      }
+      if (!part_name) part_name = part_code;
+
+      let asset_code = String(body.asset_code || "").trim();
+      if (asset_id) {
+        const asset = db.prepare(`SELECT id, asset_code FROM assets WHERE id = ? LIMIT 1`).get(asset_id);
+        if (!asset) return reply.code(400).send({ ok: false, error: "Invalid asset" });
+        asset_code = String(asset.asset_code || asset_code).trim();
+      }
+
+      const now = new Date().toISOString();
+      const info = db.prepare(`
+        INSERT INTO maintenance_parts_requests (
+          site_code, asset_id, asset_code, part_code, part_name, qty, urgency, notes,
+          work_order_id, status, requested_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?)
+      `).run(
+        site_code,
+        asset_id,
+        asset_code || null,
+        part_code || null,
+        part_name,
+        qty,
+        urgency,
+        notes || null,
+        work_order_id,
+        requested_by,
+        now,
+        now
+      );
+
+      writeAudit(db, req, {
+        module: "maintenance",
+        action: "parts_request.create",
+        entity_type: "maintenance_parts_request",
+        entity_id: String(info.lastInsertRowid),
+        after: { part_code, part_name, qty, urgency, asset_code, work_order_id },
+      });
+
+      return reply.send({ ok: true, id: Number(info.lastInsertRowid || 0) });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.patch("/parts-requests/:id/status", async (req, reply) => {
+    try {
+      const id = Number(req.params?.id || 0);
+      if (!id) return reply.code(400).send({ ok: false, error: "Invalid id" });
+
+      const body = req.body || {};
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const userName = String(req.headers?.["x-user-name"] || "").trim() || "system";
+      const roles = getMaintenanceRoles(req);
+      const isManager = roles.some((r) => PARTS_REQUEST_MANAGERS.includes(r));
+
+      const status = String(body.status || "").trim().toLowerCase();
+      if (!PARTS_REQUEST_STATUSES.has(status)) {
+        return reply.code(400).send({ ok: false, error: "Invalid status" });
+      }
+
+      const existing = db.prepare(`
+        SELECT id, status, requested_by
+        FROM maintenance_parts_requests
+        WHERE id = ? AND COALESCE(site_code, 'main') = ?
+      `).get(id, site_code);
+      if (!existing) return reply.code(404).send({ ok: false, error: "Request not found" });
+
+      if (!isManager) {
+        const own = String(existing.requested_by || "").trim().toLowerCase() === userName.toLowerCase();
+        if (!own || status !== "cancelled" || String(existing.status || "").toLowerCase() !== "requested") {
+          return reply.code(403).send({ ok: false, error: "not allowed" });
+        }
+      }
+
+      const status_notes = String(body.status_notes || "").trim() || null;
+      const ordered_by = ["ordered", "received"].includes(status) ? userName : null;
+      const now = new Date().toISOString();
+
+      db.prepare(`
+        UPDATE maintenance_parts_requests
+        SET status = ?, status_notes = ?, ordered_by = COALESCE(?, ordered_by), updated_at = ?
+        WHERE id = ? AND COALESCE(site_code, 'main') = ?
+      `).run(status, status_notes, ordered_by, now, id, site_code);
+
+      writeAudit(db, req, {
+        module: "maintenance",
+        action: "parts_request.status",
+        entity_type: "maintenance_parts_request",
+        entity_id: String(id),
+        after: { status, status_notes },
+      });
+
+      return reply.send({ ok: true, id });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
     }
   });
 }

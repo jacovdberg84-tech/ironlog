@@ -115,6 +115,7 @@ function viewForSection(section) {
     "reliability": "rel",
     "histogram": "hist",
     "sync-admin": "sync",
+    "parts-to-order": "pto",
   };
   return viewMap[String(section || "").trim()] || "";
 }
@@ -167,6 +168,7 @@ function scrollToSection(section) {
           "hist": "histogramSection",
           "sync": "syncAdminSection",
           "insights": "maintenanceInsightsCard",
+          "pto": "partsToOrderSection",
         };
         targetEl = document.getElementById(sectionMap[targetView]);
       }
@@ -222,6 +224,9 @@ function refreshTopViewData(view) {
       break;
     case "sync":
       syncLoadState().catch(() => {});
+      break;
+    case "pto":
+      initPartsToOrderSection().catch(() => {});
       break;
     default:
       break;
@@ -2490,6 +2495,7 @@ function setTopView(view, section = "") {
   const rel = document.getElementById("reliabilitySection");
   const hist = document.getElementById("histogramSection");
   const sync = document.getElementById("syncAdminSection");
+  const pto = document.getElementById("partsToOrderSection");
   const planSection = document.querySelector("section.panel.page-section");
 
   if (section) currentMaintenanceSection = section;
@@ -2506,6 +2512,7 @@ function setTopView(view, section = "") {
   if (rel) rel.style.display = "none";
   if (hist) hist.style.display = "none";
   if (sync) sync.style.display = "none";
+  if (pto) pto.style.display = "none";
   if (planSection) planSection.style.display = "none";
 
   // Show the selected section
@@ -2545,6 +2552,9 @@ function setTopView(view, section = "") {
       break;
     case "sync":
       if (sync) sync.style.display = "block";
+      break;
+    case "pto":
+      if (pto) pto.style.display = "block";
       break;
   }
 
@@ -2998,6 +3008,7 @@ async function loadAssetsForInspection() {
   const ucF = document.getElementById("ucFilterAsset");
   const ucQr = document.getElementById("ucQrAsset");
   const wiA = document.getElementById("wiAssetSelect");
+  const ptoA = document.getElementById("ptoAsset");
   if (!selA || !selF) return;
   try {
     const res = await fetch(`${API}/assets?include_archived=0`);
@@ -3020,6 +3031,7 @@ async function loadAssetsForInspection() {
     if (ucF) ucF.innerHTML = `<option value="">All assets</option>${opts}`;
     if (ucQr) ucQr.innerHTML = `<option value="">Select asset</option>${opts}`;
     if (wiA) wiA.innerHTML = `<option value="">Select asset</option>${opts}`;
+    if (ptoA) ptoA.innerHTML = `<option value="">Any / not linked</option>${opts}`;
   } catch (e) {
     selA.innerHTML = `<option value="">Assets load failed</option>`;
     selF.innerHTML = `<option value="">Assets load failed</option>`;
@@ -3033,6 +3045,7 @@ async function loadAssetsForInspection() {
     if (ucF) ucF.innerHTML = `<option value="">Assets load failed</option>`;
     if (ucQr) ucQr.innerHTML = `<option value="">Assets load failed</option>`;
     if (wiA) wiA.innerHTML = `<option value="">Assets load failed</option>`;
+    if (ptoA) ptoA.innerHTML = `<option value="">Assets load failed</option>`;
   }
 }
 
@@ -6190,6 +6203,222 @@ async function updateWeeklyForumActionStatus(id, status) {
   });
 }
 
+const PTO_MANAGER_ROLES = new Set(["admin", "supervisor", "stores", "plant_manager", "site_manager", "workshop_manager"]);
+
+function canManagePartsOrderStatus() {
+  return getSessionRoles().some((r) => PTO_MANAGER_ROLES.has(r));
+}
+
+function isArtisanOnlySession() {
+  const roles = getSessionRoles();
+  return roles.length === 1 && roles[0] === "artisan";
+}
+
+function ptoStatusLabel(status) {
+  const s = String(status || "").toLowerCase();
+  if (s === "requested") return "Pending";
+  if (s === "ordered") return "Ordered";
+  if (s === "received") return "Received";
+  if (s === "cancelled") return "Cancelled";
+  return s || "—";
+}
+
+function ptoUrgencyLabel(urgency) {
+  const u = String(urgency || "normal").toLowerCase();
+  if (u === "critical") return "Critical";
+  if (u === "urgent") return "Urgent";
+  return "Normal";
+}
+
+function ptoUrgencyClass(urgency) {
+  const u = String(urgency || "normal").toLowerCase();
+  if (u === "critical") return "message-error";
+  if (u === "urgent") return "message-error";
+  return "muted";
+}
+
+function clearPartsToOrderForm() {
+  const asset = document.getElementById("ptoAsset");
+  const code = document.getElementById("ptoPartCode");
+  const name = document.getElementById("ptoPartName");
+  const qty = document.getElementById("ptoQty");
+  const urgency = document.getElementById("ptoUrgency");
+  const wo = document.getElementById("ptoWorkOrderId");
+  const notes = document.getElementById("ptoNotes");
+  const msg = document.getElementById("ptoFormMsg");
+  if (asset) asset.value = "";
+  if (code) code.value = "";
+  if (name) name.value = "";
+  if (qty) qty.value = "1";
+  if (urgency) urgency.value = "normal";
+  if (wo) wo.value = "";
+  if (notes) notes.value = "";
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = "";
+  }
+}
+
+function bindPtoPartCodeAutofill() {
+  const input = document.getElementById("ptoPartCode");
+  if (!input || input.dataset.ptoBound === "1") return;
+  input.dataset.ptoBound = "1";
+  input.addEventListener("change", () => {
+    const hit = getWfPartByCode(input.value);
+    if (!hit) return;
+    const nameEl = document.getElementById("ptoPartName");
+    if (nameEl && !String(nameEl.value || "").trim()) {
+      nameEl.value = String(hit.part_name || "").trim();
+    }
+  });
+}
+
+function renderPartsToOrderActions(row) {
+  const id = Number(row.id || 0);
+  const status = String(row.status || "requested").toLowerCase();
+  const requestedBy = String(row.requested_by || "").trim().toLowerCase();
+  const me = getSessionUser().toLowerCase();
+  const own = requestedBy && requestedBy === me;
+  const manager = canManagePartsOrderStatus();
+  const bits = [];
+
+  if (manager && status === "requested") {
+    bits.push(`<button type="button" class="btn-sm" data-pto-status="${id}" data-pto-next="ordered">Mark ordered</button>`);
+  }
+  if (manager && status === "ordered") {
+    bits.push(`<button type="button" class="btn-sm" data-pto-status="${id}" data-pto-next="received">Mark received</button>`);
+  }
+  if ((manager || own) && (status === "requested" || (manager && status === "ordered"))) {
+    bits.push(`<button type="button" class="btn-sm btn-secondary" data-pto-status="${id}" data-pto-next="cancelled">Cancel</button>`);
+  }
+  return bits.join(" ");
+}
+
+function renderPartsToOrderTable(rows) {
+  const body = document.getElementById("ptoListBody");
+  if (!body) return;
+  if (!Array.isArray(rows) || !rows.length) {
+    body.innerHTML = `<tr><td colspan="10" class="muted">No parts requests found.</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map((r) => {
+    const asset = r.asset_code
+      ? `${esc(r.asset_code)}${r.asset_name ? ` — ${esc(r.asset_name)}` : ""}`
+      : "—";
+    const partBits = [
+      r.part_code ? `<strong>${esc(r.part_code)}</strong>` : "",
+      esc(r.part_name || ""),
+    ].filter(Boolean).join("<br />");
+    const noteBits = [r.notes, r.status_notes].map((x) => String(x || "").trim()).filter(Boolean);
+    return `
+      <tr>
+        <td>${esc(String(r.created_at || "").slice(0, 16).replace("T", " "))}</td>
+        <td>${asset}</td>
+        <td>${partBits || "—"}</td>
+        <td style="text-align:right;">${Number(r.qty || 0)}</td>
+        <td><span class="${ptoUrgencyClass(r.urgency)}">${esc(ptoUrgencyLabel(r.urgency))}</span></td>
+        <td>${r.work_order_id ? esc(String(r.work_order_id)) : "—"}</td>
+        <td>${esc(r.requested_by || "")}</td>
+        <td>${esc(ptoStatusLabel(r.status))}${r.ordered_by ? `<br /><small class="muted">${esc(r.ordered_by)}</small>` : ""}</td>
+        <td>${noteBits.length ? esc(noteBits.join(" · ")) : "—"}</td>
+        <td style="white-space:nowrap;">${renderPartsToOrderActions(r)}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+async function loadPartsToOrderList() {
+  const body = document.getElementById("ptoListBody");
+  if (body) body.innerHTML = `<tr><td colspan="10" class="muted">Loading...</td></tr>`;
+  const status = String(document.getElementById("ptoFilterStatus")?.value || "").trim();
+  const mine = document.getElementById("ptoMineOnly")?.checked ? "1" : "";
+  const q = new URLSearchParams();
+  if (status) q.set("status", status);
+  if (mine) q.set("mine", mine);
+  try {
+    const res = await fetch(`${API}/maintenance/parts-requests?${q.toString()}`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load parts requests");
+    let rows = Array.isArray(data.rows) ? data.rows : [];
+    if (!status) {
+      rows = rows.filter((r) => String(r.status || "").toLowerCase() !== "cancelled" && String(r.status || "").toLowerCase() !== "received");
+    }
+    renderPartsToOrderTable(rows);
+  } catch (e) {
+    if (body) body.innerHTML = `<tr><td colspan="10" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+  }
+}
+
+async function submitPartsToOrderRequest() {
+  const msg = document.getElementById("ptoFormMsg");
+  const asset_id = Number(document.getElementById("ptoAsset")?.value || 0) || null;
+  const part_code = String(document.getElementById("ptoPartCode")?.value || "").trim();
+  const part_name = String(document.getElementById("ptoPartName")?.value || "").trim();
+  const qty = Number(document.getElementById("ptoQty")?.value || 1);
+  const urgency = String(document.getElementById("ptoUrgency")?.value || "normal").trim();
+  const work_order_id = Number(document.getElementById("ptoWorkOrderId")?.value || 0) || null;
+  const notes = String(document.getElementById("ptoNotes")?.value || "").trim();
+  if (!msg) return;
+  if (!part_code && !part_name) {
+    msg.className = "message-error";
+    msg.textContent = "Enter a part code or description.";
+    return;
+  }
+  if (!Number.isFinite(qty) || qty <= 0) {
+    msg.className = "message-error";
+    msg.textContent = "Quantity must be greater than zero.";
+    return;
+  }
+  msg.className = "muted";
+  msg.textContent = "Submitting request...";
+  try {
+    const res = await fetch(`${API}/maintenance/parts-requests`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ asset_id, part_code, part_name, qty, urgency, work_order_id, notes }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to submit request");
+    msg.className = "message-success";
+    msg.textContent = "Part request submitted.";
+    clearPartsToOrderForm();
+    await loadPartsToOrderList();
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = e.message || String(e);
+  }
+}
+
+async function updatePartsToOrderStatus(id, status) {
+  const n = Number(id || 0);
+  if (!n) return;
+  let status_notes = "";
+  if (status === "cancelled") {
+    status_notes = String(window.prompt("Cancellation reason (optional):", "") || "").trim();
+  } else if (status === "ordered") {
+    status_notes = String(window.prompt("PO / supplier note (optional):", "") || "").trim();
+  }
+  const res = await fetch(`${API}/maintenance/parts-requests/${n}/status`, {
+    method: "PATCH",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ status, status_notes }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to update status");
+  await loadPartsToOrderList();
+}
+
+async function initPartsToOrderSection() {
+  bindPtoPartCodeAutofill();
+  const mine = document.getElementById("ptoMineOnly");
+  if (mine && !mine.dataset.inited) {
+    mine.dataset.inited = "1";
+    mine.checked = isArtisanOnlySession();
+  }
+  await loadWeeklyForumParts();
+  await loadPartsToOrderList();
+}
+
 async function loadWeeklyForumParts() {
   try {
     const res = await fetch(`${API}/maintenance/weekly-forum/parts`);
@@ -7089,6 +7318,25 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("saveWfInputBtn")?.addEventListener("click", saveWeeklyForumInput);
   document.getElementById("loadWfInputsBtn")?.addEventListener("click", loadWeeklyForumInputs);
   document.getElementById("wfAddItemBtn")?.addEventListener("click", addWfDraftItem);
+  document.getElementById("ptoSubmitBtn")?.addEventListener("click", () => submitPartsToOrderRequest().catch((e) => {
+    const msg = document.getElementById("ptoFormMsg");
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = e.message || String(e);
+    }
+  }));
+  document.getElementById("ptoClearBtn")?.addEventListener("click", clearPartsToOrderForm);
+  document.getElementById("ptoRefreshBtn")?.addEventListener("click", () => loadPartsToOrderList().catch(() => {}));
+  document.getElementById("ptoFilterStatus")?.addEventListener("change", () => loadPartsToOrderList().catch(() => {}));
+  document.getElementById("ptoMineOnly")?.addEventListener("change", () => loadPartsToOrderList().catch(() => {}));
+  document.getElementById("ptoListBody")?.addEventListener("click", (evt) => {
+    const btn = evt.target?.closest?.("button[data-pto-status]");
+    if (!btn) return;
+    const id = Number(btn.getAttribute("data-pto-status") || 0);
+    const status = String(btn.getAttribute("data-pto-next") || "").trim();
+    if (!id || !status) return;
+    updatePartsToOrderStatus(id, status).catch((e) => alert(e.message || String(e)));
+  });
   document.getElementById("wfInputPlan")?.addEventListener("change", (evt) => {
     const planId = Number(evt.target?.value || 0);
     hydrateWfDraftFromSaved(planId);
