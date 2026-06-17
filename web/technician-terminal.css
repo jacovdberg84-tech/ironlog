@@ -36,6 +36,114 @@ body {
   padding: 28px 18px 40px;
 }
 
+.shell-wide {
+  max-width: 480px;
+}
+
+.login-toggle-row {
+  text-align: center;
+  margin-top: 12px;
+}
+
+.pin-roster {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.pin-user-tile {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 8px;
+  background: var(--bg);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: center;
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pin-user-tile:hover {
+  border-color: #60a5fa;
+}
+
+.pin-user-tile.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+}
+
+.pin-user-initials {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--card-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.85rem;
+}
+
+.pin-user-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.pin-selected {
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.pin-display {
+  text-align: center;
+  font-size: 1.75rem;
+  letter-spacing: 0.35em;
+  font-weight: 700;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  min-height: 52px;
+}
+
+.pin-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.pin-key {
+  min-height: 52px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card-soft);
+  color: var(--ink);
+  font-size: 1.25rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pin-key:active {
+  transform: scale(0.97);
+}
+
+.pin-key-muted {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 .brand-block {
   text-align: center;
   margin-bottom: 22px;

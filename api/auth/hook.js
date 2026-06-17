@@ -112,6 +112,8 @@ export async function ironlogAuthHook(req, reply) {
   }
 
   if (url === "/api/auth/login" && req.method === "POST") return;
+  if (url === "/api/auth/pin/login" && req.method === "POST") return;
+  if (url === "/api/auth/pin/roster" && req.method === "GET") return;
   if (url === "/api/auth/tabs" && req.method === "GET") return;
 
   const auth = String(req.headers.authorization || "");

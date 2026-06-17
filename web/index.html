@@ -4901,7 +4901,7 @@
           <div class="report-card-body">
             <div class="info-note">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              <span>Create logins per workstation or department. Technicians use the <a href="./technician-terminal.html" target="_blank" rel="noopener"><strong>Technician Terminal</strong></a> (artisan role). Optionally restrict <b>sections</b> (leave none selected to use the role default). Set <code>IRONLOG_AUTH_REQUIRED=true</code> in server <code>.env</code> to require sign-in.</span>
+              <span>Create logins per workstation or department. Technicians use the <a href="./technician-terminal.html" target="_blank" rel="noopener"><strong>Technician Terminal</strong></a> with a <b>4–6 digit PIN</b> (artisan role). Optionally restrict <b>sections</b> (leave none selected to use the role default). Set <code>IRONLOG_AUTH_REQUIRED=true</code> in server <code>.env</code> to require sign-in.</span>
             </div>
           </div>
         </div>
@@ -5589,6 +5589,7 @@
                     <th align="left">Locations</th>
                     <th align="left">Active</th>
                     <th align="left">Password set</th>
+                    <th align="left">PIN set</th>
                   </tr>
                 </thead>
                 <tbody id="adminUsersTbody"></tbody>
@@ -5623,6 +5624,14 @@
               <div class="form-field">
                 <label>Password</label>
                 <input id="adminPassword" class="w-full" type="password" placeholder="Password (if blank, keep)" autocomplete="new-password" />
+              </div>
+              <div class="form-field">
+                <label>Terminal PIN (4–6 digits)</label>
+                <input id="adminPin" class="w-full" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="Workshop quick login" autocomplete="off" />
+                <label class="checkbox-label" style="margin-top:6px">
+                  <input id="adminClearPin" type="checkbox" />
+                  <span>Remove PIN on save</span>
+                </label>
               </div>
               <div class="form-field">
                 <label>Display Name</label>
@@ -6809,6 +6818,6 @@
 
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="./app.js?v=37"></script>
+  <script src="./app.js?v=38"></script>
 </body>
 </html>

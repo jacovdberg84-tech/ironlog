@@ -138,6 +138,15 @@ function issueSetupCode() {
   return crypto.randomBytes(4).toString("hex").toUpperCase();
 }
 
+function normalizePin(pin) {
+  return String(pin || "").replace(/\D/g, "");
+}
+
+function isValidPin(pin) {
+  const p = normalizePin(pin);
+  return p.length >= 4 && p.length <= 6;
+}
+
 function parseRoles(raw, fallbackRole = "operator") {
   let arr = [];
   if (raw != null && raw !== "") {
@@ -199,6 +208,9 @@ export default async function authRoutes(app) {
   if (!hasColumn("users", "setup_code_expires_at")) {
     db.prepare(`ALTER TABLE users ADD COLUMN setup_code_expires_at TEXT`).run();
   }
+  if (!hasColumn("users", "pin_hash")) {
+    db.prepare(`ALTER TABLE users ADD COLUMN pin_hash TEXT`).run();
+  }
 
   db.prepare(`
     CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -254,7 +266,7 @@ export default async function authRoutes(app) {
 
   const getByUsername = db.prepare(`
     SELECT id, username, full_name, role, active, created_at, password_hash, department, allowed_tabs, roles_json,
-      allowed_locations, setup_code_hash, setup_code_expires_at
+      allowed_locations, setup_code_hash, setup_code_expires_at, pin_hash
     FROM users
     WHERE username = ?
   `);
@@ -329,6 +341,7 @@ export default async function authRoutes(app) {
       allowed_tabs: parseAllowedTabs(row.allowed_tabs),
       allowed_locations: parseAllowedLocations(row.allowed_locations),
       has_password: Boolean(row.password_hash && String(row.password_hash).length > 0),
+      has_pin: Boolean(row.pin_hash && String(row.pin_hash).length > 0),
     };
   }
 
@@ -375,6 +388,76 @@ export default async function authRoutes(app) {
       token,
       user,
     };
+  });
+
+  // GET /api/auth/pin/roster — technicians with PIN enabled (terminal tile picker)
+  app.get("/pin/roster", async () => {
+    const rows = db.prepare(`
+      SELECT username, full_name, department, role, roles_json
+      FROM users
+      WHERE COALESCE(active, 1) = 1
+        AND pin_hash IS NOT NULL
+        AND length(trim(pin_hash)) > 0
+        AND (
+          LOWER(TRIM(COALESCE(role, ''))) = 'artisan'
+          OR LOWER(COALESCE(roles_json, '')) LIKE '%artisan%'
+          OR LOWER(TRIM(COALESCE(role, ''))) IN ('admin', 'supervisor')
+          OR LOWER(COALESCE(roles_json, '')) LIKE '%admin%'
+          OR LOWER(COALESCE(roles_json, '')) LIKE '%supervisor%'
+        )
+      ORDER BY COALESCE(full_name, username) ASC
+    `).all();
+
+    return {
+      ok: true,
+      technicians: rows.map((r) => ({
+        username: r.username,
+        label: r.full_name || r.username,
+        department: r.department || null,
+      })),
+    };
+  });
+
+  // POST /api/auth/pin/login — quick sign-in for workshop terminal
+  app.post("/pin/login", async (req, reply) => {
+    const body = req.body || {};
+    const username = String(body.username || "").trim();
+    const pin = normalizePin(body.pin);
+
+    if (!username || !pin) {
+      return reply.code(400).send({ error: "username and pin are required" });
+    }
+    if (!isValidPin(pin)) {
+      return reply.code(400).send({ error: "pin must be 4–6 digits" });
+    }
+
+    const row = getByUsername.get(username);
+    if (!row || Number(row.active) !== 1) {
+      return reply.code(401).send({ error: "invalid pin" });
+    }
+    if (!row.pin_hash || !verifyPassword(pin, row.pin_hash)) {
+      return reply.code(401).send({ error: "invalid pin" });
+    }
+
+    const roles = parseRoles(row.roles_json, row.role);
+    const allowed = roles.some((r) => ["artisan", "admin", "supervisor"].includes(r));
+    if (!allowed) {
+      return reply.code(403).send({ error: "pin login is not enabled for this account" });
+    }
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const dayMod = `+${SESSION_DAYS} days`;
+    insertSession.run(token, row.id, dayMod);
+
+    const user = userPayload(row);
+    user.permissions = getPermissionsForRoles(user.roles);
+    writeAudit(db, req, {
+      module: "auth",
+      action: "pin.login",
+      entity_type: "user",
+      entity_id: username,
+    });
+    return { ok: true, token, user };
   });
 
   // POST /api/auth/logout
@@ -465,7 +548,8 @@ export default async function authRoutes(app) {
         `
       SELECT id, username, full_name, role, active, created_at, department, allowed_tabs, roles_json,
         allowed_locations,
-        CASE WHEN password_hash IS NOT NULL AND length(trim(password_hash)) > 0 THEN 1 ELSE 0 END AS has_password
+        CASE WHEN password_hash IS NOT NULL AND length(trim(password_hash)) > 0 THEN 1 ELSE 0 END AS has_password,
+        CASE WHEN pin_hash IS NOT NULL AND length(trim(pin_hash)) > 0 THEN 1 ELSE 0 END AS has_pin
       FROM users
       ORDER BY username ASC
     `
@@ -483,6 +567,7 @@ export default async function authRoutes(app) {
         allowed_tabs: parseAllowedTabs(r.allowed_tabs),
         allowed_locations: parseAllowedLocations(r.allowed_locations),
         has_password: Number(r.has_password) === 1,
+        has_pin: Number(r.has_pin) === 1,
       }));
     return { ok: true, rows };
   });
@@ -545,6 +630,17 @@ export default async function authRoutes(app) {
     if (password) {
       const h = hashPassword(password);
       db.prepare(`UPDATE users SET password_hash = ?, setup_code_hash = NULL, setup_code_expires_at = NULL WHERE username = ?`).run(h, username);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "pin")) {
+      const pinRaw = body.pin;
+      if (pinRaw == null || String(pinRaw).trim() === "") {
+        db.prepare(`UPDATE users SET pin_hash = NULL WHERE username = ?`).run(username);
+      } else if (!isValidPin(pinRaw)) {
+        return reply.code(400).send({ error: "pin must be 4–6 digits" });
+      } else {
+        db.prepare(`UPDATE users SET pin_hash = ? WHERE username = ?`).run(hashPassword(normalizePin(pinRaw)), username);
+      }
     }
 
     let setup_code = null;

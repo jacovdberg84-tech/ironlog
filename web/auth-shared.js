@@ -155,6 +155,22 @@
     return data;
   }
 
+  async function loginPin(username, pin, remember = false) {
+    const data = await fetchJson(`${API}/api/auth/pin/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, pin: String(pin || "").replace(/\D/g, "") }),
+    });
+    if (data.token) setAuthToken(data.token, remember);
+    if (data.user) applyUser(data.user);
+    return data;
+  }
+
+  async function fetchPinRoster() {
+    const data = await fetchJson(`${API}/api/auth/pin/roster`);
+    return Array.isArray(data?.technicians) ? data.technicians : [];
+  }
+
   async function trySession() {
     if (!getAuthToken() && !getSessionUser()) return null;
     try {
@@ -198,6 +214,8 @@
     authHeaders,
     fetchJson,
     login,
+    loginPin,
+    fetchPinRoster,
     trySession,
     hasRole,
     escapeHtml,

@@ -14,17 +14,46 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./technician-terminal.css?v=1" />
+  <link rel="stylesheet" href="./technician-terminal.css?v=2" />
 </head>
 <body>
   <div id="loginScreen" class="screen">
-    <div class="shell">
+    <div class="shell shell-wide">
       <div class="brand-block">
         <div class="brand-mark">IL</div>
         <h1>Technician Terminal</h1>
-        <p class="muted">Sign in with your workshop account</p>
+        <p class="muted">Tap your name, then enter your PIN</p>
       </div>
-      <div class="card">
+
+      <div id="pinLoginPanel" class="card">
+        <div id="pinRoster" class="pin-roster">
+          <div class="muted small">Loading technicians…</div>
+        </div>
+        <div id="pinSelectedUser" class="pin-selected muted small hidden">Select your name above</div>
+        <div class="pin-display" id="pinDisplay" aria-live="polite">····</div>
+        <div class="pin-pad" id="pinPad">
+          <button type="button" class="pin-key" data-digit="1">1</button>
+          <button type="button" class="pin-key" data-digit="2">2</button>
+          <button type="button" class="pin-key" data-digit="3">3</button>
+          <button type="button" class="pin-key" data-digit="4">4</button>
+          <button type="button" class="pin-key" data-digit="5">5</button>
+          <button type="button" class="pin-key" data-digit="6">6</button>
+          <button type="button" class="pin-key" data-digit="7">7</button>
+          <button type="button" class="pin-key" data-digit="8">8</button>
+          <button type="button" class="pin-key" data-digit="9">9</button>
+          <button type="button" class="pin-key pin-key-muted" id="pinClearBtn">Clear</button>
+          <button type="button" class="pin-key" data-digit="0">0</button>
+          <button type="button" class="pin-key pin-key-muted" id="pinBackBtn">⌫</button>
+        </div>
+        <button type="button" id="pinSubmitBtn" class="btn primary full" disabled>Sign in with PIN</button>
+        <div id="pinLoginError" class="error"></div>
+      </div>
+
+      <div class="login-toggle-row">
+        <button type="button" id="showPasswordLoginBtn" class="btn ghost sm">Use username &amp; password</button>
+      </div>
+
+      <div id="passwordLoginPanel" class="card hidden">
         <label class="field">
           <span>Username</span>
           <input id="loginUsername" type="text" autocomplete="username" placeholder="e.g. jsmith" />
@@ -39,8 +68,10 @@
         </label>
         <button type="button" id="loginBtn" class="btn primary full">Sign in</button>
         <div id="loginError" class="error"></div>
+        <button type="button" id="showPinLoginBtn" class="btn ghost sm full" style="margin-top:10px;">← Back to PIN</button>
       </div>
-      <p class="foot muted">Supervisors manage users under <strong>User Admin</strong> in the main dashboard.</p>
+
+      <p class="foot muted">Supervisors set PINs in <strong>User Admin</strong>. PIN is 4–6 digits.</p>
     </div>
   </div>
 
@@ -85,7 +116,7 @@
     </main>
   </div>
 
-  <script src="./auth-shared.js?v=1"></script>
-  <script src="./technician-terminal.js?v=1"></script>
+  <script src="./auth-shared.js?v=2"></script>
+  <script src="./technician-terminal.js?v=2"></script>
 </body>
 </html>

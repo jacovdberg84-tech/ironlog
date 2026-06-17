@@ -1664,7 +1664,7 @@ async function loadAdminUsers() {
       const tr = document.createElement("tr");
       const rolesText = Array.isArray(r.roles) && r.roles.length ? r.roles.join(", ") : String(r.role || "operator");
       const locText = Array.isArray(r.allowed_locations) && r.allowed_locations.length ? r.allowed_locations.join(", ") : "all";
-      tr.innerHTML = `<td>${escapeHtml(r.username)}</td><td>${escapeHtml(r.full_name || "")}</td><td>${escapeHtml(r.department || "")}</td><td>${escapeHtml(rolesText)}</td><td>${escapeHtml(locText)}</td><td>${r.active ? "yes" : "no"}</td><td>${r.has_password ? "yes" : "no"}</td>`;
+      tr.innerHTML = `<td>${escapeHtml(r.username)}</td><td>${escapeHtml(r.full_name || "")}</td><td>${escapeHtml(r.department || "")}</td><td>${escapeHtml(rolesText)}</td><td>${escapeHtml(locText)}</td><td>${r.active ? "yes" : "no"}</td><td>${r.has_password ? "yes" : "no"}</td><td>${r.has_pin ? "yes" : "no"}</td>`;
       tr.style.cursor = "pointer";
       tr.addEventListener("click", () => {
         if (qs("adminUsername")) qs("adminUsername").value = r.username;
@@ -1682,6 +1682,8 @@ async function loadAdminUsers() {
           });
         }
         if (qs("adminPassword")) qs("adminPassword").value = "";
+        if (qs("adminPin")) qs("adminPin").value = "";
+        if (qs("adminClearPin")) qs("adminClearPin").checked = false;
         const tabsSel = qs("adminUserTabs");
         if (tabsSel) {
           if (Array.isArray(r.allowed_tabs) && r.allowed_tabs.length) {
@@ -1730,12 +1732,14 @@ function applyAdminArtisanPreset() {
   if (qs("adminDepartment") && !qs("adminDepartment").value) {
     qs("adminDepartment").value = "Workshop";
   }
-  setStatus("Artisan preset applied — save user to create technician login.");
+  setStatus("Artisan preset applied — set a 4–6 digit PIN, then save user.");
 }
 
 async function saveAdminUser() {
   const username = String(qs("adminUsername")?.value || "").trim();
   const password = String(qs("adminPassword")?.value || "");
+  const pin = String(qs("adminPin")?.value || "").replace(/\D/g, "");
+  const clearPin = qs("adminClearPin")?.checked === true;
   const full_name = String(qs("adminFullName")?.value || "").trim();
   const department = String(qs("adminDepartment")?.value || "").trim();
   const allowedLocationsRaw = String(qs("adminAllowedLocations")?.value || "").trim();
@@ -1757,6 +1761,11 @@ async function saveAdminUser() {
     issue_setup_code: issueSetup,
   };
   if (password) body.password = password;
+  if (clearPin) body.pin = "";
+  else if (pin) {
+    if (pin.length < 4 || pin.length > 6) return alert("PIN must be 4–6 digits.");
+    body.pin = pin;
+  }
   setStatus("Saving user…");
   try {
     const saved = await fetchJson(`${API}/api/auth/users`, {
