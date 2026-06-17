@@ -8584,6 +8584,196 @@ export default async function reportsRoutes(app) {
       .send(buffer);
   });
 
+  app.get("/gm-upcoming-costs.pptx", async (req, reply) => {
+    const resolved = resolveMaintenancePeriod(req);
+    if (!resolved) {
+      return reply.code(400).send({ error: "Provide month=YYYY-MM or start/end=YYYY-MM-DD" });
+    }
+    const { period, label } = resolved;
+    const site_code = getSiteCode(req);
+
+    const hasStoresPartOrders = hasTable("stores_part_orders");
+    const orderRows = hasStoresPartOrders
+      ? db.prepare(`
+          SELECT
+            id,
+            part_code,
+            part_name,
+            qty,
+            unit_cost,
+            supplier_name,
+            po_number,
+            order_date,
+            expected_arrival_date,
+            arrived_date,
+            status,
+            notes
+          FROM stores_part_orders
+          WHERE LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+            AND DATE(order_date) BETWEEN DATE(?) AND DATE(?)
+          ORDER BY DATE(order_date) DESC, id DESC
+          LIMIT 200
+        `).all(site_code, period.start, period.end)
+      : [];
+
+    const statusRows = {
+      on_order: orderRows.filter((r) => String(r.status || "").toLowerCase() === "on_order"),
+      in_transit: orderRows.filter((r) => String(r.status || "").toLowerCase() === "in_transit"),
+      arrived: orderRows.filter((r) => String(r.status || "").toLowerCase() === "arrived"),
+    };
+    const statusTotals = Object.fromEntries(
+      Object.entries(statusRows).map(([k, rows]) => [
+        k,
+        {
+          qty: rows.reduce((s, r) => s + Number(r.qty || 0), 0),
+          value: rows.reduce((s, r) => s + Number(r.qty || 0) * Number(r.unit_cost || 0), 0),
+          lines: rows.length,
+        },
+      ]),
+    );
+
+    const q = new URLSearchParams();
+    q.set("start", period.start);
+    q.set("end", period.end);
+    q.set("near_due_hours", "50");
+    q.set("predictive_horizon_hours", "100");
+    q.set("checklist_fail_threshold", "2");
+    q.set("fuel_variance_threshold", "15");
+    const injected = await app.inject({
+      method: "GET",
+      url: `/api/maintenance/insights?${q.toString()}`,
+      headers: {
+        "x-user-name": String(req.headers?.["x-user-name"] || "system"),
+        "x-user-role": String(req.headers?.["x-user-role"] || "admin"),
+        "x-user-roles": String(req.headers?.["x-user-roles"] || "admin"),
+        "x-site-code": site_code,
+      },
+    });
+    if (injected.statusCode >= 400) {
+      let payload = {};
+      try { payload = JSON.parse(String(injected.payload || "{}")); } catch {}
+      return reply.code(injected.statusCode).send(payload?.error ? payload : { ok: false, error: "Failed to build maintenance insights data" });
+    }
+    const insights = JSON.parse(String(injected.payload || "{}"));
+    const maintenanceRows = Array.isArray(insights?.parts_planning?.upcoming_cost_forecasts)
+      ? insights.parts_planning.upcoming_cost_forecasts
+      : [];
+
+    const maintenanceTotal = maintenanceRows.reduce(
+      (s, r) => s + Number(r?.forecast?.est_total_cost || 0),
+      0,
+    );
+    const maintenanceKit = maintenanceRows.reduce(
+      (s, r) => s + Number(r?.forecast?.est_service_kit_cost || 0),
+      0,
+    );
+    const maintenanceLabor = maintenanceRows.reduce(
+      (s, r) => s + Number(r?.forecast?.est_labor_cost || 0),
+      0,
+    );
+
+    const pptx = new PptxGenJS();
+    pptx.layout = "LAYOUT_WIDE";
+    pptx.author = "IRONLOG";
+    pptx.subject = "GM upcoming costs report";
+    pptx.title = `GM Upcoming Costs - ${label}`;
+
+    const intro = pptx.addSlide();
+    intro.addText("GM Upcoming Costs Report", { x: 0.4, y: 0.35, w: 12.4, h: 0.55, fontSize: 26, bold: true });
+    intro.addText(`Period: ${period.start} to ${period.end} | Site: ${site_code}`, { x: 0.4, y: 0.95, w: 12.4, h: 0.35, fontSize: 11 });
+    intro.addText(
+      [
+        { text: `Parts on order total: $${fmtNum(statusTotals.on_order?.value || 0, 2)}\n`, options: { bold: true } },
+        { text: `Parts in transit total: $${fmtNum(statusTotals.in_transit?.value || 0, 2)}\n`, options: { bold: true } },
+        { text: `Parts arrived total: $${fmtNum(statusTotals.arrived?.value || 0, 2)}\n`, options: { bold: true } },
+        { text: `Upcoming maintenance total: $${fmtNum(maintenanceTotal, 2)}\n`, options: { bold: true } },
+      ],
+      { x: 0.7, y: 1.75, w: 11.8, h: 2.2, fontSize: 16 }
+    );
+
+    const addPartsStatusSlide = (title, rows, totals) => {
+      const s = pptx.addSlide();
+      s.addText(title, { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 22, bold: true });
+      s.addTable(
+        [
+          [
+            { text: "Order Date", options: { bold: true } },
+            { text: "Part", options: { bold: true } },
+            { text: "Description", options: { bold: true } },
+            { text: "Qty", options: { bold: true } },
+            { text: "Unit $", options: { bold: true } },
+            { text: "Line $", options: { bold: true } },
+            { text: "Supplier", options: { bold: true } },
+            { text: "PO #", options: { bold: true } },
+            { text: "ETA/Arrived", options: { bold: true } },
+          ],
+          ...(rows.length
+            ? rows.slice(0, 14).map((r) => [
+                String(r.order_date || "-"),
+                String(r.part_code || "-"),
+                compactCell(String(r.part_name || "-"), 22),
+                fmtNum(Number(r.qty || 0), 2),
+                fmtNum(Number(r.unit_cost || 0), 2),
+                fmtNum(Number(r.qty || 0) * Number(r.unit_cost || 0), 2),
+                compactCell(String(r.supplier_name || "-"), 16),
+                compactCell(String(r.po_number || "-"), 12),
+                String(r.arrived_date || r.expected_arrival_date || "-"),
+              ])
+            : [["-", "-", "No rows in selected period", "-", "-", "-", "-", "-", "-"]]),
+        ],
+        { x: 0.35, y: 1.0, w: 12.6, h: 4.7, fontSize: 9.2, border: { pt: 1, color: "D0D0D0" } }
+      );
+      s.addText(
+        `Total lines: ${Number(totals?.lines || 0)}   |   Total qty: ${fmtNum(Number(totals?.qty || 0), 2)}   |   Total cost: $${fmtNum(Number(totals?.value || 0), 2)}`,
+        { x: 0.45, y: 5.95, w: 12.2, h: 0.35, fontSize: 12, bold: true }
+      );
+    };
+
+    addPartsStatusSlide("Parts on Order", statusRows.on_order, statusTotals.on_order);
+    addPartsStatusSlide("Parts in Transit", statusRows.in_transit, statusTotals.in_transit);
+    addPartsStatusSlide("Parts Arrived", statusRows.arrived, statusTotals.arrived);
+
+    const maint = pptx.addSlide();
+    maint.addText("Upcoming Maintenance Cost (from Maintenance Insights)", { x: 0.4, y: 0.3, w: 12.4, h: 0.5, fontSize: 20, bold: true });
+    maint.addTable(
+      [
+        [
+          { text: "Asset", options: { bold: true } },
+          { text: "Service", options: { bold: true } },
+          { text: "Remaining Hrs", options: { bold: true } },
+          { text: "Status", options: { bold: true } },
+          { text: "Kit $", options: { bold: true } },
+          { text: "Labor $", options: { bold: true } },
+          { text: "Total $", options: { bold: true } },
+          { text: "Source", options: { bold: true } },
+        ],
+        ...(maintenanceRows.length
+          ? maintenanceRows.slice(0, 14).map((r) => [
+              `${String(r.asset_code || "-")} ${compactCell(String(r.asset_name || ""), 16)}`,
+              compactCell(String(r.service_name || "-"), 20),
+              fmtNum(Number(r.remaining_hours || 0), 1),
+              String(r.status || "-"),
+              fmtNum(Number(r?.forecast?.est_service_kit_cost || 0), 2),
+              fmtNum(Number(r?.forecast?.est_labor_cost || 0), 2),
+              fmtNum(Number(r?.forecast?.est_total_cost || 0), 2),
+              compactCell(String(r?.forecast?.cost_source || "-").replace(/_/g, " "), 16),
+            ])
+          : [["-", "-", "-", "-", "-", "-", "-", "No upcoming maintenance rows"]]),
+      ],
+      { x: 0.35, y: 1.0, w: 12.6, h: 4.7, fontSize: 9.2, border: { pt: 1, color: "D0D0D0" } }
+    );
+    maint.addText(
+      `Total rows: ${maintenanceRows.length}   |   Kit total: $${fmtNum(maintenanceKit, 2)}   |   Labor total: $${fmtNum(maintenanceLabor, 2)}   |   Upcoming maintenance total: $${fmtNum(maintenanceTotal, 2)}`,
+      { x: 0.45, y: 5.95, w: 12.2, h: 0.35, fontSize: 12, bold: true }
+    );
+
+    const buffer = await pptx.write({ outputType: "nodebuffer" });
+    reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+      .header("Content-Disposition", `attachment; filename="IRONLOG_GM_Upcoming_Costs_${label}.pptx"`)
+      .send(Buffer.from(buffer));
+  });
+
   if (!maintenanceMasterSchedulerStarted) {
     maintenanceMasterSchedulerStarted = true;
     const tick = async () => {

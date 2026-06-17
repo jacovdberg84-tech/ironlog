@@ -9500,6 +9500,20 @@ function downloadMaintenanceExecutivePptx() {
   window.open(`${API}/api/reports/maintenance-exec.pptx?${q}`, "_blank");
 }
 
+function downloadGMUpcomingCostsPptx() {
+  const month = (qs("costMonth")?.value || "").trim();
+  const start = (qs("maintCostStart")?.value || "").trim();
+  const end = (qs("maintCostEnd")?.value || "").trim();
+  if (!month && (!start || !end)) {
+    alert("Select a month or a start/end range first.");
+    return;
+  }
+  const q = month
+    ? `month=${encodeURIComponent(month)}`
+    : `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+  window.open(`${API}/api/reports/gm-upcoming-costs.pptx?${q}`, "_blank");
+}
+
 async function saveRainDay() {
   const rainDate = (qs("rainDayDate")?.value || "").trim();
   if (!rainDate) return alert("Pick a rain day first.");
@@ -15445,6 +15459,7 @@ async function init() {
   qs("openMaintenanceCostByEquipmentPdf")?.addEventListener("click", () => openMaintenanceCostByEquipmentPdf(false));
   qs("downloadMaintenanceCostByEquipmentPdf")?.addEventListener("click", () => openMaintenanceCostByEquipmentPdf(true));
   qs("downloadMaintenanceExecutivePptx")?.addEventListener("click", downloadMaintenanceExecutivePptx);
+  qs("downloadGMUpcomingCostsPptx")?.addEventListener("click", downloadGMUpcomingCostsPptx);
   qs("saveRainDayBtn")?.addEventListener("click", () => saveRainDay().catch((e) => setStatus("Rain day save error: " + e.message)));
   qs("removeRainDayBtn")?.addEventListener("click", () => removeRainDay().catch((e) => setStatus("Rain day remove error: " + e.message)));
   qs("loadRainDaysBtn")?.addEventListener("click", () => loadRainDays().catch((e) => setStatus("Rain day load error: " + e.message)));
