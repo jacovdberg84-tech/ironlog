@@ -58,7 +58,12 @@
     const role = getRole();
     const mine = isAssignedToMe();
 
-    if (startBtn) startBtn.style.display = role === "artisan" && st === "assigned" && mine ? "inline-block" : "none";
+    if (startBtn) {
+      startBtn.style.display =
+        ((role === "artisan" && st === "assigned" && mine) || (["admin", "supervisor"].includes(role) && st === "assigned"))
+          ? "inline-block"
+          : "none";
+    }
     if (completeBtn) completeBtn.style.display =
       (role === "artisan" && st === "in_progress" && mine) || (["admin", "supervisor"].includes(role) && st === "in_progress")
         ? "inline-block"
@@ -72,6 +77,9 @@
       return;
     }
     if (st === "assigned" && mine) hint.textContent = "Tap Start job when you begin work.";
+    else if (st === "assigned" && ["admin", "supervisor"].includes(role)) {
+      hint.textContent = "Technician assigned. Tap Start job to move this work order in progress.";
+    }
     else if (st === "in_progress" && (mine || ["admin", "supervisor"].includes(role))) {
       hint.textContent = "Add completion notes, then submit for supervisor approval.";
     } else if (st === "completed") hint.textContent = "Job submitted. Waiting for supervisor approval.";

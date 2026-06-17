@@ -54,10 +54,32 @@ function isArtisanRole(role) {
   return String(role || "").toLowerCase() === "artisan";
 }
 
+function technicianIdentityKeys(nameOrUsername, roster = []) {
+  const keys = new Set();
+  const raw = String(nameOrUsername || "").trim().toLowerCase();
+  if (!raw) return keys;
+  keys.add(raw);
+  for (const t of roster) {
+    const username = String(t?.username || t || "").trim().toLowerCase();
+    const label = String(t?.label || t?.username || t || "").trim().toLowerCase();
+    if (raw === username || raw === label) {
+      if (username) keys.add(username);
+      if (label) keys.add(label);
+    }
+  }
+  return keys;
+}
+
 function isAssignedToMe(wo) {
   const me = getSessionUser().trim().toLowerCase();
   const assigned = String(wo?.assigned_artisan_name || "").trim().toLowerCase();
-  return Boolean(me && assigned && me === assigned);
+  if (!me || !assigned) return false;
+  const meKeys = technicianIdentityKeys(me, technicianOptions);
+  const assignedKeys = technicianIdentityKeys(assigned, technicianOptions);
+  for (const k of meKeys) {
+    if (assignedKeys.has(k)) return true;
+  }
+  return false;
 }
 
 function workflowStepClass(current, step) {
@@ -90,7 +112,7 @@ function rolePermissionText(role) {
     return "Admin: full control (status transitions, approvals, close, issue parts).";
   }
   if (r === "supervisor") {
-    return "Supervisor: assign a technician, approve completed jobs, then close work orders.";
+    return "Supervisor: assign a technician, start the job, mark complete, approve, then close work orders.";
   }
   if (r === "artisan") {
     return "Technician: start assigned jobs, complete with notes, then wait for supervisor approval.";
@@ -149,7 +171,7 @@ function workflowActionButtons(wo) {
   if (isSupervisorRole(role) && ["open", "assigned"].includes(s)) {
     buttons.push(`<button data-assign-id="${wo.id}" style="margin-top:8px;">Assign technician</button>`);
   }
-  if (isSupervisorRole(role) && s === "open" && wo.assigned_artisan_name) {
+  if (isSupervisorRole(role) && s === "assigned") {
     buttons.push(`<button data-set-status-id="${wo.id}" data-set-status="in_progress" style="margin-top:8px;">Start job</button>`);
   }
   if (isArtisanRole(role) && s === "assigned" && isAssignedToMe(wo)) {
@@ -436,7 +458,9 @@ function renderDetail(payload) {
           ${workflowStepsHtml(wo)}
           ${isSupervisorRole(getSessionRole()) ? `
             <div class="row" style="gap:8px; flex-wrap:wrap; margin-top:10px;">
-              <button type="button" data-assign-id="${wo.id}">Assign technician</button>
+              ${["open", "assigned"].includes(String(wo.status || "").toLowerCase()) ? `<button type="button" data-assign-id="${wo.id}">Assign technician</button>` : ""}
+              ${String(wo.status || "").toLowerCase() === "assigned" ? `<button type="button" data-set-status-id="${wo.id}" data-set-status="in_progress">Start job</button>` : ""}
+              ${String(wo.status || "").toLowerCase() === "in_progress" ? `<button type="button" data-complete-id="${wo.id}">Mark complete</button>` : ""}
               ${String(wo.status || "").toLowerCase() === "completed" ? `<button type="button" data-approve-id="${wo.id}">Approve job</button>` : ""}
               ${String(wo.status || "").toLowerCase() === "approved" ? `<button type="button" data-close-id="${wo.id}" data-close-source="${String(wo.source || "").toLowerCase()}">Close work order</button>` : ""}
             </div>
