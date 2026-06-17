@@ -100,6 +100,8 @@
   }
 
   function authHeaders(extra = {}) {
+    const tok = getAuthToken();
+    if (!tok) return { ...extra };
     const roles = getSessionRoles();
     const h = {
       ...extra,
@@ -107,22 +109,23 @@
       "x-user-role": getSessionRole(),
       "x-user-roles": roles.join(","),
       "x-site-code": getSessionSite(),
+      Authorization: `Bearer ${tok}`,
     };
-    const tok = getAuthToken();
-    if (tok) h.Authorization = `Bearer ${tok}`;
     return h;
   }
 
   async function fetchJson(url, opts = {}) {
     const nextOpts = { ...opts };
     const headers = new Headers(nextOpts.headers || {});
-    const roles = getSessionRoles();
-    headers.set("x-user-name", getSessionUser());
-    headers.set("x-user-role", getSessionRole());
-    headers.set("x-user-roles", roles.join(","));
-    headers.set("x-site-code", getSessionSite());
     const tok = getAuthToken();
-    if (tok) headers.set("Authorization", `Bearer ${tok}`);
+    if (tok) {
+      const roles = getSessionRoles();
+      headers.set("x-user-name", getSessionUser());
+      headers.set("x-user-role", getSessionRole());
+      headers.set("x-user-roles", roles.join(","));
+      headers.set("x-site-code", getSessionSite());
+      headers.set("Authorization", `Bearer ${tok}`);
+    }
     if (typeof nextOpts.body === "string" && !headers.has("Content-Type")) {
       headers.set("Content-Type", "application/json");
     }
@@ -172,13 +175,14 @@
   }
 
   async function trySession() {
-    if (!getAuthToken() && !getSessionUser()) return null;
+    if (!getAuthToken()) return null;
     try {
       const data = await fetchJson(`${API}/api/auth/me`);
       if (data?.user?.id != null) {
         applyUser(data.user);
         return data.user;
       }
+      clearSession();
       return null;
     } catch (e) {
       if (e.status === 401) clearSession();

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
+import { isAuthRequired } from "../auth/hook.js";
 
 export const VALID_ROLES = [
   "admin",
@@ -468,23 +469,61 @@ export default async function authRoutes(app) {
     return { ok: true };
   });
 
-  // GET /api/auth/me
-  app.get("/me", async (req) => {
+  // GET /api/auth/config — public UI bootstrap (login required?)
+  app.get("/config", async () => ({
+    ok: true,
+    auth_required: isAuthRequired(),
+  }));
+
+  // GET /api/auth/me — identity from Bearer session only (no header spoofing)
+  app.get("/me", async (req, reply) => {
+    const authRequired = isAuthRequired();
+    const auth = String(req.headers.authorization || "");
+    const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+
+    if (token) {
+      const row = db.prepare(`
+        SELECT u.id, u.username, u.full_name, u.role, u.active, u.created_at, u.password_hash, u.department,
+          u.allowed_tabs, u.roles_json, u.allowed_locations, u.setup_code_hash, u.setup_code_expires_at, u.pin_hash
+        FROM auth_sessions s
+        JOIN users u ON u.id = s.user_id
+        WHERE s.token = ?
+          AND datetime(s.expires_at) > datetime('now')
+          AND COALESCE(u.active, 1) = 1
+      `).get(token);
+
+      if (row) {
+        const user = userPayload(row);
+        user.permissions = getPermissionsForRoles(user.roles);
+        return {
+          ok: true,
+          user,
+          roles: VALID_ROLES,
+          permissions: [...PERMISSION_KEYS],
+          auth_required: authRequired,
+        };
+      }
+      return reply.code(401).send({ error: "invalid or expired session" });
+    }
+
+    if (authRequired) {
+      return reply.code(401).send({ error: "login required" });
+    }
+
+    // Legacy dev mode: header-based identity when auth is not enforced server-side
     const username = getRequestUsername(req);
     const roleFromHeader = getRequestRole(req);
-
     if (username) {
       const user = getByUsername.get(username);
       if (user && Number(user.active) === 1) {
+        const payload = userPayload(user);
+        payload.permissions = getPermissionsForRoles(payload.roles);
         return {
           ok: true,
-          user: {
-            ...userPayload(user),
-            permissions: getPermissionsForRoles(parseRoles(user.roles_json, user.role)),
-          },
+          user: payload,
           roles: VALID_ROLES,
           permissions: [...PERMISSION_KEYS],
-          auth_required: process.env.IRONLOG_AUTH_REQUIRED === "1" || String(process.env.IRONLOG_AUTH_REQUIRED).toLowerCase() === "true",
+          auth_required: false,
         };
       }
     }
@@ -502,10 +541,11 @@ export default async function authRoutes(app) {
         department: null,
         allowed_tabs: null,
         has_password: false,
+        has_pin: false,
       },
       roles: VALID_ROLES,
       permissions: [...PERMISSION_KEYS],
-      auth_required: process.env.IRONLOG_AUTH_REQUIRED === "1" || String(process.env.IRONLOG_AUTH_REQUIRED).toLowerCase() === "true",
+      auth_required: false,
     };
   });
 

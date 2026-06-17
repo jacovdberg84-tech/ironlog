@@ -736,6 +736,8 @@ function setSlaOpenSameTab(v) {
 }
 
 function authHeaders(extra = {}) {
+  const tok = getAuthToken();
+  if (!tok) return { ...extra };
   const roles = getSessionRoles();
   const h = {
     ...extra,
@@ -743,9 +745,8 @@ function authHeaders(extra = {}) {
     "x-user-role": getSessionRole(),
     "x-user-roles": roles.join(","),
     "x-site-code": getSessionSite(),
+    Authorization: `Bearer ${tok}`,
   };
-  const tok = getAuthToken();
-  if (tok) h.Authorization = `Bearer ${tok}`;
   return h;
 }
 
@@ -753,13 +754,15 @@ function authHeaders(extra = {}) {
 async function fetchJson(url, opts) {
   const nextOpts = { ...(opts || {}) };
   const headers = new Headers(nextOpts.headers || {});
-  const roles = getSessionRoles();
-  headers.set("x-user-name", getSessionUser());
-  headers.set("x-user-role", getSessionRole());
-  headers.set("x-user-roles", roles.join(","));
-  headers.set("x-site-code", getSessionSite());
   const tok = getAuthToken();
-  if (tok) headers.set("Authorization", `Bearer ${tok}`);
+  if (tok) {
+    const roles = getSessionRoles();
+    headers.set("x-user-name", getSessionUser());
+    headers.set("x-user-role", getSessionRole());
+    headers.set("x-user-roles", roles.join(","));
+    headers.set("x-site-code", getSessionSite());
+    headers.set("Authorization", `Bearer ${tok}`);
+  }
   if (typeof nextOpts.body === "string" && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
@@ -1479,25 +1482,36 @@ function applySessionFromMeUser(user) {
 }
 
 async function tryInitialSession() {
+  const tok = getAuthToken();
+  if (!tok) {
+    showLoginGate(true);
+    updateAuthChrome();
+    return;
+  }
+
   let res;
   let data = {};
   try {
-    res = await fetch(`${API}/api/auth/me`, { headers: new Headers(authHeaders()) });
+    res = await fetch(`${API}/api/auth/me`, {
+      headers: new Headers({ Authorization: `Bearer ${tok}` }),
+    });
     data = await res.json();
   } catch {
     res = { status: 0 };
   }
   if (res.status === 401) {
+    clearAuthSession();
     showLoginGate(true);
     updateAuthChrome();
     return;
   }
   if (data.ok && data.user && data.user.id != null) {
     applySessionFromMeUser(data.user);
-  } else if (data.ok && data.user && data.user.id == null) {
-    localStorage.removeItem(TABS_OVERRIDE_KEY);
+    showLoginGate(false);
+  } else {
+    clearAuthSession();
+    showLoginGate(true);
   }
-  showLoginGate(false);
   updateAuthChrome();
 }
 

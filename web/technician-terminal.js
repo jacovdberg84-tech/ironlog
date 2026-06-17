@@ -255,6 +255,14 @@
   }
 
   async function boot() {
+    if (!A.getAuthToken()) {
+      showLogin(true);
+      showPinPanel(true);
+      await loadPinRoster();
+      renderPinDisplay();
+      return;
+    }
+
     const user = await A.trySession();
     if (user) {
       try {
