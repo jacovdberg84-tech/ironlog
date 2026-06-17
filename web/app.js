@@ -8395,6 +8395,51 @@ async function cancelStoresPartOrder(id) {
   await loadStoresPartOrders();
 }
 
+function buildStoresPartOrdersExportQuery() {
+  ensureStoresPartOrderDates();
+  const start = (qs("spoDateFrom")?.value || "").trim();
+  const end = (qs("spoDateTo")?.value || "").trim();
+  const status = (qs("spoFilterStatus")?.value || "").trim();
+  if (!start || !end) throw new Error("Choose period from and to dates.");
+  const q = new URLSearchParams();
+  q.set("start", start);
+  q.set("end", end);
+  if (status) q.set("status", status);
+  return { start, end, q };
+}
+
+function openStoresPartOrdersPdf(download = false) {
+  const { q } = buildStoresPartOrdersExportQuery();
+  if (download) q.set("download", "1");
+  openAuthedPdf(`${API}/api/reports/part-orders.pdf?${q.toString()}`).catch((e) =>
+    setStatus("Parts purchases PDF error: " + (e.message || e))
+  );
+}
+
+async function exportStoresPartOrdersXlsx() {
+  const { start, end, q } = buildStoresPartOrdersExportQuery();
+  setStatus("Generating Excel...");
+  const res = await fetch(`${API}/api/reports/part-orders.xlsx?${q.toString()}`, { headers: authHeaders() });
+  if (!res.ok) {
+    let msg = await res.text().catch(() => "");
+    try {
+      const j = JSON.parse(msg);
+      msg = j.error || j.message || msg;
+    } catch {}
+    throw new Error(msg || `Export failed (${res.status})`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `IRONLOG_Parts_Purchases_${start}_${end}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  setStatus("Parts purchases Excel downloaded.");
+}
+
 async function loadAuditLogs() {
   const module = (qs("auditModule")?.value || "").trim();
   const action = (qs("auditAction")?.value || "").trim();
@@ -15271,6 +15316,11 @@ async function init() {
     if (!btn) return;
     cancelStoresPartOrder(Number(btn.getAttribute("data-spo-del") || 0)).catch((e) => alert(e.message || String(e)));
   });
+  qs("spoExportXlsx")?.addEventListener("click", () =>
+    exportStoresPartOrdersXlsx().catch((e) => setStatus("Parts purchases Excel error: " + e.message))
+  );
+  qs("spoOpenPdf")?.addEventListener("click", () => openStoresPartOrdersPdf(false));
+  qs("spoDownloadPdf")?.addEventListener("click", () => openStoresPartOrdersPdf(true));
   qs("loadAudit")?.addEventListener("click", () =>
     loadAuditLogs().catch((e) => setStatus("Audit error: " + e.message))
   );

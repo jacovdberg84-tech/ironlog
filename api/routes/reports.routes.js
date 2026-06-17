@@ -6219,6 +6219,265 @@ export default async function reportsRoutes(app) {
   });
 
   // =========================
+  // STORES PART ORDERS PDF / XLSX (purchases & forecast)
+  // =========================
+  function parsePartOrdersPeriod(req) {
+    const start = String(req.query?.start || req.query?.date_from || "").trim();
+    const end = String(req.query?.end || req.query?.date_to || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+      return { error: "start and end are required (YYYY-MM-DD)" };
+    }
+    if (start > end) return { error: "start must be on or before end" };
+    const site_code = String(req.headers["x-site-code"] || req.query?.site_code || "main").trim().toLowerCase() || "main";
+    const status = String(req.query?.status || "").trim().toLowerCase();
+    return { start, end, site_code, status };
+  }
+
+  function partOrderStatusLabel(status) {
+    const s = String(status || "").toLowerCase();
+    if (s === "on_order") return "On order";
+    if (s === "in_transit") return "In transit";
+    if (s === "arrived") return "Arrived";
+    if (s === "cancelled") return "Cancelled";
+    return s || "—";
+  }
+
+  function fetchStoresPartOrdersForReport({ start, end, site_code, status }) {
+    const where = ["LOWER(TRIM(COALESCE(o.site_code, 'main'))) = ?"];
+    const params = [site_code];
+    where.push("o.order_date >= ?");
+    params.push(start);
+    where.push("o.order_date <= ?");
+    params.push(end);
+    const allowed = new Set(["on_order", "in_transit", "arrived", "cancelled"]);
+    if (status && allowed.has(status)) {
+      where.push("LOWER(COALESCE(o.status, 'on_order')) = ?");
+      params.push(status);
+    } else {
+      where.push("LOWER(COALESCE(o.status, 'on_order')) <> 'cancelled'");
+    }
+
+    const rows = db.prepare(`
+      SELECT
+        o.id,
+        o.site_code,
+        o.part_code,
+        o.part_name,
+        o.qty,
+        o.unit_cost,
+        o.currency,
+        o.supplier_name,
+        o.po_number,
+        o.order_date,
+        o.expected_arrival_date,
+        o.arrived_date,
+        o.status,
+        o.notes,
+        o.created_by
+      FROM stores_part_orders o
+      WHERE ${where.join(" AND ")}
+      ORDER BY o.order_date DESC, o.id DESC
+      LIMIT 5000
+    `).all(...params).map((r) => {
+      const qty = Number(r.qty || 0);
+      const unit_cost = Number(r.unit_cost || 0);
+      const line_total = Number((qty * unit_cost).toFixed(2));
+      return { ...r, qty, unit_cost, line_total };
+    });
+
+    const summary = {
+      on_order: { count: 0, qty: 0, value: 0 },
+      in_transit: { count: 0, qty: 0, value: 0 },
+      arrived: { count: 0, qty: 0, value: 0 },
+      cancelled: { count: 0, qty: 0, value: 0 },
+      total_forecast: 0,
+      total_arrived: 0,
+      total_pending: 0,
+    };
+    for (const row of rows) {
+      const st = String(row.status || "on_order").toLowerCase();
+      const bucket = summary[st];
+      const value = row.line_total;
+      if (bucket) {
+        bucket.count += 1;
+        bucket.qty += row.qty;
+        bucket.value += value;
+      }
+      if (st === "arrived") summary.total_arrived += value;
+      if (st === "on_order" || st === "in_transit") summary.total_pending += value;
+      if (st !== "cancelled") summary.total_forecast += value;
+    }
+    for (const key of ["on_order", "in_transit", "arrived", "cancelled"]) {
+      summary[key].qty = Number(summary[key].qty.toFixed(2));
+      summary[key].value = Number(summary[key].value.toFixed(2));
+    }
+    summary.total_forecast = Number(summary.total_forecast.toFixed(2));
+    summary.total_arrived = Number(summary.total_arrived.toFixed(2));
+    summary.total_pending = Number(summary.total_pending.toFixed(2));
+    return { rows, summary };
+  }
+
+  // GET /api/reports/part-orders.pdf?start=&end=&status=&download=1
+  app.get("/part-orders.pdf", async (req, reply) => {
+    const period = parsePartOrdersPeriod(req);
+    if (period.error) return reply.code(400).send({ error: period.error });
+    const download = String(req.query?.download || "").trim() === "1";
+    const { start, end, site_code, status } = period;
+    const { rows, summary } = fetchStoresPartOrdersForReport(period);
+
+    const logoPath = path.join(process.cwd(), "branding", "logo.png");
+    const pdf = await buildPdfBuffer(
+      (doc) => {
+        tryDrawLogo(doc, logoPath);
+
+        sectionTitle(doc, "Parts purchases forecast");
+        kvGrid(
+          doc,
+          [
+            { k: "Site", v: site_code },
+            { k: "Period", v: `${start} → ${end}` },
+            { k: "Status filter", v: status ? partOrderStatusLabel(status) : "All active" },
+            { k: "On order", v: `$${fmtNum(summary.on_order.value, 2)} (${summary.on_order.count} lines)` },
+            { k: "In transit", v: `$${fmtNum(summary.in_transit.value, 2)} (${summary.in_transit.count} lines)` },
+            { k: "Arrived", v: `$${fmtNum(summary.arrived.value, 2)} (${summary.arrived.count} lines)` },
+            { k: "Pending forecast", v: `$${fmtNum(summary.total_pending, 2)}` },
+            { k: "Total period", v: `$${fmtNum(summary.total_forecast, 2)}` },
+          ],
+          2,
+        );
+
+        sectionTitle(doc, "Purchase lines");
+        table(
+          doc,
+          [
+            { key: "order_date", label: "Ordered", width: 0.09 },
+            { key: "part_code", label: "Part", width: 0.1 },
+            { key: "part_name", label: "Description", width: 0.18 },
+            { key: "qty", label: "Qty", width: 0.06, align: "right" },
+            { key: "unit_cost", label: "Unit $", width: 0.08, align: "right" },
+            { key: "line_total", label: "Line $", width: 0.08, align: "right" },
+            { key: "supplier", label: "Supplier", width: 0.12 },
+            { key: "po", label: "PO", width: 0.08 },
+            { key: "eta", label: "ETA", width: 0.09 },
+            { key: "status", label: "Status", width: 0.12 },
+          ],
+          rows.length
+            ? rows.map((r) => ({
+                order_date: compactCell(r.order_date, 12),
+                part_code: compactCell(r.part_code || "—", 14),
+                part_name: compactCell(r.part_name, 30),
+                qty: fmtNum(r.qty, 2),
+                unit_cost: fmtNum(r.unit_cost, 2),
+                line_total: fmtNum(r.line_total, 2),
+                supplier: compactCell(r.supplier_name || "—", 18),
+                po: compactCell(r.po_number || "—", 12),
+                eta: compactCell(r.expected_arrival_date || "—", 12),
+                status: partOrderStatusLabel(r.status),
+              }))
+            : [
+                {
+                  order_date: "-",
+                  part_code: "-",
+                  part_name: "No purchases in this period",
+                  qty: "-",
+                  unit_cost: "-",
+                  line_total: "-",
+                  supplier: "-",
+                  po: "-",
+                  eta: "-",
+                  status: "-",
+                },
+              ],
+        );
+      },
+      {
+        title: "IRONLOG",
+        subtitle: "Parts purchases & site forecast",
+        rightText: `${site_code} · ${start} → ${end}`,
+        showPageNumbers: true,
+      },
+    );
+
+    reply
+      .header("Content-Type", "application/pdf")
+      .header(
+        "Content-Disposition",
+        `${download ? "attachment" : "inline"}; filename="IRONLOG_Parts_Purchases_${start}_${end}_${todayYmd()}.pdf"`,
+      )
+      .send(pdf);
+  });
+
+  // GET /api/reports/part-orders.xlsx?start=&end=&status=
+  app.get("/part-orders.xlsx", async (req, reply) => {
+    const period = parsePartOrdersPeriod(req);
+    if (period.error) return reply.code(400).send({ error: period.error });
+    const { start, end, site_code, status } = period;
+    const { rows, summary } = fetchStoresPartOrdersForReport(period);
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "IRONLOG";
+    wb.created = new Date();
+
+    const wsSummary = wb.addWorksheet("Summary");
+    wsSummary.columns = [
+      { header: "Metric", key: "metric", width: 28 },
+      { header: "Value", key: "value", width: 36 },
+    ];
+    wsSummary.addRows([
+      { metric: "Site", value: site_code },
+      { metric: "Period from", value: start },
+      { metric: "Period to", value: end },
+      { metric: "Status filter", value: status ? partOrderStatusLabel(status) : "All active" },
+      { metric: "On order ($)", value: summary.on_order.value },
+      { metric: "On order (lines)", value: summary.on_order.count },
+      { metric: "In transit ($)", value: summary.in_transit.value },
+      { metric: "In transit (lines)", value: summary.in_transit.count },
+      { metric: "Arrived ($)", value: summary.arrived.value },
+      { metric: "Arrived (lines)", value: summary.arrived.count },
+      { metric: "Pending forecast ($)", value: summary.total_pending },
+      { metric: "Total period ($)", value: summary.total_forecast },
+    ]);
+    wsSummary.getRow(1).font = { bold: true };
+
+    const ws = wb.addWorksheet("Purchases");
+    ws.columns = [
+      { header: "Order date", key: "order_date", width: 12 },
+      { header: "Part code", key: "part_code", width: 14 },
+      { header: "Description", key: "part_name", width: 28 },
+      { header: "Qty", key: "qty", width: 10 },
+      { header: "Unit cost", key: "unit_cost", width: 12 },
+      { header: "Line total", key: "line_total", width: 12 },
+      { header: "Currency", key: "currency", width: 10 },
+      { header: "Supplier", key: "supplier_name", width: 20 },
+      { header: "PO number", key: "po_number", width: 14 },
+      { header: "Expected arrival", key: "expected_arrival_date", width: 14 },
+      { header: "Arrived date", key: "arrived_date", width: 14 },
+      { header: "Status", key: "status_label", width: 14 },
+      { header: "Notes", key: "notes", width: 30 },
+      { header: "Created by", key: "created_by", width: 16 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    for (const r of rows) {
+      ws.addRow({
+        ...r,
+        status_label: partOrderStatusLabel(r.status),
+      });
+    }
+  ["qty", "unit_cost", "line_total"].forEach((key) => {
+      ws.getColumn(key).numFmt = "#,##0.00";
+    });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header(
+        "Content-Disposition",
+        `attachment; filename="IRONLOG_Parts_Purchases_${start}_${end}.xlsx"`,
+      )
+      .send(Buffer.from(buffer));
+  });
+
+  // =========================
   // LEGAL COMPLIANCE PDF
   // =========================
   // GET /api/reports/legal-compliance.pdf?days=90&department=&status=approved&download=1
