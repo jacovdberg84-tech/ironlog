@@ -1599,11 +1599,55 @@ async function logoutAuth() {
 }
 
 let __adminTabKeysLoaded = false;
+
+const ADMIN_ROLE_OPTIONS = [
+  { value: "admin", label: "admin — system administrator" },
+  { value: "supervisor", label: "supervisor — workshop supervisor" },
+  { value: "artisan", label: "artisan — technician (workshop terminal)" },
+  { value: "operator", label: "operator — field operator" },
+  { value: "storeman", label: "storeman — stores / stock" },
+  { value: "stores", label: "stores — stores (legacy)" },
+  { value: "procurement", label: "procurement — purchasing" },
+  { value: "finance", label: "finance — finance & costing" },
+  { value: "executive", label: "executive — executive reports" },
+  { value: "site_manager", label: "site_manager — site manager" },
+  { value: "plant_manager", label: "plant_manager — plant manager" },
+  { value: "quality_manager", label: "quality_manager — quality" },
+  { value: "hr_manager", label: "hr_manager — HR" },
+];
+
+function populateAdminRolesSelect(rolesSel, selectedValues = null) {
+  if (!rolesSel) return;
+  const selected = new Set(
+    (selectedValues != null
+      ? selectedValues
+      : Array.from(rolesSel.selectedOptions || []).map((o) => o.value)
+    ).map((v) => String(v || "").trim().toLowerCase()).filter(Boolean)
+  );
+  rolesSel.innerHTML = "";
+  ADMIN_ROLE_OPTIONS.forEach(({ value, label }) => {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = label;
+    opt.selected = selected.has(value);
+    rolesSel.appendChild(opt);
+  });
+  if (!selected.size) {
+    const op = rolesSel.querySelector('option[value="operator"]');
+    if (op) op.selected = true;
+  }
+}
+
 async function ensureAdminTabOptions() {
-  if (__adminTabKeysLoaded) return;
   const sel = qs("adminUserTabs");
   const rolesSel = qs("adminRoles");
   if (!sel && !rolesSel) return;
+
+  if (rolesSel && rolesSel.options.length <= 1) {
+    populateAdminRolesSelect(rolesSel);
+  }
+
+  if (__adminTabKeysLoaded) return;
   try {
     const data = await fetchJson(`${API}/api/auth/tabs`);
     const keys = Array.isArray(data.keys) ? data.keys : [];
@@ -1616,20 +1660,32 @@ async function ensureAdminTabOptions() {
         sel.appendChild(opt);
       });
     }
-    const roles = Array.isArray(data.roles) ? data.roles : [];
-    if (rolesSel && roles.length) {
+    const apiRoles = Array.isArray(data.roles) ? data.roles.map((r) => String(r || "").trim().toLowerCase()).filter(Boolean) : [];
+    if (rolesSel && apiRoles.length) {
+      const known = new Set(ADMIN_ROLE_OPTIONS.map((r) => r.value));
       const selectedBefore = Array.from(rolesSel.selectedOptions || []).map((o) => o.value);
       rolesSel.innerHTML = "";
-      roles.forEach((r) => {
+      apiRoles.forEach((r) => {
+        const meta = ADMIN_ROLE_OPTIONS.find((x) => x.value === r);
         const opt = document.createElement("option");
-        opt.value = String(r || "").trim().toLowerCase();
-        opt.textContent = String(r || "").trim().toLowerCase();
-        if (selectedBefore.includes(opt.value) || opt.value === "operator") opt.selected = true;
+        opt.value = r;
+        opt.textContent = meta ? meta.label : r;
+        if (selectedBefore.includes(r) || (!selectedBefore.length && r === "operator")) opt.selected = true;
         rolesSel.appendChild(opt);
       });
+      apiRoles.filter((r) => !known.has(r)).forEach((r) => {
+        const opt = document.createElement("option");
+        opt.value = r;
+        opt.textContent = r;
+        rolesSel.appendChild(opt);
+      });
+    } else if (rolesSel) {
+      populateAdminRolesSelect(rolesSel);
     }
     __adminTabKeysLoaded = true;
-  } catch {}
+  } catch {
+    if (rolesSel && rolesSel.options.length <= 1) populateAdminRolesSelect(rolesSel);
+  }
 }
 
 async function loadAdminUsers() {
@@ -8633,6 +8689,7 @@ function switchTab(key) {
   }
   if (k === "admin") {
     renderOfflineQueueAdminPanel();
+    ensureAdminTabOptions().catch(() => {});
   }
   if (k === "telematics") {
     loadTelematicsTab().catch(() => {});

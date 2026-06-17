@@ -5652,9 +5652,21 @@
             </div>
             <div class="form-row">
               <div class="form-field">
-                <label>Roles</label>
-                <select id="adminRoles" class="w-full" multiple size="8">
-                  <option value="operator" selected>operator</option>
+                <label>Roles <span class="muted small">(Ctrl+click for multiple)</span></label>
+                <select id="adminRoles" class="w-full" multiple size="12">
+                  <option value="admin">admin — system administrator</option>
+                  <option value="supervisor">supervisor — workshop supervisor</option>
+                  <option value="artisan">artisan — technician (workshop terminal)</option>
+                  <option value="operator" selected>operator — field operator</option>
+                  <option value="storeman">storeman — stores / stock</option>
+                  <option value="stores">stores — stores (legacy)</option>
+                  <option value="procurement">procurement — purchasing</option>
+                  <option value="finance">finance — finance &amp; costing</option>
+                  <option value="executive">executive — executive reports</option>
+                  <option value="site_manager">site_manager — site manager</option>
+                  <option value="plant_manager">plant_manager — plant manager</option>
+                  <option value="quality_manager">quality_manager — quality</option>
+                  <option value="hr_manager">hr_manager — HR</option>
                 </select>
               </div>
               <div class="form-field">
@@ -6818,6 +6830,6 @@
 
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="./app.js?v=38"></script>
+  <script src="./app.js?v=39"></script>
 </body>
 </html>
