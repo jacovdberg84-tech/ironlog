@@ -1,4 +1,5 @@
 // IRONLOG/api/routes/assets.routes.js
+import ExcelJS from "exceljs";
 import { db } from "../db/client.js";
 import { getAssetCurrentHoursInfo } from "../utils/assetMeterHours.js";
 import {
@@ -202,6 +203,113 @@ export default async function assetRoutes(app) {
     });
 
     return { ok: true, cards };
+  });
+
+  // GET /api/assets/cost-centers.xlsx?include_archived=0|1
+  // Equipment register for manual cost center allocation in Excel.
+  app.get("/cost-centers.xlsx", async (req, reply) => {
+    const includeArchived = String(req.query?.include_archived || "0") === "1";
+    const today = new Date().toISOString().slice(0, 10);
+
+    const rows = db.prepare(`
+      SELECT
+        asset_code,
+        asset_name,
+        category,
+        site_code,
+        department_code,
+        cost_center_code,
+        active,
+        is_standby,
+        archived,
+        archive_reason
+      FROM assets
+      WHERE (? = 1 OR COALESCE(archived, 0) = 0)
+      ORDER BY asset_code ASC
+    `).all(includeArchived ? 1 : 0);
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "IRONLOG";
+    wb.created = new Date();
+
+    const wsInfo = wb.addWorksheet("Instructions");
+    wsInfo.columns = [
+      { header: "Topic", key: "topic", width: 22 },
+      { header: "Detail", key: "detail", width: 72 },
+    ];
+    wsInfo.getRow(1).font = { bold: true };
+    wsInfo.addRows([
+      {
+        topic: "Purpose",
+        detail: "Fill in the Cost Center Code column for each asset. Other columns are for reference.",
+      },
+      {
+        topic: "Asset Code",
+        detail: "Do not change asset codes — they are the key used when importing updates later.",
+      },
+      {
+        topic: "Cost Center Code",
+        detail: "Use codes from Enterprise → Master Data → Cost Centers (e.g. MINE-OPS-01).",
+      },
+      {
+        topic: "Apply changes",
+        detail: "For now, copy completed codes into IRONLOG via Assets → Site & Cost Center, or ask admin to import.",
+      },
+      {
+        topic: "Exported",
+        detail: `${today} | ${rows.length} asset(s) | Archived included: ${includeArchived ? "yes" : "no"}`,
+      },
+    ]);
+
+    const ws = wb.addWorksheet("Equipment");
+    ws.columns = [
+      { header: "Asset Code", key: "asset_code", width: 14 },
+      { header: "Asset Name", key: "asset_name", width: 28 },
+      { header: "Category", key: "category", width: 22 },
+      { header: "Site Code", key: "site_code", width: 12 },
+      { header: "Department Code", key: "department_code", width: 16 },
+      { header: "Cost Center Code", key: "cost_center_code", width: 18 },
+      { header: "Active", key: "active", width: 10 },
+      { header: "Standby", key: "is_standby", width: 10 },
+      { header: "Archived", key: "archived", width: 10 },
+      { header: "Archive Reason", key: "archive_reason", width: 24 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    ws.views = [{ state: "frozen", ySplit: 1 }];
+
+    for (const r of rows) {
+      ws.addRow({
+        asset_code: r.asset_code || "",
+        asset_name: r.asset_name || "",
+        category: r.category || "",
+        site_code: r.site_code != null ? String(r.site_code) : "",
+        department_code: r.department_code != null ? String(r.department_code) : "",
+        cost_center_code: r.cost_center_code != null ? String(r.cost_center_code) : "",
+        active: Number(r.active) ? "Yes" : "No",
+        is_standby: Number(r.is_standby) ? "Yes" : "No",
+        archived: Number(r.archived) ? "Yes" : "No",
+        archive_reason: r.archive_reason || "",
+      });
+    }
+
+    const ccCol = ws.getColumn("cost_center_code");
+    ccCol.eachCell({ includeEmpty: true }, (cell, rowNumber) => {
+      if (rowNumber === 1) return;
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFFFF9E6" },
+      };
+    });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header(
+        "Content-Disposition",
+        `attachment; filename="IRONLOG_Asset_Cost_Centers_${today}.xlsx"`,
+      )
+      .send(Buffer.from(buffer));
   });
 
   function siteCodeFromReq(req) {

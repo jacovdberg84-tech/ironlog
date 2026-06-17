@@ -14401,6 +14401,15 @@ function renderAssetFleetGrid(cards) {
   }
 }
 
+function downloadAssetsCostCentersXlsx() {
+  const includeArchived = qs("showArchived")?.checked ? 1 : 0;
+  window.open(
+    `${API}/api/assets/cost-centers.xlsx?include_archived=${includeArchived}&_ts=${Date.now()}`,
+    "_blank",
+  );
+  setStatus("Asset cost center register export started.");
+}
+
 async function loadAssetsFleet() {
   const showArchived = !!qs("showArchived")?.checked;
   const url = `${API}/api/assets/fleet-summary?include_archived=${showArchived ? 1 : 0}`;
@@ -15947,6 +15956,8 @@ async function init() {
   qs("showArchived")?.addEventListener("change", () => {
     loadAssetsFleet().catch(() => {});
   });
+
+  qs("downloadAssetsCostCentersXlsx")?.addEventListener("click", () => downloadAssetsCostCentersXlsx());
 
   qs("assetsFleetFilter")?.addEventListener("input", () => {
     renderAssetFleetGrid(assetsFleetCache);
