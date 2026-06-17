@@ -17,6 +17,7 @@ import {
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
 import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
 import { aggregateFuelBenchmarkByCategory } from "../utils/fuelBenchmarkAggregate.js";
+import { fuelBenchmarkAssetsInRangeSql } from "../utils/fuelMetricMode.js";
 import { fetchLubeMonthStockSnapshot } from "../utils/lubeMonthStock.js";
 import { getMachinePrestartTemplate } from "../utils/machinePrestartTemplates.js";
 import {
@@ -3040,40 +3041,7 @@ export default async function reportsRoutes(app) {
       return reply.code(400).send({ error: "start and end (YYYY-MM-DD) required" });
     }
 
-    const fuelByAsset = db.prepare(`
-      SELECT
-        a.id AS asset_id,
-        a.asset_code,
-        a.asset_name,
-        a.category,
-        CASE
-          WHEN UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM' THEN 'km'
-          ELSE COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
-          WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%pickup%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%bakkie%'
-            OR LOWER(COALESCE(a.asset_code, '')) LIKE 'ldv%'
-            OR UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM'
-            OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
-            THEN 'km'
-          ELSE 'hours'
-        END)
-        END AS metric_mode,
-        COALESCE(NULLIF(a.km_per_hour_factor, 0), 10.0) AS km_per_hour_factor,
-        COALESCE(a.baseline_fuel_l_per_hour, 5.0) AS oem_lph,
-        COALESCE(a.baseline_fuel_km_per_l, 2.0) AS oem_kmpl,
-        COALESCE(SUM(fl.liters), 0) AS fuel_liters,
-        COUNT(fl.id) AS fill_count
-      FROM assets a
-      LEFT JOIN fuel_logs fl
-        ON fl.asset_id = a.id
-       AND fl.log_date BETWEEN ? AND ?
-      WHERE a.active = 1
-      GROUP BY a.id
-      ORDER BY a.asset_code ASC
-    `).all(start, end);
+    const fuelByAsset = db.prepare(fuelBenchmarkAssetsInRangeSql()).all(start, end);
 
     const getFuelLogsInRange = db.prepare(`
       SELECT
@@ -3346,39 +3314,7 @@ export default async function reportsRoutes(app) {
       return reply.code(400).send({ error: "start and end (YYYY-MM-DD) required" });
     }
 
-    const fuelByAsset = db.prepare(`
-      SELECT
-        a.id AS asset_id,
-        a.asset_code,
-        a.asset_name,
-        a.category,
-        CASE
-          WHEN UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM' THEN 'km'
-          ELSE COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
-          WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%pickup%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%bakkie%'
-            OR LOWER(COALESCE(a.asset_code, '')) LIKE 'ldv%'
-            OR UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM'
-            OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
-            THEN 'km'
-          ELSE 'hours'
-        END)
-        END AS metric_mode,
-        COALESCE(a.baseline_fuel_l_per_hour, 5.0) AS oem_lph,
-        COALESCE(a.baseline_fuel_km_per_l, 2.0) AS oem_kmpl,
-        COALESCE(SUM(fl.liters), 0) AS fuel_liters,
-        COUNT(fl.id) AS fill_count
-      FROM assets a
-      LEFT JOIN fuel_logs fl
-        ON fl.asset_id = a.id
-       AND fl.log_date BETWEEN ? AND ?
-      WHERE a.active = 1
-      GROUP BY a.id
-      ORDER BY a.asset_code ASC
-    `).all(start, end);
+    const fuelByAsset = db.prepare(fuelBenchmarkAssetsInRangeSql()).all(start, end);
 
     const getFuelLogsInRange = db.prepare(`
       SELECT
@@ -3574,39 +3510,7 @@ export default async function reportsRoutes(app) {
       return reply.code(400).send({ error: "start and end (YYYY-MM-DD) required" });
     }
 
-    const fuelByAsset = db.prepare(`
-      SELECT
-        a.id AS asset_id,
-        a.asset_code,
-        a.asset_name,
-        a.category,
-        CASE
-          WHEN UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM' THEN 'km'
-          ELSE COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
-          WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%pickup%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%bakkie%'
-            OR LOWER(COALESCE(a.asset_code, '')) LIKE 'ldv%'
-            OR UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM'
-            OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
-            THEN 'km'
-          ELSE 'hours'
-        END)
-        END AS metric_mode,
-        COALESCE(a.baseline_fuel_l_per_hour, 5.0) AS oem_lph,
-        COALESCE(a.baseline_fuel_km_per_l, 2.0) AS oem_kmpl,
-        COALESCE(SUM(fl.liters), 0) AS fuel_liters,
-        COUNT(fl.id) AS fill_count
-      FROM assets a
-      LEFT JOIN fuel_logs fl
-        ON fl.asset_id = a.id
-       AND fl.log_date BETWEEN ? AND ?
-      WHERE a.active = 1
-      GROUP BY a.id
-      ORDER BY a.asset_code ASC
-    `).all(start, end);
+    const fuelByAsset = db.prepare(fuelBenchmarkAssetsInRangeSql()).all(start, end);
 
     const getFuelLogsInRange = db.prepare(`
       SELECT
@@ -3772,40 +3676,7 @@ export default async function reportsRoutes(app) {
       return reply.code(400).send({ error: "start and end (YYYY-MM-DD) required" });
     }
 
-    const fuelByAssetStmt = db.prepare(`
-      SELECT
-        a.id AS asset_id,
-        a.asset_code,
-        a.asset_name,
-        a.category,
-        CASE
-          WHEN UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM' THEN 'km'
-          ELSE COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
-          WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%pickup%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%bakkie%'
-            OR LOWER(COALESCE(a.asset_code, '')) LIKE 'ldv%'
-            OR UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM'
-            OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
-            THEN 'km'
-          ELSE 'hours'
-        END)
-        END AS metric_mode,
-        COALESCE(NULLIF(a.km_per_hour_factor, 0), 10.0) AS km_per_hour_factor,
-        COALESCE(a.baseline_fuel_l_per_hour, 5.0) AS oem_lph,
-        COALESCE(a.baseline_fuel_km_per_l, 2.0) AS oem_kmpl,
-        COALESCE(SUM(fl.liters), 0) AS fuel_liters,
-        COUNT(fl.id) AS fill_count
-      FROM assets a
-      LEFT JOIN fuel_logs fl
-        ON fl.asset_id = a.id
-       AND fl.log_date BETWEEN ? AND ?
-      WHERE a.active = 1
-      GROUP BY a.id
-      ORDER BY a.asset_code ASC
-    `);
+    const fuelByAssetStmt = db.prepare(fuelBenchmarkAssetsInRangeSql());
 
     const getFuelLogsInRange = db.prepare(`
       SELECT

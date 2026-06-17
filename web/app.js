@@ -14255,6 +14255,17 @@ function isHiredAsset(a) {
   return c.includes("contractor hire") || c.includes("contractor") || c.includes("hire");
 }
 
+function isKmFuelAsset(a) {
+  const cat = String(a?.category || "").toLowerCase();
+  const code = String(a?.asset_code || "").toUpperCase();
+  const name = String(a?.asset_name || "").toLowerCase();
+  if (/^V\d{2}AM$/.test(code) || /^T\d{2}AM$/.test(code) || code.startsWith("PTT") || code.startsWith("LDV")) return true;
+  const keys = ["truck", "vehicle", "ldv", "pickup", "bakkie", "tipper", "dump", "haul", "spinner"];
+  if (keys.some((k) => cat.includes(k) || name.includes(k))) return true;
+  if (name.includes("toyota") && name.includes("hilux")) return true;
+  return false;
+}
+
 function makeContractorAssetCode() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
@@ -14295,6 +14306,13 @@ async function saveContractorAsset() {
       body: JSON.stringify(payload),
     });
     if (out) out.textContent = JSON.stringify({ ok: true, asset_code, id: res?.id || null }, null, 2);
+    if (isKmFuelAsset({ category, asset_code, asset_name: assetName })) {
+      await fetchJson(`${API}/api/dashboard/cost/asset-rates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asset_code, utilization_mode: "km" }),
+      }).catch(() => {});
+    }
     if (qs("caCode")) qs("caCode").value = "";
     if (qs("caName")) qs("caName").value = "";
     if (qs("caStandby")) qs("caStandby").checked = false;

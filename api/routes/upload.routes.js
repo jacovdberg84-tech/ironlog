@@ -2,6 +2,7 @@
 import multipart from "@fastify/multipart";
 import { parse } from "csv-parse/sync";
 import { db } from "../db/client.js";
+import { sqlFuelMetricModeExpr } from "../utils/fuelMetricMode.js";
 import {
   parseCsvToObjects,
   requireHeaders,
@@ -69,21 +70,7 @@ export default async function uploadRoutes(app) {
   const getAssetForFuelImport = db.prepare(`
     SELECT
       a.id,
-      CASE
-        WHEN UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM' THEN 'km'
-        ELSE COALESCE(NULLIF(TRIM(a.utilization_mode), ''), CASE
-          WHEN LOWER(COALESCE(a.category, '')) LIKE '%truck%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%vehicle%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%ldv%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%pickup%'
-            OR LOWER(COALESCE(a.category, '')) LIKE '%bakkie%'
-            OR LOWER(COALESCE(a.asset_code, '')) LIKE 'ldv%'
-            OR UPPER(COALESCE(a.asset_code, '')) GLOB 'V[0-9][0-9]AM'
-            OR LOWER(COALESCE(a.asset_name, '')) LIKE '%ldv%'
-            THEN 'km'
-          ELSE 'hours'
-        END)
-      END AS metric_mode
+      ${sqlFuelMetricModeExpr("a")} AS metric_mode
     FROM assets a
     WHERE a.asset_code = ?
   `);
