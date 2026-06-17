@@ -2025,6 +2025,114 @@
           </div>
         </div>
 
+        <!-- Parts purchases & site cost forecast -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fdf4ff; color: #9333ea;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
+              </div>
+              <div>
+                <h3>Parts purchases &amp; forecast</h3>
+                <p class="muted small">Track parts bought for the site — on order, in transit, and arrived — with period costing</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Period from</label>
+                <input id="spoDateFrom" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Period to</label>
+                <input id="spoDateTo" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Status</label>
+                <select id="spoFilterStatus" class="w-full">
+                  <option value="">All active</option>
+                  <option value="on_order">On order</option>
+                  <option value="in_transit">In transit</option>
+                  <option value="arrived">Arrived</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+              <div class="form-field form-field-action">
+                <button id="spoLoad" type="button" class="btn btn-primary">Load purchases</button>
+              </div>
+            </div>
+            <div class="kpi-pills">
+              <span class="kpi-pill kpi-pill-orange"><strong>On order:</strong> $<span id="spoOnOrderValue">0.00</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>In transit:</strong> $<span id="spoInTransitValue">0.00</span></span>
+              <span class="kpi-pill kpi-pill-green"><strong>Arrived:</strong> $<span id="spoArrivedValue">0.00</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Pending forecast:</strong> $<span id="spoPendingValue">0.00</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Total period:</strong> $<span id="spoForecastValue">0.00</span></span>
+            </div>
+            <hr class="hr-soft" style="margin:16px 0;" />
+            <p class="muted small" style="margin-top:0;">Add a purchase line for this site</p>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Part code</label>
+                <input id="spoPartCode" list="partCodeOptions" class="w-full" placeholder="Stores part code" />
+              </div>
+              <div class="form-field" style="flex:1;">
+                <label>Description</label>
+                <input id="spoPartName" class="w-full" placeholder="Part name / description" />
+              </div>
+              <div class="form-field">
+                <label>Qty</label>
+                <input id="spoQty" type="number" min="0.1" step="0.1" value="1" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Unit cost ($)</label>
+                <input id="spoUnitCost" type="number" min="0" step="0.01" value="0" class="w-full" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Supplier</label>
+                <input id="spoSupplier" class="w-full" placeholder="Supplier name" />
+              </div>
+              <div class="form-field">
+                <label>PO #</label>
+                <input id="spoPoNumber" class="w-full" placeholder="Purchase order" />
+              </div>
+              <div class="form-field">
+                <label>Order date</label>
+                <input id="spoOrderDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Expected arrival</label>
+                <input id="spoExpectedDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Status</label>
+                <select id="spoStatus" class="w-full">
+                  <option value="on_order">On order</option>
+                  <option value="in_transit">In transit</option>
+                  <option value="arrived">Arrived</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field" style="flex:1;">
+                <label>Notes</label>
+                <input id="spoNotes" class="w-full" placeholder="Optional notes" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="spoSave" type="button" class="btn btn-primary">Save purchase</button>
+                <button id="spoClear" type="button" class="btn btn-secondary">Clear</button>
+              </div>
+            </div>
+            <div id="spoFormMsg" class="muted small"></div>
+            <div class="list" id="spoList" style="margin-top: 12px;"></div>
+          </div>
+        </div>
+
         <!-- Stores Allocation Card -->
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
@@ -6830,6 +6938,6 @@
 
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="./app.js?v=41"></script>
+  <script src="./app.js?v=42"></script>
 </body>
 </html>

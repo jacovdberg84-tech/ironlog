@@ -8201,6 +8201,200 @@ function openStockOnHandPdf() {
   window.open(`${API}/api/reports/stock-monitor.pdf${q}`, "_blank");
 }
 
+let storesPartOrdersCache = [];
+
+function ensureStoresPartOrderDates() {
+  const fromEl = qs("spoDateFrom");
+  const toEl = qs("spoDateTo");
+  const orderEl = qs("spoOrderDate");
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth(), 1);
+  const pad = (n) => String(n).padStart(2, "0");
+  const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  if (fromEl && !fromEl.value) fromEl.value = ymd(start);
+  if (toEl && !toEl.value) toEl.value = ymd(today);
+  if (orderEl && !orderEl.value) orderEl.value = ymd(today);
+}
+
+function spoStatusLabel(status) {
+  const s = String(status || "").toLowerCase();
+  if (s === "on_order") return "On order";
+  if (s === "in_transit") return "In transit";
+  if (s === "arrived") return "Arrived";
+  if (s === "cancelled") return "Cancelled";
+  return s || "—";
+}
+
+function moneyUsd(n) {
+  return Number(n || 0).toFixed(2);
+}
+
+function renderStoresPartOrdersSummary(summary) {
+  const s = summary || {};
+  setText("spoOnOrderValue", moneyUsd(s.on_order?.value));
+  setText("spoInTransitValue", moneyUsd(s.in_transit?.value));
+  setText("spoArrivedValue", moneyUsd(s.arrived?.value));
+  setText("spoPendingValue", moneyUsd(s.total_pending));
+  setText("spoForecastValue", moneyUsd(s.total_forecast));
+}
+
+function renderStoresPartOrdersTable(rows) {
+  const host = qs("spoList");
+  if (!host) return;
+  if (!Array.isArray(rows) || !rows.length) {
+    host.innerHTML = `<div class="muted small">No purchases in this period. Add a line above.</div>`;
+    return;
+  }
+  host.innerHTML = `
+    <table class="gridTable" style="min-width:1100px;">
+      <thead>
+        <tr>
+          <th>Order date</th>
+          <th>Part</th>
+          <th style="text-align:right;">Qty</th>
+          <th style="text-align:right;">Unit $</th>
+          <th style="text-align:right;">Line $</th>
+          <th>Supplier</th>
+          <th>PO</th>
+          <th>ETA</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((r) => {
+          const id = Number(r.id || 0);
+          const partLabel = r.part_code
+            ? `<strong>${String(r.part_code).replace(/</g, "&lt;")}</strong><br><small class="muted">${String(r.part_name || "").replace(/</g, "&lt;")}</small>`
+            : String(r.part_name || "").replace(/</g, "&lt;");
+          const statusOpts = ["on_order", "in_transit", "arrived", "cancelled"]
+            .map((st) => `<option value="${st}"${String(r.status || "").toLowerCase() === st ? " selected" : ""}>${spoStatusLabel(st)}</option>`)
+            .join("");
+          return `
+            <tr>
+              <td>${String(r.order_date || "").replace(/</g, "&lt;")}</td>
+              <td>${partLabel}</td>
+              <td style="text-align:right;">${Number(r.qty || 0)}</td>
+              <td style="text-align:right;">${moneyUsd(r.unit_cost)}</td>
+              <td style="text-align:right;"><strong>${moneyUsd(r.line_total)}</strong></td>
+              <td>${String(r.supplier_name || "—").replace(/</g, "&lt;")}</td>
+              <td>${String(r.po_number || "—").replace(/</g, "&lt;")}</td>
+              <td>${String(r.expected_arrival_date || "—").replace(/</g, "&lt;")}</td>
+              <td>
+                <select data-spo-status="${id}" class="w-full" style="min-width:120px;">${statusOpts}</select>
+              </td>
+              <td><button type="button" class="btn btn-secondary btn-sm" data-spo-del="${id}">Cancel</button></td>
+            </tr>
+          `;
+        }).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+async function loadStoresPartOrders() {
+  ensureStoresPartOrderDates();
+  const start = (qs("spoDateFrom")?.value || "").trim();
+  const end = (qs("spoDateTo")?.value || "").trim();
+  const status = (qs("spoFilterStatus")?.value || "").trim();
+  if (!start || !end) return alert("Choose period from and to dates.");
+
+  const q = new URLSearchParams();
+  q.set("start", start);
+  q.set("end", end);
+  if (status) q.set("status", status);
+
+  setStatus("Loading parts purchases...");
+  setSkeleton("spoList", 2);
+  const data = await fetchJson(`${API}/api/stock/part-orders?${q.toString()}`);
+  storesPartOrdersCache = Array.isArray(data.rows) ? data.rows : [];
+  renderStoresPartOrdersSummary(data.summary);
+  renderStoresPartOrdersTable(storesPartOrdersCache);
+  setStatus("Parts purchases loaded.");
+}
+
+function clearStoresPartOrderForm() {
+  ["spoPartCode", "spoPartName", "spoSupplier", "spoPoNumber", "spoNotes"].forEach((id) => {
+    const el = qs(id);
+    if (el) el.value = "";
+  });
+  if (qs("spoQty")) qs("spoQty").value = "1";
+  if (qs("spoUnitCost")) qs("spoUnitCost").value = "0";
+  if (qs("spoStatus")) qs("spoStatus").value = "on_order";
+  if (qs("spoExpectedDate")) qs("spoExpectedDate").value = "";
+  ensureStoresPartOrderDates();
+  const msg = qs("spoFormMsg");
+  if (msg) msg.textContent = "";
+}
+
+async function saveStoresPartOrder() {
+  ensureStoresPartOrderDates();
+  const msg = qs("spoFormMsg");
+  const part_code = normalizeStockReportPartInput(qs("spoPartCode")?.value || "");
+  const part_name = String(qs("spoPartName")?.value || "").trim();
+  const qty = Number(qs("spoQty")?.value || 1);
+  const unit_cost = Number(qs("spoUnitCost")?.value || 0);
+  const supplier_name = String(qs("spoSupplier")?.value || "").trim();
+  const po_number = String(qs("spoPoNumber")?.value || "").trim();
+  const order_date = (qs("spoOrderDate")?.value || "").trim();
+  const expected_arrival_date = (qs("spoExpectedDate")?.value || "").trim();
+  const status = String(qs("spoStatus")?.value || "on_order").trim();
+  const notes = String(qs("spoNotes")?.value || "").trim();
+
+  if (!part_code && !part_name) {
+    if (msg) msg.textContent = "Enter a part code or description.";
+    return;
+  }
+  if (!order_date) {
+    if (msg) msg.textContent = "Order date is required.";
+    return;
+  }
+  if (!Number.isFinite(qty) || qty <= 0) {
+    if (msg) msg.textContent = "Quantity must be greater than zero.";
+    return;
+  }
+
+  if (msg) msg.textContent = "Saving...";
+  await fetchJson(`${API}/api/stock/part-orders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      part_code,
+      part_name,
+      qty,
+      unit_cost,
+      supplier_name,
+      po_number,
+      order_date,
+      expected_arrival_date: expected_arrival_date || null,
+      status,
+      notes,
+    }),
+  });
+  if (msg) msg.textContent = "Purchase saved.";
+  clearStoresPartOrderForm();
+  await loadStoresPartOrders();
+}
+
+async function updateStoresPartOrderStatus(id, status) {
+  const n = Number(id || 0);
+  if (!n || !status) return;
+  await fetchJson(`${API}/api/stock/part-orders/${n}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  await loadStoresPartOrders();
+}
+
+async function cancelStoresPartOrder(id) {
+  const n = Number(id || 0);
+  if (!n) return;
+  if (!confirm("Cancel this purchase line?")) return;
+  await fetchJson(`${API}/api/stock/part-orders/${n}`, { method: "DELETE" });
+  await loadStoresPartOrders();
+}
+
 async function loadAuditLogs() {
   const module = (qs("auditModule")?.value || "").trim();
   const action = (qs("auditAction")?.value || "").trim();
@@ -15051,6 +15245,32 @@ async function init() {
   );
   qs("smrExportCsv")?.addEventListener("click", exportStockMovementsReportCsv);
   qs("smrOpenPdf")?.addEventListener("click", openStockMovementsReportPdf);
+  qs("spoLoad")?.addEventListener("click", () =>
+    loadStoresPartOrders().catch((e) => setStatus("Parts purchases error: " + e.message))
+  );
+  qs("spoSave")?.addEventListener("click", () =>
+    saveStoresPartOrder().catch((e) => {
+      const msg = qs("spoFormMsg");
+      if (msg) msg.textContent = e.message || String(e);
+    })
+  );
+  qs("spoClear")?.addEventListener("click", clearStoresPartOrderForm);
+  qs("spoFilterStatus")?.addEventListener("change", () => {
+    loadStoresPartOrders().catch(() => {});
+  });
+  qs("spoList")?.addEventListener("change", (evt) => {
+    const sel = evt.target?.closest?.("select[data-spo-status]");
+    if (!sel) return;
+    const id = Number(sel.getAttribute("data-spo-status") || 0);
+    const status = String(sel.value || "").trim();
+    if (!id) return;
+    updateStoresPartOrderStatus(id, status).catch((e) => alert(e.message || String(e)));
+  });
+  qs("spoList")?.addEventListener("click", (evt) => {
+    const btn = evt.target?.closest?.("button[data-spo-del]");
+    if (!btn) return;
+    cancelStoresPartOrder(Number(btn.getAttribute("data-spo-del") || 0)).catch((e) => alert(e.message || String(e)));
+  });
   qs("loadAudit")?.addEventListener("click", () =>
     loadAuditLogs().catch((e) => setStatus("Audit error: " + e.message))
   );

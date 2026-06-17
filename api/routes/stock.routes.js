@@ -1997,4 +1997,316 @@ export default async function stockRoutes(app) {
 
     return reply.send({ ok: true, rows });
   });
+
+  const PART_ORDER_STATUSES = new Set(["on_order", "in_transit", "arrived", "cancelled"]);
+  const PART_ORDER_WRITE_ROLES = ["admin", "supervisor", "stores", "storeman", "procurement", "plant_manager", "site_manager"];
+
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS stores_part_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      site_code TEXT NOT NULL DEFAULT 'main',
+      part_id INTEGER,
+      part_code TEXT,
+      part_name TEXT NOT NULL,
+      qty REAL NOT NULL DEFAULT 1,
+      unit_cost REAL NOT NULL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      supplier_name TEXT,
+      po_number TEXT,
+      order_date TEXT NOT NULL,
+      expected_arrival_date TEXT,
+      arrived_date TEXT,
+      status TEXT NOT NULL DEFAULT 'on_order',
+      notes TEXT,
+      created_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE SET NULL
+    )
+  `).run();
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_stores_part_orders_site_date ON stores_part_orders(site_code, order_date)`).run();
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_stores_part_orders_status ON stores_part_orders(status)`).run();
+
+  function isYmd(s) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
+  }
+
+  function partOrderLineTotal(row) {
+    return Number((Number(row?.qty || 0) * Number(row?.unit_cost || 0)).toFixed(2));
+  }
+
+  function summarizePartOrders(rows) {
+    const summary = {
+      on_order: { count: 0, qty: 0, value: 0 },
+      in_transit: { count: 0, qty: 0, value: 0 },
+      arrived: { count: 0, qty: 0, value: 0 },
+      cancelled: { count: 0, qty: 0, value: 0 },
+      total_forecast: 0,
+      total_arrived: 0,
+      total_pending: 0,
+    };
+    for (const row of rows) {
+      const status = String(row.status || "on_order").toLowerCase();
+      const bucket = summary[status] || null;
+      const qty = Number(row.qty || 0);
+      const value = partOrderLineTotal(row);
+      if (bucket) {
+        bucket.count += 1;
+        bucket.qty += qty;
+        bucket.value += value;
+      }
+      if (status === "arrived") summary.total_arrived += value;
+      if (status === "on_order" || status === "in_transit") summary.total_pending += value;
+      if (status !== "cancelled") summary.total_forecast += value;
+    }
+    for (const key of Object.keys(summary)) {
+      if (typeof summary[key] === "object" && summary[key] != null) {
+        summary[key].qty = Number(summary[key].qty.toFixed(2));
+        summary[key].value = Number(summary[key].value.toFixed(2));
+      }
+    }
+    summary.total_forecast = Number(summary.total_forecast.toFixed(2));
+    summary.total_arrived = Number(summary.total_arrived.toFixed(2));
+    summary.total_pending = Number(summary.total_pending.toFixed(2));
+    return summary;
+  }
+
+  function mapPartOrderRow(row) {
+    const line_total = partOrderLineTotal(row);
+    return {
+      ...row,
+      qty: Number(row.qty || 0),
+      unit_cost: Number(row.unit_cost || 0),
+      line_total,
+    };
+  }
+
+  // GET /api/stock/part-orders?start=&end=&status=
+  app.get("/part-orders", async (req, reply) => {
+    const site_code = getSiteCode(req);
+    const start = String(req.query?.start || req.query?.date_from || "").trim();
+    const end = String(req.query?.end || req.query?.date_to || "").trim();
+    const status = String(req.query?.status || "").trim().toLowerCase();
+
+    const where = ["LOWER(TRIM(COALESCE(o.site_code, 'main'))) = ?"];
+    const params = [site_code];
+    if (isYmd(start)) {
+      where.push("o.order_date >= ?");
+      params.push(start);
+    }
+    if (isYmd(end)) {
+      where.push("o.order_date <= ?");
+      params.push(end);
+    }
+    if (status && PART_ORDER_STATUSES.has(status)) {
+      where.push("LOWER(COALESCE(o.status, 'on_order')) = ?");
+      params.push(status);
+    } else {
+      where.push("LOWER(COALESCE(o.status, 'on_order')) <> 'cancelled'");
+    }
+
+    const rows = db.prepare(`
+      SELECT
+        o.id,
+        o.site_code,
+        o.part_id,
+        o.part_code,
+        o.part_name,
+        o.qty,
+        o.unit_cost,
+        o.currency,
+        o.supplier_name,
+        o.po_number,
+        o.order_date,
+        o.expected_arrival_date,
+        o.arrived_date,
+        o.status,
+        o.notes,
+        o.created_by,
+        o.created_at,
+        o.updated_at,
+        p.part_name AS catalog_part_name
+      FROM stores_part_orders o
+      LEFT JOIN parts p ON p.id = o.part_id
+      WHERE ${where.join(" AND ")}
+      ORDER BY o.order_date DESC, o.id DESC
+      LIMIT 2000
+    `).all(...params).map(mapPartOrderRow);
+
+    return reply.send({
+      ok: true,
+      site_code,
+      start: start || null,
+      end: end || null,
+      rows,
+      summary: summarizePartOrders(rows),
+    });
+  });
+
+  // POST /api/stock/part-orders
+  app.post("/part-orders", async (req, reply) => {
+    if (!requireRoles(req, reply, PART_ORDER_WRITE_ROLES)) return;
+    const body = req.body || {};
+    const site_code = getSiteCode(req);
+    const created_by = String(req.headers["x-user-name"] || "session-user").trim() || "session-user";
+    const part_code = String(body.part_code || "").trim();
+    let part_name = String(body.part_name || "").trim();
+    const qty = Number(body.qty ?? 1);
+    let unit_cost = Math.max(0, Number(body.unit_cost ?? 0));
+    const currency = String(body.currency || "USD").trim().toUpperCase() || "USD";
+    const supplier_name = String(body.supplier_name || "").trim() || null;
+    const po_number = String(body.po_number || "").trim() || null;
+    const order_date = String(body.order_date || "").trim();
+    const expected_arrival_date = String(body.expected_arrival_date || "").trim() || null;
+    const notes = String(body.notes || "").trim() || null;
+    let status = String(body.status || "on_order").trim().toLowerCase();
+    if (!PART_ORDER_STATUSES.has(status) || status === "cancelled") status = "on_order";
+    if (!isYmd(order_date)) return reply.code(400).send({ error: "order_date must be YYYY-MM-DD" });
+    if (!Number.isFinite(qty) || qty <= 0) return reply.code(400).send({ error: "qty must be > 0" });
+    if (!part_code && !part_name) return reply.code(400).send({ error: "part_code or part_name is required" });
+
+    let part_id = null;
+    if (part_code) {
+      const part = getPartByCode.get(part_code);
+      if (part) {
+        part_id = Number(part.id);
+        if (!part_name) part_name = String(part.part_name || part_code).trim();
+        if (!unit_cost && Number(part.unit_cost || 0) > 0) unit_cost = Number(part.unit_cost);
+      }
+    }
+    if (!part_name) part_name = part_code;
+
+    const arrived_date = status === "arrived" ? (isYmd(body.arrived_date) ? body.arrived_date : order_date) : null;
+    const now = new Date().toISOString();
+
+    const info = db.prepare(`
+      INSERT INTO stores_part_orders (
+        site_code, part_id, part_code, part_name, qty, unit_cost, currency,
+        supplier_name, po_number, order_date, expected_arrival_date, arrived_date,
+        status, notes, created_by, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      site_code,
+      part_id,
+      part_code || null,
+      part_name,
+      qty,
+      unit_cost,
+      currency,
+      supplier_name,
+      po_number,
+      order_date,
+      expected_arrival_date,
+      arrived_date,
+      status,
+      notes,
+      created_by,
+      now,
+      now,
+    );
+
+    writeAudit(db, req, {
+      module: "stock",
+      action: "part_order.create",
+      entity_type: "stores_part_order",
+      entity_id: String(info.lastInsertRowid),
+      after: { part_code, part_name, qty, unit_cost, status, order_date },
+    });
+
+    return reply.send({ ok: true, id: Number(info.lastInsertRowid || 0) });
+  });
+
+  // PATCH /api/stock/part-orders/:id
+  app.patch("/part-orders/:id", async (req, reply) => {
+    if (!requireRoles(req, reply, PART_ORDER_WRITE_ROLES)) return;
+    const id = Number(req.params?.id || 0);
+    if (!id) return reply.code(400).send({ error: "invalid id" });
+    const site_code = getSiteCode(req);
+    const body = req.body || {};
+    const existing = db.prepare(`
+      SELECT * FROM stores_part_orders
+      WHERE id = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+    `).get(id, site_code);
+    if (!existing) return reply.code(404).send({ error: "part order not found" });
+
+    const status = body.status != null ? String(body.status).trim().toLowerCase() : String(existing.status || "on_order");
+    if (!PART_ORDER_STATUSES.has(status)) return reply.code(400).send({ error: "invalid status" });
+
+    const qty = body.qty != null ? Number(body.qty) : Number(existing.qty || 0);
+    const unit_cost = body.unit_cost != null ? Math.max(0, Number(body.unit_cost)) : Number(existing.unit_cost || 0);
+    if (!Number.isFinite(qty) || qty <= 0) return reply.code(400).send({ error: "qty must be > 0" });
+
+    const order_date = body.order_date != null ? String(body.order_date).trim() : String(existing.order_date || "");
+    if (!isYmd(order_date)) return reply.code(400).send({ error: "order_date must be YYYY-MM-DD" });
+
+    let arrived_date = body.arrived_date != null ? String(body.arrived_date).trim() || null : existing.arrived_date;
+    if (status === "arrived" && !isYmd(arrived_date || "")) {
+      arrived_date = new Date().toISOString().slice(0, 10);
+    }
+    if (status !== "arrived") arrived_date = body.arrived_date === null ? null : arrived_date;
+
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE stores_part_orders
+      SET
+        part_name = ?,
+        qty = ?,
+        unit_cost = ?,
+        currency = ?,
+        supplier_name = ?,
+        po_number = ?,
+        order_date = ?,
+        expected_arrival_date = ?,
+        arrived_date = ?,
+        status = ?,
+        notes = ?,
+        updated_at = ?
+      WHERE id = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+    `).run(
+      String(body.part_name || existing.part_name || "").trim() || existing.part_name,
+      qty,
+      unit_cost,
+      String(body.currency || existing.currency || "USD").trim().toUpperCase() || "USD",
+      body.supplier_name != null ? String(body.supplier_name).trim() || null : existing.supplier_name,
+      body.po_number != null ? String(body.po_number).trim() || null : existing.po_number,
+      order_date,
+      body.expected_arrival_date != null ? String(body.expected_arrival_date).trim() || null : existing.expected_arrival_date,
+      arrived_date,
+      status,
+      body.notes != null ? String(body.notes).trim() || null : existing.notes,
+      now,
+      id,
+      site_code,
+    );
+
+    writeAudit(db, req, {
+      module: "stock",
+      action: "part_order.update",
+      entity_type: "stores_part_order",
+      entity_id: String(id),
+      before: existing,
+      after: { status, qty, unit_cost, order_date, arrived_date },
+    });
+
+    return reply.send({ ok: true, id });
+  });
+
+  // DELETE /api/stock/part-orders/:id  (soft cancel)
+  app.delete("/part-orders/:id", async (req, reply) => {
+    if (!requireRoles(req, reply, PART_ORDER_WRITE_ROLES)) return;
+    const id = Number(req.params?.id || 0);
+    if (!id) return reply.code(400).send({ error: "invalid id" });
+    const site_code = getSiteCode(req);
+    const existing = db.prepare(`
+      SELECT id FROM stores_part_orders
+      WHERE id = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+    `).get(id, site_code);
+    if (!existing) return reply.code(404).send({ error: "part order not found" });
+    db.prepare(`
+      UPDATE stores_part_orders
+      SET status = 'cancelled', updated_at = datetime('now')
+      WHERE id = ?
+    `).run(id);
+    return reply.send({ ok: true, id, status: "cancelled" });
+  });
 }
