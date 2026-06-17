@@ -36,6 +36,8 @@ function isDashSectionVisible(id) {
 }
 const DEFAULT_ROLE = "admin";
 const DEFAULT_USER = "admin";
+/** Set true to require password sign-in before using the dashboard. */
+const LOGIN_GATE_ENABLED = false;
 const DEFAULT_SITE = "main";
 const LANG_KEY = "ironlog_lang";
 const SIDEBAR_COLLAPSED_KEY = "ironlog_sidebar_collapsed";
@@ -736,8 +738,6 @@ function setSlaOpenSameTab(v) {
 }
 
 function authHeaders(extra = {}) {
-  const tok = getAuthToken();
-  if (!tok) return { ...extra };
   const roles = getSessionRoles();
   const h = {
     ...extra,
@@ -745,8 +745,9 @@ function authHeaders(extra = {}) {
     "x-user-role": getSessionRole(),
     "x-user-roles": roles.join(","),
     "x-site-code": getSessionSite(),
-    Authorization: `Bearer ${tok}`,
   };
+  const tok = getAuthToken();
+  if (tok) h.Authorization = `Bearer ${tok}`;
   return h;
 }
 
@@ -754,15 +755,13 @@ function authHeaders(extra = {}) {
 async function fetchJson(url, opts) {
   const nextOpts = { ...(opts || {}) };
   const headers = new Headers(nextOpts.headers || {});
+  const roles = getSessionRoles();
+  headers.set("x-user-name", getSessionUser());
+  headers.set("x-user-role", getSessionRole());
+  headers.set("x-user-roles", roles.join(","));
+  headers.set("x-site-code", getSessionSite());
   const tok = getAuthToken();
-  if (tok) {
-    const roles = getSessionRoles();
-    headers.set("x-user-name", getSessionUser());
-    headers.set("x-user-role", getSessionRole());
-    headers.set("x-user-roles", roles.join(","));
-    headers.set("x-site-code", getSessionSite());
-    headers.set("Authorization", `Bearer ${tok}`);
-  }
+  if (tok) headers.set("Authorization", `Bearer ${tok}`);
   if (typeof nextOpts.body === "string" && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
@@ -779,7 +778,7 @@ async function fetchJson(url, opts) {
   }
 
   if (!res.ok) {
-    if (res.status === 401) {
+    if (res.status === 401 && LOGIN_GATE_ENABLED) {
       const had = Boolean(getAuthToken());
       clearAuthSession();
       if (had) {
@@ -797,7 +796,7 @@ async function openAuthedPdf(url) {
   const res = await fetch(url, { headers: authHeaders() });
   const blob = await res.blob();
   if (!res.ok) {
-    if (res.status === 401) {
+    if (res.status === 401 && LOGIN_GATE_ENABLED) {
       const had = Boolean(getAuthToken());
       clearAuthSession();
       if (had) {
@@ -1482,6 +1481,21 @@ function applySessionFromMeUser(user) {
 }
 
 async function tryInitialSession() {
+  if (!LOGIN_GATE_ENABLED) {
+    showLoginGate(false);
+    updateAuthChrome();
+    const tok = getAuthToken();
+    if (tok) {
+      try {
+        const data = await fetchJson(`${API}/api/auth/me`);
+        if (data?.user?.id != null) applySessionFromMeUser(data.user);
+      } catch {
+        clearAuthSession();
+      }
+    }
+    return;
+  }
+
   const tok = getAuthToken();
   if (!tok) {
     showLoginGate(true);

@@ -255,6 +255,14 @@
   }
 
   async function boot() {
+    if (!A.LOGIN_GATE_ENABLED) {
+      if (!A.getSessionUser()) A.setSessionContext("admin", "admin", "main");
+      showLogin(false);
+      updateSessionChrome({ username: A.getSessionUser(), role: A.getSessionRole(), roles: A.getSessionRoles() });
+      await loadJobs().catch(() => {});
+      return;
+    }
+
     if (!A.getAuthToken()) {
       showLogin(true);
       showPinPanel(true);

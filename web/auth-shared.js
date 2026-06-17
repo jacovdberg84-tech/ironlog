@@ -11,6 +11,8 @@
   const TOKEN_KEY = "ironlog_auth_token";
   const TABS_OVERRIDE_KEY = "ironlog_allowed_tabs";
   const DEFAULT_SITE = "main";
+  /** Set true to require sign-in on standalone pages (terminal, work orders). */
+  const LOGIN_GATE_ENABLED = false;
 
   function getAuthToken() {
     return String(localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY) || "").trim();
@@ -100,32 +102,29 @@
   }
 
   function authHeaders(extra = {}) {
-    const tok = getAuthToken();
-    if (!tok) return { ...extra };
     const roles = getSessionRoles();
     const h = {
       ...extra,
-      "x-user-name": getSessionUser(),
+      "x-user-name": getSessionUser() || "admin",
       "x-user-role": getSessionRole(),
       "x-user-roles": roles.join(","),
       "x-site-code": getSessionSite(),
-      Authorization: `Bearer ${tok}`,
     };
+    const tok = getAuthToken();
+    if (tok) h.Authorization = `Bearer ${tok}`;
     return h;
   }
 
   async function fetchJson(url, opts = {}) {
     const nextOpts = { ...opts };
     const headers = new Headers(nextOpts.headers || {});
+    const roles = getSessionRoles();
+    headers.set("x-user-name", getSessionUser() || "admin");
+    headers.set("x-user-role", getSessionRole());
+    headers.set("x-user-roles", roles.join(","));
+    headers.set("x-site-code", getSessionSite());
     const tok = getAuthToken();
-    if (tok) {
-      const roles = getSessionRoles();
-      headers.set("x-user-name", getSessionUser());
-      headers.set("x-user-role", getSessionRole());
-      headers.set("x-user-roles", roles.join(","));
-      headers.set("x-site-code", getSessionSite());
-      headers.set("Authorization", `Bearer ${tok}`);
-    }
+    if (tok) headers.set("Authorization", `Bearer ${tok}`);
     if (typeof nextOpts.body === "string" && !headers.has("Content-Type")) {
       headers.set("Content-Type", "application/json");
     }
@@ -175,6 +174,25 @@
   }
 
   async function trySession() {
+    if (!LOGIN_GATE_ENABLED) {
+      if (!getSessionUser()) setSessionContext("admin", "admin", DEFAULT_SITE);
+      if (getAuthToken()) {
+        try {
+          const data = await fetchJson(`${API}/api/auth/me`);
+          if (data?.user?.id != null) {
+            applyUser(data.user);
+            return data.user;
+          }
+        } catch (e) {
+          if (e.status === 401) clearSession();
+        }
+      }
+      return {
+        username: getSessionUser(),
+        role: getSessionRole(),
+        roles: getSessionRoles(),
+      };
+    }
     if (!getAuthToken()) return null;
     try {
       const data = await fetchJson(`${API}/api/auth/me`);
@@ -206,6 +224,7 @@
 
   global.IronlogAuth = {
     API,
+    LOGIN_GATE_ENABLED,
     getAuthToken,
     setAuthToken,
     getSessionRole,
