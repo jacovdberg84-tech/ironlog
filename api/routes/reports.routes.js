@@ -8576,7 +8576,8 @@ export default async function reportsRoutes(app) {
       return reply.code(400).send({ error: "Provide month=YYYY-MM or start/end=YYYY-MM-DD" });
     }
     const { period, label } = resolved;
-    const site_code = getSiteCode(req);
+    const siteCodeFromQuery = String(req.query?.site_code || "").trim().toLowerCase();
+    const site_code = siteCodeFromQuery || getSiteCode(req);
     const buffer = await buildMaintenanceExecutiveDeck({ period, label, site_code });
     reply
       .header("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation")
@@ -8590,9 +8591,18 @@ export default async function reportsRoutes(app) {
       return reply.code(400).send({ error: "Provide month=YYYY-MM or start/end=YYYY-MM-DD" });
     }
     const { period, label } = resolved;
-    const site_code = getSiteCode(req);
+    const siteCodeFromQuery = String(req.query?.site_code || "").trim().toLowerCase();
+    const siteCodeHeader = getSiteCode(req);
+    // Window-open downloads may omit headers; include main-site fallback for legacy flows.
+    const siteCandidates = Array.from(new Set(
+      siteCodeFromQuery
+        ? [siteCodeFromQuery]
+        : (siteCodeHeader === "default" ? ["main", "default"] : [siteCodeHeader])
+    ));
+    const site_code = siteCandidates[0] || "main";
 
     const hasStoresPartOrders = hasTable("stores_part_orders");
+    const siteMarks = siteCandidates.map(() => "?").join(", ");
     const orderRows = hasStoresPartOrders
       ? db.prepare(`
           SELECT
@@ -8609,11 +8619,11 @@ export default async function reportsRoutes(app) {
             status,
             notes
           FROM stores_part_orders
-          WHERE LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+          WHERE LOWER(TRIM(COALESCE(site_code, 'main'))) IN (${siteMarks})
             AND DATE(order_date) BETWEEN DATE(?) AND DATE(?)
           ORDER BY DATE(order_date) DESC, id DESC
           LIMIT 200
-        `).all(site_code, period.start, period.end)
+        `).all(...siteCandidates, period.start, period.end)
       : [];
 
     const statusRows = {

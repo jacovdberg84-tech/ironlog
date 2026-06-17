@@ -9494,9 +9494,11 @@ function downloadMaintenanceExecutivePptx() {
     alert("Select a month or a start/end range first.");
     return;
   }
-  const q = month
+  const qCore = month
     ? `month=${encodeURIComponent(month)}`
     : `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+  const site = encodeURIComponent(getSessionSite());
+  const q = `${qCore}&site_code=${site}`;
   window.open(`${API}/api/reports/maintenance-exec.pptx?${q}`, "_blank");
 }
 
@@ -9508,9 +9510,11 @@ function downloadGMUpcomingCostsPptx() {
     alert("Select a month or a start/end range first.");
     return;
   }
-  const q = month
+  const qCore = month
     ? `month=${encodeURIComponent(month)}`
     : `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+  const site = encodeURIComponent(getSessionSite());
+  const q = `${qCore}&site_code=${site}`;
   window.open(`${API}/api/reports/gm-upcoming-costs.pptx?${q}`, "_blank");
 }
 
