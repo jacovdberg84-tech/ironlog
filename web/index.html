@@ -4901,7 +4901,7 @@
           <div class="report-card-body">
             <div class="info-note">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              <span>Create logins per workstation or department. Optionally restrict <b>sections</b> (leave none selected to use the role default). Set <code>IRONLOG_AUTH_REQUIRED=true</code> in server <code>.env</code> to require sign-in.</span>
+              <span>Create logins per workstation or department. Technicians use the <a href="./technician-terminal.html" target="_blank" rel="noopener"><strong>Technician Terminal</strong></a> (artisan role). Optionally restrict <b>sections</b> (leave none selected to use the role default). Set <code>IRONLOG_AUTH_REQUIRED=true</code> in server <code>.env</code> to require sign-in.</span>
             </div>
           </div>
         </div>
@@ -5657,6 +5657,9 @@
                 </label>
               </div>
               <div class="form-field form-field-action">
+                <button id="adminArtisanPresetBtn" type="button" class="btn btn-secondary btn-sm" style="margin-top:8px;">
+                  Artisan / technician preset
+                </button>
                 <button id="saveAdminUserBtn" class="btn btn-primary">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
                   Save User
@@ -6806,6 +6809,6 @@
 
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="./app.js?v=36"></script>
+  <script src="./app.js?v=37"></script>
 </body>
 </html>

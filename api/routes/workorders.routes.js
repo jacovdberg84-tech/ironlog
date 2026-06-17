@@ -43,6 +43,61 @@ export default async function workOrderRoutes(app) {
     return "";
   }
 
+  /** Match assigned technician to logged-in user (username or legacy display name). */
+  function technicianIdentityKeys(nameOrUsername) {
+    const raw = String(nameOrUsername || "").trim().toLowerCase();
+    const keys = new Set();
+    if (!raw) return keys;
+    keys.add(raw);
+    if (!hasTable("users")) return keys;
+    const byUser = db.prepare(`
+      SELECT username, full_name FROM users
+      WHERE LOWER(TRIM(username)) = ?
+      LIMIT 1
+    `).get(raw);
+    if (byUser) {
+      keys.add(String(byUser.username || "").trim().toLowerCase());
+      const fn = String(byUser.full_name || "").trim().toLowerCase();
+      if (fn) keys.add(fn);
+    }
+    const byName = db.prepare(`
+      SELECT username, full_name FROM users
+      WHERE LOWER(TRIM(COALESCE(full_name, ''))) = ?
+      LIMIT 1
+    `).get(raw);
+    if (byName) {
+      keys.add(String(byName.username || "").trim().toLowerCase());
+      keys.add(raw);
+    }
+    return keys;
+  }
+
+  function technicianMatchesUser(assignedName, userName) {
+    const assignedKeys = technicianIdentityKeys(assignedName);
+    const userKeys = technicianIdentityKeys(userName);
+    if (!assignedKeys.size || !userKeys.size) return false;
+    for (const k of userKeys) {
+      if (assignedKeys.has(k)) return true;
+    }
+    return false;
+  }
+
+  /** Prefer login username when supervisor picks a display name. */
+  function resolveAssignedUsername(nameOrUsername) {
+    const raw = String(nameOrUsername || "").trim();
+    if (!raw) return raw;
+    if (!hasTable("users")) return raw;
+    const byUser = db.prepare(`
+      SELECT username FROM users WHERE LOWER(TRIM(username)) = LOWER(?) LIMIT 1
+    `).get(raw);
+    if (byUser) return String(byUser.username).trim();
+    const byName = db.prepare(`
+      SELECT username FROM users WHERE LOWER(TRIM(COALESCE(full_name, ''))) = LOWER(?) LIMIT 1
+    `).get(raw);
+    if (byName) return String(byName.username).trim();
+    return raw;
+  }
+
   function getRole(req) {
     return String(req.headers["x-user-role"] || "admin").trim().toLowerCase();
   }
@@ -395,8 +450,8 @@ export default async function workOrderRoutes(app) {
     const role = getRole(req);
     const userName = String(req.headers["x-user-name"] || "").trim().toLowerCase();
     if (role === "artisan" && userName) {
-      rows = rows.filter(
-        (r) => String(r.assigned_artisan_name || "").trim().toLowerCase() === userName
+      rows = rows.filter((r) =>
+        technicianMatchesUser(r.assigned_artisan_name, userName)
       );
     }
 
@@ -405,14 +460,40 @@ export default async function workOrderRoutes(app) {
 
   app.get("/technicians", async (req, reply) => {
     if (!requireRoles(req, reply, ["admin", "supervisor", "artisan", "stores", "operator"])) return;
-    const names = new Set();
+    const byUsername = new Map();
+    const legacyNames = new Set();
+
+    const addTech = (username, label) => {
+      const u = String(username || "").trim();
+      const lbl = String(label || u).trim();
+      if (!u) return;
+      if (!byUsername.has(u)) byUsername.set(u, lbl || u);
+      legacyNames.add(lbl || u);
+    };
+
     const rules = db.prepare(`
       SELECT DISTINCT artisan_name
       FROM wo_assignment_rules
       WHERE active = 1 AND TRIM(COALESCE(artisan_name, '')) <> ''
       ORDER BY artisan_name ASC
     `).all();
-    for (const r of rules) names.add(String(r.artisan_name || "").trim());
+    for (const r of rules) {
+      const n = String(r.artisan_name || "").trim();
+      if (!n) continue;
+      legacyNames.add(n);
+      if (hasTable("users")) {
+        const row = db.prepare(`
+          SELECT username, full_name FROM users
+          WHERE LOWER(TRIM(username)) = LOWER(?)
+             OR LOWER(TRIM(COALESCE(full_name, ''))) = LOWER(?)
+          LIMIT 1
+        `).get(n, n);
+        if (row) addTech(row.username, row.full_name || row.username);
+        else addTech(n, n);
+      } else {
+        addTech(n, n);
+      }
+    }
 
     if (hasTable("users")) {
       const users = db.prepare(`
@@ -425,8 +506,7 @@ export default async function workOrderRoutes(app) {
           )
       `).all();
       for (const u of users) {
-        const label = String(u.full_name || u.username || "").trim();
-        if (label) names.add(label);
+        addTech(u.username, u.full_name || u.username);
       }
     }
 
@@ -437,11 +517,32 @@ export default async function workOrderRoutes(app) {
       ORDER BY assigned_artisan_name ASC
       LIMIT 200
     `).all();
-    for (const r of assigned) names.add(String(r.name || "").trim());
+    for (const r of assigned) {
+      const n = String(r.name || "").trim();
+      if (!n) continue;
+      legacyNames.add(n);
+      if (hasTable("users")) {
+        const row = db.prepare(`
+          SELECT username, full_name FROM users
+          WHERE LOWER(TRIM(username)) = LOWER(?)
+             OR LOWER(TRIM(COALESCE(full_name, ''))) = LOWER(?)
+          LIMIT 1
+        `).get(n, n);
+        if (row) addTech(row.username, row.full_name || row.username);
+        else addTech(n, n);
+      } else {
+        addTech(n, n);
+      }
+    }
+
+    const technician_users = [...byUsername.entries()]
+      .map(([username, label]) => ({ username, label }))
+      .sort((a, b) => String(a.label).localeCompare(String(b.label)));
 
     return {
       ok: true,
-      technicians: [...names].filter(Boolean).sort((a, b) => a.localeCompare(b)),
+      technician_users,
+      technicians: [...legacyNames].filter(Boolean).sort((a, b) => a.localeCompare(b)),
     };
   });
 
@@ -675,7 +776,9 @@ export default async function workOrderRoutes(app) {
     const id = Number(req.params.id);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
 
-    const assigned_artisan_name = String(req.body?.assigned_artisan_name || "").trim();
+    const assigned_artisan_name = resolveAssignedUsername(
+      String(req.body?.assigned_artisan_name || "").trim()
+    );
     if (!assigned_artisan_name) {
       return reply.code(400).send({ error: "assigned_artisan_name is required" });
     }
@@ -971,7 +1074,7 @@ export default async function workOrderRoutes(app) {
       if (!assignedName) {
         return reply.code(409).send({ error: "work order is not assigned to a technician yet" });
       }
-      if (assignedName.toLowerCase() !== userName.toLowerCase()) {
+      if (!technicianMatchesUser(assignedName, userName)) {
         return reply.code(403).send({ error: "this work order is assigned to another technician" });
       }
     }

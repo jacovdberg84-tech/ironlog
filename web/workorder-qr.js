@@ -1,22 +1,22 @@
 (function () {
+  const A = window.IronlogAuth;
   function qs(id) { return document.getElementById(id); }
   function setText(id, value) { const el = qs(id); if (el) el.textContent = value; }
-  function getRole() { return String(localStorage.getItem("ironlog_session_role") || "artisan").trim().toLowerCase() || "artisan"; }
-  function getUser() { return String(localStorage.getItem("ironlog_session_user") || "qr-user").trim() || "qr-user"; }
-  function headers(extra) { return { ...(extra || {}), "x-user-role": getRole(), "x-user-name": getUser() }; }
-  function statusClass(s) {
-    const v = String(s || "").toLowerCase();
-    if (v === "open") return "status open";
-    if (v === "assigned" || v === "in_progress") return "status in_progress";
-    if (v === "completed" || v === "approved" || v === "closed") return "status completed";
-    return "status";
+
+  function headers(extra) {
+    return A ? A.authHeaders(extra || {}) : {};
   }
-  function getWoId() {
-    const q = new URL(window.location.href).searchParams;
-    const id = Number(q.get("wo_id") || 0);
-    return Number.isFinite(id) && id > 0 ? id : 0;
+
+  function getRole() {
+    return A ? A.getSessionRole() : String(localStorage.getItem("ironlog_session_role") || "artisan").trim().toLowerCase();
   }
+
+  function getUser() {
+    return A ? A.getSessionUser() : String(localStorage.getItem("ironlog_session_user") || "").trim();
+  }
+
   async function fetchJson(url, options) {
+    if (A) return A.fetchJson(url, options);
     const res = await fetch(url, options);
     const text = await res.text();
     let data = null;
@@ -25,13 +25,29 @@
     return data || {};
   }
 
+  function statusClass(s) {
+    const v = String(s || "").toLowerCase();
+    if (v === "open") return "status open";
+    if (v === "assigned" || v === "in_progress") return "status in_progress";
+    if (v === "completed" || v === "approved" || v === "closed") return "status completed";
+    return "status";
+  }
+
+  function getWoId() {
+    const q = new URL(window.location.href).searchParams;
+    const id = Number(q.get("wo_id") || 0);
+    return Number.isFinite(id) && id > 0 ? id : 0;
+  }
+
   let currentStatus = "";
   let assignedTechnician = "";
 
   function isAssignedToMe() {
     const me = getUser().trim().toLowerCase();
     const assigned = String(assignedTechnician || "").trim().toLowerCase();
-    return Boolean(me && assigned && me === assigned);
+    if (!me || !assigned) return false;
+    if (me === assigned) return true;
+    return false;
   }
 
   function renderActions() {
@@ -63,13 +79,26 @@
     else hint.textContent = role === "artisan" ? "No technician action available for this status." : "";
   }
 
+  async function ensureSession() {
+    if (!A) return;
+    const user = await A.trySession();
+    if (!user && !getUser()) {
+      const woId = getWoId();
+      const ret = woId ? `?wo_id=${woId}` : "";
+      window.location.href = `./technician-terminal.html${ret}`;
+      return false;
+    }
+    return true;
+  }
+
   async function loadWoProfile() {
+    const ok = await ensureSession();
+    if (ok === false) return;
     const woId = getWoId();
     if (!woId) { setText("woQrSub", "Missing wo_id in QR URL."); return; }
     setText("woQrSub", `Loading WO #${woId}...`);
     const detail = await fetchJson(`/api/workorders/${woId}`, { headers: headers() });
     const wo = detail?.work_order || {};
-    const pAsset = detail?.work_order || {};
     setText("woQrSub", `Work order #${woId} loaded`);
     setText("woId", String(wo.id || woId));
     currentStatus = String(wo.status || "");
@@ -78,7 +107,7 @@
     if (stEl) { stEl.textContent = currentStatus.toUpperCase() || "-"; stEl.className = statusClass(currentStatus); }
     setText("woSource", String(wo.source || "-"));
     setText("woAsset", `${String(wo.asset_code || "-")} - ${String(wo.asset_name || "-")}`);
-    setText("woMakeModel", `${String(pAsset.make || "-")} / ${String(pAsset.model || "-")}`);
+    setText("woMakeModel", `${String(detail?.asset?.make || wo.make || "-")} / ${String(detail?.asset?.model || wo.model || "-")}`);
     setText("woOpened", String(wo.opened_at || "-"));
     setText("woAssigned", assignedTechnician || "Unassigned");
     if (qs("woArtisan")) qs("woArtisan").value = getUser();

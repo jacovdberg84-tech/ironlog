@@ -817,7 +817,7 @@ async function openAuthedPdf(url) {
 function getRoleAllowedTabs(role) {
   const r = String(role || "").toLowerCase();
   if (r === "operator") return ["dash", "daily", "workshop", "fuel", "lube", "legal", "operations", "ironmind", "docs", "vehicle", "tasks", "telematics", "cartrack"];
-  if (r === "artisan") return ["dash", "maintenance", "Breakdowns", "workshop", "reports", "fuel", "lube", "legal", "operations", "dispatch", "ironmind", "docs", "vehicle", "tasks", "telematics", "cartrack"];
+  if (r === "artisan") return ["workshop", "maintenance", "Breakdowns", "vehicle", "tasks"];
   if (r === "stores") return ["dash", "maintenance", "stock", "workshop", "uploads", "reports", "finance", "legal", "procurement", "operations", "dispatch", "quality", "ironmind", "docs", "vehicle", "tasks", "telematics", "cartrack"];
   if (r === "procurement") return ["dash", "stock", "workshop", "reports", "finance", "procurement", "operations", "quality", "docs", "tasks"];
   if (r === "plant_manager") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
@@ -1711,6 +1711,26 @@ function escapeHtml(s) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function applyAdminArtisanPreset() {
+  const rolesSel = qs("adminRoles");
+  const tabsSel = qs("adminUserTabs");
+  if (rolesSel) {
+    Array.from(rolesSel.options).forEach((o) => {
+      o.selected = o.value === "artisan";
+    });
+  }
+  const artisanTabs = getRoleAllowedTabs("artisan");
+  if (tabsSel) {
+    Array.from(tabsSel.options).forEach((o) => {
+      o.selected = artisanTabs.includes(o.value);
+    });
+  }
+  if (qs("adminDepartment") && !qs("adminDepartment").value) {
+    qs("adminDepartment").value = "Workshop";
+  }
+  setStatus("Artisan preset applied — save user to create technician login.");
 }
 
 async function saveAdminUser() {
@@ -14962,6 +14982,7 @@ async function init() {
   qs("mdmPolicySaveBtn")?.addEventListener("click", () =>
     saveMdmPolicies().catch((e) => setStatus("Policy error: " + e.message))
   );
+  qs("adminArtisanPresetBtn")?.addEventListener("click", applyAdminArtisanPreset);
   qs("saveAdminUserBtn")?.addEventListener("click", () =>
     saveAdminUser().catch((e) => setStatus("Save user error: " + e.message))
   );

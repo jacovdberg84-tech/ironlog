@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f172a" />
+  <title>IRONLOG Technician Terminal</title>
+  <script>
+    (function () {
+      try {
+        if (localStorage.getItem("ironlog-theme") === "dark") {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="./technician-terminal.css?v=1" />
+</head>
+<body>
+  <div id="loginScreen" class="screen">
+    <div class="shell">
+      <div class="brand-block">
+        <div class="brand-mark">IL</div>
+        <h1>Technician Terminal</h1>
+        <p class="muted">Sign in with your workshop account</p>
+      </div>
+      <div class="card">
+        <label class="field">
+          <span>Username</span>
+          <input id="loginUsername" type="text" autocomplete="username" placeholder="e.g. jsmith" />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input id="loginPassword" type="password" autocomplete="current-password" placeholder="Your password" />
+        </label>
+        <label class="chk">
+          <input id="loginRemember" type="checkbox" checked />
+          <span>Remember this device</span>
+        </label>
+        <button type="button" id="loginBtn" class="btn primary full">Sign in</button>
+        <div id="loginError" class="error"></div>
+      </div>
+      <p class="foot muted">Supervisors manage users under <strong>User Admin</strong> in the main dashboard.</p>
+    </div>
+  </div>
+
+  <div id="appScreen" class="screen hidden">
+    <header class="top">
+      <div>
+        <div class="top-title">My Workshop</div>
+        <div id="sessionLabel" class="top-sub muted">—</div>
+      </div>
+      <button type="button" id="logoutBtn" class="btn ghost sm">Sign out</button>
+    </header>
+
+    <main class="main">
+      <section class="card">
+        <div class="section-head">
+          <h2>My work orders</h2>
+          <button type="button" id="refreshJobsBtn" class="btn ghost sm">Refresh</button>
+        </div>
+        <div id="jobsSummary" class="summary-pills"></div>
+        <div id="jobsList" class="jobs-list">
+          <div class="muted small">Loading…</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Open work order</h2>
+        <p class="muted small">Scan a QR label or enter the work order number.</p>
+        <div class="row">
+          <input id="woLookupId" type="number" min="1" placeholder="WO #" class="grow" />
+          <button type="button" id="openWoBtn" class="btn primary">Open</button>
+        </div>
+      </section>
+
+      <section class="card links-card">
+        <h2>Quick links</h2>
+        <div class="link-grid">
+          <a href="./maintenance.html" class="link-tile">Maintenance</a>
+          <a href="./index.html#vehicle" class="link-tile">Checklists</a>
+          <a href="./workorders.html" class="link-tile">All WOs</a>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="./auth-shared.js?v=1"></script>
+  <script src="./technician-terminal.js?v=1"></script>
+</body>
+</html>

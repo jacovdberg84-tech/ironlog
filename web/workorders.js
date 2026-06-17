@@ -18,11 +18,14 @@ function getSessionUser() {
 }
 
 function authHeaders(extra = {}) {
-  return {
+  const h = {
     ...extra,
     "x-user-role": getSessionRole(),
     "x-user-name": getSessionUser(),
   };
+  const tok = String(localStorage.getItem("ironlog_auth_token") || sessionStorage.getItem("ironlog_auth_token") || "").trim();
+  if (tok) h.Authorization = `Bearer ${tok}`;
+  return h;
 }
 
 function canRoleTransition(role, currentStatus, nextStatus) {
@@ -762,7 +765,14 @@ async function issueToWorkOrder() {
 async function loadTechnicians() {
   try {
     const data = await fetchJson(`${API}/workorders/technicians`, { headers: authHeaders() });
-    technicianOptions = Array.isArray(data?.technicians) ? data.technicians : [];
+    if (Array.isArray(data?.technician_users) && data.technician_users.length) {
+      technicianOptions = data.technician_users;
+    } else {
+      technicianOptions = (Array.isArray(data?.technicians) ? data.technicians : []).map((name) => ({
+        username: name,
+        label: name,
+      }));
+    }
   } catch {
     technicianOptions = [];
   }
@@ -772,15 +782,28 @@ async function loadTechnicians() {
 function fillTechnicianSelect(selectEl, selectedName = "") {
   if (!selectEl) return;
   const selected = String(selectedName || "").trim();
-  const options = Array.isArray(technicianOptions) ? technicianOptions : [];
-  const merged = selected && !options.includes(selected) ? [selected, ...options] : options;
+  const users = Array.isArray(technicianOptions) ? technicianOptions : [];
+  const merged = [...users];
+  if (selected && !merged.some((t) => String(t.username || t).toLowerCase() === selected.toLowerCase() || String(t.label || t).toLowerCase() === selected.toLowerCase())) {
+    merged.unshift({ username: selected, label: selected });
+  }
   selectEl.innerHTML =
     `<option value="">Select technician...</option>` +
-    merged.map((name) => {
-      const esc = String(name).replace(/"/g, "&quot;");
-      const sel = selected && selected.toLowerCase() === String(name).toLowerCase() ? " selected" : "";
-      return `<option value="${esc}"${sel}>${esc}</option>`;
-    }).join("");
+    merged
+      .map((t) => {
+        const username = String(t.username || t || "").trim();
+        const label = String(t.label || t.username || t || "").trim();
+        const value = username || label;
+        const escVal = value.replace(/"/g, "&quot;");
+        const escLabel = label.replace(/</g, "&lt;");
+        const sel =
+          selected &&
+          (selected.toLowerCase() === value.toLowerCase() || selected.toLowerCase() === label.toLowerCase())
+            ? " selected"
+            : "";
+        return `<option value="${escVal}"${sel}>${escLabel}</option>`;
+      })
+      .join("");
 }
 
 function openAssignModal(id) {
