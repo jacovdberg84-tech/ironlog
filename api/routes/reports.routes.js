@@ -19,8 +19,11 @@ import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
 import { aggregateFuelBenchmarkByCategory } from "../utils/fuelBenchmarkAggregate.js";
 import { fuelBenchmarkAssetsInRangeSql } from "../utils/fuelMetricMode.js";
 import { buildBudgetMeetingDocxBuffer } from "../utils/budgetMeetingDocx.js";
-import { buildScheduledDowntimeCost } from "../utils/downtimeCosting.js";
-import { getMonthlyBudgetRow, getOperatingBudgetAmount } from "../utils/monthlyBudget.js";
+import { getOperatingBudgetAmount } from "../utils/monthlyBudget.js";
+import {
+  buildBreakdownDowntimeDetail,
+  buildMonthlyOperatingActuals,
+} from "../utils/monthlyOperatingCosts.js";
 import { buildPlantHireLines, prevMonth as hirePrevMonth } from "../utils/plantHire.js";
 import { fetchLubeMonthStockSnapshot } from "../utils/lubeMonthStock.js";
 import { getMachinePrestartTemplate } from "../utils/machinePrestartTemplates.js";
@@ -8690,12 +8693,12 @@ export default async function reportsRoutes(app) {
       }
     }
 
-    const [currentActuals, prevActuals, plantBudget] = await Promise.all([
-      injectJson(`/api/finance/actuals-by-category?period=${encodeURIComponent(month)}`),
-      injectJson(`/api/finance/actuals-by-category?period=${encodeURIComponent(prevLabel)}`),
+    const [plantBudget] = await Promise.all([
       injectJson(`/api/finance/plant-hire-budget?period=${encodeURIComponent(month)}&site_code=${encodeURIComponent(site_code)}`),
     ]);
 
+    const currentActuals = buildMonthlyOperatingActuals(db, month);
+    const prevActuals = buildMonthlyOperatingActuals(db, prevLabel);
     const operatingBudgetRow = getOperatingBudgetAmount(db, month, site_code);
 
     const hasStoresPartOrders = hasTable("stores_part_orders");
@@ -8746,20 +8749,15 @@ export default async function reportsRoutes(app) {
     const partsArrived = sumStatus("arrived");
     const upcomingTotal = partsOnOrder + partsInTransit + partsArrived + maintenanceTotal;
     const plantHireLines = buildPlantHireLines(db, month);
-    const downtimeCost = buildScheduledDowntimeCost(db, month, {
-      defaultScheduledHours: 10,
-      downtimeRateDefault: Number(
-        db.prepare(`SELECT value FROM cost_settings WHERE key = 'downtime_cost_per_hour_default' LIMIT 1`).get()?.value
-      ) || 120,
-    });
+    const downtimeCost = buildBreakdownDowntimeDetail(db, month);
 
     const buffer = await buildBudgetMeetingDocxBuffer({
       periodLabel: month,
       prevPeriodLabel: prevLabel,
       siteCode: site_code,
       operatingBudget: Number(operatingBudgetRow.budget_amount || 0),
-      currentActuals: currentActuals || { rows: [], total: 0 },
-      prevActuals: prevActuals || { rows: [], total: 0 },
+      currentActuals,
+      prevActuals,
       plantHireBudget: Number(plantBudget?.budget_amount || 0),
       plantHireLines,
       downtimeDetail: downtimeCost.detail,

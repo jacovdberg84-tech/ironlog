@@ -167,8 +167,8 @@ export async function buildBudgetMeetingDocxBuffer(data) {
     heading("Downtime Cost Detail", HeadingLevel.HEADING_2),
     para(
       downtimeRows.length
-        ? "Each down day uses scheduled hours from Daily Input × machine downtime rate."
-        : "No scheduled-hours downtime cost calculated for this period.",
+        ? "Each row uses logged breakdown downtime hours × the asset downtime rate (Cost Settings default only when a machine has no rate)."
+        : "No breakdown downtime logged for this period.",
     ),
   ];
 

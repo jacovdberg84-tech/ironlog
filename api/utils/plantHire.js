@@ -57,7 +57,8 @@ export function buildPlantHireLines(db, period) {
     FROM assets
     WHERE COALESCE(archived, 0) = 0
       AND (
-        LOWER(COALESCE(category, '')) LIKE '%contractor%'
+        NULLIF(TRIM(COALESCE(hire_billing_mode, '')), '') IS NOT NULL
+        OR LOWER(COALESCE(category, '')) LIKE '%contractor%'
         OR LOWER(COALESCE(category, '')) LIKE '%hire%'
       )
   `).all();
@@ -139,7 +140,8 @@ export function listHireAssetsRegister(db) {
     FROM assets
     WHERE COALESCE(archived, 0) = 0
       AND (
-        LOWER(COALESCE(category, '')) LIKE '%contractor%'
+        NULLIF(TRIM(COALESCE(hire_billing_mode, '')), '') IS NOT NULL
+        OR LOWER(COALESCE(category, '')) LIKE '%contractor%'
         OR LOWER(COALESCE(category, '')) LIKE '%hire%'
       )
     ORDER BY asset_code ASC
