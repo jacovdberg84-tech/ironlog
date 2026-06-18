@@ -116,6 +116,7 @@ export async function ironlogAuthHook(req, reply) {
   if (url === "/api/auth/pin/roster" && req.method === "GET") return;
   if (url === "/api/auth/config" && req.method === "GET") return;
   if (url === "/api/auth/tabs" && req.method === "GET") return;
+  if (url === "/api/notifications/config" && req.method === "GET") return;
 
   const auth = String(req.headers.authorization || "");
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";

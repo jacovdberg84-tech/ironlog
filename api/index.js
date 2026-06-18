@@ -69,6 +69,14 @@ app.register(fastifyStatic, {
   decorateReply: false,
 });
 
+const downloadsRoot = path.join(webRoot, "downloads");
+fs.mkdirSync(downloadsRoot, { recursive: true });
+app.register(fastifyStatic, {
+  root: downloadsRoot,
+  prefix: "/web/downloads/",
+  decorateReply: false,
+});
+
 // Handy redirect so you can just open http://localhost:3001/
 app.get("/", async (req, reply) => {
   return reply.redirect("/web/index.html");

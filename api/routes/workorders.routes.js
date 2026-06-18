@@ -1,6 +1,7 @@
 // IRONLOG/api/routes/workorders.routes.js
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
+import { notifyWorkOrderAssigned } from "../utils/pushNotify.js";
 
 export default async function workOrderRoutes(app) {
   ensureAuditTable(db);
@@ -813,6 +814,19 @@ export default async function workOrderRoutes(app) {
       entity_id: id,
       payload: { assigned_artisan_name, assigned_by: assignedBy, from_status: status },
     });
+
+    const woDetail = db.prepare(`
+      SELECT wo.source, a.asset_code
+      FROM work_orders wo
+      JOIN assets a ON a.id = wo.asset_id
+      WHERE wo.id = ?
+    `).get(id);
+    notifyWorkOrderAssigned({
+      workOrderId: id,
+      assignedUsername: assigned_artisan_name,
+      assetCode: woDetail?.asset_code,
+      source: woDetail?.source,
+    }).catch((err) => console.error("[push] wo assign:", err?.message || err));
 
     return reply.send({
       ok: true,

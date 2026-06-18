@@ -1,5 +1,6 @@
 // IRONLOG/api/routes/breakdowns.routes.js
 import { db } from "../db/client.js";
+import { notifyBreakdownCreated } from "../utils/pushNotify.js";
 
 /** Parse YYYY-MM-DDTHH:mm (no timezone) as local wall time. */
 function parseLocalDateTime(s) {
@@ -501,6 +502,12 @@ export default async function breakdownRoutes(app) {
     });
 
     const r = tx();
+    notifyBreakdownCreated({
+      assetCode: asset.asset_code,
+      description,
+      breakdownId: r.breakdownId,
+      workOrderId: r.workOrderId,
+    }).catch((err) => console.error("[push] breakdown ensure-open:", err?.message || err));
     return reply.code(201).send({
       ok: true,
       breakdown_id: r.breakdownId,
@@ -554,6 +561,13 @@ export default async function breakdownRoutes(app) {
     });
 
     const result = tx();
+
+    notifyBreakdownCreated({
+      assetCode: asset.asset_code,
+      description,
+      breakdownId: result.breakdownId,
+      workOrderId: result.workOrderId,
+    }).catch((err) => console.error("[push] breakdown create:", err?.message || err));
 
     return reply.code(201).send({
       ok: true,

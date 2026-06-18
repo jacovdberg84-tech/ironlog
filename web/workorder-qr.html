@@ -22,6 +22,8 @@
     .status.open { color:#fca5a5; border-color:#7f1d1d; background:rgba(127,29,29,.25); }
     .status.in_progress,.status.assigned { color:#fde68a; border-color:#78350f; background:rgba(120,53,15,.25); }
     .status.completed,.status.approved,.status.closed { color:#86efac; border-color:#14532d; background:rgba(20,83,45,.25); }
+    .notify-banner { border-color:#1e3a5f; background:#0f1a2e; }
+    .notify-banner a.dl { display:inline-block; margin-top:8px; padding:10px 14px; border-radius:8px; background:#2563eb; color:#fff; text-decoration:none; font-weight:700; }
   </style>
 </head>
 <body>
@@ -66,8 +68,16 @@
       <div id="woActionHint" class="k" style="margin-top:8px;"></div>
       <div id="woActionMsg" class="k" style="margin-top:8px;"></div>
     </div>
+
+    <div id="notifyAppBanner" class="card notify-banner" style="display:none;">
+      <h3 style="margin:0 0 6px;">IRONLOG Notify</h3>
+      <p class="k" style="margin:0;">Get breakdown and work order alerts on your phone — even when the app is closed.</p>
+      <p id="notifyPushStatus" class="k" style="margin:8px 0 0;"></p>
+      <a id="notifyApkLink" class="dl" href="/web/downloads/ironlog-notify.apk">Download Android app</a>
+    </div>
   </div>
   <script src="./auth-shared.js?v=2"></script>
+  <script src="./notify-banner.js?v=1"></script>
   <script src="./workorder-qr.js?v=3"></script>
 </body>
 </html>

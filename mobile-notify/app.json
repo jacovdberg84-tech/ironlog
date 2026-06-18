@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "IRONLOG Notify",
+    "slug": "ironlog-notify",
+    "version": "1.0.0",
+    "icon": "./assets/app-icon.png",
+    "platforms": ["android"],
+    "assetBundlePatterns": ["**/*"],
+    "plugins": [
+      "./plugins/withAndroidCleartext.js",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/app-icon.png",
+          "color": "#2563eb"
+        }
+      ]
+    ],
+    "android": {
+      "package": "com.aml.ironlog.notify",
+      "usesCleartextTraffic": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/app-icon.png",
+        "backgroundColor": "#0f172a"
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+      },
+      "defaultApiOrigin": "https://ironlog.ironlogafrica.com"
+    }
+  }
+}

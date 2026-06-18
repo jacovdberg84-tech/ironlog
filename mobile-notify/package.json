@@ -1,0 +1,24 @@
+{
+  "name": "ironlog-mobile-notify",
+  "version": "1.0.0",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "build:apk": "eas build -p android --profile preview",
+    "build:apk:local": "eas build -p android --profile preview --local"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "^55.0.8",
+    "expo-build-properties": "^0.13.3",
+    "expo-constants": "~55.0.12",
+    "expo-device": "~55.0.8",
+    "expo-linking": "~55.0.7",
+    "expo-notifications": "~55.0.10",
+    "expo-status-bar": "~55.0.4",
+    "react": "19.2.0",
+    "react-native": "0.83.2"
+  }
+}

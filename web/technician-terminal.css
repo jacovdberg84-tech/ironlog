@@ -407,6 +407,17 @@ input {
   border-color: #60a5fa;
 }
 
+.notify-app-card {
+  border-color: #1e3a5f;
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.08), transparent);
+}
+
+.notify-app-card .btn {
+  margin-top: 10px;
+  display: inline-block;
+  text-decoration: none;
+}
+
 @media (max-width: 480px) {
   .link-grid {
     grid-template-columns: 1fr;
