@@ -4,8 +4,12 @@
     "slug": "ironlog-notify",
     "version": "1.0.0",
     "icon": "./assets/app-icon.png",
-    "platforms": ["android"],
-    "assetBundlePatterns": ["**/*"],
+    "platforms": [
+      "android"
+    ],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "plugins": [
       "./plugins/withAndroidCleartext.js",
       [
@@ -33,10 +37,11 @@
       }
     },
     "extra": {
+      "defaultApiOrigin": "https://ironlog.ironlogafrica.com",
       "eas": {
-        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
-      },
-      "defaultApiOrigin": "https://ironlog.ironlogafrica.com"
-    }
+        "projectId": "dc2540e9-9a8d-4ca7-9006-945384c8f246"
+      }
+    },
+    "owner": "jakes84"
   }
 }

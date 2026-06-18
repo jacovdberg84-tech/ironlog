@@ -9,6 +9,10 @@
 .env
 .env.*
 !.env.example
+api/secrets/
+
+# Built mobile APK — deploy to server manually (too large for git)
+web/downloads/*.apk
 
 # local IDE/system
 .vscode/

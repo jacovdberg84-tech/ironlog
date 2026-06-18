@@ -18,8 +18,11 @@ module.exports = ({ config }) => {
     };
   }
   const gsPath = path.join(__dirname, "google-services.json");
-  if (fs.existsSync(gsPath)) {
-    next.android = { ...next.android, googleServicesFile: "./google-services.json" };
+  const googleServicesFile =
+    process.env.GOOGLE_SERVICES_JSON ||
+    (fs.existsSync(gsPath) ? "./google-services.json" : null);
+  if (googleServicesFile) {
+    next.android = { ...next.android, googleServicesFile };
   } else if (next.android?.googleServicesFile) {
     const { googleServicesFile, ...androidRest } = next.android;
     next.android = androidRest;

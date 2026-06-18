@@ -1,0 +1,8 @@
+# EAS upload archive — allow google-services.json (gitignored) but exclude heavy dirs
+node_modules/
+.git/
+android/
+ios/
+.expo/
+dist/
+*.log

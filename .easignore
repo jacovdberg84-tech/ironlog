@@ -1,0 +1,6 @@
+# EAS build upload exclusions (IRONLOG monorepo)
+web/downloads/*.apk
+api/secrets/
+**/node_modules/
+**/desktop-dist/
+**/.expo/
