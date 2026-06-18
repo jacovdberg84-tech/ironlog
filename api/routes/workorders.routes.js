@@ -1,4 +1,5 @@
 // IRONLOG/api/routes/workorders.routes.js
+import crypto from "crypto";
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { notifyWorkOrderAssigned } from "../utils/pushNotify.js";
@@ -549,6 +550,68 @@ export default async function workOrderRoutes(app) {
       technician_users,
       technicians: [...legacyNames].filter(Boolean).sort((a, b) => a.localeCompare(b)),
     };
+  });
+
+  app.post("/technicians", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    if (!hasTable("users")) return reply.code(503).send({ error: "users table not available" });
+
+    const username = String(req.body?.username || "").trim();
+    const full_name = String(req.body?.full_name || "").trim() || username;
+    const department = String(req.body?.department || "Workshop").trim() || "Workshop";
+    const pin = String(req.body?.pin || "").replace(/\D/g, "");
+
+    if (!username) return reply.code(400).send({ error: "username is required" });
+    if (pin.length < 4 || pin.length > 6) {
+      return reply.code(400).send({ error: "pin must be 4–6 digits" });
+    }
+
+    if (!hasColumn("users", "pin_hash")) {
+      db.prepare(`ALTER TABLE users ADD COLUMN pin_hash TEXT`).run();
+    }
+
+    const pinHash = (() => {
+      const salt = crypto.randomBytes(16);
+      const hash = crypto.scryptSync(pin, salt, 64);
+      return `scrypt$${salt.toString("base64")}$${hash.toString("base64")}`;
+    })();
+
+    const existing = db.prepare(`SELECT username FROM users WHERE lower(username) = lower(?)`).get(username);
+    db.prepare(`
+      INSERT INTO users (username, full_name, role, active, department, roles_json)
+      VALUES (?, ?, 'artisan', 1, ?, ?)
+      ON CONFLICT(username) DO UPDATE SET
+        full_name = COALESCE(excluded.full_name, users.full_name),
+        role = 'artisan',
+        active = 1,
+        department = COALESCE(excluded.department, users.department),
+        roles_json = excluded.roles_json
+    `).run(username, full_name, department, JSON.stringify(["artisan"]));
+    db.prepare(`UPDATE users SET pin_hash = ? WHERE lower(username) = lower(?)`).run(pinHash, username);
+
+    const ruleExists = db
+      .prepare(`
+        SELECT id FROM wo_assignment_rules
+        WHERE lower(trim(artisan_name)) = lower(trim(?)) AND active = 1
+        LIMIT 1
+      `)
+      .get(username);
+    if (!ruleExists) {
+      db.prepare(`
+        INSERT INTO wo_assignment_rules (artisan_name, skill, location_code, shift, max_open_wos, active)
+        VALUES (?, NULL, NULL, NULL, 8, 1)
+      `).run(username);
+    }
+
+    writeAudit(db, req, {
+      module: "workorders",
+      action: existing ? "technician.update" : "technician.create",
+      entity_type: "user",
+      entity_id: username,
+      payload: { full_name, department },
+    });
+
+    return { ok: true, username, full_name, created: !existing };
   });
 
   app.get("/schedule/board", async (req) => {

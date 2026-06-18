@@ -846,6 +846,93 @@ async function loadTechnicians() {
   return technicianOptions;
 }
 
+function renderTechnicianRoster() {
+  const listEl = document.getElementById("woTechniciansList");
+  if (!listEl) return;
+  const users = Array.isArray(technicianOptions) ? technicianOptions : [];
+  if (!users.length) {
+    listEl.innerHTML = `<small class="muted">No technicians yet. Add one below — they will appear on the terminal login screen after you set a PIN.</small>`;
+    return;
+  }
+  listEl.innerHTML = users
+    .map((t) => {
+      const username = escapeHtml(String(t.username || t.label || t || "").trim());
+      const label = escapeHtml(String(t.label || t.username || t || "").trim());
+      const sub = label && label.toLowerCase() !== username.toLowerCase() ? `<small class="muted"> (${username})</small>` : "";
+      return `<div class="item"><strong>${label || username}</strong>${sub}</div>`;
+    })
+    .join("");
+}
+
+async function loadTechnicianRoster() {
+  const msgEl = document.getElementById("woTechniciansMsg");
+  try {
+    await loadTechnicians();
+    renderTechnicianRoster();
+    if (msgEl) {
+      msgEl.className = "muted";
+      msgEl.textContent = `${technicianOptions.length} technician(s) on roster.`;
+    }
+  } catch (err) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = err.message || String(err);
+    }
+  }
+}
+
+async function saveWorkshopTechnician() {
+  const msgEl = document.getElementById("woTechniciansMsg");
+  const username = String(document.getElementById("woTechUsername")?.value || "").trim();
+  const full_name = String(document.getElementById("woTechFullName")?.value || "").trim();
+  const pin = String(document.getElementById("woTechPin")?.value || "").replace(/\D/g, "");
+  if (!username) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = "Username is required.";
+    }
+    return;
+  }
+  if (!pin || pin.length < 4 || pin.length > 6) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = "Enter a 4–6 digit PIN for workshop login.";
+    }
+    return;
+  }
+  const btn = document.getElementById("woTechSaveBtn");
+  if (btn) btn.disabled = true;
+  if (msgEl) {
+    msgEl.className = "muted";
+    msgEl.textContent = "Saving technician…";
+  }
+  try {
+    await fetchJson(`${API}/workorders/technicians`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        username,
+        full_name: full_name || username,
+        pin,
+      }),
+    });
+    if (msgEl) {
+      msgEl.className = "message-success";
+      msgEl.textContent = `Saved ${full_name || username}. They can sign in on the Technician Terminal and appear in Assign technician.`;
+    }
+    const pinEl = document.getElementById("woTechPin");
+    if (pinEl) pinEl.value = "";
+    await loadTechnicianRoster();
+  } catch (err) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = err.message || String(err);
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function fillTechnicianSelect(selectEl, selectedName = "") {
   if (!selectEl) return;
   const selected = String(selectedName || "").trim();
@@ -1129,6 +1216,14 @@ document.addEventListener("DOMContentLoaded", () => {
   if (!["admin", "supervisor"].includes(role) && awaitingApprovalBtn) {
     awaitingApprovalBtn.style.display = "none";
   }
+  const techPanel = document.getElementById("woTechniciansPanel");
+  if (techPanel) {
+    if (isSupervisorRole(role)) {
+      techPanel.style.display = "";
+    } else {
+      techPanel.style.display = "none";
+    }
+  }
   if (isArtisanRole(role) && statusEl) {
     statusEl.value = "";
   }
@@ -1151,6 +1246,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("woAssignCancelBtn")?.addEventListener("click", closeAssignModal);
   document.getElementById("woCompleteConfirmBtn")?.addEventListener("click", () => submitCompleteWorkOrder());
   document.getElementById("woCompleteCancelBtn")?.addEventListener("click", closeCompleteModal);
+  document.getElementById("woTechSaveBtn")?.addEventListener("click", () => saveWorkshopTechnician());
+  document.getElementById("woTechRefreshBtn")?.addEventListener("click", () => loadTechnicianRoster());
   if (closeModal) {
     closeModal.addEventListener("click", (evt) => {
       if (evt.target === closeModal) closeCloseModal();
@@ -1291,4 +1388,7 @@ document.addEventListener("DOMContentLoaded", () => {
   fetchWorkOrders();
   loadInspectionQuality();
   loadTechnicians().catch(() => {});
+  if (isSupervisorRole(getSessionRole())) {
+    loadTechnicianRoster().catch(() => {});
+  }
 });
