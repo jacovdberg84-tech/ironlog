@@ -10280,6 +10280,48 @@ async function createBreakdown() {
 }
 
 /** Short breakdown: closed incident + downtime logs + parts + oils in one POST. */
+function collectShortBreakdownParts() {
+  const parts = [];
+  document.querySelectorAll("#sqPartsRows .sq-part-row").forEach((row) => {
+    const part_code = String(row.querySelector(".sq-part-code")?.value || "").trim();
+    const quantity = Number(row.querySelector(".sq-part-qty")?.value || 0);
+    if (part_code && Number.isFinite(quantity) && quantity > 0) {
+      parts.push({ part_code, quantity });
+    }
+  });
+  return parts;
+}
+
+function addShortBreakdownPartRow() {
+  const container = qs("sqPartsRows");
+  if (!container) return;
+  const row = document.createElement("div");
+  row.className = "row sq-part-row";
+  row.innerHTML = `
+    <input class="sq-part-code w-180" list="partCodeOptions" placeholder="Part code" />
+    <input class="sq-part-qty w-70" type="number" min="1" step="1" placeholder="Qty" />
+    <button type="button" class="sq-part-remove" title="Remove part line">Remove</button>
+  `;
+  container.appendChild(row);
+}
+
+function bindShortBreakdownPartsUi() {
+  qs("sqAddPart")?.addEventListener("click", () => addShortBreakdownPartRow());
+  qs("sqPartsRows")?.addEventListener("click", (ev) => {
+    const btn = ev.target?.closest?.(".sq-part-remove");
+    if (!btn) return;
+    const row = btn.closest(".sq-part-row");
+    const container = qs("sqPartsRows");
+    if (!row || !container) return;
+    if (container.querySelectorAll(".sq-part-row").length <= 1) {
+      row.querySelector(".sq-part-code").value = "";
+      row.querySelector(".sq-part-qty").value = "";
+      return;
+    }
+    row.remove();
+  });
+}
+
 async function submitShortBreakdown() {
   const headerDate = qs("date")?.value || new Date().toISOString().slice(0, 10);
   const breakdown_date = (qs("sqDate")?.value || headerDate).trim();
@@ -10289,13 +10331,7 @@ async function submitShortBreakdown() {
   const tu = (qs("sqTimeUp")?.value || "").trim();
   const comp = (qs("sqComponent")?.value || "").trim();
 
-  const parts = [];
-  const p1 = (qs("sqPart1")?.value || "").trim();
-  const q1 = Number(qs("sqQty1")?.value || 0);
-  if (p1 && Number.isFinite(q1) && q1 > 0) parts.push({ part_code: p1, quantity: q1 });
-  const p2 = (qs("sqPart2")?.value || "").trim();
-  const q2 = Number(qs("sqQty2")?.value || 0);
-  if (p2 && Number.isFinite(q2) && q2 > 0) parts.push({ part_code: p2, quantity: q2 });
+  const parts = collectShortBreakdownParts();
 
   const oils = [];
   const oilType = (qs("sqOilType")?.value || "").trim();
@@ -15763,6 +15799,7 @@ async function init() {
   qs("makeBreakdown")?.addEventListener("click", () =>
     createBreakdown().catch((e) => setStatus("Breakdown error: " + e.message))
   );
+  bindShortBreakdownPartsUi();
   qs("sqSubmit")?.addEventListener("click", () =>
     submitShortBreakdown().catch((e) => setStatus("Short breakdown error: " + e.message))
   );

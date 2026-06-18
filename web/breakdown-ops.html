@@ -219,11 +219,20 @@
         <input id="sqComponent" class="w-180" placeholder="Component (optional)" />
         <label class="chk"><input id="sqCrit" type="checkbox" /> Critical</label>
       </div>
+      <div id="sqPartsRows">
+        <div class="row sq-part-row">
+          <input class="sq-part-code w-180" list="partCodeOptions" placeholder="Part code" />
+          <input class="sq-part-qty w-70" type="number" min="1" step="1" placeholder="Qty" />
+          <button type="button" class="sq-part-remove" title="Remove part line">Remove</button>
+        </div>
+        <div class="row sq-part-row">
+          <input class="sq-part-code w-180" list="partCodeOptions" placeholder="Part code (optional)" />
+          <input class="sq-part-qty w-70" type="number" min="1" step="1" placeholder="Qty" />
+          <button type="button" class="sq-part-remove" title="Remove part line">Remove</button>
+        </div>
+      </div>
       <div class="row">
-        <input id="sqPart1" list="partCodeOptions" class="w-180" placeholder="Part 1 code" />
-        <input id="sqQty1" class="w-70" type="number" min="1" step="1" placeholder="Qty" />
-        <input id="sqPart2" list="partCodeOptions" class="w-180" placeholder="Part 2 (optional)" />
-        <input id="sqQty2" class="w-70" type="number" min="1" step="1" placeholder="Qty" />
+        <button type="button" id="sqAddPart">+ Add part</button>
       </div>
       <div class="row">
         <input id="sqOilType" class="w-220" placeholder="Oil / lube product (optional)" />
