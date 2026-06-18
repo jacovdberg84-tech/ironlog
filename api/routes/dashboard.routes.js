@@ -5,7 +5,7 @@ import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
 import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
 import { aggregateFuelBenchmarkByCategory, normalizeEquipmentCategory } from "../utils/fuelBenchmarkAggregate.js";
-import { fuelBenchmarkAssetsInRangeSql } from "../utils/fuelMetricMode.js";
+import { fuelBenchmarkAssetsInRangeSql, sqlFuelMetricModeExpr } from "../utils/fuelMetricMode.js";
 import { ensureCostAllocationSchema, resolveLogCostCenterCode } from "../utils/costAllocation.js";
 
 function todayYYYYMMDD() {
@@ -2568,6 +2568,97 @@ export default async function dashboardRoutes(app) {
       asset_name: asset.asset_name,
       metric_mode: "hours",
       baseline_fuel_l_per_hour: Number(v.toFixed(3)),
+    });
+  });
+
+  function fuelPreviousPeriodRange(start, end) {
+    const s = new Date(`${start}T00:00:00`);
+    const e = new Date(`${end}T00:00:00`);
+    const days = Math.max(1, Math.round((e - s) / 86400000) + 1);
+    const prevEnd = new Date(s);
+    prevEnd.setDate(prevEnd.getDate() - 1);
+    const prevStart = new Date(prevEnd);
+    prevStart.setDate(prevStart.getDate() - (days - 1));
+    return {
+      start: prevStart.toISOString().slice(0, 10),
+      end: prevEnd.toISOString().slice(0, 10),
+      days,
+    };
+  }
+
+  function buildFuelDailyUsageSeries(start, end, modeFilter, assetFilter) {
+    const metricExpr = sqlFuelMetricModeExpr("a");
+    const where = [
+      "fl.log_date BETWEEN ? AND ?",
+      "COALESCE(a.archived, 0) = 0",
+    ];
+    const params = [start, end];
+    if (assetFilter) {
+      where.push("LOWER(TRIM(a.asset_code)) = LOWER(TRIM(?))");
+      params.push(assetFilter);
+    }
+    if (modeFilter === "km") {
+      where.push(`(${metricExpr}) = 'km'`);
+    } else if (modeFilter === "hours") {
+      where.push(`(${metricExpr}) = 'hours'`);
+    }
+    const rows = db.prepare(`
+      SELECT fl.log_date AS log_date, COALESCE(SUM(fl.liters), 0) AS liters
+      FROM fuel_logs fl
+      JOIN assets a ON a.id = fl.asset_id
+      WHERE ${where.join(" AND ")}
+      GROUP BY fl.log_date
+      ORDER BY fl.log_date ASC
+    `).all(...params);
+    const byDate = new Map((rows || []).map((r) => [String(r.log_date || ""), Number(r.liters || 0)]));
+    const series = [];
+    const cur = new Date(`${start}T00:00:00`);
+    const endD = new Date(`${end}T00:00:00`);
+    let dayIndex = 0;
+    while (cur <= endD) {
+      const date = cur.toISOString().slice(0, 10);
+      const liters = byDate.get(date) || 0;
+      series.push({ day_index: dayIndex, date, liters: Number(liters.toFixed(2)) });
+      dayIndex += 1;
+      cur.setDate(cur.getDate() + 1);
+    }
+    const total_liters = Number(series.reduce((s, r) => s + Number(r.liters || 0), 0).toFixed(2));
+    return { start, end, total_liters, series };
+  }
+
+  // GET /api/dashboard/fuel/period-compare?start=&end=&mode=&asset_code=
+  // Daily fuel liters for selected period vs equal-length prior period (aligned by day index).
+  app.get("/fuel/period-compare", async (req, reply) => {
+    const start = String(req.query?.start || "").trim();
+    const end = String(req.query?.end || "").trim();
+    const modeFilter = String(req.query?.mode || "").trim().toLowerCase();
+    const assetFilter = String(req.query?.asset_code || "").trim();
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+      return reply.code(400).send({ error: "start and end must be YYYY-MM-DD" });
+    }
+    if (start > end) {
+      return reply.code(400).send({ error: "start must be <= end" });
+    }
+
+    const prev = fuelPreviousPeriodRange(start, end);
+    const current = buildFuelDailyUsageSeries(start, end, modeFilter, assetFilter);
+    const previous = buildFuelDailyUsageSeries(prev.start, prev.end, modeFilter, assetFilter);
+    const deltaLiters = Number((current.total_liters - previous.total_liters).toFixed(2));
+    const deltaPct = previous.total_liters > 0
+      ? Number(((deltaLiters / previous.total_liters) * 100).toFixed(1))
+      : null;
+
+    return reply.send({
+      ok: true,
+      mode: modeFilter || null,
+      asset_code: assetFilter || null,
+      current,
+      previous,
+      delta: {
+        liters: deltaLiters,
+        pct: deltaPct,
+      },
     });
   });
 

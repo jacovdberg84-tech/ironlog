@@ -7260,6 +7260,121 @@ async function saveFuelBaseline() {
   }
 }
 
+function fuelSvgPeriodCompareLines(currentSeries, previousSeries, currentRange, previousRange) {
+  const n = Math.max(
+    Array.isArray(currentSeries) ? currentSeries.length : 0,
+    Array.isArray(previousSeries) ? previousSeries.length : 0,
+    1,
+  );
+  const cur = Array.isArray(currentSeries) ? currentSeries : [];
+  const prev = Array.isArray(previousSeries) ? previousSeries : [];
+  const allVals = [];
+  for (let i = 0; i < n; i++) {
+    allVals.push(Number(cur[i]?.liters || 0), Number(prev[i]?.liters || 0));
+  }
+  const max = Math.max(...allVals, 1);
+  const width = Math.min(920, Math.max(420, 56 + n * 28));
+  const height = 240;
+  const left = 44;
+  const right = 12;
+  const top = 24;
+  const bottom = 34;
+  const plotW = width - left - right;
+  const plotH = height - top - bottom;
+  const xAt = (i) => left + (n === 1 ? plotW / 2 : (i * plotW) / (n - 1));
+  const yAt = (v) => top + plotH - (Number(v || 0) / max) * plotH;
+
+  const linePath = (series, color) => {
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      const v = Number(series[i]?.liters || 0);
+      pts.push({ x: xAt(i), y: yAt(v), v });
+    }
+    const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+    const dots = pts.map((p) => `
+      <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.5" fill="${color}"/>
+      <text x="${p.x.toFixed(1)}" y="${(p.y - 8).toFixed(1)}" text-anchor="middle" font-size="10" fill="#334155">${p.v.toFixed(0)}</text>
+    `).join("");
+    return `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>${dots}`;
+  };
+
+  const xLabels = [];
+  for (let i = 0; i < n; i++) {
+    const step = n > 14 ? Math.ceil(n / 7) : 1;
+    if (i % step !== 0 && i !== n - 1) continue;
+    const label = `D${i + 1}`;
+    xLabels.push(`<text x="${xAt(i).toFixed(1)}" y="${top + plotH + 18}" text-anchor="middle" font-size="10" fill="#64748b">${label}</text>`);
+  }
+
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((t) => {
+    const v = max * t;
+    const y = yAt(v);
+    return `
+      <line x1="${left}" y1="${y.toFixed(1)}" x2="${width - right}" y2="${y.toFixed(1)}" stroke="#e2e8f0" stroke-width="1"/>
+      <text x="${left - 6}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-size="10" fill="#64748b">${v.toFixed(0)}</text>
+    `;
+  }).join("");
+
+  const curLabel = currentRange?.start && currentRange?.end
+    ? `${currentRange.start} → ${currentRange.end}`
+    : "Current";
+  const prevLabel = previousRange?.start && previousRange?.end
+    ? `${previousRange.start} → ${previousRange.end}`
+    : "Previous";
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img" aria-label="Fuel usage current versus previous period">
+      <text x="${left}" y="14" font-size="11" fill="#475569">${escapeHtml(curLabel)} vs ${escapeHtml(prevLabel)} (liters per day)</text>
+      ${yTicks}
+      <line x1="${left}" y1="${top + plotH}" x2="${width - right}" y2="${top + plotH}" stroke="#cbd5e1" stroke-width="1"/>
+      <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotH}" stroke="#cbd5e1" stroke-width="1"/>
+      ${linePath(prev, "#94a3b8")}
+      ${linePath(cur, "#2563eb")}
+      ${xLabels}
+    </svg>
+  `;
+}
+
+function renderFuelPeriodCompareChart(data) {
+  const host = qs("fuelPeriodCompareChart");
+  const summaryEl = qs("fuelPeriodCompareSummary");
+  const wrap = qs("fuelPeriodCompareWrap");
+  if (!host) return;
+
+  if (!data?.ok) {
+    if (summaryEl) summaryEl.textContent = "Could not load period comparison.";
+    host.className = "fuel-period-compare-chart muted";
+    host.textContent = "No comparison data.";
+    return;
+  }
+
+  const current = data.current || {};
+  const previous = data.previous || {};
+  const delta = data.delta || {};
+  const curTotal = Number(current.total_liters || 0);
+  const prevTotal = Number(previous.total_liters || 0);
+  const deltaLiters = Number(delta.liters || 0);
+  const deltaPct = delta.pct;
+  const sign = deltaLiters >= 0 ? "+" : "";
+
+  if (summaryEl) {
+    summaryEl.innerHTML =
+      `<strong>Current:</strong> ${curTotal.toFixed(1)} L (${escapeHtml(current.start || "")} to ${escapeHtml(current.end || "")})` +
+      ` · <strong>Previous:</strong> ${prevTotal.toFixed(1)} L (${escapeHtml(previous.start || "")} to ${escapeHtml(previous.end || "")})` +
+      ` · <strong>Change:</strong> <span class="${deltaLiters > 0 ? "pill red" : deltaLiters < 0 ? "pill blue" : "pill"}">${sign}${deltaLiters.toFixed(1)} L` +
+      `${deltaPct == null ? "" : ` (${sign}${Number(deltaPct).toFixed(1)}%)`}</span></span>`;
+  }
+
+  if (wrap) wrap.style.display = "";
+  host.className = "fuel-period-compare-chart";
+  host.innerHTML = fuelSvgPeriodCompareLines(
+    current.series,
+    previous.series,
+    { start: current.start, end: current.end },
+    { start: previous.start, end: previous.end },
+  );
+}
+
 async function loadFuelBenchmark() {
   const start = (qs("fuelStart")?.value || "").trim();
   const end = (qs("fuelEnd")?.value || "").trim();
@@ -7273,13 +7388,18 @@ async function loadFuelBenchmark() {
 
   setStatus("Loading fuel benchmark...");
   setSkeleton("fuelBenchmarkList", 2);
-  const data = duplicatesOnly
-    ? await fetchJson(
-      `${API}/api/dashboard/fuel/duplicates?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&mode=${encodeURIComponent(mode)}&asset_code=${encodeURIComponent(assetCode)}`
-    )
-    : await fetchJson(
-      `${API}/api/dashboard/fuel?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&tolerance=${encodeURIComponent(tolerance)}&mode=${encodeURIComponent(mode)}&asset_code=${encodeURIComponent(assetCode)}`
-    );
+  const compareUrl =
+    `${API}/api/dashboard/fuel/period-compare?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&mode=${encodeURIComponent(mode)}&asset_code=${encodeURIComponent(assetCode)}`;
+  const [data, compareData] = await Promise.all([
+    duplicatesOnly
+      ? fetchJson(
+        `${API}/api/dashboard/fuel/duplicates?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&mode=${encodeURIComponent(mode)}&asset_code=${encodeURIComponent(assetCode)}`
+      )
+      : fetchJson(
+        `${API}/api/dashboard/fuel?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&tolerance=${encodeURIComponent(tolerance)}&mode=${encodeURIComponent(mode)}&asset_code=${encodeURIComponent(assetCode)}`
+      ),
+    duplicatesOnly ? Promise.resolve(null) : fetchJson(compareUrl).catch(() => null),
+  ]);
   if (window.__fuelBenchmarkRunToken !== runToken) return;
 
   const rawRows = Array.isArray(data.rows) ? data.rows : [];
@@ -7315,6 +7435,13 @@ async function loadFuelBenchmark() {
     setText("fbAvgLph", "-");
     setText("fbAvgKmpl", "-");
     setText("fbExcessive", Number(benchmarkSummary.duplicate_rows || 0));
+    const compareHost = qs("fuelPeriodCompareChart");
+    const compareSummary = qs("fuelPeriodCompareSummary");
+    if (compareSummary) compareSummary.textContent = "Period comparison is hidden while viewing duplicates.";
+    if (compareHost) {
+      compareHost.className = "fuel-period-compare-chart muted";
+      compareHost.textContent = "Switch off duplicates filter to view period comparison.";
+    }
   } else {
     // Pills must reflect only the currently selected date range + filters.
     const s = data.summary || {};
@@ -7324,6 +7451,7 @@ async function loadFuelBenchmark() {
     setText("fbAvgLph", s.avg_lph == null ? "-" : Number(s.avg_lph).toFixed(3));
     setText("fbAvgKmpl", s.avg_km_per_l == null ? "-" : Number(s.avg_km_per_l).toFixed(3));
     setText("fbExcessive", Number(s.excessive_count || 0));
+    renderFuelPeriodCompareChart(compareData);
   }
 
   const list = qs("fuelBenchmarkList");

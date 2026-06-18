@@ -513,6 +513,50 @@ button.btn-disabled{
   border-radius:10px;
   background:#f9fafb;
 }
+
+.fuel-period-compare-wrap{
+  margin:14px 0 4px;
+  padding:12px 14px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:#f9fafb;
+}
+.fuel-period-compare-head h4{
+  font-size:15px;
+}
+.fuel-period-compare-legend{
+  display:flex;
+  flex-wrap:wrap;
+  gap:14px;
+  margin:10px 0 6px;
+  font-size:12px;
+  color:var(--muted);
+}
+.fuel-legend-item{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+}
+.fuel-legend-swatch{
+  width:22px;
+  height:3px;
+  border-radius:2px;
+  display:inline-block;
+}
+.fuel-legend-current{
+  background:#2563eb;
+}
+.fuel-legend-previous{
+  background:#94a3b8;
+}
+.fuel-period-compare-chart{
+  min-height:220px;
+}
+.fuel-period-compare-chart svg{
+  display:block;
+  width:100%;
+  max-width:100%;
+}
 .cost-bar{
   flex:1 1 0;
   min-width:16px;
