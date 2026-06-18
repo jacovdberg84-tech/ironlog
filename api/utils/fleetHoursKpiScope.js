@@ -36,3 +36,15 @@ export function andAssetFleetHoursOnly(a = "a") {
     )
   `;
 }
+
+/** Exclude LDV / light-vehicle fleet from plant-hour KPI slides. */
+export function andAssetExcludeLdv(a = "a") {
+  return `
+    AND NOT (
+      LOWER(COALESCE(${a}.category, '')) LIKE '%ldv%'
+      OR LOWER(COALESCE(${a}.asset_code, '')) LIKE 'ldv%'
+      OR UPPER(COALESCE(${a}.asset_code, '')) GLOB 'V[0-9][0-9]AM'
+      OR LOWER(COALESCE(${a}.asset_name, '')) LIKE '%ldv%'
+    )
+  `;
+}
