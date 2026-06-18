@@ -1753,10 +1753,29 @@ export default async function stockRoutes(app) {
       let lube_log_id = null;
       if (asset) {
         const cost_center_code = resolveLogCostCenterCode(db, asset.id, body.cost_center_code);
-        const lg = db.prepare(`
-          INSERT INTO oil_logs (asset_id, log_date, oil_type, quantity, cost_center_code)
-          VALUES (?, ?, ?, ?, ?)
-        `).run(asset.id, log_date, normalizeOilTypeInput(oil_type, part.part_code || null), quantity, cost_center_code);
+        const oilUnitCost = Number(part.unit_cost || 0) > 0 ? Number(part.unit_cost) : null;
+        const lg = hasColumn("oil_logs", "unit_cost")
+          ? db.prepare(`
+              INSERT INTO oil_logs (asset_id, log_date, oil_type, quantity, cost_center_code, unit_cost)
+              VALUES (?, ?, ?, ?, ?, ?)
+            `).run(
+              asset.id,
+              log_date,
+              normalizeOilTypeInput(oil_type, part.part_code || null),
+              quantity,
+              cost_center_code,
+              oilUnitCost,
+            )
+          : db.prepare(`
+              INSERT INTO oil_logs (asset_id, log_date, oil_type, quantity, cost_center_code)
+              VALUES (?, ?, ?, ?, ?)
+            `).run(
+              asset.id,
+              log_date,
+              normalizeOilTypeInput(oil_type, part.part_code || null),
+              quantity,
+              cost_center_code,
+            );
         lube_log_id = Number(lg.lastInsertRowid);
       }
 

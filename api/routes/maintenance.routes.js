@@ -868,6 +868,31 @@ function sqlOilPartPredicate(alias = "p") {
  * SQL expression for one stock_movements row's monetary cost (optionally joined to parts as `p`).
  * Aligns with asset maintenance history: line total_cost, sm.unit_cost×qty, parts.unit_cost×qty, then unit_cost_usd/cost_input×qty.
  */
+/** SQL expression: sum of oil_log line costs with unit_cost fallback when stores issue omits cost. */
+function sqlOilLogCostSumExpr(olAlias = "ol", unitCostFallbackSql = "?") {
+  const ol = olAlias;
+  return `COALESCE(SUM(COALESCE(${ol}.quantity, 0) * COALESCE(NULLIF(${ol}.unit_cost, 0), ${unitCostFallbackSql})), 0)`;
+}
+
+function sqlStockMovementDateExpr(hasColumnFn, smAlias = "sm") {
+  const sm = smAlias;
+  if (hasColumnFn("stock_movements", "created_at")) return `DATE(${sm}.created_at)`;
+  if (hasColumnFn("stock_movements", "movement_date")) return `DATE(${sm}.movement_date)`;
+  return `DATE(${sm}.created_at)`;
+}
+
+function readLubeCostPerQtyDefault(dbConn, hasTableFn) {
+  let fallback = 4.0;
+  if (hasTableFn("cost_settings")) {
+    const row = dbConn.prepare(`
+      SELECT value FROM cost_settings WHERE key = 'lube_cost_per_qty_default' LIMIT 1
+    `).get();
+    const n = Number(row?.value);
+    if (Number.isFinite(n) && n > 0) fallback = n;
+  }
+  return fallback;
+}
+
 function sqlStockMovementLineCostExpr(smAlias = "sm", partsAlias = "p", joinPartsTable, flags) {
   const sm = smAlias;
   const p = partsAlias;
@@ -1038,11 +1063,12 @@ function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
       const avgPartsQty = serviceEvents > 0 ? Number(hist.parts_qty_total || 0) / serviceEvents : 0;
       const avgPartsCost = serviceEvents > 0 ? Number(hist.parts_cost_total || 0) / serviceEvents : 0;
 
+      const lubeCostDefault = Number(ctx.lubeCostDefault || 4);
       const oilAvg = hasTable("oil_logs") && hasTable("work_orders")
         ? dbConn.prepare(`
             SELECT
               COALESCE(SUM(ol.quantity), 0) AS oil_qty_total,
-              COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, 0)), 0) AS oil_cost_total
+              ${sqlOilLogCostSumExpr("ol", "?")} AS oil_cost_total
             FROM oil_logs ol
             WHERE ol.asset_id = ?
               AND ol.log_date IN (
@@ -1053,7 +1079,7 @@ function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
                   AND ${woCloseExpr} IS NOT NULL
                   AND LOWER(COALESCE(w.status, '')) IN (${closedStatuses})
               )
-          `).get(assetId, planId)
+          `).get(lubeCostDefault, assetId, planId)
         : null;
       const oilQtyLogs = Number(oilAvg?.oil_qty_total || 0);
       const oilCostLogsPlan = Number(oilAvg?.oil_cost_total || 0);
@@ -4711,6 +4737,8 @@ export default async function maintenanceRoutes(app) {
       };
       const smCostWithParts = sqlStockMovementLineCostExpr("sm", "p", true, smLineFlags);
       const smCostNoParts = sqlStockMovementLineCostExpr("sm", "p", false, smLineFlags);
+      const lubeCostDefault = readLubeCostPerQtyDefault(db, hasTable);
+      const smDateExpr = sqlStockMovementDateExpr(hasColumn);
 
       const partsCost =
         hasTable("stock_movements") && hasTable("work_orders")
@@ -4740,12 +4768,27 @@ export default async function maintenanceRoutes(app) {
       const oilCostFromLogs = hasTable("oil_logs")
         ? Number(
             db.prepare(`
-              SELECT COALESCE(SUM(COALESCE(quantity, 0) * COALESCE(unit_cost, 0)), 0) AS v
-              FROM oil_logs
-              WHERE log_date BETWEEN ? AND ?
-            `).get(start, end)?.v || 0
+              SELECT ${sqlOilLogCostSumExpr("ol", "?")} AS v
+              FROM oil_logs ol
+              WHERE ol.log_date BETWEEN ? AND ?
+            `).get(lubeCostDefault, start, end)?.v || 0
           )
         : 0;
+
+      const oilCostFromDirectAssetStores =
+        hasTable("stock_movements") && hasTable("parts")
+          ? Number(
+              db.prepare(`
+                SELECT COALESCE(SUM((${smCostWithParts})), 0) AS v
+                FROM stock_movements sm
+                JOIN parts p ON p.id = sm.part_id
+                WHERE sm.reference LIKE 'asset:%:stores'
+                  AND ${smDateExpr} BETWEEN ? AND ?
+                  AND (${smOutSql})
+                  AND (${oilPartSql})
+              `).get(start, end)?.v || 0
+            )
+          : 0;
 
       const oilCostFromWoStock =
         hasTable("stock_movements") && hasTable("work_orders") && hasTable("parts")
@@ -4763,7 +4806,7 @@ export default async function maintenanceRoutes(app) {
             )
           : 0;
 
-      const oilCost = oilCostFromLogs + oilCostFromWoStock;
+      const oilCost = oilCostFromLogs + oilCostFromWoStock + oilCostFromDirectAssetStores;
 
       const laborCost = hasTable("work_orders")
         ? Number(
@@ -4830,13 +4873,38 @@ export default async function maintenanceRoutes(app) {
         if (hasTable("oil_logs")) {
           const oilLogRows = db.prepare(`
             SELECT ol.asset_id, a.asset_code, a.asset_name,
-              COALESCE(SUM(COALESCE(ol.quantity, 0) * COALESCE(ol.unit_cost, 0)), 0) AS v
+              ${sqlOilLogCostSumExpr("ol", "?")} AS v
             FROM oil_logs ol
             JOIN assets a ON a.id = ol.asset_id
             WHERE ol.log_date BETWEEN ? AND ?
             GROUP BY ol.asset_id
-          `).all(start, end);
+          `).all(lubeCostDefault, start, end);
           for (const r of oilLogRows || []) putActual(r.asset_id, r.asset_code, r.asset_name, { lubes_logs_cost: Number(r.v || 0) });
+        }
+        if (hasTable("stock_movements") && hasTable("parts")) {
+          const directOilRows = db.prepare(`
+            SELECT
+              a.id AS asset_id,
+              a.asset_code,
+              a.asset_name,
+              COALESCE(SUM((${smCostWithParts})), 0) AS v
+            FROM stock_movements sm
+            JOIN parts p ON p.id = sm.part_id
+            JOIN assets a ON a.id = CAST(REPLACE(REPLACE(sm.reference, 'asset:', ''), ':stores', '') AS INTEGER)
+            WHERE sm.reference LIKE 'asset:%:stores'
+              AND ${smDateExpr} BETWEEN ? AND ?
+              AND (${smOutSql})
+              AND (${oilPartSql})
+            GROUP BY a.id
+          `).all(start, end);
+          for (const r of directOilRows || []) {
+            const aid = Number(r.asset_id || 0);
+            const cur = mergeActual.get(aid);
+            const prior = cur ? Number(cur.lubes_logs_cost || 0) : 0;
+            putActual(r.asset_id, r.asset_code, r.asset_name, {
+              lubes_logs_cost: prior + Number(r.v || 0),
+            });
+          }
         }
         if (hasTable("stock_movements") && hasTable("parts")) {
           const oilWoRows = db.prepare(`
@@ -4915,6 +4983,7 @@ export default async function maintenanceRoutes(app) {
           oilPartSql,
           smCostWithParts,
           smCostNoParts,
+          lubeCostDefault,
         },
       }).filter((r) => r.status === "OVERDUE" || r.status === "ALMOST DUE")
         .slice(0, 40);
@@ -4933,8 +5002,9 @@ export default async function maintenanceRoutes(app) {
         },
         costs: {
           stores_oil_cost: Number(oilCost.toFixed(2)),
-          stores_oil_from_logs: Number(oilCostFromLogs.toFixed(2)),
+          stores_oil_from_logs: Number((oilCostFromLogs + oilCostFromDirectAssetStores).toFixed(2)),
           stores_oil_from_work_orders: Number(oilCostFromWoStock.toFixed(2)),
+          stores_oil_from_direct_asset_issues: Number(oilCostFromDirectAssetStores.toFixed(2)),
           stores_parts_cost: Number(partsCost.toFixed(2)),
           maintenance_labor_cost: Number(laborCost.toFixed(2)),
           weekly_total_cost: Number((oilCost + partsCost + laborCost).toFixed(2)),
