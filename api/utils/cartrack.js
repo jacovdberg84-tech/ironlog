@@ -660,14 +660,24 @@ export function listCartrackFleetFromDb() {
   `).all();
 }
 
-export function listCartrackEventsFromDb({ startDate, endDate, speedingOnly = false, limit = 200 } = {}) {
+export function listCartrackEventsFromDb({
+  startDate,
+  endDate,
+  speedingOnly = false,
+  minSpeedKmh = null,
+  limit = 200,
+} = {}) {
   const start = String(startDate || "").slice(0, 10);
   const end = String(endDate || start).slice(0, 10);
   const lim = Math.max(1, Math.min(500, Number(limit) || 200));
   const threshold = getCartrackSpeedAlertKmh();
   const where = ["date(event_time) >= date(?)", "date(event_time) <= date(?)"];
   const params = [start, end];
-  if (speedingOnly) {
+  const minSpeed = minSpeedKmh != null ? Number(minSpeedKmh) : null;
+  if (Number.isFinite(minSpeed)) {
+    where.push("speed_kmh > ?");
+    params.push(minSpeed);
+  } else if (speedingOnly) {
     where.push("(is_speeding = 1 OR speed_kmh >= ?)");
     params.push(threshold);
   }
@@ -719,12 +729,12 @@ export function buildSpeedingReportPdfContent(summary) {
   return { columns, rows };
 }
 
-export function buildMorningSpeedingReport(reportDate) {
+export function summarizeSpeedingEvents(reportDate, events, speedAlertKmh = null) {
   const date = String(reportDate || "").slice(0, 10);
-  const threshold = getCartrackSpeedAlertKmh();
-  const events = listCartrackEventsFromDb({ startDate: date, endDate: date, speedingOnly: true, limit: 500 });
+  const threshold = speedAlertKmh ?? getCartrackSpeedAlertKmh();
+  const list = Array.isArray(events) ? events : [];
   const byVehicle = new Map();
-  for (const e of events) {
+  for (const e of list) {
     const key = e.asset_code || e.registration || "Unknown";
     if (!byVehicle.has(key)) {
       byVehicle.set(key, { asset_code: key, registration: e.registration, count: 0, max_speed: 0, events: [] });
@@ -735,15 +745,22 @@ export function buildMorningSpeedingReport(reportDate) {
     if (row.events.length < 5) row.events.push(e);
   }
   const vehicles = Array.from(byVehicle.values()).sort((a, b) => b.count - a.count);
-  const summary = {
+  return {
     report_date: date,
     speed_alert_kmh: threshold,
-    total_speeding_events: events.length,
+    total_speeding_events: list.length,
     vehicles_with_speeding: vehicles.length,
     vehicles,
-    events,
+    events: list,
     generated_at: new Date().toISOString(),
   };
+}
+
+export function buildMorningSpeedingReport(reportDate) {
+  const date = String(reportDate || "").slice(0, 10);
+  const threshold = getCartrackSpeedAlertKmh();
+  const events = listCartrackEventsFromDb({ startDate: date, endDate: date, speedingOnly: true, limit: 500 });
+  const summary = summarizeSpeedingEvents(date, events, threshold);
   db.prepare(`
     INSERT INTO cartrack_morning_reports (report_date, summary_json, created_at)
     VALUES (?, ?, datetime('now'))

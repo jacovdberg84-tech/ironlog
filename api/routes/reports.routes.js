@@ -25,9 +25,10 @@ import {
   buildMonthlyOperatingActuals,
 } from "../utils/monthlyOperatingCosts.js";
 import {
-  buildMorningSpeedingReport,
   buildSpeedingReportPdfContent,
   getCartrackSpeedAlertKmh,
+  listCartrackEventsFromDb,
+  summarizeSpeedingEvents,
 } from "../utils/cartrack.js";
 import { buildPlantHireLines, prevMonth as hirePrevMonth } from "../utils/plantHire.js";
 import { fetchLubeMonthStockSnapshot } from "../utils/lubeMonthStock.js";
@@ -8846,7 +8847,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    const reportRevision = "daily-pdf-cartrack-speeding-r2026-06-17";
+    const reportRevision = "daily-pdf-cartrack-speed-strict-r2026-06-17";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -9093,7 +9094,13 @@ export default async function reportsRoutes(app) {
     let cartrackSpeeding = null;
     if (hasTable("cartrack_events")) {
       try {
-        cartrackSpeeding = buildMorningSpeedingReport(date);
+        const events = listCartrackEventsFromDb({
+          startDate: date,
+          endDate: date,
+          minSpeedKmh: speedAlertKmh,
+          limit: 500,
+        });
+        cartrackSpeeding = summarizeSpeedingEvents(date, events, speedAlertKmh);
       } catch {
         cartrackSpeeding = null;
       }
@@ -9115,7 +9122,7 @@ export default async function reportsRoutes(app) {
           { k: "Utilization %", v: kpi.utilization == null ? "N/A" : `${fmtNum(kpi.utilization, 2)}%` },
           ...(cartrackSpeeding
             ? [{
-                k: `Speeding >${speedAlertKmh} km/h`,
+                k: `Speeding above ${speedAlertKmh} km/h`,
                 v: cartrackSpeeding.total_speeding_events
                   ? `${cartrackSpeeding.total_speeding_events} event(s) · ${cartrackSpeeding.vehicles_with_speeding} vehicle(s)`
                   : "None",
@@ -9224,16 +9231,15 @@ export default async function reportsRoutes(app) {
         );
 
         if (cartrackSpeeding) {
-          sectionTitle(doc, `Cartrack fleet — speeding over ${speedAlertKmh} km/h`);
+          sectionTitle(doc, `Cartrack fleet — speeding above ${speedAlertKmh} km/h`);
           if (!cartrackSpeeding.total_speeding_events) {
             doc.fontSize(10).fillColor("#64748b");
-            doc.text(`No speeding events over ${speedAlertKmh} km/h recorded for ${date}.`);
+            doc.text(`No speeding events above ${speedAlertKmh} km/h recorded for ${date}.`);
             doc.moveDown(0.5);
           } else {
             doc.fontSize(10).fillColor("#334155");
             doc.text(
-              `${cartrackSpeeding.total_speeding_events} event(s) across ${cartrackSpeeding.vehicles_with_speeding} vehicle(s) ` +
-              `(IRONLOG live GPS threshold ${speedAlertKmh} km/h; Cartrack API events are typically 160+ km/h only).`,
+              `${cartrackSpeeding.total_speeding_events} event(s) above ${speedAlertKmh} km/h across ${cartrackSpeeding.vehicles_with_speeding} vehicle(s).`,
             );
             doc.moveDown(0.4);
             const speedPdf = buildSpeedingReportPdfContent(cartrackSpeeding);
