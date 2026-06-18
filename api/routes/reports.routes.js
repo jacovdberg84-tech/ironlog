@@ -8174,31 +8174,34 @@ export default async function reportsRoutes(app) {
           AND ${smDateExprDeck} BETWEEN ? AND ?
         GROUP BY wo_id
       )
-      SELECT
-        w.id AS wo_id,
-        a.asset_code,
-        a.asset_name,
-        COALESCE(a.category, '') AS category,
-        LOWER(COALESCE(w.source, '')) AS source,
-        COALESCE(b.description, ${hasBreakdownRepairLabor ? "brl.notes," : ""} w.completion_notes, w.repair_progress, '-') AS reason,
-        COALESCE(wp.parts_cost, 0) AS parts_cost,
-        CASE
-          WHEN LOWER(COALESCE(w.source, '')) = 'breakdown' THEN
-            COALESCE(${hasBreakdownRepairLabor ? "NULLIF(brl.labor_hours, 0)," : ""} w.labor_hours, 0)
-            * COALESCE(NULLIF(w.labor_rate_per_hour, 0), ?)
-          ELSE COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, ?)
-        END AS labor_cost
-      FROM work_orders w
-      JOIN assets a ON a.id = w.asset_id
-      LEFT JOIN breakdowns b ON b.id = w.reference_id AND LOWER(COALESCE(w.source, '')) = 'breakdown'
-      ${hasBreakdownRepairLabor
-        ? "LEFT JOIN breakdown_repair_labor brl ON brl.breakdown_id = b.id"
-        : ""}
-      LEFT JOIN wo_parts wp ON wp.wo_id = w.id
-      WHERE DATE(COALESCE(w.completed_at, w.closed_at, w.opened_at)) BETWEEN ? AND ?
-        AND LOWER(COALESCE(w.source, '')) IN ('breakdown', 'service')
-      HAVING parts_cost > 0 OR labor_cost > 0
-      ORDER BY (parts_cost + labor_cost) DESC, w.id DESC
+      SELECT *
+      FROM (
+        SELECT
+          w.id AS wo_id,
+          a.asset_code,
+          a.asset_name,
+          COALESCE(a.category, '') AS category,
+          LOWER(COALESCE(w.source, '')) AS source,
+          COALESCE(b.description, ${hasBreakdownRepairLabor ? "brl.notes," : ""} w.completion_notes, w.repair_progress, '-') AS reason,
+          COALESCE(wp.parts_cost, 0) AS parts_cost,
+          CASE
+            WHEN LOWER(COALESCE(w.source, '')) = 'breakdown' THEN
+              COALESCE(${hasBreakdownRepairLabor ? "NULLIF(brl.labor_hours, 0)," : ""} w.labor_hours, 0)
+              * COALESCE(NULLIF(w.labor_rate_per_hour, 0), ?)
+            ELSE COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, ?)
+          END AS labor_cost
+        FROM work_orders w
+        JOIN assets a ON a.id = w.asset_id
+        LEFT JOIN breakdowns b ON b.id = w.reference_id AND LOWER(COALESCE(w.source, '')) = 'breakdown'
+        ${hasBreakdownRepairLabor
+          ? "LEFT JOIN breakdown_repair_labor brl ON brl.breakdown_id = b.id"
+          : ""}
+        LEFT JOIN wo_parts wp ON wp.wo_id = w.id
+        WHERE DATE(COALESCE(w.completed_at, w.closed_at, w.opened_at)) BETWEEN ? AND ?
+          AND LOWER(COALESCE(w.source, '')) IN ('breakdown', 'service')
+      ) wo_costs
+      WHERE wo_costs.parts_cost > 0 OR wo_costs.labor_cost > 0
+      ORDER BY (wo_costs.parts_cost + wo_costs.labor_cost) DESC, wo_costs.wo_id DESC
       LIMIT 14
     `).all(period.start, period.end, laborRate, laborRate, period.start, period.end)
       : [];
