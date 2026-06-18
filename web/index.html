@@ -6084,6 +6084,104 @@
           </div>
         </div>
 
+        <!-- Push Notifications Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false" id="adminPushNotifyCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eef2ff; color: #4338ca;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+              </div>
+              <div>
+                <h3>Push Notifications (IRONLOG Notify)</h3>
+                <p class="muted small">Mobile alerts for breakdowns and work orders. Install the app on technician phones, then send test or manual notifications from here.</p>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="loadPushNotifyBtn" class="btn btn-secondary btn-sm">Refresh</button>
+              <button class="report-card-toggle" aria-label="Toggle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+              </button>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <p id="pushNotifyStatus" class="muted small" style="margin-bottom:12px;">Loading push status…</p>
+            <div class="form-row">
+              <div class="form-field">
+                <label>APK download</label>
+                <a id="pushNotifyApkLink" class="btn btn-secondary btn-sm" href="/web/downloads/ironlog-notify.apk" target="_blank" rel="noopener">Download IRONLOG Notify APK</a>
+              </div>
+              <div class="form-field">
+                <label>Expo install page</label>
+                <a id="pushNotifyExpoLink" href="#" target="_blank" rel="noopener" class="muted small">Open Expo builds</a>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Recipient (registered device)</label>
+                <select id="pushNotifyUsername" class="w-full">
+                  <option value="">Select technician…</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Work order # (optional — tap opens WO)</label>
+                <input id="pushNotifyWoId" class="w-full" type="number" min="1" step="1" placeholder="e.g. 1234" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Title</label>
+                <input id="pushNotifyTitle" class="w-full" placeholder="IRONLOG alert" />
+              </div>
+              <div class="form-field">
+                <label>Message</label>
+                <input id="pushNotifyBody" class="w-full" placeholder="Tap to open work order" />
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="sendPushNotifyTestBtn" class="btn btn-secondary">Send test notification</button>
+              <button id="sendPushNotifyBtn" class="btn btn-primary">Send notification</button>
+            </div>
+            <div style="margin-top:16px;">
+              <h4 class="muted small" style="margin:0 0 8px;">Registered devices</h4>
+              <div class="table-wrap">
+                <table class="data-table compact">
+                  <thead>
+                    <tr>
+                      <th>Username</th>
+                      <th>Device</th>
+                      <th>Platform</th>
+                      <th>Last seen</th>
+                    </tr>
+                  </thead>
+                  <tbody id="pushNotifyDevicesTbody">
+                    <tr><td colspan="4" class="muted small">No devices registered yet.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div style="margin-top:16px;">
+              <h4 class="muted small" style="margin:0 0 8px;">Recent deliveries</h4>
+              <div class="table-wrap">
+                <table class="data-table compact">
+                  <thead>
+                    <tr>
+                      <th>When</th>
+                      <th>User</th>
+                      <th>Kind</th>
+                      <th>Title</th>
+                      <th>OK</th>
+                    </tr>
+                  </thead>
+                  <tbody id="pushNotifyRecentTbody">
+                    <tr><td colspan="5" class="muted small">No notifications sent yet.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <pre class="output" id="pushNotifyResult"></pre>
+          </div>
+        </div>
+
         <!-- Backup + Restore Card -->
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">

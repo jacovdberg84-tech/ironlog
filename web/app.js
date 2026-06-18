@@ -2589,6 +2589,150 @@ async function testSmtpSettings() {
   }
 }
 
+function renderPushNotifyDevices(devices) {
+  const tbody = qs("pushNotifyDevicesTbody");
+  if (!tbody) return;
+  const rows = Array.isArray(devices) ? devices : [];
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="muted small">No devices registered yet. Technicians must sign into IRONLOG Notify on their phone.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows
+    .map((d) => {
+      const user = escapeHtml(String(d.username || ""));
+      const label = escapeHtml(String(d.device_label || "—"));
+      const platform = escapeHtml(String(d.platform || "android"));
+      const seen = escapeHtml(String(d.last_seen_at || "—"));
+      return `<tr><td>${user}</td><td>${label}</td><td>${platform}</td><td>${seen}</td></tr>`;
+    })
+    .join("");
+}
+
+function renderPushNotifyRecent(recent) {
+  const tbody = qs("pushNotifyRecentTbody");
+  if (!tbody) return;
+  const rows = Array.isArray(recent) ? recent : [];
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="muted small">No notifications sent yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows
+    .map((r) => {
+      const when = escapeHtml(String(r.sent_at || "—"));
+      const user = escapeHtml(String(r.username || "—"));
+      const kindVal = escapeHtml(String(r.kind || "—"));
+      const title = escapeHtml(String(r.title || "—"));
+      const ok = r.success ? "Yes" : "No";
+      const err = r.error ? ` title="${escapeHtml(String(r.error))}"` : "";
+      return `<tr><td>${when}</td><td>${user}</td><td>${kindVal}</td><td>${title}</td><td${err}>${ok}</td></tr>`;
+    })
+    .join("");
+}
+
+function populatePushNotifyUserOptions(devices) {
+  const sel = qs("pushNotifyUsername");
+  if (!sel) return;
+  const current = String(sel.value || "");
+  const rows = Array.isArray(devices) ? devices : [];
+  const seen = new Set();
+  sel.innerHTML = '<option value="">Select technician…</option>';
+  rows.forEach((d) => {
+    const username = String(d.username || "").trim();
+    if (!username || seen.has(username.toLowerCase())) return;
+    seen.add(username.toLowerCase());
+    const opt = document.createElement("option");
+    opt.value = username;
+    const label = String(d.device_label || "").trim();
+    opt.textContent = label ? `${username} (${label})` : username;
+    sel.appendChild(opt);
+  });
+  if (current && Array.from(sel.options).some((o) => o.value === current)) sel.value = current;
+}
+
+async function loadPushNotificationSettings() {
+  const out = qs("pushNotifyResult");
+  const statusEl = qs("pushNotifyStatus");
+  try {
+    const data = await fetchJson(`${API}/api/notifications/admin`);
+    const enabled = Boolean(data.push_enabled);
+    if (statusEl) {
+      statusEl.textContent = enabled
+        ? "Server push is configured and ready."
+        : "Push is not configured on the server (Firebase service account missing). Devices can register but alerts will not send.";
+      statusEl.className = enabled ? "muted small" : "muted small";
+      statusEl.style.color = enabled ? "" : "#b45309";
+    }
+    const apkLink = qs("pushNotifyApkLink");
+    if (apkLink && data.apk_url) apkLink.href = data.apk_url;
+    const expoLink = qs("pushNotifyExpoLink");
+    if (expoLink && data.expo_install_url) {
+      expoLink.href = data.expo_install_url;
+      expoLink.textContent = "Open Expo install page";
+    }
+    populatePushNotifyUserOptions(data.devices);
+    renderPushNotifyDevices(data.devices);
+    renderPushNotifyRecent(data.recent);
+    if (out) {
+      out.textContent =
+        `Push enabled: ${enabled ? "yes" : "no"}\n` +
+        `Registered devices: ${Array.isArray(data.devices) ? data.devices.length : 0}\n` +
+        `APK: ${data.apk_url || "(not set)"}`;
+    }
+    setStatus("Push notification settings loaded.");
+  } catch (e) {
+    if (out) out.textContent = String(e.message || e);
+    if (statusEl) statusEl.textContent = "Could not load push notification settings.";
+    setStatus("Push notification load failed.");
+  }
+}
+
+async function sendPushNotificationTest() {
+  const out = qs("pushNotifyResult");
+  const username = String(qs("pushNotifyUsername")?.value || "").trim();
+  if (!username) return alert("Select a technician with a registered device.");
+  setStatus("Sending push test…");
+  try {
+    const data = await fetchJson(`${API}/api/notifications/test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username }),
+    });
+    if (out) out.textContent = JSON.stringify(data, null, 2);
+    setStatus(data.sent ? "Push test sent." : "Push test completed (check result — device may be unregistered).");
+    await loadPushNotificationSettings();
+  } catch (e) {
+    if (out) out.textContent = String(e.message || e);
+    setStatus("Push test failed.");
+  }
+}
+
+async function sendPushNotificationManual() {
+  const out = qs("pushNotifyResult");
+  const username = String(qs("pushNotifyUsername")?.value || "").trim();
+  const title = String(qs("pushNotifyTitle")?.value || "").trim();
+  const body = String(qs("pushNotifyBody")?.value || "").trim();
+  const woId = String(qs("pushNotifyWoId")?.value || "").trim();
+  if (!username) return alert("Select a technician with a registered device.");
+  if (!title) return alert("Enter a notification title.");
+  if (!body) return alert("Enter a notification message.");
+  setStatus("Sending push notification…");
+  try {
+    const payload = { username, title, body };
+    if (woId) payload.wo_id = woId;
+    const data = await fetchJson(`${API}/api/notifications/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (out) out.textContent = JSON.stringify(data, null, 2);
+    setStatus(data.sent ? "Push notification sent." : "Send completed (check result).");
+    await loadPushNotificationSettings();
+  } catch (e) {
+    if (out) out.textContent = String(e.message || e);
+    setStatus("Push send failed.");
+  }
+}
+
 let pdfReportSitesCache = [];
 
 async function loadPdfReportSettings() {
@@ -15826,6 +15970,15 @@ async function init() {
   qs("testSmtpSettingsBtn")?.addEventListener("click", () =>
     testSmtpSettings().catch((e) => setStatus("SMTP test error: " + e.message))
   );
+  qs("loadPushNotifyBtn")?.addEventListener("click", () =>
+    loadPushNotificationSettings().catch((e) => setStatus("Push load error: " + e.message))
+  );
+  qs("sendPushNotifyTestBtn")?.addEventListener("click", () =>
+    sendPushNotificationTest().catch((e) => setStatus("Push test error: " + e.message))
+  );
+  qs("sendPushNotifyBtn")?.addEventListener("click", () =>
+    sendPushNotificationManual().catch((e) => setStatus("Push send error: " + e.message))
+  );
   qs("loadPdfReportSettingsBtn")?.addEventListener("click", () =>
     loadPdfReportSettings().catch((e) => setStatus("PDF site load error: " + e.message))
   );
@@ -16532,6 +16685,7 @@ async function init() {
     loadAuditLogs().catch(() => {});
     loadApprovalRequests().catch(() => {});
     loadSmtpSettings().catch(() => {});
+    loadPushNotificationSettings().catch(() => {});
     loadPdfReportSettings().catch(() => {});
     loadBackupFiles().catch(() => {});
   }
