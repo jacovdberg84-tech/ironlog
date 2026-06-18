@@ -2,6 +2,7 @@
 import { db } from "../db/client.js";
 import {
   getNotifyApkUrl,
+  getNotifyExpoInstallUrl,
   isPushConfigured,
   sendPushToUsernames,
 } from "../utils/pushNotify.js";
@@ -30,10 +31,13 @@ function sessionUsername(req) {
 
 export default async function notificationsRoutes(app) {
   app.get("/config", async (req) => {
+    const expoInstallUrl = getNotifyExpoInstallUrl();
     return {
       ok: true,
       push_enabled: isPushConfigured(),
       apk_url: getNotifyApkUrl(req),
+      expo_install_url: expoInstallUrl,
+      expo_qr_url: `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(expoInstallUrl)}`,
       register_path: "/api/notifications/register",
     };
   });

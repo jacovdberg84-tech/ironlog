@@ -119,13 +119,20 @@
         <h2>IRONLOG Notify</h2>
         <p class="muted small">Install on your phone for breakdown and work order push alerts.</p>
         <p id="notifyPushStatus" class="muted small"></p>
-        <a id="notifyApkLink" class="btn primary" href="/web/downloads/ironlog-notify.apk">Download Android app</a>
+        <div class="notify-qr">
+          <img id="notifyExpoQr" alt="Scan to install IRONLOG Notify" />
+          <div class="notify-qr-links">
+            <strong class="small">Scan to install (recommended)</strong>
+            <a id="notifyExpoLink" href="#" target="_blank" rel="noopener">Open Expo install page</a>
+            <a id="notifyApkLink" class="btn primary" href="/web/downloads/ironlog-notify.apk">Or download APK</a>
+          </div>
+        </div>
       </section>
     </main>
   </div>
 
   <script src="./auth-shared.js?v=4"></script>
-  <script src="./notify-banner.js?v=1"></script>
+  <script src="./notify-banner.js?v=2"></script>
   <script src="./technician-terminal.js?v=4"></script>
 </body>
 </html>

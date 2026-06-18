@@ -2,7 +2,7 @@
   "expo": {
     "name": "IRONLOG Notify",
     "slug": "ironlog-notify",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "icon": "./assets/app-icon.png",
     "platforms": [
       "android"
@@ -24,7 +24,8 @@
         "expo-notifications",
         {
           "icon": "./assets/app-icon.png",
-          "color": "#2563eb"
+          "color": "#2563eb",
+          "defaultChannel": "breakdowns"
         }
       ]
     ],

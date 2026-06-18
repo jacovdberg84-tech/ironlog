@@ -1,12 +1,14 @@
+import Constants from "expo-constants";
 import * as Device from "expo-device";
 import * as Linking from "expo-linking";
 import * as Notifications from "expo-notifications";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Component, useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   FlatList,
+  InteractionManager,
   Platform,
   ScrollView,
   StyleSheet,
@@ -16,6 +18,7 @@ import {
   View,
 } from "react-native";
 import {
+  DEFAULT_ORIGIN,
   apiBase,
   clearStoredSession,
   fetchInbox,
@@ -31,13 +34,8 @@ import {
   workOrderUrl,
 } from "./src/api";
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+const BAKED_ORIGIN =
+  String(Constants.expoConfig?.extra?.defaultApiOrigin || "").trim() || DEFAULT_ORIGIN;
 
 const MAX_PIN = 6;
 const ALLOWED_ROLES = ["artisan", "admin", "supervisor"];
@@ -50,26 +48,29 @@ function initials(label) {
 }
 
 async function ensureAndroidChannel() {
-  if (Platform.OS === "android") {
+  if (Platform.OS !== "android") return;
+  try {
     await Notifications.setNotificationChannelAsync("breakdowns", {
       name: "Breakdowns & work orders",
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 120, 250],
     });
+  } catch {
+    // Non-fatal — app must still open if channel setup fails.
   }
 }
 
 async function getFcmDeviceToken() {
   if (!Device.isDevice) return null;
-  await ensureAndroidChannel();
-  const { status: existing } = await Notifications.getPermissionsAsync();
-  let status = existing;
-  if (existing !== "granted") {
-    const req = await Notifications.requestPermissionsAsync();
-    status = req.status;
-  }
-  if (status !== "granted") return null;
   try {
+    await ensureAndroidChannel();
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    let status = existing;
+    if (existing !== "granted") {
+      const req = await Notifications.requestPermissionsAsync();
+      status = req.status;
+    }
+    if (status !== "granted") return null;
     const tok = await Notifications.getDevicePushTokenAsync();
     return String(tok?.data || "").trim() || null;
   } catch {
@@ -77,10 +78,50 @@ async function getFcmDeviceToken() {
   }
 }
 
-export default function App() {
+function setupNotificationHandler() {
+  try {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }),
+    });
+  } catch {
+    // Ignore — UI must still load.
+  }
+}
+
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={styles.centered}>
+          <Text style={styles.brand}>IRONLOG Notify</Text>
+          <Text style={styles.error}>Something went wrong starting the app.</Text>
+          <Text style={styles.hint}>{String(this.state.error?.message || this.state.error)}</Text>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function AppBody() {
   const [ready, setReady] = useState(false);
-  const [originInput, setOriginInput] = useState("");
-  const [origin, setOrigin] = useState("");
+  const [bootError, setBootError] = useState("");
+  const [showServerEdit, setShowServerEdit] = useState(false);
+  const [originInput, setOriginInput] = useState(BAKED_ORIGIN);
+  const [origin, setOrigin] = useState(BAKED_ORIGIN);
   const [sessionToken, setSessionToken] = useState("");
   const [user, setUser] = useState(null);
   const [roster, setRoster] = useState([]);
@@ -93,17 +134,14 @@ export default function App() {
   const [inbox, setInbox] = useState([]);
   const responseListener = useRef(null);
 
-  const openFromNotificationData = useCallback(
-    (data) => {
-      const woId = data?.wo_id || data?.work_order_id;
-      if (woId && origin) {
-        Linking.openURL(workOrderUrl(origin, woId));
-        return;
-      }
-      if (origin) Linking.openURL(technicianTerminalUrl(origin));
-    },
-    [origin]
-  );
+  const openFromNotificationData = useCallback((data) => {
+    const woId = data?.wo_id || data?.work_order_id;
+    if (woId && origin) {
+      Linking.openURL(workOrderUrl(origin, woId));
+      return;
+    }
+    if (origin) Linking.openURL(technicianTerminalUrl(origin));
+  }, [origin]);
 
   const refreshInbox = useCallback(async () => {
     if (!origin || !sessionToken) return;
@@ -115,62 +153,98 @@ export default function App() {
     }
   }, [origin, sessionToken]);
 
-  const registerPush = useCallback(
-    async (authToken, apiOrigin) => {
+  const registerPush = useCallback(async (authToken, apiOrigin) => {
+    try {
       const deviceToken = await getFcmDeviceToken();
       if (!deviceToken) {
         setPushStatus("Notification permission denied or unavailable on this device.");
         return;
       }
       setPushToken(deviceToken);
-      try {
-        const label = `${Device.modelName || "Android"} · ${Device.osVersion || ""}`.trim();
-        const res = await registerPushToken(apiOrigin, authToken, deviceToken, label);
-        setPushStatus(
-          res.push_enabled
-            ? "Registered for push alerts."
-            : "App registered; server push pending Firebase setup."
-        );
-      } catch (err) {
-        setPushStatus(err?.message || "Could not register push token.");
-      }
-    },
-    []
-  );
-
-  const boot = useCallback(async () => {
-    const o = await getStoredOrigin();
-    const tok = await getStoredToken();
-    const u = await getStoredUser();
-    setOriginInput(o);
-    setOrigin(o);
-    if (tok && u) {
-      setSessionToken(tok);
-      setUser(u);
-      await registerPush(tok, o);
-    } else {
-      try {
-        const rosterRes = await fetchPinRoster(o);
-        setRoster(Array.isArray(rosterRes.technicians) ? rosterRes.technicians : []);
-      } catch {
-        setRoster([]);
-      }
+      const label = `${Device.modelName || "Android"} · ${Device.osVersion || ""}`.trim();
+      const res = await registerPushToken(apiOrigin, authToken, deviceToken, label);
+      setPushStatus(
+        res.push_enabled
+          ? "Registered for push alerts."
+          : "App registered; server push pending Firebase setup."
+      );
+    } catch (err) {
+      setPushStatus(err?.message || "Could not register push token.");
     }
-    setReady(true);
-  }, [registerPush]);
+  }, []);
+
+  const loadRoster = useCallback(async (apiOrigin) => {
+    try {
+      const rosterRes = await fetchPinRoster(apiOrigin);
+      setRoster(Array.isArray(rosterRes.technicians) ? rosterRes.technicians : []);
+      setBootError("");
+    } catch (err) {
+      setRoster([]);
+      setBootError(err?.message || "Could not reach IRONLOG server.");
+    }
+  }, []);
 
   useEffect(() => {
-    boot();
-    responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response?.notification?.request?.content?.data || {};
-      openFromNotificationData(data);
-    });
-    return () => {
-      if (responseListener.current) {
-        Notifications.removeNotificationSubscription(responseListener.current);
+    let cancelled = false;
+
+    async function boot() {
+      try {
+        setupNotificationHandler();
+        const stored = await getStoredOrigin();
+        const o = stored || BAKED_ORIGIN;
+        if (!cancelled) {
+          setOriginInput(o);
+          setOrigin(o);
+        }
+
+        const tok = await getStoredToken();
+        const u = await getStoredUser();
+
+        if (tok && u) {
+          if (!cancelled) {
+            setSessionToken(tok);
+            setUser(u);
+          }
+          InteractionManager.runAfterInteractions(() => {
+            if (!cancelled) registerPush(tok, o).catch(() => {});
+          });
+        }
+
+        await loadRoster(o);
+      } catch (err) {
+        if (!cancelled) setBootError(err?.message || "Startup failed.");
+      } finally {
+        if (!cancelled) setReady(true);
       }
+    }
+
+    boot();
+    return () => {
+      cancelled = true;
     };
-  }, [boot, openFromNotificationData]);
+  }, [loadRoster, registerPush]);
+
+  useEffect(() => {
+    if (!ready) return undefined;
+
+    try {
+      responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
+        const data = response?.notification?.request?.content?.data || {};
+        openFromNotificationData(data);
+      });
+    } catch {
+      // Non-fatal.
+    }
+
+    return () => {
+      try {
+        responseListener.current?.remove?.();
+      } catch {
+        // Ignore cleanup errors.
+      }
+      responseListener.current = null;
+    };
+  }, [ready, openFromNotificationData]);
 
   useEffect(() => {
     if (sessionToken) refreshInbox();
@@ -183,12 +257,8 @@ export default function App() {
       return;
     }
     setOrigin(o);
-    try {
-      const rosterRes = await fetchPinRoster(o);
-      setRoster(Array.isArray(rosterRes.technicians) ? rosterRes.technicians : []);
-    } catch (err) {
-      Alert.alert("Connection failed", err?.message || "Could not reach server.");
-    }
+    setShowServerEdit(false);
+    await loadRoster(o);
   }
 
   async function submitPinLogin() {
@@ -223,12 +293,7 @@ export default function App() {
     setInbox([]);
     setPinValue("");
     setSelectedUsername("");
-    try {
-      const rosterRes = await fetchPinRoster(origin);
-      setRoster(Array.isArray(rosterRes.technicians) ? rosterRes.technicians : []);
-    } catch {
-      setRoster([]);
-    }
+    await loadRoster(origin);
   }
 
   function onPinDigit(d) {
@@ -240,6 +305,7 @@ export default function App() {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color="#2563eb" />
+        <Text style={styles.hint}>Loading IRONLOG Notify…</Text>
       </View>
     );
   }
@@ -252,21 +318,31 @@ export default function App() {
         <Text style={styles.sub}>Breakdown & work order alerts for technicians</Text>
 
         <Text style={styles.label}>IRONLOG server</Text>
-        <View style={styles.row}>
-          <TextInput
-            style={styles.input}
-            value={originInput}
-            onChangeText={setOriginInput}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="https://ironlog.ironlogafrica.com"
-            placeholderTextColor="#64748b"
-          />
-          <TouchableOpacity style={styles.btn} onPress={saveOrigin}>
-            <Text style={styles.btnText}>Connect</Text>
-          </TouchableOpacity>
-        </View>
-        {origin ? <Text style={styles.hint}>API: {apiBase(origin)}</Text> : null}
+        {showServerEdit ? (
+          <View style={styles.row}>
+            <TextInput
+              style={styles.input}
+              value={originInput}
+              onChangeText={setOriginInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="https://ironlog.ironlogafrica.com"
+              placeholderTextColor="#64748b"
+            />
+            <TouchableOpacity style={styles.btn} onPress={saveOrigin}>
+              <Text style={styles.btnText}>Save</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View>
+            <Text style={styles.serverValue}>{origin}</Text>
+            <TouchableOpacity onPress={() => setShowServerEdit(true)}>
+              <Text style={styles.link}>Change server</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        <Text style={styles.hint}>API: {apiBase(origin)}</Text>
+        {bootError ? <Text style={styles.error}>{bootError}</Text> : null}
 
         <Text style={[styles.label, { marginTop: 20 }]}>Tap your name</Text>
         <View style={styles.roster}>
@@ -357,7 +433,7 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
-      <View style={[styles.card, { flex: 1 }]}>
+      <View style={[styles.card, styles.inboxCard]}>
         <View style={styles.rowBetween}>
           <Text style={styles.cardTitle}>Recent alerts</Text>
           <TouchableOpacity onPress={refreshInbox}>
@@ -365,6 +441,7 @@ export default function App() {
           </TouchableOpacity>
         </View>
         <FlatList
+          style={styles.inboxList}
           data={inbox}
           keyExtractor={(item) => String(item.id)}
           ListEmptyComponent={<Text style={styles.hint}>No alerts yet.</Text>}
@@ -389,16 +466,25 @@ export default function App() {
   );
 }
 
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppBody />
+    </ErrorBoundary>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#0f172a", padding: 16, paddingTop: 48 },
-  centered: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#0f172a" },
+  centered: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#0f172a", padding: 24 },
   loginScroll: { flexGrow: 1, backgroundColor: "#0f172a", padding: 20, paddingTop: 56 },
-  brand: { color: "#f8fafc", fontSize: 28, fontWeight: "800" },
+  brand: { color: "#f8fafc", fontSize: 28, fontWeight: "700" },
   sub: { color: "#94a3b8", marginTop: 6, marginBottom: 20 },
   label: { color: "#cbd5e1", fontSize: 13, fontWeight: "700", marginBottom: 6 },
+  serverValue: { color: "#f8fafc", fontSize: 16, fontWeight: "700", marginBottom: 4 },
   hint: { color: "#94a3b8", fontSize: 13, marginTop: 4 },
   mono: { color: "#64748b", fontSize: 11, marginTop: 6 },
-  row: { flexDirection: "row", gap: 8 },
+  row: { flexDirection: "row", marginBottom: 4 },
   rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   input: {
     flex: 1,
@@ -409,10 +495,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderWidth: 1,
     borderColor: "#334155",
+    marginRight: 8,
   },
   btn: { backgroundColor: "#334155", borderRadius: 10, paddingHorizontal: 14, justifyContent: "center" },
   btnText: { color: "#f8fafc", fontWeight: "700" },
-  roster: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  roster: { flexDirection: "row", flexWrap: "wrap", marginHorizontal: -5 },
   rosterBtn: {
     width: "30%",
     minWidth: 96,
@@ -422,6 +509,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 1,
     borderColor: "#334155",
+    margin: 5,
   },
   rosterBtnActive: { borderColor: "#2563eb", backgroundColor: "#172554" },
   avatar: {
@@ -433,10 +521,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 6,
   },
-  avatarText: { color: "#fff", fontWeight: "800" },
+  avatarText: { color: "#fff", fontWeight: "700" },
   rosterLabel: { color: "#e2e8f0", fontSize: 12, textAlign: "center" },
   pinDisplay: { color: "#f8fafc", fontSize: 28, letterSpacing: 8, textAlign: "center", marginVertical: 16 },
-  pad: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 8, marginBottom: 16 },
+  pad: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", marginHorizontal: -4, marginBottom: 16 },
   padKey: {
     width: "28%",
     maxWidth: 110,
@@ -444,6 +532,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: "center",
+    margin: 4,
   },
   padKeyMuted: {
     width: "28%",
@@ -454,6 +543,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 1,
     borderColor: "#334155",
+    margin: 4,
   },
   padKeyText: { color: "#f8fafc", fontSize: 20, fontWeight: "700" },
   primaryBtn: {
@@ -463,7 +553,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 8,
   },
-  primaryBtnText: { color: "#fff", fontWeight: "800" },
+  primaryBtnText: { color: "#fff", fontWeight: "700" },
   secondaryBtn: {
     marginTop: 10,
     borderRadius: 10,
@@ -476,7 +566,7 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.5 },
   error: { color: "#fca5a5", marginTop: 10 },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-  headerTitle: { color: "#f8fafc", fontSize: 22, fontWeight: "800" },
+  headerTitle: { color: "#f8fafc", fontSize: 22, fontWeight: "700" },
   headerSub: { color: "#94a3b8", marginTop: 2 },
   link: { color: "#93c5fd", fontWeight: "700" },
   card: {
@@ -487,7 +577,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#334155",
   },
-  cardTitle: { color: "#f8fafc", fontSize: 16, fontWeight: "800", marginBottom: 4 },
+  inboxCard: { flex: 1, minHeight: 180 },
+  inboxList: { flex: 1 },
+  cardTitle: { color: "#f8fafc", fontSize: 16, fontWeight: "700", marginBottom: 4 },
   inboxItem: {
     borderTopWidth: 1,
     borderTopColor: "#334155",

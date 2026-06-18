@@ -5,6 +5,8 @@ const STORAGE_TOKEN = "ironlog_notify_token";
 const STORAGE_USER = "ironlog_notify_user";
 const DEFAULT_ORIGIN = "https://ironlog.ironlogafrica.com";
 
+export { DEFAULT_ORIGIN };
+
 export function normalizeOrigin(raw) {
   let s = String(raw || "").trim();
   if (!s) return "";

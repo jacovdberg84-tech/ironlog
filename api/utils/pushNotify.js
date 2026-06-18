@@ -41,6 +41,14 @@ export function getNotifyApkUrl(req) {
   return "/web/downloads/ironlog-notify.apk";
 }
 
+/** Expo internal build page — scan QR on phone to install without hosting APK. */
+export function getNotifyExpoInstallUrl() {
+  return (
+    String(process.env.IRONLOG_NOTIFY_EXPO_INSTALL_URL || "").trim() ||
+    "https://expo.dev/accounts/jakes84/projects/ironlog-notify/builds"
+  );
+}
+
 async function getAccessToken() {
   const creds = loadServiceAccount();
   if (!creds) return null;
