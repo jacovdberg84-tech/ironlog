@@ -24,6 +24,11 @@ import {
   buildBreakdownDowntimeDetail,
   buildMonthlyOperatingActuals,
 } from "../utils/monthlyOperatingCosts.js";
+import {
+  buildMorningSpeedingReport,
+  buildSpeedingReportPdfContent,
+  getCartrackSpeedAlertKmh,
+} from "../utils/cartrack.js";
 import { buildPlantHireLines, prevMonth as hirePrevMonth } from "../utils/plantHire.js";
 import { fetchLubeMonthStockSnapshot } from "../utils/lubeMonthStock.js";
 import { getMachinePrestartTemplate } from "../utils/machinePrestartTemplates.js";
@@ -8841,7 +8846,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    const reportRevision = "daily-pdf-repair-progress-r2026-06-17";
+    const reportRevision = "daily-pdf-cartrack-speeding-r2026-06-17";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -9084,6 +9089,16 @@ export default async function reportsRoutes(app) {
 
     const kpi = kpiDaily(date, scheduled);
 
+    const speedAlertKmh = getCartrackSpeedAlertKmh();
+    let cartrackSpeeding = null;
+    if (hasTable("cartrack_events")) {
+      try {
+        cartrackSpeeding = buildMorningSpeedingReport(date);
+      } catch {
+        cartrackSpeeding = null;
+      }
+    }
+
     const pdf = await buildPdfBuffer(
       (doc) => {
         tryDrawLogo(doc, logoPath);
@@ -9098,6 +9113,14 @@ export default async function reportsRoutes(app) {
           { k: "Downtime hours", v: fmtNum(kpi.downtime_hours, 1) },
           { k: "Availability %", v: kpi.availability == null ? "N/A" : `${fmtNum(kpi.availability, 2)}%` },
           { k: "Utilization %", v: kpi.utilization == null ? "N/A" : `${fmtNum(kpi.utilization, 2)}%` },
+          ...(cartrackSpeeding
+            ? [{
+                k: `Speeding >${speedAlertKmh} km/h`,
+                v: cartrackSpeeding.total_speeding_events
+                  ? `${cartrackSpeeding.total_speeding_events} event(s) · ${cartrackSpeeding.vehicles_with_speeding} vehicle(s)`
+                  : "None",
+              }]
+            : []),
         ], 2);
 
         sectionTitle(doc, "Hours by asset (active fleet, non-standby)");
@@ -9199,6 +9222,34 @@ export default async function reportsRoutes(app) {
             progress: compactCell(r.repair_progress ?? "", 320),
           }))
         );
+
+        if (cartrackSpeeding) {
+          sectionTitle(doc, `Cartrack fleet — speeding over ${speedAlertKmh} km/h`);
+          if (!cartrackSpeeding.total_speeding_events) {
+            doc.fontSize(10).fillColor("#64748b");
+            doc.text(`No speeding events over ${speedAlertKmh} km/h recorded for ${date}.`);
+            doc.moveDown(0.5);
+          } else {
+            doc.fontSize(10).fillColor("#334155");
+            doc.text(
+              `${cartrackSpeeding.total_speeding_events} event(s) across ${cartrackSpeeding.vehicles_with_speeding} vehicle(s) ` +
+              `(IRONLOG live GPS threshold ${speedAlertKmh} km/h; Cartrack API events are typically 160+ km/h only).`,
+            );
+            doc.moveDown(0.4);
+            const speedPdf = buildSpeedingReportPdfContent(cartrackSpeeding);
+            table(
+              doc,
+              speedPdf.columns,
+              speedPdf.rows.slice(0, 25).map((r) => ({
+                time: compactCell(r.time ?? "", 16),
+                vehicle: compactCell(String(r.vehicle ?? "").replace(/\n/g, " / "), 24),
+                speed: r.speed ?? "—",
+                limit: r.limit ?? "—",
+                type: compactCell(r.type ?? "", 80),
+              })),
+            );
+          }
+        }
 
         sectionTitle(doc, "Critical Stock (Top 20)");
         table(
