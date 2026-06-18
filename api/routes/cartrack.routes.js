@@ -10,7 +10,6 @@ import {
   listCartrackFleetFromDb,
   listCartrackEventsFromDb,
   buildMorningSpeedingReport,
-  buildSpeedingReportPdfContent,
   formatMorningReportText,
   runCartrackMorningJob,
   sendCartrackMorningEmail,
@@ -258,21 +257,37 @@ export default async function cartrackRoutes(app) {
     if (!isDate(date)) return reply.code(400).send({ error: "date must be YYYY-MM-DD" });
     try {
       const summary = buildMorningSpeedingReport(date);
-      const { columns, rows } = buildSpeedingReportPdfContent(summary);
       const pdf = await buildPdfBuffer((doc) => {
-        sectionTitle(doc, `GPS fleet speeding report — ${date}`);
+        sectionTitle(doc, `Cartrack speeding report — ${date}`);
         doc.fontSize(10).fillColor("#334155");
+        doc.text(`Alert threshold: ${summary.speed_alert_kmh ?? 100} km/h (IRONLOG live GPS — Cartrack API events are typically 160+ km/h only)`);
         doc.text(`Total events: ${summary.total_speeding_events} · Vehicles: ${summary.vehicles_with_speeding}`);
         doc.moveDown(0.5);
+        const columns = [
+          { key: "time", label: "Time", width: 72 },
+          { key: "vehicle", label: "Vehicle", width: 56 },
+          { key: "speed", label: "Speed", width: 36 },
+          { key: "limit", label: "Limit", width: 36 },
+          { key: "driver", label: "Driver", width: 56 },
+          { key: "type", label: "Type", width: 72 },
+        ];
+        const rows = (summary.events || []).slice(0, 80).map((e) => ({
+          time: String(e.event_time || "").slice(0, 16),
+          vehicle: e.asset_code || e.registration || "",
+          speed: e.speed_kmh != null ? `${Number(e.speed_kmh).toFixed(0)}` : "—",
+          limit: e.speed_limit_kmh != null ? `${Number(e.speed_limit_kmh).toFixed(0)}` : "—",
+          driver: e.driver_name || "",
+          type: e.event_type_label || e.event_type || "",
+        }));
         if (!rows.length) {
           doc.fontSize(10).fillColor("#64748b");
           doc.text("No speeding events recorded for this date.");
           return;
         }
         table(doc, columns, rows, { fontSize: 8, compact: true });
-      }, { title: "GPS Fleet Speeding Report", layout: "landscape" });
+      }, { title: "Cartrack Speeding Report", layout: "landscape" });
       reply.header("Content-Type", "application/pdf");
-      reply.header("Content-Disposition", `inline; filename="gps_speeding_${date}.pdf"`);
+      reply.header("Content-Disposition", `inline; filename="cartrack_speeding_${date}.pdf"`);
       return reply.send(pdf);
     } catch (err) {
       req.log.error(err);
