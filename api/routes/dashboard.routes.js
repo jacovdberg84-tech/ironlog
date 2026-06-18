@@ -2572,16 +2572,20 @@ export default async function dashboardRoutes(app) {
   });
 
   function fuelPreviousPeriodRange(start, end) {
-    const s = new Date(`${start}T00:00:00`);
-    const e = new Date(`${end}T00:00:00`);
-    const days = Math.max(1, Math.round((e - s) / 86400000) + 1);
-    const prevEnd = new Date(s);
-    prevEnd.setDate(prevEnd.getDate() - 1);
-    const prevStart = new Date(prevEnd);
-    prevStart.setDate(prevStart.getDate() - (days - 1));
+    const [sy, sm, sd] = start.split("-").map(Number);
+    const [ey, em, ed] = end.split("-").map(Number);
+    const startTs = Date.UTC(sy, sm - 1, sd);
+    const endTs = Date.UTC(ey, em - 1, ed);
+    const days = Math.max(1, Math.round((endTs - startTs) / 86400000) + 1);
+    const prevEndTs = startTs - 86400000;
+    const prevStartTs = prevEndTs - (days - 1) * 86400000;
+    const fmt = (ts) => {
+      const d = new Date(ts);
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+    };
     return {
-      start: prevStart.toISOString().slice(0, 10),
-      end: prevEnd.toISOString().slice(0, 10),
+      start: fmt(prevStartTs),
+      end: fmt(prevEndTs),
       days,
     };
   }
@@ -2612,15 +2616,18 @@ export default async function dashboardRoutes(app) {
     `).all(...params);
     const byDate = new Map((rows || []).map((r) => [String(r.log_date || ""), Number(r.liters || 0)]));
     const series = [];
-    const cur = new Date(`${start}T00:00:00`);
-    const endD = new Date(`${end}T00:00:00`);
+    const [sy, sm, sd] = start.split("-").map(Number);
+    const [ey, em, ed] = end.split("-").map(Number);
+    let ts = Date.UTC(sy, sm - 1, sd);
+    const endTs = Date.UTC(ey, em - 1, ed);
     let dayIndex = 0;
-    while (cur <= endD) {
-      const date = cur.toISOString().slice(0, 10);
+    while (ts <= endTs) {
+      const d = new Date(ts);
+      const date = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
       const liters = byDate.get(date) || 0;
       series.push({ day_index: dayIndex, date, liters: Number(liters.toFixed(2)) });
       dayIndex += 1;
-      cur.setDate(cur.getDate() + 1);
+      ts += 86400000;
     }
     const total_liters = Number(series.reduce((s, r) => s + Number(r.liters || 0), 0).toFixed(2));
     return { start, end, total_liters, series };

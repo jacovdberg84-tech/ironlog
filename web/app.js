@@ -7323,7 +7323,8 @@ function fuelSvgPeriodCompareLines(currentSeries, previousSeries, currentRange, 
     : "Previous";
 
   return `
-    <svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img" aria-label="Fuel usage current versus previous period">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img" aria-label="Fuel usage current versus previous period" preserveAspectRatio="xMidYMid meet">
+      <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff" rx="8"/>
       <text x="${left}" y="14" font-size="11" fill="#475569">${escapeHtml(curLabel)} vs ${escapeHtml(prevLabel)} (liters per day)</text>
       ${yTicks}
       <line x1="${left}" y1="${top + plotH}" x2="${width - right}" y2="${top + plotH}" stroke="#cbd5e1" stroke-width="1"/>
@@ -7333,6 +7334,37 @@ function fuelSvgPeriodCompareLines(currentSeries, previousSeries, currentRange, 
       ${xLabels}
     </svg>
   `;
+}
+
+function mountFuelCompareSvg(host, svgMarkup) {
+  if (!host) return false;
+  const markup = String(svgMarkup || "").trim();
+  if (!markup) return false;
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(markup, "image/svg+xml");
+    if (doc.querySelector("parsererror")) throw new Error("svg parse error");
+    const svg = doc.documentElement;
+    if (!svg || String(svg.tagName || "").toLowerCase() !== "svg") throw new Error("svg root missing");
+    const node = host.ownerDocument.importNode(svg, true);
+    node.setAttribute("width", "100%");
+    node.setAttribute("height", "260");
+    node.style.display = "block";
+    node.style.width = "100%";
+    node.style.height = "260px";
+    node.style.minHeight = "220px";
+    host.replaceChildren(node);
+    return true;
+  } catch {
+    host.innerHTML = markup;
+    const svg = host.querySelector("svg");
+    if (svg) {
+      svg.style.display = "block";
+      svg.style.width = "100%";
+      svg.style.height = "260px";
+    }
+    return Boolean(svg);
+  }
 }
 
 function renderFuelPeriodCompareChart(data) {
@@ -7367,12 +7399,17 @@ function renderFuelPeriodCompareChart(data) {
 
   if (wrap) wrap.style.display = "";
   host.className = "fuel-period-compare-chart";
-  host.innerHTML = fuelSvgPeriodCompareLines(
+  const svgMarkup = fuelSvgPeriodCompareLines(
     current.series,
     previous.series,
     { start: current.start, end: current.end },
     { start: previous.start, end: previous.end },
   );
+  const mounted = mountFuelCompareSvg(host, svgMarkup);
+  if (!mounted) {
+    host.className = "fuel-period-compare-chart muted";
+    host.textContent = "Chart could not be rendered for this period.";
+  }
 }
 
 async function loadFuelBenchmark() {
