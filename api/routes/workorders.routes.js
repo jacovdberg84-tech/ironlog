@@ -183,6 +183,8 @@ export default async function workOrderRoutes(app) {
   ensureColumn("work_orders", "location_code", "location_code TEXT");
   ensureColumn("work_orders", "escalated_at", "escalated_at TEXT");
   ensureColumn("work_orders", "site_code", "site_code TEXT DEFAULT 'main'");
+  ensureColumn("work_orders", "repair_progress", "repair_progress TEXT");
+  ensureColumn("work_orders", "repair_progress_at", "repair_progress_at TEXT");
   db.prepare(`
     CREATE TABLE IF NOT EXISTS approval_requests (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -426,6 +428,8 @@ export default async function workOrderRoutes(app) {
         w.assigned_artisan_name,
         w.assigned_at,
         w.started_at,
+        w.repair_progress,
+        w.repair_progress_at,
         w.completed_at,
         w.artisan_name,
         w.supervisor_name,
@@ -1159,6 +1163,61 @@ export default async function workOrderRoutes(app) {
     });
 
     return reply.send({ ok: true, id, from: currentStatus, status: nextStatus });
+  });
+
+  // POST /api/workorders/:id/progress  { repair_progress } — shown on daily PDF for active jobs
+  app.post("/:id/progress", async (req, reply) => {
+    const role = getRole(req);
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+
+    const wo = db.prepare(`
+      SELECT id, status, assigned_artisan_name
+      FROM work_orders
+      WHERE id = ?
+    `).get(id);
+    if (!wo) return reply.code(404).send({ error: "work order not found" });
+
+    const status = String(wo.status || "").toLowerCase();
+    if (!["open", "assigned", "in_progress"].includes(status)) {
+      return reply.code(409).send({ error: "repair progress can only be updated on open, assigned, or in-progress work orders" });
+    }
+
+    const userName = String(req.headers["x-user-name"] || "").trim();
+    const isSupervisor = ["admin", "supervisor"].includes(role);
+    const isAssignedTech = role === "artisan" && technicianMatchesUser(wo.assigned_artisan_name, userName);
+    if (!isSupervisor && !isAssignedTech) {
+      return reply.code(403).send({ error: "only a supervisor or assigned technician can update repair progress" });
+    }
+
+    const repair_progress =
+      req.body?.repair_progress != null ? String(req.body.repair_progress).trim() : "";
+    db.prepare(`
+      UPDATE work_orders
+      SET
+        repair_progress = ?,
+        repair_progress_at = datetime('now')
+      WHERE id = ?
+    `).run(repair_progress || null, id);
+
+    const row = db.prepare(`
+      SELECT repair_progress, repair_progress_at FROM work_orders WHERE id = ?
+    `).get(id);
+
+    writeAudit(db, req, {
+      module: "workorders",
+      action: "repair_progress_update",
+      entity_type: "work_order",
+      entity_id: id,
+      payload: { repair_progress: repair_progress || null },
+    });
+
+    return reply.send({
+      ok: true,
+      id,
+      repair_progress: row?.repair_progress || null,
+      repair_progress_at: row?.repair_progress_at || null,
+    });
   });
 
   // Work order detail (includes linked breakdown if source=breakdown)

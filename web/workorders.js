@@ -112,10 +112,10 @@ function rolePermissionText(role) {
     return "Admin: full control (status transitions, approvals, close, issue parts).";
   }
   if (r === "supervisor") {
-    return "Supervisor: assign a technician, start the job, mark complete, approve, then close work orders.";
+    return "Supervisor: assign a technician, update repair progress, start/complete jobs, approve, then close work orders.";
   }
   if (r === "artisan") {
-    return "Technician: start assigned jobs, complete with notes, then wait for supervisor approval.";
+    return "Technician: start assigned jobs, save repair progress (daily PDF), complete with notes, then wait for supervisor approval.";
   }
   if (r === "stores") {
     return "Stores: issue/allocate parts only. Cannot change work order statuses or close.";
@@ -160,6 +160,47 @@ function woPriority(status, openedAt) {
   if (s === "in_progress" && age > 48) return "P2";
   if ((s === "open" || s === "assigned") && age > 48) return "P2";
   return "P3";
+}
+
+function escapeHtml(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function canEditRepairProgress(wo) {
+  const s = String(wo?.status || "").toLowerCase();
+  if (!["open", "assigned", "in_progress"].includes(s)) return false;
+  const role = getSessionRole();
+  if (isSupervisorRole(role)) return true;
+  return isArtisanRole(role) && isAssignedToMe(wo) && s !== "open";
+}
+
+function renderRepairProgressPanel(wo) {
+  const s = String(wo?.status || "").toLowerCase();
+  if (!["open", "assigned", "in_progress"].includes(s)) return "";
+  const canEdit = canEditRepairProgress(wo);
+  const progress = String(wo?.repair_progress || "").trim();
+  if (!canEdit && !progress) return "";
+  const updated = wo?.repair_progress_at ? `Last updated: ${wo.repair_progress_at}` : "";
+  return `
+    <div class="item" style="margin-top:12px;">
+      <h4 style="margin:0 0 8px 0;">Repair progress <span class="muted" style="font-weight:normal;">(shows on daily PDF)</span></h4>
+      ${
+        canEdit
+          ? `<textarea id="woRepairProgressInput" rows="3" style="width:100%;max-width:640px;padding:10px;border-radius:8px;border:1px solid #2b3f63;background:#0b1628;color:#e8eefc;" placeholder="e.g. Removed pump, waiting on seal kit — ETA tomorrow">${escapeHtml(progress)}</textarea>
+      <div class="row" style="gap:8px;align-items:center;margin-top:8px;">
+        <button type="button" data-wo-save-progress="${wo.id}">Save progress</button>
+        <span class="muted small" id="woRepairProgressMeta">${escapeHtml(updated)}</span>
+        <span id="woRepairProgressMsg"></span>
+      </div>`
+          : `<div>${escapeHtml(progress) || "—"}</div>
+      ${updated ? `<div class="muted small">${escapeHtml(updated)}</div>` : ""}`
+      }
+    </div>
+  `;
 }
 
 function workflowActionButtons(wo) {
@@ -210,6 +251,7 @@ function workOrderCard(wo) {
       <div><strong>Age:</strong> ${ageHours}h <span class="pill ${pClass}">${p}</span></div>
       <div><strong>Closed:</strong> ${wo.closed_at || "-"}</div>
       <div><strong>Technician:</strong> ${wo.assigned_artisan_name || wo.artisan_name || "Unassigned"}</div>
+      ${wo.repair_progress ? `<div><strong>Progress:</strong> ${escapeHtml(String(wo.repair_progress).slice(0, 160))}${String(wo.repair_progress).length > 160 ? "…" : ""}</div>` : ""}
       ${workflowStepsHtml(wo)}
       <div class="${statusClass(wo.status)}">${String(wo.status || "unknown").toUpperCase()}</div>
       ${workflowActionButtons(wo)}
@@ -453,6 +495,7 @@ function renderDetail(payload) {
           <div><strong>Completed:</strong> ${wo.completed_at || "-"}</div>
           <div><strong>Technician sign-off:</strong> ${wo.artisan_name || "-"}</div>
           <div><strong>Supervisor sign-off:</strong> ${wo.supervisor_name || "-"}</div>
+          ${renderRepairProgressPanel(wo)}
           <div><strong>Opened:</strong> ${wo.opened_at || "-"}</div>
           <div><strong>Closed:</strong> ${wo.closed_at || "-"}</div>
           ${workflowStepsHtml(wo)}
@@ -965,6 +1008,38 @@ async function approveWorkOrder(id) {
   await setWorkOrderStatus(woId, "approved", { supervisor_name });
 }
 
+async function saveRepairProgress(woId) {
+  const id = Number(woId || 0);
+  if (!id) return;
+  const input = document.getElementById("woRepairProgressInput");
+  const msg = document.getElementById("woRepairProgressMsg");
+  const meta = document.getElementById("woRepairProgressMeta");
+  const repair_progress = String(input?.value || "").trim();
+  if (msg) {
+    msg.className = "";
+    msg.textContent = "Saving...";
+  }
+  try {
+    const res = await fetchJson(`${API}/workorders/${id}/progress`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ repair_progress }),
+    });
+    if (meta) meta.textContent = res.repair_progress_at ? `Last updated: ${res.repair_progress_at}` : "";
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = "Progress saved — will appear on the daily PDF.";
+    }
+    await fetchWorkOrders();
+    if (currentDetailWorkOrderId === id) await loadWorkOrderDetail(id);
+  } catch (err) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = err.message || String(err);
+    }
+  }
+}
+
 async function setWorkOrderStatus(id, status, extraBody = {}) {
   const woId = Number(id || 0);
   const next = String(status || "").trim().toLowerCase();
@@ -1179,6 +1254,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const setStatus = target.getAttribute("data-set-status");
       const closeId = target.getAttribute("data-close-id");
       const closeSource = target.getAttribute("data-close-source");
+      const saveProgressId = target.getAttribute("data-wo-save-progress");
       if (issueId) {
         currentDetailWorkOrderId = Number(issueId);
         issueToWorkOrder();
@@ -1201,6 +1277,7 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
       if (closeId) openCloseModalForRow(closeId, closeSource);
+      if (saveProgressId) saveRepairProgress(saveProgressId).catch(() => {});
     });
     detailEl.addEventListener("input", (evt) => {
       const target = evt.target;

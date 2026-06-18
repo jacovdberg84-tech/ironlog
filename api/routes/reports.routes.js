@@ -1108,6 +1108,8 @@ export default async function reportsRoutes(app) {
   ensureColumn("fuel_logs", "hours_run", "hours_run REAL");
   ensureColumn("work_orders", "labor_hours", "labor_hours REAL DEFAULT 0");
   ensureColumn("work_orders", "labor_rate_per_hour", "labor_rate_per_hour REAL");
+  ensureColumn("work_orders", "repair_progress", "repair_progress TEXT");
+  ensureColumn("work_orders", "repair_progress_at", "repair_progress_at TEXT");
 
   db.prepare(`
     CREATE TABLE IF NOT EXISTS cost_settings (
@@ -8839,7 +8841,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    const reportRevision = "daily-pdf-no-cost-r2026-04-04b";
+    const reportRevision = "daily-pdf-repair-progress-r2026-06-17";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -9040,6 +9042,8 @@ export default async function reportsRoutes(app) {
         a.asset_code,
         w.source,
         w.status,
+        w.assigned_artisan_name,
+        w.repair_progress,
         CASE
           WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(b.start_at), ''), NULLIF(TRIM(b.breakdown_date), ''), w.opened_at)
           ELSE w.opened_at
@@ -9179,18 +9183,20 @@ export default async function reportsRoutes(app) {
         table(
           doc,
           [
-            { key: "wo", label: "WO#", width: 0.12, align: "right" },
-            { key: "asset", label: "Asset", width: 0.14 },
-            { key: "source", label: "Source", width: 0.20 },
-            { key: "status", label: "Status", width: 0.14 },
-            { key: "opened", label: "Opened", width: 0.40 },
+            { key: "wo", label: "WO#", width: 0.08, align: "right" },
+            { key: "asset", label: "Asset", width: 0.10 },
+            { key: "source", label: "Source", width: 0.12 },
+            { key: "status", label: "Status", width: 0.10 },
+            { key: "tech", label: "Technician", width: 0.14 },
+            { key: "progress", label: "Repair progress", width: 0.46 },
           ],
           openWOsPdf.map(r => ({
             wo: String(r.id),
             asset: r.asset_code,
-            source: compactCell(r.source ?? "", 24),
-            status: compactCell(r.status ?? "", 24),
-            opened: r.opened_at ?? "",
+            source: compactCell(r.source ?? "", 20),
+            status: compactCell(String(r.status ?? "").replace(/_/g, " "), 16),
+            tech: compactCell(r.assigned_artisan_name ?? "", 28),
+            progress: compactCell(r.repair_progress ?? "", 320),
           }))
         );
 
