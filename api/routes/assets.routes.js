@@ -714,7 +714,7 @@ export default async function assetRoutes(app) {
       ORDER BY interval_hours ASC, id ASC
     `).all(asset.id);
     const nextResolved = planRows.length
-      ? resolveNextServiceForAssetPlans(planRows, currentHours)
+      ? resolveNextServiceForAssetPlans(planRows, currentHours, asset.asset_code)
       : null;
     const nextService = nextResolved
       ? {

@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { notifyWorkOrderAssigned } from "../utils/pushNotify.js";
+import { snapLastServiceHours } from "../utils/serviceSchedule.js";
 
 export default async function workOrderRoutes(app) {
   ensureAuditTable(db);
@@ -1793,7 +1794,17 @@ export default async function workOrderRoutes(app) {
 
       if (isServiceWO && planId > 0) {
         const currentHours = getAssetCurrentHours(Number(wo.asset_id || 0));
-        const safeHours = Number.isFinite(currentHours) ? Number(currentHours.toFixed(2)) : 0;
+        const planRow = db.prepare(`
+          SELECT mp.interval_hours, a.asset_code
+          FROM maintenance_plans mp
+          JOIN assets a ON a.id = mp.asset_id
+          WHERE mp.id = ?
+        `).get(planId);
+        const safeHours = snapLastServiceHours(
+          Number.isFinite(currentHours) ? currentHours : 0,
+          Number(planRow?.interval_hours || 0),
+          planRow?.asset_code,
+        );
 
         updatePlanLastServiceHours.run(safeHours, planId);
         updateAllAssetPlanLastServiceHours.run(safeHours, Number(wo.asset_id || 0));

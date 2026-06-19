@@ -313,7 +313,7 @@ function planCard(p) {
       <div><strong>${p.asset_code}</strong> - ${p.asset_name}</div>
       <div><strong>Service:</strong> ${p.service_name}</div>
       <div><strong>Interval:</strong> ${Number(p.interval_hours || 0).toFixed(1)} hrs</div>
-      <div><strong>Last Service:</strong> ${Number(p.last_service_hours || 0).toFixed(1)} hrs</div>
+      <div><strong>Last Service:</strong> ${Number(p.last_service_hours_snapped ?? p.last_service_hours ?? 0).toFixed(1)} hrs</div>
       ${p.next_due_hours != null ? `<div><strong>Next due:</strong> ${Number(p.next_due_hours || 0).toFixed(1)} hrs (${Number(p.remaining_hours ?? 0).toFixed(1)} remaining)</div>` : ""}
       ${nextLabel}
       <div><strong>Active:</strong> ${Number(p.active || 0) ? "Yes" : "No"}</div>
@@ -372,19 +372,22 @@ function histRow(r) {
   };
   const src = sourceMap[String(r.current_hours_source || "").trim()] || "Unknown";
   const assetCode = String(r.asset_code || "").trim();
+  const assetId = Number(r.asset_id || 0);
+  const lastSvcHrs = r.last_service_hours != null ? fmt1(r.last_service_hours) : null;
   const lastSrc = String(r.last_service_source || "").trim();
   const srcLabel = lastSrc === "backfill" ? " <span class='pill orange' style='font-size:0.65rem;'>record</span>" : lastSrc === "work_order" ? " <span class='pill blue' style='font-size:0.65rem;'>WO</span>" : "";
+  const nextDue = r.next_due_hours != null ? `<br><small class="muted">Due @ ${fmt1(r.next_due_hours)}h</small>` : "";
   return `
     <tr class="${hrsToNext <= 0 ? "downRow" : ""}">
-      <td><b>${escBackfill(eq)}</b></td>
-      <td>${escBackfill(r.service_name || "-")}</td>
+      <td><b>${escBackfill(eq)}</b>${lastSvcHrs != null ? `<br><small class="muted">Last svc ${lastSvcHrs}h</small>` : ""}</td>
+      <td>${escBackfill(r.service_name || "-")}${nextDue}</td>
       <td>${escBackfill(last)}${srcLabel}</td>
       <td style="text-align:right;">${fmt1(r.current_hours)}<br><small class="muted">(${escBackfill(src)})</small></td>
       <td style="text-align:right;"><span class="${warn}">${fmt1(r.remaining_hours)}</span></td>
       <td style="text-align:right;">${fmt1(r.avg_daily_hours)}</td>
       <td>
         ${escBackfill(est)}
-        ${assetCode ? `<div style="margin-top:6px;"><button type="button" data-hist-view-records="${assetCode.replace(/"/g, "")}">View records</button></div>` : ""}
+        ${assetCode ? `<div style="margin-top:6px;"><button type="button" data-hist-view-records="${assetCode.replace(/"/g, "")}" data-hist-asset-id="${assetId}">View records</button></div>` : ""}
       </td>
     </tr>
   `;
@@ -397,21 +400,35 @@ function filterHistoryRows(rows) {
 }
 
 function openServiceRecordsForAsset(assetCode, assetId = 0) {
-  scrollToSection("service-history");
   const code = String(assetCode || "").trim().toUpperCase();
-  const listSel = document.getElementById("backfillListAsset");
-  if (listSel) {
-    if (assetId > 0) {
-      listSel.value = String(assetId);
-    } else {
-      const opt = Array.from(listSel.options).find(
-        (o) => String(o.textContent || "").toUpperCase().includes(code)
-      );
-      if (opt) listSel.value = opt.value;
-    }
+  window.__serviceRecordsPendingFilter = {
+    code,
+    assetId: Number(assetId || 0),
+  };
+  applyServiceRecordsAssetFilter();
+  scrollToSection("service-history");
+  const card = document.getElementById("serviceRecordsCard");
+  if (card) {
+    card.setAttribute("data-collapsed", "false");
+    card.querySelector(".maintenance-card-body")?.removeAttribute("hidden");
   }
-  document.getElementById("serviceRecordsCard")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  loadBackfillHistory().catch(() => {});
+  setTimeout(() => loadBackfillHistory().catch(() => {}), 80);
+}
+
+function applyServiceRecordsAssetFilter() {
+  const pending = window.__serviceRecordsPendingFilter;
+  if (!pending) return;
+  const listSel = document.getElementById("backfillListAsset");
+  if (!listSel) return;
+  if (pending.assetId > 0) {
+    listSel.value = String(pending.assetId);
+    return;
+  }
+  const code = String(pending.code || "").trim().toUpperCase();
+  const opt = Array.from(listSel.options).find(
+    (o) => String(o.getAttribute("data-asset-code") || "").toUpperCase() === code
+  );
+  if (opt) listSel.value = opt.value;
 }
 
 function hideBackfillEditPanel() {
@@ -448,17 +465,21 @@ function escBackfill(s) {
 
 function backfillRow(r) {
   const hours = r.service_hours == null ? "-" : Number(r.service_hours).toFixed(1);
+  const source = String(r.record_source || "backfill");
+  const isWo = source === "work_order";
+  const srcBadge = isWo ? ` <span class="pill blue" style="font-size:0.65rem;">WO #${Number(r.id || 0)}</span>` : "";
+  const actions = isWo
+    ? `<span class="muted">Closed work order</span>`
+    : `<button data-backfill-action="edit">Edit</button>
+        <button data-backfill-action="delete">Delete</button>`;
   return `
-    <tr data-backfill-id="${Number(r.id || 0)}">
+    <tr data-backfill-id="${Number(r.id || 0)}" data-record-source="${escBackfill(source)}">
       <td>${escBackfill(r.asset_code || "-")} - ${escBackfill(r.asset_name || "-")}</td>
-      <td>${escBackfill(r.service_name || "-")}</td>
+      <td>${escBackfill(r.service_name || "-")}${srcBadge}</td>
       <td>${escBackfill(r.service_date || "-")}</td>
       <td style="text-align:right;">${hours}</td>
       <td>${escBackfill(r.notes || "")}</td>
-      <td>
-        <button data-backfill-action="edit">Edit</button>
-        <button data-backfill-action="delete">Delete</button>
-      </td>
+      <td>${actions}</td>
     </tr>
   `;
 }
@@ -1797,11 +1818,12 @@ async function loadBackfillHistory() {
   const body = document.getElementById("backfillBody");
   const meta = document.getElementById("backfillListMeta");
   if (!body) return;
+  applyServiceRecordsAssetFilter();
   body.innerHTML = `<tr><td colspan="6" class="muted">Loading...</td></tr>`;
   try {
     const assetId = Number(document.getElementById("backfillListAsset")?.value || 0);
-    const limit = assetId > 0 ? 500 : 200;
-    const q = new URLSearchParams({ limit: String(limit) });
+    const limit = 200;
+    const q = new URLSearchParams({ limit: String(limit), include_work_orders: "1" });
     if (assetId > 0) q.set("asset_id", String(assetId));
     const res = await fetch(`${API}/maintenance/history/backfill?${q.toString()}`);
     const data = await res.json();
@@ -1852,7 +1874,7 @@ function populateMaintAssetSelects(validAssets) {
   const filterOptionsHtml = `
     <option value="">All assets</option>
     ${validAssets.map(a => `
-      <option value="${a.id}">
+      <option value="${a.id}" data-asset-code="${escBackfill(a.asset_code || "")}">
         ${a.asset_code || "NO-CODE"} - ${a.asset_name || "Unnamed Asset"}
       </option>
     `).join("")}
@@ -7296,7 +7318,10 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("histBody")?.addEventListener("click", (evt) => {
     const viewBtn = evt.target?.closest?.("button[data-hist-view-records]");
     if (!viewBtn) return;
-    openServiceRecordsForAsset(String(viewBtn.getAttribute("data-hist-view-records") || ""));
+    openServiceRecordsForAsset(
+      String(viewBtn.getAttribute("data-hist-view-records") || ""),
+      Number(viewBtn.getAttribute("data-hist-asset-id") || 0),
+    );
   });
   document.getElementById("loadAssetKpiBtn")?.addEventListener("click", () => loadAssetKpiWeekly());
   document.getElementById("loadReliabilityBtn")?.addEventListener("click", () => loadReliabilityMetrics());

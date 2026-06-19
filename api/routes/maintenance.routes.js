@@ -24,6 +24,9 @@ import {
   hasRotatingSchedule,
   resolveNextServiceForAssetPlans,
   groupActivePlansByAsset,
+  snapLastServiceHours,
+  planIntervalHours,
+  resolveLegacyPlanDue,
 } from "../utils/serviceSchedule.js";
 import {
   buildUndercarriageComponentSchema,
@@ -1844,7 +1847,6 @@ export default async function maintenanceRoutes(app) {
       const asset_id = Number(req.body?.asset_id || 0);
       const service_name = String(req.body?.service_name || "").trim();
       const interval_hours = Number(req.body?.interval_hours || 0);
-      const last_service_hours = Number(req.body?.last_service_hours || 0);
       const active = Number(req.body?.active ?? 1) ? 1 : 0;
 
       if (!asset_id || !service_name || interval_hours <= 0) {
@@ -1855,7 +1857,7 @@ export default async function maintenanceRoutes(app) {
       }
 
       const asset = db.prepare(`
-        SELECT id
+        SELECT id, asset_code
         FROM assets
         WHERE id = ?
       `).get(asset_id);
@@ -1866,6 +1868,12 @@ export default async function maintenanceRoutes(app) {
           error: "Asset not found"
         });
       }
+
+      const last_service_hours = snapLastServiceHours(
+        Number(req.body?.last_service_hours || 0),
+        interval_hours,
+        asset.asset_code,
+      );
 
       const result = db.prepare(`
         INSERT INTO maintenance_plans (
@@ -1944,7 +1952,7 @@ export default async function maintenanceRoutes(app) {
           ? Number(req.body.interval_hours)
           : Number(existing.interval_hours || 0);
 
-      const last_service_hours =
+      const last_service_hours_raw =
         req.body?.last_service_hours != null
           ? Number(req.body.last_service_hours)
           : Number(existing.last_service_hours || 0);
@@ -1962,7 +1970,7 @@ export default async function maintenanceRoutes(app) {
       }
 
       const asset = db.prepare(`
-        SELECT id
+        SELECT id, asset_code
         FROM assets
         WHERE id = ?
       `).get(asset_id);
@@ -1973,6 +1981,12 @@ export default async function maintenanceRoutes(app) {
           error: "Asset not found"
         });
       }
+
+      const last_service_hours = snapLastServiceHours(
+        last_service_hours_raw,
+        interval_hours,
+        asset.asset_code,
+      );
 
       db.prepare(`
         UPDATE maintenance_plans
@@ -2126,13 +2140,27 @@ export default async function maintenanceRoutes(app) {
 
       const currentInfo = getAssetCurrentHoursInfo(Number(plan.asset_id || 0));
       const liveHours = Number(currentInfo.hours || 0);
-      const safeHours = Number.isFinite(liveHours) ? Number(liveHours.toFixed(2)) : 0;
+      const planMeta = db.prepare(`
+        SELECT interval_hours FROM maintenance_plans WHERE id = ?
+      `).get(Number(plan.id));
+      const safeHours = snapLastServiceHours(
+        Number.isFinite(liveHours) ? liveHours : 0,
+        Number(planMeta?.interval_hours || 0),
+        plan.asset_code,
+      );
 
       db.prepare(`
         UPDATE maintenance_plans
         SET last_service_hours = ?
         WHERE id = ?
       `).run(safeHours, Number(plan.id));
+
+      db.prepare(`
+        UPDATE maintenance_plans
+        SET last_service_hours = ?
+        WHERE asset_id = ?
+          AND active = 1
+      `).run(safeHours, Number(plan.asset_id || 0));
 
       return reply.send({
         ok: true,
@@ -2191,7 +2219,7 @@ export default async function maintenanceRoutes(app) {
         ORDER BY interval_hours ASC, id ASC
       `).all(assetId);
       const next_service = assetPlans.length
-        ? resolveNextServiceForAssetPlans(assetPlans, current_hours)
+        ? resolveNextServiceForAssetPlans(assetPlans, current_hours, asset.asset_code)
         : null;
 
       return reply.send({
@@ -2402,7 +2430,11 @@ export default async function maintenanceRoutes(app) {
         const rotating = hasRotatingSchedule(assetPlans);
 
         if (rotating) {
-          const resolved = resolveNextServiceForAssetPlans(assetPlans, current);
+          const resolved = resolveNextServiceForAssetPlans(
+            assetPlans,
+            current,
+            String(sample.asset_code || ""),
+          );
           const lastWo = getLastServicedAnyOnAsset.get(assetId);
           const lastBackfill = db.prepare(`
             SELECT
@@ -2442,13 +2474,14 @@ export default async function maintenanceRoutes(app) {
             estimated_service_date: estDate,
             schedule_mode: "rotating",
             next_due_hours: resolved?.next_due_hours ?? null,
+            last_service_hours: resolved?.last_service_hours ?? null,
           });
           continue;
         }
 
         for (const p of assetPlans) {
-          const next_due = Number(p.last_service_hours || 0) + Number(p.interval_hours || 0);
-          const remaining = next_due - current;
+          const resolved = resolveLegacyPlanDue(p, current, String(p.asset_code || ""));
+          const remaining = resolved.remaining_hours;
 
           const lastWo = getLastServiced.get(Number(p.plan_id || 0));
           const lastBackfill = getLastBackfillServiced.get(assetId, String(p.service_name || ""));
@@ -2478,7 +2511,9 @@ export default async function maintenanceRoutes(app) {
             remaining_hours: Number(remaining.toFixed(2)),
             avg_daily_hours: Number(avgDaily.toFixed(2)),
             estimated_service_date: estDate,
-            schedule_mode: "legacy",
+            schedule_mode: "grid",
+            next_due_hours: resolved.next_due_hours,
+            last_service_hours: resolved.last_service_hours,
           });
         }
       }
@@ -4302,17 +4337,31 @@ export default async function maintenanceRoutes(app) {
       if (!asset) return reply.code(404).send({ ok: false, error: "asset not found" });
 
       let planId = planIdIn > 0 ? planIdIn : null;
+      let planInterval = 0;
       if (!planId) {
         const matchedPlan = db.prepare(`
-          SELECT id
+          SELECT id, interval_hours
           FROM maintenance_plans
           WHERE asset_id = ?
             AND UPPER(TRIM(service_name)) = UPPER(TRIM(?))
           ORDER BY active DESC, id DESC
           LIMIT 1
         `).get(assetId, serviceName);
-        if (matchedPlan?.id) planId = Number(matchedPlan.id);
+        if (matchedPlan?.id) {
+          planId = Number(matchedPlan.id);
+          planInterval = Number(matchedPlan.interval_hours || 0);
+        }
+      } else {
+        const matchedPlan = db.prepare(`
+          SELECT interval_hours FROM maintenance_plans WHERE id = ?
+        `).get(planId);
+        planInterval = Number(matchedPlan?.interval_hours || 0);
       }
+      if (!planInterval) planInterval = planIntervalHours({ service_name: serviceName, interval_hours: 0 });
+
+      const snappedServiceHours = serviceHours != null
+        ? snapLastServiceHours(serviceHours, planInterval, asset.asset_code)
+        : null;
 
       const insert = db.prepare(`
         INSERT INTO maintenance_service_history (
@@ -4331,12 +4380,16 @@ export default async function maintenanceRoutes(app) {
           planId,
           serviceName,
           serviceDate,
-          serviceHours,
+          snappedServiceHours,
           notes,
           String(req.headers?.["x-user-name"] || "system")
         );
-        if (updatePlanLastHours && planId && serviceHours != null) {
-          updatePlan.run(Number(serviceHours), Number(planId));
+        if (updatePlanLastHours && planId && snappedServiceHours != null) {
+          updatePlan.run(snappedServiceHours, Number(planId));
+          db.prepare(`
+            UPDATE maintenance_plans SET last_service_hours = ?
+            WHERE asset_id = ? AND active = 1
+          `).run(snappedServiceHours, assetId);
         }
         return Number(r.lastInsertRowid || 0);
       });
@@ -4352,7 +4405,7 @@ export default async function maintenanceRoutes(app) {
           plan_id: planId || null,
           service_name: serviceName,
           service_date: serviceDate,
-          service_hours: serviceHours,
+          service_hours: snappedServiceHours,
         },
       });
       return reply.send({
@@ -4362,9 +4415,9 @@ export default async function maintenanceRoutes(app) {
         asset_code: asset.asset_code,
         service_name: serviceName,
         service_date: serviceDate,
-        service_hours: serviceHours,
+        service_hours: snappedServiceHours,
         plan_id: planId || null,
-        plan_last_hours_updated: Boolean(updatePlanLastHours && planId && serviceHours != null),
+        plan_last_hours_updated: Boolean(updatePlanLastHours && planId && snappedServiceHours != null),
       });
     } catch (e) {
       req.log.error(e);
@@ -4372,13 +4425,21 @@ export default async function maintenanceRoutes(app) {
     }
   });
 
-  // GET /api/maintenance/history/backfill?asset_id=&limit=20
+  // GET /api/maintenance/history/backfill?asset_id=&asset_code=&limit=200&include_work_orders=1
   app.get("/history/backfill", async (req, reply) => {
     try {
-      const assetId = Number(req.query?.asset_id || 0);
-      const limit = Math.max(1, Math.min(200, Number(req.query?.limit || 20)));
+      let assetId = Number(req.query?.asset_id || 0);
+      const assetCode = String(req.query?.asset_code || "").trim();
+      if (!assetId && assetCode) {
+        const a = db.prepare(`
+          SELECT id FROM assets WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?)) LIMIT 1
+        `).get(assetCode);
+        assetId = Number(a?.id || 0);
+      }
+      const limit = Math.max(1, Math.min(500, Number(req.query?.limit || 200)));
+      const includeWorkOrders = String(req.query?.include_work_orders || "1").trim() !== "0";
       const where = assetId > 0 ? "WHERE h.asset_id = ?" : "";
-      const rows = db.prepare(`
+      const backfillRows = db.prepare(`
         SELECT
           h.id,
           h.asset_id,
@@ -4390,14 +4451,52 @@ export default async function maintenanceRoutes(app) {
           h.created_by,
           h.created_at,
           a.asset_code,
-          a.asset_name
+          a.asset_name,
+          'backfill' AS record_source
         FROM maintenance_service_history h
         JOIN assets a ON a.id = h.asset_id
         ${where}
         ORDER BY h.service_date DESC, h.id DESC
         LIMIT ?
       `).all(...(assetId > 0 ? [assetId, limit] : [limit]));
-      return reply.send({ ok: true, rows });
+
+      let woRows = [];
+      if (includeWorkOrders && hasTable("work_orders")) {
+        const woWhere = assetId > 0 ? "AND w.asset_id = ?" : "";
+        woRows = db.prepare(`
+          SELECT
+            w.id,
+            w.asset_id,
+            w.reference_id AS plan_id,
+            COALESCE(mp.service_name, 'Service') AS service_name,
+            DATE(COALESCE(w.closed_at, w.completed_at)) AS service_date,
+            NULL AS service_hours,
+            w.completion_notes AS notes,
+            w.artisan_name AS created_by,
+            COALESCE(w.closed_at, w.completed_at) AS created_at,
+            a.asset_code,
+            a.asset_name,
+            'work_order' AS record_source
+          FROM work_orders w
+          JOIN assets a ON a.id = w.asset_id
+          LEFT JOIN maintenance_plans mp ON mp.id = w.reference_id
+          WHERE LOWER(COALESCE(w.source, '')) = 'service'
+            AND LOWER(COALESCE(w.status, '')) IN ('completed', 'approved', 'closed')
+            ${woWhere}
+          ORDER BY COALESCE(w.closed_at, w.completed_at) DESC, w.id DESC
+          LIMIT ?
+        `).all(...(assetId > 0 ? [assetId, limit] : [limit]));
+      }
+
+      const merged = [...backfillRows, ...woRows]
+        .sort((a, b) => {
+          const da = String(a.service_date || a.created_at || "");
+          const dbd = String(b.service_date || b.created_at || "");
+          return dbd.localeCompare(da) || Number(b.id || 0) - Number(a.id || 0);
+        })
+        .slice(0, limit);
+
+      return reply.send({ ok: true, rows: merged, asset_id: assetId || null });
     } catch (e) {
       req.log.error(e);
       return reply.code(500).send({ ok: false, error: e.message || String(e) });

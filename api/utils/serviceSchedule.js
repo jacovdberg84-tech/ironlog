@@ -1,3 +1,6 @@
+/** Standard hourmeter / odometer service grids (plant + LDV). */
+export const STANDARD_SERVICE_GRIDS = [250, 500, 1000, 10000];
+
 /** Parse hour interval from names like "500", "500H Service", "1000 hr". */
 export function parseIntervalFromServiceName(name) {
   const s = String(name || "").trim();
@@ -8,10 +11,42 @@ export function parseIntervalFromServiceName(name) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+export function isLdvServiceAssetCode(assetCode) {
+  return /^V(0[1-9]|1[0-5])AM$/i.test(String(assetCode || "").trim());
+}
+
 export function planIntervalHours(plan) {
   const interval = Number(plan?.interval_hours ?? plan?.intervalHours ?? 0);
   if (Number.isFinite(interval) && interval > 0) return interval;
   return parseIntervalFromServiceName(plan?.service_name ?? plan?.serviceName) || 0;
+}
+
+/** Map plan interval to a fixed service grid step. */
+export function normalizeGridStep(intervalHours, assetCode = null) {
+  const iv = Number(intervalHours) || 0;
+  if (isLdvServiceAssetCode(assetCode)) {
+    if (iv >= 5000 || iv === 10000) return 10000;
+    if (iv > 0) return iv;
+    return 10000;
+  }
+  if (STANDARD_SERVICE_GRIDS.includes(iv)) return iv;
+  if (iv > 0 && iv <= 250) return 250;
+  if (iv <= 500) return 500;
+  if (iv <= 1000) return 1000;
+  if (iv <= 10000) return 10000;
+  return iv > 0 ? iv : 500;
+}
+
+/** Round hourmeter reading down to the nearest service milestone on the grid. */
+export function snapToServiceMilestone(hours, gridStep) {
+  const h = Math.max(0, Number(hours) || 0);
+  const step = Math.max(1, Number(gridStep) || 1);
+  return Number((Math.floor(h / step) * step).toFixed(2));
+}
+
+export function snapLastServiceHours(hours, intervalHours, assetCode = null) {
+  const step = normalizeGridStep(intervalHours, assetCode);
+  return snapToServiceMilestone(hours, step);
 }
 
 export function groupActivePlansByAsset(plans) {
@@ -31,7 +66,15 @@ export function hasRotatingSchedule(plans) {
   return intervals.length >= 2;
 }
 
-/** Next service milestone on a fixed hourmeter grid (e.g. every 500h). */
+function gridBaseInterval(plans, assetCode = null) {
+  const intervals = [...new Set((plans || []).map(planIntervalHours).filter((x) => x > 0))]
+    .map((iv) => normalizeGridStep(iv, assetCode))
+    .sort((a, b) => a - b);
+  if (!intervals.length) return isLdvServiceAssetCode(assetCode) ? 10000 : 500;
+  return intervals[0];
+}
+
+/** Next service milestone on a fixed hourmeter grid. */
 export function nextMilestoneHours(currentHours, baseInterval) {
   const cur = Math.max(0, Number(currentHours) || 0);
   const base = Math.max(1, Number(baseInterval) || 1);
@@ -40,12 +83,19 @@ export function nextMilestoneHours(currentHours, baseInterval) {
   return Math.ceil(cur / base) * base;
 }
 
-export function milestoneServiceInterval(milestoneHours, baseInterval, majorInterval) {
+/** Pick service type (250 / 500 / 1000 / 10000) at a grid milestone. */
+export function milestoneServiceInterval(milestoneHours, intervals, assetCode = null) {
   const m = Number(milestoneHours);
-  const base = Math.max(1, Number(baseInterval) || 1);
-  const major = Math.max(base, Number(majorInterval) || base);
-  if (major > base && Math.abs(m % major) < 1e-6) return major;
-  return base;
+  const unique = [...new Set(
+    (intervals || [])
+      .map((iv) => normalizeGridStep(iv, assetCode))
+      .filter((x) => x > 0),
+  )].sort((a, b) => b - a);
+  if (!unique.length) return normalizeGridStep(500, assetCode);
+  for (const iv of unique) {
+    if (Math.abs(m % iv) < 1e-6) return iv;
+  }
+  return unique[unique.length - 1];
 }
 
 function findPlanForInterval(plans, targetInterval) {
@@ -70,19 +120,22 @@ function findPlanForInterval(plans, targetInterval) {
   return exact || closest;
 }
 
-export function resolveLegacyPlanDue(plan, currentHours) {
+export function resolveLegacyPlanDue(plan, currentHours, assetCode = null) {
   const current = Number(currentHours) || 0;
-  const last = Number(plan.last_service_hours || 0);
   const interval = planIntervalHours(plan);
-  const nextDue = last + interval;
+  const gridStep = normalizeGridStep(interval, assetCode);
+  const last = snapToServiceMilestone(Number(plan.last_service_hours || 0), gridStep);
+  const nextDue = nextMilestoneHours(current, gridStep);
   const remaining = nextDue - current;
   return {
-    schedule_mode: "legacy",
+    schedule_mode: "grid",
     plan_id: Number(plan.id ?? plan.plan_id ?? 0),
     asset_id: Number(plan.asset_id || 0),
     service_name: String(plan.service_name || ""),
     interval_hours: interval,
+    grid_step_hours: gridStep,
     last_service_hours: last,
+    last_service_hours_raw: Number(plan.last_service_hours || 0),
     next_due_hours: Number(nextDue.toFixed(2)),
     remaining_hours: Number(remaining.toFixed(2)),
     next_service_interval: interval,
@@ -91,23 +144,23 @@ export function resolveLegacyPlanDue(plan, currentHours) {
 }
 
 /** Pick the next service type from active plans on a shared hourmeter grid. */
-export function resolveNextServiceForAssetPlans(plans, currentHours) {
+export function resolveNextServiceForAssetPlans(plans, currentHours, assetCode = null) {
   const activePlans = (plans || []).filter((p) => Number(p.active ?? 1) !== 0);
   if (!activePlans.length) return null;
 
+  const code = assetCode || String(activePlans[0]?.asset_code || "");
   const intervals = [...new Set(activePlans.map(planIntervalHours).filter((x) => x > 0))].sort((a, b) => a - b);
   if (intervals.length < 2) {
-    return resolveLegacyPlanDue(activePlans[0], currentHours);
+    return resolveLegacyPlanDue(activePlans[0], currentHours, code);
   }
 
-  const baseInterval = intervals[0];
-  const majorInterval = intervals[intervals.length - 1];
+  const baseInterval = gridBaseInterval(activePlans, code);
   const current = Number(currentHours) || 0;
   const nextDue = nextMilestoneHours(current, baseInterval);
-  const serviceInterval = milestoneServiceInterval(nextDue, baseInterval, majorInterval);
+  const serviceInterval = milestoneServiceInterval(nextDue, intervals, code);
   const matchedPlan = findPlanForInterval(activePlans, serviceInterval);
   const remaining = nextDue - current;
-  const lastService = Math.max(0, nextDue - serviceInterval);
+  const lastService = snapToServiceMilestone(Math.max(0, nextDue - serviceInterval), baseInterval);
 
   return {
     schedule_mode: "rotating",
@@ -115,12 +168,13 @@ export function resolveNextServiceForAssetPlans(plans, currentHours) {
     asset_id: Number(activePlans[0].asset_id || 0),
     service_name: String(matchedPlan?.service_name || `${serviceInterval}`),
     interval_hours: serviceInterval,
-    last_service_hours: Number(lastService.toFixed(2)),
+    grid_step_hours: baseInterval,
+    last_service_hours: lastService,
     next_due_hours: Number(nextDue.toFixed(2)),
     remaining_hours: Number(remaining.toFixed(2)),
     next_service_interval: serviceInterval,
     base_interval_hours: baseInterval,
-    major_interval_hours: majorInterval,
+    major_interval_hours: intervals[intervals.length - 1],
     is_next_for_asset: true,
   };
 }
@@ -130,14 +184,21 @@ export function enrichPlansWithNextService(plans, getCurrentHours) {
   const nextByAsset = new Map();
   for (const [assetId, assetPlans] of byAsset) {
     const current = typeof getCurrentHours === "function" ? getCurrentHours(assetId) : 0;
-    nextByAsset.set(assetId, resolveNextServiceForAssetPlans(assetPlans, current));
+    const code = String(assetPlans[0]?.asset_code || "");
+    nextByAsset.set(assetId, resolveNextServiceForAssetPlans(assetPlans, current, code));
   }
 
   return (plans || []).map((plan) => {
     const assetId = Number(plan.asset_id || 0);
     const assetPlans = byAsset.get(assetId) || [];
     const current = typeof getCurrentHours === "function" ? getCurrentHours(assetId) : 0;
+    const code = String(plan.asset_code || assetPlans[0]?.asset_code || "");
     const rotating = hasRotatingSchedule(assetPlans);
+    const snappedLast = snapLastServiceHours(
+      Number(plan.last_service_hours || 0),
+      planIntervalHours(plan),
+      code,
+    );
 
     if (rotating) {
       const next = nextByAsset.get(assetId);
@@ -145,6 +206,7 @@ export function enrichPlansWithNextService(plans, getCurrentHours) {
       const isNext = Number(next?.plan_id || 0) === planId;
       return {
         ...plan,
+        last_service_hours_snapped: snappedLast,
         schedule_mode: "rotating",
         current_hours: Number(Number(current).toFixed(2)),
         next_due_hours: next?.next_due_hours ?? null,
@@ -154,10 +216,11 @@ export function enrichPlansWithNextService(plans, getCurrentHours) {
       };
     }
 
-    const legacy = resolveLegacyPlanDue(plan, current);
+    const legacy = resolveLegacyPlanDue(plan, current, code);
     return {
       ...plan,
-      schedule_mode: "legacy",
+      last_service_hours_snapped: snappedLast,
+      schedule_mode: "grid",
       current_hours: Number(Number(current).toFixed(2)),
       next_due_hours: legacy.next_due_hours,
       remaining_hours: legacy.remaining_hours,
@@ -176,7 +239,11 @@ export function buildDueListFromPlans(plans, getCurrentHours) {
     const sample = assetPlans[0];
     const assetId = Number(sample.asset_id || 0);
     const current = typeof getCurrentHours === "function" ? getCurrentHours(assetId) : 0;
-    const resolved = resolveNextServiceForAssetPlans(assetPlans, current);
+    const resolved = resolveNextServiceForAssetPlans(
+      assetPlans,
+      current,
+      String(sample.asset_code || ""),
+    );
     if (!resolved) continue;
 
     const remaining = resolved.remaining_hours;
@@ -189,6 +256,7 @@ export function buildDueListFromPlans(plans, getCurrentHours) {
       service_name: resolved.service_name,
       interval_hours: resolved.interval_hours,
       last_service_hours: resolved.last_service_hours,
+      grid_step_hours: resolved.grid_step_hours,
       current_hours: Number(Number(current).toFixed(2)),
       next_due_hours: resolved.next_due_hours,
       remaining_hours: resolved.remaining_hours,
