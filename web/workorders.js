@@ -6,6 +6,7 @@ let completingWorkOrderId = null;
 let currentDetailWorkOrderId = null;
 let stockCatalogCache = [];
 let technicianOptions = [];
+let lastCreatedRepairWoId = null;
 const ROLE_KEY = "ironlog_session_role";
 const USER_KEY = "ironlog_session_user";
 
@@ -130,7 +131,8 @@ function sourceLabel(source) {
   const s = String(source || "").toLowerCase();
   if (s === "service") return "Service";
   if (s === "breakdown") return "Breakdown";
-  if (s === "manual") return "Manual";
+  if (s === "inspection") return "Inspection repair";
+  if (s === "manual") return "Manual repair";
   return s || "Unknown";
 }
 
@@ -869,6 +871,7 @@ async function loadTechnicianRoster() {
   try {
     await loadTechnicians();
     renderTechnicianRoster();
+    fillTechnicianSelect(document.getElementById("woRepairAssignee"));
     if (msgEl) {
       msgEl.className = "muted";
       msgEl.textContent = `${technicianOptions.length} technician(s) on roster.`;
@@ -878,6 +881,89 @@ async function loadTechnicianRoster() {
       msgEl.className = "message-error";
       msgEl.textContent = err.message || String(err);
     }
+  }
+}
+
+async function loadRepairAssetOptions() {
+  const dl = document.getElementById("woRepairAssetList");
+  if (!dl) return;
+  try {
+    const rows = await fetchJson(`${API}/assets?include_archived=0`, { headers: authHeaders() });
+    const arr = Array.isArray(rows) ? rows : [];
+    dl.innerHTML = arr
+      .map((a) => `<option value="${escapeHtml(String(a.asset_code || ""))}"></option>`)
+      .join("");
+  } catch {
+    dl.innerHTML = "";
+  }
+}
+
+async function createRepairWorkOrder() {
+  const msgEl = document.getElementById("woRepairMsg");
+  const asset_code = String(document.getElementById("woRepairAsset")?.value || "").trim();
+  const component = String(document.getElementById("woRepairComponent")?.value || "").trim();
+  const description = String(document.getElementById("woRepairDescription")?.value || "").trim();
+  const inspectionRaw = String(document.getElementById("woRepairInspectionId")?.value || "").trim();
+  const inspection_id = inspectionRaw ? Number(inspectionRaw) : 0;
+  const assigned_artisan_name = String(document.getElementById("woRepairAssignee")?.value || "").trim();
+
+  if (!asset_code) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = "Asset code is required.";
+    }
+    return;
+  }
+  if (!description) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = "Repair description is required.";
+    }
+    return;
+  }
+
+  const btn = document.getElementById("woRepairCreateBtn");
+  if (btn) btn.disabled = true;
+  if (msgEl) {
+    msgEl.className = "muted";
+    msgEl.textContent = "Creating repair work order…";
+  }
+
+  try {
+    const body = { asset_code, description };
+    if (component) body.component = component;
+    if (Number.isFinite(inspection_id) && inspection_id > 0) body.inspection_id = inspection_id;
+    if (assigned_artisan_name) body.assigned_artisan_name = assigned_artisan_name;
+
+    const data = await fetchJson(`${API}/workorders/repair`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    });
+
+    lastCreatedRepairWoId = Number(data.work_order_id || 0) || null;
+    const openBtn = document.getElementById("woRepairOpenWoBtn");
+    if (openBtn && lastCreatedRepairWoId) openBtn.style.display = "";
+
+    if (msgEl) {
+      msgEl.className = "message-success";
+      msgEl.textContent = data.already_exists
+        ? `Work order #${lastCreatedRepairWoId} already linked to inspection (status: ${data.status || "open"}).`
+        : `Created repair work order #${lastCreatedRepairWoId} (${data.status || "open"}) — no breakdown logged.`;
+    }
+
+    await fetchWorkOrders();
+    if (lastCreatedRepairWoId) {
+      loadWorkOrderDetail(lastCreatedRepairWoId);
+      scrollToWorkOrderCard(lastCreatedRepairWoId);
+    }
+  } catch (err) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = err.message || String(err);
+    }
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -1224,6 +1310,10 @@ document.addEventListener("DOMContentLoaded", () => {
       techPanel.style.display = "none";
     }
   }
+  const repairPanel = document.getElementById("woCreateRepairPanel");
+  if (repairPanel) {
+    repairPanel.style.display = isSupervisorRole(role) ? "" : "none";
+  }
   if (isArtisanRole(role) && statusEl) {
     statusEl.value = "";
   }
@@ -1248,6 +1338,10 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("woCompleteCancelBtn")?.addEventListener("click", closeCompleteModal);
   document.getElementById("woTechSaveBtn")?.addEventListener("click", () => saveWorkshopTechnician());
   document.getElementById("woTechRefreshBtn")?.addEventListener("click", () => loadTechnicianRoster());
+  document.getElementById("woRepairCreateBtn")?.addEventListener("click", () => createRepairWorkOrder());
+  document.getElementById("woRepairOpenWoBtn")?.addEventListener("click", () => {
+    if (lastCreatedRepairWoId) loadWorkOrderDetail(lastCreatedRepairWoId);
+  });
   if (closeModal) {
     closeModal.addEventListener("click", (evt) => {
       if (evt.target === closeModal) closeCloseModal();
@@ -1390,5 +1484,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadTechnicians().catch(() => {});
   if (isSupervisorRole(getSessionRole())) {
     loadTechnicianRoster().catch(() => {});
+    loadRepairAssetOptions().catch(() => {});
+    fillTechnicianSelect(document.getElementById("woRepairAssignee"));
   }
 });

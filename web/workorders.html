@@ -54,7 +54,8 @@
             <option value="">All</option>
             <option value="service">Service</option>
             <option value="breakdown">Breakdown</option>
-            <option value="manual">Manual</option>
+            <option value="inspection">Inspection repair</option>
+            <option value="manual">Manual repair</option>
           </select>
         </label>
 
@@ -94,6 +95,42 @@
         <button id="woTechRefreshBtn" type="button">Refresh list</button>
       </div>
       <div id="woTechniciansMsg" class="muted" style="margin-top:10px;"></div>
+    </details>
+
+    <details id="woCreateRepairPanel" class="card" style="display:none;">
+      <summary style="cursor:pointer; font-weight:700;">Create repair work order (no breakdown)</summary>
+      <p class="muted small" style="margin:10px 0;">
+        For inspection findings and planned repairs — creates a normal work order (<strong>open</strong> or <strong>assigned</strong>)
+        without logging a breakdown or downtime incident.
+      </p>
+      <div class="row" style="gap:10px; align-items:flex-end; flex-wrap:wrap;">
+        <label style="display:flex; flex-direction:column; gap:6px;">
+          Asset code *
+          <input id="woRepairAsset" type="text" placeholder="e.g. F500AM" list="woRepairAssetList" autocomplete="off" />
+          <datalist id="woRepairAssetList"></datalist>
+        </label>
+        <label style="display:flex; flex-direction:column; gap:6px;">
+          Component (optional)
+          <input id="woRepairComponent" type="text" placeholder="e.g. hydraulics" />
+        </label>
+        <label style="display:flex; flex-direction:column; gap:6px;">
+          Inspection # (optional)
+          <input id="woRepairInspectionId" type="number" min="1" step="1" placeholder="Manager inspection id" />
+        </label>
+        <label style="display:flex; flex-direction:column; gap:6px;">
+          Assign now (optional)
+          <select id="woRepairAssignee" style="padding:10px; border-radius:8px; border:1px solid #2b3f63; background:#0b1628; color:#e8eefc; min-width:180px;"></select>
+        </label>
+      </div>
+      <label style="display:flex; flex-direction:column; gap:6px; margin-top:10px;">
+        Repair description / inspection finding *
+        <textarea id="woRepairDescription" rows="3" placeholder="Describe the repair needed from inspection…" style="padding:10px; border-radius:8px; border:1px solid #2b3f63; background:#0b1628; color:#e8eefc;"></textarea>
+      </label>
+      <div class="row" style="margin-top:12px; gap:8px;">
+        <button id="woRepairCreateBtn" type="button">Create repair work order</button>
+        <button id="woRepairOpenWoBtn" type="button" style="display:none;">Open work order</button>
+      </div>
+      <div id="woRepairMsg" class="muted" style="margin-top:10px;"></div>
     </details>
 
     <div class="card">
@@ -192,6 +229,6 @@
     </div>
   </div>
 
-  <script src="./workorders.js?v=4"></script>
+  <script src="./workorders.js?v=5"></script>
 </body>
 </html>

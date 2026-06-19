@@ -6904,6 +6904,30 @@
         </div>
 
         <div class="card">
+          <h4>Inspection repair — work order only</h4>
+          <p class="muted">Create a repair work order from an inspection finding <b>without</b> logging a breakdown. Uses the same open → assigned → in progress workflow as other work orders.</p>
+          <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
+            <label>Asset code *
+              <input id="boRepairAsset" list="assetCodeOptions" class="w-200" placeholder="Asset code" />
+            </label>
+            <label>Component
+              <input id="boRepairComponent" class="w-200" placeholder="Optional" />
+            </label>
+            <label>Inspection #
+              <input id="boRepairInspectionId" class="w-120" type="number" min="1" step="1" placeholder="Optional" />
+            </label>
+          </div>
+          <label style="display:block; margin-top:10px;">Repair description *
+            <textarea id="boRepairDescription" rows="3" class="w-full" placeholder="Describe repair needed from inspection…" style="margin-top:6px;"></textarea>
+          </label>
+          <div class="row" style="margin-top:10px; gap:8px;">
+            <button type="button" id="boRepairCreateWo">Create repair WO</button>
+            <button type="button" id="boRepairOpenWo" class="btn btn-secondary" style="display:none;">Open in Work Orders</button>
+          </div>
+          <pre class="output" id="boRepairResult"></pre>
+        </div>
+
+        <div class="card">
           <div class="section-head-row">
             <h4>Operational slip reports (PDF)</h4>
             <button type="button" class="sectionToggleBtn" data-section-body="boSlipBody" data-storage-key="ironlog_section_bo_slip">Hide</button>

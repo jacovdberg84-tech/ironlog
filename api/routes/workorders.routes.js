@@ -614,6 +614,105 @@ export default async function workOrderRoutes(app) {
     return { ok: true, username, full_name, created: !existing };
   });
 
+  app.post("/repair", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+
+    const asset_code = String(req.body?.asset_code || "").trim();
+    const description = String(req.body?.description || req.body?.issue || "").trim();
+    const component = String(req.body?.component || "").trim() || null;
+    const inspection_id = Number(req.body?.inspection_id || 0);
+    const assignedRaw = String(req.body?.assigned_artisan_name || "").trim();
+    const site_code = getSiteCode(req);
+
+    if (!asset_code) return reply.code(400).send({ error: "asset_code is required" });
+    if (!description) return reply.code(400).send({ error: "description is required" });
+
+    const asset = db.prepare(`
+      SELECT id, asset_code, asset_name
+      FROM assets
+      WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?))
+      LIMIT 1
+    `).get(asset_code);
+    if (!asset) return reply.code(404).send({ error: "Asset not found" });
+
+    if (inspection_id > 0 && hasTable("manager_inspections")) {
+      const insp = db.prepare(`SELECT id, work_order_id FROM manager_inspections WHERE id = ?`).get(inspection_id);
+      if (!insp) return reply.code(404).send({ error: "Inspection not found" });
+      if (insp.work_order_id) {
+        return reply.send({
+          ok: true,
+          work_order_id: Number(insp.work_order_id),
+          already_exists: true,
+          status: db.prepare(`SELECT status FROM work_orders WHERE id = ?`).get(insp.work_order_id)?.status || null,
+        });
+      }
+    }
+
+    const source = inspection_id > 0 ? "inspection" : "manual";
+    const reference_id = inspection_id > 0 ? inspection_id : null;
+    const assigned_artisan_name = assignedRaw ? resolveAssignedUsername(assignedRaw) : null;
+    const initialStatus = assigned_artisan_name ? "assigned" : "open";
+    const assignedBy = assigned_artisan_name
+      ? String(req.headers["x-user-name"] || "supervisor").trim() || "supervisor"
+      : null;
+
+    const noteLines = [
+      inspection_id > 0 ? `Inspection repair #${inspection_id}` : "Repair work order (no breakdown logged)",
+      `Asset: ${String(asset.asset_code || "")} — ${String(asset.asset_name || "")}`,
+      component ? `Component: ${component}` : null,
+      "",
+      description,
+    ].filter((x) => x !== null);
+    const completion_notes = noteLines.join("\n").trim();
+
+    const ins = db.prepare(`
+      INSERT INTO work_orders (asset_id, source, reference_id, status, site_code)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(asset.id, source, reference_id, initialStatus, site_code);
+    const work_order_id = Number(ins.lastInsertRowid);
+
+    if (hasColumn("work_orders", "completion_notes") && completion_notes) {
+      db.prepare(`UPDATE work_orders SET completion_notes = ? WHERE id = ?`).run(completion_notes, work_order_id);
+    }
+    if (assigned_artisan_name && hasColumn("work_orders", "assigned_artisan_name")) {
+      db.prepare(`
+        UPDATE work_orders
+        SET assigned_artisan_name = ?, assigned_at = datetime('now'), assigned_by = ?
+        WHERE id = ?
+      `).run(assigned_artisan_name, assignedBy, work_order_id);
+    }
+
+    if (inspection_id > 0 && hasTable("manager_inspections") && hasColumn("manager_inspections", "work_order_id")) {
+      db.prepare(`UPDATE manager_inspections SET work_order_id = ? WHERE id = ?`).run(work_order_id, inspection_id);
+    }
+
+    writeAudit(db, req, {
+      module: "workorders",
+      action: "repair.create",
+      entity_type: "work_order",
+      entity_id: work_order_id,
+      payload: { asset_code, source, inspection_id: inspection_id || null, assigned_artisan_name },
+    });
+
+    if (assigned_artisan_name) {
+      notifyWorkOrderAssigned({
+        workOrderId: work_order_id,
+        assignedUsername: assigned_artisan_name,
+        assetCode: asset.asset_code,
+        source,
+      }).catch((err) => console.error("[push] repair wo assign:", err?.message || err));
+    }
+
+    return reply.code(201).send({
+      ok: true,
+      work_order_id,
+      status: initialStatus,
+      source,
+      assigned_artisan_name,
+      breakdown_logged: false,
+    });
+  });
+
   app.get("/schedule/board", async (req) => {
     const artisan = String(req.query?.artisan || "").trim().toLowerCase();
     const shift = normalizeShift(req.query?.shift || "");

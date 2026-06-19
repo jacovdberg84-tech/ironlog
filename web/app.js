@@ -10512,6 +10512,41 @@ async function ensureOpenBreakdownOps() {
   }
 }
 
+let lastBoRepairWoId = null;
+
+async function createRepairWorkOrderOps() {
+  const asset_code = (qs("boRepairAsset")?.value || "").trim();
+  const component = (qs("boRepairComponent")?.value || "").trim();
+  const description = (qs("boRepairDescription")?.value || "").trim();
+  const inspectionRaw = (qs("boRepairInspectionId")?.value || "").trim();
+  const inspection_id = inspectionRaw ? Number(inspectionRaw) : 0;
+  if (!asset_code) return alert("Enter asset code.");
+  if (!description) return alert("Enter repair description.");
+  setStatus("Creating repair work order…");
+  try {
+    const body = { asset_code, description };
+    if (component) body.component = component;
+    if (Number.isFinite(inspection_id) && inspection_id > 0) body.inspection_id = inspection_id;
+    const res = await fetchJson(`${API}/api/workorders/repair`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    lastBoRepairWoId = Number(res.work_order_id || 0) || null;
+    setText("boRepairResult", JSON.stringify(res, null, 2));
+    const openBtn = qs("boRepairOpenWo");
+    if (openBtn && lastBoRepairWoId) openBtn.style.display = "";
+    setStatus(
+      res.already_exists
+        ? `WO #${lastBoRepairWoId} already linked to inspection.`
+        : `Repair WO #${lastBoRepairWoId} created (no breakdown).`
+    );
+  } catch (e) {
+    setText("boRepairResult", String(e.message || e));
+    setStatus("Repair WO create failed.");
+  }
+}
+
 async function pullBreakdownOpsLiveHours() {
   const hint = qs("boLiveHoursHint");
   const code = (qs("sqAsset")?.value || "").trim();
@@ -16077,6 +16112,12 @@ async function init() {
   qs("boEnsureOpen")?.addEventListener("click", () =>
     ensureOpenBreakdownOps().catch((e) => setStatus("Ensure open error: " + e.message))
   );
+  qs("boRepairCreateWo")?.addEventListener("click", () =>
+    createRepairWorkOrderOps().catch((e) => setStatus("Repair WO error: " + e.message))
+  );
+  qs("boRepairOpenWo")?.addEventListener("click", () => {
+    if (lastBoRepairWoId) window.open(`/web/workorders.html?wo=${encodeURIComponent(String(lastBoRepairWoId))}`, "_blank");
+  });
   qs("boPullLiveHours")?.addEventListener("click", () =>
     pullBreakdownOpsLiveHours().catch((e) => setStatus("Live hours error: " + e.message))
   );
