@@ -1769,6 +1769,12 @@ export default async function workOrderRoutes(app) {
       SET last_service_hours = ?
       WHERE id = ?
     `);
+    const updateAllAssetPlanLastServiceHours = db.prepare(`
+      UPDATE maintenance_plans
+      SET last_service_hours = ?
+      WHERE asset_id = ?
+        AND active = 1
+    `);
 
     const tx = db.transaction(() => {
       closeWorkOrder.run(
@@ -1790,6 +1796,7 @@ export default async function workOrderRoutes(app) {
         const safeHours = Number.isFinite(currentHours) ? Number(currentHours.toFixed(2)) : 0;
 
         updatePlanLastServiceHours.run(safeHours, planId);
+        updateAllAssetPlanLastServiceHours.run(safeHours, Number(wo.asset_id || 0));
         rolled_plan_id = planId;
         rolled_last_service_hours = safeHours;
       }

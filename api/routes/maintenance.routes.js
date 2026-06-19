@@ -19,6 +19,13 @@ import {
 import { normalizeUploadedPhoto } from "../utils/imagePdf.js";
 import { resolveStorageAbs as resolveStorageAbsPath, getDataRoot } from "../utils/storagePaths.js";
 import {
+  buildDueListFromPlans,
+  enrichPlansWithNextService,
+  hasRotatingSchedule,
+  resolveNextServiceForAssetPlans,
+  groupActivePlansByAsset,
+} from "../utils/serviceSchedule.js";
+import {
   buildUndercarriageComponentSchema,
   enrichUndercarriageMeasurement,
   normalizeUndercarriageChecklist,
@@ -1814,15 +1821,7 @@ export default async function maintenanceRoutes(app) {
         ORDER BY a.asset_code ASC, mp.service_name ASC
       `).all();
 
-      const plans = rows.map((r) => {
-        const current_hours = getAssetCurrentHours(r.asset_id);
-        return {
-          ...r,
-          current_hours: Number(current_hours.toFixed(2)),
-          next_due_hours: Number((Number(r.last_service_hours || 0) + Number(r.interval_hours || 0)).toFixed(2)),
-          remaining_hours: Number((Number(r.last_service_hours || 0) + Number(r.interval_hours || 0) - current_hours).toFixed(2)),
-        };
-      });
+      const plans = enrichPlansWithNextService(rows, getAssetCurrentHours);
 
       return reply.send({
         ok: true,
@@ -2184,6 +2183,17 @@ export default async function maintenanceRoutes(app) {
         : getAssetCurrentHoursInfo(assetId);
       const current_hours = Number(currentInfo.hours || 0);
 
+      const assetPlans = db.prepare(`
+        SELECT id, service_name, interval_hours, last_service_hours, active
+        FROM maintenance_plans
+        WHERE asset_id = ?
+          AND active = 1
+        ORDER BY interval_hours ASC, id ASC
+      `).all(assetId);
+      const next_service = assetPlans.length
+        ? resolveNextServiceForAssetPlans(assetPlans, current_hours)
+        : null;
+
       return reply.send({
         ok: true,
         asset_id: asset.id,
@@ -2191,7 +2201,9 @@ export default async function maintenanceRoutes(app) {
         asset_name: asset.asset_name,
         as_of: isDate(asOf) ? asOf : null,
         current_hours: Number(current_hours.toFixed(1)),
-        current_hours_source: currentInfo.source
+        current_hours_source: currentInfo.source,
+        next_service,
+        rotating_schedule: hasRotatingSchedule(assetPlans),
       });
     } catch (err) {
       req.log.error(err);
@@ -2269,28 +2281,14 @@ export default async function maintenanceRoutes(app) {
             ORDER BY a.asset_code, mp.id
           `).all();
 
-      const due = rows.map((r) => {
-  const current = getAssetCurrentHours(r.asset_id);
-  const next_due = Number(r.last_service_hours || 0) + Number(r.interval_hours || 0);
-  const remaining = next_due - current;
-  const status = classifyDueStatus(remaining, nearDueHours);
-
-  return {
-    plan_id: r.plan_id,
-    asset_id: r.asset_id,
-    asset_code: r.asset_code,
-    asset_name: r.asset_name,
-    category: r.category,
-    service_name: r.service_name,
-    interval_hours: Number(r.interval_hours || 0),
-    last_service_hours: Number(r.last_service_hours || 0),
-    current_hours: Number(current.toFixed(2)),
-    next_due_hours: Number(next_due.toFixed(2)),
-    remaining_hours: Number(remaining.toFixed(2)),
-    is_overdue: remaining <= 0,
-    status
-  };
-});
+      const getHours = (assetId) => {
+        if (date) return Number(rows.find((r) => Number(r.asset_id) === Number(assetId))?.current_hours ?? getAssetCurrentHours(assetId));
+        return getAssetCurrentHours(assetId);
+      };
+      const due = buildDueListFromPlans(rows, getHours).map((r) => ({
+        ...r,
+        status: classifyDueStatus(r.remaining_hours, nearDueHours),
+      }));
 
       return reply.send({
         ok: true,
@@ -2382,42 +2380,108 @@ export default async function maintenanceRoutes(app) {
         return d.toISOString().slice(0, 10);
       };
 
-      const rows = plans.map((p) => {
-        const currentInfo = getAssetCurrentHoursInfo(Number(p.asset_id || 0));
+      const getLastServicedAnyOnAsset = db.prepare(`
+        SELECT
+          DATE(COALESCE(w.closed_at, w.completed_at)) AS last_serviced_date,
+          COALESCE(w.closed_at, w.completed_at) AS last_serviced_at
+        FROM work_orders w
+        WHERE w.source = 'service'
+          AND w.asset_id = ?
+          AND w.status IN ('completed', 'approved', 'closed')
+        ORDER BY COALESCE(w.closed_at, w.completed_at) DESC
+        LIMIT 1
+      `);
+
+      const rows = [];
+      const byAsset = groupActivePlansByAsset(plans);
+      for (const [, assetPlans] of byAsset) {
+        const sample = assetPlans[0];
+        const assetId = Number(sample.asset_id || 0);
+        const currentInfo = getAssetCurrentHoursInfo(assetId);
         const current = Number(currentInfo.hours || 0);
-        const next_due = Number(p.last_service_hours || 0) + Number(p.interval_hours || 0);
-        const remaining = next_due - current;
+        const rotating = hasRotatingSchedule(assetPlans);
 
-        const lastWo = getLastServiced.get(Number(p.plan_id || 0));
-        const lastBackfill = getLastBackfillServiced.get(Number(p.asset_id || 0), String(p.service_name || ""));
-        const lastWoAt = String(lastWo?.last_serviced_at || "");
-        const lastBackfillAt = String(lastBackfill?.last_serviced_at || "");
-        const useBackfill = Boolean(lastBackfillAt && (!lastWoAt || lastBackfillAt > lastWoAt));
-        const last = useBackfill ? lastBackfill : lastWo;
-        const avgRow = getAvgDaily.get(Number(p.asset_id || 0), startDate, endDate);
-        const totalRun = Number(avgRow?.total_run || 0);
-        const dayCount = Number(avgRow?.day_count || 0);
-        const avgDaily = dayCount > 0 ? totalRun / dayCount : 0;
+        if (rotating) {
+          const resolved = resolveNextServiceForAssetPlans(assetPlans, current);
+          const lastWo = getLastServicedAnyOnAsset.get(assetId);
+          const lastBackfill = db.prepare(`
+            SELECT
+              h.id AS history_id,
+              DATE(h.service_date) AS last_serviced_date,
+              h.service_date AS last_serviced_at
+            FROM maintenance_service_history h
+            WHERE h.asset_id = ?
+            ORDER BY h.service_date DESC, h.id DESC
+            LIMIT 1
+          `).get(assetId);
+          const lastWoAt = String(lastWo?.last_serviced_at || "");
+          const lastBackfillAt = String(lastBackfill?.last_serviced_at || "");
+          const useBackfill = Boolean(lastBackfillAt && (!lastWoAt || lastBackfillAt > lastWoAt));
+          const last = useBackfill ? lastBackfill : lastWo;
+          const avgRow = getAvgDaily.get(assetId, startDate, endDate);
+          const totalRun = Number(avgRow?.total_run || 0);
+          const dayCount = Number(avgRow?.day_count || 0);
+          const avgDaily = dayCount > 0 ? totalRun / dayCount : 0;
+          const remaining = Number(resolved?.remaining_hours || 0);
+          const estDays = avgDaily > 0 ? Math.max(0, remaining / avgDaily) : null;
+          const estDate = estDays == null ? null : addDays(endDate, estDays);
 
-        const estDays = avgDaily > 0 ? Math.max(0, remaining / avgDaily) : null;
-        const estDate = estDays == null ? null : addDays(endDate, estDays);
+          rows.push({
+            plan_id: Number(resolved?.plan_id || 0),
+            asset_id: assetId,
+            asset_code: sample.asset_code,
+            asset_name: sample.asset_name,
+            service_name: resolved?.service_name || sample.service_name,
+            last_serviced_date: last?.last_serviced_date || null,
+            last_service_source: useBackfill ? "backfill" : (last?.last_serviced_at ? "work_order" : null),
+            last_service_history_id: useBackfill ? Number(lastBackfill?.history_id || 0) : null,
+            current_hours: Number(current.toFixed(2)),
+            current_hours_source: currentInfo.source,
+            remaining_hours: Number(remaining.toFixed(2)),
+            avg_daily_hours: Number(avgDaily.toFixed(2)),
+            estimated_service_date: estDate,
+            schedule_mode: "rotating",
+            next_due_hours: resolved?.next_due_hours ?? null,
+          });
+          continue;
+        }
 
-        return {
-          plan_id: Number(p.plan_id || 0),
-          asset_id: Number(p.asset_id || 0),
-          asset_code: p.asset_code,
-          asset_name: p.asset_name,
-          service_name: p.service_name,
-          last_serviced_date: last?.last_serviced_date || null,
-          last_service_source: useBackfill ? "backfill" : (last?.last_serviced_at ? "work_order" : null),
-          last_service_history_id: useBackfill ? Number(lastBackfill?.history_id || 0) : null,
-          current_hours: Number(current.toFixed(2)),
-          current_hours_source: currentInfo.source,
-          remaining_hours: Number(remaining.toFixed(2)),
-          avg_daily_hours: Number(avgDaily.toFixed(2)),
-          estimated_service_date: estDate,
-        };
-      });
+        for (const p of assetPlans) {
+          const next_due = Number(p.last_service_hours || 0) + Number(p.interval_hours || 0);
+          const remaining = next_due - current;
+
+          const lastWo = getLastServiced.get(Number(p.plan_id || 0));
+          const lastBackfill = getLastBackfillServiced.get(assetId, String(p.service_name || ""));
+          const lastWoAt = String(lastWo?.last_serviced_at || "");
+          const lastBackfillAt = String(lastBackfill?.last_serviced_at || "");
+          const useBackfill = Boolean(lastBackfillAt && (!lastWoAt || lastBackfillAt > lastWoAt));
+          const last = useBackfill ? lastBackfill : lastWo;
+          const avgRow = getAvgDaily.get(assetId, startDate, endDate);
+          const totalRun = Number(avgRow?.total_run || 0);
+          const dayCount = Number(avgRow?.day_count || 0);
+          const avgDaily = dayCount > 0 ? totalRun / dayCount : 0;
+
+          const estDays = avgDaily > 0 ? Math.max(0, remaining / avgDaily) : null;
+          const estDate = estDays == null ? null : addDays(endDate, estDays);
+
+          rows.push({
+            plan_id: Number(p.plan_id || 0),
+            asset_id: assetId,
+            asset_code: p.asset_code,
+            asset_name: p.asset_name,
+            service_name: p.service_name,
+            last_serviced_date: last?.last_serviced_date || null,
+            last_service_source: useBackfill ? "backfill" : (last?.last_serviced_at ? "work_order" : null),
+            last_service_history_id: useBackfill ? Number(lastBackfill?.history_id || 0) : null,
+            current_hours: Number(current.toFixed(2)),
+            current_hours_source: currentInfo.source,
+            remaining_hours: Number(remaining.toFixed(2)),
+            avg_daily_hours: Number(avgDaily.toFixed(2)),
+            estimated_service_date: estDate,
+            schedule_mode: "legacy",
+          });
+        }
+      }
 
       return reply.send({ ok: true, as_of: endDate, range: { start: startDate, end: endDate }, rows });
     } catch (e) {
@@ -4569,22 +4633,16 @@ export default async function maintenanceRoutes(app) {
             ORDER BY a.asset_code ASC, mp.service_name ASC
           `).all();
 
-      const dueRows = rows
-        .map((r) => {
-          const current = getAssetCurrentHours(r.asset_id);
-          const nextDue = Number(r.last_service_hours || 0) + Number(r.interval_hours || 0);
-          const remaining = nextDue - current;
-          const status = classifyDueStatus(remaining, nearDueHours);
-          return {
-            asset_code: r.asset_code,
-            asset_name: r.asset_name,
-            service_name: r.service_name,
-            current_hours: Number(current.toFixed(2)),
-            next_due_hours: Number(nextDue.toFixed(2)),
-            remaining_hours: Number(remaining.toFixed(2)),
-            status,
-          };
-        })
+      const dueRows = buildDueListFromPlans(rows, getAssetCurrentHours)
+        .map((r) => ({
+          asset_code: r.asset_code,
+          asset_name: r.asset_name,
+          service_name: r.service_name,
+          current_hours: Number(r.current_hours || 0),
+          next_due_hours: Number(r.next_due_hours || 0),
+          remaining_hours: Number(r.remaining_hours || 0),
+          status: classifyDueStatus(r.remaining_hours, nearDueHours),
+        }))
         .filter((r) => r.status === "OVERDUE" || r.status === "ALMOST DUE")
         .sort((a, b) => Number(a.remaining_hours || 0) - Number(b.remaining_hours || 0));
 

@@ -22,6 +22,7 @@ import {
   listHireAssetsRegister,
   normalizeHireBillingMode,
 } from "../utils/plantHire.js";
+import { resolveNextServiceForAssetPlans } from "../utils/serviceSchedule.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -706,22 +707,24 @@ export default async function assetRoutes(app) {
     const currentHours = Number(Number(meter.hours || 0).toFixed(1));
 
     const planRows = db.prepare(`
-      SELECT service_name, interval_hours, last_service_hours
+      SELECT id, service_name, interval_hours, last_service_hours, active
       FROM maintenance_plans
       WHERE asset_id = ?
         AND active = 1
-      ORDER BY id ASC
+      ORDER BY interval_hours ASC, id ASC
     `).all(asset.id);
-    const dueRows = planRows.map((p) => {
-      const nextDueHours = Number(p.last_service_hours || 0) + Number(p.interval_hours || 0);
-      const remaining = nextDueHours - currentHours;
-      return {
-        service_name: String(p.service_name || "Service"),
-        next_due_hours: Number(nextDueHours.toFixed(1)),
-        remaining_hours: Number(remaining.toFixed(1)),
-      };
-    }).sort((a, b) => a.remaining_hours - b.remaining_hours);
-    const nextService = dueRows[0] || null;
+    const nextResolved = planRows.length
+      ? resolveNextServiceForAssetPlans(planRows, currentHours)
+      : null;
+    const nextService = nextResolved
+      ? {
+          service_name: nextResolved.service_name,
+          next_due_hours: nextResolved.next_due_hours,
+          remaining_hours: nextResolved.remaining_hours,
+          is_overdue: nextResolved.remaining_hours <= 0,
+          schedule_mode: nextResolved.schedule_mode,
+        }
+      : null;
 
     const machineProfileId = resolveMachinePrestartProfile(asset.category, asset.asset_name, asset.asset_code);
     const machineTemplate = machineProfileId ? getMachinePrestartTemplate(machineProfileId) : null;

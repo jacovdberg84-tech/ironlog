@@ -301,12 +301,21 @@ function planCard(p) {
   const planId = Number(p.id ?? p.plan_id ?? 0);
   const assetId = Number(p.asset_id || 0);
   const serviceName = String(p.service_name || "");
+  const rotating = String(p.schedule_mode || "") === "rotating";
+  const isNext = p.is_next_for_asset !== false;
+  const nextLabel = rotating
+    ? (isNext
+      ? `<div class="pill orange" style="display:inline-block; margin-top:6px;">Next up @ ${Number(p.next_due_hours || 0).toFixed(0)}h</div>`
+      : `<div class="muted" style="margin-top:6px;">Alternates with other service types on this asset</div>`)
+    : "";
   return `
     <div class="card" data-plan-id="${planId}" data-asset-id="${assetId}" data-service-name="${esc(serviceName)}">
       <div><strong>${p.asset_code}</strong> - ${p.asset_name}</div>
       <div><strong>Service:</strong> ${p.service_name}</div>
       <div><strong>Interval:</strong> ${Number(p.interval_hours || 0).toFixed(1)} hrs</div>
       <div><strong>Last Service:</strong> ${Number(p.last_service_hours || 0).toFixed(1)} hrs</div>
+      ${p.next_due_hours != null ? `<div><strong>Next due:</strong> ${Number(p.next_due_hours || 0).toFixed(1)} hrs (${Number(p.remaining_hours ?? 0).toFixed(1)} remaining)</div>` : ""}
+      ${nextLabel}
       <div><strong>Active:</strong> ${Number(p.active || 0) ? "Yes" : "No"}</div>
       ${planId > 0 ? `
       <div style="margin-top:8px;">
@@ -336,7 +345,7 @@ function dueCard(d) {
         <small>Select for work order</small>
       </label>
       <div><strong>${d.asset_code}</strong> - ${d.asset_name}</div>
-      <div><strong>Service:</strong> ${d.service_name}</div>
+      <div><strong>Next service:</strong> ${d.service_name}${String(d.schedule_mode || "") === "rotating" ? ` <span class="muted">(${Number(d.next_service_interval || d.interval_hours || 0).toFixed(0)}h)</span>` : ""}</div>
       <div><strong>Current Hours:</strong> ${Number(d.current_hours || 0).toFixed(1)}</div>
       <div><strong>Next Due:</strong> ${Number(d.next_due_hours || 0).toFixed(1)}</div>
       <div><strong>Remaining:</strong> ${Number(d.remaining_hours || 0).toFixed(1)}</div>
@@ -2034,6 +2043,7 @@ async function loadLiveHoursForSelectedAsset() {
   const assetEl = document.getElementById("planAsset");
   const currentHoursEl = document.getElementById("planCurrentHours");
   const currentHoursSrcEl = document.getElementById("planCurrentHoursSource");
+  const nextPreviewEl = document.getElementById("planNextServicePreview");
 
   if (!assetEl || !currentHoursEl) return;
 
@@ -2042,6 +2052,7 @@ async function loadLiveHoursForSelectedAsset() {
   if (!assetId) {
     currentHoursEl.value = "0";
     if (currentHoursSrcEl) currentHoursSrcEl.textContent = "Source: -";
+    if (nextPreviewEl) nextPreviewEl.textContent = "";
     syncLastServiceHoursFromLive();
     return;
   }
@@ -2066,6 +2077,16 @@ async function loadLiveHoursForSelectedAsset() {
     };
     const src = sourceMap[String(data.current_hours_source || "").trim()] || "Unknown";
     if (currentHoursSrcEl) currentHoursSrcEl.textContent = `Source: ${src}`;
+    if (nextPreviewEl) {
+      const ns = data.next_service;
+      if (ns && data.rotating_schedule) {
+        nextPreviewEl.textContent = `Next service: ${ns.service_name} @ ${Number(ns.next_due_hours || 0).toFixed(0)}h (${Number(ns.remaining_hours || 0).toFixed(0)}h remaining)`;
+      } else if (ns) {
+        nextPreviewEl.textContent = `Next due: ${ns.service_name} @ ${Number(ns.next_due_hours || 0).toFixed(0)}h`;
+      } else {
+        nextPreviewEl.textContent = "No active plans yet for this asset.";
+      }
+    }
     syncLastServiceHoursFromLive();
   } catch (err) {
     console.error("Live hours load error:", err);
@@ -2073,6 +2094,7 @@ async function loadLiveHoursForSelectedAsset() {
     currentHoursEl.value = "";
     currentHoursEl.placeholder = "";
     if (currentHoursSrcEl) currentHoursSrcEl.textContent = "Source: -";
+    if (nextPreviewEl) nextPreviewEl.textContent = "";
   }
 }
 
