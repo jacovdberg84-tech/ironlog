@@ -22,7 +22,7 @@ import {
   listHireAssetsRegister,
   normalizeHireBillingMode,
 } from "../utils/plantHire.js";
-import { resolveNextServiceForAssetPlans } from "../utils/serviceSchedule.js";
+import { resolveNextServiceForAssetPlans, classifyServiceDue } from "../utils/serviceSchedule.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -716,12 +716,24 @@ export default async function assetRoutes(app) {
     const nextResolved = planRows.length
       ? resolveNextServiceForAssetPlans(planRows, currentHours, asset.asset_code)
       : null;
+    const nextDueMeta = nextResolved
+      ? classifyServiceDue(
+          nextResolved.remaining_hours,
+          asset.asset_code,
+          nextResolved.interval_hours,
+          50,
+        )
+      : null;
     const nextService = nextResolved
       ? {
           service_name: nextResolved.service_name,
           next_due_hours: nextResolved.next_due_hours,
           remaining_hours: nextResolved.remaining_hours,
-          is_overdue: nextResolved.remaining_hours <= 0,
+          is_overdue: nextDueMeta?.is_overdue ?? nextResolved.remaining_hours <= 0,
+          is_almost_due: nextDueMeta?.is_almost_due ?? false,
+          status: nextDueMeta?.status ?? "OK",
+          meter_unit: nextDueMeta?.meter_unit ?? "hours",
+          near_due_threshold: nextDueMeta?.near_due_threshold ?? 50,
           schedule_mode: nextResolved.schedule_mode,
         }
       : null;

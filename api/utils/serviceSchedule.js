@@ -179,7 +179,7 @@ export function resolveNextServiceForAssetPlans(plans, currentHours, assetCode =
   };
 }
 
-export function enrichPlansWithNextService(plans, getCurrentHours) {
+export function enrichPlansWithNextService(plans, getCurrentHours, defaultNearDue = 50) {
   const byAsset = groupActivePlansByAsset(plans);
   const nextByAsset = new Map();
   for (const [assetId, assetPlans] of byAsset) {
@@ -204,19 +204,28 @@ export function enrichPlansWithNextService(plans, getCurrentHours) {
       const next = nextByAsset.get(assetId);
       const planId = Number(plan.id ?? plan.plan_id ?? 0);
       const isNext = Number(next?.plan_id || 0) === planId;
+      const remaining = isNext ? next?.remaining_hours ?? null : null;
+      const dueMeta = isNext && remaining != null
+        ? classifyServiceDue(remaining, code, planIntervalHours(plan), defaultNearDue)
+        : null;
       return {
         ...plan,
         last_service_hours_snapped: snappedLast,
         schedule_mode: "rotating",
         current_hours: Number(Number(current).toFixed(2)),
         next_due_hours: next?.next_due_hours ?? null,
-        remaining_hours: isNext ? next?.remaining_hours ?? null : null,
+        remaining_hours: remaining,
         is_next_for_asset: isNext,
         next_service_name: isNext ? next?.service_name : null,
+        meter_unit: dueMeta?.meter_unit ?? meterUnitForAsset(code),
+        near_due_threshold: dueMeta?.near_due_threshold ?? null,
+        status: dueMeta?.status ?? null,
+        is_almost_due: dueMeta?.is_almost_due ?? false,
       };
     }
 
     const legacy = resolveLegacyPlanDue(plan, current, code);
+    const dueMeta = classifyServiceDue(legacy.remaining_hours, code, planIntervalHours(plan), defaultNearDue);
     return {
       ...plan,
       last_service_hours_snapped: snappedLast,
@@ -226,12 +235,64 @@ export function enrichPlansWithNextService(plans, getCurrentHours) {
       remaining_hours: legacy.remaining_hours,
       is_next_for_asset: true,
       next_service_name: legacy.service_name,
+      meter_unit: dueMeta.meter_unit,
+      near_due_threshold: dueMeta.near_due_threshold,
+      status: dueMeta.status,
+      is_almost_due: dueMeta.is_almost_due,
     };
   });
 }
 
+export function meterUnitForAsset(assetCode) {
+  return isLdvServiceAssetCode(assetCode) ? "km" : "hours";
+}
+
+/** Plant default 50h; LDV 10000 km cycle flags almost due within 500 km. */
+export function nearDueThresholdForAsset(assetCode, serviceInterval = 0, defaultNear = 50) {
+  const code = String(assetCode || "");
+  const iv = normalizeGridStep(
+    Number(serviceInterval) || (isLdvServiceAssetCode(code) ? 10000 : 500),
+    code,
+  );
+  if (isLdvServiceAssetCode(code) && iv >= 10000) return 500;
+  if (isLdvServiceAssetCode(code)) return Math.max(100, Number(defaultNear || 50));
+  return Math.max(1, Number(defaultNear || 50));
+}
+
+export function classifyServiceDue(remaining, assetCode, serviceInterval = 0, defaultNear = 50) {
+  const rem = Number(remaining || 0);
+  const threshold = nearDueThresholdForAsset(assetCode, serviceInterval, defaultNear);
+  let status = "OK";
+  if (rem <= 0) status = "OVERDUE";
+  else if (rem <= threshold) status = "ALMOST DUE";
+  return {
+    status,
+    near_due_threshold: threshold,
+    meter_unit: meterUnitForAsset(assetCode),
+    is_overdue: rem <= 0,
+    is_almost_due: rem > 0 && rem <= threshold,
+  };
+}
+
+export function classifyServiceDueStatus(remaining, assetCode, serviceInterval = 0, defaultNear = 50) {
+  return classifyServiceDue(remaining, assetCode, serviceInterval, defaultNear).status;
+}
+
+function attachDueMeta(row, assetCode, defaultNear = 50) {
+  const interval = Number(row.next_service_interval || row.interval_hours || 0);
+  const due = classifyServiceDue(row.remaining_hours, assetCode, interval, defaultNear);
+  return {
+    ...row,
+    meter_unit: due.meter_unit,
+    near_due_threshold: due.near_due_threshold,
+    status: due.status,
+    is_overdue: due.is_overdue,
+    is_almost_due: due.is_almost_due,
+  };
+}
+
 /** One due row per asset — uses rotating schedule when multiple intervals exist. */
-export function buildDueListFromPlans(plans, getCurrentHours) {
+export function buildDueListFromPlans(plans, getCurrentHours, defaultNearDue = 50) {
   const byAsset = groupActivePlansByAsset(plans);
   const rows = [];
 
@@ -247,24 +308,29 @@ export function buildDueListFromPlans(plans, getCurrentHours) {
     if (!resolved) continue;
 
     const remaining = resolved.remaining_hours;
-    rows.push({
-      plan_id: resolved.plan_id,
-      asset_id: assetId,
-      asset_code: sample.asset_code,
-      asset_name: sample.asset_name,
-      category: sample.category,
-      service_name: resolved.service_name,
-      interval_hours: resolved.interval_hours,
-      last_service_hours: resolved.last_service_hours,
-      grid_step_hours: resolved.grid_step_hours,
-      current_hours: Number(Number(current).toFixed(2)),
-      next_due_hours: resolved.next_due_hours,
-      remaining_hours: resolved.remaining_hours,
-      is_overdue: remaining <= 0,
-      schedule_mode: resolved.schedule_mode,
-      next_service_interval: resolved.next_service_interval,
-      is_next_for_asset: true,
-    });
+    rows.push(
+      attachDueMeta(
+        {
+          plan_id: resolved.plan_id,
+          asset_id: assetId,
+          asset_code: sample.asset_code,
+          asset_name: sample.asset_name,
+          category: sample.category,
+          service_name: resolved.service_name,
+          interval_hours: resolved.interval_hours,
+          last_service_hours: resolved.last_service_hours,
+          grid_step_hours: resolved.grid_step_hours,
+          current_hours: Number(Number(current).toFixed(2)),
+          next_due_hours: resolved.next_due_hours,
+          remaining_hours: resolved.remaining_hours,
+          schedule_mode: resolved.schedule_mode,
+          next_service_interval: resolved.next_service_interval,
+          is_next_for_asset: true,
+        },
+        String(sample.asset_code || ""),
+        defaultNearDue,
+      ),
+    );
   }
 
   return rows;

@@ -356,6 +356,9 @@ function groupPlansByAsset(plans) {
     group.next_due_hours = nextPlan?.next_due_hours;
     group.remaining_hours = nextPlan?.remaining_hours;
     group.schedule_mode = nextPlan?.schedule_mode;
+    group.near_due_threshold = nextPlan?.near_due_threshold ?? 50;
+    group.meter_unit = nextPlan?.meter_unit || "hours";
+    group.status = nextPlan?.status || null;
   }
   return Array.from(map.values()).sort((a, b) =>
     String(a.asset_code || "").localeCompare(String(b.asset_code || ""))
@@ -376,15 +379,17 @@ function plansTableRow(group) {
     </span>`;
   }).join("") || "—";
   const remaining = Number(group.remaining_hours ?? 0);
-  const remClass = remaining <= 0 ? "status-overdue" : remaining <= 50 ? "status-soon" : "";
+  const near = Number(group.near_due_threshold ?? 50);
+  const unit = String(group.meter_unit || "hours") === "km" ? "km" : "h";
+  const remClass = remaining <= 0 ? "status-overdue" : remaining <= near ? "status-soon" : "";
   return `
     <tr data-plan-asset-id="${assetId}" data-plan-id="${planId}">
       <td><b>${escBackfill(group.asset_code || "-")}</b><br><small class="muted">${escBackfill(group.asset_name || "")}</small></td>
-      <td style="text-align:right;">${fmt1(group.current_hours)}</td>
-      <td style="text-align:right;">${fmt1(group.last_service_hours)}</td>
-      <td><strong>${escBackfill(group.next_service_name || "-")}</strong>${String(group.schedule_mode || "") === "rotating" ? `<br><small class="muted">Auto alternates</small>` : ""}</td>
-      <td style="text-align:right;">${fmt1(group.next_due_hours)}</td>
-      <td style="text-align:right;"><span class="${remClass}">${fmt1(group.remaining_hours)}</span></td>
+      <td style="text-align:right;">${fmt1(group.current_hours)}<br><small class="muted">${unit}</small></td>
+      <td style="text-align:right;">${fmt1(group.last_service_hours)}<br><small class="muted">${unit}</small></td>
+      <td><strong>${escBackfill(group.next_service_name || "-")}</strong>${String(group.schedule_mode || "") === "rotating" ? `<br><small class="muted">Auto alternates</small>` : ""}${group.status === "ALMOST DUE" ? `<br><span class="pill orange">Almost due</span>` : ""}</td>
+      <td style="text-align:right;">${fmt1(group.next_due_hours)}<br><small class="muted">${unit}</small></td>
+      <td style="text-align:right;"><span class="${remClass}">${fmt1(group.remaining_hours)}</span><br><small class="muted">${unit}</small></td>
       <td>${types}</td>
       <td>
         ${planId > 0 ? `<button type="button" data-plan-rebase-id="${planId}">Rebase</button>` : ""}
@@ -412,6 +417,8 @@ function dueCard(d) {
     statusText = "ALMOST DUE";
   }
 
+  const unit = String(d.meter_unit || "hours") === "km" ? "km" : "h";
+
   return `
     <div class="card">
       <label style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
@@ -419,10 +426,10 @@ function dueCard(d) {
         <small>Select for work order</small>
       </label>
       <div><strong>${d.asset_code}</strong> - ${d.asset_name}</div>
-      <div><strong>Next service:</strong> ${d.service_name}${String(d.schedule_mode || "") === "rotating" ? ` <span class="muted">(${Number(d.next_service_interval || d.interval_hours || 0).toFixed(0)}h)</span>` : ""}</div>
-      <div><strong>Current Hours:</strong> ${Number(d.current_hours || 0).toFixed(1)}</div>
-      <div><strong>Next Due:</strong> ${Number(d.next_due_hours || 0).toFixed(1)}</div>
-      <div><strong>Remaining:</strong> ${Number(d.remaining_hours || 0).toFixed(1)}</div>
+      <div><strong>Next service:</strong> ${d.service_name}${String(d.schedule_mode || "") === "rotating" ? ` <span class="muted">(${Number(d.next_service_interval || d.interval_hours || 0).toFixed(0)}${unit})</span>` : ""}</div>
+      <div><strong>Current:</strong> ${Number(d.current_hours || 0).toFixed(1)} ${unit}</div>
+      <div><strong>Next Due:</strong> ${Number(d.next_due_hours || 0).toFixed(1)} ${unit}</div>
+      <div><strong>Remaining:</strong> ${Number(d.remaining_hours || 0).toFixed(1)} ${unit}${Number(d.near_due_threshold || 0) > 0 ? ` <span class="muted">(almost due ≤ ${Number(d.near_due_threshold).toFixed(0)}${unit})</span>` : ""}</div>
       <div class="${statusClass}">${statusText}</div>
     </div>
   `;
@@ -438,7 +445,9 @@ function histRow(r) {
   const last = r.last_serviced_date || "-";
   const est = r.estimated_service_date || "-";
   const hrsToNext = Number(r.remaining_hours || 0);
-  const warn = hrsToNext <= 0 ? "status-overdue" : hrsToNext <= 50 ? "status-soon" : "status-ok";
+  const near = Number(r.near_due_threshold ?? 50);
+  const unit = String(r.meter_unit || "hours") === "km" ? "km" : "h";
+  const warn = hrsToNext <= 0 ? "status-overdue" : hrsToNext <= near ? "status-soon" : "status-ok";
   const sourceMap = {
     daily_closing: "Daily closing",
     asset_hours: "Asset hours",
@@ -456,8 +465,8 @@ function histRow(r) {
       <td><b>${escBackfill(eq)}</b>${lastSvcHrs != null ? `<br><small class="muted">Last svc ${lastSvcHrs}h</small>` : ""}</td>
       <td>${escBackfill(r.service_name || "-")}${nextDue}</td>
       <td>${escBackfill(last)}${srcLabel}</td>
-      <td style="text-align:right;">${fmt1(r.current_hours)}<br><small class="muted">(${escBackfill(src)})</small></td>
-      <td style="text-align:right;"><span class="${warn}">${fmt1(r.remaining_hours)}</span></td>
+      <td style="text-align:right;">${fmt1(r.current_hours)}<br><small class="muted">(${escBackfill(src)}, ${unit})</small></td>
+      <td style="text-align:right;"><span class="${warn}">${fmt1(r.remaining_hours)}</span>${r.status === "ALMOST DUE" ? `<br><small class="pill orange">Almost due</small>` : ""}</td>
       <td style="text-align:right;">${fmt1(r.avg_daily_hours)}</td>
       <td>
         ${escBackfill(est)}
@@ -2362,8 +2371,9 @@ async function loadDue() {
     due.sort((a, b) => {
       const getRank = (d) => {
         const remaining = Number(d.remaining_hours || 0);
+        const near = Number(d.near_due_threshold || nearDueHours);
         if (remaining <= 0) return 1;
-        if (remaining <= nearDueHours) return 2;
+        if (remaining <= near) return 2;
         return 3;
       };
 

@@ -160,7 +160,7 @@
         <option value="250">250 hour service</option>
         <option value="500">500 hour service</option>
         <option value="1000">1000 hour service</option>
-        <option value="10000" data-ldv-only="1">10000 hour service (LDV)</option>
+        <option value="10000" data-ldv-only="1">10000 km service (LDV)</option>
       </select>
       <small class="muted">Pick 500 + 1000 on the same machine for alternating services. IRONLOG calculates which is due next from the hourmeter.</small>
     </label>
@@ -378,8 +378,9 @@
         <h3 style="margin:0;">Due Services</h3>
         <div class="row" style="gap:8px; align-items:center;">
           <label style="display:flex; flex-direction:column; gap:4px;">
-            Near-Due Hours
+            Near-Due (plant, hours)
             <input id="dueNearThresholdHours" type="number" min="1" step="1" value="50" style="width:120px;" />
+            <small class="muted" style="display:block;">LDVs on 10000 km cycles auto-flag almost due within 500 km.</small>
           </label>
           <button id="applyDueThresholdBtn" style="height:40px; margin-top:20px;">Apply</button>
         </div>

@@ -27,6 +27,9 @@ import {
   snapLastServiceHours,
   planIntervalHours,
   resolveLegacyPlanDue,
+  classifyServiceDue,
+  classifyServiceDueStatus,
+  meterUnitForAsset,
 } from "../utils/serviceSchedule.js";
 import {
   buildUndercarriageComponentSchema,
@@ -839,7 +842,10 @@ function getAssetHoursInfoAsOf(assetId, asOfYmd) {
   return getAssetCurrentHoursInfo(aid);
 }
 
-function classifyDueStatus(remainingHours, nearDueHours = 50) {
+function classifyDueStatus(remainingHours, nearDueHours = 50, assetCode = null, serviceInterval = 0) {
+  if (assetCode) {
+    return classifyServiceDueStatus(remainingHours, assetCode, serviceInterval, nearDueHours);
+  }
   const remaining = Number(remainingHours || 0);
   const threshold = Math.max(1, Number(nearDueHours || 50));
   if (remaining <= 0) return "OVERDUE";
@@ -1824,7 +1830,7 @@ export default async function maintenanceRoutes(app) {
         ORDER BY a.asset_code ASC, mp.service_name ASC
       `).all();
 
-      const plans = enrichPlansWithNextService(rows, getAssetCurrentHours);
+      const plans = enrichPlansWithNextService(rows, getAssetCurrentHours, 50);
 
       return reply.send({
         ok: true,
@@ -2313,10 +2319,7 @@ export default async function maintenanceRoutes(app) {
         if (date) return Number(rows.find((r) => Number(r.asset_id) === Number(assetId))?.current_hours ?? getAssetCurrentHours(assetId));
         return getAssetCurrentHours(assetId);
       };
-      const due = buildDueListFromPlans(rows, getHours).map((r) => ({
-        ...r,
-        status: classifyDueStatus(r.remaining_hours, nearDueHours),
-      }));
+      const due = buildDueListFromPlans(rows, getHours, nearDueHours);
 
       return reply.send({
         ok: true,
@@ -2458,6 +2461,13 @@ export default async function maintenanceRoutes(app) {
           const estDays = avgDaily > 0 ? Math.max(0, remaining / avgDaily) : null;
           const estDate = estDays == null ? null : addDays(endDate, estDays);
 
+          const dueMeta = classifyServiceDue(
+            remaining,
+            String(sample.asset_code || ""),
+            Number(resolved?.interval_hours || resolved?.next_service_interval || 0),
+            50,
+          );
+
           rows.push({
             plan_id: Number(resolved?.plan_id || 0),
             asset_id: assetId,
@@ -2475,6 +2485,10 @@ export default async function maintenanceRoutes(app) {
             schedule_mode: "rotating",
             next_due_hours: resolved?.next_due_hours ?? null,
             last_service_hours: resolved?.last_service_hours ?? null,
+            meter_unit: dueMeta.meter_unit,
+            near_due_threshold: dueMeta.near_due_threshold,
+            status: dueMeta.status,
+            is_almost_due: dueMeta.is_almost_due,
           });
           continue;
         }
@@ -2497,6 +2511,13 @@ export default async function maintenanceRoutes(app) {
           const estDays = avgDaily > 0 ? Math.max(0, remaining / avgDaily) : null;
           const estDate = estDays == null ? null : addDays(endDate, estDays);
 
+          const dueMeta = classifyServiceDue(
+            remaining,
+            String(p.asset_code || ""),
+            Number(resolved.interval_hours || 0),
+            50,
+          );
+
           rows.push({
             plan_id: Number(p.plan_id || 0),
             asset_id: assetId,
@@ -2514,6 +2535,10 @@ export default async function maintenanceRoutes(app) {
             schedule_mode: "grid",
             next_due_hours: resolved.next_due_hours,
             last_service_hours: resolved.last_service_hours,
+            meter_unit: dueMeta.meter_unit,
+            near_due_threshold: dueMeta.near_due_threshold,
+            status: dueMeta.status,
+            is_almost_due: dueMeta.is_almost_due,
           });
         }
       }
@@ -4732,7 +4757,7 @@ export default async function maintenanceRoutes(app) {
             ORDER BY a.asset_code ASC, mp.service_name ASC
           `).all();
 
-      const dueRows = buildDueListFromPlans(rows, getAssetCurrentHours)
+      const dueRows = buildDueListFromPlans(rows, getAssetCurrentHours, nearDueHours)
         .map((r) => ({
           asset_code: r.asset_code,
           asset_name: r.asset_name,
@@ -4740,7 +4765,7 @@ export default async function maintenanceRoutes(app) {
           current_hours: Number(r.current_hours || 0),
           next_due_hours: Number(r.next_due_hours || 0),
           remaining_hours: Number(r.remaining_hours || 0),
-          status: classifyDueStatus(r.remaining_hours, nearDueHours),
+          status: r.status,
         }))
         .filter((r) => r.status === "OVERDUE" || r.status === "ALMOST DUE")
         .sort((a, b) => Number(a.remaining_hours || 0) - Number(b.remaining_hours || 0));
