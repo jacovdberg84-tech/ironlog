@@ -144,13 +144,25 @@
 
   <section class="panel show page-section">
   <div class="panel-header">
-    <h3>Create Maintenance Plan</h3>
+    <h3>Service Schedule Setup</h3>
   </div>
 
   <div class="form-grid">
     <label>
       Asset
       <select id="planAsset"></select>
+    </label>
+
+    <label>
+      Service type
+      <select id="planServiceType">
+        <option value="">Select service type…</option>
+        <option value="250">250 hour service</option>
+        <option value="500">500 hour service</option>
+        <option value="1000">1000 hour service</option>
+        <option value="10000" data-ldv-only="1">10000 hour service (LDV)</option>
+      </select>
+      <small class="muted">Pick 500 + 1000 on the same machine for alternating services. IRONLOG calculates which is due next from the hourmeter.</small>
     </label>
 
     <label>
@@ -166,20 +178,13 @@
     </label>
 
     <label>
-      Service Name
-      <input id="planServiceName" type="text" placeholder="500 or 1000" />
-      <small class="muted">Add both a 500 and 1000 plan on the same asset — IRONLOG picks the next type from the hourmeter (e.g. 12983h → 1000 @ 13000h, then 500 @ 13500h).</small>
-    </label>
-
-    <label>
-      Interval Hours
-      <input id="planIntervalHours" type="number" min="1" step="0.1" placeholder="250" />
-    </label>
-
-    <label>
       Last Service Hours
       <input id="planLastServiceHours" type="number" min="0" step="0.1" value="0" />
+      <small class="muted">Snaps to nearest service milestone on save (e.g. 12026 → 12000).</small>
     </label>
+
+    <input id="planIntervalHours" type="hidden" value="0" />
+    <input id="planServiceName" type="hidden" value="" />
 
     <label>
       Active
@@ -191,7 +196,7 @@
   </div>
 
   <div class="stack-12">
-    <button id="savePlanBtn">Save Maintenance Plan</button>
+    <button id="savePlanBtn" type="button">Add service type to asset</button>
   </div>
 
   <div id="planFormMessage" style="margin-top:10px;"></div>
@@ -201,13 +206,30 @@
     <div id="mainMaintenanceCards">
     <div id="maintenancePlansCard" class="maintenance-card collapsible" data-collapsed="false">
       <div class="maintenance-card-header">
-        <h3>Maintenance Plans</h3>
+        <h3>Service Schedules</h3>
         <button class="maintenance-card-toggle" aria-label="Toggle">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
         </button>
       </div>
       <div class="maintenance-card-body">
-        <div id="plansList" class="card-grid"></div>
+        <p class="muted mini" style="margin:0 0 12px;">One row per machine — next service is calculated automatically. Expand <strong>Types</strong> to remove duplicate entries.</p>
+        <div style="overflow:auto;">
+          <table class="gridTable" style="min-width:920px;">
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th style="text-align:right;">Current h</th>
+                <th style="text-align:right;">Last svc h</th>
+                <th>Next service</th>
+                <th style="text-align:right;">Due @ h</th>
+                <th style="text-align:right;">Remaining h</th>
+                <th>Schedule types</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="plansList"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 

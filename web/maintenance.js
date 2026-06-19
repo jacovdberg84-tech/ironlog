@@ -297,33 +297,107 @@ function syncLastServiceHoursFromLive() {
   lastServiceEl.value = Number.isFinite(current) ? current.toFixed(1) : "0";
 }
 
-function planCard(p) {
-  const planId = Number(p.id ?? p.plan_id ?? 0);
-  const assetId = Number(p.asset_id || 0);
-  const serviceName = String(p.service_name || "");
-  const rotating = String(p.schedule_mode || "") === "rotating";
-  const isNext = p.is_next_for_asset !== false;
-  const nextLabel = rotating
-    ? (isNext
-      ? `<div class="pill orange" style="display:inline-block; margin-top:6px;">Next up @ ${Number(p.next_due_hours || 0).toFixed(0)}h</div>`
-      : `<div class="muted" style="margin-top:6px;">Alternates with other service types on this asset</div>`)
-    : "";
+function isLdvAssetCode(code) {
+  return /^V(0[1-9]|1[0-5])AM$/i.test(String(code || "").trim());
+}
+
+function syncPlanServiceTypeFromDropdown() {
+  const typeEl = document.getElementById("planServiceType");
+  const nameEl = document.getElementById("planServiceName");
+  const intervalEl = document.getElementById("planIntervalHours");
+  if (!typeEl || !nameEl || !intervalEl) return;
+  const hours = Number(typeEl.value || 0);
+  if (hours > 0) {
+    nameEl.value = String(hours);
+    intervalEl.value = String(hours);
+  } else {
+    nameEl.value = "";
+    intervalEl.value = "0";
+  }
+}
+
+function refreshPlanServiceTypeDropdown() {
+  const assetEl = document.getElementById("planAsset");
+  const typeEl = document.getElementById("planServiceType");
+  if (!typeEl) return;
+  const opt = assetEl?.selectedOptions?.[0];
+  const code = String(opt?.textContent || "").split(" - ")[0]?.trim() || "";
+  const ldv = isLdvAssetCode(code);
+  typeEl.querySelectorAll("option[data-ldv-only]").forEach((o) => {
+    o.hidden = !ldv;
+    o.disabled = !ldv;
+  });
+  if (!ldv && typeEl.value === "10000") typeEl.value = "";
+  syncPlanServiceTypeFromDropdown();
+}
+
+function groupPlansByAsset(plans) {
+  const map = new Map();
+  for (const p of plans || []) {
+    const assetId = Number(p.asset_id || 0);
+    if (!assetId) continue;
+    if (!map.has(assetId)) {
+      map.set(assetId, {
+        asset_id: assetId,
+        asset_code: p.asset_code,
+        asset_name: p.asset_name,
+        plans: [],
+      });
+    }
+    map.get(assetId).plans.push(p);
+  }
+  for (const group of map.values()) {
+    group.plans.sort((a, b) => Number(a.interval_hours || 0) - Number(b.interval_hours || 0));
+    const nextPlan = group.plans.find((p) => p.is_next_for_asset) || group.plans[0];
+    group.next = nextPlan || null;
+    group.current_hours = nextPlan?.current_hours;
+    group.last_service_hours = nextPlan?.last_service_hours_snapped ?? nextPlan?.last_service_hours;
+    group.next_service_name = nextPlan?.next_service_name || nextPlan?.service_name;
+    group.next_due_hours = nextPlan?.next_due_hours;
+    group.remaining_hours = nextPlan?.remaining_hours;
+    group.schedule_mode = nextPlan?.schedule_mode;
+  }
+  return Array.from(map.values()).sort((a, b) =>
+    String(a.asset_code || "").localeCompare(String(b.asset_code || ""))
+  );
+}
+
+function plansTableRow(group) {
+  const assetId = Number(group.asset_id || 0);
+  const nextPlan = group.next;
+  const planId = Number(nextPlan?.id ?? nextPlan?.plan_id ?? 0);
+  const types = (group.plans || []).map((p) => {
+    const pid = Number(p.id ?? p.plan_id ?? 0);
+    const iv = Number(p.interval_hours || 0);
+    const isNext = Boolean(p.is_next_for_asset);
+    return `<span class="pill ${isNext ? "orange" : "blue"}" style="margin:2px 4px 2px 0; display:inline-flex; align-items:center; gap:4px;">
+      ${escBackfill(String(p.service_name || iv))}
+      ${pid > 0 ? `<button type="button" class="plan-type-remove" data-plan-delete-id="${pid}" title="Remove duplicate" style="border:none;background:transparent;color:inherit;cursor:pointer;padding:0 2px;">×</button>` : ""}
+    </span>`;
+  }).join("") || "—";
+  const remaining = Number(group.remaining_hours ?? 0);
+  const remClass = remaining <= 0 ? "status-overdue" : remaining <= 50 ? "status-soon" : "";
   return `
-    <div class="card" data-plan-id="${planId}" data-asset-id="${assetId}" data-service-name="${esc(serviceName)}">
-      <div><strong>${p.asset_code}</strong> - ${p.asset_name}</div>
-      <div><strong>Service:</strong> ${p.service_name}</div>
-      <div><strong>Interval:</strong> ${Number(p.interval_hours || 0).toFixed(1)} hrs</div>
-      <div><strong>Last Service:</strong> ${Number(p.last_service_hours_snapped ?? p.last_service_hours ?? 0).toFixed(1)} hrs</div>
-      ${p.next_due_hours != null ? `<div><strong>Next due:</strong> ${Number(p.next_due_hours || 0).toFixed(1)} hrs (${Number(p.remaining_hours ?? 0).toFixed(1)} remaining)</div>` : ""}
-      ${nextLabel}
-      <div><strong>Active:</strong> ${Number(p.active || 0) ? "Yes" : "No"}</div>
-      ${planId > 0 ? `
-      <div style="margin-top:8px;">
-        <button type="button" data-plan-rebase-id="${planId}">Rebase Last Service to Current Hours</button>
-      </div>
-      ` : `<div class="muted" style="margin-top:8px;">Plan ID missing — cannot rebase from this row.</div>`}
-    </div>
+    <tr data-plan-asset-id="${assetId}" data-plan-id="${planId}">
+      <td><b>${escBackfill(group.asset_code || "-")}</b><br><small class="muted">${escBackfill(group.asset_name || "")}</small></td>
+      <td style="text-align:right;">${fmt1(group.current_hours)}</td>
+      <td style="text-align:right;">${fmt1(group.last_service_hours)}</td>
+      <td><strong>${escBackfill(group.next_service_name || "-")}</strong>${String(group.schedule_mode || "") === "rotating" ? `<br><small class="muted">Auto alternates</small>` : ""}</td>
+      <td style="text-align:right;">${fmt1(group.next_due_hours)}</td>
+      <td style="text-align:right;"><span class="${remClass}">${fmt1(group.remaining_hours)}</span></td>
+      <td>${types}</td>
+      <td>
+        ${planId > 0 ? `<button type="button" data-plan-rebase-id="${planId}">Rebase</button>` : ""}
+      </td>
+    </tr>
   `;
+}
+
+function planIntervalForMatch(p) {
+  const iv = Number(p?.interval_hours || 0);
+  if (iv > 0) return iv;
+  const m = String(p?.service_name || "").match(/(\d+(?:\.\d+)?)/);
+  return m ? Number(m[1]) : 0;
 }
 
 function dueCard(d) {
@@ -2122,13 +2196,16 @@ async function loadLiveHoursForSelectedAsset() {
 
 async function savePlan() {
   const assetEl = document.getElementById("planAsset");
+  const typeEl = document.getElementById("planServiceType");
   const serviceNameEl = document.getElementById("planServiceName");
   const intervalEl = document.getElementById("planIntervalHours");
   const lastServiceEl = document.getElementById("planLastServiceHours");
   const activeEl = document.getElementById("planActive");
   const msgEl = document.getElementById("planFormMessage");
 
-  if (!assetEl || !serviceNameEl || !intervalEl || !lastServiceEl || !activeEl || !msgEl) {
+  syncPlanServiceTypeFromDropdown();
+
+  if (!assetEl || !typeEl || !serviceNameEl || !intervalEl || !lastServiceEl || !activeEl || !msgEl) {
     console.error("Plan form elements missing");
     return;
   }
@@ -2138,26 +2215,35 @@ async function savePlan() {
     service_name: serviceNameEl.value.trim(),
     interval_hours: Number(intervalEl.value || 0),
     last_service_hours: Number(lastServiceEl.value || 0),
-    active: Number(activeEl.value || 1)
+    active: Number(activeEl.value || 1),
   };
 
   if (!payload.asset_id || !payload.service_name || payload.interval_hours <= 0) {
     msgEl.className = "message-error";
-    msgEl.textContent = "Please select an asset, enter a service name, and set interval hours.";
+    msgEl.textContent = "Please select an asset and a service type from the dropdown.";
     return;
   }
 
+  const existing = (__maintenancePlansCache || []).find(
+    (p) =>
+      Number(p.asset_id) === payload.asset_id &&
+      planIntervalForMatch(p) === payload.interval_hours,
+  );
+
   msgEl.className = "";
-  msgEl.textContent = "Saving plan...";
+  msgEl.textContent = existing ? "Updating existing schedule…" : "Adding service type…";
 
   try {
-    const res = await fetch(`${API}/maintenance/plans`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
+    const res = await fetch(
+      existing
+        ? `${API}/maintenance/plans/${Number(existing.id ?? existing.plan_id ?? 0)}`
+        : `${API}/maintenance/plans`,
+      {
+        method: existing ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload)
-    });
+    );
 
     const data = await res.json();
 
@@ -2166,10 +2252,12 @@ async function savePlan() {
     }
 
     msgEl.className = "message-success";
-    msgEl.textContent = "Maintenance plan saved successfully.";
+    msgEl.textContent = existing
+      ? "Service schedule updated."
+      : "Service type added to asset.";
 
-    serviceNameEl.value = "";
-    intervalEl.value = "";
+    typeEl.value = "";
+    syncPlanServiceTypeFromDropdown();
     lastServiceEl.value = "0";
     activeEl.value = "1";
 
@@ -2183,14 +2271,28 @@ async function savePlan() {
   }
 }
 
+async function deleteMaintenancePlan(planId) {
+  const id = Number(planId || 0);
+  if (!id) return;
+  if (!confirm("Remove this service type from the asset? (Use this to delete duplicate entries.)")) return;
+  const res = await fetch(`${API}/maintenance/plans/${id}`, { method: "DELETE" });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to delete plan");
+  await loadPlans();
+  await loadDue();
+  await loadHistory();
+}
+
+let __maintenancePlansCache = [];
+
 async function loadPlans() {
   const container = document.getElementById("plansList");
-  container.innerHTML = `<div class="skeleton-block"></div><div class="skeleton-block"></div>`;
+  if (!container) return;
+  container.innerHTML = `<tr><td colspan="8" class="muted">Loading...</td></tr>`;
 
   try {
     const res = await fetch(`${API}/maintenance/plans`);
     const data = await res.json();
-    console.log("Plans response:", data);
 
     if (!res.ok) {
       throw new Error(data.error || "Failed to load plans");
@@ -2198,14 +2300,16 @@ async function loadPlans() {
 
     const plans = (Array.isArray(data.plans) ? data.plans : []).map((p) => ({
       ...p,
-      id: Number(p?.id ?? p?.plan_id ?? 0) || 0
+      id: Number(p?.id ?? p?.plan_id ?? 0) || 0,
     }));
-    container.innerHTML = plans.length
-      ? plans.map(planCard).join("")
-      : "<div>No maintenance plans found.</div>";
+    __maintenancePlansCache = plans;
+    const groups = groupPlansByAsset(plans);
+    container.innerHTML = groups.length
+      ? groups.map(plansTableRow).join("")
+      : `<tr><td colspan="8" class="muted">No service schedules yet — pick an asset and service type above.</td></tr>`;
   } catch (err) {
     console.error("Plans error:", err);
-    container.innerHTML = `<div style="color:#ff8080;">Error loading plans: ${err.message}</div>`;
+    container.innerHTML = `<tr><td colspan="8" class="message-error">Error loading plans: ${escBackfill(err.message)}</td></tr>`;
   }
 }
 
@@ -6951,21 +7055,35 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (plansList) {
     plansList.addEventListener("click", (e) => {
+      const delBtn = e.target instanceof HTMLElement ? e.target.closest("button.plan-type-remove") : null;
+      if (delBtn) {
+        deleteMaintenancePlan(Number(delBtn.getAttribute("data-plan-delete-id") || 0)).catch((err) =>
+          alert(err.message || err),
+        );
+        return;
+      }
       const btn = e.target instanceof HTMLElement ? e.target.closest("button[data-plan-rebase-id]") : null;
       if (!btn) return;
-      const card = btn.closest(".card");
+      const row = btn.closest("tr");
       const directId = Number(btn.getAttribute("data-plan-rebase-id") || 0);
-      const cardId = Number(card?.getAttribute("data-plan-id") || 0);
-      const planId = directId || cardId;
-      const assetId = Number(card?.getAttribute("data-asset-id") || 0);
-      const serviceName = String(card?.getAttribute("data-service-name") || "");
-      rebasePlanLastServiceHours(planId, { asset_id: assetId, service_name: serviceName }).catch((err) => alert(err.message || err));
+      const rowId = Number(row?.getAttribute("data-plan-id") || 0);
+      const planId = directId || rowId;
+      const assetId = Number(row?.getAttribute("data-plan-asset-id") || 0);
+      rebasePlanLastServiceHours(planId, { asset_id: assetId }).catch((err) => alert(err.message || err));
     });
+  }
+
+  const planServiceTypeEl = document.getElementById("planServiceType");
+  if (planServiceTypeEl) {
+    planServiceTypeEl.addEventListener("change", syncPlanServiceTypeFromDropdown);
   }
 
   const assetEl = document.getElementById("planAsset");
   if (assetEl) {
-    assetEl.addEventListener("change", loadLiveHoursForSelectedAsset);
+    assetEl.addEventListener("change", () => {
+      refreshPlanServiceTypeDropdown();
+      loadLiveHoursForSelectedAsset();
+    });
   }
 
   if (useLiveEl) {
@@ -6973,6 +7091,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   loadAssetsForPlan().then(() => {
+    refreshPlanServiceTypeDropdown();
     loadLiveHoursForSelectedAsset();
     const urlCode = String(new URLSearchParams(window.location.search).get("asset_code") || "")
       .trim()
