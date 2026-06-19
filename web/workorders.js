@@ -497,6 +497,7 @@ function renderDetail(payload) {
           <div><strong>Completed:</strong> ${wo.completed_at || "-"}</div>
           <div><strong>Technician sign-off:</strong> ${wo.artisan_name || "-"}</div>
           <div><strong>Supervisor sign-off:</strong> ${wo.supervisor_name || "-"}</div>
+          ${wo.job_description ? `<div style="margin-top:8px;"><strong>Job description / findings:</strong><pre style="white-space:pre-wrap; margin:4px 0 0 0; font-family:inherit;">${escapeHtml(wo.job_description)}</pre></div>` : ""}
           ${renderRepairProgressPanel(wo)}
           <div><strong>Opened:</strong> ${wo.opened_at || "-"}</div>
           <div><strong>Closed:</strong> ${wo.closed_at || "-"}</div>

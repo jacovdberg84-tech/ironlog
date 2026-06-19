@@ -6279,6 +6279,7 @@ export default async function maintenanceRoutes(app) {
       let work_order_id = null;
 
       if (shouldCreateWo) {
+        ensureColumn("work_orders", "job_description TEXT", "job_description");
         ensureColumn("work_orders", "completion_notes TEXT", "completion_notes");
         const woNotes = buildInspectionWorkOrderNotes({
           inspectionId,
@@ -6294,8 +6295,12 @@ export default async function maintenanceRoutes(app) {
           VALUES (?, 'inspection', ?, 'open')
         `).run(asset_id, inspectionId);
         work_order_id = Number(wo.lastInsertRowid);
-        if (work_order_id > 0 && hasColumn("work_orders", "completion_notes") && woNotes) {
-          db.prepare(`UPDATE work_orders SET completion_notes = ? WHERE id = ?`).run(woNotes, work_order_id);
+        if (work_order_id > 0 && woNotes) {
+          if (hasColumn("work_orders", "job_description")) {
+            db.prepare(`UPDATE work_orders SET job_description = ? WHERE id = ?`).run(woNotes, work_order_id);
+          } else if (hasColumn("work_orders", "completion_notes")) {
+            db.prepare(`UPDATE work_orders SET completion_notes = ? WHERE id = ?`).run(woNotes, work_order_id);
+          }
         }
         if (work_order_id > 0) {
           db.prepare(`UPDATE manager_inspections SET work_order_id = ? WHERE id = ?`).run(work_order_id, inspectionId);

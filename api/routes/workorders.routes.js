@@ -169,6 +169,7 @@ export default async function workOrderRoutes(app) {
 
   // Backward-compatible schema upgrades for WO completion/sign-off.
   ensureColumn("work_orders", "completion_notes", "completion_notes TEXT");
+  ensureColumn("work_orders", "job_description", "job_description TEXT");
   ensureColumn("work_orders", "artisan_name", "artisan_name TEXT");
   ensureColumn("work_orders", "artisan_signed_at", "artisan_signed_at TEXT");
   ensureColumn("work_orders", "supervisor_name", "supervisor_name TEXT");
@@ -671,8 +672,8 @@ export default async function workOrderRoutes(app) {
     `).run(asset.id, source, reference_id, initialStatus, site_code);
     const work_order_id = Number(ins.lastInsertRowid);
 
-    if (hasColumn("work_orders", "completion_notes") && completion_notes) {
-      db.prepare(`UPDATE work_orders SET completion_notes = ? WHERE id = ?`).run(completion_notes, work_order_id);
+    if (hasColumn("work_orders", "job_description") && completion_notes) {
+      db.prepare(`UPDATE work_orders SET job_description = ? WHERE id = ?`).run(completion_notes, work_order_id);
     }
     if (assigned_artisan_name && hasColumn("work_orders", "assigned_artisan_name")) {
       db.prepare(`

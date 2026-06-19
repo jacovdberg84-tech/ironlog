@@ -117,6 +117,37 @@ function compactCell(v, max = 140) {
   return s.length > max ? `${s.slice(0, Math.max(1, max - 1))}...` : s;
 }
 
+function workOrderTerminalStatus(status) {
+  const s = String(status || "").toLowerCase();
+  return ["completed", "approved", "closed"].includes(s);
+}
+
+function jobFindingsTextForPdf(wo, breakdown) {
+  const jobDesc = String(wo?.job_description || "").trim();
+  const bdDesc = String(breakdown?.description || "").trim();
+  const parts = [];
+  if (jobDesc) parts.push(jobDesc);
+  else if (!workOrderTerminalStatus(wo?.status)) {
+    const legacy = String(wo?.completion_notes || "").trim();
+    if (legacy) parts.push(legacy);
+  }
+  if (bdDesc && (!jobDesc || !jobDesc.includes(bdDesc))) parts.push(bdDesc);
+  const progress = String(wo?.repair_progress || "").trim();
+  if (progress) {
+    const when = String(wo?.repair_progress_at || "").trim();
+    parts.push(when ? `Progress (${when}): ${progress}` : `Progress: ${progress}`);
+  }
+  return parts.join("\n\n");
+}
+
+function completionNotesForPdf(wo, findingsText) {
+  const notes = String(wo?.completion_notes || "").trim();
+  if (!notes) return "-";
+  const findings = String(findingsText || "").trim();
+  if (findings && notes === findings) return "-";
+  return compactCell(notes.replace(/\s+/g, " "), 220);
+}
+
 function makeArtisanFormNumber() {
   const d = new Date();
   const p = (n) => String(n).padStart(2, "0");
@@ -2019,6 +2050,9 @@ export default async function reportsRoutes(app) {
         ${optionalWoCol("closed_at")},
         ${optionalWoCol("completed_at")},
         ${optionalWoCol("completion_notes")},
+        ${optionalWoCol("job_description")},
+        ${optionalWoCol("repair_progress")},
+        ${optionalWoCol("repair_progress_at")},
         ${optionalWoCol("artisan_name")},
         ${optionalWoCol("artisan_signed_at")},
         ${optionalWoCol("supervisor_name")},
@@ -2129,6 +2163,8 @@ export default async function reportsRoutes(app) {
     }
 
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
+    const jobFindingsText = jobFindingsTextForPdf(wo, breakdown);
+    const completionNotesPdf = completionNotesForPdf(wo, jobFindingsText);
 
     const pdf = await buildPdfBuffer(
       (doc) => {
@@ -2277,9 +2313,7 @@ export default async function reportsRoutes(app) {
           { k: "Supervisor Signed At", v: wo.supervisor_signed_at || "-" },
           {
             k: "Completion Notes",
-            v: wo.completion_notes
-              ? compactCell(String(wo.completion_notes || "").replace(/\s+/g, " ").trim(), 220)
-              : "-",
+            v: completionNotesPdf,
           },
         ], 2);
 
@@ -2287,7 +2321,12 @@ export default async function reportsRoutes(app) {
         doc.font("Helvetica").fontSize(10);
         doc.text("Job Description / Findings:", { width: 460 });
         doc.moveDown(0.2);
-        for (let i = 0; i < 4; i++) {
+        if (jobFindingsText) {
+          doc.font("Helvetica").fontSize(9).text(jobFindingsText, { width: 460 });
+          doc.moveDown(0.4);
+        }
+        const findingBlankLines = jobFindingsText ? 2 : 4;
+        for (let i = 0; i < findingBlankLines; i++) {
           const y = doc.y + 12;
           doc.moveTo(doc.page.margins.left, y).lineTo(doc.page.width - doc.page.margins.right, y).strokeOpacity(0.2).stroke("#000000");
           doc.moveDown(0.8);
