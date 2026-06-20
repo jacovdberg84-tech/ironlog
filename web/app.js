@@ -13417,6 +13417,12 @@ async function loadDispatchTrips() {
 
 let dailyRows = [];
 let dailyShowDownOnly = false;
+let dailyPrestartRows = [];
+let dailyPrestartMeta = {
+  deduction_hours_per_check: 0.5,
+  production_deduction_hours: 0,
+  production_deduction_count: 0,
+};
 
 function fmt(n) {
   if (n === null || n === undefined || Number.isNaN(n)) return "";
@@ -13531,6 +13537,13 @@ function calcDailyPreviewKpis() {
   let totalRun = 0;
   let totalDowntime = 0;
 
+  let totalPrestart = 0;
+  let prestartCount = 0;
+  const prestartPerCheck = Number(dailyPrestartMeta.deduction_hours_per_check || 0.5);
+  const prestartCodes = new Set(
+    dailyPrestartRows.map((r) => String(r.asset_code || "").trim()).filter(Boolean)
+  );
+
   for (const r of used) {
     const scheduled = Math.max(0, Number(r.scheduled_hours || 0));
     const runRaw = Math.max(0, Number(r.hours_run || 0));
@@ -13543,10 +13556,15 @@ function calcDailyPreviewKpis() {
     totalScheduled += scheduled;
     totalRun += runEff;
     totalDowntime += downEff;
+
+    if (prestartCodes.has(r.asset_code)) {
+      totalPrestart += prestartPerCheck;
+      prestartCount += 1;
+    }
   }
 
   const utilization = totalScheduled > 0 ? (totalRun / totalScheduled) * 100 : null;
-  const available = Math.max(0, totalScheduled - totalDowntime);
+  const available = Math.max(0, totalScheduled - totalDowntime - totalPrestart);
   const availability = totalScheduled > 0 ? (available / totalScheduled) * 100 : null;
 
   return {
@@ -13554,6 +13572,8 @@ function calcDailyPreviewKpis() {
     totalScheduled,
     totalRun,
     totalDowntime,
+    totalPrestart,
+    prestartCount,
     availability,
     utilization,
   };
@@ -13579,7 +13599,55 @@ function renderDailyPreview() {
   });
 
   if (k.totalScheduled === 0) setText("kNote", "Preview waiting for scheduled/run hours. Standby excluded.");
-  else setText("kNote", `Preview uses production rows only (standby excluded). Down hours counted: ${k.totalDowntime.toFixed(1).replace(/\.0$/, "")}.`);
+  else {
+    const prestartNote = k.prestartCount > 0
+      ? ` Pre-start: ${k.prestartCount} production check(s), ${k.totalPrestart.toFixed(1).replace(/\.0$/, "")} hr deducted from availability.`
+      : "";
+    setText(
+      "kNote",
+      `Preview uses production rows only (standby excluded). Down hours: ${k.totalDowntime.toFixed(1).replace(/\.0$/, "")}.${prestartNote}`
+    );
+  }
+}
+
+function renderDailyPrestartSection() {
+  const panel = qs("dailyPrestartPanel");
+  if (!panel) return;
+
+  const perCheck = Number(dailyPrestartMeta.deduction_hours_per_check || 0.5);
+  const perCheckLabel = perCheck.toFixed(1).replace(/\.0$/, "");
+
+  if (!dailyPrestartRows.length) {
+    panel.innerHTML = `
+      <div class="daily-prestart-header">
+        <strong>Daily pre-start checks</strong>
+        <span class="muted small">None logged for this date</span>
+      </div>`;
+    panel.classList.add("is-empty");
+    return;
+  }
+
+  panel.classList.remove("is-empty");
+  const prodCount = Number(dailyPrestartMeta.production_deduction_count || 0);
+  const prodHours = Number(dailyPrestartMeta.production_deduction_hours || 0);
+  const chips = dailyPrestartRows.map((r) => {
+    const code = String(r.asset_code || "").trim();
+    const type = String(r.check_type || "Pre-start");
+    const inspector = r.inspector_name ? ` · ${String(r.inspector_name).trim()}` : "";
+    return `<span class="daily-prestart-chip" title="${type}${inspector}"><b>${code}</b> ${type}</span>`;
+  }).join("");
+
+  panel.innerHTML = `
+    <div class="daily-prestart-header">
+      <strong>Daily pre-start checks</strong>
+      <span class="muted small">${dailyPrestartRows.length} completed · ${perCheckLabel} hr each</span>
+    </div>
+    <div class="daily-prestart-list">${chips}</div>
+    <div class="daily-prestart-foot muted small">
+      ${prodCount > 0
+        ? `${prodCount} production asset pre-start(s) deduct ${prodHours.toFixed(1).replace(/\.0$/, "")} hr from preview availability.`
+        : "Pre-starts shown for reference; none apply to production hour-based availability today."}
+    </div>`;
 }
 
 /* -------- DOWN helper -------- */
@@ -13919,6 +13987,23 @@ async function loadDailyInput() {
     openBreakdownByAsset = new Map();
   }
 
+  try {
+    const ps = await fetchJson(`${API}/api/maintenance/prestart/daily-summary?date=${encodeURIComponent(date)}`);
+    dailyPrestartRows = Array.isArray(ps?.rows) ? ps.rows : [];
+    dailyPrestartMeta = {
+      deduction_hours_per_check: Number(ps?.deduction_hours_per_check ?? 0.5),
+      production_deduction_hours: Number(ps?.production_deduction?.hours ?? 0),
+      production_deduction_count: Number(ps?.production_deduction?.count ?? 0),
+    };
+  } catch {
+    dailyPrestartRows = [];
+    dailyPrestartMeta = {
+      deduction_hours_per_check: 0.5,
+      production_deduction_hours: 0,
+      production_deduction_count: 0,
+    };
+  }
+
   const parseDownReasonFromDesc = (desc) => {
     const d = String(desc || "").trim();
     if (!d) return "";
@@ -14041,6 +14126,7 @@ async function loadDailyInput() {
   }
 
   validateDailyRows();
+  renderDailyPrestartSection();
   renderDailyTable();
   renderDailyPreview();
   setStatus("Daily input loaded.");

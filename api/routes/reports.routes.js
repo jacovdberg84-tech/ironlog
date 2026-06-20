@@ -40,6 +40,8 @@ import {
 } from "../utils/imagePdf.js";
 import { resolveStorageAbs as resolveStorageAbsUtil, getDataRoot, normalizeStorageRel } from "../utils/storagePaths.js";
 import { getPdfReportBranding, savePdfReportBranding } from "../utils/reportSettings.js";
+import { prestartDeductionForProductionFleet, PRESTART_DEDUCTION_HOURS } from "../utils/prestartDaily.js";
+import { listShortBreakdownsForDate, shiftDateYmd } from "../utils/shortBreakdowns.js";
 
 let maintenanceMasterSchedulerStarted = false;
 let reportSubscriptionsSchedulerStarted = false;
@@ -574,7 +576,12 @@ function kpiDaily(date, scheduled) {
   `).get(...openNoLogParams);
   downtime_hours += Number(openNoLogRow?.assumed_down_hours || 0);
 
-  const availability = available_hours > 0 ? ((available_hours - downtime_hours) / available_hours) * 100 : null;
+  const prestart = prestartDeductionForProductionFleet(db, date);
+  const prestart_hours = Number(prestart.hours || 0);
+  const effective_loss_hours = downtime_hours + prestart_hours;
+  const availability = available_hours > 0
+    ? ((available_hours - effective_loss_hours) / available_hours) * 100
+    : null;
   const utilization = utilization_base_hours > 0 ? (run_hours / utilization_base_hours) * 100 : null;
 
   return {
@@ -583,6 +590,9 @@ function kpiDaily(date, scheduled) {
     utilization_base_hours,
     run_hours,
     downtime_hours,
+    prestart_hours,
+    prestart_count: Number(prestart.count || 0),
+    prestart_deduction_hours_per_check: PRESTART_DEDUCTION_HOURS,
     availability: availability == null ? null : Number(availability.toFixed(2)),
     utilization: utilization == null ? null : Number(utilization.toFixed(2)),
   };
@@ -9085,7 +9095,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    const reportRevision = "daily-pdf-cartrack-speed-strict-r2026-06-17";
+    const reportRevision = "daily-pdf-prestart-short-bd-r2026-06-18";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -9327,6 +9337,8 @@ export default async function reportsRoutes(app) {
     const stockCriticalPdf = stockCritical.slice(0, 40);
 
     const kpi = kpiDaily(date, scheduled);
+    const prevDay = shiftDateYmd(date, -1);
+    const prevShortBreakdowns = listShortBreakdownsForDate(db, prevDay).slice(0, 40);
 
     const speedAlertKmh = getCartrackSpeedAlertKmh();
     let cartrackSpeeding = null;
@@ -9356,6 +9368,12 @@ export default async function reportsRoutes(app) {
           { k: "Available hours", v: fmtNum(kpi.available_hours, 0) },
           { k: "Run hours", v: fmtNum(kpi.run_hours, 1) },
           { k: "Downtime hours", v: fmtNum(kpi.downtime_hours, 1) },
+          ...(kpi.prestart_count > 0
+            ? [{
+                k: `Pre-start checks (${fmtNum(kpi.prestart_deduction_hours_per_check, 1)} hr each)`,
+                v: `${fmtNum(kpi.prestart_count, 0)} check(s) · ${fmtNum(kpi.prestart_hours, 1)} hr deducted`,
+              }]
+            : []),
           { k: "Availability %", v: kpi.availability == null ? "N/A" : `${fmtNum(kpi.availability, 2)}%` },
           { k: "Utilization %", v: kpi.utilization == null ? "N/A" : `${fmtNum(kpi.utilization, 2)}%` },
           ...(cartrackSpeeding
@@ -9425,6 +9443,27 @@ export default async function reportsRoutes(app) {
             qty: fmtNum(r.quantity, 1),
           }))
         );
+
+        if (prevShortBreakdowns.length) {
+          sectionTitle(doc, `Previous day short breakdowns (${prevDay})`);
+          table(
+            doc,
+            [
+              { key: "asset", label: "Asset", width: 0.14 },
+              { key: "hrs", label: "Hours down", width: 0.12, align: "right" },
+              { key: "crit", label: "Critical", width: 0.10, align: "center" },
+              { key: "comp", label: "Component", width: 0.16 },
+              { key: "desc", label: "Description", width: 0.48 },
+            ],
+            prevShortBreakdowns.map((r) => ({
+              asset: r.asset_code,
+              hrs: fmtNum(r.hours_down, 1),
+              crit: r.critical ? "YES" : "NO",
+              comp: compactCell(r.component ?? "", 40),
+              desc: compactCell(r.description ?? "", 260),
+            })),
+          );
+        }
 
         sectionTitle(doc, "Breakdowns & Downtime");
         table(

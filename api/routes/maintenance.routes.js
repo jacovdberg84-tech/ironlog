@@ -16,6 +16,7 @@ import {
   checklistToJsonObject,
   machinePrestartCheckMode,
 } from "../utils/machinePrestartTemplates.js";
+import { listDailyPrestarts, prestartDeductionForProductionFleet } from "../utils/prestartDaily.js";
 import { normalizeUploadedPhoto } from "../utils/imagePdf.js";
 import { resolveStorageAbs as resolveStorageAbsPath, getDataRoot } from "../utils/storagePaths.js";
 import {
@@ -9646,6 +9647,26 @@ export default async function maintenanceRoutes(app) {
   });
 
   // Machine-group prestart (excavator, dozer, etc.) — same storage as LDV checks, different check_mode; no daily_hours sync.
+
+  // GET /api/maintenance/prestart/daily-summary?date=YYYY-MM-DD
+  app.get("/prestart/daily-summary", async (req, reply) => {
+    try {
+      const date = String(req.query?.date || "").trim() || new Date().toISOString().slice(0, 10);
+      if (!isDate(date)) return reply.code(400).send({ ok: false, error: "date must be YYYY-MM-DD" });
+      const summary = listDailyPrestarts(db, date);
+      const production = prestartDeductionForProductionFleet(db, date);
+      return reply.send({
+        ok: true,
+        date,
+        ...summary,
+        production_deduction: production,
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
   app.get("/machine-prestart/context", async (req, reply) => {
     try {
       const asset_code = String(req.query?.asset_code || "").trim().toUpperCase();
