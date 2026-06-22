@@ -2735,6 +2735,79 @@ async function sendPushNotificationManual() {
 
 let pdfReportSitesCache = [];
 
+function updatePdfReportLogoPreview(available, customOnly = false) {
+  const img = qs("pdfReportLogoPreview");
+  const removeBtn = qs("removePdfReportLogoBtn");
+  if (!img) return;
+  if (available) {
+    const headers = new Headers(authHeaders());
+    const tok = getAuthToken();
+    if (tok) headers.set("Authorization", `Bearer ${tok}`);
+    fetch(`${API}/api/reports/pdf-settings/logo?t=${Date.now()}`, { headers })
+      .then((res) => {
+        if (!res.ok) throw new Error("Logo not found");
+        return res.blob();
+      })
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        if (img.dataset.blobUrl) URL.revokeObjectURL(img.dataset.blobUrl);
+        img.dataset.blobUrl = url;
+        img.src = url;
+        img.hidden = false;
+      })
+      .catch(() => {
+        img.hidden = true;
+        img.removeAttribute("src");
+      });
+  } else {
+    if (img.dataset.blobUrl) {
+      URL.revokeObjectURL(img.dataset.blobUrl);
+      delete img.dataset.blobUrl;
+    }
+    img.hidden = true;
+    img.removeAttribute("src");
+  }
+  if (removeBtn) removeBtn.disabled = !customOnly;
+}
+
+async function uploadPdfReportLogo() {
+  const file = qs("pdfReportLogoFile")?.files?.[0];
+  if (!file) return alert("Choose a logo image first (PNG or JPEG).");
+  const out = qs("pdfReportSettingsResult");
+  const fd = new FormData();
+  fd.append("file", file);
+  const headers = new Headers(authHeaders());
+  headers.delete("Content-Type");
+  setStatus("Uploading PDF logo…");
+  try {
+    const res = await fetch(`${API}/api/reports/pdf-settings/logo`, { method: "POST", headers, body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || data.message || "Upload failed");
+    if (qs("pdfReportLogoFile")) qs("pdfReportLogoFile").value = "";
+    updatePdfReportLogoPreview(Boolean(data?.company_logo_available), Boolean(data?.company_logo_custom));
+    if (out) out.textContent = data?.message || "PDF logo uploaded.";
+    setStatus("PDF logo uploaded.");
+  } catch (e) {
+    if (out) out.textContent = String(e.message || e);
+    setStatus("PDF logo upload failed.");
+  }
+}
+
+async function removePdfReportLogo() {
+  const out = qs("pdfReportSettingsResult");
+  if (!confirm("Remove the uploaded PDF company logo?")) return;
+  setStatus("Removing PDF logo…");
+  try {
+    const data = await fetchJson(`${API}/api/reports/pdf-settings/logo`, { method: "DELETE" });
+    updatePdfReportLogoPreview(Boolean(data?.company_logo_available), Boolean(data?.company_logo_custom));
+    if (out) out.textContent = data?.message || "PDF logo removed.";
+    setStatus("PDF logo removed.");
+  } catch (e) {
+    if (out) out.textContent = String(e.message || e);
+    setStatus("PDF logo remove failed.");
+  }
+}
+
 async function loadPdfReportSettings() {
   const out = qs("pdfReportSettingsResult");
   try {
@@ -2765,9 +2838,15 @@ async function loadPdfReportSettings() {
       siteSel.value = currentSite && Array.from(siteSel.options).some((o) => o.value === currentSite) ? currentSite : "";
     }
     if (qs("pdfReportSiteName")) qs("pdfReportSiteName").value = String(data?.site_name || "");
+    updatePdfReportLogoPreview(
+      Boolean(data?.company_logo_available),
+      Boolean(data?.company_logo_custom)
+    );
     const parts = [];
     if (data?.company_name) parts.push(`Company: ${data.company_name}`);
     if (data?.site_name) parts.push(`Site: ${data.site_name}`);
+    if (data?.company_logo_custom) parts.push("Custom logo: yes");
+    else if (data?.company_logo_available) parts.push("Logo: default");
     if (out) out.textContent = parts.length ? `Current PDF header — ${parts.join(" · ")}` : "No PDF branding configured yet.";
     setStatus("PDF report branding loaded.");
   } catch (e) {
@@ -16105,6 +16184,12 @@ async function init() {
   );
   qs("savePdfReportSettingsBtn")?.addEventListener("click", () =>
     savePdfReportSettings().catch((e) => setStatus("PDF site save error: " + e.message))
+  );
+  qs("uploadPdfReportLogoBtn")?.addEventListener("click", () =>
+    uploadPdfReportLogo().catch((e) => setStatus("PDF logo upload error: " + e.message))
+  );
+  qs("removePdfReportLogoBtn")?.addEventListener("click", () =>
+    removePdfReportLogo().catch((e) => setStatus("PDF logo remove error: " + e.message))
   );
   qs("pdfReportSiteCode")?.addEventListener("change", () => onPdfReportSiteCodeChange());
   qs("pdfReportCompanyCode")?.addEventListener("change", () => onPdfReportCompanyCodeChange());

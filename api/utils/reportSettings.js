@@ -1,3 +1,10 @@
+import fs from "node:fs";
+import path from "node:path";
+import { getDataRoot, normalizeStorageRel, resolveStorageAbs } from "./storagePaths.js";
+
+const PDF_LOGO_SETTING_KEY = "pdf_company_logo_path";
+export const PDF_REPORT_LOGO_REL_DIR = "uploads/report-branding";
+
 export function ensureReportSettingsSchema(db) {
   db.prepare(`
     CREATE TABLE IF NOT EXISTS report_settings (
@@ -56,6 +63,50 @@ function lookupSiteName(db, site_code) {
   }
 }
 
+export function getPdfBrandingLogoDir(dataRoot = getDataRoot()) {
+  return path.join(dataRoot, PDF_REPORT_LOGO_REL_DIR);
+}
+
+function legacyPdfLogoCandidates(dataRoot = getDataRoot()) {
+  return [
+    path.join(process.cwd(), "branding", "logo.png"),
+    path.join(dataRoot, "branding", "logo.png"),
+    path.join(process.cwd(), "..", "branding", "logo.png"),
+  ];
+}
+
+/** Absolute path to the logo used on PDF headers, or null. */
+export function resolvePdfCompanyLogoAbs(db, dataRoot = getDataRoot()) {
+  const rel = getReportSetting(db, PDF_LOGO_SETTING_KEY);
+  if (rel) {
+    const abs = resolveStorageAbs(rel, dataRoot);
+    if (abs && fs.existsSync(abs)) return abs;
+  }
+  for (const candidate of legacyPdfLogoCandidates(dataRoot)) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+export function setPdfCompanyLogoPath(db, relPath) {
+  setReportSetting(db, PDF_LOGO_SETTING_KEY, String(relPath || "").trim());
+}
+
+export function clearPdfCompanyLogo(db, dataRoot = getDataRoot()) {
+  const rel = getReportSetting(db, PDF_LOGO_SETTING_KEY);
+  if (rel) {
+    const abs = resolveStorageAbs(rel, dataRoot);
+    if (abs && fs.existsSync(abs)) {
+      try {
+        fs.unlinkSync(abs);
+      } catch {
+        // ignore
+      }
+    }
+  }
+  setReportSetting(db, PDF_LOGO_SETTING_KEY, "");
+}
+
 export function getPdfReportBranding(db) {
   ensureReportSettingsSchema(db);
   const company_code = getReportSetting(db, "pdf_company_code");
@@ -68,7 +119,21 @@ export function getPdfReportBranding(db) {
   if (!site_name && site_code) {
     site_name = lookupSiteName(db, site_code) || site_code;
   }
-  return { company_code, company_name, site_code, site_name };
+  const company_logo_path = getReportSetting(db, PDF_LOGO_SETTING_KEY);
+  const company_logo_abs = resolvePdfCompanyLogoAbs(db);
+  const company_logo_custom = Boolean(company_logo_path);
+  const company_logo_available = Boolean(company_logo_abs);
+  const company_logo_url = company_logo_available ? "/api/reports/pdf-settings/logo" : "";
+  return {
+    company_code,
+    company_name,
+    site_code,
+    site_name,
+    company_logo_path,
+    company_logo_custom,
+    company_logo_available,
+    company_logo_url,
+  };
 }
 
 /** @deprecated use getPdfReportBranding */

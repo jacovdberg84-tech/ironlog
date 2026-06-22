@@ -4760,6 +4760,30 @@ body.sidebar-collapsed .main-content {
   font-size: 12px;
 }
 
+.pdf-report-logo-admin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.pdf-report-logo-preview {
+  max-height: 48px;
+  max-width: 140px;
+  object-fit: contain;
+  padding: 6px 10px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.pdf-report-logo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 /* Table Container */
 .daily-table-container {
   background: var(--card);

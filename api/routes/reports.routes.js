@@ -2,6 +2,8 @@
 import path from "node:path";
 import fs from "node:fs";
 import crypto from "node:crypto";
+import multipart from "@fastify/multipart";
+import sharp from "sharp";
 import ExcelJS from "exceljs";
 import PptxGenJS from "pptxgenjs";
 import nodemailer from "nodemailer";
@@ -39,7 +41,7 @@ import {
   cleanupTempPdfImages,
 } from "../utils/imagePdf.js";
 import { resolveStorageAbs as resolveStorageAbsUtil, getDataRoot, normalizeStorageRel } from "../utils/storagePaths.js";
-import { getPdfReportBranding, savePdfReportBranding } from "../utils/reportSettings.js";
+import { getPdfReportBranding, savePdfReportBranding, resolvePdfCompanyLogoAbs, setPdfCompanyLogoPath, clearPdfCompanyLogo, getPdfBrandingLogoDir } from "../utils/reportSettings.js";
 import { prestartDeductionForProductionFleet, PRESTART_DEDUCTION_HOURS } from "../utils/prestartDaily.js";
 import { listShortBreakdownsForDate, listPlannedMaintenanceForDate, shiftDateYmd } from "../utils/shortBreakdowns.js";
 
@@ -1107,6 +1109,9 @@ function buildGmWeeklyExecutiveSheet(wb, p) {
 
 export default async function reportsRoutes(app) {
   const dataRoot = getDataRoot();
+  await app.register(multipart, { limits: { fileSize: 2 * 1024 * 1024 } });
+  const pdfBrandingLogoDir = getPdfBrandingLogoDir(dataRoot);
+  fs.mkdirSync(pdfBrandingLogoDir, { recursive: true });
   function hasColumn(table, col) {
     const rows = db.prepare(`PRAGMA table_info(${table})`).all();
     return rows.some((r) => String(r.name || "") === String(col));
@@ -1860,6 +1865,70 @@ export default async function reportsRoutes(app) {
       companies = [];
     }
     return reply.send({ ok: true, ...branding, sites, companies });
+  });
+
+  app.get("/pdf-settings/logo", async (req, reply) => {
+    const abs = resolvePdfCompanyLogoAbs(db, dataRoot);
+    if (!abs || !fs.existsSync(abs)) {
+      return reply.code(404).send({ ok: false, error: "No PDF logo configured" });
+    }
+    const ext = path.extname(abs).toLowerCase();
+    const contentType = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
+    reply.header("Content-Type", contentType);
+    reply.header("Cache-Control", "no-store");
+    return reply.send(fs.readFileSync(abs));
+  });
+
+  app.post("/pdf-settings/logo", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    try {
+      const part = await req.file();
+      if (!part) return reply.code(400).send({ ok: false, error: "Upload an image in form field 'file'" });
+
+      const mime = String(part.mimetype || "").toLowerCase();
+      if (!mime.startsWith("image/")) {
+        return reply.code(400).send({ ok: false, error: "File must be an image (PNG, JPEG, or WebP)" });
+      }
+
+      const rawBuffer = await part.toBuffer();
+      if (!rawBuffer?.length) return reply.code(400).send({ ok: false, error: "Empty file" });
+
+      const meta = await sharp(rawBuffer, { failOn: "none" }).metadata();
+      const hasAlpha = Boolean(meta.hasAlpha);
+      const pipeline = sharp(rawBuffer, { failOn: "none" })
+        .rotate()
+        .resize({ width: 480, height: 240, fit: "inside", withoutEnlargement: true });
+
+      let outBuffer;
+      let ext;
+      if (hasAlpha) {
+        outBuffer = await pipeline.png({ compressionLevel: 9 }).toBuffer();
+        ext = ".png";
+      } else {
+        outBuffer = await pipeline.jpeg({ quality: 90, mozjpeg: true }).toBuffer();
+        ext = ".jpg";
+      }
+
+      clearPdfCompanyLogo(db, dataRoot);
+      const fileName = `company-logo${ext}`;
+      const absPath = path.join(pdfBrandingLogoDir, fileName);
+      await fs.promises.writeFile(absPath, outBuffer);
+
+      const relPath = path.join("uploads", "report-branding", fileName).replace(/\\/g, "/");
+      setPdfCompanyLogoPath(db, relPath);
+      const branding = getPdfReportBranding(db);
+      return reply.send({ ok: true, message: "PDF logo uploaded.", ...branding });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.delete("/pdf-settings/logo", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    clearPdfCompanyLogo(db, dataRoot);
+    const branding = getPdfReportBranding(db);
+    return reply.send({ ok: true, message: "PDF logo removed.", ...branding });
   });
 
   app.post("/pdf-settings", async (req, reply) => {

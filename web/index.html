@@ -5966,7 +5966,7 @@
               </div>
               <div>
                 <h3>PDF Report Branding</h3>
-                <p class="muted small">Company and site names shown on PDF report headers instead of IRONLOG. Logos are not used on PDFs.</p>
+                <p class="muted small">Company and site names on PDF headers. Upload a company logo for the top-right corner (below the date).</p>
               </div>
             </div>
             <div class="action-buttons">
@@ -5999,6 +5999,20 @@
               <div class="form-field">
                 <label>Site name on reports</label>
                 <input id="pdfReportSiteName" class="w-full" placeholder="e.g. North Pit, Main Workshop" />
+              </div>
+            </div>
+            <div class="form-row pdf-report-logo-row">
+              <div class="form-field">
+                <label>Company logo (PDF header)</label>
+                <div class="pdf-report-logo-admin">
+                  <img id="pdfReportLogoPreview" class="pdf-report-logo-preview" alt="PDF logo preview" hidden />
+                  <div class="pdf-report-logo-actions">
+                    <input id="pdfReportLogoFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
+                    <button type="button" id="uploadPdfReportLogoBtn" class="btn btn-secondary btn-sm">Upload logo</button>
+                    <button type="button" id="removePdfReportLogoBtn" class="btn btn-secondary btn-sm">Remove logo</button>
+                  </div>
+                </div>
+                <p class="muted small">Shown top right on every PDF page, just below the date line. PNG with transparent background works best.</p>
               </div>
             </div>
             <div class="action-buttons">

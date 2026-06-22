@@ -1,7 +1,8 @@
 // IRONLOG/api/utils/pdfGenerator.js
+import fs from "node:fs";
 import PDFDocument from "pdfkit";
 import { db } from "../db/client.js";
-import { getPdfReportBranding } from "./reportSettings.js";
+import { getPdfReportBranding, resolvePdfCompanyLogoAbs } from "./reportSettings.js";
 
 const DEFAULT_MARGINS = { top: 72, bottom: 52, left: 70, right: 70 };
 const BRAND = {
@@ -55,6 +56,25 @@ export function ensurePageSpace(doc, neededHeight = 60) {
 }
 
 /**
+ * Company logo — top right of PDF header, below the date line.
+ */
+function drawHeaderLogo(doc, logoPath, opts = {}) {
+  if (!logoPath) return;
+  try {
+    if (!fs.existsSync(logoPath)) return;
+    const right = doc.page.width - doc.page.margins.right;
+    const dateY = Number(opts.dateY ?? 20);
+    const dateFontSize = Number(opts.dateFontSize ?? 10);
+    const logoY = dateY + dateFontSize + 5;
+    const maxW = 92;
+    const maxH = 40;
+    doc.image(logoPath, right - maxW, logoY, { fit: [maxW, maxH], align: "right", valign: "top" });
+  } catch {
+    // ignore logo failures
+  }
+}
+
+/**
  * Draws consistent header and footer on the current page.
  * Call this ONCE per page, typically from doc.on("pageAdded", ...) and at start.
  */
@@ -65,6 +85,7 @@ export function drawHeaderFooter(doc, opts = {}) {
     rightText = "",
     showPageNumbers = true,
     siteName = "",
+    logoPath = "",
   } = opts;
   const displayTitle = String(title || "").trim() || "Report";
   const siteLabel = String(siteName || "").trim();
@@ -120,6 +141,10 @@ export function drawHeaderFooter(doc, opts = {}) {
       .font("Helvetica")
       .fontSize(subtitleSize)
       .text(rightText, left + padX, 20, { width: width - padX * 2, align: "right", lineBreak: false });
+  }
+
+  if (logoPath) {
+    drawHeaderLogo(doc, logoPath, { dateY: 20, dateFontSize: subtitleSize });
   }
 
   const dividerY = Math.max(textY + 8, marginTop - 2);
@@ -190,6 +215,7 @@ export function buildPdfBuffer(buildFn, opts = {}) {
 
     const companyName = String(opts.companyName || branding.company_name || "").trim();
     const siteName = String(opts.siteName || branding.site_name || "").trim();
+    const logoPath = String(opts.logoPath || resolvePdfCompanyLogoAbs(opts.db || db) || "").trim();
     const rawTitle = String(opts.title || "").trim();
     const headerTitle = companyName || (rawTitle && rawTitle.toUpperCase() !== "IRONLOG" ? rawTitle : "IRONLOG");
 
@@ -199,6 +225,7 @@ export function buildPdfBuffer(buildFn, opts = {}) {
       rightText: opts.rightText || "",
       showPageNumbers: opts.showPageNumbers !== false,
       siteName,
+      logoPath,
     };
 
     buildFn(doc);
@@ -220,10 +247,10 @@ export function buildPdfBuffer(buildFn, opts = {}) {
 }
 
 /**
- * Logo disabled — reports use text header with site name instead.
+ * Optional logo draw (legacy reports call this inside buildFn; header also draws logo on every page).
  */
-export function tryDrawLogo(_doc, _logoPath) {
-  // intentionally no-op
+export function tryDrawLogo(doc, logoPath) {
+  drawHeaderLogo(doc, logoPath, { dateY: 20, dateFontSize: 10 });
 }
 
 /**
