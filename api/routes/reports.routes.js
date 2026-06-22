@@ -41,7 +41,7 @@ import {
 import { resolveStorageAbs as resolveStorageAbsUtil, getDataRoot, normalizeStorageRel } from "../utils/storagePaths.js";
 import { getPdfReportBranding, savePdfReportBranding } from "../utils/reportSettings.js";
 import { prestartDeductionForProductionFleet, PRESTART_DEDUCTION_HOURS } from "../utils/prestartDaily.js";
-import { listShortBreakdownsForDate, shiftDateYmd } from "../utils/shortBreakdowns.js";
+import { listShortBreakdownsForDate, listPlannedMaintenanceForDate, shiftDateYmd } from "../utils/shortBreakdowns.js";
 
 let maintenanceMasterSchedulerStarted = false;
 let reportSubscriptionsSchedulerStarted = false;
@@ -9338,7 +9338,8 @@ export default async function reportsRoutes(app) {
 
     const kpi = kpiDaily(date, scheduled);
     const prevDay = shiftDateYmd(date, -1);
-    const prevShortBreakdowns = listShortBreakdownsForDate(db, prevDay).slice(0, 40);
+    const dailyShortBreakdowns = listShortBreakdownsForDate(db, prevDay).slice(0, 40);
+    const dailyPlannedMaintenance = listPlannedMaintenanceForDate(db, date).slice(0, 40);
 
     const speedAlertKmh = getCartrackSpeedAlertKmh();
     let cartrackSpeeding = null;
@@ -9444,24 +9445,38 @@ export default async function reportsRoutes(app) {
           }))
         );
 
-        if (prevShortBreakdowns.length) {
-          sectionTitle(doc, `Previous day short breakdowns (${prevDay})`);
+        const dailyBdPmRows = [
+          ...dailyShortBreakdowns.map((r) => ({
+            asset: r.asset_code,
+            type: "Short breakdown",
+            hrs: fmtNum(r.hours_down, 1),
+            crit: r.critical ? "YES" : "NO",
+            comp: compactCell(r.component ?? "", 40),
+            desc: compactCell(r.description ?? "", 260),
+          })),
+          ...dailyPlannedMaintenance.map((r) => ({
+            asset: r.asset_code,
+            type: "Planned maintenance",
+            hrs: "—",
+            crit: "—",
+            comp: compactCell(r.service_name ?? "", 40),
+            desc: compactCell(r.description ?? "", 260),
+          })),
+        ];
+
+        if (dailyBdPmRows.length) {
+          sectionTitle(doc, "Daily breakdowns and planned maintenance");
           table(
             doc,
             [
-              { key: "asset", label: "Asset", width: 0.14 },
-              { key: "hrs", label: "Hours down", width: 0.12, align: "right" },
-              { key: "crit", label: "Critical", width: 0.10, align: "center" },
-              { key: "comp", label: "Component", width: 0.16 },
-              { key: "desc", label: "Description", width: 0.48 },
+              { key: "asset", label: "Asset", width: 0.12 },
+              { key: "type", label: "Type", width: 0.16 },
+              { key: "hrs", label: "Hours down", width: 0.10, align: "right" },
+              { key: "crit", label: "Critical", width: 0.09, align: "center" },
+              { key: "comp", label: "Component / Service", width: 0.16 },
+              { key: "desc", label: "Description", width: 0.37 },
             ],
-            prevShortBreakdowns.map((r) => ({
-              asset: r.asset_code,
-              hrs: fmtNum(r.hours_down, 1),
-              crit: r.critical ? "YES" : "NO",
-              comp: compactCell(r.component ?? "", 40),
-              desc: compactCell(r.description ?? "", 260),
-            })),
+            dailyBdPmRows,
           );
         }
 
