@@ -8664,6 +8664,7 @@ function renderStoresPartOrdersTable(rows) {
           <th style="text-align:right;">Line $</th>
           <th>Supplier</th>
           <th>PO</th>
+          <th>Req #</th>
           <th>ETA</th>
           <th>Status</th>
           <th>Inventory</th>
@@ -8695,6 +8696,7 @@ function renderStoresPartOrdersTable(rows) {
               <td style="text-align:right;"><strong>${moneyUsd(r.line_total)}</strong></td>
               <td>${String(r.supplier_name || "—").replace(/</g, "&lt;")}</td>
               <td>${String(r.po_number || "—").replace(/</g, "&lt;")}</td>
+              <td>${String(r.requisition_number || "—").replace(/</g, "&lt;")}</td>
               <td>${String(r.expected_arrival_date || "—").replace(/</g, "&lt;")}</td>
               <td>
                 <select data-spo-status="${id}" class="w-full" style="min-width:120px;"${inStore ? " disabled title=\"Already in store inventory\"" : ""}>${statusOpts}</select>
@@ -8731,7 +8733,7 @@ async function loadStoresPartOrders() {
 }
 
 function clearStoresPartOrderForm() {
-  ["spoPartCode", "spoPartName", "spoSupplier", "spoPoNumber", "spoNotes"].forEach((id) => {
+  ["spoPartCode", "spoPartName", "spoSupplier", "spoPoNumber", "spoRequisitionNumber", "spoNotes"].forEach((id) => {
     const el = qs(id);
     if (el) el.value = "";
   });
@@ -8753,6 +8755,7 @@ async function saveStoresPartOrder() {
   const unit_cost = Number(qs("spoUnitCost")?.value || 0);
   const supplier_name = String(qs("spoSupplier")?.value || "").trim();
   const po_number = String(qs("spoPoNumber")?.value || "").trim();
+  const requisition_number = String(qs("spoRequisitionNumber")?.value || "").trim();
   const order_date = (qs("spoOrderDate")?.value || "").trim();
   const expected_arrival_date = (qs("spoExpectedDate")?.value || "").trim();
   const status = String(qs("spoStatus")?.value || "on_order").trim();
@@ -8781,7 +8784,8 @@ async function saveStoresPartOrder() {
       qty,
       unit_cost,
       supplier_name,
-      po_number,
+      po_number: po_number || null,
+      requisition_number: requisition_number || null,
       order_date,
       expected_arrival_date: expected_arrival_date || null,
       status,

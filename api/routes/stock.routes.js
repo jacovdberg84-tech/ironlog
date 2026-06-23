@@ -2048,6 +2048,9 @@ export default async function stockRoutes(app) {
   if (!hasColumn("stores_part_orders", "stock_movement_id")) {
     db.prepare(`ALTER TABLE stores_part_orders ADD COLUMN stock_movement_id INTEGER`).run();
   }
+  if (!hasColumn("stores_part_orders", "requisition_number")) {
+    db.prepare(`ALTER TABLE stores_part_orders ADD COLUMN requisition_number TEXT`).run();
+  }
 
   function partOrderReceiveRef(orderId) {
     return `part_order:${Number(orderId)}`;
@@ -2256,6 +2259,7 @@ export default async function stockRoutes(app) {
         o.currency,
         o.supplier_name,
         o.po_number,
+        o.requisition_number,
         o.order_date,
         o.expected_arrival_date,
         o.arrived_date,
@@ -2296,6 +2300,7 @@ export default async function stockRoutes(app) {
     const currency = String(body.currency || "USD").trim().toUpperCase() || "USD";
     const supplier_name = String(body.supplier_name || "").trim() || null;
     const po_number = String(body.po_number || "").trim() || null;
+    const requisition_number = String(body.requisition_number || "").trim() || null;
     const order_date = String(body.order_date || "").trim();
     const expected_arrival_date = String(body.expected_arrival_date || "").trim() || null;
     const notes = String(body.notes || "").trim() || null;
@@ -2322,9 +2327,9 @@ export default async function stockRoutes(app) {
     const info = db.prepare(`
       INSERT INTO stores_part_orders (
         site_code, part_id, part_code, part_name, qty, unit_cost, currency,
-        supplier_name, po_number, order_date, expected_arrival_date, arrived_date,
+        supplier_name, po_number, requisition_number, order_date, expected_arrival_date, arrived_date,
         status, notes, created_by, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       site_code,
       part_id,
@@ -2335,6 +2340,7 @@ export default async function stockRoutes(app) {
       currency,
       supplier_name,
       po_number,
+      requisition_number,
       order_date,
       expected_arrival_date,
       arrived_date,
@@ -2404,6 +2410,7 @@ export default async function stockRoutes(app) {
         currency = ?,
         supplier_name = ?,
         po_number = ?,
+        requisition_number = ?,
         order_date = ?,
         expected_arrival_date = ?,
         arrived_date = ?,
@@ -2418,6 +2425,9 @@ export default async function stockRoutes(app) {
       String(body.currency || existing.currency || "USD").trim().toUpperCase() || "USD",
       body.supplier_name != null ? String(body.supplier_name).trim() || null : existing.supplier_name,
       body.po_number != null ? String(body.po_number).trim() || null : existing.po_number,
+      body.requisition_number != null
+        ? String(body.requisition_number).trim() || null
+        : existing.requisition_number,
       order_date,
       body.expected_arrival_date != null ? String(body.expected_arrival_date).trim() || null : existing.expected_arrival_date,
       arrived_date,
