@@ -4721,6 +4721,9 @@ export default async function maintenanceRoutes(app) {
         return reply.code(400).send({ error: "date must be YYYY-MM-DD" });
       }
       const nearDueHours = Math.max(1, Number(req.query?.near_due_hours || 50));
+      const asOfLabel = date || new Date().toISOString().slice(0, 10);
+      const historyDays = 14;
+      const startDate = addDaysYmd(asOfLabel, -(historyDays - 1));
 
       const rows = date
         ? db.prepare(`
@@ -4731,7 +4734,15 @@ export default async function maintenanceRoutes(app) {
               mp.interval_hours,
               mp.last_service_hours,
               a.asset_code,
-              a.asset_name
+              a.asset_name,
+              IFNULL((
+                SELECT SUM(dh.hours_run)
+                FROM daily_hours dh
+                WHERE dh.asset_id = a.id
+                  AND dh.is_used = 1
+                  AND dh.hours_run > 0
+                  AND dh.work_date <= ?
+              ), 0) AS current_hours
             FROM maintenance_plans mp
             JOIN assets a ON a.id = mp.asset_id
             WHERE mp.active = 1
@@ -4739,7 +4750,7 @@ export default async function maintenanceRoutes(app) {
               AND a.is_standby = 0
               AND a.archived = 0
             ORDER BY a.asset_code ASC, mp.service_name ASC
-          `).all()
+          `).all(date)
         : db.prepare(`
             SELECT
               mp.id AS plan_id,
@@ -4758,39 +4769,69 @@ export default async function maintenanceRoutes(app) {
             ORDER BY a.asset_code ASC, mp.service_name ASC
           `).all();
 
-      const dueRows = buildDueListFromPlans(rows, getAssetCurrentHours, nearDueHours)
-        .map((r) => ({
-          asset_code: r.asset_code,
-          asset_name: r.asset_name,
-          service_name: r.service_name,
-          current_hours: Number(r.current_hours || 0),
-          next_due_hours: Number(r.next_due_hours || 0),
-          remaining_hours: Number(r.remaining_hours || 0),
-          status: r.status,
-        }))
+      const getHours = (assetId) => {
+        if (date) {
+          return Number(rows.find((r) => Number(r.asset_id) === Number(assetId))?.current_hours ?? getAssetCurrentHours(assetId));
+        }
+        return getAssetCurrentHours(assetId);
+      };
+
+      const getAvgDaily = db.prepare(`
+        SELECT
+          COALESCE(SUM(hours_run), 0) AS total_run,
+          COUNT(DISTINCT work_date) AS day_count
+        FROM daily_hours
+        WHERE asset_id = ?
+          AND is_used = 1
+          AND hours_run > 0
+          AND work_date BETWEEN ? AND ?
+      `);
+
+      const dueRows = buildDueListFromPlans(rows, getHours, nearDueHours)
+        .map((r) => {
+          const assetId = Number(r.asset_id || 0);
+          const remaining = Number(r.remaining_hours || 0);
+          const avgRow = getAvgDaily.get(assetId, startDate, asOfLabel);
+          const totalRun = Number(avgRow?.total_run || 0);
+          const dayCount = Number(avgRow?.day_count || 0);
+          const avgDaily = dayCount > 0 ? totalRun / dayCount : 0;
+          const estDays = avgDaily > 0 ? Math.max(0, remaining / avgDaily) : null;
+          const estDate = estDays == null ? null : addDaysYmd(asOfLabel, Math.round(estDays));
+
+          return {
+            asset_code: r.asset_code,
+            asset_name: r.asset_name,
+            service_name: r.service_name,
+            current_hours: Number(r.current_hours || 0),
+            next_due_hours: Number(r.next_due_hours || 0),
+            remaining_hours: remaining,
+            estimated_service_date: estDate,
+            status: r.status,
+          };
+        })
         .filter((r) => r.status === "OVERDUE" || r.status === "ALMOST DUE")
         .sort((a, b) => Number(a.remaining_hours || 0) - Number(b.remaining_hours || 0));
 
-      const asOfLabel = date || new Date().toISOString().slice(0, 10);
       const pdf = await buildPdfBuffer(
         (doc) => {
           sectionTitle(doc, "Upcoming Services");
           doc
             .font("Helvetica")
             .fontSize(10)
-            .text(`As of: ${asOfLabel} | Threshold: <= ${nearDueHours.toFixed(0)}h flagged as ALMOST DUE`);
+            .text(`As of: ${asOfLabel} | Threshold: <= ${nearDueHours.toFixed(0)}h flagged as ALMOST DUE | Est. date from ${historyDays}-day avg usage`);
           doc.moveDown(0.4);
 
           table(
             doc,
             [
-              { key: "asset_code", label: "Asset", width: 0.12 },
-              { key: "asset_name", label: "Name", width: 0.2 },
-              { key: "service_name", label: "Service", width: 0.18 },
-              { key: "current_hours", label: "Current", width: 0.12, align: "right" },
-              { key: "next_due_hours", label: "Next Due", width: 0.12, align: "right" },
-              { key: "remaining_hours", label: "Remaining", width: 0.12, align: "right" },
-              { key: "status", label: "Status", width: 0.14 },
+              { key: "asset_code", label: "Asset", width: 0.1 },
+              { key: "asset_name", label: "Name", width: 0.16 },
+              { key: "service_name", label: "Service", width: 0.15 },
+              { key: "current_hours", label: "Current", width: 0.1, align: "right" },
+              { key: "next_due_hours", label: "Next Due", width: 0.1, align: "right" },
+              { key: "remaining_hours", label: "Remaining", width: 0.1, align: "right" },
+              { key: "estimated_service_date", label: "Est. Date", width: 0.11 },
+              { key: "status", label: "Status", width: 0.12 },
             ],
             dueRows.length
               ? dueRows.map((r) => ({
@@ -4798,6 +4839,7 @@ export default async function maintenanceRoutes(app) {
                   current_hours: Number(r.current_hours || 0).toFixed(1),
                   next_due_hours: Number(r.next_due_hours || 0).toFixed(1),
                   remaining_hours: Number(r.remaining_hours || 0).toFixed(1),
+                  estimated_service_date: r.estimated_service_date || "—",
                 }))
               : [
                   {
@@ -4807,6 +4849,7 @@ export default async function maintenanceRoutes(app) {
                     current_hours: "-",
                     next_due_hours: "-",
                     remaining_hours: "-",
+                    estimated_service_date: "-",
                     status: "-",
                   },
                 ]
