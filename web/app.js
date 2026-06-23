@@ -8626,6 +8626,26 @@ function renderStoresPartOrdersSummary(summary) {
   setText("spoForecastValue", moneyUsd(s.total_forecast));
 }
 
+function handleStoresPartOrderReceipt(data) {
+  const receipt = data?.stock_receipt;
+  if (!receipt) return;
+  if (receipt.received) {
+    setStatus(
+      `Received ${receipt.qty} × ${receipt.part_code} into store inventory (${receipt.on_hand_after} on hand).`
+    );
+    loadStockOnHandPage().catch(() => {});
+    loadStockMonitor().catch(() => {});
+    return;
+  }
+  if (receipt.already) {
+    setStatus("Purchase already received into store inventory.");
+    return;
+  }
+  if (receipt.error) {
+    alert(`Status saved, but stock was not updated: ${receipt.error}`);
+  }
+}
+
 function renderStoresPartOrdersTable(rows) {
   const host = qs("spoList");
   if (!host) return;
@@ -8646,6 +8666,7 @@ function renderStoresPartOrdersTable(rows) {
           <th>PO</th>
           <th>ETA</th>
           <th>Status</th>
+          <th>Inventory</th>
           <th></th>
         </tr>
       </thead>
@@ -8658,6 +8679,13 @@ function renderStoresPartOrdersTable(rows) {
           const statusOpts = ["on_order", "in_transit", "arrived", "cancelled"]
             .map((st) => `<option value="${st}"${String(r.status || "").toLowerCase() === st ? " selected" : ""}>${spoStatusLabel(st)}</option>`)
             .join("");
+          const inStore = Boolean(r.in_store_inventory || r.stock_movement_id);
+          const isArrived = String(r.status || "").toLowerCase() === "arrived";
+          const inventoryCell = inStore
+            ? `<span class="pill green" title="Received into store stock">In store</span>`
+            : isArrived
+              ? `<button type="button" class="btn btn-secondary btn-sm" data-spo-receive="${id}">Receive to store</button>`
+              : "—";
           return `
             <tr>
               <td>${String(r.order_date || "").replace(/</g, "&lt;")}</td>
@@ -8669,8 +8697,9 @@ function renderStoresPartOrdersTable(rows) {
               <td>${String(r.po_number || "—").replace(/</g, "&lt;")}</td>
               <td>${String(r.expected_arrival_date || "—").replace(/</g, "&lt;")}</td>
               <td>
-                <select data-spo-status="${id}" class="w-full" style="min-width:120px;">${statusOpts}</select>
+                <select data-spo-status="${id}" class="w-full" style="min-width:120px;"${inStore ? " disabled title=\"Already in store inventory\"" : ""}>${statusOpts}</select>
               </td>
+              <td>${inventoryCell}</td>
               <td><button type="button" class="btn btn-secondary btn-sm" data-spo-del="${id}">Cancel</button></td>
             </tr>
           `;
@@ -8743,7 +8772,7 @@ async function saveStoresPartOrder() {
   }
 
   if (msg) msg.textContent = "Saving...";
-  await fetchJson(`${API}/api/stock/part-orders`, {
+  const data = await fetchJson(`${API}/api/stock/part-orders`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -8759,7 +8788,10 @@ async function saveStoresPartOrder() {
       notes,
     }),
   });
-  if (msg) msg.textContent = "Purchase saved.";
+  handleStoresPartOrderReceipt(data);
+  if (msg) msg.textContent = data?.stock_receipt?.received
+    ? "Purchase saved and received into store."
+    : "Purchase saved.";
   clearStoresPartOrderForm();
   await loadStoresPartOrders();
 }
@@ -8767,11 +8799,20 @@ async function saveStoresPartOrder() {
 async function updateStoresPartOrderStatus(id, status) {
   const n = Number(id || 0);
   if (!n || !status) return;
-  await fetchJson(`${API}/api/stock/part-orders/${n}`, {
+  const data = await fetchJson(`${API}/api/stock/part-orders/${n}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status }),
   });
+  handleStoresPartOrderReceipt(data);
+  await loadStoresPartOrders();
+}
+
+async function receiveStoresPartOrderToInventory(id) {
+  const n = Number(id || 0);
+  if (!n) return;
+  const data = await fetchJson(`${API}/api/stock/part-orders/${n}/receive`, { method: "POST" });
+  handleStoresPartOrderReceipt(data);
   await loadStoresPartOrders();
 }
 
@@ -16120,6 +16161,13 @@ async function init() {
     updateStoresPartOrderStatus(id, status).catch((e) => alert(e.message || String(e)));
   });
   qs("spoList")?.addEventListener("click", (evt) => {
+    const recvBtn = evt.target?.closest?.("button[data-spo-receive]");
+    if (recvBtn) {
+      receiveStoresPartOrderToInventory(Number(recvBtn.getAttribute("data-spo-receive") || 0)).catch((e) =>
+        alert(e.message || String(e))
+      );
+      return;
+    }
     const btn = evt.target?.closest?.("button[data-spo-del]");
     if (!btn) return;
     cancelStoresPartOrder(Number(btn.getAttribute("data-spo-del") || 0)).catch((e) => alert(e.message || String(e)));

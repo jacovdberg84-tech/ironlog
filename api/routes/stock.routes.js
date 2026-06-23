@@ -2045,6 +2045,123 @@ export default async function stockRoutes(app) {
   `).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_stores_part_orders_site_date ON stores_part_orders(site_code, order_date)`).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_stores_part_orders_status ON stores_part_orders(status)`).run();
+  if (!hasColumn("stores_part_orders", "stock_movement_id")) {
+    db.prepare(`ALTER TABLE stores_part_orders ADD COLUMN stock_movement_id INTEGER`).run();
+  }
+
+  function partOrderReceiveRef(orderId) {
+    return `part_order:${Number(orderId)}`;
+  }
+
+  function receivePartOrderToStock(orderRow, req) {
+    const orderId = Number(orderRow?.id || 0);
+    if (!orderId) return { received: false, error: "invalid order id" };
+
+    const existingMovementId = Number(orderRow?.stock_movement_id || 0);
+    if (existingMovementId > 0) {
+      return { received: false, already: true, movement_id: existingMovementId };
+    }
+
+    const ref = partOrderReceiveRef(orderId);
+    const dup = db.prepare(`SELECT id FROM stock_movements WHERE reference = ? LIMIT 1`).get(ref);
+    if (dup?.id) {
+      const mid = Number(dup.id);
+      db.prepare(`UPDATE stores_part_orders SET stock_movement_id = ? WHERE id = ?`).run(mid, orderId);
+      return { received: false, already: true, movement_id: mid };
+    }
+
+    const part_code = String(orderRow?.part_code || "").trim();
+    if (!part_code) {
+      return {
+        received: false,
+        error: "Add a part code on this purchase line to receive it into store inventory.",
+      };
+    }
+
+    let part = getPartByCode.get(part_code);
+    if (!part) {
+      const part_name = String(orderRow?.part_name || part_code).trim() || part_code;
+      const uc = Math.max(0, Number(orderRow?.unit_cost || 0));
+      try {
+        insertPart.run(part_code, part_name, uc, null, null, null);
+      } catch {
+        // race — re-read
+      }
+      part = getPartByCode.get(part_code);
+    }
+    if (!part) return { received: false, error: `Could not create or find part ${part_code}` };
+
+    const qty = Math.abs(Number(orderRow?.qty || 0));
+    if (!Number.isFinite(qty) || qty <= 0) return { received: false, error: "invalid quantity on order line" };
+
+    const unit_cost = Math.max(0, Number(orderRow?.unit_cost || 0));
+    const currency = String(orderRow?.currency || "USD").trim().toUpperCase() || "USD";
+    let unit_cost_usd = null;
+    let cost_input = null;
+    let cost_curr_out = null;
+    if (unit_cost > 0) {
+      cost_input = unit_cost;
+      cost_curr_out = currency;
+      unit_cost_usd = unitCostToUsd(unit_cost, currency);
+      if (unit_cost_usd == null || !Number.isFinite(unit_cost_usd)) {
+        unit_cost_usd = currency === "USD" ? unit_cost : null;
+      }
+    }
+
+    const on_hand_before = Number(getOnHand.get(part.id)?.on_hand || 0);
+
+    const receiveTx = db.transaction(() => {
+      const ins = insertGenericMove.run(
+        part.id,
+        qty,
+        "in",
+        ref,
+        null,
+        null,
+        null,
+        unit_cost_usd != null ? Number(unit_cost_usd.toFixed(6)) : null,
+        cost_curr_out,
+        cost_input,
+      );
+      const movement_id = Number(ins.lastInsertRowid);
+      if (unit_cost_usd != null) {
+        updatePartUnitCostUsd.run(Number(unit_cost_usd.toFixed(6)), part.id);
+      }
+      db.prepare(`
+        UPDATE stores_part_orders
+        SET stock_movement_id = ?, part_id = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(movement_id, Number(part.id), orderId);
+      return movement_id;
+    });
+
+    const movement_id = receiveTx();
+    const on_hand_after = Number(getOnHand.get(part.id)?.on_hand || 0);
+
+    writeAudit(db, req, {
+      module: "stock",
+      action: "part_order.receive",
+      entity_type: "stores_part_order",
+      entity_id: String(orderId),
+      payload: {
+        part_code,
+        qty,
+        movement_id,
+        on_hand_before,
+        on_hand_after,
+        reference: ref,
+      },
+    });
+
+    return {
+      received: true,
+      movement_id,
+      part_code,
+      qty,
+      on_hand_before,
+      on_hand_after,
+    };
+  }
 
   function isYmd(s) {
     return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -2092,11 +2209,14 @@ export default async function stockRoutes(app) {
 
   function mapPartOrderRow(row) {
     const line_total = partOrderLineTotal(row);
+    const stock_movement_id = row.stock_movement_id != null ? Number(row.stock_movement_id) : null;
     return {
       ...row,
       qty: Number(row.qty || 0),
       unit_cost: Number(row.unit_cost || 0),
       line_total,
+      stock_movement_id,
+      in_store_inventory: Boolean(stock_movement_id),
     };
   }
 
@@ -2141,6 +2261,7 @@ export default async function stockRoutes(app) {
         o.arrived_date,
         o.status,
         o.notes,
+        o.stock_movement_id,
         o.created_by,
         o.created_at,
         o.updated_at,
@@ -2232,7 +2353,14 @@ export default async function stockRoutes(app) {
       after: { part_code, part_name, qty, unit_cost, status, order_date },
     });
 
-    return reply.send({ ok: true, id: Number(info.lastInsertRowid || 0) });
+    const newId = Number(info.lastInsertRowid || 0);
+    let stock_receipt = null;
+    if (status === "arrived" && newId) {
+      const row = db.prepare(`SELECT * FROM stores_part_orders WHERE id = ?`).get(newId);
+      stock_receipt = receivePartOrderToStock(row, req);
+    }
+
+    return reply.send({ ok: true, id: newId, stock_receipt });
   });
 
   // PATCH /api/stock/part-orders/:id
@@ -2248,7 +2376,9 @@ export default async function stockRoutes(app) {
     `).get(id, site_code);
     if (!existing) return reply.code(404).send({ error: "part order not found" });
 
-    const status = body.status != null ? String(body.status).trim().toLowerCase() : String(existing.status || "on_order");
+    const prevStatus = String(existing.status || "on_order").toLowerCase();
+
+    const status = body.status != null ? String(body.status).trim().toLowerCase() : prevStatus;
     if (!PART_ORDER_STATUSES.has(status)) return reply.code(400).send({ error: "invalid status" });
 
     const qty = body.qty != null ? Number(body.qty) : Number(existing.qty || 0);
@@ -2307,7 +2437,13 @@ export default async function stockRoutes(app) {
       after: { status, qty, unit_cost, order_date, arrived_date },
     });
 
-    return reply.send({ ok: true, id });
+    let stock_receipt = null;
+    if (status === "arrived" && prevStatus !== "arrived") {
+      const updated = db.prepare(`SELECT * FROM stores_part_orders WHERE id = ?`).get(id);
+      stock_receipt = receivePartOrderToStock(updated, req);
+    }
+
+    return reply.send({ ok: true, id, stock_receipt });
   });
 
   // DELETE /api/stock/part-orders/:id  (soft cancel)
@@ -2327,5 +2463,24 @@ export default async function stockRoutes(app) {
       WHERE id = ?
     `).run(id);
     return reply.send({ ok: true, id, status: "cancelled" });
+  });
+
+  // POST /api/stock/part-orders/:id/receive — push an arrived line into store inventory
+  app.post("/part-orders/:id/receive", async (req, reply) => {
+    if (!requireRoles(req, reply, PART_ORDER_WRITE_ROLES)) return;
+    const id = Number(req.params?.id || 0);
+    if (!id) return reply.code(400).send({ error: "invalid id" });
+    const site_code = getSiteCode(req);
+    const row = db.prepare(`
+      SELECT * FROM stores_part_orders
+      WHERE id = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+    `).get(id, site_code);
+    if (!row) return reply.code(404).send({ error: "part order not found" });
+
+    const stock_receipt = receivePartOrderToStock(row, req);
+    if (!stock_receipt.received && !stock_receipt.already && stock_receipt.error) {
+      return reply.code(400).send({ ok: false, error: stock_receipt.error, stock_receipt });
+    }
+    return reply.send({ ok: true, id, stock_receipt });
   });
 }
