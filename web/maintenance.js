@@ -430,6 +430,7 @@ function dueCard(d) {
       <div><strong>Current:</strong> ${Number(d.current_hours || 0).toFixed(1)} ${unit}</div>
       <div><strong>Next Due:</strong> ${Number(d.next_due_hours || 0).toFixed(1)} ${unit}</div>
       <div><strong>Remaining:</strong> ${Number(d.remaining_hours || 0).toFixed(1)} ${unit}${Number(d.near_due_threshold || 0) > 0 ? ` <span class="muted">(almost due ≤ ${Number(d.near_due_threshold).toFixed(0)}${unit})</span>` : ""}</div>
+      <div><strong>Est. service date:</strong> ${d.estimated_service_date || "—"}</div>
       <div class="${statusClass}">${statusText}</div>
     </div>
   `;
@@ -2402,6 +2403,7 @@ async function openUpcomingServicesPdf(download = false) {
   const nearDueHours = getDueThresholdHours();
   const q = new URLSearchParams();
   q.set("near_due_hours", String(nearDueHours));
+  q.set("_", String(Date.now()));
   const url = `${API}/maintenance/due-upcoming.pdf?${q.toString()}`;
   try {
     const res = await fetch(url, { headers: authHeaders() });

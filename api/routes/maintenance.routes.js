@@ -32,6 +32,7 @@ import {
   classifyServiceDueStatus,
   meterUnitForAsset,
 } from "../utils/serviceSchedule.js";
+import { enrichDueRowsWithEstimates } from "../utils/maintenanceEstimates.js";
 import {
   buildUndercarriageComponentSchema,
   enrichUndercarriageMeasurement,
@@ -2320,7 +2321,11 @@ export default async function maintenanceRoutes(app) {
         if (date) return Number(rows.find((r) => Number(r.asset_id) === Number(assetId))?.current_hours ?? getAssetCurrentHours(assetId));
         return getAssetCurrentHours(assetId);
       };
-      const due = buildDueListFromPlans(rows, getHours, nearDueHours);
+      const due = enrichDueRowsWithEstimates(
+        buildDueListFromPlans(rows, getHours, nearDueHours),
+        db,
+        { as_of: date || new Date().toISOString().slice(0, 10), history_days: 14 },
+      );
 
       return reply.send({
         ok: true,
@@ -4723,7 +4728,6 @@ export default async function maintenanceRoutes(app) {
       const nearDueHours = Math.max(1, Number(req.query?.near_due_hours || 50));
       const asOfLabel = date || new Date().toISOString().slice(0, 10);
       const historyDays = 14;
-      const startDate = addDaysYmd(asOfLabel, -(historyDays - 1));
 
       const rows = date
         ? db.prepare(`
@@ -4776,39 +4780,21 @@ export default async function maintenanceRoutes(app) {
         return getAssetCurrentHours(assetId);
       };
 
-      const getAvgDaily = db.prepare(`
-        SELECT
-          COALESCE(SUM(hours_run), 0) AS total_run,
-          COUNT(DISTINCT work_date) AS day_count
-        FROM daily_hours
-        WHERE asset_id = ?
-          AND is_used = 1
-          AND hours_run > 0
-          AND work_date BETWEEN ? AND ?
-      `);
-
-      const dueRows = buildDueListFromPlans(rows, getHours, nearDueHours)
-        .map((r) => {
-          const assetId = Number(r.asset_id || 0);
-          const remaining = Number(r.remaining_hours || 0);
-          const avgRow = getAvgDaily.get(assetId, startDate, asOfLabel);
-          const totalRun = Number(avgRow?.total_run || 0);
-          const dayCount = Number(avgRow?.day_count || 0);
-          const avgDaily = dayCount > 0 ? totalRun / dayCount : 0;
-          const estDays = avgDaily > 0 ? Math.max(0, remaining / avgDaily) : null;
-          const estDate = estDays == null ? null : addDaysYmd(asOfLabel, Math.round(estDays));
-
-          return {
-            asset_code: r.asset_code,
-            asset_name: r.asset_name,
-            service_name: r.service_name,
-            current_hours: Number(r.current_hours || 0),
-            next_due_hours: Number(r.next_due_hours || 0),
-            remaining_hours: remaining,
-            estimated_service_date: estDate,
-            status: r.status,
-          };
-        })
+      const dueRows = enrichDueRowsWithEstimates(
+        buildDueListFromPlans(rows, getHours, nearDueHours),
+        db,
+        { as_of: asOfLabel, history_days: historyDays },
+      )
+        .map((r) => ({
+          asset_code: r.asset_code,
+          asset_name: r.asset_name,
+          service_name: r.service_name,
+          current_hours: Number(r.current_hours || 0),
+          next_due_hours: Number(r.next_due_hours || 0),
+          remaining_hours: Number(r.remaining_hours || 0),
+          estimated_service_date: r.estimated_service_date,
+          status: r.status,
+        }))
         .filter((r) => r.status === "OVERDUE" || r.status === "ALMOST DUE")
         .sort((a, b) => Number(a.remaining_hours || 0) - Number(b.remaining_hours || 0));
 
@@ -4864,6 +4850,8 @@ export default async function maintenanceRoutes(app) {
       );
 
       const isDownload = String(req.query?.download || "").trim() === "1";
+      reply.header("Cache-Control", "no-store, no-cache, must-revalidate");
+      reply.header("Pragma", "no-cache");
       reply.header("Content-Type", "application/pdf");
       reply.header(
         "Content-Disposition",
