@@ -17,6 +17,11 @@ import {
   machinePrestartCheckMode,
 } from "../utils/machinePrestartTemplates.js";
 import { listDailyPrestarts, prestartDeductionForProductionFleet } from "../utils/prestartDaily.js";
+import {
+  buildReliabilityIncidentsForAssets,
+  computeMtbfLttr,
+  round2,
+} from "../utils/reliabilityMetrics.js";
 import { normalizeUploadedPhoto } from "../utils/imagePdf.js";
 import { resolveStorageAbs as resolveStorageAbsPath, getDataRoot } from "../utils/storagePaths.js";
 import {
@@ -2628,12 +2633,6 @@ export default async function maintenanceRoutes(app) {
     }
 
     const marks = assetIds.map(() => "?").join(",");
-    const canBreakdowns = hasTable("breakdowns");
-    const canDtLogs = hasTable("breakdown_downtime_logs");
-    const dtCol = breakdownDowntimeColumnName();
-    const breakdownDateExpr = hasColumn("breakdowns", "breakdown_date")
-      ? "b.breakdown_date"
-      : "DATE(COALESCE(b.created_at, b.updated_at))";
 
     const runByAsset = new Map(
       db.prepare(`
@@ -2647,65 +2646,31 @@ export default async function maintenanceRoutes(app) {
       `).all(start, end, ...assetIds).map((r) => [Number(r.asset_id || 0), Number(r.run_hours || 0)])
     );
 
-    const failuresByAsset = new Map();
-    if (canBreakdowns) {
-      for (const r of db.prepare(`
-        SELECT b.asset_id, COUNT(*) AS failure_count
-        FROM breakdowns b
-        WHERE ${breakdownDateExpr} BETWEEN ? AND ?
-          AND b.asset_id IN (${marks})
-        GROUP BY b.asset_id
-      `).all(start, end, ...assetIds)) {
-        failuresByAsset.set(Number(r.asset_id || 0), Number(r.failure_count || 0));
-      }
-    }
-
-    const downtimeByAsset = new Map();
-    if (canDtLogs) {
-      for (const r of db.prepare(`
-        SELECT b.asset_id, COALESCE(SUM(l.hours_down), 0) AS downtime_hours
-        FROM breakdown_downtime_logs l
-        JOIN breakdowns b ON b.id = l.breakdown_id
-        WHERE l.log_date BETWEEN ? AND ?
-          AND b.asset_id IN (${marks})
-        GROUP BY b.asset_id
-      `).all(start, end, ...assetIds)) {
-        downtimeByAsset.set(Number(r.asset_id || 0), Number(r.downtime_hours || 0));
-      }
-    }
-    if (canBreakdowns && dtCol) {
-      for (const r of db.prepare(`
-        SELECT b.asset_id, COALESCE(SUM(b.${dtCol}), 0) AS downtime_hours
-        FROM breakdowns b
-        WHERE ${breakdownDateExpr} BETWEEN ? AND ?
-          AND b.asset_id IN (${marks})
-        GROUP BY b.asset_id
-      `).all(start, end, ...assetIds)) {
-        const aid = Number(r.asset_id || 0);
-        const base = Number(r.downtime_hours || 0);
-        if (!downtimeByAsset.has(aid) || Number(downtimeByAsset.get(aid) || 0) <= 0) {
-          downtimeByAsset.set(aid, base);
-        }
-      }
-    }
+    const { incidents, byAsset: reliabilityByAsset } = buildReliabilityIncidentsForAssets(db, {
+      assetIds,
+      start,
+      end,
+      hasTable,
+      hasColumn,
+    });
 
     const by_asset = assetRows.map((a) => {
       const aid = Number(a.asset_id || 0);
       const operating_hours = Number(runByAsset.get(aid) || 0);
-      const failure_count = Number(failuresByAsset.get(aid) || 0);
-      const downtime_hours = Number(downtimeByAsset.get(aid) || 0);
-      const mtbf_hours = failure_count > 0 ? operating_hours / failure_count : null;
-      const lttr_hours = failure_count > 0 ? downtime_hours / failure_count : null;
+      const rel = reliabilityByAsset.get(aid) || { failure_count: 0, downtime_hours: 0 };
+      const failure_count = Number(rel.failure_count || 0);
+      const downtime_hours = Number(rel.downtime_hours || 0);
+      const { mtbf_hours, lttr_hours } = computeMtbfLttr(operating_hours, failure_count, downtime_hours);
       return {
         asset_id: aid,
         asset_code: String(a.asset_code || ""),
         asset_name: String(a.asset_name || ""),
         category: String(a.category || ""),
         failure_count,
-        operating_hours: Number(operating_hours.toFixed(2)),
-        downtime_hours: Number(downtime_hours.toFixed(2)),
-        mtbf_hours: mtbf_hours == null ? null : Number(mtbf_hours.toFixed(2)),
-        lttr_hours: lttr_hours == null ? null : Number(lttr_hours.toFixed(2)),
+        operating_hours: round2(operating_hours),
+        downtime_hours: round2(downtime_hours),
+        mtbf_hours,
+        lttr_hours,
       };
     }).sort((x, y) => {
       const xm = x.mtbf_hours == null ? Infinity : Number(x.mtbf_hours);
@@ -2716,8 +2681,20 @@ export default async function maintenanceRoutes(app) {
     const failure_count = by_asset.reduce((s, r) => s + Number(r.failure_count || 0), 0);
     const operating_hours = by_asset.reduce((s, r) => s + Number(r.operating_hours || 0), 0);
     const downtime_hours = by_asset.reduce((s, r) => s + Number(r.downtime_hours || 0), 0);
-    const mtbf_hours = failure_count > 0 ? operating_hours / failure_count : null;
-    const lttr_hours = failure_count > 0 ? downtime_hours / failure_count : null;
+    const { mtbf_hours, lttr_hours } = computeMtbfLttr(operating_hours, failure_count, downtime_hours);
+
+    const incidentsWithAsset = incidents.map((inc) => {
+      const a = assetRows.find((r) => Number(r.asset_id) === Number(inc.asset_id));
+      return {
+        ...inc,
+        asset_code: String(a?.asset_code || ""),
+        asset_name: String(a?.asset_name || ""),
+      };
+    }).sort((x, y) => {
+      const c = String(x.asset_code || "").localeCompare(String(y.asset_code || ""));
+      if (c !== 0) return c;
+      return String(x.breakdown_date || "").localeCompare(String(y.breakdown_date || ""));
+    });
 
     return {
       start,
@@ -2727,18 +2704,19 @@ export default async function maintenanceRoutes(app) {
       formulas: {
         mtbf: "operating_hours / failure_count",
         lttr: "downtime_hours / failure_count",
-        failures: "breakdowns with breakdown_date in selected period",
+        failures: "distinct breakdown incidents with downtime > 0 in period (daily logs, else header when reported in period, else linked breakdown WO wall-clock)",
         operating_hours: "sum of daily_hours.hours_run (is_used=1) in period",
-        downtime_hours: "sum of breakdown_downtime_logs in period, else breakdown header downtime",
+        downtime_hours: "per-incident downtime in period (same sources as failures)",
       },
       summary: {
         failure_count,
-        operating_hours: Number(operating_hours.toFixed(2)),
-        downtime_hours: Number(downtime_hours.toFixed(2)),
-        mtbf_hours: mtbf_hours == null ? null : Number(mtbf_hours.toFixed(2)),
-        lttr_hours: lttr_hours == null ? null : Number(lttr_hours.toFixed(2)),
+        operating_hours: round2(operating_hours),
+        downtime_hours: round2(downtime_hours),
+        mtbf_hours,
+        lttr_hours,
       },
       by_asset,
+      incidents: incidentsWithAsset,
     };
   }
 
@@ -2810,6 +2788,22 @@ export default async function maintenanceRoutes(app) {
         { header: "LTTR h", key: "lttr_hours", width: 12 },
       ];
       assets.addRows(data.by_asset || []);
+
+      const incSheet = wb.addWorksheet("Incidents");
+      incSheet.columns = [
+        { header: "Asset", key: "asset_code", width: 14 },
+        { header: "Breakdown #", key: "breakdown_id", width: 12 },
+        { header: "Report date", key: "breakdown_date", width: 14 },
+        { header: "WO #", key: "work_order_id", width: 10 },
+        { header: "Downtime h (period)", key: "downtime_hours", width: 18 },
+        { header: "Source", key: "downtime_source", width: 16 },
+        { header: "Log h (period)", key: "log_downtime_in_period", width: 14 },
+        { header: "Header h (total)", key: "header_downtime_hours", width: 14 },
+        { header: "WO opened", key: "work_order_opened_at", width: 20 },
+        { header: "WO closed", key: "work_order_closed_at", width: 20 },
+        { header: "Description", key: "description", width: 40 },
+      ];
+      incSheet.addRows(data.incidents || []);
 
       const buf = await wb.xlsx.writeBuffer();
       reply

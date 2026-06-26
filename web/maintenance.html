@@ -1591,7 +1591,8 @@
         <p class="muted" style="margin:0 0 12px 0;">
           <strong>MTBF</strong> (mean time between failures) = operating hours ÷ failure count.
           <strong>LTTR</strong> (lost time to repair) = downtime hours ÷ failure count.
-          Failures are breakdowns logged in the selected date range. Operating hours come from daily input run hours.
+          Failures are breakdown incidents with machine downtime in the selected period (daily downtime logs, breakdown total when reported in range, or linked breakdown work order hours).
+          Operating hours come from daily input run hours. Expand the incident table below to reconcile against work orders.
         </p>
         <div class="row stack-10">
           <label>
@@ -1640,6 +1641,26 @@
               </tr>
             </thead>
             <tbody id="relAssetBody"></tbody>
+          </table>
+        </div>
+        <h4 style="margin:20px 0 8px;">Incidents in period (audit)</h4>
+        <p class="muted" style="margin:0 0 8px;">Each row is one failure counted above. Downtime source shows whether hours came from daily logs, the breakdown record, or the linked work order.</p>
+        <div style="overflow:auto;">
+          <table class="gridTable" style="min-width:960px;">
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Breakdown #</th>
+                <th>Report date</th>
+                <th>WO #</th>
+                <th style="text-align:right;">Downtime h</th>
+                <th>Source</th>
+                <th style="text-align:right;">Log h</th>
+                <th style="text-align:right;">Header h</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody id="relIncidentBody"></tbody>
           </table>
         </div>
       </div>

@@ -5996,13 +5996,14 @@ async function loadReliabilityAssets() {
 function renderReliabilityReport(data) {
   const summaryEl = document.getElementById("relSummary");
   const body = document.getElementById("relAssetBody");
+  const incBody = document.getElementById("relIncidentBody");
   const s = data?.summary || {};
   if (summaryEl) {
     summaryEl.innerHTML = `
       <div class="kpi-card kpi-util">
         <div class="kpi-card-header"><div class="kpi-icon">F</div><div class="kpi-title">Failures</div></div>
         <div class="kpi-big-value">${Number(s.failure_count || 0)}</div>
-        <div class="kpi-meta">Breakdowns in period</div>
+        <div class="kpi-meta">Incidents with downtime in period</div>
       </div>
       <div class="kpi-card kpi-scheduled">
         <div class="kpi-card-header"><div class="kpi-icon">O</div><div class="kpi-title">Operating hours</div></div>
@@ -6026,9 +6027,9 @@ function renderReliabilityReport(data) {
       </div>
     `;
   }
-  if (!body) return;
-  const rows = Array.isArray(data?.by_asset) ? data.by_asset : [];
-  body.innerHTML = rows.length
+  if (body) {
+    const rows = Array.isArray(data?.by_asset) ? data.by_asset : [];
+    body.innerHTML = rows.length
     ? rows.map((r) => `
       <tr>
         <td>${esc(r.asset_code || "")}</td>
@@ -6041,7 +6042,33 @@ function renderReliabilityReport(data) {
         <td style="text-align:right;">${relFmtHours(r.lttr_hours)}</td>
       </tr>
     `).join("")
-    : `<tr><td colspan="8" class="muted">No assets in scope for this filter.</td></tr>`;
+      : `<tr><td colspan="8" class="muted">No assets in scope for this filter.</td></tr>`;
+  }
+
+  if (incBody) {
+    const incidents = Array.isArray(data?.incidents) ? data.incidents : [];
+    const srcLabel = (src) => {
+      if (src === "downtime_logs") return "Daily logs";
+      if (src === "breakdown_header") return "Breakdown total";
+      if (src === "work_order") return "Work order";
+      return src || "-";
+    };
+    incBody.innerHTML = incidents.length
+      ? incidents.map((r) => `
+        <tr>
+          <td>${esc(r.asset_code || "")}</td>
+          <td>${Number(r.breakdown_id || 0) || "-"}</td>
+          <td>${esc(r.breakdown_date || "")}</td>
+          <td>${r.work_order_id ? `#${Number(r.work_order_id)}` : "-"}</td>
+          <td style="text-align:right;">${relFmtHours(r.downtime_hours)}</td>
+          <td>${esc(srcLabel(r.downtime_source))}</td>
+          <td style="text-align:right;">${relFmtHours(r.log_downtime_in_period)}</td>
+          <td style="text-align:right;">${relFmtHours(r.header_downtime_hours)}</td>
+          <td>${esc(String(r.description || "").slice(0, 80))}</td>
+        </tr>
+      `).join("")
+      : `<tr><td colspan="9" class="muted">No breakdown incidents with downtime in this period.</td></tr>`;
+  }
 }
 
 async function loadReliabilityMetrics() {
@@ -6063,6 +6090,8 @@ async function loadReliabilityMetrics() {
     msg.textContent = "Loading MTBF / LTTR…";
   }
   if (body) body.innerHTML = `<tr><td colspan="8" class="muted">Loading…</td></tr>`;
+  const incBody = document.getElementById("relIncidentBody");
+  if (incBody) incBody.innerHTML = `<tr><td colspan="9" class="muted">Loading…</td></tr>`;
   const q = new URLSearchParams();
   q.set("start", start);
   q.set("end", end);
