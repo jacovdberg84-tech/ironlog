@@ -1989,6 +1989,49 @@
           </div>
         </div>
 
+        <!-- Store QR — field terminal -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #ecfdf5; color: #059669;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><path d="M14 14h7v7h-7z"></path></svg>
+              </div>
+              <div>
+                <h3>Store QR — field terminal</h3>
+                <p class="muted small">One QR for the stores desk. Storeman scans to open a <strong>standalone</strong> UI: browse stock, receive arrivals, print shelf labels — not the full IRONLOG dashboard.</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row" style="align-items:flex-end;">
+              <div class="form-field">
+                <label>Site code</label>
+                <input id="storeQrSite" class="w-full" value="main" placeholder="main" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="storeQrPreviewBtn" type="button" class="btn btn-primary">Generate QR</button>
+              </div>
+              <div class="form-field form-field-action">
+                <button id="storeQrDownloadBtn" type="button" class="btn btn-secondary btn-sm">Download PNG</button>
+              </div>
+              <div class="form-field form-field-action">
+                <button id="storeQrPrintBtn" type="button" class="btn btn-secondary btn-sm">Print QR label</button>
+              </div>
+              <div class="form-field form-field-action">
+                <a id="storeQrOpenMobile" href="./store-mobile.html" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">Open mobile UI</a>
+              </div>
+            </div>
+            <div id="storeQrMsg" class="muted small" style="margin-top:8px;"></div>
+            <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-top:12px;">
+              <img id="storeQrPreview" alt="Store QR preview" style="display:none;width:200px;height:200px;border-radius:12px;background:#fff;padding:8px;" />
+              <div id="storeQrMeta" class="muted small" style="flex:1;min-width:220px;"></div>
+            </div>
+          </div>
+        </div>
+
         <!-- Stock On Hand Card -->
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
@@ -7210,6 +7253,7 @@
 
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="./store-mobile.js?v=1"></script>
   <script src="./app.js?v=45"></script>
 </body>
 </html>

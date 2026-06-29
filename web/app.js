@@ -8646,6 +8646,13 @@ function handleStoresPartOrderReceipt(data) {
   }
 }
 
+function spoAttrVal(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;");
+}
+
 function renderStoresPartOrdersTable(rows) {
   const host = qs("spoList");
   if (!host) return;
@@ -8654,7 +8661,7 @@ function renderStoresPartOrdersTable(rows) {
     return;
   }
   host.innerHTML = `
-    <table class="gridTable" style="min-width:1100px;">
+    <table class="gridTable spo-purchases-table" style="min-width:1200px;">
       <thead>
         <tr>
           <th>Order date</th>
@@ -8674,6 +8681,7 @@ function renderStoresPartOrdersTable(rows) {
       <tbody>
         ${rows.map((r) => {
           const id = Number(r.id || 0);
+          const cancelled = String(r.status || "").toLowerCase() === "cancelled";
           const partLabel = r.part_code
             ? `<strong>${String(r.part_code).replace(/</g, "&lt;")}</strong><br><small class="muted">${String(r.part_name || "").replace(/</g, "&lt;")}</small>`
             : String(r.part_name || "").replace(/</g, "&lt;");
@@ -8687,28 +8695,86 @@ function renderStoresPartOrdersTable(rows) {
             : isArrived
               ? `<button type="button" class="btn btn-secondary btn-sm" data-spo-receive="${id}">Receive to store</button>`
               : "—";
+          const dis = cancelled ? " disabled" : "";
           return `
-            <tr>
+            <tr data-spo-row="${id}">
               <td>${String(r.order_date || "").replace(/</g, "&lt;")}</td>
               <td>${partLabel}</td>
               <td style="text-align:right;">${Number(r.qty || 0)}</td>
               <td style="text-align:right;">${moneyUsd(r.unit_cost)}</td>
               <td style="text-align:right;"><strong>${moneyUsd(r.line_total)}</strong></td>
-              <td>${String(r.supplier_name || "—").replace(/</g, "&lt;")}</td>
-              <td>${String(r.po_number || "—").replace(/</g, "&lt;")}</td>
-              <td>${String(r.requisition_number || "—").replace(/</g, "&lt;")}</td>
-              <td>${String(r.expected_arrival_date || "—").replace(/</g, "&lt;")}</td>
               <td>
-                <select data-spo-status="${id}" class="w-full" style="min-width:120px;"${inStore ? " disabled title=\"Already in store inventory\"" : ""}>${statusOpts}</select>
+                <input type="text" class="spo-inline-input w-full" data-spo-field="supplier_name" value="${spoAttrVal(r.supplier_name || "")}" placeholder="Supplier"${dis} />
+              </td>
+              <td>
+                <input type="text" class="spo-inline-input w-full" data-spo-field="po_number" value="${spoAttrVal(r.po_number || "")}" placeholder="PO when issued"${dis} />
+              </td>
+              <td>
+                <input type="text" class="spo-inline-input w-full" data-spo-field="requisition_number" value="${spoAttrVal(r.requisition_number || "")}" placeholder="Req #"${dis} />
+              </td>
+              <td>
+                <input type="date" class="spo-inline-input w-full" data-spo-field="expected_arrival_date" value="${spoAttrVal(r.expected_arrival_date || "")}"${dis} />
+              </td>
+              <td>
+                <select data-spo-status="${id}" class="w-full" style="min-width:120px;"${inStore ? " disabled title=\"Already in store inventory\"" : dis}>${statusOpts}</select>
               </td>
               <td>${inventoryCell}</td>
-              <td><button type="button" class="btn btn-secondary btn-sm" data-spo-del="${id}">Cancel</button></td>
+              <td class="spo-row-actions">
+                ${cancelled
+                  ? `<span class="muted small">Cancelled</span>`
+                  : `<button type="button" class="btn btn-primary btn-sm" data-spo-save="${id}">Save</button>
+                     <button type="button" class="btn btn-secondary btn-sm" data-spo-del="${id}">Cancel</button>`}
+              </td>
             </tr>
           `;
         }).join("")}
       </tbody>
     </table>
+    <p class="muted small" style="margin-top:8px;">Edit Req # or PO on each line, then click <strong>Save</strong>. Change status to Arrived when goods land to post into store inventory.</p>
   `;
+}
+
+function readStoresPartOrderRowPatch(rowEl) {
+  if (!rowEl) return null;
+  const read = (field) => {
+    const el = rowEl.querySelector(`[data-spo-field="${field}"]`);
+    if (!el) return null;
+    const v = String(el.value || "").trim();
+    return v || null;
+  };
+  const statusEl = rowEl.querySelector("select[data-spo-status]");
+  const patch = {
+    supplier_name: read("supplier_name"),
+    po_number: read("po_number"),
+    requisition_number: read("requisition_number"),
+    expected_arrival_date: read("expected_arrival_date"),
+  };
+  if (statusEl && !statusEl.disabled) {
+    patch.status = String(statusEl.value || "").trim();
+  }
+  return patch;
+}
+
+async function patchStoresPartOrder(id, patch) {
+  const n = Number(id || 0);
+  if (!n) return null;
+  const data = await fetchJson(`${API}/api/stock/part-orders/${n}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch || {}),
+  });
+  handleStoresPartOrderReceipt(data);
+  return data;
+}
+
+async function saveStoresPartOrderRow(id) {
+  const host = qs("spoList");
+  const rowEl = host?.querySelector(`tr[data-spo-row="${Number(id)}"]`);
+  const patch = readStoresPartOrderRowPatch(rowEl);
+  if (!patch) return;
+  await patchStoresPartOrder(id, patch);
+  setStatus("Purchase line saved.");
+  await loadStoresPartOrders();
 }
 
 async function loadStoresPartOrders() {
@@ -8803,12 +8869,11 @@ async function saveStoresPartOrder() {
 async function updateStoresPartOrderStatus(id, status) {
   const n = Number(id || 0);
   if (!n || !status) return;
-  const data = await fetchJson(`${API}/api/stock/part-orders/${n}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ status }),
-  });
-  handleStoresPartOrderReceipt(data);
+  const host = qs("spoList");
+  const rowEl = host?.querySelector(`tr[data-spo-row="${n}"]`);
+  const patch = readStoresPartOrderRowPatch(rowEl) || {};
+  patch.status = status;
+  await patchStoresPartOrder(n, patch);
   await loadStoresPartOrders();
 }
 
@@ -16165,6 +16230,13 @@ async function init() {
     updateStoresPartOrderStatus(id, status).catch((e) => alert(e.message || String(e)));
   });
   qs("spoList")?.addEventListener("click", (evt) => {
+    const saveBtn = evt.target?.closest?.("button[data-spo-save]");
+    if (saveBtn) {
+      saveStoresPartOrderRow(Number(saveBtn.getAttribute("data-spo-save") || 0)).catch((e) =>
+        alert(e.message || String(e))
+      );
+      return;
+    }
     const recvBtn = evt.target?.closest?.("button[data-spo-receive]");
     if (recvBtn) {
       receiveStoresPartOrderToInventory(Number(recvBtn.getAttribute("data-spo-receive") || 0)).catch((e) =>
@@ -19517,4 +19589,5 @@ document.addEventListener("DOMContentLoaded", () => {
     bindFinanceHandlers();
   } catch (e) { console.error("finance bind failed", e); }
   try { bindEnterpriseHandlers(); } catch (e) { console.error("enterprise bind failed", e); }
+  try { if (typeof window.bindStoreQrAdmin === "function") window.bindStoreQrAdmin(); } catch (e) { console.error("store QR bind failed", e); }
 });

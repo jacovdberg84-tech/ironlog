@@ -1434,7 +1434,7 @@ export default async function stockRoutes(app) {
   // Body: { part_code, quantity, movement_type: in|out|adjust, reference?, location_code?,
   //         part_name?, create_if_missing?, unit_cost?, cost_currency? (USD|ZAR|MZN) }
   app.post("/movement", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
+    if (!requireRoles(req, reply, ["admin", "supervisor", "stores", "storeman"])) return;
     const site = getSiteCode(req);
     const body = req.body || {};
     const part_code = String(body.part_code || "").trim();
@@ -2492,5 +2492,126 @@ export default async function stockRoutes(app) {
       return reply.code(400).send({ ok: false, error: stock_receipt.error, stock_receipt });
     }
     return reply.send({ ok: true, id, stock_receipt });
+  });
+
+  // ============================================================
+  // STORE QR — single field terminal for storeman (scan → store-mobile.html)
+  // ============================================================
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS stores_qr_profiles (
+      site_code TEXT PRIMARY KEY,
+      qr_payload TEXT NOT NULL,
+      qr_text TEXT NOT NULL,
+      generated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+
+  const getStoredStoreQrProfile = db.prepare(`
+    SELECT qr_payload, qr_text, generated_at
+    FROM stores_qr_profiles
+    WHERE LOWER(TRIM(site_code)) = ?
+  `);
+  const upsertStoreQrProfile = db.prepare(`
+    INSERT INTO stores_qr_profiles (site_code, qr_payload, qr_text, generated_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT(site_code) DO UPDATE SET
+      qr_payload = excluded.qr_payload,
+      qr_text = excluded.qr_text,
+      generated_at = datetime('now')
+  `);
+
+  function resolveWebOrigin(req) {
+    const protoHeader = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+    const hostHeader = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
+    const proto = protoHeader || "http";
+    if (hostHeader) return `${proto}://${hostHeader}`;
+    return "";
+  }
+
+  function buildStoreQrProfile(siteCode, req) {
+    const site_code = String(siteCode || "main").trim().toLowerCase() || "main";
+    const origin = resolveWebOrigin(req);
+    const targetPath = `/web/store-mobile.html?site=${encodeURIComponent(site_code)}`;
+    const scan_url = origin ? `${origin}${targetPath}` : targetPath;
+
+    const inv = db.prepare(`
+      SELECT
+        COUNT(DISTINCT p.id) AS part_count,
+        COALESCE(SUM(CASE WHEN oh.on_hand < p.min_stock THEN 1 ELSE 0 END), 0) AS below_min
+      FROM parts p
+      LEFT JOIN (
+        SELECT part_id, IFNULL(SUM(quantity), 0) AS on_hand
+        FROM stock_movements
+        GROUP BY part_id
+      ) oh ON oh.part_id = p.id
+    `).get();
+
+    const pending = db.prepare(`
+      SELECT COUNT(*) AS c
+      FROM stores_part_orders
+      WHERE LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+        AND LOWER(COALESCE(status, 'on_order')) IN ('on_order', 'in_transit')
+    `).get(site_code);
+
+    const profile = {
+      purpose: "stores_field_terminal",
+      generated_at: new Date().toISOString(),
+      site_code,
+      scan_url,
+      inventory: {
+        part_count: Number(inv?.part_count || 0),
+        below_min: Number(inv?.below_min || 0),
+      },
+      pending_arrivals: Number(pending?.c || 0),
+    };
+
+    const qrText = [
+      `IRONLOG STORES — ${site_code.toUpperCase()}`,
+      `Scan for store field terminal (inventory, receive, labels)`,
+      `Scan URL: ${scan_url}`,
+      `Parts in catalogue: ${profile.inventory.part_count}`,
+      `Below minimum: ${profile.inventory.below_min}`,
+      `Pending arrivals: ${profile.pending_arrivals}`,
+    ].join("\n");
+
+    return { profile, qrText };
+  }
+
+  // GET /api/stock/store-qr-profile
+  app.get("/store-qr-profile", async (req, reply) => {
+    const site_code = String(req.query?.site || getSiteCode(req)).trim().toLowerCase() || "main";
+    const stored = getStoredStoreQrProfile.get(site_code);
+    let storedPayload = null;
+    if (stored?.qr_payload) {
+      try {
+        storedPayload = JSON.parse(String(stored.qr_payload || "{}"));
+      } catch {
+        storedPayload = null;
+      }
+    }
+    const live = buildStoreQrProfile(site_code, req);
+    return reply.send({
+      ok: true,
+      site_code,
+      stored: storedPayload
+        ? { qr_payload: storedPayload, qr_text: stored.qr_text, generated_at: stored.generated_at }
+        : null,
+      live_preview: live.profile,
+      live_qr_text: live.qrText,
+    });
+  });
+
+  // POST /api/stock/store-qr-profile/refresh
+  app.post("/store-qr-profile/refresh", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "stores", "storeman"])) return;
+    const site_code = String(req.body?.site || req.query?.site || getSiteCode(req)).trim().toLowerCase() || "main";
+    const built = buildStoreQrProfile(site_code, req);
+    upsertStoreQrProfile.run(site_code, JSON.stringify(built.profile), built.qrText);
+    return reply.send({
+      ok: true,
+      site_code,
+      qr_payload: built.profile,
+      qr_text: built.qrText,
+    });
   });
 }
