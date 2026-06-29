@@ -1365,7 +1365,13 @@ export default async function reportsRoutes(app) {
       out.xlsx = `/api/reports/executive-kpi-pack.xlsx?${q}`;
       out.names.xlsx = `IRONLOG_Executive_KPI_Pack_${end}.xlsx`;
     } else {
-      const q = `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&near_due_hours=${near}&predictive_horizon_hours=${horizon}`;
+      const checklist = Number.isFinite(Number(f.checklist_fail_threshold))
+        ? Number(f.checklist_fail_threshold)
+        : 2;
+      const fuelVar = Number.isFinite(Number(f.fuel_variance_threshold))
+        ? Number(f.fuel_variance_threshold)
+        : 15;
+      const q = `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&near_due_hours=${near}&predictive_horizon_hours=${horizon}&checklist_fail_threshold=${checklist}&fuel_variance_threshold=${fuelVar}`;
       out.pdf = `/api/maintenance/insights.pdf?${q}&download=1`;
       out.xlsx = `/api/maintenance/insights.xlsx?${q}`;
       out.names.pdf = `IRONLOG_Maintenance_Insights_${end}.pdf`;
@@ -1376,7 +1382,14 @@ export default async function reportsRoutes(app) {
 
   async function fetchInternalReport(path) {
     const url = `${internalApiBase()}${path}`;
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      headers: {
+        "x-user-name": "system",
+        "x-user-role": "admin",
+        "x-user-roles": "admin",
+        "x-site-code": String(process.env.IRONLOG_DEFAULT_SITE_CODE || "main"),
+      },
+    });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       throw new Error(`Report generation failed (${res.status}): ${body.slice(0, 200) || path}`);

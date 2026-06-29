@@ -3197,7 +3197,7 @@ export default async function maintenanceRoutes(app) {
             WHERE DATE(mr.maintenance_date) BETWEEN DATE(?) AND DATE(?)
               AND TRIM(COALESCE(mr.service_type, '')) <> ''
               AND TRIM(COALESCE(mp.part_name, '')) <> ''
-            GROUP BY service_key, part_name
+            GROUP BY 1, 2
           `).all(startDate, endDate)
         : [];
       const partDemandMap = new Map();

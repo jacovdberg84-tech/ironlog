@@ -1750,6 +1750,18 @@ function fillSubscriptionForm(s) {
   set("subDayOfWeek", Number(s?.day_of_week ?? 1));
   set("subDayOfMonth", Number(s?.day_of_month ?? 1));
   set("subActive", Number(s?.active ?? 1) === 1);
+  const startEl = document.getElementById("insightsStart");
+  const endEl = document.getElementById("insightsEnd");
+  if (s?.filters?.start && startEl) startEl.value = String(s.filters.start);
+  if (s?.filters?.end && endEl) endEl.value = String(s.filters.end);
+  const setNum = (id, v) => {
+    const el = document.getElementById(id);
+    if (el && v != null && v !== "") el.value = String(v);
+  };
+  setNum("insightsNearDueHours", s?.filters?.near_due_hours);
+  setNum("insightsPredictiveHorizonHours", s?.filters?.predictive_horizon_hours);
+  setNum("insightsChecklistFailThreshold", s?.filters?.checklist_fail_threshold);
+  setNum("insightsFuelVarianceThreshold", s?.filters?.fuel_variance_threshold);
 }
 
 async function loadReportSubscriptionLogs() {
@@ -1816,9 +1828,29 @@ async function loadReportSubscriptions() {
   }
 }
 
+function subscriptionInsightsThresholds() {
+  const nearEl = document.getElementById("insightsNearDueHours");
+  const horizonEl = document.getElementById("insightsPredictiveHorizonHours");
+  const failEl = document.getElementById("insightsChecklistFailThreshold");
+  const fuelEl = document.getElementById("insightsFuelVarianceThreshold");
+  const saved = getInsightsThresholds();
+  return {
+    near_due_hours: Math.max(1, Number(nearEl?.value || saved.near_due_hours || 50)),
+    predictive_horizon_hours: Math.max(
+      1,
+      Number(horizonEl?.value || saved.predictive_horizon_hours || 100),
+    ),
+    checklist_fail_threshold: Math.max(1, Number(failEl?.value || saved.checklist_fail_threshold || 2)),
+    fuel_variance_threshold: Math.max(0, Number(fuelEl?.value || saved.fuel_variance_threshold || 15)),
+  };
+}
+
 function subscriptionPayloadFromForm() {
   const isChecked = (id) => Boolean(document.getElementById(id)?.checked);
   const value = (id) => String(document.getElementById(id)?.value || "").trim();
+  const thresholds = subscriptionInsightsThresholds();
+  const start = String(document.getElementById("insightsStart")?.value || "").trim();
+  const end = String(document.getElementById("insightsEnd")?.value || "").trim();
   return {
     id: reportSubscriptionEditId || undefined,
     name: value("subName"),
@@ -1831,11 +1863,12 @@ function subscriptionPayloadFromForm() {
     day_of_month: Number(value("subDayOfMonth") || 1),
     active: isChecked("subActive") ? 1 : 0,
     filters: {
-      start: String(document.getElementById("insightsStart")?.value || "").trim(),
-      end: String(document.getElementById("insightsEnd")?.value || "").trim(),
+      start,
+      end,
       site_codes: String(document.getElementById("kpiPackSiteCodes")?.value || "main").trim() || "main",
       period_type: String(document.getElementById("kpiPackPeriodType")?.value || "weekly").trim().toLowerCase(),
       attach_format: value("subAttachFormat") || "pdf",
+      ...thresholds,
     },
   };
 }
