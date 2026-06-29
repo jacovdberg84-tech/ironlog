@@ -4675,6 +4675,31 @@
               </div>
             </div>
             <div class="checklist-hub-summary" id="clHubSummary"></div>
+            <details id="clPtTranslator" class="checklist-pt-translator">
+              <summary>Portuguese ⇄ English helper (checklists &amp; notes)</summary>
+              <div class="checklist-pt-translator-body">
+                <p class="muted small">Use this for checklist wording or operator notes. Turn on <strong>PT ⇄ EN</strong> in the pills above to show Portuguese under each checklist line.</p>
+                <div class="form-row">
+                  <div class="form-field form-field-full">
+                    <label for="clPtTranslateIn">Text</label>
+                    <textarea id="clPtTranslateIn" class="w-full" rows="3" placeholder="Paste Portuguese or English text here…"></textarea>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-field">
+                    <label for="clPtTranslateDir">Direction</label>
+                    <select id="clPtTranslateDir" class="w-full">
+                      <option value="pt-en">Portuguese → English</option>
+                      <option value="en-pt">English → Portuguese</option>
+                    </select>
+                  </div>
+                  <div class="form-field form-field-action">
+                    <button type="button" id="clPtTranslateBtn" class="btn btn-secondary">Translate</button>
+                  </div>
+                </div>
+                <div id="clPtTranslateOut" class="checklist-pt-translate-out muted small">Translation will appear here.</div>
+              </div>
+            </details>
             <div id="clDayComments" class="checklist-day-comments hidden"></div>
             <div id="clHubSections" class="checklist-hub-sections">
               <div class="muted small">Loading checklists…</div>

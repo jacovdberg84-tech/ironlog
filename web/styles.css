@@ -3330,6 +3330,59 @@ body.sidebar-collapsed .main-content {
   padding: 12px 14px;
 }
 
+.checklist-pt-translator {
+  margin-bottom: 14px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.checklist-pt-translator > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.checklist-pt-translator-body {
+  margin-top: 10px;
+}
+
+.checklist-pt-translate-out {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #dbeafe;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  line-height: 1.45;
+  color: #1e3a5f;
+}
+
+.cl-label-pt {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #1d4ed8;
+  line-height: 1.35;
+}
+
+.checklist-hub-summary .pill-btn {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.checklist-hub-summary .pill-btn.active {
+  background: #dbeafe;
+  border-color: #3b82f6;
+  color: #1e40af;
+}
+
 .checklist-day-comments-head {
   display: flex;
   align-items: baseline;

@@ -3067,6 +3067,171 @@ const CL_LDV_ITEMS = [
   { key: "safety_items_ok", label: "Safety items in place" },
 ];
 
+const CL_PT_HELP_KEY = "ironlog_cl_pt_help";
+
+/** English → Portuguese (Mozambique field Portuguese) for checklist labels & common notes. */
+const CL_PT_GLOSSARY = {
+  "Pre-start checks (all required)": "Verificações pré-arranque (todas obrigatórias)",
+  "Brakes OK": "Travões OK",
+  "Lights OK": "Luzes OK",
+  "Tyres OK": "Pneus OK",
+  "Oil/Coolant OK": "Óleo / líquido de arrefecimento OK",
+  "No leaks or visible damage": "Sem fugas ou danos visíveis",
+  "Safety items in place": "Equipamento de segurança no lugar",
+  "Fluid levels": "Níveis de fluidos",
+  "Undercarriage": "Trem de rodagem / esteiras",
+  "Safety & cab": "Segurança e cabine",
+  "Safety": "Segurança",
+  "Machine & tyres": "Máquina e pneus",
+  "Body & running gear": "Caixa basculante e rodagem",
+  "Fluids & fuel systems": "Fluidos e sistemas de combustível",
+  "Dispensing equipment": "Equipamento de distribuição",
+  "Vehicle": "Veículo",
+  "Moldboard & tyres": "Lâmina e pneus",
+  "Engine oil level OK": "Nível de óleo do motor OK",
+  "Engine oil OK": "Óleo do motor OK",
+  "Coolant level OK": "Nível de líquido de arrefecimento OK",
+  "Coolant OK": "Líquido de arrefecimento OK",
+  "Hydraulic oil level OK": "Nível de óleo hidráulico OK",
+  "Hydraulic oil OK": "Óleo hidráulico OK",
+  "Hydraulic / transmission oil OK": "Óleo hidráulico / transmissão OK",
+  "Swing / slew gear oil OK (if applicable)": "Óleo da giratória OK (se aplicável)",
+  "Final drives / track gear oil OK": "Redutores finais / óleo das esteiras OK",
+  "Final drives OK": "Redutores finais OK",
+  "Track tension OK": "Tensão das esteiras OK",
+  "Rollers & idlers OK (no seized / flat spots)": "Rolos e rodas guia OK (sem bloqueios / zonas planas)",
+  "Sprocket teeth OK": "Dentes da coroa OK",
+  "No abnormal cuts, cracks, or leaks on tracks": "Sem cortes, fissuras ou fugas anormais nas esteiras",
+  "Fire extinguisher present & charged": "Extintor presente e carregado",
+  "Fire extinguisher OK": "Extintor OK",
+  "Seat belt OK": "Cinto de segurança OK",
+  "Mirrors / cameras clean & working": "Espelhos / câmaras limpos e a funcionar",
+  "Horn & emergency stop OK": "Buzina e paragem de emergência OK",
+  "Horn & E-stop OK": "Buzina e paragem de emergência OK",
+  "Windows / guards intact": "Janelas / proteções intactas",
+  "Blade / ripper pins & hydraulics OK": "Pinos da lâmina / ripper e hidráulica OK",
+  "Rollers & sprocket OK": "Rolos e coroa OK",
+  "Transmission / axle oils OK": "Óleos de transmissão / eixos OK",
+  "Brake fluid OK": "Líquido de travões OK",
+  "Tyres — pressure & damage OK": "Pneus — pressão e danos OK",
+  "Tyres OK": "Pneus OK",
+  "Centre articulation / pins OK": "Articulação central / pinos OK",
+  "Bucket & linkage OK": "Caçamba e linkage OK",
+  "Lights & beacon OK": "Luzes e baliza OK",
+  "Horn & reversing alarm OK": "Buzina e alarme de marcha-atrás OK",
+  "Body / hoist & tail door OK": "Caixa, elevador e porta traseira OK",
+  "Steering free play OK": "Folga da direção OK",
+  "Product tank level OK": "Nível do tanque de produto OK",
+  "No fuel, oil, or hydraulic leaks": "Sem fugas de combustível, óleo ou hidráulica",
+  "Hoses, reels & nozzles OK (no damage/leaks)": "Mangueiras, carretéis e bicos OK (sem danos/fugas)",
+  "Meters / pumps OK": "Medidores / bombas OK",
+  "Bonding & earthing OK": "Ligação equipotencial e aterramento OK",
+  "Spill kit present & accessible": "Kit de derrame presente e acessível",
+  "Brakes & steering OK": "Travões e direção OK",
+  "Hazchem / no smoking signage OK": "Sinalização Hazchem / proibido fumar OK",
+  "Circle drive oil OK (if applicable)": "Óleo do círculo OK (se aplicável)",
+  "Moldboard & linkage OK": "Lâmina e linkage OK",
+  "Horn OK": "Buzina OK",
+  "leak": "fuga",
+  "leaks": "fugas",
+  "damage": "dano",
+  "broken": "partido",
+  "low oil": "óleo baixo",
+  "low coolant": "líquido de arrefecimento baixo",
+  "not working": "não funciona",
+  "needs attention": "precisa de atenção",
+  "flat tyre": "pneu furado",
+  "warning light": "luz de aviso",
+};
+
+let clPtGlossaryReverse = null;
+
+function isClPtHelpOn() {
+  if (getLang() === "pt") return true;
+  return localStorage.getItem(CL_PT_HELP_KEY) === "1";
+}
+
+function setClPtHelp(on) {
+  localStorage.setItem(CL_PT_HELP_KEY, on ? "1" : "0");
+}
+
+function clBuildPtGlossaryReverse() {
+  if (clPtGlossaryReverse) return clPtGlossaryReverse;
+  clPtGlossaryReverse = {};
+  for (const [en, pt] of Object.entries(CL_PT_GLOSSARY)) {
+    if (pt && !clPtGlossaryReverse[pt.toLowerCase()]) {
+      clPtGlossaryReverse[pt.toLowerCase()] = en;
+    }
+  }
+  return clPtGlossaryReverse;
+}
+
+function clEnToPt(text) {
+  const src = String(text || "").trim();
+  if (!src) return "";
+  if (CL_PT_GLOSSARY[src]) return CL_PT_GLOSSARY[src];
+  let out = src;
+  const phrases = Object.keys(CL_PT_GLOSSARY).sort((a, b) => b.length - a.length);
+  for (const en of phrases) {
+    if (en.length < 4) continue;
+    const re = new RegExp(en.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    out = out.replace(re, CL_PT_GLOSSARY[en]);
+  }
+  return out;
+}
+
+function clPtToEn(text) {
+  const src = String(text || "").trim();
+  if (!src) return "";
+  const reverse = clBuildPtGlossaryReverse();
+  if (reverse[src.toLowerCase()]) return reverse[src.toLowerCase()];
+  let out = src;
+  const phrases = Object.entries(reverse).sort((a, b) => b[0].length - a[0].length);
+  for (const [pt, en] of phrases) {
+    if (pt.length < 4) continue;
+    const re = new RegExp(pt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    out = out.replace(re, en);
+  }
+  return out;
+}
+
+function clTranslateFreeText(text, direction = "pt-en") {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  return direction === "en-pt" ? clEnToPt(raw) : clPtToEn(raw);
+}
+
+function clLabelHtml(englishLabel) {
+  const en = String(englishLabel || "");
+  if (!isClPtHelpOn()) return escapeHtml(en);
+  const pt = clEnToPt(en);
+  if (!pt || pt.toLowerCase() === en.toLowerCase()) return escapeHtml(en);
+  return `${escapeHtml(en)}<small class="cl-label-pt">${escapeHtml(pt)}</small>`;
+}
+
+function clSectionTitleHtml(title) {
+  return clLabelHtml(title);
+}
+
+async function refreshClChecklistLabels() {
+  if (!clSelectedAssetCode) return;
+  await selectChecklistAsset(clSelectedAssetCode).catch(() => {});
+}
+
+function runClPtTranslate() {
+  const out = qs("clPtTranslateOut");
+  const input = String(qs("clPtTranslateIn")?.value || "").trim();
+  const dir = String(qs("clPtTranslateDir")?.value || "pt-en");
+  if (!input) {
+    if (out) out.textContent = "Enter text to translate.";
+    return;
+  }
+  const translated = clTranslateFreeText(input, dir);
+  if (out) {
+    out.textContent = translated || "(No translation found — try shorter phrases or checklist terms.)";
+  }
+}
+
 function clCheckDate() {
   return qs("clCheckDate")?.value || todayLocalYmd();
 }
@@ -3140,8 +3305,14 @@ function renderClHubSummary(data) {
       return `<span class="pill blue">Safety: ${done}/${total} done${flaggedNote}</span>`;
     })() : ""}
     ${commentCount ? `<span class="pill amber">${commentCount} comment${commentCount === 1 ? "" : "s"}</span>` : ""}
+    <button type="button" id="clPtHelpPill" class="pill pill-btn${isClPtHelpOn() ? " active" : ""}" title="Show Portuguese under checklist lines">PT ⇄ EN${isClPtHelpOn() ? " ON" : ""}</button>
     <span class="pill">${escapeHtml(String(data?.check_date || clCheckDate()))}</span>
   `;
+  qs("clPtHelpPill")?.addEventListener("click", () => {
+    setClPtHelp(!isClPtHelpOn());
+    renderClHubSummary(data);
+    refreshClChecklistLabels().catch(() => {});
+  });
 }
 
 function clCommentKindLabel(kind) {
@@ -3355,13 +3526,13 @@ function renderClLdvChecklist(checklist) {
   (Array.isArray(checklist) ? checklist : []).forEach((c) => {
     byKey[String(c.key)] = Boolean(c.ok);
   });
-  root.innerHTML = `<div class="cl-sec"><div class="cl-sec-title">Pre-start checks (all required)</div>`;
+  root.innerHTML = `<div class="cl-sec"><div class="cl-sec-title">${clSectionTitleHtml("Pre-start checks (all required)")}</div>`;
   const sec = root.querySelector(".cl-sec");
   CL_LDV_ITEMS.forEach((it) => {
     const id = clSafeDomId(it.key);
     const row = document.createElement("div");
     row.className = "cl-check-row";
-    row.innerHTML = `<input type="checkbox" id="${id}" data-key="${escapeHtml(it.key)}" ${byKey[it.key] ? "checked" : ""} /><label for="${id}">${escapeHtml(it.label)}</label>`;
+    row.innerHTML = `<input type="checkbox" id="${id}" data-key="${escapeHtml(it.key)}" ${byKey[it.key] ? "checked" : ""} /><label for="${id}">${clLabelHtml(it.label)}</label>`;
     sec.appendChild(row);
   });
 }
@@ -3379,7 +3550,7 @@ function renderClMachineChecklist(template, checklist) {
     wrap.className = "cl-sec";
     const title = document.createElement("div");
     title.className = "cl-sec-title";
-    title.textContent = String(sec.title || "");
+    title.innerHTML = clSectionTitleHtml(String(sec.title || ""));
     wrap.appendChild(title);
     for (const it of sec.items || []) {
       const key = String(it.key || "").trim();
@@ -3387,7 +3558,7 @@ function renderClMachineChecklist(template, checklist) {
       const id = clSafeDomId(key);
       const row = document.createElement("div");
       row.className = "cl-check-row";
-      row.innerHTML = `<input type="checkbox" id="${id}" data-key="${escapeHtml(key)}" ${byKey[key] ? "checked" : ""} /><label for="${id}">${escapeHtml(it.label || key)}</label>`;
+      row.innerHTML = `<input type="checkbox" id="${id}" data-key="${escapeHtml(key)}" ${byKey[key] ? "checked" : ""} /><label for="${id}">${clLabelHtml(it.label || key)}</label>`;
       wrap.appendChild(row);
     }
     root.appendChild(wrap);
@@ -3852,6 +4023,10 @@ function initChecklistTab() {
   if (ins && !ins.value) ins.value = getSessionUser();
 
   qs("clRefreshHub")?.addEventListener("click", () => loadChecklistHub().catch((e) => setStatus(String(e.message || e))));
+  qs("clPtTranslateBtn")?.addEventListener("click", runClPtTranslate);
+  qs("clPtTranslateIn")?.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") runClPtTranslate();
+  });
   qs("clCheckDate")?.addEventListener("change", () => {
     clSelectedAssetCode = "";
     qs("clFormPanel")?.classList.add("hidden");
