@@ -217,6 +217,7 @@ function refreshTopViewData(view) {
       break;
     case "insights":
       loadMaintenanceInsights().catch(() => {});
+      loadReportSubscriptions().catch(() => {});
       break;
     case "service-history":
       loadBackfillHistory().catch(() => {});
@@ -7748,9 +7749,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadMaintenanceInsights().catch(() => {});
   loadGovernanceSignals().catch(() => {});
   loadReportBuilderMeta().then(() => loadReportBuilderTemplates()).catch(() => {});
-  if (!document.getElementById("reportSubscriptionsCard")?.classList.contains("hidden")) {
-    loadReportSubscriptions().catch(() => {});
-  }
+  loadReportSubscriptions().catch(() => {});
   scrollToSection("maintenance");
   loadHistogramEvents().catch(() => {});
 });
