@@ -14,6 +14,7 @@ import {
   buildSmtpTransport,
   saveSmtpSettings,
   formatSmtpError,
+  sendIronlogMail,
 } from "../utils/mail.js";
 import {
   buildPdfBuffer,
@@ -1323,24 +1324,133 @@ export default async function reportsRoutes(app) {
     }
     return toIsoNoMs(next);
   }
-  function reportLinkForType(reportType, filters = {}) {
+  const MAX_SUBSCRIPTION_ATTACHMENT_BYTES = 22 * 1024 * 1024;
+
+  function subscriptionAttachFormat(filters = {}) {
+    const raw = String(filters?.attach_format || "pdf").trim().toLowerCase();
+    if (raw === "link" || raw === "none") return "link";
+    if (raw === "xlsx" || raw === "excel") return "xlsx";
+    if (raw === "both" || raw === "pdf_xlsx") return "both";
+    return "pdf";
+  }
+
+  function internalApiBase() {
+    return `http://127.0.0.1:${process.env.PORT_EFFECTIVE || process.env.PORT || 3001}`;
+  }
+
+  function publicReportLink(path) {
+    const base = String(process.env.IRONLOG_PUBLIC_BASE_URL || "").trim().replace(/\/+$/, "");
+    return base ? `${base}${path}` : path;
+  }
+
+  function reportPathsForType(reportType, filters = {}) {
     const f = filters && typeof filters === "object" ? filters : {};
-    if (reportType === "fuel_benchmark_xlsx") {
-      const start = isDate(f.start) ? String(f.start) : todayYmd().slice(0, 8) + "01";
-      const end = isDate(f.end) ? String(f.end) : todayYmd();
-      return `/api/reports/fuel-benchmark.xlsx?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
-    }
-    if (reportType === "executive_kpi_pack_xlsx") {
-      const period = String(f.period_type || "weekly").trim().toLowerCase();
-      const start = isDate(f.start) ? String(f.start) : todayYmd().slice(0, 8) + "01";
-      const end = isDate(f.end) ? String(f.end) : todayYmd();
-      const siteCodes = String(f.site_codes || "main").trim();
-      return `/api/reports/executive-kpi-pack.xlsx?period_type=${encodeURIComponent(period)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&site_codes=${encodeURIComponent(siteCodes)}`;
-    }
     const start = isDate(f.start) ? String(f.start) : todayYmd().slice(0, 8) + "01";
     const end = isDate(f.end) ? String(f.end) : todayYmd();
-    return `/api/maintenance/insights.xlsx?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+    const tolerance = Number.isFinite(Number(f.tolerance)) ? Number(f.tolerance) : 0.15;
+    const near = Number.isFinite(Number(f.near_due_hours)) ? Number(f.near_due_hours) : 50;
+    const horizon = Number.isFinite(Number(f.predictive_horizon_hours)) ? Number(f.predictive_horizon_hours) : 100;
+    const period = String(f.period_type || "weekly").trim().toLowerCase();
+    const siteCodes = String(f.site_codes || "main").trim();
+    const out = { pdf: null, xlsx: null, names: { pdf: null, xlsx: null }, start, end };
+
+    if (reportType === "fuel_benchmark_xlsx") {
+      const q = `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&tolerance=${tolerance}`;
+      out.pdf = `/api/reports/fuel-benchmark.pdf?${q}&download=1`;
+      out.xlsx = `/api/reports/fuel-benchmark.xlsx?${q}`;
+      out.names.pdf = `IRONLOG_Fuel_Benchmark_${end}.pdf`;
+      out.names.xlsx = `IRONLOG_Fuel_Benchmark_${end}.xlsx`;
+    } else if (reportType === "executive_kpi_pack_xlsx") {
+      const q = `period_type=${encodeURIComponent(period)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&site_codes=${encodeURIComponent(siteCodes)}`;
+      out.xlsx = `/api/reports/executive-kpi-pack.xlsx?${q}`;
+      out.names.xlsx = `IRONLOG_Executive_KPI_Pack_${end}.xlsx`;
+    } else {
+      const q = `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&near_due_hours=${near}&predictive_horizon_hours=${horizon}`;
+      out.pdf = `/api/maintenance/insights.pdf?${q}&download=1`;
+      out.xlsx = `/api/maintenance/insights.xlsx?${q}`;
+      out.names.pdf = `IRONLOG_Maintenance_Insights_${end}.pdf`;
+      out.names.xlsx = `IRONLOG_Maintenance_Insights_${end}.xlsx`;
+    }
+    return out;
   }
+
+  async function fetchInternalReport(path) {
+    const url = `${internalApiBase()}${path}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Report generation failed (${res.status}): ${body.slice(0, 200) || path}`);
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length) throw new Error(`Report generation returned empty file: ${path}`);
+    return buf;
+  }
+
+  async function buildSubscriptionAttachments(reportType, filters = {}) {
+    const fmt = subscriptionAttachFormat(filters);
+    if (fmt === "link") return [];
+    const paths = reportPathsForType(reportType, filters);
+    const attachments = [];
+    const wantPdf = fmt === "pdf" || fmt === "both";
+    const wantXlsx = fmt === "xlsx" || fmt === "both";
+
+    async function add(path, filename, contentType) {
+      if (!path || !filename) return;
+      const content = await fetchInternalReport(path);
+      if (content.length > MAX_SUBSCRIPTION_ATTACHMENT_BYTES) {
+        const mb = Math.round(content.length / 1024 / 1024);
+        throw new Error(`${filename} is too large to email (${mb} MB). Use link delivery or a narrower date range.`);
+      }
+      attachments.push({ filename, content, contentType });
+    }
+
+    if (wantPdf) {
+      if (paths.pdf) {
+        await add(paths.pdf, paths.names.pdf, "application/pdf");
+      } else if (fmt === "pdf" && paths.xlsx) {
+        await add(
+          paths.xlsx,
+          paths.names.xlsx,
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        );
+      }
+    }
+    if (wantXlsx) {
+      await add(
+        paths.xlsx,
+        paths.names.xlsx,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      );
+    }
+    return attachments;
+  }
+
+  function reportLinkForType(reportType, filters = {}) {
+    const paths = reportPathsForType(reportType, filters);
+    return paths.xlsx || paths.pdf || `/api/reports/${encodeURIComponent(reportType)}`;
+  }
+
+  function buildSubscriptionEmailText({ subRow, reportType, filters, link, attachments, generatedAt }) {
+    const paths = reportPathsForType(reportType, filters);
+    const publicLink = publicReportLink(link);
+    const lines = [
+      "Your IRONLOG report is ready.",
+      "",
+      `Report: ${String(subRow.name || reportType)}`,
+      `Period: ${paths.start} to ${paths.end}`,
+    ];
+    if (attachments.length) {
+      lines.push(`Attachments: ${attachments.map((a) => a.filename).join(", ")}`);
+      lines.push("");
+      lines.push(`You can also open the report in IRONLOG: ${publicLink}`);
+    } else {
+      lines.push("");
+      lines.push(`Download: ${publicLink}`);
+    }
+    lines.push(`Generated: ${generatedAt}`);
+    return lines.join("\n");
+  }
+
   async function deliverSubscription(subRow, manual = false) {
     const id = Number(subRow.id || 0);
     const reportType = String(subRow.report_type || "");
@@ -1349,6 +1459,7 @@ export default async function reportsRoutes(app) {
     let filters = {};
     try { filters = JSON.parse(String(subRow.filters_json || "{}")); } catch {}
     const link = reportLinkForType(reportType, filters);
+    const generatedAt = new Date().toISOString();
     const payload = {
       subscription_id: id,
       name: String(subRow.name || ""),
@@ -1356,11 +1467,13 @@ export default async function reportsRoutes(app) {
       channel,
       recipients,
       report_link: link,
+      attach_format: subscriptionAttachFormat(filters),
       manual: Boolean(manual),
-      generated_at: new Date().toISOString(),
+      generated_at: generatedAt,
     };
     let status = "simulated";
     let detail = "Logged only";
+    let attachments = [];
     if (channel === "email") {
       const smtp = buildSmtpTransport();
       if (smtp.error) {
@@ -1369,14 +1482,20 @@ export default async function reportsRoutes(app) {
         if (manual) throw new Error(smtp.error);
       } else if (smtp.transporter) {
         try {
-          await smtp.transporter.sendMail({
-            from: smtp.from,
-            to: recipients.join(", "),
+          if (subscriptionAttachFormat(filters) !== "link") {
+            attachments = await buildSubscriptionAttachments(reportType, filters);
+          }
+          const mailOut = await sendIronlogMail({
+            to: recipients,
             subject: `IRONLOG Report: ${String(subRow.name || reportType)}`,
-            text: `Your IRONLOG report is ready.\n\nReport: ${reportType}\nLink: ${link}\nGenerated: ${new Date().toISOString()}`,
+            text: buildSubscriptionEmailText({ subRow, reportType, filters, link, attachments, generatedAt }),
+            attachments: attachments.length ? attachments : undefined,
           });
+          if (!mailOut.ok) throw new Error(mailOut.error || "SMTP send failed");
           status = "sent";
-          detail = "SMTP email sent";
+          detail = attachments.length
+            ? `SMTP email sent with ${attachments.length} attachment(s)`
+            : "SMTP email sent (link only)";
         } catch (err) {
           status = "failed";
           detail = formatSmtpError(err);
@@ -1430,7 +1549,7 @@ export default async function reportsRoutes(app) {
       SET last_sent_at = datetime('now'), next_run_at = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(nextRun, id);
-    return { status, detail, report_link: link };
+    return { status, detail, report_link: link, attachment_count: attachments.length };
   }
 
   const reportDatasets = {

@@ -1742,6 +1742,7 @@ function fillSubscriptionForm(s) {
   set("subName", s?.name || "");
   set("subReportType", s?.report_type || "fuel_benchmark_xlsx");
   set("subChannel", s?.channel || "email");
+  set("subAttachFormat", s?.filters?.attach_format || "pdf");
   set("subRecipients", Array.isArray(s?.recipients) ? s.recipients.join(",") : "");
   set("subFrequency", s?.schedule_frequency || "weekly");
   set("subSendTime", s?.send_time || "07:00");
@@ -1833,6 +1834,7 @@ function subscriptionPayloadFromForm() {
       end: String(document.getElementById("insightsEnd")?.value || "").trim(),
       site_codes: String(document.getElementById("kpiPackSiteCodes")?.value || "main").trim() || "main",
       period_type: String(document.getElementById("kpiPackPeriodType")?.value || "weekly").trim().toLowerCase(),
+      attach_format: value("subAttachFormat") || "pdf",
     },
   };
 }
@@ -1871,7 +1873,9 @@ async function sendSubscriptionNow(id) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Send failed");
     msg.className = "message-success";
-    msg.textContent = `Sent: ${data.status || "ok"}`;
+    msg.textContent = data.attachment_count
+      ? `Sent: ${data.status || "ok"} (${data.attachment_count} attachment${data.attachment_count === 1 ? "" : "s"})`
+      : `Sent: ${data.status || "ok"}`;
     await loadReportSubscriptions();
   } catch (e) {
     msg.className = "message-error";
