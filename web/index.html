@@ -4675,6 +4675,7 @@
               </div>
             </div>
             <div class="checklist-hub-summary" id="clHubSummary"></div>
+            <div id="clDayComments" class="checklist-day-comments hidden"></div>
             <div id="clHubSections" class="checklist-hub-sections">
               <div class="muted small">Loading checklists…</div>
             </div>
@@ -6078,7 +6079,7 @@
               </div>
               <div>
                 <h3>SMTP Mail Service</h3>
-                <p class="muted small">Configure outgoing email for report subscriptions and alerts. Microsoft 365: smtp.office365.com, port 587, Secure = No, full email as username; SMTP AUTH must be enabled on the mailbox.</p>
+                <p class="muted small">Configure outgoing email for report subscriptions and alerts. Zoho (custom domain): smtppro.zoho.com, port 587, Secure = No, full email as username; use an app-specific password if 2FA is on. Microsoft 365: smtp.office365.com, port 587, Secure = No.</p>
               </div>
             </div>
             <div class="action-buttons">
@@ -6092,7 +6093,7 @@
             <div class="form-row">
               <div class="form-field">
                 <label>SMTP Host</label>
-                <input id="smtpHost" class="w-full" placeholder="smtp.office365.com" />
+                <input id="smtpHost" class="w-full" placeholder="smtppro.zoho.com" />
               </div>
               <div class="form-field">
                 <label>Port</label>
@@ -6109,7 +6110,7 @@
             <div class="form-row">
               <div class="form-field">
                 <label>Username</label>
-                <input id="smtpUsername" class="w-full" placeholder="noreply@company.com" />
+                <input id="smtpUsername" class="w-full" placeholder="reports@ironlogafrica.com" />
               </div>
               <div class="form-field">
                 <label>Password</label>
@@ -6119,7 +6120,7 @@
             <div class="form-row">
               <div class="form-field">
                 <label>From Email</label>
-                <input id="smtpFromEmail" class="w-full" placeholder="noreply@company.com" />
+                <input id="smtpFromEmail" class="w-full" placeholder="reports@ironlogafrica.com" />
               </div>
               <div class="form-field">
                 <label>From Name</label>

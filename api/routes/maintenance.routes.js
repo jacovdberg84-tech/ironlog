@@ -9298,12 +9298,36 @@ export default async function maintenanceRoutes(app) {
         ),
       };
 
+      const commentRows = db.prepare(`
+        SELECT v.id AS check_id, v.check_date, v.inspector_name, v.notes, v.check_mode, v.updated_at,
+               a.asset_code, a.asset_name
+        FROM vehicle_ldv_checks v
+        JOIN assets a ON a.id = v.asset_id
+        WHERE v.check_date = ?
+          AND TRIM(COALESCE(v.notes, '')) != ''
+        ORDER BY datetime(COALESCE(v.updated_at, v.check_date)) DESC, v.id DESC
+      `).all(check_date);
+      const comments = commentRows.map((r) => {
+        const mode = String(r.check_mode || "").toLowerCase();
+        const kind = mode.includes("machine_prestart") ? "machine" : "ldv";
+        return {
+          kind,
+          check_id: Number(r.check_id),
+          asset_code: String(r.asset_code || ""),
+          asset_name: String(r.asset_name || ""),
+          inspector_name: String(r.inspector_name || "").trim() || null,
+          notes: String(r.notes || "").trim(),
+          updated_at: r.updated_at || null,
+        };
+      });
+
       return reply.send({
         ok: true,
         check_date,
         summary,
         ldv: ldvAssets,
         machine_groups,
+        comments,
       });
     } catch (err) {
       req.log.error(err);

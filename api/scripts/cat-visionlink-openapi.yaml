@@ -1,0 +1,1576 @@
+openapi: 3.0.3
+info:
+  title: ISO15143 (AEMP 2.0)
+  description: |
+    Provides a snapshot view of a fleet/Equipment or a time-series data view of an individual piece of equipment.
+  termsOfService: https://www.caterpillar.com/en/legal-notices/terms.html
+  version: 1.2.0
+  contact:
+    name: Omega
+    email: omegagroup@cat.com
+  x-cat-confidential-level-oas: 'Caterpillar: Confidential Yellow'
+servers:
+- url: https://api.cat.com/telematics/iso15143
+security:
+- catFedLogin: []
+- b2cLogin: []
+- entraId: []
+externalDocs:
+  description: ISO Specification.
+  url: https://www.iso.org/standard/76394.html
+tags:
+- name: Snapshot
+  description: |
+    Provide a snapshot view of a fleet or an individual piece of equipment.
+- name: Time Series
+  description: |
+    TimeSeries endpoints provides a view into telematics data like Fault Code,
+    Switch Status, Engine Condition, Last known Location, Operating Hours,
+    Idle Operating Hours, Cumulative Fuel Used and Fuel Remaining Ratio
+    for a single construction machine over the specified time.
+paths:
+  /fleet/{pageNumber}:
+    get:
+      x-cat-confidential-level-data: 'Caterpillar: Confidential Yellow'
+      x-cat-entitlements-enforced: true
+      tags:
+      - Snapshot
+      summary: Fleet Snapshot
+      description: Retrieves snapshot view of the fleet.
+      operationId: getFleetSnapshot
+      parameters:
+      - $ref: '#/components/parameters/X-Cat-API-Tracking-Id'
+      - $ref: '#/components/parameters/pageNumber'
+      responses:
+        '200':
+          $ref: '#/components/responses/GetFleetSnapshotResponse'
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '406':
+          $ref: '#/components/responses/406RequestNotAcceptable'
+        '429':
+          $ref: '#/components/responses/429TooManyRequests'
+        '500':
+          $ref: '#/components/responses/500InternalServerError'
+        '503':
+          $ref: '#/components/responses/503ServiceUnavailable'
+  /fleet/equipment/makeModelSerial/{make}/{model}/{serialNumber}:
+    get:
+      x-cat-confidential-level-data: 'Caterpillar: Confidential Yellow'
+      x-cat-entitlements-enforced: true
+      tags:
+      - Snapshot
+      summary: Equipment Snapshot
+      description: |
+        Retrieves the snapshot view of the fleet,
+        but is limited to a single piece of equipment.
+      operationId: getEquipmentSnapshot
+      parameters:
+      - $ref: '#/components/parameters/X-Cat-API-Tracking-Id'
+      - $ref: '#/components/parameters/make'
+      - $ref: '#/components/parameters/model'
+      - $ref: '#/components/parameters/serialNumber'
+      responses:
+        '200':
+          $ref: '#/components/responses/GetEquipmentSnapshotResponse'
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '406':
+          $ref: '#/components/responses/406RequestNotAcceptable'
+        '429':
+          $ref: '#/components/responses/429TooManyRequests'
+        '500':
+          $ref: '#/components/responses/500InternalServerError'
+        '503':
+          $ref: '#/components/responses/503ServiceUnavailable'
+  /fleet/equipment/makeModelSerial/{make}/{model}/{serialNumber}/faults/{startDateUTC}/{endDateUTC}/{pageNumber}:
+    get:
+      x-cat-confidential-level-data: 'Caterpillar: Confidential Yellow'
+      x-cat-entitlements-enforced: true
+      tags:
+      - Time Series
+      summary: Time Series Fault Code
+      description: |
+        Returns the fault code details along with the recorded time for the given asset within the specified time range (UTC) up to the last 14 days.
+      operationId: getTimeseriesFaultCode
+      parameters:
+      - $ref: '#/components/parameters/X-Cat-API-Tracking-Id'
+      - $ref: '#/components/parameters/make'
+      - $ref: '#/components/parameters/model'
+      - $ref: '#/components/parameters/serialNumber'
+      - $ref: '#/components/parameters/startDateUTC'
+      - $ref: '#/components/parameters/endDateUTC'
+      - $ref: '#/components/parameters/pageNumber'
+      responses:
+        '200':
+          $ref: '#/components/responses/GetTimeSeriesFaultCodeResponse'
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '406':
+          $ref: '#/components/responses/406RequestNotAcceptable'
+        '429':
+          $ref: '#/components/responses/429TooManyRequests'
+        '500':
+          $ref: '#/components/responses/500InternalServerError'
+        '503':
+          $ref: '#/components/responses/503ServiceUnavailable'
+  /fleet/equipment/makeModelSerial/{make}/{model}/{serialNumber}/switchStatus/{startDateUTC}/{endDateUTC}/{pageNumber}:
+    get:
+      tags:
+      - Time Series
+      x-cat-confidential-level-data: 'Caterpillar: Confidential Yellow'
+      x-cat-entitlements-enforced: true
+      summary: Get Asset SwitchStatus
+      description: |
+        Endpoint returns the switch status details in addition to the recorded time(UTC) of a
+        given asset and the time range. The data can be requested for up to 14 days in the past.
+        Data availability is dependent on machine support and commercial subscription.
+      operationId: getTimeseriesSwitchStatus
+      parameters:
+      - $ref: '#/components/parameters/X-Cat-API-Tracking-Id'
+      - $ref: '#/components/parameters/make'
+      - $ref: '#/components/parameters/model'
+      - $ref: '#/components/parameters/serialNumber'
+      - $ref: '#/components/parameters/startDateUTC'
+      - $ref: '#/components/parameters/endDateUTC'
+      - $ref: '#/components/parameters/pageNumber'
+      responses:
+        '200':
+          $ref: '#/components/responses/GetTimeSeriesSwitchStatusResponse'
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '406':
+          $ref: '#/components/responses/406RequestNotAcceptable'
+        '412':
+          $ref: '#/components/responses/412PreconditionedFailed'
+        '429':
+          $ref: '#/components/responses/429TooManyRequests'
+        '500':
+          $ref: '#/components/responses/500InternalServerError'
+        '503':
+          $ref: '#/components/responses/503ServiceUnavailable'
+  /fleet/equipment/makeModelSerial/{make}/{model}/{serialNumber}/locations/{startDateUTC}/{endDateUTC}/{pageNumber}:
+    get:
+      tags:
+      - Time Series
+      x-cat-confidential-level-data: 'Caterpillar: Confidential Yellow'
+      x-cat-entitlements-enforced: true
+      summary: Get Asset Locations
+      description: |
+        Endpoint returns the location details in addition to the recorded time(UTC) of a
+        given asset and the time range. The data can be requested for up to 14 days in the past.
+        Data availability is dependent on machine support and commercial subscription.
+      operationId: getTimeseriesLastKnownLocations
+      parameters:
+      - $ref: '#/components/parameters/X-Cat-API-Tracking-Id'
+      - $ref: '#/components/parameters/make'
+      - $ref: '#/components/parameters/model'
+      - $ref: '#/components/parameters/serialNumber'
+      - $ref: '#/components/parameters/startDateUTC'
+      - $ref: '#/components/parameters/endDateUTC'
+      - $ref: '#/components/parameters/pageNumber'
+      responses:
+        '200':
+          $ref: '#/components/responses/GetTimeSeriesLocationResponse'
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '406':
+          $ref: '#/components/responses/406RequestNotAcceptable'
+        '412':
+          $ref: '#/components/responses/412PreconditionedFailed'
+        '429':
+          $ref: '#/components/responses/429TooManyRequests'
+        '500':
+          $ref: '#/components/responses/500InternalServerError'
+        '503':
+          $ref: '#/components/responses/503ServiceUnavailable'
+  /fleet/equipment/makeModelSerial/{make}/{model}/{serialNumber}/engineCondition/{startDateUTC}/{endDateUTC}/{pageNumber}:
+    get:
+      tags:
+      - Time Series
+      x-cat-confidential-level-data: 'Caterpillar: Confidential Yellow'
+      x-cat-entitlements-enforced: true
+      summary: Get Asset EngineConditions
+      description: |
+        Endpoint returns the engine condition details in addition to the recorded time(UTC) of a
+        given asset and the time range. The data can be requested for up to 14 days in the past.
+        Data availability is dependent on machine support and commercial subscription.
+      operationId: getTimeseriesEngineStatus
+      parameters:
+      - $ref: '#/components/parameters/X-Cat-API-Tracking-Id'
+      - $ref: '#/components/parameters/make'
+      - $ref: '#/components/parameters/model'
+      - $ref: '#/components/parameters/serialNumber'
+      - $ref: '#/components/parameters/startDateUTC'
+      - $ref: '#/components/parameters/endDateUTC'
+      - $ref: '#/components/parameters/pageNumber'
+      responses:
+        '200':
+          $ref: '#/components/responses/GetTimeSeriesEngineStatusResponse'
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '406':
+          $ref: '#/components/responses/406RequestNotAcceptable'
+        '412':
+          $ref: '#/components/responses/412PreconditionedFailed'
+        '429':
+          $ref: '#/components/responses/429TooManyRequests'
+        '500':
+          $ref: '#/components/responses/500InternalServerError'
+        '503':
+          $ref: '#/components/responses/503ServiceUnavailable'
+  /fleet/equipment/makeModelSerial/{make}/{model}/{serialNumber}/cumulativeOperatingHours/{startDateUTC}/{endDateUTC}/{pageNumber}:
+    get:
+      tags:
+      - Time Series
+      x-cat-confidential-level-data: 'Caterpillar: Confidential Yellow'
+      x-cat-entitlements-enforced: true
+      summary: Get Asset cumulativeOperatingHours
+      description: |
+        Endpoint returns the cumulative operating hours details in addition to the recorded
+        time(UTC) of a given asset and the time range. The data can be requested for up to 14 days
+        in the past. Data availability is dependent on machine support and commercial subscription.
+      operationId: getTimeseriesCumulativeOperatingHours
+      parameters:
+      - $ref: '#/components/parameters/X-Cat-API-Tracking-Id'
+      - $ref: '#/components/parameters/make'
+      - $ref: '#/components/parameters/model'
+      - $ref: '#/components/parameters/serialNumber'
+      - $ref: '#/components/parameters/startDateUTC'
+      - $ref: '#/components/parameters/endDateUTC'
+      - $ref: '#/components/parameters/pageNumber'
+      responses:
+        '200':
+          $ref: '#/components/responses/GetTimeSeriesCumulativeOperatingHoursResponse'
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '406':
+          $ref: '#/components/responses/406RequestNotAcceptable'
+        '412':
+          $ref: '#/components/responses/412PreconditionedFailed'
+        '429':
+          $ref: '#/components/responses/429TooManyRequests'
+        '500':
+          $ref: '#/components/responses/500InternalServerError'
+        '503':
+          $ref: '#/components/responses/503ServiceUnavailable'
+  /fleet/equipment/makeModelSerial/{make}/{model}/{serialNumber}/cumulativeIdleHours/{startDateUTC}/{endDateUTC}/{pageNumber}:
+    get:
+      tags:
+      - Time Series
+      x-cat-confidential-level-data: 'Caterpillar: Confidential Yellow'
+      x-cat-entitlements-enforced: true
+      summary: Get Asset cumulativeIdleHours
+      description: |
+        Endpoint returns the cumulative idle hours details in addition to the recorded time(UTC)
+        of a given asset and the time range. The data can be requested for up to 14 days
+        in the past. Data availability is dependent on machine support and commercial subscription.
+      operationId: getTimeseriesCumulativeIdleHours
+      parameters:
+      - $ref: '#/components/parameters/X-Cat-API-Tracking-Id'
+      - $ref: '#/components/parameters/make'
+      - $ref: '#/components/parameters/model'
+      - $ref: '#/components/parameters/serialNumber'
+      - $ref: '#/components/parameters/startDateUTC'
+      - $ref: '#/components/parameters/endDateUTC'
+      - $ref: '#/components/parameters/pageNumber'
+      responses:
+        '200':
+          $ref: '#/components/responses/GetTimeSeriesCumulativeIdleHoursResponse'
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '406':
+          $ref: '#/components/responses/406RequestNotAcceptable'
+        '412':
+          $ref: '#/components/responses/412PreconditionedFailed'
+        '429':
+          $ref: '#/components/responses/429TooManyRequests'
+        '500':
+          $ref: '#/components/responses/500InternalServerError'
+        '503':
+          $ref: '#/components/responses/503ServiceUnavailable'
+  /fleet/equipment/makeModelSerial/{make}/{model}/{serialNumber}/cumulativeFuelUsed/{startDateUTC}/{endDateUTC}/{pageNumber}:
+    get:
+      tags:
+      - Time Series
+      x-cat-confidential-level-data: 'Caterpillar: Confidential Yellow'
+      x-cat-entitlements-enforced: true
+      summary: Get Asset cumulativeFuelUsed
+      description: |
+        Endpoint returns the fuel used details in addition to the recorded time(UTC) of a
+        given asset and the time range. The data can be requested for up to 14 days in the past.
+        Data availability is dependent on machine support and commercial subscription.
+      operationId: getTimeseriesCumulativeFuelUsed
+      parameters:
+      - $ref: '#/components/parameters/X-Cat-API-Tracking-Id'
+      - $ref: '#/components/parameters/make'
+      - $ref: '#/components/parameters/model'
+      - $ref: '#/components/parameters/serialNumber'
+      - $ref: '#/components/parameters/startDateUTC'
+      - $ref: '#/components/parameters/endDateUTC'
+      - $ref: '#/components/parameters/pageNumber'
+      responses:
+        '200':
+          $ref: '#/components/responses/GetTimeSeriesCumulativeFuelUsedResponse'
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '406':
+          $ref: '#/components/responses/406RequestNotAcceptable'
+        '412':
+          $ref: '#/components/responses/412PreconditionedFailed'
+        '429':
+          $ref: '#/components/responses/429TooManyRequests'
+        '500':
+          $ref: '#/components/responses/500InternalServerError'
+        '503':
+          $ref: '#/components/responses/503ServiceUnavailable'
+  /fleet/equipment/makeModelSerial/{make}/{model}/{serialNumber}/fuelRemainingRatio/{startDateUTC}/{endDateUTC}/{pageNumber}:
+    get:
+      tags:
+      - Time Series
+      x-cat-confidential-level-data: 'Caterpillar: Confidential Yellow'
+      x-cat-entitlements-enforced: true
+      summary: Get Asset FuelRemaining
+      description: |
+        Endpoint returns the fuel remaining ratio details in addition to the recorded time(UTC) of a
+        given asset and the time range. The data can be requested for up to 14 days in the past.
+        Data availability is dependent on machine support and commercial subscription.
+      operationId: getTimeseriesFuelRemaingRatio
+      parameters:
+      - $ref: '#/components/parameters/X-Cat-API-Tracking-Id'
+      - $ref: '#/components/parameters/make'
+      - $ref: '#/components/parameters/model'
+      - $ref: '#/components/parameters/serialNumber'
+      - $ref: '#/components/parameters/startDateUTC'
+      - $ref: '#/components/parameters/endDateUTC'
+      - $ref: '#/components/parameters/pageNumber'
+      responses:
+        '200':
+          $ref: '#/components/responses/GetTimeSeriesFuelRemainingRatioResponse'
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403Forbidden'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '406':
+          $ref: '#/components/responses/406RequestNotAcceptable'
+        '412':
+          $ref: '#/components/responses/412PreconditionedFailed'
+        '429':
+          $ref: '#/components/responses/429TooManyRequests'
+        '500':
+          $ref: '#/components/responses/500InternalServerError'
+        '503':
+          $ref: '#/components/responses/503ServiceUnavailable'
+components:
+  headers:
+    X-Cat-API-Tracking-Id:
+      description: A unique ID generated for each response.
+      required: false
+      schema:
+        $ref: '#/components/schemas/ApiTrackingId'
+  schemas:
+    FleetJson:
+      description: The response object of the fleet endpoint.
+      type: object
+      properties:
+        Links:
+          type: array
+          description: List of various link information for different pages.
+          items:
+            anyOf:
+            - $ref: '#/components/schemas/CurrentLinkJson'
+            - $ref: '#/components/schemas/NextLinkJson'
+            - $ref: '#/components/schemas/PreviousLinkJson'
+            - $ref: '#/components/schemas/FirstLinkJson'
+            - $ref: '#/components/schemas/LastLinkJson'
+        Equipment:
+          type: array
+          items:
+            $ref: '#/components/schemas/Equipment'
+        Version:
+          type: string
+          description: Version number of the snapshot API.
+          example: '1'
+        SnapshotTime:
+          $ref: '#/components/schemas/DateTime'
+    Fleet:
+      type: object
+      description: Telemetry data for list of assets.
+      properties:
+        Links:
+          type: array
+          description: List of various link information for different pages.
+          items:
+            anyOf:
+            - $ref: '#/components/schemas/CurrentLinkXml'
+            - $ref: '#/components/schemas/NextLinkXml'
+            - $ref: '#/components/schemas/PreviousLinkXml'
+            - $ref: '#/components/schemas/FirstLinkXml'
+            - $ref: '#/components/schemas/LastLinkXml'
+        Equipment:
+          type: array
+          items:
+            $ref: '#/components/schemas/Equipment'
+        version:
+          type: string
+          description: Version number of the snapshot API.
+          xml:
+            attribute: true
+          example: '1'
+        snapshotTime:
+          $ref: '#/components/schemas/DateTime'
+      xml:
+        namespace: http://standards.iso.org/iso/15143/-3
+    EquipmentXml:
+      type: object
+      description: Telemetry data for list of assets.
+      properties:
+        Links:
+          type: array
+          description: List of various link information for different pages.
+          items:
+            $ref: '#/components/schemas/EquipmentLinkXml'
+        Equipment:
+          type: array
+          items:
+            $ref: '#/components/schemas/Equipment'
+        version:
+          type: string
+          description: Version number of the snapshot API.
+          xml:
+            attribute: true
+          example: '1'
+        snapshotTime:
+          $ref: '#/components/schemas/DateTime'
+      xml:
+        namespace: http://standards.iso.org/iso/15143/-3
+    EquipmentJson:
+      type: object
+      description: The response object of Equipment endpoint.
+      properties:
+        Links:
+          type: array
+          description: List of various link information for different pages.
+          items:
+            anyOf:
+            - $ref: '#/components/schemas/EquipmentLinkJson'
+        Equipment:
+          type: array
+          items:
+            $ref: '#/components/schemas/Equipment'
+        Version:
+          type: string
+          description: Version number of the snapshot API.
+          example: '1'
+        SnapshotTime:
+          $ref: '#/components/schemas/DateTime'
+    FuelUsedLast24:
+      description: Cumulative fuel used in last 24 hours.
+      type: object
+      properties:
+        FuelConsumed:
+          type: number
+          description: Cumulative fuel used in last 24 hours.
+          format: integer
+          example: 600
+        datetime:
+          $ref: '#/components/schemas/DateTime'
+        FuelUnits:
+          type: string
+          description: Unit of measure of fuel.
+          example: litre
+    Distance:
+      description: Cumulative distance travelled.
+      type: object
+      properties:
+        Odometer:
+          type: number
+          description: Cumulative distance travelled.
+          format: double
+          example: 746.9
+        datetime:
+          $ref: '#/components/schemas/DateTime'
+        OdometerUnits:
+          type: string
+          description: Unit of measure of distance.
+          example: kilometre
+    CumulativeIdleHours:
+      $ref: '#/components/schemas/CumulativeOperatingHours'
+    FuelRemaining:
+      description: Fuel remaining ratio.
+      type: object
+      properties:
+        Percent:
+          type: number
+          description: Fuel remaining ratio.
+          format: double
+          example: 72.1
+        datetime:
+          $ref: '#/components/schemas/DateTime'
+    DefRemaining:
+      description: DEF remaining ratio.
+      type: object
+      properties:
+        Percent:
+          type: number
+          description: DEF remaining ratio.
+          format: double
+          example: 74
+        datetime:
+          $ref: '#/components/schemas/DateTime'
+    CumulativeLoadCount:
+      description: Cumulative load count.
+      type: object
+      properties:
+        Count:
+          type: number
+          description: Cumulative load count.
+          format: integer
+          example: 600
+        datetime:
+          $ref: '#/components/schemas/DateTime'
+    CumulativePayloadTotals:
+      description: Cumulative payload total.
+      type: object
+      properties:
+        PayloadUnits:
+          type: string
+          description: Unit of measure of payload.
+          example: Kilogram
+        Payload:
+          type: number
+          description: Cumulative payload total.
+          format: double
+          example: 200
+        datetime:
+          $ref: '#/components/schemas/DateTime'
+    FaultCodesResponse:
+      type: object
+      description: The response object for fault code endpoint.
+      properties:
+        Links:
+          type: array
+          description: List of various link information for different pages.
+          items:
+            $ref: '#/components/schemas/CurrentLinkFaultsJson'
+        FaultCode:
+          type: array
+          description: List of Fault Code information reported for different datetime.
+          items:
+            $ref: '#/components/schemas/FaultCode'
+      xml:
+        namespace: http://standards.iso.org/iso/15143/-3
+    FaultCode:
+      type: object
+      description: The fault code details for each asset.
+      properties:
+        CodeIdentifier:
+          type: string
+          description: Fault Code Identifier.
+          example: 2114-3
+        CodeDescription:
+          type: string
+          description: Fault Code description.
+          example: Blade Control Handle Trigger Switch:Voltage Above Normal
+        CodeSeverity:
+          type: string
+          description: Fault Code severity.
+          example: Medium
+        AirTemperature:
+          type: integer
+          description: Fault Code Air Temperature.
+          example: 6
+        TemperatureUnit:
+          type: string
+          description: Fault Code Temperature Unit.
+          example: Celsius
+        CodeSource:
+          type: string
+          description: Fault Code source.
+          example: TTT Trans
+        datetime:
+          $ref: '#/components/schemas/DateTime'
+    Equipment:
+      type: object
+      description: Various telemetry data for each asset.
+      properties:
+        EquipmentHeader:
+          $ref: '#/components/schemas/EquipmentHeader'
+        Location:
+          $ref: '#/components/schemas/Location'
+        CumulativeOperatingHours:
+          $ref: '#/components/schemas/CumulativeOperatingHours'
+        FuelUsed:
+          $ref: '#/components/schemas/FuelUsed'
+        FuelUsedLast24:
+          $ref: '#/components/schemas/FuelUsedLast24'
+        Distance:
+          $ref: '#/components/schemas/Distance'
+        CumulativeIdleHours:
+          $ref: '#/components/schemas/CumulativeOperatingHours'
+        FuelRemaining:
+          $ref: '#/components/schemas/FuelRemaining'
+        DEFRemaining:
+          $ref: '#/components/schemas/DefRemaining'
+        EngineStatus:
+          $ref: '#/components/schemas/EngineStatus'
+        CumulativeLoadCount:
+          $ref: '#/components/schemas/CumulativeLoadCount'
+        CumulativePayloadTotals:
+          $ref: '#/components/schemas/CumulativePayloadTotals'
+    EquipmentHeader:
+      type: object
+      properties:
+        OEMName:
+          type: string
+          description: Original Equipment Manufacturers Name.
+          example: CAT
+        Model:
+          type: string
+          description: Equipment Model.
+          example: 924K
+        EquipmentID:
+          type: string
+          description: Equipment ID.
+          example: HU-HH-ZH
+        SerialNumber:
+          maxLength: 17
+          minLength: 1
+          type: string
+          description: Serial Number.
+          example: MEJ00000
+      description: Equipment header information.
+    EquipmentLinkJson:
+      description: Json response object for Pagination reference.
+      type: object
+      properties:
+        Rel:
+          $ref: '#/components/schemas/Rel'
+        Href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          example: https://api.cat.com/telematics/iso15143/fleet/equipment/makeModelSerial/CAT/null/MEJ00000
+    EquipmentLinkXml:
+      type: object
+      description: XML response object for Pagination reference.
+      properties:
+        rel:
+          $ref: '#/components/schemas/Rel'
+        href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          example: https://api.cat.com/telematics/iso15143/fleet/equipment/makeModelSerial/CAT/null/MEJ00000
+    NextLinkJson:
+      type: object
+      description: Link to the next page.
+      properties:
+        Rel:
+          allOf:
+          - $ref: '#/components/schemas/Rel'
+          example: Next
+        Href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          description: Reference of the page link for next page.
+          example: https://api.cat.com/telematics/iso15143/fleet/5
+    CurrentLinkJson:
+      type: object
+      description: Link to the current page.
+      properties:
+        Rel:
+          $ref: '#/components/schemas/Rel'
+        Href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          example: https://api.cat.com/telematics/iso15143/fleet/4
+    CurrentLinkFaultsJson:
+      type: object
+      description: Link to the current page.
+      properties:
+        Rel:
+          $ref: '#/components/schemas/Rel'
+        Href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          example: https://api.cat.com/telematics/iso15143/fleet/equipment/makeModelSerial/SMC_1/null/LEV24541/faults/2015-07-10T06:50:06Z/2015-07-15T06:50:06Z/1
+    CurrentLinkSwitchStatusJson:
+      type: object
+      description: Link to the current page.
+      properties:
+        Rel:
+          $ref: '#/components/schemas/Rel'
+        Href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          example: https://api.cat.com/telematics/iso15143/fleet/equipment/makeModelSerial/SMC_1/null/LEV24541/switchStatus/2015-07-10T06:50:06Z/2015-07-15T06:50:06Z/1
+    CurrentLinkLocationJson:
+      type: object
+      description: Link to the current page.
+      properties:
+        Rel:
+          $ref: '#/components/schemas/Rel'
+        Href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          example: https://api.cat.com/telematics/iso15143/fleet/equipment/makeModelSerial/SMC_1/null/LEV24541/locations/2015-07-10T06:50:06Z/2015-07-15T06:50:06Z/1
+    CurrentLinkEngineConditionJson:
+      type: object
+      description: Link to the current page.
+      properties:
+        Rel:
+          $ref: '#/components/schemas/Rel'
+        Href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          example: https://api.cat.com/telematics/iso15143/fleet/equipment/makeModelSerial/SMC_1/null/LEV24541/engineCondition/2015-07-10T06:50:06Z/2015-07-15T06:50:06Z/1
+    CurrentLinkOperatingHoursJson:
+      type: object
+      description: Link to the current page.
+      properties:
+        Rel:
+          $ref: '#/components/schemas/Rel'
+        Href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          example: https://api.cat.com/telematics/iso15143/fleet/equipment/makeModelSerial/SMC_1/null/LEV24541/cumulativeOperatingHours/2015-07-10T06:50:06Z/2015-07-15T06:50:06Z/1
+    CurrentLinkIdleHoursJson:
+      type: object
+      description: Link to the current page.
+      properties:
+        Rel:
+          $ref: '#/components/schemas/Rel'
+        Href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          example: https://api.cat.com/telematics/iso15143/fleet/equipment/makeModelSerial/SMC_1/null/LEV24541/cumulativeIdleHours/2015-07-10T06:50:06Z/2015-07-15T06:50:06Z/1
+    CurrentLinkFuelUsedJson:
+      type: object
+      description: Link to the current page.
+      properties:
+        Rel:
+          $ref: '#/components/schemas/Rel'
+        Href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          example: https://api.cat.com/telematics/iso15143/fleet/equipment/makeModelSerial/SMC_1/null/LEV24541/cumulativeFuelUsed/2015-07-10T06:50:06Z/2015-07-15T06:50:06Z/1
+    CurrentLinkFuelRemainingRatioJson:
+      type: object
+      description: Link to the current page.
+      properties:
+        Rel:
+          $ref: '#/components/schemas/Rel'
+        Href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          example: https://api.cat.com/telematics/iso15143/fleet/equipment/makeModelSerial/SMC_1/null/LEV24541/fuelRemainingRatio/2015-07-10T06:50:06Z/2015-07-15T06:50:06Z/1
+    Rel:
+      type: string
+      description: To specify the reference of the link.
+      example: Current
+      enum:
+      - Current
+      - Last
+      - Next
+      - First
+    Href:
+      type: string
+      description: Reference of the page link for current page.
+      example: https://api.cat.com/telematics/iso15143/fleet/1
+    PreviousLinkJson:
+      type: object
+      description: Links to the previous page.
+      properties:
+        Rel:
+          allOf:
+          - $ref: '#/components/schemas/Rel'
+          example: previous
+        Href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          description: Reference of the page link for previous page.
+          example: https://api.cat.com/telematics/iso15143/fleet/3
+    FirstLinkJson:
+      type: object
+      description: Link to the first page.
+      properties:
+        Rel:
+          allOf:
+          - $ref: '#/components/schemas/Rel'
+          example: First
+        Href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          description: Reference of the page link for first page.
+          example: https://api.cat.com/telematics/iso15143/fleet/1
+    LastLinkJson:
+      type: object
+      description: Link to the last page.
+      properties:
+        Rel:
+          allOf:
+          - $ref: '#/components/schemas/Rel'
+          example: Last
+        Href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          description: Reference of the page link for last page.
+          example: https://api.cat.com/telematics/iso15143/fleet/31
+    NextLinkXml:
+      type: object
+      description: Link to the next page.
+      properties:
+        rel:
+          allOf:
+          - $ref: '#/components/schemas/Rel'
+          example: Next
+        href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          description: Reference of the page link for next page.
+          example: https://api.cat.com/telematics/iso15143/fleet/5
+    CurrentLinkXml:
+      type: object
+      description: Link to the current page.
+      properties:
+        rel:
+          allOf:
+          - $ref: '#/components/schemas/Rel'
+          example: Current
+        href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          example: https://api.cat.com/telematics/iso15143/fleet/4
+    PreviousLinkXml:
+      type: object
+      description: Links to the previous page.
+      properties:
+        rel:
+          allOf:
+          - $ref: '#/components/schemas/Rel'
+          example: previous
+        href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          description: Reference of the page link for previous page.
+          example: https://api.cat.com/telematics/iso15143/fleet/3
+    FirstLinkXml:
+      type: object
+      description: Link to the first page.
+      properties:
+        rel:
+          allOf:
+          - $ref: '#/components/schemas/Rel'
+          example: First
+        href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          description: Reference of the page link for first page.
+          example: https://api.cat.com/telematics/iso15143/fleet/1
+    LastLinkXml:
+      type: object
+      description: Link to the last page.
+      properties:
+        rel:
+          allOf:
+          - $ref: '#/components/schemas/Rel'
+          example: Last
+        href:
+          allOf:
+          - $ref: '#/components/schemas/Href'
+          description: Reference of the page link for last page.
+          example: https://api.cat.com/telematics/iso15143/fleet/31
+    DateTime:
+      type: string
+      description: |
+        A date time format is yyyy-MM-ddTHH:mm:ssZ when the data is
+        reported in UTC.
+      format: date-time
+      xml:
+        attribute: true
+      example: '2015-07-11T03:49:16Z'
+    Location:
+      type: object
+      required:
+      - Latitude
+      - Longitude
+      - Altitude
+      - AltitudeUnits
+      - ChinaCoordinateId
+      - datetime
+      description: Changes in Latitude, Longitude and Altitude.
+      properties:
+        Latitude:
+          maximum: 90
+          minimum: -90
+          type: number
+          description: Latitude of location.
+          format: double
+          example: 40.69223
+        Longitude:
+          maximum: 180
+          minimum: -180
+          type: number
+          description: Longitude of location.
+          format: double
+          example: -89.58893
+        Altitude:
+          type: number
+          description: Altitude of location.
+          format: double
+          example: 42.007
+        AltitudeUnits:
+          type: string
+          description: Units of Altitude.
+          example: metre
+        ChinaCoordinateId:
+          type: number
+          description: China Coordinate ID(s).
+          format: double
+          example: 499478202
+        datetime:
+          $ref: '#/components/schemas/DateTime'
+    CumulativeOperatingHours:
+      type: object
+      description: Total or Cumulative Hours.
+      required:
+      - Hour
+      - datetime
+      properties:
+        Hour:
+          type: number
+          description: Total or Cumulative hours.
+          format: double
+          example: 441.7
+        datetime:
+          $ref: '#/components/schemas/DateTime'
+    FuelUsed:
+      type: object
+      description: Cumulative fuel used.
+      required:
+      - FuelConsumed
+      - datetime
+      properties:
+        FuelConsumed:
+          type: number
+          description: Cumulative fuel used.
+          format: integer
+          example: 600
+        datetime:
+          $ref: '#/components/schemas/DateTime'
+        FuelUnits:
+          type: string
+          description: Unit of measure of fuel.
+          example: litre
+    FuelRemainingWithTankInfo:
+      type: object
+      description: Fuel remaining ratio.
+      required:
+      - Percent
+      - datetime
+      properties:
+        Percent:
+          type: number
+          description: Fuel remaining ratio.
+          format: double
+          example: 72.1
+        datetime:
+          $ref: '#/components/schemas/DateTime'
+        FuelTankCapacityUnits:
+          type: string
+          description: Unit of measure of fuel tank capacity.
+          example: litre
+        FuelTankCapacity:
+          type: number
+          description: Fuel tank capacity.
+          format: integer
+          example: 50
+    EngineStatus:
+      type: object
+      description: Engine condition.
+      required:
+      - datetime
+      - EngineNumber
+      - Running
+      properties:
+        datetime:
+          $ref: '#/components/schemas/DateTime'
+        EngineNumber:
+          type: string
+          description: Engine Serial Number.
+          example: ENG00001
+        Running:
+          type: boolean
+          description: Engine Status.
+          example: true
+    SwitchStatusMessages:
+      type: object
+      description: Switch status messages.
+      required:
+      - Links
+      properties:
+        Links:
+          type: array
+          description: List of various link information for different pages.
+          items:
+            $ref: '#/components/schemas/CurrentLinkSwitchStatusJson'
+        SwitchStatus:
+          type: array
+          description: List of switch status information reported for different datetime.
+          items:
+            $ref: '#/components/schemas/SwitchStatus'
+      xml:
+        namespace: http://standards.iso.org/iso/15143/-3
+    SwitchStatus:
+      type: object
+      description: Switch status.
+      required:
+      - SwitchNumber
+      - IsOn
+      properties:
+        SwitchNumber:
+          type: integer
+          description: The switch number.
+          example: 7
+        IsOn:
+          type: boolean
+          description: The switch status.
+          example: true
+        datetime:
+          $ref: '#/components/schemas/DateTime'
+    LocationMessages:
+      type: object
+      description: The Location messages.
+      required:
+      - Links
+      - Location
+      properties:
+        Links:
+          type: array
+          description: List of various link information for different pages.
+          items:
+            $ref: '#/components/schemas/CurrentLinkLocationJson'
+        Location:
+          type: array
+          description: List of location information reported for different datetime.
+          items:
+            $ref: '#/components/schemas/Location'
+      xml:
+        namespace: http://standards.iso.org/iso/15143/-3
+    EngineStatusMessages:
+      type: object
+      description: Engine status messages.
+      required:
+      - Links
+      - EngineStatus
+      properties:
+        Links:
+          type: array
+          description: List of various link information for different pages.
+          items:
+            $ref: '#/components/schemas/CurrentLinkEngineConditionJson'
+        EngineStatus:
+          type: array
+          description: List of location information reported for different datetime.
+          items:
+            $ref: '#/components/schemas/EngineStatus'
+      xml:
+        namespace: http://standards.iso.org/iso/15143/-3
+    CumulativeOperatingHoursMessages:
+      type: object
+      description: Total operating hours messages.
+      required:
+      - Links
+      - CumulativeOperatingHours
+      properties:
+        Links:
+          type: array
+          description: List of various link information for different pages.
+          items:
+            $ref: '#/components/schemas/CurrentLinkOperatingHoursJson'
+        CumulativeOperatingHours:
+          type: array
+          description: List of cumulative operative hours data reported for different
+            datetime.
+          items:
+            $ref: '#/components/schemas/CumulativeOperatingHours'
+      xml:
+        namespace: http://standards.iso.org/iso/15143/-3
+    CumulativeIdleHoursMessages:
+      type: object
+      description: Total idle hour messages.
+      required:
+      - Links
+      - CumulativeIdleHours
+      properties:
+        Links:
+          type: array
+          description: List of various link information for different pages.
+          items:
+            $ref: '#/components/schemas/CurrentLinkIdleHoursJson'
+        CumulativeIdleHours:
+          type: array
+          description: List of cumulative idle hours data reported for different datetime.
+          items:
+            $ref: '#/components/schemas/CumulativeOperatingHours'
+      xml:
+        namespace: http://standards.iso.org/iso/15143/-3
+    FuelUsedMessages:
+      type: object
+      description: Fuel used messages.
+      required:
+      - Links
+      - FuelUsed
+      properties:
+        Links:
+          type: array
+          description: List of various link information for different pages.
+          items:
+            $ref: '#/components/schemas/CurrentLinkFuelUsedJson'
+        FuelUsed:
+          type: array
+          description: List of fuel used data reported for different datetime.
+          items:
+            $ref: '#/components/schemas/FuelUsed'
+      xml:
+        namespace: http://standards.iso.org/iso/15143/-3
+    FuelRemainingMessages:
+      type: object
+      description: Fuel remaining messages.
+      required:
+      - Links
+      - FuelRemaining
+      properties:
+        Links:
+          type: array
+          description: List of various link information for different pages.
+          items:
+            $ref: '#/components/schemas/CurrentLinkFuelRemainingRatioJson'
+        FuelRemaining:
+          type: array
+          description: List of fuel remaining data reported for different datetime.
+          items:
+            $ref: '#/components/schemas/FuelRemainingWithTankInfo'
+      xml:
+        namespace: http://standards.iso.org/iso/15143/-3
+    ApiTrackingId:
+      type: string
+      description: A unique ID generated for each request or response.
+      format: uuid
+      example: 33aa372a-a4e4-11ea-bb37-0242ac130002
+    Error:
+      type: object
+      required:
+      - code
+      - description
+      description: |
+        'Represents an error code, description, and detailed error message for a given endpoint. 
+        Every HTTP status code returns a different `code` value in the response based on the
+        nature of the error that occurred. One HTTP status code can return different `code`
+        for different use cases'.
+      properties:
+        code:
+          type: string
+          description: Error Code represents an alpha-numeric error code received
+            from the error.
+          example: '404.001'
+        description:
+          type: string
+          description: Message represents a textual description of a given error code.
+          example: Resource Not Found
+  parameters:
+    X-Cat-API-Tracking-Id:
+      name: X-Cat-API-Tracking-Id
+      in: header
+      description: A unique ID generated for each request.
+      required: false
+      schema:
+        $ref: '#/components/schemas/ApiTrackingId'
+    pageNumber:
+      name: pageNumber
+      in: path
+      description: Any endpoints that return more than one piece of equipment or list
+        of telematics data shall be paged.
+      required: true
+      schema:
+        type: integer
+      example: 2
+    make:
+      name: make
+      in: path
+      description: Alphabetic string representing the OEM of a specific piece of equipment.
+      required: true
+      schema:
+        type: string
+      example: CAT
+    model:
+      name: model
+      in: path
+      description: |
+        Alphanumeric string representing the machine form type and series
+        as defined by the OEM, In case of Model is unknown 'null' should be passed.
+      required: true
+      schema:
+        type: string
+      example: 924K
+    serialNumber:
+      name: serialNumber
+      in: path
+      description: |
+        Alphanumeric string defined by the OEM identifying a specific piece
+        of equipment. The serial number is generally PIN as defined in ISO 10261.
+      required: true
+      schema:
+        type: string
+      example: LEV24571
+    startDateUTC:
+      name: startDateUTC
+      in: path
+      description: |
+        StartDate range of the API call. It must be in ISO 8601 format yyyy-MM-ddTHH:mm:ssZ.
+      required: true
+      schema:
+        $ref: '#/components/schemas/DateTime'
+    endDateUTC:
+      name: endDateUTC
+      in: path
+      description: |
+        EndDate range of the API call. It must be in ISO 8601 format yyyy-MM-ddTHH:mm:ssZ.
+      required: true
+      schema:
+        $ref: '#/components/schemas/DateTime'
+  responses:
+    GetFleetSnapshotResponse:
+      description: OK
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/iso15143-snapshot+json:
+          schema:
+            $ref: '#/components/schemas/FleetJson'
+        application/iso15143-snapshot+xml:
+          schema:
+            $ref: '#/components/schemas/Fleet'
+    GetEquipmentSnapshotResponse:
+      description: OK
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/iso15143-snapshot+json:
+          schema:
+            $ref: '#/components/schemas/EquipmentJson'
+        application/iso15143-snapshot+xml:
+          schema:
+            $ref: '#/components/schemas/EquipmentXml'
+    GetTimeSeriesFaultCodeResponse:
+      description: OK
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FaultCodesResponse'
+        application/iso15143-faults+json:
+          schema:
+            $ref: '#/components/schemas/FaultCodesResponse'
+        application/xml:
+          schema:
+            $ref: '#/components/schemas/FaultCodesResponse'
+        application/iso15143-faults+xml:
+          schema:
+            $ref: '#/components/schemas/FaultCodesResponse'
+    GetTimeSeriesSwitchStatusResponse:
+      description: OK
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SwitchStatusMessages'
+        application/xml:
+          schema:
+            $ref: '#/components/schemas/SwitchStatusMessages'
+    GetTimeSeriesLocationResponse:
+      description: OK
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/LocationMessages'
+        application/xml:
+          schema:
+            $ref: '#/components/schemas/LocationMessages'
+    GetTimeSeriesEngineStatusResponse:
+      description: OK
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/EngineStatusMessages'
+        application/xml:
+          schema:
+            $ref: '#/components/schemas/EngineStatusMessages'
+    GetTimeSeriesCumulativeOperatingHoursResponse:
+      description: OK
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CumulativeOperatingHoursMessages'
+        application/xml:
+          schema:
+            $ref: '#/components/schemas/CumulativeOperatingHoursMessages'
+    GetTimeSeriesCumulativeIdleHoursResponse:
+      description: OK
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CumulativeIdleHoursMessages'
+        application/xml:
+          schema:
+            $ref: '#/components/schemas/CumulativeIdleHoursMessages'
+    GetTimeSeriesCumulativeFuelUsedResponse:
+      description: OK
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FuelUsedMessages'
+        application/xml:
+          schema:
+            $ref: '#/components/schemas/FuelUsedMessages'
+    GetTimeSeriesFuelRemainingRatioResponse:
+      description: OK
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FuelRemainingMessages'
+        application/xml:
+          schema:
+            $ref: '#/components/schemas/FuelRemainingMessages'
+    400BadRequest:
+      description: Bad Request
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          example:
+            code: '400.001'
+            description: missing required fields
+          schema:
+            $ref: '#/components/schemas/Error'
+    401Unauthorized:
+      description: Unauthorized
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          example:
+            code: '401.001'
+            description: Invalid Access Token
+          schema:
+            $ref: '#/components/schemas/Error'
+    403Forbidden:
+      description: Forbidden
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          example:
+            code: '403.001'
+            description: Request not coming from valid IP
+          schema:
+            $ref: '#/components/schemas/Error'
+    404NotFound:
+      description: Not Found
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          example:
+            code: '404.001'
+            description: Resource not found
+          schema:
+            $ref: '#/components/schemas/Error'
+    406RequestNotAcceptable:
+      description: Not Acceptable
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          example:
+            code: '406.001'
+            description: |
+              Request not acceptable. The target resource does not have a current representation
+              that would be acceptable to the user agent.
+          schema:
+            $ref: '#/components/schemas/Error'
+    412PreconditionedFailed:
+      description: Precondition Failed The HyperText Transfer Protocol
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          example:
+            code: '412.001'
+            description: Precondition Failed
+          schema:
+            $ref: '#/components/schemas/Error'
+    429TooManyRequests:
+      description: Too Many Requests
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          example:
+            code: '429.001'
+            description: Throttling rate limit exceeded
+          schema:
+            $ref: '#/components/schemas/Error'
+    500InternalServerError:
+      description: Internal Server Error
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          example:
+            code: '500.001'
+            description: Uncaught server error
+          schema:
+            $ref: '#/components/schemas/Error'
+    503ServiceUnavailable:
+      description: Service Unavailable
+      headers:
+        X-Cat-API-Tracking-Id:
+          $ref: '#/components/headers/X-Cat-API-Tracking-Id'
+      content:
+        application/json:
+          example:
+            code: '503.001'
+            description: Service is currently not available
+          schema:
+            $ref: '#/components/schemas/Error'
+  securitySchemes:
+    catFedLogin:
+      type: oauth2
+      description: Authentication using Cat FedLogin and the OAuth 2.0 framework.
+      flows:
+        authorizationCode:
+          authorizationUrl: https://fedlogin.cat.com/as/authorization.oauth2?pfidpadapterid=OAuthAdapterCCDS
+          tokenUrl: https://fedlogin.cat.com/as/token.oauth2?pfidpadapterid=OAuthAdapterCCDS
+          refreshUrl: https://fedlogin.cat.com/as/token.oauth2?pfidpadapterid=OAuthAdapterCCDS
+          scopes: {}
+        clientCredentials:
+          tokenUrl: https://fedlogin.cat.com/as/token.oauth2?pfidpadapterid=OAuthAdapterCCDS
+          scopes: {}
+    b2cLogin:
+      type: oauth2
+      description: Use B2C to obtain OAuth token.
+      flows:
+        authorizationCode:
+          authorizationUrl: https://cwslogin.b2clogin.com/cwslogin.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_P2_V1_SIGNIN_Prod
+          tokenUrl: https://cwslogin.b2clogin.com/cwslogin.onmicrosoft.com/oauth2/v2.0/token?p=B2C_1A_P2_V1_SIGNIN_Prod
+          refreshUrl: https://cwslogin.b2clogin.com/cwslogin.onmicrosoft.com/oauth2/v2.0/token?p=B2C_1A_P2_V1_SIGNIN_Prod
+          scopes:
+            <client application's b2c scope>: Scope for the registered application
+              in B2C
+            https://cwslogin.onmicrosoft.com/44202339-d17a-452d-b6f3-6c1e71552971/read: Scopes
+              you define in B2C
+    entraId:
+      type: oauth2
+      description: Use Entra ID to obtain OAuth token.
+      flows:
+        clientCredentials:
+          tokenUrl: https://login.microsoftonline.com/ceb177bf-013b-49ab-8a9c-4abce32afc1e/oauth2/token
+          scopes:
+            api://<application-ID-URI>/.default: Default scope for a client app in
+              Entra ID
+        authorizationCode:
+          authorizationUrl: https://login.microsoftonline.com/ceb177bf-013b-49ab-8a9c-4abce32afc1e/oauth2/v2.0/authorize
+          tokenUrl: https://login.microsoftonline.com/ceb177bf-013b-49ab-8a9c-4abce32afc1e/oauth2/v2.0/token
+          scopes:
+            api://<application-ID-URI>/.default: Default scope for a client app in
+              Entra ID

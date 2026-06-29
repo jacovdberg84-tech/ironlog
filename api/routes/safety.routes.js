@@ -596,6 +596,31 @@ export default async function safetyRoutes(app) {
           flagged,
           pending: Math.max(0, out.length - completed),
         },
+        comments: (() => {
+          try {
+            const rows = db.prepare(`
+              SELECT si.id AS inspection_id, si.inspector_name, si.notes, si.updated_at, si.created_at,
+                     sei.item_code, sei.item_name, sei.location
+              FROM safety_inspections si
+              JOIN safety_equipment_items sei ON sei.id = si.item_id
+              WHERE si.inspection_date = ?
+                AND TRIM(COALESCE(si.notes, '')) != ''
+              ORDER BY datetime(COALESCE(si.updated_at, si.created_at)) DESC, si.id DESC
+            `).all(check_date);
+            return rows.map((r) => ({
+              kind: "safety",
+              inspection_id: Number(r.inspection_id),
+              item_code: String(r.item_code || ""),
+              item_name: String(r.item_name || ""),
+              location: String(r.location || "").trim() || null,
+              inspector_name: String(r.inspector_name || "").trim() || null,
+              notes: String(r.notes || "").trim(),
+              updated_at: r.updated_at || r.created_at || null,
+            }));
+          } catch {
+            return [];
+          }
+        })(),
       });
     } catch (err) {
       req.log.error(err);

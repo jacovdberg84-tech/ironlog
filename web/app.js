@@ -3127,6 +3127,7 @@ function renderClHubSummary(data) {
   const ldvTotal = Number(s.ldv_total || 0);
   const macDone = Number(s.machine_compliant || 0);
   const macTotal = Number(s.machine_total || 0);
+  const commentCount = Number(data?.comments?.length || 0) + Number(clSafetyHubData?.comments?.length || 0);
   el.innerHTML = `
     <span class="pill blue">LDV: ${ldvDone}/${ldvTotal}</span>
     <span class="pill blue">Machines: ${macDone}/${macTotal}</span>
@@ -3138,8 +3139,78 @@ function renderClHubSummary(data) {
       const flaggedNote = flagged ? ` · ${flagged} flagged` : "";
       return `<span class="pill blue">Safety: ${done}/${total} done${flaggedNote}</span>`;
     })() : ""}
+    ${commentCount ? `<span class="pill amber">${commentCount} comment${commentCount === 1 ? "" : "s"}</span>` : ""}
     <span class="pill">${escapeHtml(String(data?.check_date || clCheckDate()))}</span>
   `;
+}
+
+function clCommentKindLabel(kind) {
+  if (kind === "machine") return "Machine";
+  if (kind === "safety") return "Safety";
+  return "LDV";
+}
+
+function renderClDayComments() {
+  const host = qs("clDayComments");
+  if (!host) return;
+
+  const rows = [
+    ...(Array.isArray(clHubData?.comments) ? clHubData.comments : []),
+    ...(Array.isArray(clSafetyHubData?.comments) ? clSafetyHubData.comments : []),
+  ];
+
+  if (!rows.length) {
+    host.classList.add("hidden");
+    host.innerHTML = "";
+    return;
+  }
+
+  host.classList.remove("hidden");
+  host.innerHTML = `
+    <div class="checklist-day-comments-head">
+      <h4>Comments for ${escapeHtml(String(clHubData?.check_date || clCheckDate()))}</h4>
+      <span class="muted small">${rows.length} note${rows.length === 1 ? "" : "s"}</span>
+    </div>
+    <div class="checklist-day-comments-list"></div>
+  `;
+
+  const list = host.querySelector(".checklist-day-comments-list");
+  rows.forEach((row) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "checklist-day-comment";
+    const code = row.kind === "safety"
+      ? String(row.item_code || "")
+      : String(row.asset_code || "");
+    const name = row.kind === "safety"
+      ? String(row.item_name || row.location || "")
+      : String(row.asset_name || "");
+    const inspector = String(row.inspector_name || "").trim();
+    const when = String(row.updated_at || "").replace("T", " ").slice(0, 16);
+    btn.innerHTML = `
+      <div class="checklist-day-comment-meta">
+        <span class="pill">${escapeHtml(clCommentKindLabel(row.kind))}</span>
+        <strong>${escapeHtml(code || "—")}</strong>
+        ${name ? `<span class="muted small">${escapeHtml(name)}</span>` : ""}
+        ${inspector ? `<span class="muted small">· ${escapeHtml(inspector)}</span>` : ""}
+        ${when ? `<span class="muted small">· ${escapeHtml(when)}</span>` : ""}
+      </div>
+      <p class="checklist-day-comment-text">${escapeHtml(String(row.notes || ""))}</p>
+    `;
+    btn.addEventListener("click", () => {
+      if (row.kind === "safety") {
+        const itemCode = String(row.item_code || "").trim();
+        if (itemCode) {
+          window.location.href = `./safety-inspection.html?item_code=${encodeURIComponent(itemCode)}`;
+        }
+        return;
+      }
+      selectChecklistAsset(String(row.asset_code || "")).catch((e) => {
+        setStatus("Checklist open error: " + (e.message || e));
+      });
+    });
+    list.appendChild(btn);
+  });
 }
 
 function renderClAssetChip(asset, selectedCode) {
@@ -3246,6 +3317,7 @@ async function loadChecklistHub() {
     clHubData = data;
     clSafetyHubData = safety;
     renderClHubSummary(data);
+    renderClDayComments();
     renderClHubSections(data);
     if (clPendingSafetyItemCode) {
       const code = clPendingSafetyItemCode;

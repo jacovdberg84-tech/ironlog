@@ -13,6 +13,7 @@ import { runIronmindAutoScheduler } from "./utils/ironmind.js";
 import { runCartrackAutoScheduler } from "./utils/cartrack.js";
 import { runUnitechAutoScheduler } from "./utils/unitech.js";
 import { startDbAutoBackup } from "./db/autoBackup.js";
+import { bootstrapSmtpFromEnv } from "./utils/mail.js";
 
 // Load api/.env first, then cwd .env for any missing keys (override off by default).
 const __dirnameApi = path.dirname(fileURLToPath(import.meta.url));
@@ -110,6 +111,7 @@ try {
   const stopDbAutoBackup = startDbAutoBackup(app.log);
   process.once("SIGINT", stopDbAutoBackup);
   process.once("SIGTERM", stopDbAutoBackup);
+  bootstrapSmtpFromEnv({ log: app.log });
   await runIronmindAutoScheduler(app.log);
   runCartrackAutoScheduler(app.log);
   runUnitechAutoScheduler(app.log);

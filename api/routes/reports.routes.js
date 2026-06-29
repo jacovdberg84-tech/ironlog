@@ -6,8 +6,15 @@ import multipart from "@fastify/multipart";
 import sharp from "sharp";
 import ExcelJS from "exceljs";
 import PptxGenJS from "pptxgenjs";
-import nodemailer from "nodemailer";
 import { db } from "../db/client.js";
+import {
+  ensureSmtpTables,
+  getSmtpSettingsRow,
+  smtpPublicPayload,
+  buildSmtpTransport,
+  saveSmtpSettings,
+  formatSmtpError,
+} from "../utils/mail.js";
 import {
   buildPdfBuffer,
   tryDrawLogo,
@@ -1252,21 +1259,7 @@ export default async function reportsRoutes(app) {
   `).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_report_subscriptions_next ON report_subscriptions(active, next_run_at)`).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_report_delivery_logs_sub ON report_delivery_logs(subscription_id, created_at DESC)`).run();
-  db.prepare(`
-    CREATE TABLE IF NOT EXISTS smtp_settings (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      host TEXT,
-      port INTEGER,
-      secure INTEGER NOT NULL DEFAULT 0,
-      username TEXT,
-      password_enc TEXT,
-      from_email TEXT,
-      from_name TEXT,
-      updated_by TEXT,
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    )
-  `).run();
-  db.prepare(`INSERT INTO smtp_settings (id) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM smtp_settings WHERE id = 1)`).run();
+  ensureSmtpTables();
 
   function requestRoles(req) {
     const fromMany = String(req.headers["x-user-roles"] || "")
@@ -1288,113 +1281,6 @@ export default async function reportsRoutes(app) {
     }
     return true;
   }
-  function smtpSecret() {
-    const raw = String(process.env.IRONLOG_SMTP_SECRET || process.env.IRONLOG_AUTH_SECRET || "").trim();
-    if (!raw) return "IRONLOG_SMTP_DEFAULT_SECRET_CHANGE_ME";
-    return raw;
-  }
-  function encryptSecret(plain) {
-    const iv = crypto.randomBytes(12);
-    const key = crypto.createHash("sha256").update(smtpSecret()).digest();
-    const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-    const encrypted = Buffer.concat([cipher.update(String(plain || ""), "utf8"), cipher.final()]);
-    const tag = cipher.getAuthTag();
-    return `${iv.toString("base64")}.${tag.toString("base64")}.${encrypted.toString("base64")}`;
-  }
-  function decryptSecret(cipherText) {
-    const raw = String(cipherText || "").trim();
-    if (!raw) return "";
-    const [ivB64, tagB64, encB64] = raw.split(".");
-    if (!ivB64 || !tagB64 || !encB64) return null;
-    try {
-      const iv = Buffer.from(ivB64, "base64");
-      const tag = Buffer.from(tagB64, "base64");
-      const enc = Buffer.from(encB64, "base64");
-      const key = crypto.createHash("sha256").update(smtpSecret()).digest();
-      const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-      decipher.setAuthTag(tag);
-      const out = Buffer.concat([decipher.update(enc), decipher.final()]);
-      return out.toString("utf8");
-    } catch {
-      return null;
-    }
-  }
-  function formatSmtpError(err) {
-    const code = String(err?.code || "").trim();
-    const msg = String(err?.response || err?.message || err || "SMTP error").trim();
-    const combined = `${code} ${msg}`.trim();
-    if (/ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EHOSTUNREACH|ESOCKET/i.test(combined)) {
-      return `${msg} — Check host and port. Use port 587 with Secure = No (STARTTLS), or port 465 with Secure = Yes.`;
-    }
-    if (/535|534|EAUTH|authentication|invalid login|auth failed/i.test(combined)) {
-      return `${msg} — Authentication failed. Use the full email as username. For Microsoft 365, enable SMTP AUTH on the mailbox (or use an app password).`;
-    }
-    if (/certificate|self[- ]signed|UNABLE_TO_VERIFY/i.test(combined)) {
-      return `${msg} — TLS certificate problem. Confirm host/port with your IT team.`;
-    }
-    return msg;
-  }
-  function getSmtpSettingsRow() {
-    return db.prepare(`
-      SELECT id, host, port, secure, username, password_enc, from_email, from_name, updated_by, updated_at
-      FROM smtp_settings
-      WHERE id = 1
-    `).get() || null;
-  }
-  function smtpPublicPayload(row) {
-    const r = row || {};
-    return {
-      host: String(r.host || ""),
-      port: Number(r.port || 587),
-      secure: Number(r.secure || 0) === 1 ? 1 : 0,
-      username: String(r.username || ""),
-      from_email: String(r.from_email || ""),
-      from_name: String(r.from_name || ""),
-      has_password: Boolean(String(r.password_enc || "").trim()),
-      updated_by: String(r.updated_by || ""),
-      updated_at: r.updated_at || null,
-    };
-  }
-  function buildSmtpTransport() {
-    const row = getSmtpSettingsRow();
-    if (!row) return { error: "SMTP is not configured. Save settings in Admin first." };
-    const host = String(row.host || "").trim();
-    const username = String(row.username || "").trim();
-    const fromEmail = String(row.from_email || "").trim();
-    if (!host) return { error: "SMTP host is missing. Save settings again." };
-    if (!username) return { error: "SMTP username is missing. Save settings again." };
-    if (!fromEmail) return { error: "From email is missing. Save settings again." };
-    const enc = String(row.password_enc || "").trim();
-    if (!enc) {
-      return { error: "SMTP password is not set. Enter the password and click Save SMTP (required on first setup)." };
-    }
-    const password = decryptSecret(enc);
-    if (password === null) {
-      return { error: "Stored SMTP password could not be decrypted (server secret may have changed). Re-enter the password and click Save SMTP." };
-    }
-    if (!password) return { error: "SMTP password is empty. Re-enter the password and click Save SMTP." };
-    const port = Math.max(1, Number(row.port || 587));
-    const secure = Number(row.secure || 0) === 1;
-    const transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      requireTLS: !secure && port === 587,
-      auth: { user: username, pass: password },
-      tls: { minVersion: "TLSv1.2" },
-      connectionTimeout: 20000,
-      greetingTimeout: 20000,
-      socketTimeout: 45000,
-    });
-    return {
-      transporter,
-      from: row.from_name ? `"${String(row.from_name).replace(/"/g, "")}" <${fromEmail}>` : fromEmail,
-    };
-  }
-
-  const allowedReportTypes = new Set(["fuel_benchmark_xlsx", "executive_kpi_pack_xlsx", "maintenance_insights_xlsx"]);
-  const allowedChannels = new Set(["email", "whatsapp"]);
-  const allowedFrequencies = new Set(["daily", "weekly", "monthly"]);
   function parseRecipients(raw) {
     return Array.from(new Set(
       String(raw || "")
@@ -1790,29 +1676,19 @@ export default async function reportsRoutes(app) {
   app.post("/smtp-settings", async (req, reply) => {
     if (!requireAdmin(req, reply)) return;
     const body = req.body || {};
-    const host = String(body.host || "").trim();
-    const port = Math.max(1, Number(body.port || 587));
-    const secure = Number(body.secure || 0) === 1 ? 1 : 0;
-    const username = String(body.username || "").trim();
-    const fromEmail = String(body.from_email || "").trim();
-    const fromName = String(body.from_name || "").trim();
-    const password = String(body.password || "");
-    if (!host) return reply.code(400).send({ ok: false, error: "SMTP host is required" });
-    if (!username) return reply.code(400).send({ ok: false, error: "SMTP username is required" });
-    if (!fromEmail) return reply.code(400).send({ ok: false, error: "From email is required" });
     const who = String(req.headers["x-user-name"] || "system");
-    const existing = getSmtpSettingsRow() || {};
-    const hasStoredPassword = Boolean(String(existing.password_enc || "").trim());
-    if (!password && !hasStoredPassword) {
-      return reply.code(400).send({ ok: false, error: "SMTP password is required on first setup." });
-    }
-    const passwordEnc = password ? encryptSecret(password) : String(existing.password_enc || "");
-    db.prepare(`
-      UPDATE smtp_settings
-      SET host = ?, port = ?, secure = ?, username = ?, password_enc = ?, from_email = ?, from_name = ?, updated_by = ?, updated_at = datetime('now')
-      WHERE id = 1
-    `).run(host, port, secure, username, passwordEnc, fromEmail, fromName || null, who);
-    return reply.send({ ok: true, settings: smtpPublicPayload(getSmtpSettingsRow()) });
+    const out = saveSmtpSettings({
+      host: body.host,
+      port: body.port,
+      secure: body.secure,
+      username: body.username,
+      password: String(body.password || ""),
+      from_email: body.from_email,
+      from_name: body.from_name,
+      updated_by: who,
+    });
+    if (!out.ok) return reply.code(400).send({ ok: false, error: out.error });
+    return reply.send({ ok: true, settings: out.settings });
   });
 
   app.post("/smtp-settings/test", async (req, reply) => {

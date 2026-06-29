@@ -1,8 +1,8 @@
 // Cartrack Fleet API (Mozambique) — live fleet status, events, morning speeding reports.
 
 import crypto from "node:crypto";
-import nodemailer from "nodemailer";
 import { db } from "../db/client.js";
+import { buildSmtpTransport } from "./mail.js";
 import {
   normalizeGpsRegistration,
   resolveGpsAssetCode,
@@ -793,28 +793,6 @@ export function formatMorningReportText(summary) {
     lines.push(`  ${String(e.event_time || "").slice(0, 16)}  ${e.asset_code || e.registration}  ${spd}${lim}  ${e.event_type_label || e.event_type || ""}`);
   }
   return lines.join("\n");
-}
-
-function buildSmtpTransport() {
-  const row = db.prepare(`SELECT * FROM smtp_settings WHERE id = 1`).get();
-  if (!row?.host || !row?.username || !row?.password_enc || !row?.from_email) {
-    return { error: "SMTP is not configured" };
-  }
-  const password = decryptSecret(row.password_enc);
-  if (!password) return { error: "SMTP password could not be decrypted" };
-  const fromEmail = String(row.from_email).trim();
-  const transporter = nodemailer.createTransport({
-    host: String(row.host).trim(),
-    port: Math.max(1, Number(row.port || 587)),
-    secure: Number(row.secure || 0) === 1,
-    requireTLS: Number(row.secure || 0) !== 1 && Number(row.port || 587) === 587,
-    auth: { user: String(row.username).trim(), pass: password },
-    tls: { minVersion: "TLSv1.2" },
-  });
-  const from = row.from_name
-    ? `"${String(row.from_name).replace(/"/g, "")}" <${fromEmail}>`
-    : fromEmail;
-  return { transporter, from };
 }
 
 export async function sendCartrackMorningEmail(summary, recipients) {
