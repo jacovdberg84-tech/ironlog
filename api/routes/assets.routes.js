@@ -54,6 +54,15 @@ export default async function assetRoutes(app) {
       FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
     )
   `).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS asset_tyre_qr_profiles (
+      asset_id INTEGER PRIMARY KEY,
+      qr_payload TEXT NOT NULL,
+      qr_text TEXT NOT NULL,
+      generated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    )
+  `).run();
 
   /* =========================
      PREPARED STATEMENTS
@@ -98,6 +107,19 @@ export default async function assetRoutes(app) {
   `);
   const upsertUndercarriageQrProfile = db.prepare(`
     INSERT INTO asset_undercarriage_qr_profiles (asset_id, qr_payload, qr_text, generated_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT(asset_id) DO UPDATE SET
+      qr_payload = excluded.qr_payload,
+      qr_text = excluded.qr_text,
+      generated_at = datetime('now')
+  `);
+  const getStoredTyreQrProfile = db.prepare(`
+    SELECT qr_payload, qr_text, generated_at
+    FROM asset_tyre_qr_profiles
+    WHERE asset_id = ?
+  `);
+  const upsertTyreQrProfile = db.prepare(`
+    INSERT INTO asset_tyre_qr_profiles (asset_id, qr_payload, qr_text, generated_at)
     VALUES (?, ?, ?, datetime('now'))
     ON CONFLICT(asset_id) DO UPDATE SET
       qr_payload = excluded.qr_payload,
@@ -660,33 +682,27 @@ export default async function assetRoutes(app) {
     return "";
   }
 
-  function buildQrProfile(asset, req) {
-    function inferMakeModelFromName(name, code) {
-      const raw = String(name || "").trim();
-      if (!raw) return { make: null, model: null };
-      const parts = raw.split(/\s+/).filter(Boolean);
-      if (!parts.length) return { make: null, model: null };
-
-      // Typical names like "CAT 336D Excavator" => make CAT, model 336D
-      const make = parts[0] ? String(parts[0]).toUpperCase() : null;
-      let model = null;
-      if (parts.length >= 2) {
-        const second = String(parts[1] || "");
-        if (/[0-9]/.test(second) || second.length <= 12) {
-          model = second.toUpperCase();
-        }
+  function inferMakeModelFromName(name, code) {
+    const raw = String(name || "").trim();
+    if (!raw) return { make: null, model: null };
+    const parts = raw.split(/\s+/).filter(Boolean);
+    if (!parts.length) return { make: null, model: null };
+    const make = parts[0] ? String(parts[0]).toUpperCase() : null;
+    let model = null;
+    if (parts.length >= 2) {
+      const second = String(parts[1] || "");
+      if (/[0-9]/.test(second) || second.length <= 12) {
+        model = second.toUpperCase();
       }
-      // Fallback: derive model-ish token from asset code if name is sparse.
-      if (!model) {
-        const codeToken = String(code || "").split(/[-_\s]/).find((t) => /[0-9]/.test(t));
-        if (codeToken) model = codeToken.toUpperCase();
-      }
-      return {
-        make: make || null,
-        model: model || null,
-      };
     }
+    if (!model) {
+      const codeToken = String(code || "").split(/[-_\s]/).find((t) => /[0-9]/.test(t));
+      if (codeToken) model = codeToken.toUpperCase();
+    }
+    return { make: make || null, model: model || null };
+  }
 
+  function buildQrProfile(asset, req) {
     const makeCol = firstExistingColumn("assets", ["make", "asset_make", "manufacturer", "brand"]);
     const modelCol = firstExistingColumn("assets", ["model", "asset_model"]);
     let assetMake = null;
@@ -884,6 +900,80 @@ export default async function assetRoutes(app) {
     return { profile, qrText };
   }
 
+  function buildTyreQrProfile(asset, req) {
+    const meter = getAssetCurrentHoursInfo(asset.id);
+    const currentHours = Number(Number(meter.hours || 0).toFixed(1));
+    const origin = resolveWebOrigin(req);
+    const targetPath = `/web/tyre-inspection-mobile.html?asset_code=${encodeURIComponent(asset.asset_code)}`;
+    const scan_url = origin ? `${origin}${targetPath}` : targetPath;
+
+    let lastInspectionDate = null;
+    let lastRunningHours = null;
+    if (hasTable("tyre_inspections")) {
+      const last = db.prepare(`
+        SELECT inspection_date, running_hours
+        FROM tyre_inspections
+        WHERE asset_id = ?
+        ORDER BY inspection_date DESC, id DESC
+        LIMIT 1
+      `).get(asset.id);
+      if (last) {
+        lastInspectionDate = String(last.inspection_date || "").trim() || null;
+        lastRunningHours = last.running_hours != null ? Number(last.running_hours) : null;
+      }
+    }
+
+    let assetMake = null;
+    let assetModel = null;
+    const makeCol = firstExistingColumn("assets", ["make", "asset_make", "manufacturer", "brand"]);
+    const modelCol = firstExistingColumn("assets", ["model", "asset_model"]);
+    if (makeCol || modelCol) {
+      const row = db.prepare(`SELECT ${makeCol ? `${makeCol} AS make` : "NULL AS make"}, ${modelCol ? `${modelCol} AS model` : "NULL AS model"} FROM assets WHERE id = ?`).get(asset.id);
+      assetMake = row?.make || null;
+      assetModel = row?.model || null;
+    }
+    if (!assetMake || !assetModel) {
+      const inferred = inferMakeModelFromName(asset.asset_name, asset.asset_code);
+      if (!assetMake) assetMake = inferred.make;
+      if (!assetModel) assetModel = inferred.model;
+    }
+
+    const profile = {
+      purpose: "tyre_inspection",
+      generated_at: new Date().toISOString(),
+      asset: {
+        id: asset.id,
+        asset_code: asset.asset_code,
+        asset_name: asset.asset_name || null,
+        category: asset.category || null,
+        make: assetMake,
+        model: assetModel,
+      },
+      scan_url,
+      meter: {
+        current_hours: currentHours,
+        source: meter.source || "unknown",
+      },
+      tyres: {
+        last_inspection_date: lastInspectionDate,
+        last_running_hours: lastRunningHours,
+      },
+    };
+
+    const lastText = lastInspectionDate
+      ? `${lastInspectionDate} @ ${lastRunningHours != null ? `${Number(lastRunningHours).toFixed(1)}h` : "—"}`
+      : "No prior inspection";
+    const qrText = [
+      `IRONLOG TYRE INSPECTION — ${asset.asset_code}`,
+      `Scan to open tyre inspection for this machine only`,
+      `Scan URL: ${scan_url}`,
+      `Current meter: ${currentHours}h`,
+      `Last tyre inspection: ${lastText}`,
+    ].join("\n");
+
+    return { profile, qrText };
+  }
+
   app.get("/:asset_code/qr-profile", async (req, reply) => {
     const asset_code = String(req.params.asset_code || "").trim();
     if (!asset_code) return reply.code(400).send({ error: "Asset code is required" });
@@ -968,6 +1058,50 @@ export default async function assetRoutes(app) {
 
     const built = buildUndercarriageQrProfile(asset, req);
     upsertUndercarriageQrProfile.run(asset.id, JSON.stringify(built.profile), built.qrText);
+
+    return {
+      ok: true,
+      asset_code: asset.asset_code,
+      qr_payload: built.profile,
+      qr_text: built.qrText,
+    };
+  });
+
+  app.get("/:asset_code/tyre-qr-profile", async (req, reply) => {
+    const asset_code = String(req.params.asset_code || "").trim();
+    if (!asset_code) return reply.code(400).send({ error: "Asset code is required" });
+    const asset = getAssetByCode.get(asset_code);
+    if (!asset) return reply.code(404).send({ error: "Asset not found" });
+
+    const stored = getStoredTyreQrProfile.get(asset.id);
+    let storedPayload = null;
+    if (stored?.qr_payload) {
+      try {
+        storedPayload = JSON.parse(String(stored.qr_payload || "{}"));
+      } catch {
+        storedPayload = null;
+      }
+    }
+    const live = buildTyreQrProfile(asset, req);
+    return {
+      ok: true,
+      asset_code: asset.asset_code,
+      stored: storedPayload
+        ? { qr_payload: storedPayload, qr_text: stored.qr_text, generated_at: stored.generated_at }
+        : null,
+      live_preview: live.profile,
+      live_qr_text: live.qrText,
+    };
+  });
+
+  app.post("/:asset_code/tyre-qr-profile/refresh", async (req, reply) => {
+    const asset_code = String(req.params.asset_code || "").trim();
+    if (!asset_code) return reply.code(400).send({ error: "Asset code is required" });
+    const asset = getAssetByCode.get(asset_code);
+    if (!asset) return reply.code(404).send({ error: "Asset not found" });
+
+    const built = buildTyreQrProfile(asset, req);
+    upsertTyreQrProfile.run(asset.id, JSON.stringify(built.profile), built.qrText);
 
     return {
       ok: true,

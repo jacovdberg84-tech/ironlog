@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b3a7e" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>IRONLOG — Tyre Inspection</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1220;
+      --panel: #121a2b;
+      --line: #2a3a55;
+      --text: #e8eefc;
+      --muted: #94a3b8;
+      --accent: #2563eb;
+      --accent2: #1d4ed8;
+      --ok: #22c55e;
+      --warn: #eab308;
+      --bad: #ef4444;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding-bottom: calc(76px + var(--safe-bottom));
+    }
+    .ti-header {
+      background: linear-gradient(180deg, #0f2d5c 0%, var(--bg) 100%);
+      padding: 16px 16px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .ti-header h1 { margin: 0 0 4px; font-size: 1.35rem; }
+    .ti-header p { margin: 0; color: var(--muted); font-size: 0.85rem; }
+    .ti-machine {
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .ti-kv {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+    }
+    .ti-kv .k { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .ti-kv .v { font-size: 1rem; font-weight: 700; margin-top: 2px; }
+    .ti-main { padding: 14px 16px 20px; max-width: 720px; margin: 0 auto; }
+    .ti-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .ti-row.ti-row-1 { grid-template-columns: 1fr; }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+    input, textarea, select {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #0a1424;
+      color: var(--text);
+      font-size: 16px;
+    }
+    input:focus, textarea:focus { outline: 2px solid rgba(37,99,235,0.45); border-color: var(--accent); }
+    .ti-layout-hint {
+      margin: 12px 0;
+      padding: 10px;
+      border: 1px dashed var(--line);
+      border-radius: 10px;
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.5;
+    }
+    .ti-pos {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      margin-bottom: 10px;
+      overflow: hidden;
+      background: var(--panel);
+    }
+    .ti-pos summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 12px 14px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .ti-pos summary::-webkit-details-marker { display: none; }
+    .ti-pos-code {
+      font-size: 0.75rem;
+      color: var(--muted);
+      font-weight: 600;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 8px;
+    }
+    .ti-pos-body { padding: 0 12px 12px; }
+    .ti-pos-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .ti-pos-grid .span-2 { grid-column: 1 / -1; }
+    .ti-status {
+      font-size: 0.72rem;
+      font-weight: 700;
+      border-radius: 999px;
+      padding: 3px 8px;
+      border: 1px solid var(--line);
+    }
+    .ti-status.ok { color: #86efac; border-color: #14532d; background: rgba(20,83,45,0.35); }
+    .ti-status.warn { color: #fde68a; border-color: #78350f; background: rgba(120,53,15,0.35); }
+    .ti-status.bad { color: #fca5a5; border-color: #7f1d1d; background: rgba(127,29,29,0.35); }
+    .ti-footer {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      padding: 10px 16px calc(10px + var(--safe-bottom));
+      background: rgba(11,18,32,0.96);
+      border-top: 1px solid var(--line);
+      backdrop-filter: blur(8px);
+    }
+    .ti-footer button {
+      width: 100%;
+      border: 0;
+      border-radius: 12px;
+      padding: 14px;
+      font-size: 1rem;
+      font-weight: 700;
+      background: var(--accent);
+      color: #fff;
+    }
+    .ti-footer button:disabled { opacity: 0.55; }
+    .ti-msg { margin-top: 10px; font-size: 0.85rem; min-height: 1.2em; }
+    .ti-msg.ok { color: #86efac; }
+    .ti-msg.err { color: #fca5a5; }
+    .ti-inline-btn {
+      margin-top: 6px;
+      border: 1px solid var(--line);
+      background: #172033;
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 0.85rem;
+      width: 100%;
+    }
+    .ti-locked-note {
+      margin-top: 8px;
+      font-size: 0.8rem;
+      color: #93c5fd;
+    }
+  </style>
+</head>
+<body>
+  <header class="ti-header">
+    <h1>Tyre inspection</h1>
+    <p>Scan the tyre QR sticker on this machine — field form only, not the main IRONLOG dashboard.</p>
+    <div class="ti-machine">
+      <div class="ti-kv"><div class="k">Machine</div><div class="v" id="tiMachineCode">—</div></div>
+      <div class="ti-kv"><div class="k">Meter</div><div class="v" id="tiMeter">—</div></div>
+      <div class="ti-kv" style="grid-column:1/-1;"><div class="k">Name</div><div class="v" id="tiMachineName">—</div></div>
+    </div>
+    <div class="ti-locked-note" id="tiLockedNote" style="display:none;">This QR is locked to one machine.</div>
+  </header>
+
+  <main class="ti-main">
+    <div class="ti-row">
+      <div>
+        <label for="tiInspector">Inspector</label>
+        <input id="tiInspector" type="text" placeholder="Your name" autocomplete="name" />
+      </div>
+      <div>
+        <label for="tiDate">Inspection date</label>
+        <input id="tiDate" type="date" />
+      </div>
+    </div>
+    <div class="ti-row">
+      <div>
+        <label for="tiHours">Machine hours (SMU)</label>
+        <input id="tiHours" type="number" min="0" step="0.1" inputmode="decimal" placeholder="Current meter" />
+        <button type="button" class="ti-inline-btn" id="tiPullHoursBtn">Pull live hours</button>
+      </div>
+      <div>
+        <label for="tiNotes">Notes (optional)</label>
+        <textarea id="tiNotes" rows="3" placeholder="General comments"></textarea>
+      </div>
+    </div>
+    <div id="tiHoursMeta" class="ti-msg muted"></div>
+
+    <div class="ti-layout-hint">
+      Front: <b>LF</b> · <b>RF</b> &nbsp;|&nbsp;
+      Rear: <b>RM</b> inner R · <b>RR</b> outer R · <b>LR</b> outer L · <b>LM</b> inner L
+    </div>
+
+    <div id="tiPositions"></div>
+    <div id="tiMsg" class="ti-msg"></div>
+  </main>
+
+  <footer class="ti-footer">
+    <button type="button" id="tiSaveBtn">Save tyre inspection</button>
+  </footer>
+
+  <script src="./tyre-inspection-qr.js?v=1"></script>
+  <script>
+    if (window.initTyreInspectionMobile) {
+      initTyreInspectionMobile().catch((e) => {
+        const el = document.getElementById("tiMsg");
+        if (el) {
+          el.className = "ti-msg err";
+          el.textContent = e.message || String(e);
+        }
+      });
+    }
+  </script>
+</body>
+</html>

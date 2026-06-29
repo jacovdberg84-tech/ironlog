@@ -801,6 +801,28 @@
           <button id="loadTyreInspectionsBtn" type="button">Load Saved</button>
         </div>
         <div id="tyreList" class="list"></div>
+
+        <hr class="hr-soft" />
+        <div class="uc-qr-panel">
+          <h3 style="margin:0 0 8px;">Tyre inspection QR labels</h3>
+          <p class="muted mini" style="margin:0 0 12px;">
+            Each machine gets its own QR code. Scanning opens a <b>standalone tyre inspection form</b> for that machine only — not the main IRONLOG dashboard.
+            Print, laminate, and stick near the wheel arch or tyre bay.
+          </p>
+          <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
+            <label>Machine for QR<select id="tiQrAsset" class="w-220"></select></label>
+            <button type="button" id="tiQrPreviewBtn">Generate QR</button>
+            <button type="button" id="tiQrDownloadBtn">Download PNG</button>
+            <button type="button" id="tiQrPrintBtn">Print label</button>
+            <button type="button" id="tiQrPrintAllBtn">Print all machines</button>
+            <a class="btn" id="tiQrOpenMobileDemo" href="./tyre-inspection-mobile.html" target="_blank" rel="noopener">Open mobile form</a>
+          </div>
+          <div id="tiQrMsg" class="muted mini" style="margin-top:8px;"></div>
+          <div class="uc-qr-preview-wrap">
+            <img id="tiQrPreview" alt="Tyre inspection QR preview" style="display:none;" />
+            <div id="tiQrMeta" class="muted mini"></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1902,6 +1924,7 @@
 
   <script src="./undercarriage-diagrams.js?v=1"></script>
   <script src="./undercarriage.js?v=5"></script>
+  <script src="./tyre-inspection-qr.js?v=1"></script>
   <script src="./maintenance.js?v=35"></script>
 </body>
 </html>

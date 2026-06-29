@@ -3212,6 +3212,7 @@ async function loadAssetsForInspection() {
   const ucA = document.getElementById("ucAsset");
   const ucF = document.getElementById("ucFilterAsset");
   const ucQr = document.getElementById("ucQrAsset");
+  const tiQr = document.getElementById("tiQrAsset");
   const wiA = document.getElementById("wiAssetSelect");
   const ptoA = document.getElementById("ptoAsset");
   if (!selA || !selF) return;
@@ -3235,6 +3236,7 @@ async function loadAssetsForInspection() {
     if (ucA) ucA.innerHTML = `<option value="">Select asset</option>${opts}`;
     if (ucF) ucF.innerHTML = `<option value="">All assets</option>${opts}`;
     if (ucQr) ucQr.innerHTML = `<option value="">Select asset</option>${opts}`;
+    if (tiQr) tiQr.innerHTML = `<option value="">Select asset</option>${opts}`;
     if (wiA) wiA.innerHTML = `<option value="">Select asset</option>${opts}`;
     if (ptoA) ptoA.innerHTML = `<option value="">Any / not linked</option>${opts}`;
   } catch (e) {
@@ -7711,6 +7713,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (tyreSurveyMonthEl && !tyreSurveyMonthEl.value) tyreSurveyMonthEl.value = new Date().toISOString().slice(0, 7);
   loadTyreInspections();
   if (typeof window.bindUndercarriageEvents === "function") window.bindUndercarriageEvents();
+  if (typeof window.bindTyreQrAdmin === "function") window.bindTyreQrAdmin();
   document.getElementById("wfActionBody")?.addEventListener("change", (evt) => {
     const sel = evt.target?.closest?.("select[data-wf-action-status]");
     if (!sel) return;
