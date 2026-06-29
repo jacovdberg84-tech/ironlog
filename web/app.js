@@ -14285,6 +14285,35 @@ async function loadDailyInput() {
       } catch {}
     }
 
+    // Opening must match previous closing — refresh when prior day was corrected after save
+    if (!row.telematics_locked && !row.is_master_standby && row.opening_hours != null) {
+      let expectedOpen = null;
+      let fromDate = null;
+      const yClose = yr ? toNum(yr.closing_hours) : null;
+      if (yClose != null) {
+        expectedOpen = yClose;
+        fromDate = y;
+      } else {
+        try {
+          const d = await fetchJson(
+            `${API}/api/hours/defaults?asset_code=${encodeURIComponent(row.asset_code)}&work_date=${date}`
+          );
+          if (d?.suggested_opening_hours != null) {
+            expectedOpen = Number(d.suggested_opening_hours);
+            fromDate = String(d.suggested_opening_from_date || "").trim() || null;
+          }
+        } catch {}
+      }
+      if (
+        expectedOpen != null &&
+        Math.abs(Number(row.opening_hours) - expectedOpen) > 0.0001
+      ) {
+        row.opening_hours = expectedOpen;
+        row.opening_from_date = fromDate;
+        if (!row.warning) row.warning = "Opening updated from corrected previous closing";
+      }
+    }
+
     if (row.scheduled_hours == null) row.scheduled_hours = 0;
     if (row.is_master_standby) row.is_used = false;
     row.hours_run = calcRun(row.opening_hours, row.closing_hours);

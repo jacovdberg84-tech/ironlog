@@ -15,6 +15,11 @@ function prevDate(dateStr) {
   return `${y}-${m}-${day}`;
 }
 
+function metersCloseEnough(a, b) {
+  if (a == null || b == null) return false;
+  return Math.abs(Number(a) - Number(b)) <= 0.0001;
+}
+
 function numOrNull(v) {
   if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
@@ -85,6 +90,63 @@ export default async function hoursRoutes(app) {
       LIMIT 1
     `).get(assetId, workDate);
     return prevRow || null;
+  }
+
+  /** After saving workDate, align the next logged day's opening to this day's closing (meter chain). */
+  function syncFollowingDayOpening(assetId, savedWorkDate) {
+    if (isTelematicsMeterLocked(assetId)) return [];
+    const nextRow = db.prepare(`
+      SELECT id, work_date, opening_hours, closing_hours, hours_run
+      FROM daily_hours
+      WHERE asset_id = ? AND work_date > ?
+      ORDER BY work_date ASC
+      LIMIT 1
+    `).get(assetId, savedWorkDate);
+    if (!nextRow) return [];
+
+    const carry = getCarryForwardRow(assetId, nextRow.work_date);
+    const expectedOpen = carry?.closing_hours != null ? Number(carry.closing_hours) : null;
+    if (expectedOpen == null) return [];
+
+    const currentOpen = nextRow.opening_hours != null ? Number(nextRow.opening_hours) : null;
+    if (currentOpen != null && metersCloseEnough(currentOpen, expectedOpen)) return [];
+
+    let hours_run = Number(nextRow.hours_run || 0);
+    const closing = nextRow.closing_hours != null ? Number(nextRow.closing_hours) : null;
+    if (closing != null && closing >= expectedOpen) {
+      hours_run = closing - expectedOpen;
+    }
+
+    db.prepare(`
+      UPDATE daily_hours
+      SET opening_hours = ?, hours_run = ?
+      WHERE id = ?
+    `).run(expectedOpen, hours_run, nextRow.id);
+
+    return [{
+      work_date: nextRow.work_date,
+      opening_hours: expectedOpen,
+      hours_run,
+      opening_from_date: carry?.source_date ?? savedWorkDate,
+    }];
+  }
+
+  function reconcileOpeningFromCarryForward(assetId, workDate, opening_hours, closing_hours, hours_run) {
+    const carry = getCarryForwardRow(assetId, workDate);
+    const expectedOpen = carry?.closing_hours != null ? Number(carry.closing_hours) : null;
+    if (expectedOpen == null) {
+      return { opening_hours, closing_hours, hours_run, reconciled: false };
+    }
+    let open = opening_hours;
+    let run = hours_run;
+    let close = closing_hours;
+    if (open == null || !metersCloseEnough(open, expectedOpen)) {
+      open = expectedOpen;
+      if (close != null) run = close - open;
+      else if (run != null && open != null) close = open + run;
+      return { opening_hours: open, closing_hours: close, hours_run: run, reconciled: true };
+    }
+    return { opening_hours: open, closing_hours: close, hours_run: run, reconciled: false };
   }
 
   function hasColumn(table, col) {
@@ -251,12 +313,26 @@ export default async function hoursRoutes(app) {
       return reply.code(400).send({ error: "hours_run must be 0..24 for hours input_unit" });
     }
 
-    // Auto opening from carry-forward closing if missing
-    if (opening_hours == null) {
+    // Auto opening from carry-forward closing if missing or stale
+    if (!telematicsLocked) {
+      const reconciled = reconcileOpeningFromCarryForward(
+        asset.id,
+        work_date,
+        opening_hours,
+        closing_hours,
+        hours_run,
+      );
+      opening_hours = reconciled.opening_hours;
+      closing_hours = reconciled.closing_hours;
+      hours_run = reconciled.hours_run;
+    } else if (opening_hours == null) {
       const yRow = getCarryForwardRow(asset.id, work_date);
-
       if (yRow?.closing_hours != null) opening_hours = Number(yRow.closing_hours);
-      if (scheduled_hours == null && yRow?.scheduled_hours != null) scheduled_hours = Number(yRow.scheduled_hours);
+    }
+
+    if (scheduled_hours == null) {
+      const yRow = getCarryForwardRow(asset.id, work_date);
+      if (yRow?.scheduled_hours != null) scheduled_hours = Number(yRow.scheduled_hours);
     }
 
     if (scheduled_hours == null) scheduled_hours = 0;
@@ -350,6 +426,8 @@ export default async function hoursRoutes(app) {
       meterSource
     );
 
+    const chain_updated = syncFollowingDayOpening(asset.id, work_date);
+
     // Persist selected input unit per asset for next-day suggestion (editable anytime).
     upsertAssetInputUnit.run(asset.id, input_unit);
     // Persist selected production flag per asset for next-day default.
@@ -367,7 +445,8 @@ export default async function hoursRoutes(app) {
       input_unit_locked: telematicsLocked,
       telematics_locked: telematicsLocked,
       meter_source: meterSource,
-      is_used: Boolean(is_used)
+      is_used: Boolean(is_used),
+      chain_updated,
     });
   });
 }
