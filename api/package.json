@@ -22,7 +22,8 @@
     "db:restore:latest": "bash ./scripts/restore-latest-backup.sh --yes",
     "db:restore:latest:dry": "bash ./scripts/restore-latest-backup.sh --dry-run",
     "db:restore:file": "bash ./scripts/restore-latest-backup.sh --yes --file \"$IRONLOG_RESTORE_FILE\"",
-    "db:restore:file:dry": "bash ./scripts/restore-latest-backup.sh --dry-run --file \"$IRONLOG_RESTORE_FILE\""
+    "db:restore:file:dry": "bash ./scripts/restore-latest-backup.sh --dry-run --file \"$IRONLOG_RESTORE_FILE\"",
+    "telematics:visionlink:poll": "node scripts/poll-cat-visionlink.js"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
