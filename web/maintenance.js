@@ -1882,11 +1882,16 @@ async function saveReportSubscription() {
     const payload = subscriptionPayloadFromForm();
     const res = await fetch(`${API}/reports/subscriptions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to save subscription");
+    let data = {};
+    try {
+      data = await res.json();
+    } catch {
+      throw new Error(`Save failed (${res.status})`);
+    }
+    if (!res.ok) throw new Error(data.error || data.message || "Failed to save subscription");
     reportSubscriptionEditId = Number(data?.id || 0);
     msg.className = "message-success";
     msg.textContent = "Subscription saved.";

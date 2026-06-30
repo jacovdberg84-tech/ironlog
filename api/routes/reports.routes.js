@@ -1262,6 +1262,14 @@ export default async function reportsRoutes(app) {
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_report_delivery_logs_sub ON report_delivery_logs(subscription_id, created_at DESC)`).run();
   ensureSmtpTables();
 
+  const allowedReportTypes = new Set([
+    "fuel_benchmark_xlsx",
+    "executive_kpi_pack_xlsx",
+    "maintenance_insights_xlsx",
+  ]);
+  const allowedChannels = new Set(["email", "whatsapp"]);
+  const allowedFrequencies = new Set(["daily", "weekly", "monthly"]);
+
   function requestRoles(req) {
     const fromMany = String(req.headers["x-user-roles"] || "")
       .split(",")
@@ -1988,56 +1996,61 @@ export default async function reportsRoutes(app) {
   });
 
   app.post("/subscriptions", async (req, reply) => {
-    const body = req.body || {};
-    const id = Number(body.id || 0);
-    const name = String(body.name || "").trim();
-    const reportType = String(body.report_type || "").trim().toLowerCase();
-    const channel = String(body.channel || "").trim().toLowerCase();
-    const freq = String(body.schedule_frequency || "weekly").trim().toLowerCase();
-    const sendTime = parseTimeHhMm(body.send_time);
-    const dayOfWeek = body.day_of_week == null ? null : Math.max(0, Math.min(6, Number(body.day_of_week)));
-    const dayOfMonth = body.day_of_month == null ? null : Math.max(1, Math.min(28, Number(body.day_of_month)));
-    const active = Number(body.active ?? 1) === 1 ? 1 : 0;
-    const recipients = parseRecipients(body.recipients || "");
-    const filters = body.filters && typeof body.filters === "object" ? body.filters : {};
-    if (!name) return reply.code(400).send({ ok: false, error: "Name is required" });
-    if (!allowedReportTypes.has(reportType)) return reply.code(400).send({ ok: false, error: "Invalid report_type" });
-    if (!allowedChannels.has(channel)) return reply.code(400).send({ ok: false, error: "Invalid channel" });
-    if (!allowedFrequencies.has(freq)) return reply.code(400).send({ ok: false, error: "Invalid schedule_frequency" });
-    if (!recipients.length) return reply.code(400).send({ ok: false, error: "At least one recipient is required" });
-    const who = String(req.headers["x-user-name"] || "system");
-    const nextRun = active ? nextRunForSchedule({
-      schedule_frequency: freq,
-      send_time: sendTime,
-      day_of_week: dayOfWeek,
-      day_of_month: dayOfMonth,
-    }, new Date()) : null;
-    if (id > 0) {
-      const ex = db.prepare(`SELECT id FROM report_subscriptions WHERE id = ? LIMIT 1`).get(id);
-      if (!ex) return reply.code(404).send({ ok: false, error: "Subscription not found" });
-      db.prepare(`
-        UPDATE report_subscriptions
-        SET
-          name = ?, report_type = ?, channel = ?, recipients = ?, schedule_frequency = ?, send_time = ?,
-          day_of_week = ?, day_of_month = ?, active = ?, filters_json = ?, next_run_at = ?, updated_at = datetime('now')
-        WHERE id = ?
+    try {
+      const body = req.body || {};
+      const id = Number(body.id || 0);
+      const name = String(body.name || "").trim();
+      const reportType = String(body.report_type || "").trim().toLowerCase();
+      const channel = String(body.channel || "").trim().toLowerCase();
+      const freq = String(body.schedule_frequency || "weekly").trim().toLowerCase();
+      const sendTime = parseTimeHhMm(body.send_time);
+      const dayOfWeek = body.day_of_week == null ? null : Math.max(0, Math.min(6, Number(body.day_of_week)));
+      const dayOfMonth = body.day_of_month == null ? null : Math.max(1, Math.min(28, Number(body.day_of_month)));
+      const active = Number(body.active ?? 1) === 1 ? 1 : 0;
+      const recipients = parseRecipients(body.recipients || "");
+      const filters = body.filters && typeof body.filters === "object" ? body.filters : {};
+      if (!name) return reply.code(400).send({ ok: false, error: "Name is required" });
+      if (!allowedReportTypes.has(reportType)) return reply.code(400).send({ ok: false, error: "Invalid report_type" });
+      if (!allowedChannels.has(channel)) return reply.code(400).send({ ok: false, error: "Invalid channel" });
+      if (!allowedFrequencies.has(freq)) return reply.code(400).send({ ok: false, error: "Invalid schedule_frequency" });
+      if (!recipients.length) return reply.code(400).send({ ok: false, error: "At least one recipient is required" });
+      const who = String(req.headers["x-user-name"] || "system");
+      const nextRun = active ? nextRunForSchedule({
+        schedule_frequency: freq,
+        send_time: sendTime,
+        day_of_week: dayOfWeek,
+        day_of_month: dayOfMonth,
+      }, new Date()) : null;
+      if (id > 0) {
+        const ex = db.prepare(`SELECT id FROM report_subscriptions WHERE id = ? LIMIT 1`).get(id);
+        if (!ex) return reply.code(404).send({ ok: false, error: "Subscription not found" });
+        db.prepare(`
+          UPDATE report_subscriptions
+          SET
+            name = ?, report_type = ?, channel = ?, recipients = ?, schedule_frequency = ?, send_time = ?,
+            day_of_week = ?, day_of_month = ?, active = ?, filters_json = ?, next_run_at = ?, updated_at = datetime('now')
+          WHERE id = ?
+        `).run(
+          name, reportType, channel, recipients.join(","), freq, sendTime, dayOfWeek, dayOfMonth, active,
+          JSON.stringify(filters), nextRun, id
+        );
+        return reply.send({ ok: true, id });
+      }
+      const out = db.prepare(`
+        INSERT INTO report_subscriptions (
+          name, report_type, channel, recipients, schedule_frequency, send_time, day_of_week, day_of_month,
+          active, filters_json, next_run_at, created_by, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `).run(
-        name, reportType, channel, recipients.join(","), freq, sendTime, dayOfWeek, dayOfMonth, active,
-        JSON.stringify(filters), nextRun, id
+        name, reportType, channel, recipients.join(","), freq, sendTime, dayOfWeek, dayOfMonth,
+        active, JSON.stringify(filters), nextRun, who
       );
-      return reply.send({ ok: true, id });
+      return reply.send({ ok: true, id: Number(out.lastInsertRowid || 0) });
+    } catch (err) {
+      req.log?.error?.(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
     }
-    const out = db.prepare(`
-      INSERT INTO report_subscriptions (
-        name, report_type, channel, recipients, schedule_frequency, send_time, day_of_week, day_of_month,
-        active, filters_json, next_run_at, created_by, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    `).run(
-      name, reportType, channel, recipients.join(","), freq, sendTime, dayOfWeek, dayOfMonth,
-      active, JSON.stringify(filters), nextRun, who
-    );
-    return reply.send({ ok: true, id: Number(out.lastInsertRowid || 0) });
   });
 
   app.delete("/subscriptions/:id", async (req, reply) => {
