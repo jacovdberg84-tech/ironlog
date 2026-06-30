@@ -1851,10 +1851,12 @@ function subscriptionPayloadFromForm() {
   const thresholds = subscriptionInsightsThresholds();
   const start = String(document.getElementById("insightsStart")?.value || "").trim();
   const end = String(document.getElementById("insightsEnd")?.value || "").trim();
+  const reportType = value("subReportType");
+  const rollingReport = reportType === "maintenance_insights_xlsx" || reportType === "fuel_benchmark_xlsx";
   return {
     id: reportSubscriptionEditId || undefined,
     name: value("subName"),
-    report_type: value("subReportType"),
+    report_type: reportType,
     channel: value("subChannel"),
     recipients: value("subRecipients"),
     schedule_frequency: value("subFrequency"),
@@ -1865,6 +1867,7 @@ function subscriptionPayloadFromForm() {
     filters: {
       start,
       end,
+      period_mode: rollingReport ? "rolling" : "fixed",
       site_codes: String(document.getElementById("kpiPackSiteCodes")?.value || "main").trim() || "main",
       period_type: String(document.getElementById("kpiPackPeriodType")?.value || "weekly").trim().toLowerCase(),
       attach_format: value("subAttachFormat") || "pdf",

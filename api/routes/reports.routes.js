@@ -1351,10 +1351,24 @@ export default async function reportsRoutes(app) {
     return base ? `${base}${path}` : path;
   }
 
+  function resolveSubscriptionDateRange(filters = {}, reportType = "") {
+    const f = filters && typeof filters === "object" ? filters : {};
+    const type = String(reportType || "").trim().toLowerCase();
+    const mode = String(f.period_mode || "").trim().toLowerCase();
+    if ((type === "maintenance_insights_xlsx" || type === "fuel_benchmark_xlsx") && mode !== "fixed") {
+      const end = todayYmd();
+      const d = new Date(`${end}T12:00:00`);
+      d.setDate(d.getDate() - 29);
+      return { start: d.toISOString().slice(0, 10), end };
+    }
+    const start = isDate(f.start) ? String(f.start).trim() : `${todayYmd().slice(0, 8)}01`;
+    const end = isDate(f.end) ? String(f.end).trim() : todayYmd();
+    return { start, end };
+  }
+
   function reportPathsForType(reportType, filters = {}) {
     const f = filters && typeof filters === "object" ? filters : {};
-    const start = isDate(f.start) ? String(f.start) : todayYmd().slice(0, 8) + "01";
-    const end = isDate(f.end) ? String(f.end) : todayYmd();
+    const { start, end } = resolveSubscriptionDateRange(f, reportType);
     const tolerance = Number.isFinite(Number(f.tolerance)) ? Number(f.tolerance) : 0.15;
     const near = Number.isFinite(Number(f.near_due_hours)) ? Number(f.near_due_hours) : 50;
     const horizon = Number.isFinite(Number(f.predictive_horizon_hours)) ? Number(f.predictive_horizon_hours) : 100;
@@ -1389,8 +1403,9 @@ export default async function reportsRoutes(app) {
   }
 
   async function fetchInternalReport(path) {
-    const url = `${internalApiBase()}${path}`;
-    const res = await fetch(url, {
+    const res = await app.inject({
+      method: "GET",
+      url: path,
       headers: {
         "x-user-name": "system",
         "x-user-role": "admin",
@@ -1398,13 +1413,50 @@ export default async function reportsRoutes(app) {
         "x-site-code": String(process.env.IRONLOG_DEFAULT_SITE_CODE || "main"),
       },
     });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`Report generation failed (${res.status}): ${body.slice(0, 200) || path}`);
+    if (res.statusCode >= 400) {
+      const body = String(res.payload || "");
+      let msg = body.slice(0, 300) || path;
+      try {
+        const j = JSON.parse(body);
+        msg = j.error || j.message || msg;
+      } catch {}
+      throw new Error(`Report generation failed (${res.statusCode}): ${msg}`);
     }
-    const buf = Buffer.from(await res.arrayBuffer());
+    const buf = Buffer.from(res.rawPayload || res.payload || "");
     if (!buf.length) throw new Error(`Report generation returned empty file: ${path}`);
     return buf;
+  }
+
+  async function probeMaintenanceInsightsData(filters = {}) {
+    const paths = reportPathsForType("maintenance_insights_xlsx", filters);
+    const q = String(paths.pdf || "").split("?")[1] || "";
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/maintenance/insights?${q.replace(/&download=1/g, "").replace(/download=1&/g, "")}`,
+      headers: {
+        "x-user-name": "system",
+        "x-user-role": "admin",
+        "x-user-roles": "admin",
+        "x-site-code": String(process.env.IRONLOG_DEFAULT_SITE_CODE || "main"),
+      },
+    });
+    if (res.statusCode >= 400) {
+      let msg = `HTTP ${res.statusCode}`;
+      try {
+        const j = JSON.parse(String(res.payload || "{}"));
+        msg = j.error || j.message || msg;
+      } catch {}
+      throw new Error(`Maintenance insights data failed: ${msg}`);
+    }
+    const data = JSON.parse(String(res.payload || "{}"));
+    if (!String(data?.range?.start || "").trim()) {
+      throw new Error("Maintenance insights returned an empty payload (check API is up to date)");
+    }
+    return {
+      data,
+      at_risk: Array.isArray(data?.predictive?.at_risk_plans) ? data.predictive.at_risk_plans.length : 0,
+      cost_rows: Array.isArray(data?.maintenance_cost) ? data.maintenance_cost.length : 0,
+    };
   }
 
   async function buildSubscriptionAttachments(reportType, filters = {}) {
@@ -1417,6 +1469,9 @@ export default async function reportsRoutes(app) {
 
     async function add(path, filename, contentType) {
       if (!path || !filename) return;
+      if (reportType === "maintenance_insights_xlsx") {
+        await probeMaintenanceInsightsData(filters);
+      }
       const content = await fetchInternalReport(path);
       if (content.length > MAX_SUBSCRIPTION_ATTACHMENT_BYTES) {
         const mb = Math.round(content.length / 1024 / 1024);
@@ -1514,9 +1569,16 @@ export default async function reportsRoutes(app) {
           });
           if (!mailOut.ok) throw new Error(mailOut.error || "SMTP send failed");
           status = "sent";
+          let insightNote = "";
+          if (reportType === "maintenance_insights_xlsx" && subscriptionAttachFormat(filters) !== "link") {
+            try {
+              const probe = await probeMaintenanceInsightsData(filters);
+              insightNote = ` (${probe.at_risk} at-risk, ${probe.cost_rows} cost rows, ${probe.data?.range?.start || "?"} to ${probe.data?.range?.end || "?"})`;
+            } catch {}
+          }
           detail = attachments.length
-            ? `SMTP email sent with ${attachments.length} attachment(s)`
-            : "SMTP email sent (link only)";
+            ? `SMTP email sent with ${attachments.length} attachment(s)${insightNote}`
+            : `SMTP email sent (link only)${insightNote}`;
         } catch (err) {
           status = "failed";
           detail = formatSmtpError(err);

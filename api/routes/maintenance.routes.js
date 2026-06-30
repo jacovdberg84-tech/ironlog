@@ -3829,38 +3829,49 @@ export default async function maintenanceRoutes(app) {
     }
   });
 
+  async function loadInsightsExportPayload(req) {
+    const q = new URLSearchParams();
+    const copy = (name, fallback = "") => {
+      const v = String(req.query?.[name] ?? fallback).trim();
+      if (v !== "") q.set(name, v);
+    };
+    copy("start");
+    copy("end");
+    copy("near_due_hours", "50");
+    copy("predictive_horizon_hours", "100");
+    copy("checklist_fail_threshold", "2");
+    copy("fuel_variance_threshold", "15");
+
+    const injected = await app.inject({
+      method: "GET",
+      url: `/api/maintenance/insights?${q.toString()}`,
+      headers: {
+        "x-user-name": String(req.headers?.["x-user-name"] || "system"),
+        "x-user-role": String(req.headers?.["x-user-role"] || "admin"),
+        "x-user-roles": String(req.headers?.["x-user-roles"] || "admin"),
+        "x-site-code": String(req.headers?.["x-site-code"] || "main"),
+      },
+    });
+    if (injected.statusCode >= 400) {
+      let payload = {};
+      try { payload = JSON.parse(String(injected.payload || "{}")); } catch {}
+      const err = new Error(payload?.error || "Failed to build insights export");
+      err.statusCode = injected.statusCode;
+      throw err;
+    }
+    const data = JSON.parse(String(injected.payload || "{}"));
+    if (!String(data?.range?.start || "").trim()) {
+      const err = new Error("Maintenance insights returned an empty payload");
+      err.statusCode = 500;
+      throw err;
+    }
+    return data;
+  }
+
   // GET /api/maintenance/insights.xlsx?start=YYYY-MM-DD&end=YYYY-MM-DD&near_due_hours=50
   app.get("/insights.xlsx", async (req, reply) => {
     try {
-      const q = new URLSearchParams();
-      const copy = (name, fallback = "") => {
-        const v = String(req.query?.[name] ?? fallback).trim();
-        if (v !== "") q.set(name, v);
-      };
-      copy("start");
-      copy("end");
-      copy("near_due_hours", "50");
-      copy("predictive_horizon_hours", "100");
-      copy("checklist_fail_threshold", "2");
-      copy("fuel_variance_threshold", "15");
-
-      const injected = await app.inject({
-        method: "GET",
-        url: `/api/maintenance/insights?${q.toString()}`,
-        headers: {
-          "x-user-name": String(req.headers?.["x-user-name"] || "system"),
-          "x-user-role": String(req.headers?.["x-user-role"] || "admin"),
-          "x-user-roles": String(req.headers?.["x-user-roles"] || "admin"),
-          "x-site-code": String(req.headers?.["x-site-code"] || "main"),
-        },
-      });
-      if (injected.statusCode >= 400) {
-        let payload = {};
-        try { payload = JSON.parse(String(injected.payload || "{}")); } catch {}
-        return reply.code(injected.statusCode).send(payload?.error ? payload : { ok: false, error: "Failed to build insights export" });
-      }
-
-      const data = JSON.parse(String(injected.payload || "{}"));
+      const data = await loadInsightsExportPayload(req);
       const wb = new ExcelJS.Workbook();
       wb.creator = "IRONLOG";
       wb.created = new Date();
@@ -4018,39 +4029,6 @@ export default async function maintenanceRoutes(app) {
     }
   });
 
-  async function loadInsightsExportPayload(req) {
-    const q = new URLSearchParams();
-    const copy = (name, fallback = "") => {
-      const v = String(req.query?.[name] ?? fallback).trim();
-      if (v !== "") q.set(name, v);
-    };
-    copy("start");
-    copy("end");
-    copy("near_due_hours", "50");
-    copy("predictive_horizon_hours", "100");
-    copy("checklist_fail_threshold", "2");
-    copy("fuel_variance_threshold", "15");
-
-    const injected = await app.inject({
-      method: "GET",
-      url: `/api/maintenance/insights?${q.toString()}`,
-      headers: {
-        "x-user-name": String(req.headers?.["x-user-name"] || "system"),
-        "x-user-role": String(req.headers?.["x-user-role"] || "admin"),
-        "x-user-roles": String(req.headers?.["x-user-roles"] || "admin"),
-        "x-site-code": String(req.headers?.["x-site-code"] || "main"),
-      },
-    });
-    if (injected.statusCode >= 400) {
-      let payload = {};
-      try { payload = JSON.parse(String(injected.payload || "{}")); } catch {}
-      const err = new Error(payload?.error || "Failed to build insights export");
-      err.statusCode = injected.statusCode;
-      throw err;
-    }
-    return JSON.parse(String(injected.payload || "{}"));
-  }
-
   function addInsightsExportSummarySheet(wb, data) {
     const wsSummary = wb.addWorksheet("Summary");
     wsSummary.columns = [{ header: "Field", key: "field", width: 34 }, { header: "Value", key: "value", width: 30 }];
@@ -4185,35 +4163,8 @@ export default async function maintenanceRoutes(app) {
   // GET /api/maintenance/insights.pdf?start=YYYY-MM-DD&end=YYYY-MM-DD&near_due_hours=50&download=1
   app.get("/insights.pdf", async (req, reply) => {
     try {
-      const q = new URLSearchParams();
-      const copy = (name, fallback = "") => {
-        const v = String(req.query?.[name] ?? fallback).trim();
-        if (v !== "") q.set(name, v);
-      };
-      copy("start");
-      copy("end");
-      copy("near_due_hours", "50");
-      copy("predictive_horizon_hours", "100");
-      copy("checklist_fail_threshold", "2");
-      copy("fuel_variance_threshold", "15");
       const download = String(req.query?.download || "").trim() === "1";
-
-      const injected = await app.inject({
-        method: "GET",
-        url: `/api/maintenance/insights?${q.toString()}`,
-        headers: {
-          "x-user-name": String(req.headers?.["x-user-name"] || "system"),
-          "x-user-role": String(req.headers?.["x-user-role"] || "admin"),
-          "x-user-roles": String(req.headers?.["x-user-roles"] || "admin"),
-          "x-site-code": String(req.headers?.["x-site-code"] || "main"),
-        },
-      });
-      if (injected.statusCode >= 400) {
-        let payload = {};
-        try { payload = JSON.parse(String(injected.payload || "{}")); } catch {}
-        return reply.code(injected.statusCode).send(payload?.error ? payload : { ok: false, error: "Failed to build insights PDF" });
-      }
-      const data = JSON.parse(String(injected.payload || "{}"));
+      const data = await loadInsightsExportPayload(req);
       const start = String(data?.range?.start || "");
       const end = String(data?.range?.end || "");
 
