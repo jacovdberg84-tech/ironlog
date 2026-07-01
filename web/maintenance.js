@@ -6713,6 +6713,206 @@ async function initPartsToOrderSection() {
 
 let mcTechnicianOptions = [];
 let mcDayRowsCache = [];
+let mcDraftRows = [];
+
+function mcEmptyDraftRow(technician_name = "") {
+  return {
+    technician_name: String(technician_name || "").trim(),
+    hours: "",
+    asset_code: "",
+    reason: "",
+    labor_rate_per_hour: "",
+  };
+}
+
+function mcTechnicianLabel(t) {
+  return String(t?.label || t?.username || t || "").trim();
+}
+
+function mcTechnicianValue(t) {
+  return String(t?.username || t?.label || t || "").trim();
+}
+
+function mcTechnicianSelectOptions(selected = "") {
+  const picked = String(selected || "").trim().toLowerCase();
+  const users = Array.isArray(mcTechnicianOptions) ? mcTechnicianOptions : [];
+  const merged = [...users];
+  if (
+    picked &&
+    !merged.some((t) => {
+      const v = mcTechnicianValue(t).toLowerCase();
+      const l = mcTechnicianLabel(t).toLowerCase();
+      return v === picked || l === picked;
+    })
+  ) {
+    merged.unshift({ username: selected, label: selected });
+  }
+  return (
+    `<option value="">Select…</option>` +
+    merged
+      .map((t) => {
+        const value = mcTechnicianValue(t);
+        const label = mcTechnicianLabel(t) || value;
+        const sel =
+          picked && (picked === value.toLowerCase() || picked === label.toLowerCase()) ? " selected" : "";
+        return `<option value="${esc(value)}"${sel}>${esc(label)}</option>`;
+      })
+      .join("")
+  );
+}
+
+function renderMcTechChips() {
+  const el = document.getElementById("mcTechChips");
+  if (!el) return;
+  const users = Array.isArray(mcTechnicianOptions) ? mcTechnicianOptions : [];
+  if (!users.length) {
+    el.innerHTML = `<span class="muted small">No technicians on roster — add them under Work Orders.</span>`;
+    return;
+  }
+  el.innerHTML = users
+    .map((t) => {
+      const label = mcTechnicianLabel(t);
+      const value = mcTechnicianValue(t);
+      return `<button type="button" class="pill" data-mc-chip-tech="${esc(value)}" title="Add row for ${esc(label)}">+ ${esc(label)}</button>`;
+    })
+    .join("");
+}
+
+function refreshMcDraftEditor() {
+  const body = document.getElementById("mcDraftBody");
+  if (!body) return;
+  if (!mcDraftRows.length) {
+    body.innerHTML = `<tr><td colspan="6" class="muted">Click <strong>+ Row per technician</strong> or a technician chip above to start.</td></tr>`;
+    return;
+  }
+  body.innerHTML = mcDraftRows
+    .map(
+      (row, idx) => `
+    <tr data-mc-draft-idx="${idx}">
+      <td>
+        <select data-mc-draft-field="technician_name" data-mc-draft-idx="${idx}" style="min-width:160px;">
+          ${mcTechnicianSelectOptions(row.technician_name)}
+        </select>
+      </td>
+      <td>
+        <input data-mc-draft-field="hours" data-mc-draft-idx="${idx}" type="number" min="0" step="0.25"
+          value="${esc(row.hours !== "" && row.hours != null ? String(row.hours) : "")}" placeholder="0" style="width:80px;" />
+      </td>
+      <td>
+        <input data-mc-draft-field="asset_code" data-mc-draft-idx="${idx}" type="text" list="mcAssetList"
+          value="${esc(row.asset_code || "")}" placeholder="A300AM" style="width:110px;" autocomplete="off" />
+      </td>
+      <td>
+        <input data-mc-draft-field="reason" data-mc-draft-idx="${idx}" type="text"
+          value="${esc(row.reason || "")}" placeholder="Job description" style="width:100%; min-width:200px;" />
+      </td>
+      <td>
+        <input data-mc-draft-field="labor_rate_per_hour" data-mc-draft-idx="${idx}" type="number" min="0" step="0.01"
+          value="${esc(row.labor_rate_per_hour !== "" && row.labor_rate_per_hour != null ? String(row.labor_rate_per_hour) : "")}"
+          placeholder="Default" style="width:90px;" />
+      </td>
+      <td style="text-align:right;">
+        <button type="button" data-mc-draft-del="${idx}">Remove</button>
+      </td>
+    </tr>`,
+    )
+    .join("");
+}
+
+function syncMcDraftFromDom() {
+  document.querySelectorAll("#mcDraftBody tr[data-mc-draft-idx]").forEach((tr) => {
+    const idx = Number(tr.getAttribute("data-mc-draft-idx") || -1);
+    if (idx < 0 || idx >= mcDraftRows.length) return;
+    tr.querySelectorAll("[data-mc-draft-field]").forEach((el) => {
+      const field = String(el.getAttribute("data-mc-draft-field") || "");
+      if (!field) return;
+      mcDraftRows[idx][field] = String(el.value || "").trim();
+    });
+  });
+}
+
+function addMcDraftRow(technician_name = "") {
+  mcDraftRows.push(mcEmptyDraftRow(technician_name));
+  refreshMcDraftEditor();
+}
+
+function addMcDraftRowPerTechnician() {
+  const users = Array.isArray(mcTechnicianOptions) ? mcTechnicianOptions : [];
+  if (!users.length) {
+    addMcDraftRow();
+    return;
+  }
+  users.forEach((t) => mcDraftRows.push(mcEmptyDraftRow(mcTechnicianValue(t))));
+  refreshMcDraftEditor();
+}
+
+function addMcDraftBlankRows(count = 5) {
+  const n = Math.max(1, Math.min(50, Number(count) || 5));
+  for (let i = 0; i < n; i += 1) mcDraftRows.push(mcEmptyDraftRow());
+  refreshMcDraftEditor();
+}
+
+function clearMcDraft() {
+  mcDraftRows = [];
+  refreshMcDraftEditor();
+  const msg = document.getElementById("mcFormMsg");
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = "";
+  }
+}
+
+function loadMcSavedIntoDraft() {
+  if (!mcDayRowsCache.length) {
+    const msg = document.getElementById("mcFormMsg");
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = "No saved entries for this date to load.";
+    }
+    return;
+  }
+  mcDraftRows = mcDayRowsCache.map((r) => ({
+    technician_name: String(r.technician_name || ""),
+    hours: r.hours != null ? String(r.hours) : "",
+    asset_code: String(r.asset_code || ""),
+    reason: String(r.reason || ""),
+    labor_rate_per_hour:
+      r.labor_rate_per_hour != null && Number(r.labor_rate_per_hour) > 0 ? String(r.labor_rate_per_hour) : "",
+  }));
+  refreshMcDraftEditor();
+  const msg = document.getElementById("mcFormMsg");
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = `Loaded ${mcDraftRows.length} saved row(s) into the sheet. Edit and use Save all with Replace checked to overwrite the day.`;
+  }
+}
+
+function readMcDraftEntriesForSave() {
+  syncMcDraftFromDom();
+  const defaultRate = Number(document.getElementById("mcDefaultRate")?.value || 0);
+  const entries = [];
+  const errors = [];
+  mcDraftRows.forEach((row, idx) => {
+    const technician_name = String(row.technician_name || "").trim();
+    const hours = Math.max(0, Number(row.hours || 0));
+    const asset_code = String(row.asset_code || "").trim().toUpperCase();
+    const reason = String(row.reason || "").trim();
+    const rateRaw = String(row.labor_rate_per_hour ?? "").trim();
+    const empty = !technician_name && !asset_code && !reason && !hours;
+    if (empty) return;
+    const line = idx + 1;
+    if (!technician_name) errors.push(`Row ${line}: technician required`);
+    if (!Number.isFinite(hours) || hours <= 0) errors.push(`Row ${line}: hours must be > 0`);
+    if (!asset_code) errors.push(`Row ${line}: plant / asset required`);
+    if (!reason) errors.push(`Row ${line}: reason required`);
+    if (!technician_name || !Number.isFinite(hours) || hours <= 0 || !asset_code || !reason) return;
+    const entry = { technician_name, hours, asset_code, reason };
+    if (rateRaw !== "") entry.labor_rate_per_hour = Math.max(0, Number(rateRaw));
+    else if (defaultRate > 0) entry.labor_rate_per_hour = defaultRate;
+    entries.push(entry);
+  });
+  return { entries, errors };
+}
 
 function mcYearValue() {
   const y = Number(document.getElementById("mcReportYear")?.value || 0);
@@ -6734,37 +6934,6 @@ function syncMcDateBounds() {
   }
 }
 
-function fillMcTechnicianSelect(selected = "") {
-  const sel = document.getElementById("mcTechnician");
-  if (!sel) return;
-  const picked = String(selected || "").trim();
-  const users = Array.isArray(mcTechnicianOptions) ? mcTechnicianOptions : [];
-  const merged = [...users];
-  if (picked && !merged.some((t) => {
-    const u = String(t.username || t.label || t || "").trim().toLowerCase();
-    const l = String(t.label || t.username || t || "").trim().toLowerCase();
-    const p = picked.toLowerCase();
-    return u === p || l === p;
-  })) {
-    merged.unshift({ username: picked, label: picked });
-  }
-  sel.innerHTML =
-    `<option value="">Select technician…</option>` +
-    merged
-      .map((t) => {
-        const username = String(t.username || t.label || t || "").trim();
-        const label = String(t.label || t.username || t || "").trim();
-        const value = username || label;
-        const selAttr =
-          picked &&
-          (picked.toLowerCase() === value.toLowerCase() || picked.toLowerCase() === label.toLowerCase())
-            ? " selected"
-            : "";
-        return `<option value="${esc(value)}"${selAttr}>${esc(label || value)}</option>`;
-      })
-      .join("");
-}
-
 async function loadMcTechnicians() {
   try {
     const res = await fetch(`${API}/workorders/technicians`, { headers: authHeaders() });
@@ -6781,7 +6950,8 @@ async function loadMcTechnicians() {
   } catch {
     mcTechnicianOptions = [];
   }
-  fillMcTechnicianSelect();
+  renderMcTechChips();
+  refreshMcDraftEditor();
 }
 
 async function loadMcAssetDatalist() {
@@ -6800,22 +6970,61 @@ async function loadMcAssetDatalist() {
   }
 }
 
-function clearMcEntryForm() {
-  const editEl = document.getElementById("mcEditId");
-  if (editEl) editEl.value = "";
-  const hours = document.getElementById("mcHours");
-  const asset = document.getElementById("mcAssetCode");
-  const reason = document.getElementById("mcReason");
-  const rate = document.getElementById("mcEntryRate");
-  if (hours) hours.value = "";
-  if (asset) asset.value = "";
-  if (reason) reason.value = "";
-  if (rate) rate.value = "";
-  fillMcTechnicianSelect();
+async function saveMcAllRows() {
   const msg = document.getElementById("mcFormMsg");
+  syncMcDateBounds();
+  const work_date = String(document.getElementById("mcWorkDate")?.value || "").trim();
+  const replace = Boolean(document.getElementById("mcReplaceDay")?.checked);
+  const { entries, errors } = readMcDraftEntriesForSave();
+
+  if (!work_date) {
+    if (msg) { msg.className = "message-error"; msg.textContent = "Work date is required."; }
+    return;
+  }
+  if (errors.length) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = errors.slice(0, 4).join(" · ") + (errors.length > 4 ? ` (+${errors.length - 4} more)` : "");
+    }
+    return;
+  }
+  if (!entries.length) {
+    if (msg) { msg.className = "message-error"; msg.textContent = "Add at least one complete row before saving."; }
+    return;
+  }
+  if (replace && mcDayRowsCache.length) {
+    const ok = window.confirm(
+      `Replace all ${mcDayRowsCache.length} saved entr${mcDayRowsCache.length === 1 ? "y" : "ies"} for ${work_date} with ${entries.length} row(s) from the sheet?`,
+    );
+    if (!ok) return;
+  }
+
   if (msg) {
     msg.className = "muted";
-    msg.textContent = "";
+    msg.textContent = `Saving ${entries.length} row(s)…`;
+  }
+  try {
+    const res = await fetch(`${API}/maintenance/mechanic-labor/batch`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ work_date, entries, mode: replace ? "replace" : "append" }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Batch save failed");
+    if (msg) {
+      msg.className = "message-success";
+      const skipped = Number(data.skipped || 0);
+      msg.textContent = `Saved ${Number(data.saved || entries.length)} row(s) for ${work_date}.${skipped ? ` Skipped ${skipped} blank row(s).` : ""}`;
+    }
+    clearMcDraft();
+    const replaceEl = document.getElementById("mcReplaceDay");
+    if (replaceEl) replaceEl.checked = false;
+    await loadMcDayEntries();
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = e.message || String(e);
+    }
   }
 }
 
@@ -6851,7 +7060,7 @@ function renderMcDayTable(rows) {
         <td style="text-align:right;">$${Number(r.labor_rate_per_hour || 0).toFixed(2)}</td>
         <td style="text-align:right;">$${Number(r.labor_cost || 0).toFixed(2)}</td>
         <td>
-          <button type="button" data-mc-edit="${id}">Edit</button>
+          <button type="button" data-mc-add-sheet="${id}">Add to sheet</button>
           <button type="button" data-mc-delete="${id}">Delete</button>
         </td>
       </tr>`;
@@ -6920,93 +7129,20 @@ async function saveMcDefaultRate() {
   }
 }
 
-async function saveMcEntry() {
-  const msg = document.getElementById("mcFormMsg");
-  syncMcDateBounds();
-  const work_date = String(document.getElementById("mcWorkDate")?.value || "").trim();
-  const technician_name = String(document.getElementById("mcTechnician")?.value || "").trim();
-  const hours = Math.max(0, Number(document.getElementById("mcHours")?.value || 0));
-  const asset_code = String(document.getElementById("mcAssetCode")?.value || "").trim().toUpperCase();
-  const reason = String(document.getElementById("mcReason")?.value || "").trim();
-  const rateRaw = String(document.getElementById("mcEntryRate")?.value || "").trim();
-  const editId = Number(document.getElementById("mcEditId")?.value || 0);
-
-  if (!work_date) {
-    if (msg) { msg.className = "message-error"; msg.textContent = "Work date is required."; }
-    return;
-  }
-  if (!technician_name) {
-    if (msg) { msg.className = "message-error"; msg.textContent = "Select a technician."; }
-    return;
-  }
-  if (!Number.isFinite(hours) || hours <= 0) {
-    if (msg) { msg.className = "message-error"; msg.textContent = "Hours must be greater than zero."; }
-    return;
-  }
-  if (!asset_code) {
-    if (msg) { msg.className = "message-error"; msg.textContent = "Plant / asset code is required."; }
-    return;
-  }
-  if (!reason) {
-    if (msg) { msg.className = "message-error"; msg.textContent = "Reason / job description is required."; }
-    return;
-  }
-
-  const body = { work_date, technician_name, hours, asset_code, reason };
-  if (rateRaw !== "") body.labor_rate_per_hour = Math.max(0, Number(rateRaw));
-
-  if (msg) {
-    msg.className = "muted";
-    msg.textContent = editId ? "Updating entry…" : "Saving entry…";
-  }
-  try {
-    const url = editId
-      ? `${API}/maintenance/mechanic-labor/${editId}`
-      : `${API}/maintenance/mechanic-labor`;
-    const res = await fetch(url, {
-      method: editId ? "PATCH" : "POST",
-      headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Save failed");
-    if (msg) {
-      msg.className = "message-success";
-      msg.textContent = editId ? "Entry updated." : "Entry saved.";
-    }
-    clearMcEntryForm();
-    await loadMcDayEntries();
-  } catch (e) {
-    if (msg) {
-      msg.className = "message-error";
-      msg.textContent = e.message || String(e);
-    }
-  }
-}
-
-function startMcEdit(row) {
+function addMcDraftRowFromSaved(row) {
   if (!row) return;
-  const editEl = document.getElementById("mcEditId");
-  if (editEl) editEl.value = String(row.id || "");
-  fillMcTechnicianSelect(row.technician_name || "");
-  const hours = document.getElementById("mcHours");
-  const asset = document.getElementById("mcAssetCode");
-  const reason = document.getElementById("mcReason");
-  const rate = document.getElementById("mcEntryRate");
-  if (hours) hours.value = row.hours != null ? String(row.hours) : "";
-  if (asset) asset.value = String(row.asset_code || "");
-  if (reason) reason.value = String(row.reason || "");
-  if (rate) {
-    const def = Number(document.getElementById("mcDefaultRate")?.value || 0);
-    const r = Number(row.labor_rate_per_hour || 0);
-    rate.value = r > 0 && r !== def ? String(r) : "";
-  }
-  const msg = document.getElementById("mcFormMsg");
-  if (msg) {
-    msg.className = "muted";
-    msg.textContent = `Editing entry #${row.id}`;
-  }
-  document.getElementById("mcSaveEntryBtn")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  mcDraftRows.push({
+    technician_name: String(row.technician_name || ""),
+    hours: row.hours != null ? String(row.hours) : "",
+    asset_code: String(row.asset_code || ""),
+    reason: String(row.reason || ""),
+    labor_rate_per_hour:
+      row.labor_rate_per_hour != null && Number(row.labor_rate_per_hour) > 0
+        ? String(row.labor_rate_per_hour)
+        : "",
+  });
+  refreshMcDraftEditor();
+  document.getElementById("mcDraftBody")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 async function deleteMcEntry(id) {
@@ -7020,7 +7156,6 @@ async function deleteMcEntry(id) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Delete failed");
-  clearMcEntryForm();
   await loadMcDayEntries();
 }
 
@@ -8011,14 +8146,17 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!id || !status) return;
     updatePartsToOrderStatus(id, status).catch((e) => alert(e.message || String(e)));
   });
-  document.getElementById("mcSaveEntryBtn")?.addEventListener("click", () => saveMcEntry().catch((e) => {
+  document.getElementById("mcAddRowBtn")?.addEventListener("click", () => addMcDraftRow());
+  document.getElementById("mcAddRowPerTechBtn")?.addEventListener("click", () => addMcDraftRowPerTechnician());
+  document.getElementById("mcAdd5RowsBtn")?.addEventListener("click", () => addMcDraftBlankRows(5));
+  document.getElementById("mcLoadDayBtn")?.addEventListener("click", loadMcSavedIntoDraft);
+  document.getElementById("mcClearDraftBtn")?.addEventListener("click", clearMcDraft);
+  document.getElementById("mcSaveAllBtn")?.addEventListener("click", () => saveMcAllRows().catch((e) => {
     const msg = document.getElementById("mcFormMsg");
     if (msg) { msg.className = "message-error"; msg.textContent = e.message || String(e); }
   }));
-  document.getElementById("mcClearFormBtn")?.addEventListener("click", clearMcEntryForm);
   document.getElementById("mcRefreshBtn")?.addEventListener("click", () => loadMcDayEntries().catch(() => {}));
   document.getElementById("mcWorkDate")?.addEventListener("change", () => {
-    clearMcEntryForm();
     loadMcDayEntries().catch(() => {});
   });
   document.getElementById("mcReportYear")?.addEventListener("change", () => {
@@ -8030,13 +8168,27 @@ document.addEventListener("DOMContentLoaded", () => {
     if (msg) { msg.className = "message-error"; msg.textContent = e.message || String(e); }
   }));
   document.getElementById("mcDownloadXlsxBtn")?.addEventListener("click", () => downloadMcYearXlsx());
+  document.getElementById("mcTechChips")?.addEventListener("click", (evt) => {
+    const btn = evt.target?.closest?.("button[data-mc-chip-tech]");
+    if (!btn) return;
+    addMcDraftRow(String(btn.getAttribute("data-mc-chip-tech") || ""));
+  });
+  document.getElementById("mcDraftBody")?.addEventListener("click", (evt) => {
+    const delBtn = evt.target?.closest?.("button[data-mc-draft-del]");
+    if (!delBtn) return;
+    syncMcDraftFromDom();
+    const idx = Number(delBtn.getAttribute("data-mc-draft-del") || -1);
+    if (idx < 0 || idx >= mcDraftRows.length) return;
+    mcDraftRows.splice(idx, 1);
+    refreshMcDraftEditor();
+  });
   document.getElementById("mcDayBody")?.addEventListener("click", (evt) => {
-    const editBtn = evt.target?.closest?.("button[data-mc-edit]");
+    const addBtn = evt.target?.closest?.("button[data-mc-add-sheet]");
     const delBtn = evt.target?.closest?.("button[data-mc-delete]");
-    if (editBtn) {
-      const id = Number(editBtn.getAttribute("data-mc-edit") || 0);
+    if (addBtn) {
+      const id = Number(addBtn.getAttribute("data-mc-add-sheet") || 0);
       const row = mcDayRowsCache.find((r) => Number(r.id) === id);
-      if (row) startMcEdit(row);
+      if (row) addMcDraftRowFromSaved(row);
       return;
     }
     if (delBtn) {

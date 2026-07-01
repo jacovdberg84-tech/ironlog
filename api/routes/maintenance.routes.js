@@ -10765,6 +10765,116 @@ export default async function maintenanceRoutes(app) {
     }
   });
 
+  // POST /api/maintenance/mechanic-labor/batch — save many rows for one day
+  app.post("/mechanic-labor/batch", async (req, reply) => {
+    try {
+      if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_EDITORS)) return;
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const userName = String(req.headers?.["x-user-name"] || "").trim() || "system";
+      const body = req.body || {};
+      const work_date = String(body.work_date || "").trim();
+      const mode = String(body.mode || "append").trim().toLowerCase();
+      const rawEntries = Array.isArray(body.entries) ? body.entries : [];
+
+      if (!isDate(work_date)) {
+        return reply.code(400).send({ ok: false, error: "work_date (YYYY-MM-DD) required" });
+      }
+      if (!rawEntries.length) {
+        return reply.code(400).send({ ok: false, error: "entries array required" });
+      }
+
+      const validEntries = [];
+      const errors = [];
+      rawEntries.forEach((item, idx) => {
+        const parsed = mechanicLaborEntryBody({ ...item, work_date });
+        const line = idx + 1;
+        if (!parsed.technician_name) errors.push(`Row ${line}: technician_name required`);
+        if (!parsed.asset_code) errors.push(`Row ${line}: asset_code required`);
+        if (!parsed.reason) errors.push(`Row ${line}: reason required`);
+        if (!Number.isFinite(parsed.hours) || parsed.hours <= 0) errors.push(`Row ${line}: hours must be > 0`);
+        if (
+          !parsed.technician_name ||
+          !parsed.asset_code ||
+          !parsed.reason ||
+          !Number.isFinite(parsed.hours) ||
+          parsed.hours <= 0
+        ) {
+          return;
+        }
+        validEntries.push(parsed);
+      });
+
+      if (errors.length) {
+        return reply.code(400).send({ ok: false, error: errors.slice(0, 8).join("; "), errors });
+      }
+      if (!validEntries.length) {
+        return reply.code(400).send({ ok: false, error: "no valid entries to save" });
+      }
+
+      const insertStmt = db.prepare(`
+        INSERT INTO mechanic_labor_entries (
+          work_date, technician_name, hours, asset_code, reason,
+          labor_rate_per_hour, site_code, created_by, updated_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      const tx = db.transaction(() => {
+        let deleted = 0;
+        if (mode === "replace") {
+          const info = db.prepare(`
+            DELETE FROM mechanic_labor_entries
+            WHERE work_date = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+          `).run(work_date, site_code);
+          deleted = Number(info.changes || 0);
+        }
+        const ids = [];
+        for (const parsed of validEntries) {
+          const info = insertStmt.run(
+            work_date,
+            parsed.technician_name,
+            parsed.hours,
+            parsed.asset_code,
+            parsed.reason,
+            parsed.labor_rate_per_hour,
+            site_code,
+            userName,
+            userName,
+          );
+          ids.push(Number(info.lastInsertRowid || 0));
+        }
+        return { deleted, ids };
+      });
+
+      const result = tx();
+      writeAudit(db, req, {
+        module: "maintenance",
+        action: "mechanic_labor.batch",
+        entity_type: "mechanic_labor_entry",
+        entity_id: work_date,
+        payload: { mode, saved: validEntries.length, deleted: result.deleted },
+      });
+
+      const defaultRate = readMechanicLaborDefaultRate();
+      const rows = result.ids
+        .map((id) => db.prepare(`SELECT * FROM mechanic_labor_entries WHERE id = ?`).get(id))
+        .filter(Boolean)
+        .map((r) => enrichMechanicLaborRow(r, defaultRate));
+
+      return reply.send({
+        ok: true,
+        work_date,
+        mode,
+        saved: validEntries.length,
+        deleted: result.deleted,
+        skipped: Math.max(0, rawEntries.length - validEntries.length),
+        rows,
+      });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
   // PATCH /api/maintenance/mechanic-labor/:id
   app.patch("/mechanic-labor/:id", async (req, reply) => {
     try {

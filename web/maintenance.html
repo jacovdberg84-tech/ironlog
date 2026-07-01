@@ -1276,8 +1276,8 @@
           </div>
         </div>
         <p class="muted" style="margin-top:0;">
-          Log technician hours per plant per day — e.g. <strong>20 Jun 2026</strong>: Sergio 0.5h on A300AM (startup inspection), Charles 4h on F501AM (500hr service).
-          Export includes monthly tabs January–December.
+          Log all technician work for a day on one sheet — add multiple rows per tech, then <strong>Save all</strong> once.
+          Example <strong>20 Jun 2026</strong>: Sergio 0.5h A300AM (startup inspection), Charles 4h F501AM (500hr service), and more rows as needed.
         </p>
 
         <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
@@ -1294,40 +1294,48 @@
         </div>
 
         <hr class="hr-soft" />
-        <h4 style="margin:0 0 8px 0;">Add / edit entry</h4>
-        <input id="mcEditId" type="hidden" value="" />
-        <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
-          <label>
-            Technician *
-            <select id="mcTechnician" style="min-width:180px;"></select>
-          </label>
-          <label>
-            Hours *
-            <input id="mcHours" type="number" min="0" step="0.25" placeholder="e.g. 4" class="w-120" />
-          </label>
-          <label>
-            Plant / asset *
-            <input id="mcAssetCode" type="text" list="mcAssetList" placeholder="e.g. A300AM" class="w-140" autocomplete="off" />
-            <datalist id="mcAssetList"></datalist>
-          </label>
-          <label>
-            Rate ($/hr)
-            <input id="mcEntryRate" type="number" min="0" step="0.01" placeholder="Default" class="w-120" />
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+          <h4 style="margin:0;">Daily entry sheet</h4>
+          <div id="mcTechChips" class="row stack-10" style="flex-wrap:wrap;"></div>
+        </div>
+        <div class="row stack-10" style="flex-wrap:wrap; margin-bottom:10px;">
+          <button type="button" id="mcAddRowBtn">+ Add row</button>
+          <button type="button" id="mcAddRowPerTechBtn">+ Row per technician</button>
+          <button type="button" id="mcAdd5RowsBtn">+ 5 blank rows</button>
+          <button type="button" id="mcLoadDayBtn" class="btn-secondary">Load saved day into sheet</button>
+          <button type="button" id="mcClearDraftBtn" class="btn-secondary">Clear sheet</button>
+        </div>
+        <div style="overflow:auto;">
+          <table class="gridTable" style="min-width:1080px;">
+            <thead>
+              <tr>
+                <th>Technician</th>
+                <th style="text-align:right; width:90px;">Hours</th>
+                <th>Plant no</th>
+                <th>Reason / job</th>
+                <th style="text-align:right; width:100px;">Rate</th>
+                <th style="width:70px;"></th>
+              </tr>
+            </thead>
+            <tbody id="mcDraftBody">
+              <tr><td colspan="6" class="muted">Click <strong>+ Row per technician</strong> or <strong>+ Add row</strong> to start.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="row stack-10" style="margin-top:12px; flex-wrap:wrap; align-items:center;">
+          <button type="button" id="mcSaveAllBtn">Save all rows</button>
+          <label style="display:flex; align-items:center; gap:8px;">
+            <input id="mcReplaceDay" type="checkbox" />
+            Replace existing entries for this date
           </label>
         </div>
-        <label>
-          Reason / job description *
-          <input id="mcReason" type="text" placeholder="e.g. 500hr service, startup inspection" style="width:100%;" />
-        </label>
-        <div class="row stack-10">
-          <button type="button" id="mcSaveEntryBtn">Save entry</button>
-          <button type="button" id="mcClearFormBtn" class="btn-secondary">Clear form</button>
-        </div>
-        <div id="mcFormMsg" class="muted"></div>
+        <datalist id="mcAssetList"></datalist>
+        <div id="mcFormMsg" class="muted" style="margin-top:8px;"></div>
 
         <div id="mcDaySummary" class="row stack-10" style="margin-top:12px; flex-wrap:wrap;"></div>
 
-        <div style="overflow:auto; margin-top:12px;">
+        <h4 style="margin:16px 0 8px 0;">Saved for this date</h4>
+        <div style="overflow:auto;">
           <table class="gridTable" style="min-width:980px;">
             <thead>
               <tr>
@@ -2025,6 +2033,6 @@
   <script src="./undercarriage-diagrams.js?v=1"></script>
   <script src="./undercarriage.js?v=5"></script>
   <script src="./tyre-inspection-qr.js?v=1"></script>
-  <script src="./maintenance.js?v=36"></script>
+  <script src="./maintenance.js?v=37"></script>
 </body>
 </html>
