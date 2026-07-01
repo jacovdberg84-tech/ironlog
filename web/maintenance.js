@@ -7195,6 +7195,47 @@ async function downloadMcYearXlsx() {
   }
 }
 
+async function downloadMcTimesheetXlsx() {
+  const year = mcYearValue();
+  const syntheticThrough = String(document.getElementById("mcSyntheticThrough")?.value || "2026-03-31").trim();
+  const msg = document.getElementById("mcFormMsg");
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = `Generating ${year} mechanics timesheet…`;
+  }
+  try {
+    const qs = new URLSearchParams({
+      year: String(year),
+      synthetic_through: syntheticThrough,
+    });
+    const res = await fetch(`${API}/maintenance/mechanic-labor/timesheet.xlsx?${qs.toString()}`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Download failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `mechanics-timesheet-${year}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = `Downloaded mechanics timesheet for ${year} (synthetic through ${syntheticThrough}).`;
+    }
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = e.message || String(e);
+    }
+  }
+}
+
 async function initMechanicsCostSection() {
   syncMcDateBounds();
   await loadMcTechnicians();
@@ -8168,6 +8209,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (msg) { msg.className = "message-error"; msg.textContent = e.message || String(e); }
   }));
   document.getElementById("mcDownloadXlsxBtn")?.addEventListener("click", () => downloadMcYearXlsx());
+  document.getElementById("mcDownloadTimesheetBtn")?.addEventListener("click", () => downloadMcTimesheetXlsx());
   document.getElementById("mcTechChips")?.addEventListener("click", (evt) => {
     const btn = evt.target?.closest?.("button[data-mc-chip-tech]");
     if (!btn) return;

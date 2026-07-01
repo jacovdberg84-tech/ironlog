@@ -23,6 +23,10 @@ import {
   round2,
 } from "../utils/reliabilityMetrics.js";
 import { normalizeUploadedPhoto } from "../utils/imagePdf.js";
+import {
+  generateMechanicsTimesheet,
+  mechanicsTimesheetToExportRows,
+} from "../utils/mechanicsTimesheetGenerator.js";
 import { resolveStorageAbs as resolveStorageAbsPath, getDataRoot } from "../utils/storagePaths.js";
 import {
   buildDueListFromPlans,
@@ -11109,6 +11113,177 @@ export default async function maintenanceRoutes(app) {
       return reply
         .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         .header("Content-Disposition", `attachment; filename="IRONLOG_Mechanics_Cost_${year}.xlsx"`)
+        .send(buffer);
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  function ensureMechanicLaborExtendedColumns() {
+    for (const [col, def] of [
+      ["category", "category TEXT"],
+      ["time_started", "time_started TEXT"],
+      ["time_finished", "time_finished TEXT"],
+      ["job_card_no", "job_card_no TEXT"],
+      ["smr", "smr REAL"],
+    ]) {
+      try {
+        const rows = db.prepare(`PRAGMA table_info(mechanic_labor_entries)`).all();
+        if (rows.length && !rows.some((r) => String(r.name) === col)) {
+          db.prepare(`ALTER TABLE mechanic_labor_entries ADD COLUMN ${def}`).run();
+        }
+      } catch {}
+    }
+  }
+
+  const MECHANICS_TIMESHEET_COLS = [
+    { header: "Date", key: "Date", width: 18 },
+    { header: "Plant no", key: "Plant no", width: 14 },
+    { header: "Work Hours", key: "Work Hours", width: 11 },
+    { header: "Category", key: "Category", width: 12 },
+    { header: "Description Of Work Carried Out", key: "Description Of Work Carried Out", width: 42 },
+    { header: "Time Started", key: "Time Started", width: 12 },
+    { header: "Time finished", key: "Time finished", width: 12 },
+    { header: "Technician", key: "Technician", width: 14 },
+    { header: "Job Card No", key: "Job Card No", width: 12 },
+    { header: "SMR", key: "SMR", width: 10 },
+  ];
+
+  function parseMechanicsTimesheetRange(req) {
+    const year = String(req.query?.year || "").trim();
+    let from = String(req.query?.from || "").trim();
+    let to = String(req.query?.to || "").trim();
+    if (/^\d{4}$/.test(year)) {
+      from = `${year}-01-01`;
+      to = `${year}-12-31`;
+    }
+    const syntheticThrough = String(req.query?.synthetic_through || req.query?.syntheticThrough || "2026-03-31").trim();
+    const minTechHours = Number(req.query?.min_tech_hours || req.query?.minTechHours || 6);
+    return { from, to, syntheticThrough, minTechHours };
+  }
+
+  function buildMechanicsTimesheetWorkbook(exportRows, meta) {
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "IRONLOG";
+    wb.created = new Date();
+
+    const wsLog = wb.addWorksheet("Mechanics log", { views: [{ state: "frozen", ySplit: 1 }] });
+    wsLog.columns = MECHANICS_TIMESHEET_COLS;
+    for (const r of exportRows) {
+      wsLog.addRow({
+        Date: r.Date,
+        "Plant no": r["Plant no"],
+        "Work Hours": r["Work Hours"],
+        Category: r.Category,
+        "Description Of Work Carried Out": r["Description Of Work Carried Out"],
+        "Time Started": r["Time Started"],
+        "Time finished": r["Time finished"],
+        Technician: r.Technician,
+        "Job Card No": r["Job Card No"],
+        SMR: r.SMR != null ? r.SMR : "",
+      });
+    }
+    wsLog.getRow(1).font = { bold: true };
+
+    const yearMatch = String(meta.from || "").match(/^(\d{4})/);
+    const year = yearMatch ? yearMatch[1] : "report";
+    for (let m = 1; m <= 12; m += 1) {
+      const monthKey = `${year}-${String(m).padStart(2, "0")}`;
+      const monthRows = exportRows.filter((r) => String(r.work_date || "").startsWith(monthKey));
+      if (!monthRows.length) continue;
+      const ws = wb.addWorksheet(MECHANIC_MONTH_NAMES[m - 1], { views: [{ state: "frozen", ySplit: 1 }] });
+      ws.columns = MECHANICS_TIMESHEET_COLS;
+      for (const r of monthRows) {
+        ws.addRow({
+          Date: r.Date,
+          "Plant no": r["Plant no"],
+          "Work Hours": r["Work Hours"],
+          Category: r.Category,
+          "Description Of Work Carried Out": r["Description Of Work Carried Out"],
+          "Time Started": r["Time Started"],
+          "Time finished": r["Time finished"],
+          Technician: r.Technician,
+          "Job Card No": r["Job Card No"],
+          SMR: r.SMR != null ? r.SMR : "",
+        });
+      }
+      ws.getRow(1).font = { bold: true };
+    }
+
+    const wsInfo = wb.addWorksheet("Info");
+    wsInfo.columns = [
+      { header: "Field", key: "field", width: 28 },
+      { header: "Value", key: "value", width: 36 },
+    ];
+    wsInfo.addRows([
+      { field: "Period", value: `${meta.from} to ${meta.to}` },
+      { field: "Synthetic fill through", value: meta.synthetic_through },
+      { field: "Min technician hours / day", value: meta.min_tech_hours },
+      { field: "Startup fleet (ADT / loader / excavator / crusher+screen)", value: `${meta.startup_fleet.dumptrucks} / ${meta.startup_fleet.loaders} / ${meta.startup_fleet.excavators} / ${meta.startup_fleet.crushers_screens}` },
+      { field: "Days from saved entries", value: meta.days_from_saved },
+      { field: "Days generated (synthetic + breakdowns)", value: meta.days_synthetic },
+      { field: "Total rows", value: meta.row_count },
+      { field: "Startup techs", value: "ADT: Sergio & Arnold | Loaders: Ronnie | Excavators: Charles | Crushers/screens: Moses" },
+    ]);
+    wsInfo.getRow(1).font = { bold: true };
+
+    return { wb, year };
+  }
+
+  // GET /api/maintenance/mechanic-labor/timesheet?from=&to=&synthetic_through=2026-03-31
+  app.get("/mechanic-labor/timesheet", async (req, reply) => {
+    try {
+      if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_EDITORS)) return;
+      ensureMechanicLaborExtendedColumns();
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const { from, to, syntheticThrough, minTechHours } = parseMechanicsTimesheetRange(req);
+      if (!isDate(from) || !isDate(to)) {
+        return reply.code(400).send({ ok: false, error: "from and to (YYYY-MM-DD), or year=YYYY, required" });
+      }
+      if (from > to) {
+        return reply.code(400).send({ ok: false, error: "from must be on or before to" });
+      }
+
+      const { rows, meta } = generateMechanicsTimesheet(db, {
+        from,
+        to,
+        syntheticThrough,
+        siteCode: site_code,
+        minTechHours,
+      });
+      const exportRows = mechanicsTimesheetToExportRows(rows);
+      return reply.send({ ok: true, meta, rows: exportRows });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // GET /api/maintenance/mechanic-labor/timesheet.xlsx?year=2026&synthetic_through=2026-03-31
+  app.get("/mechanic-labor/timesheet.xlsx", async (req, reply) => {
+    try {
+      if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_EDITORS)) return;
+      ensureMechanicLaborExtendedColumns();
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const { from, to, syntheticThrough, minTechHours } = parseMechanicsTimesheetRange(req);
+      if (!isDate(from) || !isDate(to)) {
+        return reply.code(400).send({ ok: false, error: "from and to (YYYY-MM-DD), or year=YYYY, required" });
+      }
+
+      const { rows, meta } = generateMechanicsTimesheet(db, {
+        from,
+        to,
+        syntheticThrough,
+        siteCode: site_code,
+        minTechHours,
+      });
+      const exportRows = mechanicsTimesheetToExportRows(rows);
+      const { wb, year } = buildMechanicsTimesheetWorkbook(exportRows, meta);
+      const buffer = await wb.xlsx.writeBuffer();
+      return reply
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header("Content-Disposition", `attachment; filename="IRONLOG_Mechanics_Timesheet_${year}.xlsx"`)
         .send(buffer);
     } catch (err) {
       req.log.error(err);

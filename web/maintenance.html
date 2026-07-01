@@ -1280,6 +1280,23 @@
           Example <strong>20 Jun 2026</strong>: Sergio 0.5h A300AM (startup inspection), Charles 4h F501AM (500hr service), and more rows as needed.
         </p>
 
+        <div class="card stack-16" style="background:var(--surface-2, rgba(255,255,255,0.03)); padding:14px;">
+          <h4 style="margin:0 0 8px 0;">Generate mechanics timesheet (Excel)</h4>
+          <p class="muted small" style="margin:0 0 10px 0;">
+            Builds a log like your workshop sheet: daily <strong>0.5h startup inspections</strong> per ADT (Sergio &amp; Arnold), loader (Ronnie), excavator (Charles), and crusher/screen (Moses);
+            real <strong>breakdowns</strong> from IRONLOG; synthetic fill to <strong>6h minimum</strong> per technician.
+            Jan–Mar (or any range before <em>synthetic fill through</em>) is generated when you had no manual entries yet.
+            From April onward, saved daily entries are used when present.
+          </p>
+          <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
+            <label>
+              Synthetic fill through
+              <input id="mcSyntheticThrough" type="date" class="w-160" value="2026-03-31" />
+            </label>
+            <button type="button" id="mcDownloadTimesheetBtn">Download timesheet XLSX</button>
+          </div>
+        </div>
+
         <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
           <label>
             Default labor rate ($/hr)
@@ -2033,6 +2050,6 @@
   <script src="./undercarriage-diagrams.js?v=1"></script>
   <script src="./undercarriage.js?v=5"></script>
   <script src="./tyre-inspection-qr.js?v=1"></script>
-  <script src="./maintenance.js?v=37"></script>
+  <script src="./maintenance.js?v=38"></script>
 </body>
 </html>
