@@ -7516,6 +7516,234 @@ export default async function reportsRoutes(app) {
   });
 
   // =========================
+  // PLANT LABOR & OIL (annual workbook — Plant No / Mechanics style)
+  // GET /api/reports/plant-labor-oil.xlsx?year=2026&site_code=main
+  // =========================
+  app.get("/plant-labor-oil.xlsx", async (req, reply) => {
+    const year = String(req.query?.year || new Date().getFullYear()).trim();
+    if (!/^\d{4}$/.test(year)) {
+      return reply.code(400).send({ error: "year (YYYY) required" });
+    }
+    const siteCode = String(req.query?.site_code || req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
+    const start = `${year}-01-01`;
+    const end = `${year}-12-31`;
+    const defaults = costDefaults();
+    const laborRate = Number(defaults.labor_cost_per_hour_default || 35);
+    const lubeDefault = Number(defaults.lube_cost_per_qty_default || 4);
+
+    const woOilStockSql = `(
+      SELECT COALESCE(SUM(ABS(sm.quantity) * COALESCE(NULLIF(sm.unit_cost, 0), p.unit_cost, ${lubeDefault})), 0)
+      FROM stock_movements sm
+      JOIN parts p ON p.id = sm.part_id
+      WHERE sm.reference = ('work_order:' || w.id)
+        AND sm.movement_type = 'out'
+        AND (
+          LOWER(COALESCE(p.consumable_kind, '')) IN ('oil', 'lube', 'lubricant', 'hydraulic', 'hydraulic_oil', 'coolant', 'grease')
+          OR LOWER(COALESCE(p.part_name, '')) LIKE '%oil%'
+          OR LOWER(COALESCE(p.part_name, '')) LIKE '%lube%'
+          OR LOWER(COALESCE(p.part_name, '')) LIKE '%hydraulic%'
+        )
+    )`;
+
+    const woLines = db.prepare(`
+      SELECT
+        w.id AS work_order_id,
+        strftime('%Y-%m', COALESCE(w.completed_at, w.closed_at, w.opened_at)) AS year_month,
+        CAST(strftime('%m', COALESCE(w.completed_at, w.closed_at, w.opened_at)) AS INTEGER) AS month_num,
+        COALESCE(w.site_code, 'main') AS site_code,
+        a.asset_code AS plant_no,
+        a.asset_name,
+        a.category,
+        COALESCE(NULLIF(TRIM(w.assigned_artisan_name), ''), NULLIF(TRIM(w.artisan_name), ''), '') AS technician,
+        COALESCE(w.labor_hours, 0) AS labor_hours,
+        COALESCE(w.labor_rate_per_hour, ?) AS labor_rate_per_hour,
+        COALESCE(w.oil_cost, 0) AS manual_oil_cost,
+        ${woOilStockSql} AS issued_oil_cost,
+        (COALESCE(w.oil_cost, 0) + ${woOilStockSql}) AS total_oil_cost,
+        (COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, ?)) AS labor_cost_usd,
+        w.source,
+        w.status,
+        DATE(COALESCE(w.completed_at, w.closed_at, w.opened_at)) AS work_date
+      FROM work_orders w
+      JOIN assets a ON a.id = w.asset_id
+      WHERE DATE(COALESCE(w.completed_at, w.closed_at)) BETWEEN ? AND ?
+        AND w.status IN ('completed', 'approved', 'closed')
+        AND LOWER(TRIM(COALESCE(w.site_code, 'main'))) = ?
+      ORDER BY work_date ASC, w.id ASC
+    `).all(laborRate, laborRate, start, end, siteCode);
+
+    const monthNames = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+    const plantYearMap = new Map();
+    const monthlyMap = new Map();
+    for (const r of woLines) {
+      const plant = String(r.plant_no || "");
+      if (!plantYearMap.has(plant)) {
+        plantYearMap.set(plant, {
+          plant_no: plant,
+          asset_name: r.asset_name,
+          category: r.category,
+          labor_hours: 0,
+          labor_cost_usd: 0,
+          oil_cost_usd: 0,
+          work_orders: 0,
+        });
+      }
+      const py = plantYearMap.get(plant);
+      py.labor_hours += Number(r.labor_hours || 0);
+      py.labor_cost_usd += Number(r.labor_cost_usd || 0);
+      py.oil_cost_usd += Number(r.total_oil_cost || 0);
+      py.work_orders += 1;
+
+      const mKey = `${r.year_month}|${plant}`;
+      if (!monthlyMap.has(mKey)) {
+        monthlyMap.set(mKey, {
+          month: monthNames[Number(r.month_num || 0)] || String(r.year_month || ""),
+          year_month: r.year_month,
+          site: r.site_code,
+          plant_no: plant,
+          asset_name: r.asset_name,
+          labor_hours: 0,
+          labor_cost_usd: 0,
+          oil_cost_usd: 0,
+        });
+      }
+      const mo = monthlyMap.get(mKey);
+      mo.labor_hours += Number(r.labor_hours || 0);
+      mo.labor_cost_usd += Number(r.labor_cost_usd || 0);
+      mo.oil_cost_usd += Number(r.total_oil_cost || 0);
+    }
+
+    const plantSummary = Array.from(plantYearMap.values())
+      .map((r) => ({
+        ...r,
+        labor_hours: Number(r.labor_hours.toFixed(2)),
+        labor_cost_usd: Number(r.labor_cost_usd.toFixed(2)),
+        oil_cost_usd: Number(r.oil_cost_usd.toFixed(2)),
+      }))
+      .sort((a, b) => a.plant_no.localeCompare(b.plant_no));
+
+    const monthlyRows = Array.from(monthlyMap.values())
+      .map((r) => ({
+        ...r,
+        labor_hours: Number(r.labor_hours.toFixed(2)),
+        labor_cost_usd: Number(r.labor_cost_usd.toFixed(2)),
+        oil_cost_usd: Number(r.oil_cost_usd.toFixed(2)),
+      }))
+      .sort((a, b) => String(a.year_month).localeCompare(String(b.year_month)) || a.plant_no.localeCompare(b.plant_no));
+
+    const technicians = db.prepare(`
+      SELECT DISTINCT COALESCE(NULLIF(TRIM(assigned_artisan_name), ''), NULLIF(TRIM(artisan_name), '')) AS technician_name
+      FROM work_orders
+      WHERE DATE(COALESCE(completed_at, closed_at)) BETWEEN ? AND ?
+        AND TRIM(COALESCE(NULLIF(TRIM(assigned_artisan_name), ''), NULLIF(TRIM(artisan_name), ''), '')) <> ''
+      ORDER BY technician_name ASC
+    `).all(start, end);
+
+    const maintPlans = hasTable("maintenance_plans")
+      ? db.prepare(`
+          SELECT
+            a.asset_code AS plant_no,
+            a.asset_name,
+            a.category,
+            mp.service_name,
+            mp.interval_hours,
+            mp.last_service_hours,
+            mp.active
+          FROM maintenance_plans mp
+          JOIN assets a ON a.id = mp.asset_id
+          WHERE COALESCE(mp.active, 1) = 1
+          ORDER BY a.asset_code ASC, mp.service_name ASC
+        `).all()
+      : [];
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "IRONLOG";
+    wb.created = new Date();
+
+    const wsHead = wb.addWorksheet("Plant Summary");
+    wsHead.columns = [
+      { header: "Plant No", key: "plant_no", width: 14 },
+      { header: "Description", key: "asset_name", width: 28 },
+      { header: "Category", key: "category", width: 14 },
+      { header: "Total Hours Worked", key: "labor_hours", width: 18 },
+      { header: "Labor USD", key: "labor_cost_usd", width: 14 },
+      { header: "Oil USD", key: "oil_cost_usd", width: 12 },
+      { header: "Work Orders", key: "work_orders", width: 12 },
+    ];
+    wsHead.getRow(1).font = { bold: true };
+    wsHead.addRows(plantSummary.length ? plantSummary : [{
+      plant_no: "-", asset_name: "No labor/oil on work orders for year", category: "", labor_hours: 0, labor_cost_usd: 0, oil_cost_usd: 0, work_orders: 0,
+    }]);
+
+    const wsMonthly = wb.addWorksheet("Monthly by Plant");
+    wsMonthly.columns = [
+      { header: "Month", key: "month", width: 14 },
+      { header: "Year-Month", key: "year_month", width: 12 },
+      { header: "Site", key: "site", width: 10 },
+      { header: "Plant No", key: "plant_no", width: 14 },
+      { header: "Description", key: "asset_name", width: 24 },
+      { header: "Total Hours Worked", key: "labor_hours", width: 18 },
+      { header: "Labor USD", key: "labor_cost_usd", width: 14 },
+      { header: "Oil USD", key: "oil_cost_usd", width: 12 },
+    ];
+    wsMonthly.getRow(1).font = { bold: true };
+    wsMonthly.addRows(monthlyRows);
+
+    const wsWo = wb.addWorksheet("Work Orders");
+    wsWo.columns = [
+      { header: "WO #", key: "work_order_id", width: 8 },
+      { header: "Date", key: "work_date", width: 12 },
+      { header: "Month", key: "year_month", width: 10 },
+      { header: "Plant No", key: "plant_no", width: 14 },
+      { header: "Technician", key: "technician", width: 18 },
+      { header: "Repair Hours", key: "labor_hours", width: 14 },
+      { header: "Labor Rate", key: "labor_rate_per_hour", width: 12 },
+      { header: "Labor USD", key: "labor_cost_usd", width: 12 },
+      { header: "Manual Oil USD", key: "manual_oil_cost", width: 14 },
+      { header: "Issued Oil USD", key: "issued_oil_cost", width: 14 },
+      { header: "Total Oil USD", key: "total_oil_cost", width: 14 },
+      { header: "Source", key: "source", width: 12 },
+      { header: "Status", key: "status", width: 12 },
+    ];
+    wsWo.getRow(1).font = { bold: true };
+    wsWo.addRows(woLines.map((r) => ({
+      ...r,
+      labor_hours: Number(Number(r.labor_hours || 0).toFixed(2)),
+      labor_rate_per_hour: Number(Number(r.labor_rate_per_hour || 0).toFixed(2)),
+      labor_cost_usd: Number(Number(r.labor_cost_usd || 0).toFixed(2)),
+      manual_oil_cost: Number(Number(r.manual_oil_cost || 0).toFixed(2)),
+      issued_oil_cost: Number(Number(r.issued_oil_cost || 0).toFixed(2)),
+      total_oil_cost: Number(Number(r.total_oil_cost || 0).toFixed(2)),
+    })));
+
+    const wsTech = wb.addWorksheet("Technicians");
+    wsTech.columns = [
+      { header: "Technician Name", key: "technician_name", width: 28 },
+    ];
+    wsTech.getRow(1).font = { bold: true };
+    wsTech.addRows(technicians);
+
+    const wsSched = wb.addWorksheet("Maintenance Schedule");
+    wsSched.columns = [
+      { header: "Plant No", key: "plant_no", width: 14 },
+      { header: "Description", key: "asset_name", width: 24 },
+      { header: "Category", key: "category", width: 14 },
+      { header: "Service", key: "service_name", width: 22 },
+      { header: "Interval Hrs", key: "interval_hours", width: 12 },
+      { header: "Last Service Hrs", key: "last_service_hours", width: 16 },
+    ];
+    wsSched.getRow(1).font = { bold: true };
+    wsSched.addRows(maintPlans);
+
+    const buffer = await wb.xlsx.writeBuffer();
+    reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header("Content-Disposition", `attachment; filename="IRONLOG_Plant_Labor_Oil_${year}_${siteCode}.xlsx"`)
+      .send(Buffer.from(buffer));
+  });
+
+  // =========================
   // MAINTENANCE COST BY EQUIPMENT (XLSX/PDF)
   // =========================
   // GET /api/reports/maintenance-cost-by-equipment.xlsx?month=YYYY-MM

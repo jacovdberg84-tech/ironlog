@@ -189,6 +189,51 @@ export default async function workOrderRoutes(app) {
   ensureColumn("work_orders", "site_code", "site_code TEXT DEFAULT 'main'");
   ensureColumn("work_orders", "repair_progress", "repair_progress TEXT");
   ensureColumn("work_orders", "repair_progress_at", "repair_progress_at TEXT");
+  ensureColumn("work_orders", "labor_hours", "labor_hours REAL DEFAULT 0");
+  ensureColumn("work_orders", "labor_rate_per_hour", "labor_rate_per_hour REAL");
+  ensureColumn("work_orders", "oil_cost", "oil_cost REAL DEFAULT 0");
+  function readLaborRateDefault() {
+    try {
+      const row = db.prepare(`SELECT value FROM cost_settings WHERE key = 'labor_cost_per_hour_default' LIMIT 1`).get();
+      const v = Number(row?.value);
+      return Number.isFinite(v) && v > 0 ? v : 35;
+    } catch {
+      return 35;
+    }
+  }
+
+  function isOilPartRow(partName, partCode, consumableKind) {
+    const kind = String(consumableKind || "").trim().toLowerCase();
+    if (["oil", "lube", "lubricant", "hydraulic", "hydraulic_oil", "coolant", "grease"].includes(kind)) return true;
+    const txt = `${String(partName || "")} ${String(partCode || "")}`.toLowerCase();
+    return /\boil\b|\blube\b|\bgrease\b|\bhydraulic\b/.test(txt);
+  }
+
+  function sumIssuedOilCost(movements) {
+    return (Array.isArray(movements) ? movements : []).reduce((sum, m) => {
+      if (String(m.movement_type || "").toLowerCase() !== "out") return sum;
+      if (!isOilPartRow(m.part_name, m.part_code, m.consumable_kind)) return sum;
+      const qty = Math.abs(Number(m.quantity || 0));
+      const unit = Number(m.unit_cost || 0);
+      return sum + (qty * (Number.isFinite(unit) ? unit : 0));
+    }, 0);
+  }
+
+  function enrichWorkOrderCosts(wo, movements = []) {
+    const laborHours = Number(wo?.labor_hours || 0);
+    const laborRate = Number.isFinite(Number(wo?.labor_rate_per_hour))
+      ? Number(wo.labor_rate_per_hour)
+      : readLaborRateDefault();
+    const manualOil = Number(wo?.oil_cost || 0);
+    const issuedOil = sumIssuedOilCost(movements);
+    return {
+      ...wo,
+      labor_rate_per_hour: laborRate,
+      labor_cost: Number((laborHours * laborRate).toFixed(2)),
+      issued_oil_cost: Number(issuedOil.toFixed(2)),
+      total_oil_cost: Number((manualOil + issuedOil).toFixed(2)),
+    };
+  }
   db.prepare(`
     CREATE TABLE IF NOT EXISTS approval_requests (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -434,6 +479,9 @@ export default async function workOrderRoutes(app) {
         w.started_at,
         w.repair_progress,
         w.repair_progress_at,
+        w.labor_hours,
+        w.labor_rate_per_hour,
+        w.oil_cost,
         w.completed_at,
         w.artisan_name,
         w.supervisor_name,
@@ -1300,6 +1348,11 @@ export default async function workOrderRoutes(app) {
         WHERE id = ?
       `).run(nextStatus, artisan_name, id);
     } else if (nextStatus === "completed") {
+      const labor_hours = req.body?.labor_hours != null ? Math.max(0, Number(req.body.labor_hours)) : null;
+      const labor_rate_per_hour = req.body?.labor_rate_per_hour != null
+        ? Math.max(0, Number(req.body.labor_rate_per_hour))
+        : null;
+      const oil_cost = req.body?.oil_cost != null ? Math.max(0, Number(req.body.oil_cost)) : null;
       db.prepare(`
         UPDATE work_orders
         SET
@@ -1307,9 +1360,12 @@ export default async function workOrderRoutes(app) {
           completed_at = datetime('now'),
           completion_notes = COALESCE(?, completion_notes),
           artisan_name = COALESCE(?, artisan_name, assigned_artisan_name),
-          artisan_signed_at = datetime('now')
+          artisan_signed_at = datetime('now'),
+          labor_hours = COALESCE(?, labor_hours),
+          labor_rate_per_hour = COALESCE(?, labor_rate_per_hour),
+          oil_cost = COALESCE(?, oil_cost)
         WHERE id = ?
-      `).run(nextStatus, completion_notes, artisan_name, id);
+      `).run(nextStatus, completion_notes, artisan_name, labor_hours, labor_rate_per_hour, oil_cost, id);
     } else if (nextStatus === "approved") {
       db.prepare(`
         UPDATE work_orders
@@ -1398,6 +1454,73 @@ export default async function workOrderRoutes(app) {
     });
   });
 
+  // POST /api/workorders/:id/costs — repair hours, labor rate, manual oil cost, technician
+  app.post("/:id/costs", async (req, reply) => {
+    const role = getRole(req);
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+
+    const wo = db.prepare(`
+      SELECT id, status, assigned_artisan_name
+      FROM work_orders
+      WHERE id = ?
+    `).get(id);
+    if (!wo) return reply.code(404).send({ error: "work order not found" });
+
+    const status = String(wo.status || "").toLowerCase();
+    if (status === "closed") return reply.code(409).send({ error: "cannot edit costs on a closed work order" });
+
+    const userName = String(req.headers["x-user-name"] || "").trim();
+    const isSupervisor = ["admin", "supervisor"].includes(role);
+    const isAssignedTech = role === "artisan" && technicianMatchesUser(wo.assigned_artisan_name, userName);
+    if (!isSupervisor && !isAssignedTech) {
+      return reply.code(403).send({ error: "only a supervisor or assigned technician can update repair costs" });
+    }
+
+    const body = req.body || {};
+    const labor_hours = body.labor_hours != null ? Math.max(0, Number(body.labor_hours)) : null;
+    const labor_rate_per_hour = body.labor_rate_per_hour != null
+      ? Math.max(0, Number(body.labor_rate_per_hour))
+      : null;
+    const oil_cost = body.oil_cost != null ? Math.max(0, Number(body.oil_cost)) : null;
+    let assigned_artisan_name = null;
+    if (body.assigned_artisan_name != null) {
+      if (!isSupervisor) return reply.code(403).send({ error: "only a supervisor can reassign the technician" });
+      assigned_artisan_name = resolveAssignedUsername(String(body.assigned_artisan_name || "").trim());
+    }
+
+    db.prepare(`
+      UPDATE work_orders
+      SET
+        labor_hours = COALESCE(?, labor_hours),
+        labor_rate_per_hour = COALESCE(?, labor_rate_per_hour),
+        oil_cost = COALESCE(?, oil_cost),
+        assigned_artisan_name = COALESCE(?, assigned_artisan_name)
+      WHERE id = ?
+    `).run(
+      labor_hours,
+      labor_rate_per_hour,
+      oil_cost,
+      assigned_artisan_name,
+      id,
+    );
+
+    writeAudit(db, req, {
+      module: "workorders",
+      action: "costs_update",
+      entity_type: "work_order",
+      entity_id: id,
+      payload: {
+        labor_hours,
+        labor_rate_per_hour,
+        oil_cost,
+        assigned_artisan_name,
+      },
+    });
+
+    return reply.send({ ok: true, id, default_labor_rate: readLaborRateDefault() });
+  });
+
   // Work order detail (includes linked breakdown if source=breakdown)
   app.get("/:id", async (req, reply) => {
     const id = Number(req.params.id);
@@ -1447,14 +1570,23 @@ export default async function workOrderRoutes(app) {
         sm.movement_type,
         sm.reference,
         p.part_code,
-        p.part_name
+        p.part_name,
+        p.consumable_kind,
+        p.unit_cost
       FROM stock_movements sm
       JOIN parts p ON p.id = sm.part_id
       WHERE sm.reference = ?
       ORDER BY sm.id ASC
     `).all(`work_order:${id}`);
 
-    return { work_order: wo, breakdown, parts_issued: movements };
+    const work_order = enrichWorkOrderCosts(wo, movements);
+
+    return {
+      work_order,
+      breakdown,
+      parts_issued: movements,
+      default_labor_rate: readLaborRateDefault(),
+    };
   });
 
   app.get("/:id/qr-profile", async (req, reply) => {

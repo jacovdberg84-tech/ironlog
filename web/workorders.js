@@ -4,6 +4,7 @@ let closingWorkOrderSource = "";
 let assigningWorkOrderId = null;
 let completingWorkOrderId = null;
 let currentDetailWorkOrderId = null;
+let lastWorkOrderDetail = null;
 let stockCatalogCache = [];
 let technicianOptions = [];
 let lastCreatedRepairWoId = null;
@@ -180,6 +181,83 @@ function canEditRepairProgress(wo) {
   return isArtisanRole(role) && isAssignedToMe(wo) && s !== "open";
 }
 
+function canEditRepairCosts(wo) {
+  const s = String(wo?.status || "").toLowerCase();
+  if (s === "closed") return false;
+  if (isSupervisorRole(getSessionRole())) return true;
+  return isArtisanRole(getSessionRole()) && isAssignedToMe(wo);
+}
+
+function renderRepairCostsPanel(wo) {
+  const s = String(wo?.status || "").toLowerCase();
+  const canEdit = canEditRepairCosts(wo);
+  const laborHours = Number(wo?.labor_hours || 0);
+  const laborCost = Number(wo?.labor_cost || 0);
+  const totalOil = Number(wo?.total_oil_cost || 0);
+  const hasData = laborHours > 0 || laborCost > 0 || totalOil > 0 || Number(wo?.oil_cost || 0) > 0;
+  if (!canEdit && !hasData) return "";
+
+  const rate = Number.isFinite(Number(wo?.labor_rate_per_hour))
+    ? Number(wo.labor_rate_per_hour)
+    : Number(wo?.default_labor_rate || 0);
+  const manualOil = Number(wo?.oil_cost || 0);
+  const issuedOil = Number(wo?.issued_oil_cost || 0);
+  const tech = String(wo?.assigned_artisan_name || "").trim();
+  const inputStyle =
+    "width:100%;max-width:200px;padding:10px;border-radius:8px;border:1px solid #2b3f63;background:#0b1628;color:#e8eefc;";
+
+  if (!canEdit) {
+    return `
+    <div class="item" style="margin-top:12px;">
+      <h4 style="margin:0 0 8px 0;">Repair costs &amp; labor</h4>
+      <div><strong>Repair hours:</strong> ${laborHours > 0 ? laborHours : "—"}</div>
+      <div><strong>Labor rate:</strong> ${rate > 0 ? `$${rate.toFixed(2)}/hr` : "—"}</div>
+      <div><strong>Labor cost:</strong> $${laborCost.toFixed(2)}</div>
+      <div><strong>Manual oil cost:</strong> $${manualOil.toFixed(2)}</div>
+      <div><strong>Issued oil (stores):</strong> $${issuedOil.toFixed(2)}</div>
+      <div><strong>Total oil:</strong> $${totalOil.toFixed(2)}</div>
+      <div><strong>Technician:</strong> ${escapeHtml(tech || "—")}</div>
+    </div>`;
+  }
+
+  const hoursVal = laborHours > 0 ? laborHours : "";
+  const rateVal = rate > 0 ? rate : "";
+  const oilVal = manualOil > 0 ? manualOil : "";
+  const techField = isSupervisorRole(getSessionRole())
+    ? `<label style="display:flex;flex-direction:column;gap:6px;">
+        Technician
+        <select id="woRepairCostTechnician" style="padding:10px;border-radius:8px;border:1px solid #2b3f63;background:#0b1628;color:#e8eefc;min-width:200px;"></select>
+      </label>`
+    : `<div><strong>Technician:</strong> ${escapeHtml(tech || getSessionUser())}</div>`;
+
+  return `
+    <div class="item" style="margin-top:12px;">
+      <h4 style="margin:0 0 8px 0;">Repair costs &amp; labor <span class="muted" style="font-weight:normal;">(feeds Plant Labor &amp; Oil XLSX)</span></h4>
+      <div class="row" style="gap:12px;flex-wrap:wrap;align-items:flex-end;">
+        <label style="display:flex;flex-direction:column;gap:6px;">
+          Repair hours
+          <input id="woRepairCostHours" type="number" min="0" step="0.25" value="${hoursVal}" placeholder="e.g. 4.5" style="${inputStyle}" />
+        </label>
+        <label style="display:flex;flex-direction:column;gap:6px;">
+          Labor rate ($/hr)
+          <input id="woRepairCostRate" type="number" min="0" step="0.01" value="${rateVal}" placeholder="Default rate" style="${inputStyle}" />
+        </label>
+        <label style="display:flex;flex-direction:column;gap:6px;">
+          Manual oil cost (USD)
+          <input id="woRepairCostOil" type="number" min="0" step="0.01" value="${oilVal}" placeholder="Oil not via stores" style="${inputStyle}" />
+        </label>
+        ${techField}
+      </div>
+      <div class="muted small" style="margin-top:8px;">
+        Issued oil from stores: $${issuedOil.toFixed(2)} · Total oil: $${totalOil.toFixed(2)} · Labor cost: $${laborCost.toFixed(2)}
+      </div>
+      <div class="row" style="gap:8px;align-items:center;margin-top:8px;">
+        <button type="button" data-wo-save-costs="${wo.id}">Save costs</button>
+        <span id="woRepairCostsMsg"></span>
+      </div>
+    </div>`;
+}
+
 function renderRepairProgressPanel(wo) {
   const s = String(wo?.status || "").toLowerCase();
   if (!["open", "assigned", "in_progress"].includes(s)) return "";
@@ -253,6 +331,8 @@ function workOrderCard(wo) {
       <div><strong>Age:</strong> ${ageHours}h <span class="pill ${pClass}">${p}</span></div>
       <div><strong>Closed:</strong> ${wo.closed_at || "-"}</div>
       <div><strong>Technician:</strong> ${wo.assigned_artisan_name || wo.artisan_name || "Unassigned"}</div>
+      ${Number(wo.labor_hours || 0) > 0 ? `<div><strong>Repair hours:</strong> ${Number(wo.labor_hours).toFixed(2)}</div>` : ""}
+      ${Number(wo.total_oil_cost || wo.oil_cost || 0) > 0 ? `<div><strong>Oil cost:</strong> $${Number(wo.total_oil_cost || wo.oil_cost || 0).toFixed(2)}</div>` : ""}
       ${wo.repair_progress ? `<div><strong>Progress:</strong> ${escapeHtml(String(wo.repair_progress).slice(0, 160))}${String(wo.repair_progress).length > 160 ? "…" : ""}</div>` : ""}
       ${workflowStepsHtml(wo)}
       <div class="${statusClass(wo.status)}">${String(wo.status || "unknown").toUpperCase()}</div>
@@ -499,6 +579,7 @@ function renderDetail(payload) {
           <div><strong>Supervisor sign-off:</strong> ${wo.supervisor_name || "-"}</div>
           ${wo.job_description ? `<div style="margin-top:8px;"><strong>Job description / findings:</strong><pre style="white-space:pre-wrap; margin:4px 0 0 0; font-family:inherit;">${escapeHtml(wo.job_description)}</pre></div>` : ""}
           ${renderRepairProgressPanel(wo)}
+          ${renderRepairCostsPanel(wo)}
           <div><strong>Opened:</strong> ${wo.opened_at || "-"}</div>
           <div><strong>Closed:</strong> ${wo.closed_at || "-"}</div>
           ${workflowStepsHtml(wo)}
@@ -766,7 +847,13 @@ async function loadWorkOrderDetail(id) {
     if (!res.ok) {
       throw new Error(data.error || "Failed to load work order detail");
     }
+    lastWorkOrderDetail = data;
     detailEl.innerHTML = renderDetail(data);
+    const techSelect = document.getElementById("woRepairCostTechnician");
+    if (techSelect) {
+      await loadTechnicians();
+      fillTechnicianSelect(techSelect, data.work_order?.assigned_artisan_name || "");
+    }
     if (canIssueParts(getSessionRole())) {
       const select = document.getElementById("woIssuePartCode");
       const searchInput = document.getElementById("woIssueSearch");
@@ -1121,11 +1208,22 @@ function openCompleteModal(id) {
   const title = document.getElementById("woCompleteModalTitle");
   const notesEl = document.getElementById("woCompleteNotes");
   const artisanEl = document.getElementById("woCompleteArtisan");
+  const laborEl = document.getElementById("woCompleteLaborHours");
+  const oilEl = document.getElementById("woCompleteOilCost");
   const msgEl = document.getElementById("woCompleteModalMsg");
   if (!modal || !title || !notesEl || !artisanEl) return;
   title.textContent = `#${woId}`;
   notesEl.value = "";
   artisanEl.value = getSessionUser();
+  const wo = lastWorkOrderDetail?.work_order;
+  if (laborEl) {
+    laborEl.value =
+      wo && Number(wo.id) === woId && Number(wo.labor_hours || 0) > 0 ? String(wo.labor_hours) : "";
+  }
+  if (oilEl) {
+    oilEl.value =
+      wo && Number(wo.id) === woId && Number(wo.oil_cost || 0) > 0 ? String(wo.oil_cost) : "";
+  }
   if (msgEl) {
     msgEl.className = "";
     msgEl.textContent = "";
@@ -1148,6 +1246,8 @@ async function submitCompleteWorkOrder() {
   const confirmBtn = document.getElementById("woCompleteConfirmBtn");
   const completion_notes = String(notesEl?.value || "").trim();
   const artisan_name = String(artisanEl?.value || getSessionUser()).trim();
+  const laborRaw = String(document.getElementById("woCompleteLaborHours")?.value || "").trim();
+  const oilRaw = String(document.getElementById("woCompleteOilCost")?.value || "").trim();
   if (!completion_notes) {
     if (msgEl) {
       msgEl.className = "message-error";
@@ -1161,7 +1261,10 @@ async function submitCompleteWorkOrder() {
     msgEl.textContent = "Submitting...";
   }
   try {
-    await setWorkOrderStatus(woId, "completed", { completion_notes, artisan_name });
+    const extra = { completion_notes, artisan_name };
+    if (laborRaw !== "") extra.labor_hours = Math.max(0, Number(laborRaw));
+    if (oilRaw !== "") extra.oil_cost = Math.max(0, Number(oilRaw));
+    await setWorkOrderStatus(woId, "completed", extra);
     closeCompleteModal();
   } catch (err) {
     if (msgEl) {
@@ -1180,6 +1283,51 @@ async function approveWorkOrder(id) {
   const ok = window.confirm(`Approve completed work on WO #${woId}?`);
   if (!ok) return;
   await setWorkOrderStatus(woId, "approved", { supervisor_name });
+}
+
+async function saveRepairCosts(woId) {
+  const id = Number(woId || 0);
+  if (!id) return;
+  const hoursEl = document.getElementById("woRepairCostHours");
+  const rateEl = document.getElementById("woRepairCostRate");
+  const oilEl = document.getElementById("woRepairCostOil");
+  const techEl = document.getElementById("woRepairCostTechnician");
+  const msg = document.getElementById("woRepairCostsMsg");
+  const body = {};
+  const hoursRaw = String(hoursEl?.value ?? "").trim();
+  const rateRaw = String(rateEl?.value ?? "").trim();
+  const oilRaw = String(oilEl?.value ?? "").trim();
+  if (hoursRaw !== "") body.labor_hours = Math.max(0, Number(hoursRaw));
+  if (rateRaw !== "") body.labor_rate_per_hour = Math.max(0, Number(rateRaw));
+  if (oilRaw !== "") body.oil_cost = Math.max(0, Number(oilRaw));
+  if (techEl && isSupervisorRole(getSessionRole())) {
+    const tech = String(techEl.value || "").trim();
+    if (tech) body.assigned_artisan_name = tech;
+  }
+  if (msg) {
+    msg.className = "";
+    msg.textContent = "Saving...";
+  }
+  try {
+    const res = await fetch(`${API}/workorders/${id}/costs`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save costs");
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = "Costs saved.";
+    }
+    await fetchWorkOrders();
+    if (currentDetailWorkOrderId === id) await loadWorkOrderDetail(id);
+  } catch (err) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = err.message || String(err);
+    }
+  }
 }
 
 async function saveRepairProgress(woId) {
@@ -1252,6 +1400,43 @@ function downloadWorkOrderPdf(id) {
   const woId = Number(id || 0);
   if (!woId) return;
   window.open(`${API}/reports/workorder/${woId}.pdf?download=1`, "_blank");
+}
+
+async function downloadPlantLaborOilReport() {
+  const yearEl = document.getElementById("woLaborReportYear");
+  const msgEl = document.getElementById("woMessage");
+  const year = Number(yearEl?.value) || new Date().getFullYear();
+  if (msgEl) {
+    msgEl.className = "";
+    msgEl.textContent = "Generating report...";
+  }
+  try {
+    const res = await fetch(`${API}/reports/plant-labor-oil.xlsx?year=${encodeURIComponent(year)}`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Download failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `plant-labor-oil-${year}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    if (msgEl) {
+      msgEl.className = "message-success";
+      msgEl.textContent = `Downloaded Plant Labor & Oil report for ${year}.`;
+    }
+  } catch (err) {
+    if (msgEl) {
+      msgEl.className = "message-error";
+      msgEl.textContent = err.message || String(err);
+    }
+  }
 }
 
 function getRequestedWorkOrderId() {
@@ -1343,6 +1528,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("woRepairOpenWoBtn")?.addEventListener("click", () => {
     if (lastCreatedRepairWoId) loadWorkOrderDetail(lastCreatedRepairWoId);
   });
+  const laborYearEl = document.getElementById("woLaborReportYear");
+  if (laborYearEl && !laborYearEl.value) laborYearEl.value = String(new Date().getFullYear());
+  document.getElementById("woLaborReportBtn")?.addEventListener("click", () => downloadPlantLaborOilReport());
   if (closeModal) {
     closeModal.addEventListener("click", (evt) => {
       if (evt.target === closeModal) closeCloseModal();
@@ -1447,6 +1635,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const closeId = target.getAttribute("data-close-id");
       const closeSource = target.getAttribute("data-close-source");
       const saveProgressId = target.getAttribute("data-wo-save-progress");
+      const saveCostsId = target.getAttribute("data-wo-save-costs");
       if (issueId) {
         currentDetailWorkOrderId = Number(issueId);
         issueToWorkOrder();
@@ -1470,6 +1659,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       if (closeId) openCloseModalForRow(closeId, closeSource);
       if (saveProgressId) saveRepairProgress(saveProgressId).catch(() => {});
+      if (saveCostsId) saveRepairCosts(saveCostsId).catch(() => {});
     });
     detailEl.addEventListener("input", (evt) => {
       const target = evt.target;

@@ -67,6 +67,13 @@
         <button id="woAwaitingApprovalBtn" type="button">Awaiting Approval</button>
         <button id="woRefreshBtn">Refresh</button>
       </div>
+      <div class="row" style="gap:10px; align-items:flex-end; margin-top:10px; flex-wrap:wrap;">
+        <label>
+          Labor &amp; oil report year
+          <input id="woLaborReportYear" type="number" min="2020" max="2099" step="1" style="width:100px;" />
+        </label>
+        <button id="woLaborReportBtn" type="button">Download Plant Labor &amp; Oil XLSX</button>
+      </div>
       <div id="woMessage" style="margin-top:10px;"></div>
     </div>
 
@@ -181,6 +188,14 @@
     <div class="card" style="width:min(680px, 100%); max-height:90vh; overflow:auto;">
       <h3 style="margin-top:0;">Mark job complete <span id="woCompleteModalTitle"></span></h3>
       <label style="display:flex; flex-direction:column; gap:6px; margin-bottom:10px;">
+        Repair hours (labor)
+        <input id="woCompleteLaborHours" type="number" min="0" step="0.25" placeholder="e.g. 4.5" />
+      </label>
+      <label style="display:flex; flex-direction:column; gap:6px; margin-bottom:10px;">
+        Manual oil cost (USD)
+        <input id="woCompleteOilCost" type="number" min="0" step="0.01" placeholder="Oil not via stores issue" />
+      </label>
+      <label style="display:flex; flex-direction:column; gap:6px; margin-bottom:10px;">
         Completion notes *
         <textarea id="woCompleteNotes" rows="4" style="padding:10px; border-radius:8px; border:1px solid #2b3f63; background:#0b1628; color:#e8eefc;"></textarea>
       </label>
@@ -229,6 +244,6 @@
     </div>
   </div>
 
-  <script src="./workorders.js?v=5"></script>
+  <script src="./workorders.js?v=7"></script>
 </body>
 </html>
