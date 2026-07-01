@@ -105,6 +105,7 @@ function viewForSection(section) {
     "maintenance": "main",
     "service-history": "service-history",
     "maintenance-insights": "insights",
+    "mechanics-cost": "mc",
     "manager-inspections": "mi",
     "artisan-inspections": "ai",
     "weekly-forum": "wf",
@@ -168,6 +169,7 @@ function scrollToSection(section) {
           "hist": "histogramSection",
           "sync": "syncAdminSection",
           "insights": "maintenanceInsightsCard",
+          "mc": "mechanicsCostSection",
           "pto": "partsToOrderSection",
         };
         targetEl = document.getElementById(sectionMap[targetView]);
@@ -228,6 +230,9 @@ function refreshTopViewData(view) {
       break;
     case "pto":
       initPartsToOrderSection().catch(() => {});
+      break;
+    case "mc":
+      initMechanicsCostSection().catch(() => {});
       break;
     default:
       break;
@@ -2747,6 +2752,7 @@ function setTopView(view, section = "") {
   const hist = document.getElementById("histogramSection");
   const sync = document.getElementById("syncAdminSection");
   const pto = document.getElementById("partsToOrderSection");
+  const mc = document.getElementById("mechanicsCostSection");
   const planSection = document.querySelector("section.panel.page-section");
 
   if (section) currentMaintenanceSection = section;
@@ -2764,6 +2770,7 @@ function setTopView(view, section = "") {
   if (hist) hist.style.display = "none";
   if (sync) sync.style.display = "none";
   if (pto) pto.style.display = "none";
+  if (mc) mc.style.display = "none";
   if (planSection) planSection.style.display = "none";
 
   // Show the selected section
@@ -2806,6 +2813,9 @@ function setTopView(view, section = "") {
       break;
     case "pto":
       if (pto) pto.style.display = "block";
+      break;
+    case "mc":
+      if (mc) mc.style.display = "block";
       break;
   }
 
@@ -6701,6 +6711,362 @@ async function initPartsToOrderSection() {
   await loadPartsToOrderList();
 }
 
+let mcTechnicianOptions = [];
+let mcDayRowsCache = [];
+
+function mcYearValue() {
+  const y = Number(document.getElementById("mcReportYear")?.value || 0);
+  return Number.isFinite(y) && y >= 2020 ? y : new Date().getFullYear();
+}
+
+function syncMcDateBounds() {
+  const year = mcYearValue();
+  const dateEl = document.getElementById("mcWorkDate");
+  const yearEl = document.getElementById("mcReportYear");
+  if (yearEl && !yearEl.value) yearEl.value = String(year);
+  if (!dateEl) return;
+  dateEl.min = `${year}-01-01`;
+  dateEl.max = `${year}-12-31`;
+  const cur = String(dateEl.value || "").trim();
+  if (!cur || cur < dateEl.min || cur > dateEl.max) {
+    const today = new Date().toISOString().slice(0, 10);
+    dateEl.value = today >= dateEl.min && today <= dateEl.max ? today : dateEl.min;
+  }
+}
+
+function fillMcTechnicianSelect(selected = "") {
+  const sel = document.getElementById("mcTechnician");
+  if (!sel) return;
+  const picked = String(selected || "").trim();
+  const users = Array.isArray(mcTechnicianOptions) ? mcTechnicianOptions : [];
+  const merged = [...users];
+  if (picked && !merged.some((t) => {
+    const u = String(t.username || t.label || t || "").trim().toLowerCase();
+    const l = String(t.label || t.username || t || "").trim().toLowerCase();
+    const p = picked.toLowerCase();
+    return u === p || l === p;
+  })) {
+    merged.unshift({ username: picked, label: picked });
+  }
+  sel.innerHTML =
+    `<option value="">Select technician…</option>` +
+    merged
+      .map((t) => {
+        const username = String(t.username || t.label || t || "").trim();
+        const label = String(t.label || t.username || t || "").trim();
+        const value = username || label;
+        const selAttr =
+          picked &&
+          (picked.toLowerCase() === value.toLowerCase() || picked.toLowerCase() === label.toLowerCase())
+            ? " selected"
+            : "";
+        return `<option value="${esc(value)}"${selAttr}>${esc(label || value)}</option>`;
+      })
+      .join("");
+}
+
+async function loadMcTechnicians() {
+  try {
+    const res = await fetch(`${API}/workorders/technicians`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load technicians");
+    if (Array.isArray(data?.technician_users) && data.technician_users.length) {
+      mcTechnicianOptions = data.technician_users;
+    } else {
+      mcTechnicianOptions = (Array.isArray(data?.technicians) ? data.technicians : []).map((name) => ({
+        username: name,
+        label: name,
+      }));
+    }
+  } catch {
+    mcTechnicianOptions = [];
+  }
+  fillMcTechnicianSelect();
+}
+
+async function loadMcAssetDatalist() {
+  const dl = document.getElementById("mcAssetList");
+  if (!dl) return;
+  try {
+    const res = await fetch(`${API}/assets?include_archived=0`, { headers: authHeaders() });
+    const rows = await res.json();
+    if (!res.ok) throw new Error(rows.error || "Failed to load assets");
+    const arr = Array.isArray(rows) ? rows : [];
+    dl.innerHTML = arr
+      .map((a) => `<option value="${esc(String(a.asset_code || ""))}">${esc(String(a.asset_name || ""))}</option>`)
+      .join("");
+  } catch {
+    dl.innerHTML = "";
+  }
+}
+
+function clearMcEntryForm() {
+  const editEl = document.getElementById("mcEditId");
+  if (editEl) editEl.value = "";
+  const hours = document.getElementById("mcHours");
+  const asset = document.getElementById("mcAssetCode");
+  const reason = document.getElementById("mcReason");
+  const rate = document.getElementById("mcEntryRate");
+  if (hours) hours.value = "";
+  if (asset) asset.value = "";
+  if (reason) reason.value = "";
+  if (rate) rate.value = "";
+  fillMcTechnicianSelect();
+  const msg = document.getElementById("mcFormMsg");
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = "";
+  }
+}
+
+function renderMcDaySummary(totals) {
+  const el = document.getElementById("mcDaySummary");
+  if (!el) return;
+  const hours = Number(totals?.hours || 0);
+  const cost = Number(totals?.labor_cost || 0);
+  const entries = Number(totals?.entries || 0);
+  el.innerHTML = `
+    <span class="pill blue">Entries: ${entries}</span>
+    <span class="pill">Total hours: ${hours.toFixed(2)}</span>
+    <span class="pill">Labor cost: $${cost.toFixed(2)}</span>
+  `;
+}
+
+function renderMcDayTable(rows) {
+  const body = document.getElementById("mcDayBody");
+  if (!body) return;
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) {
+    body.innerHTML = `<tr><td colspan="7" class="muted">No labor entries for this date.</td></tr>`;
+    return;
+  }
+  body.innerHTML = list
+    .map((r) => {
+      const id = Number(r.id || 0);
+      return `<tr data-mc-id="${id}">
+        <td>${esc(r.technician_name || "")}</td>
+        <td style="text-align:right;">${Number(r.hours || 0).toFixed(2)}</td>
+        <td>${esc(r.asset_code || "")}</td>
+        <td>${esc(r.reason || "")}</td>
+        <td style="text-align:right;">$${Number(r.labor_rate_per_hour || 0).toFixed(2)}</td>
+        <td style="text-align:right;">$${Number(r.labor_cost || 0).toFixed(2)}</td>
+        <td>
+          <button type="button" data-mc-edit="${id}">Edit</button>
+          <button type="button" data-mc-delete="${id}">Delete</button>
+        </td>
+      </tr>`;
+    })
+    .join("");
+}
+
+async function loadMcDayEntries() {
+  syncMcDateBounds();
+  const date = String(document.getElementById("mcWorkDate")?.value || "").trim();
+  const body = document.getElementById("mcDayBody");
+  if (!date) {
+    if (body) body.innerHTML = `<tr><td colspan="7" class="muted">Pick a work date.</td></tr>`;
+    return;
+  }
+  if (body) body.innerHTML = `<tr><td colspan="7" class="muted">Loading…</td></tr>`;
+  try {
+    const res = await fetch(`${API}/maintenance/mechanic-labor?date=${encodeURIComponent(date)}`, {
+      headers: authHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load entries");
+    const rateEl = document.getElementById("mcDefaultRate");
+    if (rateEl && data?.default_labor_rate != null) {
+      rateEl.value = String(Number(data.default_labor_rate));
+    }
+    renderMcDayTable(data.rows);
+    mcDayRowsCache = Array.isArray(data.rows) ? data.rows : [];
+    renderMcDaySummary(data.totals);
+  } catch (e) {
+    if (body) body.innerHTML = `<tr><td colspan="7" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+  }
+}
+
+async function saveMcDefaultRate() {
+  const msg = document.getElementById("mcFormMsg");
+  const rate = Math.max(0, Number(document.getElementById("mcDefaultRate")?.value || 0));
+  if (!Number.isFinite(rate) || rate <= 0) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = "Enter a valid default labor rate.";
+    }
+    return;
+  }
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = "Saving default rate…";
+  }
+  try {
+    const res = await fetch(`${API}/maintenance/mechanic-labor/settings`, {
+      method: "PUT",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ labor_rate_per_hour: rate }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save rate");
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = `Default labor rate saved: $${rate.toFixed(2)}/hr`;
+    }
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = e.message || String(e);
+    }
+  }
+}
+
+async function saveMcEntry() {
+  const msg = document.getElementById("mcFormMsg");
+  syncMcDateBounds();
+  const work_date = String(document.getElementById("mcWorkDate")?.value || "").trim();
+  const technician_name = String(document.getElementById("mcTechnician")?.value || "").trim();
+  const hours = Math.max(0, Number(document.getElementById("mcHours")?.value || 0));
+  const asset_code = String(document.getElementById("mcAssetCode")?.value || "").trim().toUpperCase();
+  const reason = String(document.getElementById("mcReason")?.value || "").trim();
+  const rateRaw = String(document.getElementById("mcEntryRate")?.value || "").trim();
+  const editId = Number(document.getElementById("mcEditId")?.value || 0);
+
+  if (!work_date) {
+    if (msg) { msg.className = "message-error"; msg.textContent = "Work date is required."; }
+    return;
+  }
+  if (!technician_name) {
+    if (msg) { msg.className = "message-error"; msg.textContent = "Select a technician."; }
+    return;
+  }
+  if (!Number.isFinite(hours) || hours <= 0) {
+    if (msg) { msg.className = "message-error"; msg.textContent = "Hours must be greater than zero."; }
+    return;
+  }
+  if (!asset_code) {
+    if (msg) { msg.className = "message-error"; msg.textContent = "Plant / asset code is required."; }
+    return;
+  }
+  if (!reason) {
+    if (msg) { msg.className = "message-error"; msg.textContent = "Reason / job description is required."; }
+    return;
+  }
+
+  const body = { work_date, technician_name, hours, asset_code, reason };
+  if (rateRaw !== "") body.labor_rate_per_hour = Math.max(0, Number(rateRaw));
+
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = editId ? "Updating entry…" : "Saving entry…";
+  }
+  try {
+    const url = editId
+      ? `${API}/maintenance/mechanic-labor/${editId}`
+      : `${API}/maintenance/mechanic-labor`;
+    const res = await fetch(url, {
+      method: editId ? "PATCH" : "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Save failed");
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = editId ? "Entry updated." : "Entry saved.";
+    }
+    clearMcEntryForm();
+    await loadMcDayEntries();
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = e.message || String(e);
+    }
+  }
+}
+
+function startMcEdit(row) {
+  if (!row) return;
+  const editEl = document.getElementById("mcEditId");
+  if (editEl) editEl.value = String(row.id || "");
+  fillMcTechnicianSelect(row.technician_name || "");
+  const hours = document.getElementById("mcHours");
+  const asset = document.getElementById("mcAssetCode");
+  const reason = document.getElementById("mcReason");
+  const rate = document.getElementById("mcEntryRate");
+  if (hours) hours.value = row.hours != null ? String(row.hours) : "";
+  if (asset) asset.value = String(row.asset_code || "");
+  if (reason) reason.value = String(row.reason || "");
+  if (rate) {
+    const def = Number(document.getElementById("mcDefaultRate")?.value || 0);
+    const r = Number(row.labor_rate_per_hour || 0);
+    rate.value = r > 0 && r !== def ? String(r) : "";
+  }
+  const msg = document.getElementById("mcFormMsg");
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = `Editing entry #${row.id}`;
+  }
+  document.getElementById("mcSaveEntryBtn")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function deleteMcEntry(id) {
+  const entryId = Number(id || 0);
+  if (!entryId) return;
+  const ok = window.confirm(`Delete labor entry #${entryId}?`);
+  if (!ok) return;
+  const res = await fetch(`${API}/maintenance/mechanic-labor/${entryId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Delete failed");
+  clearMcEntryForm();
+  await loadMcDayEntries();
+}
+
+async function downloadMcYearXlsx() {
+  const year = mcYearValue();
+  const msg = document.getElementById("mcFormMsg");
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = `Generating ${year} workbook…`;
+  }
+  try {
+    const res = await fetch(`${API}/maintenance/mechanic-labor.xlsx?year=${encodeURIComponent(year)}`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Download failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `mechanics-cost-${year}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = `Downloaded mechanics cost report for ${year}.`;
+    }
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = e.message || String(e);
+    }
+  }
+}
+
+async function initMechanicsCostSection() {
+  syncMcDateBounds();
+  await loadMcTechnicians();
+  await loadMcAssetDatalist();
+  await loadMcDayEntries();
+}
+
 async function loadWeeklyForumParts() {
   try {
     const res = await fetch(`${API}/maintenance/weekly-forum/parts`);
@@ -7644,6 +8010,38 @@ document.addEventListener("DOMContentLoaded", () => {
     const status = String(btn.getAttribute("data-pto-next") || "").trim();
     if (!id || !status) return;
     updatePartsToOrderStatus(id, status).catch((e) => alert(e.message || String(e)));
+  });
+  document.getElementById("mcSaveEntryBtn")?.addEventListener("click", () => saveMcEntry().catch((e) => {
+    const msg = document.getElementById("mcFormMsg");
+    if (msg) { msg.className = "message-error"; msg.textContent = e.message || String(e); }
+  }));
+  document.getElementById("mcClearFormBtn")?.addEventListener("click", clearMcEntryForm);
+  document.getElementById("mcRefreshBtn")?.addEventListener("click", () => loadMcDayEntries().catch(() => {}));
+  document.getElementById("mcWorkDate")?.addEventListener("change", () => {
+    clearMcEntryForm();
+    loadMcDayEntries().catch(() => {});
+  });
+  document.getElementById("mcReportYear")?.addEventListener("change", () => {
+    syncMcDateBounds();
+    loadMcDayEntries().catch(() => {});
+  });
+  document.getElementById("mcSaveRateBtn")?.addEventListener("click", () => saveMcDefaultRate().catch((e) => {
+    const msg = document.getElementById("mcFormMsg");
+    if (msg) { msg.className = "message-error"; msg.textContent = e.message || String(e); }
+  }));
+  document.getElementById("mcDownloadXlsxBtn")?.addEventListener("click", () => downloadMcYearXlsx());
+  document.getElementById("mcDayBody")?.addEventListener("click", (evt) => {
+    const editBtn = evt.target?.closest?.("button[data-mc-edit]");
+    const delBtn = evt.target?.closest?.("button[data-mc-delete]");
+    if (editBtn) {
+      const id = Number(editBtn.getAttribute("data-mc-edit") || 0);
+      const row = mcDayRowsCache.find((r) => Number(r.id) === id);
+      if (row) startMcEdit(row);
+      return;
+    }
+    if (delBtn) {
+      deleteMcEntry(Number(delBtn.getAttribute("data-mc-delete") || 0)).catch((e) => alert(e.message || String(e)));
+    }
   });
   document.getElementById("wfInputPlan")?.addEventListener("change", (evt) => {
     const planId = Number(evt.target?.value || 0);

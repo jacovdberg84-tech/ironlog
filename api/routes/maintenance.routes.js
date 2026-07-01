@@ -1544,6 +1544,27 @@ export default async function maintenanceRoutes(app) {
   `).run();
 
   db.prepare(`
+    CREATE TABLE IF NOT EXISTS mechanic_labor_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      work_date TEXT NOT NULL,
+      technician_name TEXT NOT NULL,
+      hours REAL NOT NULL DEFAULT 0,
+      asset_code TEXT NOT NULL,
+      reason TEXT,
+      labor_rate_per_hour REAL,
+      site_code TEXT NOT NULL DEFAULT 'main',
+      created_by TEXT,
+      updated_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  db.prepare(`
+    CREATE INDEX IF NOT EXISTS idx_mechanic_labor_date
+    ON mechanic_labor_entries(work_date, site_code)
+  `).run();
+
+  db.prepare(`
     CREATE TABLE IF NOT EXISTS manager_damage_report_photos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       damage_report_id INTEGER NOT NULL,
@@ -10550,6 +10571,435 @@ export default async function maintenanceRoutes(app) {
       });
 
       return reply.send({ ok: true, id });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  const MECHANIC_LABOR_EDITORS = [
+    "admin",
+    "supervisor",
+    "plant_manager",
+    "site_manager",
+    "workshop_manager",
+    "artisan",
+    "stores",
+  ];
+  const MECHANIC_LABOR_RATE_MANAGERS = [
+    "admin",
+    "supervisor",
+    "plant_manager",
+    "site_manager",
+    "workshop_manager",
+  ];
+  const MECHANIC_MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+
+  function readMechanicLaborDefaultRate() {
+    try {
+      const row = db.prepare(`
+        SELECT value FROM cost_settings WHERE key = 'labor_cost_per_hour_default' LIMIT 1
+      `).get();
+      const v = Number(row?.value);
+      return Number.isFinite(v) && v > 0 ? v : 35;
+    } catch {
+      return 35;
+    }
+  }
+
+  function enrichMechanicLaborRow(row, defaultRate) {
+    const hours = Number(row?.hours || 0);
+    const rate = Number.isFinite(Number(row?.labor_rate_per_hour)) && Number(row.labor_rate_per_hour) > 0
+      ? Number(row.labor_rate_per_hour)
+      : defaultRate;
+    return {
+      ...row,
+      hours: Number(hours.toFixed(2)),
+      labor_rate_per_hour: Number(rate.toFixed(2)),
+      labor_cost: Number((hours * rate).toFixed(2)),
+    };
+  }
+
+  function mechanicLaborEntryBody(body = {}) {
+    const work_date = String(body.work_date || "").trim();
+    const technician_name = String(body.technician_name || "").trim();
+    const asset_code = String(body.asset_code || "").trim().toUpperCase();
+    const reason = String(body.reason || "").trim();
+    const hours = Math.max(0, Number(body.hours || 0));
+    const labor_rate_per_hour = body.labor_rate_per_hour != null
+      ? Math.max(0, Number(body.labor_rate_per_hour))
+      : null;
+    return { work_date, technician_name, asset_code, reason, hours, labor_rate_per_hour };
+  }
+
+  // GET /api/maintenance/mechanic-labor?date=YYYY-MM-DD
+  app.get("/mechanic-labor", async (req, reply) => {
+    try {
+      if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_EDITORS)) return;
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const date = String(req.query?.date || "").trim();
+      if (!isDate(date)) {
+        return reply.code(400).send({ ok: false, error: "date (YYYY-MM-DD) required" });
+      }
+      const defaultRate = readMechanicLaborDefaultRate();
+      const rows = db.prepare(`
+        SELECT id, work_date, technician_name, hours, asset_code, reason, labor_rate_per_hour, created_by, updated_at
+        FROM mechanic_labor_entries
+        WHERE work_date = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+        ORDER BY id ASC
+      `).all(date, site_code).map((r) => enrichMechanicLaborRow(r, defaultRate));
+
+      const totals = rows.reduce(
+        (acc, r) => {
+          acc.entries += 1;
+          acc.hours += Number(r.hours || 0);
+          acc.labor_cost += Number(r.labor_cost || 0);
+          return acc;
+        },
+        { entries: 0, hours: 0, labor_cost: 0 },
+      );
+      totals.hours = Number(totals.hours.toFixed(2));
+      totals.labor_cost = Number(totals.labor_cost.toFixed(2));
+
+      return reply.send({ ok: true, date, default_labor_rate: defaultRate, rows, totals });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // PUT /api/maintenance/mechanic-labor/settings — default labor rate
+  app.put("/mechanic-labor/settings", async (req, reply) => {
+    try {
+      if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_RATE_MANAGERS)) return;
+      const rate = Math.max(0, Number(req.body?.labor_rate_per_hour || 0));
+      if (!Number.isFinite(rate) || rate <= 0) {
+        return reply.code(400).send({ ok: false, error: "labor_rate_per_hour must be > 0" });
+      }
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS cost_settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `).run();
+      db.prepare(`
+        INSERT INTO cost_settings (key, value, updated_at)
+        VALUES ('labor_cost_per_hour_default', ?, datetime('now'))
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
+      `).run(String(rate));
+      writeAudit(db, req, {
+        module: "maintenance",
+        action: "mechanic_labor.rate_default",
+        entity_type: "cost_settings",
+        entity_id: "labor_cost_per_hour_default",
+        after: { labor_rate_per_hour: rate },
+      });
+      return reply.send({ ok: true, default_labor_rate: rate });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // POST /api/maintenance/mechanic-labor
+  app.post("/mechanic-labor", async (req, reply) => {
+    try {
+      if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_EDITORS)) return;
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const userName = String(req.headers?.["x-user-name"] || "").trim() || "system";
+      const parsed = mechanicLaborEntryBody(req.body || {});
+      if (!isDate(parsed.work_date)) {
+        return reply.code(400).send({ ok: false, error: "work_date (YYYY-MM-DD) required" });
+      }
+      if (!parsed.technician_name) {
+        return reply.code(400).send({ ok: false, error: "technician_name required" });
+      }
+      if (!parsed.asset_code) {
+        return reply.code(400).send({ ok: false, error: "asset_code required" });
+      }
+      if (!parsed.reason) {
+        return reply.code(400).send({ ok: false, error: "reason required" });
+      }
+      if (!Number.isFinite(parsed.hours) || parsed.hours <= 0) {
+        return reply.code(400).send({ ok: false, error: "hours must be > 0" });
+      }
+
+      const info = db.prepare(`
+        INSERT INTO mechanic_labor_entries (
+          work_date, technician_name, hours, asset_code, reason,
+          labor_rate_per_hour, site_code, created_by, updated_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        parsed.work_date,
+        parsed.technician_name,
+        parsed.hours,
+        parsed.asset_code,
+        parsed.reason,
+        parsed.labor_rate_per_hour,
+        site_code,
+        userName,
+        userName,
+      );
+
+      writeAudit(db, req, {
+        module: "maintenance",
+        action: "mechanic_labor.create",
+        entity_type: "mechanic_labor_entry",
+        entity_id: String(info.lastInsertRowid),
+        after: parsed,
+      });
+
+      const defaultRate = readMechanicLaborDefaultRate();
+      const row = enrichMechanicLaborRow(
+        db.prepare(`SELECT * FROM mechanic_labor_entries WHERE id = ?`).get(info.lastInsertRowid),
+        defaultRate,
+      );
+      return reply.send({ ok: true, row });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // PATCH /api/maintenance/mechanic-labor/:id
+  app.patch("/mechanic-labor/:id", async (req, reply) => {
+    try {
+      if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_EDITORS)) return;
+      const id = Number(req.params?.id || 0);
+      if (!id) return reply.code(400).send({ ok: false, error: "Invalid id" });
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const userName = String(req.headers?.["x-user-name"] || "").trim() || "system";
+      const existing = db.prepare(`
+        SELECT id FROM mechanic_labor_entries
+        WHERE id = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+      `).get(id, site_code);
+      if (!existing) return reply.code(404).send({ ok: false, error: "Entry not found" });
+
+      const parsed = mechanicLaborEntryBody(req.body || {});
+      if (!isDate(parsed.work_date)) {
+        return reply.code(400).send({ ok: false, error: "work_date (YYYY-MM-DD) required" });
+      }
+      if (!parsed.technician_name || !parsed.asset_code || !parsed.reason) {
+        return reply.code(400).send({ ok: false, error: "technician_name, asset_code and reason required" });
+      }
+      if (!Number.isFinite(parsed.hours) || parsed.hours <= 0) {
+        return reply.code(400).send({ ok: false, error: "hours must be > 0" });
+      }
+
+      db.prepare(`
+        UPDATE mechanic_labor_entries
+        SET
+          work_date = ?,
+          technician_name = ?,
+          hours = ?,
+          asset_code = ?,
+          reason = ?,
+          labor_rate_per_hour = ?,
+          updated_by = ?,
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        parsed.work_date,
+        parsed.technician_name,
+        parsed.hours,
+        parsed.asset_code,
+        parsed.reason,
+        parsed.labor_rate_per_hour,
+        userName,
+        id,
+      );
+
+      writeAudit(db, req, {
+        module: "maintenance",
+        action: "mechanic_labor.update",
+        entity_type: "mechanic_labor_entry",
+        entity_id: String(id),
+        after: parsed,
+      });
+
+      const defaultRate = readMechanicLaborDefaultRate();
+      const row = enrichMechanicLaborRow(
+        db.prepare(`SELECT * FROM mechanic_labor_entries WHERE id = ?`).get(id),
+        defaultRate,
+      );
+      return reply.send({ ok: true, row });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // DELETE /api/maintenance/mechanic-labor/:id
+  app.delete("/mechanic-labor/:id", async (req, reply) => {
+    try {
+      if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_EDITORS)) return;
+      const id = Number(req.params?.id || 0);
+      if (!id) return reply.code(400).send({ ok: false, error: "Invalid id" });
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const existing = db.prepare(`
+        SELECT id FROM mechanic_labor_entries
+        WHERE id = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+      `).get(id, site_code);
+      if (!existing) return reply.code(404).send({ ok: false, error: "Entry not found" });
+      db.prepare(`DELETE FROM mechanic_labor_entries WHERE id = ?`).run(id);
+      writeAudit(db, req, {
+        module: "maintenance",
+        action: "mechanic_labor.delete",
+        entity_type: "mechanic_labor_entry",
+        entity_id: String(id),
+      });
+      return reply.send({ ok: true, id });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // GET /api/maintenance/mechanic-labor.xlsx?year=2026
+  app.get("/mechanic-labor.xlsx", async (req, reply) => {
+    try {
+      if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_EDITORS)) return;
+      const year = String(req.query?.year || new Date().getFullYear()).trim();
+      if (!/^\d{4}$/.test(year)) {
+        return reply.code(400).send({ ok: false, error: "year (YYYY) required" });
+      }
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const defaultRate = readMechanicLaborDefaultRate();
+      const start = `${year}-01-01`;
+      const end = `${year}-12-31`;
+
+      const rawRows = db.prepare(`
+        SELECT id, work_date, technician_name, hours, asset_code, reason, labor_rate_per_hour
+        FROM mechanic_labor_entries
+        WHERE work_date >= ? AND work_date <= ?
+          AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+        ORDER BY work_date ASC, id ASC
+      `).all(start, end, site_code);
+
+      const rows = rawRows.map((r) => enrichMechanicLaborRow(r, defaultRate));
+
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "IRONLOG";
+      wb.created = new Date();
+
+      const wsSummary = wb.addWorksheet("Summary");
+      wsSummary.columns = [
+        { header: "Field", key: "field", width: 28 },
+        { header: "Value", key: "value", width: 24 },
+      ];
+      const yearHours = rows.reduce((s, r) => s + Number(r.hours || 0), 0);
+      const yearCost = rows.reduce((s, r) => s + Number(r.labor_cost || 0), 0);
+      wsSummary.addRows([
+        { field: "Year", value: year },
+        { field: "Site", value: site_code },
+        { field: "Default labor rate ($/hr)", value: defaultRate },
+        { field: "Total entries", value: rows.length },
+        { field: "Total hours", value: Number(yearHours.toFixed(2)) },
+        { field: "Total labor cost ($)", value: Number(yearCost.toFixed(2)) },
+      ]);
+
+      const monthCols = [
+        { header: "Date", key: "work_date", width: 14 },
+        { header: "Technician", key: "technician_name", width: 22 },
+        { header: "Hours", key: "hours", width: 10 },
+        { header: "Plant no", key: "asset_code", width: 14 },
+        { header: "Reason", key: "reason", width: 36 },
+        { header: "Rate ($/hr)", key: "labor_rate_per_hour", width: 12 },
+        { header: "Labor cost ($)", key: "labor_cost", width: 14 },
+      ];
+
+      for (let m = 1; m <= 12; m += 1) {
+        const monthKey = `${year}-${String(m).padStart(2, "0")}`;
+        const sheetName = MECHANIC_MONTH_NAMES[m - 1];
+        const ws = wb.addWorksheet(sheetName, { views: [{ state: "frozen", ySplit: 1 }] });
+        ws.columns = monthCols;
+        const monthRows = rows.filter((r) => String(r.work_date || "").startsWith(monthKey));
+        ws.addRows(monthRows);
+        if (!monthRows.length) {
+          ws.addRow({
+            work_date: "-",
+            technician_name: "No entries",
+            hours: 0,
+            asset_code: "",
+            reason: "",
+            labor_rate_per_hour: defaultRate,
+            labor_cost: 0,
+          });
+        }
+        const monthHours = monthRows.reduce((s, r) => s + Number(r.hours || 0), 0);
+        const monthCost = monthRows.reduce((s, r) => s + Number(r.labor_cost || 0), 0);
+        ws.addRow({});
+        ws.addRow({
+          work_date: "TOTAL",
+          technician_name: "",
+          hours: Number(monthHours.toFixed(2)),
+          asset_code: "",
+          reason: "",
+          labor_rate_per_hour: "",
+          labor_cost: Number(monthCost.toFixed(2)),
+        });
+      }
+
+      const byTech = new Map();
+      const byPlant = new Map();
+      for (const r of rows) {
+        const tech = String(r.technician_name || "").trim() || "Unknown";
+        const plant = String(r.asset_code || "").trim() || "Unknown";
+        if (!byTech.has(tech)) byTech.set(tech, { technician_name: tech, hours: 0, labor_cost: 0, entries: 0 });
+        if (!byPlant.has(plant)) byPlant.set(plant, { asset_code: plant, hours: 0, labor_cost: 0, entries: 0 });
+        const t = byTech.get(tech);
+        const p = byPlant.get(plant);
+        t.entries += 1;
+        t.hours += Number(r.hours || 0);
+        t.labor_cost += Number(r.labor_cost || 0);
+        p.entries += 1;
+        p.hours += Number(r.hours || 0);
+        p.labor_cost += Number(r.labor_cost || 0);
+      }
+
+      const wsTech = wb.addWorksheet("Technicians");
+      wsTech.columns = [
+        { header: "Technician", key: "technician_name", width: 24 },
+        { header: "Entries", key: "entries", width: 10 },
+        { header: "Total Hours", key: "hours", width: 14 },
+        { header: "Labor cost ($)", key: "labor_cost", width: 14 },
+      ];
+      wsTech.addRows(
+        [...byTech.values()]
+          .map((r) => ({
+            ...r,
+            hours: Number(r.hours.toFixed(2)),
+            labor_cost: Number(r.labor_cost.toFixed(2)),
+          }))
+          .sort((a, b) => b.hours - a.hours),
+      );
+
+      const wsPlant = wb.addWorksheet("Plant Summary");
+      wsPlant.columns = [
+        { header: "Plant no", key: "asset_code", width: 14 },
+        { header: "Entries", key: "entries", width: 10 },
+        { header: "Total Hours", key: "hours", width: 14 },
+        { header: "Labor cost ($)", key: "labor_cost", width: 14 },
+      ];
+      wsPlant.addRows(
+        [...byPlant.values()]
+          .map((r) => ({
+            ...r,
+            hours: Number(r.hours.toFixed(2)),
+            labor_cost: Number(r.labor_cost.toFixed(2)),
+          }))
+          .sort((a, b) => b.hours - a.hours),
+      );
+
+      const buffer = await wb.xlsx.writeBuffer();
+      return reply
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header("Content-Disposition", `attachment; filename="IRONLOG_Mechanics_Cost_${year}.xlsx"`)
+        .send(buffer);
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message || String(err) });
