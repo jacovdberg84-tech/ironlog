@@ -1284,8 +1284,8 @@
           <h4 style="margin:0 0 8px 0;">Generate mechanics timesheet (Excel)</h4>
           <p class="muted small" style="margin:0 0 10px 0;">
             Builds a log like your workshop sheet: daily <strong>0.5h startup inspections</strong> per ADT (Sergio &amp; Arnold), loader (Ronnie), excavator (Charles), and crusher/screen (Moses);
-            real <strong>breakdowns</strong> from IRONLOG; synthetic fill to <strong>6h minimum</strong> per technician.
-            Jan–Mar (or any range before <em>synthetic fill through</em>) is generated when you had no manual entries yet.
+            real <strong>services</strong> and <strong>breakdowns</strong> from IRONLOG; varied <strong>Service / Maintenance</strong> fill to <strong>6h minimum</strong> per technician (randomized, de-duplicated).
+            Excludes E017, E018, E025, CRT01AM, FIN694. Jan–Mar (or before <em>synthetic fill through</em>) is generated when you had no manual entries yet.
             From April onward, saved daily entries are used when present.
           </p>
           <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
@@ -2050,6 +2050,6 @@
   <script src="./undercarriage-diagrams.js?v=1"></script>
   <script src="./undercarriage.js?v=5"></script>
   <script src="./tyre-inspection-qr.js?v=1"></script>
-  <script src="./maintenance.js?v=38"></script>
+  <script src="./maintenance.js?v=39"></script>
 </body>
 </html>

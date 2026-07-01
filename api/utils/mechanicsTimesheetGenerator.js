@@ -1,4 +1,4 @@
-// Generate mechanics labour timesheet rows (startup inspections + breakdowns + fill).
+// Generate mechanics labour timesheet rows (startup inspections + real work + varied fill).
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -9,6 +9,10 @@ const STARTUP_HOURS = 0.5;
 const DEFAULT_MIN_TECH_HOURS = 6;
 const DEFAULT_SYNTHETIC_THROUGH = "2026-03-31";
 
+const EXCLUDED_ASSET_CODES = new Set([
+  "E017", "E018", "E025", "CRT01AM", "FIN694",
+]);
+
 const TECH_BY_GROUP = {
   dumptruck: ["Sergio", "Arnold"],
   loader: ["Ronnie"],
@@ -16,18 +20,73 @@ const TECH_BY_GROUP = {
   crusher_screen: ["Moses"],
 };
 
-const FILLER_DESCRIPTIONS = [
-  "Hydraulic hose replacement",
-  "Bearing inspection and grease",
-  "Brake system adjustment",
-  "500hr service",
-  "Remove and inspect diff",
-  "Track tension adjustment",
-  "Cooling system repair",
-  "Electrical fault finding",
-  "Welding on chassis crack",
-  "Replace worn pins and bushes",
-];
+const JOB_POOLS = {
+  Service: [
+    "250hr PM service",
+    "500hr service",
+    "1000hr service",
+    "2000hr major service",
+    "Engine oil and filter change",
+    "Hydraulic oil and filter change",
+    "Transmission service",
+    "Diff oil change",
+    "Final drive oil change",
+    "Swing bearing grease service",
+    "Fuel system filter replacement",
+    "Coolant flush and refill",
+    "Air filter replacement",
+    "Cab air filter replacement",
+    "Track roller inspection service",
+  ],
+  Maintenance: [
+    "Grease all grease points",
+    "Tyre pressure check and adjust",
+    "Track tension check and adjust",
+    "Battery terminals clean and tighten",
+    "Fan belt inspection and adjust",
+    "Radiator external clean",
+    "Work lights check and repair",
+    "Mirror adjustment and mount check",
+    "Fire extinguisher inspection",
+    "Seat belt inspection",
+    "Reverse alarm test and repair",
+    "Wheel nut torque check",
+    "Pivot pin wear inspection",
+    "Undercarriage visual inspection",
+    "Hydraulic cylinder rod inspection",
+  ],
+  Breakdown: [
+    "Hydraulic hose replacement",
+    "Front spindle bearing failure",
+    "Remove and inspect diff",
+    "Brake system repair",
+    "Cooling system leak repair",
+    "Electrical fault finding",
+    "Starter motor replacement",
+    "Alternator replacement",
+    "Turbo oil feed line repair",
+    "Steering cylinder seal replacement",
+    "Bucket cylinder repack",
+    "Transmission oil leak",
+    "Drive shaft UJ replacement",
+    "Park brake adjustment",
+    "Wiring harness repair",
+    "Aircon compressor fault",
+    "Fuel pump replacement",
+    "Radiator hose replacement",
+  ],
+};
+
+const GENERIC_WORK_NOTES = new Set([
+  "repaired",
+  "work was done",
+  "problem repaired",
+  "done",
+  "completed",
+  "fixed",
+  "mechanical",
+  "mechanical breakdown",
+]);
 
 function hasTable(db, table) {
   try {
@@ -45,6 +104,10 @@ function hasColumn(db, table, col) {
   } catch {
     return false;
   }
+}
+
+function isExcludedAsset(code) {
+  return EXCLUDED_ASSET_CODES.has(String(code || "").trim().toUpperCase());
 }
 
 function isDate(s) {
@@ -72,6 +135,15 @@ function hashSeed(...parts) {
   return h;
 }
 
+function shuffled(arr, seed) {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = hashSeed(seed, i, "shuffle") % (i + 1);
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
 function isWorkingDay(ymd) {
   const d = new Date(`${ymd}T12:00:00`);
   if (Number.isNaN(d.getTime())) return false;
@@ -96,6 +168,7 @@ function enumerateDates(from, to) {
 
 function classifyAsset(asset) {
   const code = String(asset.asset_code || "").trim().toUpperCase();
+  if (isExcludedAsset(code)) return null;
   const cat = String(asset.category || "").toLowerCase();
   const name = String(asset.asset_name || "").toLowerCase();
   const hay = `${cat} ${name}`;
@@ -105,9 +178,7 @@ function classifyAsset(asset) {
   if (/^F\d+AM$/.test(code) || (/\bloader\b/.test(hay) && !/forklift|tlb|backhoe|block/.test(hay))) {
     return "loader";
   }
-  if (/crusher|screen|trommel/.test(hay) || /^CR\d+AM$/.test(code) || code === "FIN694") {
-    return "crusher_screen";
-  }
+  if (/crusher|screen|trommel/.test(hay) || /^CR\d+AM$/.test(code)) return "crusher_screen";
   return null;
 }
 
@@ -140,19 +211,83 @@ function addMinutesToTime(timeStr, minutes) {
   return minutesToTime(hh * 60 + mm + minutes);
 }
 
-function cleanBreakdownDesc(desc) {
-  const s = String(desc || "")
+function techDayStartMinutes(date, tech) {
+  return 6 * 60 + (hashSeed(date, tech, "daystart") % 4) * 15;
+}
+
+function cleanBreakdownDesc(desc, component) {
+  let s = String(desc || "")
     .replace(/^DOWN\s*[—\-]\s*/i, "")
     .replace(/^DOWN\s+/i, "")
     .trim();
-  return s || "Mechanical breakdown";
+  if (GENERIC_WORK_NOTES.has(s.toLowerCase()) && component) {
+    s = `${String(component).trim()} failure`;
+  }
+  if (!s || GENERIC_WORK_NOTES.has(s.toLowerCase())) return "Mechanical breakdown";
+  return s;
 }
 
-function inferCategory(reason) {
+function isGenericNote(text) {
+  const t = String(text || "").trim().toLowerCase();
+  return !t || GENERIC_WORK_NOTES.has(t);
+}
+
+function inferCategory(reason, explicit) {
+  if (explicit) return String(explicit);
   const r = String(reason || "").toLowerCase();
   if (r.includes("startup")) return "Startup";
-  if (r.includes("inspection") && r.includes("startup")) return "Startup";
+  if (/\b\d+hr\b|\bpm service\b|\bservice\b/.test(r) && !r.includes("breakdown")) return "Service";
+  if (/grease|inspect|check|adjust|torque|clean/.test(r)) return "Maintenance";
   return "Breakdown";
+}
+
+function woSourceCategory(source) {
+  const s = String(source || "").toLowerCase();
+  if (s === "service") return "Service";
+  if (s === "manual" || s === "maintenance") return "Maintenance";
+  return "Breakdown";
+}
+
+function describeWorkOrder(row) {
+  if (!isGenericNote(row.completion_notes)) return String(row.completion_notes).trim();
+  if (!isGenericNote(row.job_description)) return String(row.job_description).trim();
+  if (row.service_name) return `${String(row.service_name).trim()}hr service`;
+  return null;
+}
+
+class UsageTracker {
+  constructor(maxRecent = 10) {
+    this.maxRecent = maxRecent;
+    this.techRecent = new Map();
+    this.techCounts = new Map();
+  }
+
+  record(tech, desc) {
+    const key = String(desc || "").trim();
+    if (!key) return;
+    const recent = this.techRecent.get(tech) || [];
+    recent.push(key);
+    while (recent.length > this.maxRecent) recent.shift();
+    this.techRecent.set(tech, recent);
+    const counts = this.techCounts.get(tech) || new Map();
+    counts.set(key, (counts.get(key) || 0) + 1);
+    this.techCounts.set(tech, counts);
+  }
+
+  pick(tech, date, category, pool, salt) {
+    const list = pool.filter(Boolean);
+    if (!list.length) return "General workshop duties";
+    const recent = new Set(this.techRecent.get(tech) || []);
+    let candidates = list.filter((d) => !recent.has(d));
+    if (!candidates.length) candidates = list;
+
+    const counts = this.techCounts.get(tech) || new Map();
+    const minCount = Math.min(...candidates.map((d) => counts.get(d) || 0));
+    const tier = candidates.filter((d) => (counts.get(d) || 0) === minCount);
+    const desc = tier[hashSeed(date, tech, salt, category, "pick") % tier.length];
+    this.record(tech, desc);
+    return desc;
+  }
 }
 
 function resolveSmr(db, assetId, usageDate, cache) {
@@ -206,31 +341,54 @@ function loadStartupFleet(db) {
   const assetByCode = new Map();
 
   for (const a of assets) {
-    const group = classifyAsset(a);
-    if (!group) continue;
     const code = String(a.asset_code || "").trim().toUpperCase();
-    assetByCode.set(code, a);
+    if (isExcludedAsset(code)) continue;
+    const group = classifyAsset({ ...a, asset_code: code });
+    if (!group) continue;
+    assetByCode.set(code, { ...a, asset_code: code });
     groups[group].push({ ...a, asset_code: code });
   }
 
   return { groups, assetByCode };
 }
 
+function loadServiceCatalog(db) {
+  if (!hasTable(db, "maintenance_plans") || !hasTable(db, "assets")) return [];
+  const rows = db.prepare(`
+    SELECT mp.service_name, mp.interval_hours, a.id AS asset_id, a.asset_code
+    FROM maintenance_plans mp
+    JOIN assets a ON a.id = mp.asset_id
+    WHERE COALESCE(mp.active, 1) = 1
+    ORDER BY a.asset_code ASC, mp.interval_hours ASC
+  `).all();
+  return rows
+    .map((r) => ({
+      asset_id: Number(r.asset_id),
+      asset_code: String(r.asset_code || "").toUpperCase(),
+      service_name: String(r.service_name || "").trim(),
+      interval_hours: Number(r.interval_hours || 0),
+    }))
+    .filter((r) => r.asset_code && !isExcludedAsset(r.asset_code) && r.service_name);
+}
+
 function loadBreakdownsByDate(db, from, to) {
   if (!hasTable(db, "breakdowns") || !hasTable(db, "assets")) return new Map();
   const hasWo = hasTable(db, "work_orders");
   const hasDowntimeLogs = hasTable(db, "breakdown_downtime_logs");
+  const hasComponent = hasColumn(db, "breakdowns", "component");
 
   const rows = db.prepare(`
     SELECT
       b.id,
       b.breakdown_date,
       b.description,
+      ${hasComponent ? "b.component" : "NULL AS component"},
       b.asset_id,
       a.asset_code,
       a.asset_name,
       a.category,
-      ${hasWo ? "w.labor_hours" : "NULL AS labor_hours"}
+      ${hasWo ? "w.labor_hours" : "NULL AS labor_hours"},
+      ${hasWo && hasColumn(db, "work_orders", "completion_notes") ? "w.completion_notes" : "NULL AS completion_notes"}
     FROM breakdowns b
     JOIN assets a ON a.id = b.asset_id
     ${hasWo ? "LEFT JOIN work_orders w ON w.id = b.primary_work_order_id" : ""}
@@ -253,24 +411,83 @@ function loadBreakdownsByDate(db, from, to) {
 
   const byDate = new Map();
   for (const r of rows) {
+    const code = String(r.asset_code || "").toUpperCase();
+    if (isExcludedAsset(code)) continue;
     const date = String(r.breakdown_date || "");
     if (!date) continue;
+
+    const woNote = describeWorkOrder(r);
+    const description = woNote && !isGenericNote(woNote)
+      ? woNote
+      : cleanBreakdownDesc(r.description, r.component);
+
     const bdKey = `${Number(r.id)}|${date}`;
     const downtime = downtimeByBdDate.get(bdKey) || 0;
     let hours = Number(r.labor_hours || 0);
     if (!Number.isFinite(hours) || hours <= 0) {
-      hours = downtime > 0 ? Math.min(8, Math.max(2, downtime * 0.6)) : 4;
+      hours = downtime > 0 ? Math.min(8, Math.max(2, downtime * 0.6)) : 3 + (hashSeed(date, code, description) % 3);
     }
     hours = Math.max(1, Math.min(8, Number(hours.toFixed(1))));
 
     if (!byDate.has(date)) byDate.set(date, []);
     byDate.get(date).push({
       asset_id: Number(r.asset_id),
-      asset_code: String(r.asset_code || "").toUpperCase(),
-      asset_name: String(r.asset_name || ""),
-      category: String(r.category || ""),
-      description: cleanBreakdownDesc(r.description),
+      asset_code: code,
+      description,
       hours,
+      category: "Breakdown",
+    });
+  }
+  return byDate;
+}
+
+function loadCompletedWorkByDate(db, from, to) {
+  if (!hasTable(db, "work_orders") || !hasTable(db, "assets")) return new Map();
+  const hasClosed = hasColumn(db, "work_orders", "closed_at");
+  if (!hasClosed) return new Map();
+
+  const hasPlans = hasTable(db, "maintenance_plans");
+  const rows = db.prepare(`
+    SELECT
+      date(w.closed_at) AS work_date,
+      w.source,
+      ${hasColumn(db, "work_orders", "labor_hours") ? "w.labor_hours" : "0 AS labor_hours"},
+      ${hasColumn(db, "work_orders", "completion_notes") ? "w.completion_notes" : "'' AS completion_notes"},
+      ${hasColumn(db, "work_orders", "job_description") ? "w.job_description" : "'' AS job_description"},
+      a.id AS asset_id,
+      a.asset_code,
+      ${hasPlans ? "mp.service_name" : "NULL AS service_name"}
+    FROM work_orders w
+    JOIN assets a ON a.id = w.asset_id
+    ${hasPlans ? "LEFT JOIN maintenance_plans mp ON mp.id = w.reference_id AND LOWER(w.source) = 'service'" : ""}
+    WHERE w.closed_at IS NOT NULL
+      AND date(w.closed_at) >= ?
+      AND date(w.closed_at) <= ?
+      AND LOWER(COALESCE(w.source, '')) IN ('service', 'manual', 'maintenance')
+    ORDER BY w.closed_at ASC
+  `).all(from, to);
+
+  const byDate = new Map();
+  for (const r of rows) {
+    const code = String(r.asset_code || "").toUpperCase();
+    if (isExcludedAsset(code)) continue;
+    const date = String(r.work_date || "");
+    const description = describeWorkOrder(r);
+    if (!date || !description) continue;
+
+    let hours = Number(r.labor_hours || 0);
+    if (!Number.isFinite(hours) || hours <= 0) {
+      hours = woSourceCategory(r.source) === "Service" ? 4 + (hashSeed(date, code, description) % 3) : 2 + (hashSeed(date, code) % 3);
+    }
+    hours = Math.max(0.5, Math.min(8, Number(hours.toFixed(1))));
+
+    if (!byDate.has(date)) byDate.set(date, []);
+    byDate.get(date).push({
+      asset_id: Number(r.asset_id),
+      asset_code: code,
+      description,
+      hours,
+      category: woSourceCategory(r.source),
     });
   }
   return byDate;
@@ -294,6 +511,8 @@ function loadSavedEntriesByDate(db, from, to, siteCode) {
   `).all(from, to, siteCode);
 
   for (const r of rows) {
+    const code = String(r.asset_code || "").toUpperCase();
+    if (isExcludedAsset(code)) continue;
     const date = String(r.work_date || "");
     if (!out.has(date)) out.set(date, []);
     out.get(date).push(r);
@@ -332,7 +551,7 @@ function makeRow({
   };
 }
 
-function scheduleTechRows(rows) {
+function scheduleTechRows(rows, work_date) {
   const byTech = new Map();
   for (const r of rows) {
     const tech = r.technician_name || "Workshop";
@@ -344,11 +563,11 @@ function scheduleTechRows(rows) {
   for (const [tech, techRows] of byTech) {
     const startups = techRows.filter((r) => r.category === "Startup");
     const others = techRows.filter((r) => r.category !== "Startup");
-    startups.sort((a, b) => String(a.asset_code).localeCompare(String(b.asset_code)));
-    others.sort((a, b) => Number(b.hours) - Number(a.hours));
+    const startupOrder = shuffled(startups, `${work_date}|${tech}|startup`);
+    const otherOrder = shuffled(others, `${work_date}|${tech}|other`);
 
-    let cursor = 6 * 60;
-    for (const r of [...startups, ...others]) {
+    let cursor = techDayStartMinutes(work_date, tech);
+    for (const r of [...startupOrder, ...otherOrder]) {
       const mins = Math.round(Number(r.hours || 0) * 60);
       const start = minutesToTime(cursor);
       const end = addMinutesToTime(start, mins);
@@ -372,32 +591,66 @@ function scheduleTechRows(rows) {
   return scheduled;
 }
 
-function pickFillerDescription(date, tech, idx) {
-  const h = hashSeed(date, tech, idx, "filler");
-  return FILLER_DESCRIPTIONS[h % FILLER_DESCRIPTIONS.length];
+function pickGroupAsset(groupAssets, date, tech, salt) {
+  if (!groupAssets?.length) return { asset_code: "ST01AM", asset_id: null };
+  const order = shuffled(groupAssets, `${date}|${tech}|asset|${salt}`);
+  const a = order[0];
+  return { asset_code: a.asset_code, asset_id: a.id };
 }
 
-function pickFillerAsset(groupAssets, date, tech, idx) {
-  if (!groupAssets?.length) return { asset_code: "ST01AM", asset_id: null };
-  const h = hashSeed(date, tech, idx, "asset");
-  const a = groupAssets[h % groupAssets.length];
-  return { asset_code: a.asset_code, asset_id: a.id };
+function pickServiceFromCatalog(catalog, groupAssets, date, tech, salt) {
+  const codes = new Set(groupAssets.map((a) => a.asset_code));
+  const eligible = catalog.filter((c) => codes.has(c.asset_code));
+  if (!eligible.length) return null;
+  const item = eligible[hashSeed(date, tech, salt, "svc") % eligible.length];
+  return {
+    asset_code: item.asset_code,
+    asset_id: item.asset_id,
+    description: `${item.service_name}hr service`,
+    category: "Service",
+  };
+}
+
+function planFillJobs(remaining, date, tech) {
+  const jobs = [];
+  let rem = remaining;
+  let salt = 0;
+  while (rem >= 0.5 && salt < 8) {
+    const roll = hashSeed(date, tech, salt, "chunk") % 100;
+    let category = "Service";
+    if (roll >= 40 && roll < 72) category = "Maintenance";
+    else if (roll >= 72) category = "Breakdown";
+
+    const maxChunk = rem <= 2
+      ? rem
+      : Math.min(rem, 1.5 + (hashSeed(date, tech, salt, "hrs") % 5) * 0.5);
+    const hrs = Math.max(0.5, Math.round(Math.min(maxChunk, rem) * 2) / 2);
+    jobs.push({ hours: hrs, category, salt });
+    rem = Number((rem - hrs).toFixed(2));
+    salt += 1;
+  }
+  return jobs;
 }
 
 function generateDayRows({
   work_date,
   fleet,
   breakdowns,
+  completedWork,
+  serviceCatalog,
   dumptruckCodes,
   minTechHours,
   smrCache,
+  usageTracker,
   db,
 }) {
   const raw = [];
   const { groups, assetByCode } = fleet;
+  const dayUsedKeys = new Set();
 
   for (const [group, assets] of Object.entries(groups)) {
-    for (const a of assets) {
+    const order = shuffled(assets, `${work_date}|${group}|fleet`);
+    for (const a of order) {
       const tech = techForAsset(group, a.asset_code, dumptruckCodes);
       raw.push(makeRow({
         work_date,
@@ -412,23 +665,33 @@ function generateDayRows({
     }
   }
 
-  const usedBreakdownKeys = new Set();
+  const addWorkRow = (item, tech, source) => {
+    const key = `${item.asset_code}|${item.category}|${item.description}`;
+    if (dayUsedKeys.has(key)) return;
+    dayUsedKeys.add(key);
+    usageTracker.record(tech, item.description);
+    raw.push(makeRow({
+      work_date,
+      asset_code: item.asset_code,
+      asset_id: item.asset_id,
+      hours: item.hours,
+      category: item.category,
+      reason: item.description,
+      technician_name: tech,
+      source,
+    }));
+  };
+
+  for (const item of completedWork || []) {
+    const group = classifyAsset({ asset_code: item.asset_code });
+    const tech = group ? techForAsset(group, item.asset_code, dumptruckCodes) : "Joaquim";
+    addWorkRow(item, tech, "work_order");
+  }
+
   for (const bd of breakdowns || []) {
     const group = classifyAsset(bd);
     const tech = group ? techForAsset(group, bd.asset_code, dumptruckCodes) : "Joaquim";
-    const key = `${bd.asset_code}|${bd.description}`;
-    if (usedBreakdownKeys.has(key)) continue;
-    usedBreakdownKeys.add(key);
-    raw.push(makeRow({
-      work_date,
-      asset_code: bd.asset_code,
-      asset_id: bd.asset_id,
-      hours: bd.hours,
-      category: "Breakdown",
-      reason: bd.description,
-      technician_name: tech,
-      source: "breakdown",
-    }));
+    addWorkRow(bd, tech, "breakdown");
   }
 
   const hoursByTech = new Map();
@@ -446,22 +709,88 @@ function generateDayRows({
 
   for (const tech of allTechs) {
     let remaining = minTechHours - (hoursByTech.get(tech) || 0);
+    if (remaining < 0.5) continue;
+
     const groupKey = Object.entries(TECH_BY_GROUP).find(([, list]) => list.includes(tech))?.[0];
     const groupAssets = groupKey ? groups[groupKey] : groups.loader;
-    if (remaining >= 0.5) {
-      const hrs = Math.max(0.5, Math.round(remaining * 2) / 2);
-      const pick = pickFillerAsset(groupAssets, work_date, tech, 0);
+    const fillJobs = planFillJobs(remaining, work_date, tech);
+
+    for (const job of fillJobs) {
+      let asset = pickGroupAsset(groupAssets, work_date, tech, job.salt);
+      let description = null;
+      let category = job.category;
+
+      if (job.category === "Service" && hashSeed(work_date, tech, job.salt, "svcMix") % 100 < 45) {
+        const fromCatalog = pickServiceFromCatalog(serviceCatalog, groupAssets, work_date, tech, job.salt);
+        if (fromCatalog) {
+          const recent = new Set(usageTracker.techRecent.get(tech) || []);
+          if (!recent.has(fromCatalog.description)) {
+            asset = { asset_code: fromCatalog.asset_code, asset_id: fromCatalog.asset_id };
+            description = fromCatalog.description;
+            category = "Service";
+          }
+        }
+      }
+
+      if (!description) {
+        description = usageTracker.pick(
+          tech,
+          work_date,
+          category,
+          JOB_POOLS[category] || JOB_POOLS.Maintenance,
+          job.salt,
+        );
+      }
+
+      const key = `${asset.asset_code}|${category}|${description}`;
+      if (dayUsedKeys.has(key)) {
+        description = usageTracker.pick(tech, work_date, category, JOB_POOLS[category] || JOB_POOLS.Maintenance, `${job.salt}|alt`);
+      }
+      const finalKey = `${asset.asset_code}|${category}|${description}`;
+      if (dayUsedKeys.has(finalKey)) continue;
+      dayUsedKeys.add(finalKey);
+
       raw.push(makeRow({
         work_date,
-        asset_code: pick.asset_code,
-        asset_id: pick.asset_id,
-        hours: hrs,
-        category: "Breakdown",
-        reason: pickFillerDescription(work_date, tech, 0),
+        asset_code: asset.asset_code,
+        asset_id: asset.asset_id,
+        hours: job.hours,
+        category,
+        reason: description,
         technician_name: tech,
         source: "synthetic_fill",
       }));
     }
+  }
+
+  for (const tech of allTechs) {
+    const total = raw
+      .filter((r) => r.technician_name === tech)
+      .reduce((s, r) => s + Number(r.hours || 0), 0);
+    const short = Number((minTechHours - total).toFixed(2));
+    if (short < 0.5) continue;
+
+    const groupKey = Object.entries(TECH_BY_GROUP).find(([, list]) => list.includes(tech))?.[0];
+    const groupAssets = groupKey ? groups[groupKey] : groups.loader;
+    const asset = pickGroupAsset(groupAssets, work_date, tech, "topup");
+    const category = hashSeed(work_date, tech, "topup") % 2 === 0 ? "Maintenance" : "Service";
+    const description = usageTracker.pick(
+      tech,
+      work_date,
+      category,
+      JOB_POOLS[category],
+      "topup",
+    );
+    raw.push(makeRow({
+      work_date,
+      asset_code: asset.asset_code,
+      asset_id: asset.asset_id,
+      hours: Math.max(0.5, Math.round(short * 2) / 2),
+      category,
+      reason: description,
+      technician_name: tech,
+      source: "synthetic_topup",
+    }));
   }
 
   for (const r of raw) {
@@ -470,7 +799,7 @@ function generateDayRows({
     r.smr = resolveSmr(db, aid, work_date, smrCache);
   }
 
-  return scheduleTechRows(raw);
+  return scheduleTechRows(raw, work_date);
 }
 
 function mapSavedToRows(savedRows, db, smrCache) {
@@ -525,8 +854,11 @@ export function generateMechanicsTimesheet(db, opts = {}) {
   const fleet = loadStartupFleet(db);
   const dumptruckCodes = fleet.groups.dumptruck.map((a) => a.asset_code);
   const breakdownsByDate = loadBreakdownsByDate(db, from, to);
+  const completedWorkByDate = loadCompletedWorkByDate(db, from, to);
+  const serviceCatalog = loadServiceCatalog(db);
   const savedByDate = loadSavedEntriesByDate(db, from, to, siteCode);
   const smrCache = new Map();
+  const usageTracker = new UsageTracker(12);
 
   const allRows = [];
   const meta = {
@@ -535,6 +867,7 @@ export function generateMechanicsTimesheet(db, opts = {}) {
     synthetic_through: syntheticThrough,
     site_code: siteCode,
     min_tech_hours: minTechHours,
+    excluded_assets: [...EXCLUDED_ASSET_CODES],
     days_generated: 0,
     days_from_saved: 0,
     days_synthetic: 0,
@@ -544,6 +877,7 @@ export function generateMechanicsTimesheet(db, opts = {}) {
       excavators: fleet.groups.excavator.length,
       crushers_screens: fleet.groups.crusher_screen.length,
     },
+    service_catalog_entries: serviceCatalog.length,
   };
 
   for (const work_date of enumerateDates(from, to)) {
@@ -560,9 +894,12 @@ export function generateMechanicsTimesheet(db, opts = {}) {
       work_date,
       fleet,
       breakdowns: breakdownsByDate.get(work_date) || [],
+      completedWork: completedWorkByDate.get(work_date) || [],
+      serviceCatalog,
       dumptruckCodes,
       minTechHours,
       smrCache,
+      usageTracker,
       db,
     });
     allRows.push(...dayRows);

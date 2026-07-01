@@ -11225,6 +11225,9 @@ export default async function maintenanceRoutes(app) {
       { field: "Days generated (synthetic + breakdowns)", value: meta.days_synthetic },
       { field: "Total rows", value: meta.row_count },
       { field: "Startup techs", value: "ADT: Sergio & Arnold | Loaders: Ronnie | Excavators: Charles | Crushers/screens: Moses" },
+      { field: "Excluded plant", value: (meta.excluded_assets || []).join(", ") },
+      { field: "Service catalog entries", value: meta.service_catalog_entries ?? 0 },
+      { field: "Categories", value: "Startup, Breakdown, Service, Maintenance" },
     ]);
     wsInfo.getRow(1).font = { bold: true };
 
