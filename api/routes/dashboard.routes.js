@@ -7,6 +7,7 @@ import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
 import { aggregateFuelBenchmarkByCategory, normalizeEquipmentCategory } from "../utils/fuelBenchmarkAggregate.js";
 import { fuelBenchmarkAssetsInRangeSql, sqlFuelMetricModeExpr } from "../utils/fuelMetricMode.js";
 import { ensureCostAllocationSchema, resolveLogCostCenterCode } from "../utils/costAllocation.js";
+import { fetchLubeUsageLines } from "../utils/lubeUsageLines.js";
 
 function todayYYYYMMDD() {
   return new Date().toISOString().slice(0, 10);
@@ -1686,6 +1687,18 @@ export default async function dashboardRoutes(app) {
       WHERE ol.log_date BETWEEN ? AND ?
     `).get(lubeUnitFallback, start, end);
 
+    const lines = fetchLubeUsageLines(db, { start, end, lubeUnitFallback });
+    const lineSummary = lines.reduce(
+      (acc, r) => {
+        acc.qty_total += Number(r.quantity || 0);
+        acc.line_cost += Number(r.line_cost || 0);
+        acc.entries += 1;
+        if (r.asset_code) acc.assets.add(String(r.asset_code));
+        return acc;
+      },
+      { qty_total: 0, line_cost: 0, entries: 0, assets: new Set() },
+    );
+
     return {
       ok: true,
       start,
@@ -1695,8 +1708,13 @@ export default async function dashboardRoutes(app) {
         total_lube_cost: Number(summary?.total_lube_cost || 0),
         entries: Number(summary?.entries || 0),
         assets: Number(summary?.assets || 0),
+        line_entries: lineSummary.entries,
+        line_qty_total: Number(lineSummary.qty_total.toFixed(3)),
+        line_total_cost: Number(lineSummary.line_cost.toFixed(2)),
+        line_assets: lineSummary.assets.size,
       },
       rows,
+      lines,
     };
   });
 

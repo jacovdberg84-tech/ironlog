@@ -7354,39 +7354,74 @@ function isPartLikeOilType(v) {
 function renderLubeUsageTable(payload) {
   const lubeList = qs("lubeList");
   if (!lubeList) return;
-  const dataRows = Array.isArray(payload?.rows) ? payload.rows : [];
   const assetFilter = String(qs("lubeFilterAsset")?.value || "").trim().toLowerCase();
   const oilTypeFilter = String(qs("lubeFilterOilType")?.value || "").trim().toLowerCase();
   const hidePartLike = Boolean(qs("lubeHidePartLike")?.checked);
 
-  const flat = [];
-  for (const r of dataRows) {
-    const assetCode = String(r.asset_code || "");
-    const assetName = String(r.asset_name || "");
-    if (assetFilter && !assetCode.toLowerCase().includes(assetFilter)) continue;
-    const byType = Array.isArray(r.by_oil_type) ? r.by_oil_type : [];
-    const normalized = byType.length
-      ? byType.map((x) => ({
-          oil_type: String(x.oil_type || "UNSPECIFIED"),
-          qty: Number(x.qty ?? x.qty_total ?? 0),
-          cost: Number(x.lube_cost ?? x.total_lube_cost ?? 0),
-        }))
-      : [{
-          oil_type: "UNSPECIFIED",
-          qty: Number(r.qty ?? r.qty_total ?? 0),
-          cost: Number(r.lube_cost ?? r.total_lube_cost ?? 0),
-        }];
+  const detailLines = Array.isArray(payload?.lines) ? payload.lines : [];
+  let flat = [];
 
-    for (const t of normalized) {
-      if (hidePartLike && isPartLikeOilType(t.oil_type)) continue;
-      if (oilTypeFilter && !String(t.oil_type || "").toLowerCase().includes(oilTypeFilter)) continue;
-      flat.push({
-        asset_code: assetCode,
-        asset_name: assetName,
-        oil_type: t.oil_type,
-        qty: t.qty,
-        cost: t.cost,
-      });
+  if (detailLines.length) {
+    flat = detailLines
+      .filter((r) => {
+        const code = String(r.asset_code || "").toLowerCase();
+        const part = String(r.part_code || "").toLowerCase();
+        const typ = String(r.lube_type || "").toLowerCase();
+        const name = String(r.part_name || "").toLowerCase();
+        if (assetFilter && !code.includes(assetFilter)) return false;
+        if (oilTypeFilter && !typ.includes(oilTypeFilter) && !part.includes(oilTypeFilter) && !name.includes(oilTypeFilter)) {
+          return false;
+        }
+        if (hidePartLike && isPartLikeOilType(r.part_code) && !typ.includes("oil") && !name.includes("oil")) return false;
+        return true;
+      })
+      .map((r) => ({
+        usage_date: String(r.usage_date || ""),
+        asset_code: String(r.asset_code || ""),
+        asset_name: String(r.asset_name || ""),
+        part_code: String(r.part_code || ""),
+        part_name: String(r.part_name || ""),
+        lube_type: String(r.lube_type || "lube"),
+        qty: Number(r.quantity || 0),
+        cost: Number(r.line_cost || 0),
+        source: String(r.source || ""),
+        work_order_id: r.work_order_id != null ? Number(r.work_order_id) : null,
+      }));
+  } else {
+    const dataRows = Array.isArray(payload?.rows) ? payload.rows : [];
+    for (const r of dataRows) {
+      const assetCode = String(r.asset_code || "");
+      const assetName = String(r.asset_name || "");
+      if (assetFilter && !assetCode.toLowerCase().includes(assetFilter)) continue;
+      const byType = Array.isArray(r.by_oil_type) ? r.by_oil_type : [];
+      const normalized = byType.length
+        ? byType.map((x) => ({
+            oil_type: String(x.oil_type || "UNSPECIFIED"),
+            qty: Number(x.qty ?? x.qty_total ?? 0),
+            cost: Number(x.lube_cost ?? x.total_lube_cost ?? 0),
+          }))
+        : [{
+            oil_type: "UNSPECIFIED",
+            qty: Number(r.qty ?? r.qty_total ?? 0),
+            cost: Number(r.lube_cost ?? r.total_lube_cost ?? 0),
+          }];
+
+      for (const t of normalized) {
+        if (hidePartLike && isPartLikeOilType(t.oil_type)) continue;
+        if (oilTypeFilter && !String(t.oil_type || "").toLowerCase().includes(oilTypeFilter)) continue;
+        flat.push({
+          usage_date: "",
+          asset_code: assetCode,
+          asset_name: assetName,
+          part_code: t.oil_type,
+          part_name: t.oil_type,
+          lube_type: t.oil_type,
+          qty: t.qty,
+          cost: t.cost,
+          source: "summary",
+          work_order_id: null,
+        });
+      }
     }
   }
 
@@ -7401,31 +7436,41 @@ function renderLubeUsageTable(payload) {
 
   lubeList.innerHTML = `
     <div style="overflow:auto;">
-      <table class="gridTable" style="min-width:1100px;">
+      <table class="gridTable" style="min-width:1240px;">
         <thead>
           <tr>
-            <th>Asset Code</th>
-            <th>Equipment</th>
-            <th>Oil Type</th>
+            <th>Date</th>
+            <th>Lube part no</th>
+            <th>Description</th>
+            <th>Type</th>
+            <th>Plant no</th>
+            <th>Machine</th>
             <th style="text-align:right;">Qty</th>
             <th style="text-align:right;">Cost</th>
+            <th>Source</th>
+            <th>WO #</th>
           </tr>
         </thead>
         <tbody>
           ${flat.map((r) => `
             <tr>
+              <td style="padding:10px 8px;">${escapeHtml(r.usage_date || "-")}</td>
+              <td style="padding:10px 8px;">${escapeHtml(r.part_code || "-")}</td>
+              <td style="padding:10px 8px;">${escapeHtml(r.part_name || "-")}</td>
+              <td style="padding:10px 8px;">${escapeHtml(r.lube_type || "-")}</td>
               <td style="padding:10px 8px;">${escapeHtml(r.asset_code || "-")}</td>
               <td style="padding:10px 8px;">${escapeHtml(r.asset_name || r.asset_code || "-")}</td>
-              <td style="padding:10px 8px;">${escapeHtml(r.oil_type || "UNSPECIFIED")}</td>
               <td style="padding:10px 8px; text-align:right;">${Number(r.qty || 0).toFixed(1)}</td>
               <td style="padding:10px 8px; text-align:right;">${fmtMoney(r.cost || 0)}</td>
+              <td style="padding:10px 8px;">${escapeHtml(r.source || "-")}</td>
+              <td style="padding:10px 8px;">${r.work_order_id ? escapeHtml(String(r.work_order_id)) : "-"}</td>
             </tr>
           `).join("")}
         </tbody>
       </table>
     </div>
     <div class="muted" style="margin-top:8px;">
-      Showing ${flat.length} oil-type lines across ${visibleAssets} assets | visible qty ${visibleQty.toFixed(1)} | visible cost ${fmtMoney(visibleCost)}
+      Showing ${flat.length} line(s) across ${visibleAssets} machine(s) | qty ${visibleQty.toFixed(1)} | cost ${fmtMoney(visibleCost)}
     </div>
   `;
 }
@@ -7442,10 +7487,10 @@ async function loadLubeUsage() {
   setSkeleton("lubeList", 2);
   const data = await fetchJson(`${API}/api/dashboard/lube?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
 
-  setText("lubeQtyTotal", Number(data.summary?.qty_total || 0).toFixed(1));
-  setText("lubeEntries", Number(data.summary?.entries || 0));
-  setText("lubeAssets", Number(data.summary?.assets || 0));
-  setText("cLubeCost", fmtMoney(data.summary?.total_lube_cost || 0));
+  setText("lubeQtyTotal", Number(data.summary?.line_qty_total ?? data.summary?.qty_total ?? 0).toFixed(1));
+  setText("lubeEntries", Number(data.summary?.line_entries ?? data.summary?.entries ?? 0));
+  setText("lubeAssets", Number(data.summary?.line_assets ?? data.summary?.assets ?? 0));
+  setText("cLubeCost", fmtMoney(data.summary?.line_total_cost ?? data.summary?.total_lube_cost ?? 0));
   lubeUsageCache = data;
   renderLubeUsageTable(data);
 
@@ -9705,6 +9750,9 @@ function switchTab(key) {
   }
   if (k === "telematics") {
     loadTelematicsTab().catch(() => {});
+  }
+  if (k === "lube") {
+    loadLubeUsage().catch(() => {});
   }
   if (k === "cartrack") {
     loadCartrackTrackingTab({ refresh: true }).catch(() => {});

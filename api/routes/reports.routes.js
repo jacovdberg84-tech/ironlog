@@ -42,6 +42,7 @@ import {
 } from "../utils/cartrack.js";
 import { buildPlantHireLines, prevMonth as hirePrevMonth } from "../utils/plantHire.js";
 import { fetchLubeMonthStockSnapshot } from "../utils/lubeMonthStock.js";
+import { fetchLubeUsageLines } from "../utils/lubeUsageLines.js";
 import { getMachinePrestartTemplate } from "../utils/machinePrestartTemplates.js";
 import {
   resolvePdfImage,
@@ -3196,6 +3197,38 @@ export default async function reportsRoutes(app) {
       });
     }
     wsUsage.getRow(1).font = { bold: true };
+
+    const usageLines = fetchLubeUsageLines(db, { start, end, lubeUnitFallback });
+    const wsLines = wb.addWorksheet("Usage lines", { views: [{ state: "frozen", ySplit: 1 }] });
+    wsLines.columns = [
+      { header: "Date", key: "usage_date", width: 12 },
+      { header: "Lube part no", key: "part_code", width: 16 },
+      { header: "Description", key: "part_name", width: 32 },
+      { header: "Type", key: "lube_type", width: 14 },
+      { header: "Plant no", key: "asset_code", width: 14 },
+      { header: "Machine", key: "asset_name", width: 28 },
+      { header: "Qty", key: "quantity", width: 10 },
+      { header: "Unit cost", key: "unit_cost", width: 11 },
+      { header: "Line cost", key: "line_cost", width: 11 },
+      { header: "Source", key: "source", width: 14 },
+      { header: "WO #", key: "work_order_id", width: 8 },
+    ];
+    for (const r of usageLines) {
+      wsLines.addRow({
+        usage_date: r.usage_date,
+        part_code: r.part_code,
+        part_name: r.part_name,
+        lube_type: r.lube_type,
+        asset_code: r.asset_code,
+        asset_name: r.asset_name,
+        quantity: Number(r.quantity || 0),
+        unit_cost: Number(r.unit_cost || 0),
+        line_cost: Number(r.line_cost || 0),
+        source: r.source,
+        work_order_id: r.work_order_id || "",
+      });
+    }
+    wsLines.getRow(1).font = { bold: true };
 
     const wsStock = wb.addWorksheet("Month store stock", { views: [{ state: "frozen", ySplit: 6 }] });
     wsStock.addRow(["Lube store — month opening / closing (from stock movements)"]);
