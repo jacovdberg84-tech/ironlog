@@ -7382,6 +7382,7 @@ function renderLubeUsageTable(payload) {
         part_code: String(r.part_code || ""),
         part_name: String(r.part_name || ""),
         lube_type: String(r.lube_type || "lube"),
+        smr: r.smr != null && Number.isFinite(Number(r.smr)) ? Number(r.smr) : null,
         qty: Number(r.quantity || 0),
         cost: Number(r.line_cost || 0),
         source: String(r.source || ""),
@@ -7416,6 +7417,7 @@ function renderLubeUsageTable(payload) {
           part_code: t.oil_type,
           part_name: t.oil_type,
           lube_type: t.oil_type,
+          smr: null,
           qty: t.qty,
           cost: t.cost,
           source: "summary",
@@ -7436,7 +7438,7 @@ function renderLubeUsageTable(payload) {
 
   lubeList.innerHTML = `
     <div style="overflow:auto;">
-      <table class="gridTable" style="min-width:1240px;">
+      <table class="gridTable" style="min-width:1320px;">
         <thead>
           <tr>
             <th>Date</th>
@@ -7445,6 +7447,7 @@ function renderLubeUsageTable(payload) {
             <th>Type</th>
             <th>Plant no</th>
             <th>Machine</th>
+            <th style="text-align:right;">Machine hrs</th>
             <th style="text-align:right;">Qty</th>
             <th style="text-align:right;">Cost</th>
             <th>Source</th>
@@ -7460,6 +7463,7 @@ function renderLubeUsageTable(payload) {
               <td style="padding:10px 8px;">${escapeHtml(r.lube_type || "-")}</td>
               <td style="padding:10px 8px;">${escapeHtml(r.asset_code || "-")}</td>
               <td style="padding:10px 8px;">${escapeHtml(r.asset_name || r.asset_code || "-")}</td>
+              <td style="padding:10px 8px; text-align:right;">${r.smr != null ? Number(r.smr).toFixed(1) : "-"}</td>
               <td style="padding:10px 8px; text-align:right;">${Number(r.qty || 0).toFixed(1)}</td>
               <td style="padding:10px 8px; text-align:right;">${fmtMoney(r.cost || 0)}</td>
               <td style="padding:10px 8px;">${escapeHtml(r.source || "-")}</td>

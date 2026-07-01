@@ -58,6 +58,54 @@ function num(v, digits = 2) {
   return Number(n.toFixed(digits));
 }
 
+function resolveSmrForAssetDate(db, assetId, usageDate, cache) {
+  const aid = Number(assetId);
+  const d = String(usageDate || "").trim();
+  if (!Number.isFinite(aid) || aid <= 0 || !d) return null;
+  const key = `${aid}|${d}`;
+  if (cache.has(key)) return cache.get(key);
+
+  let smr = null;
+  if (hasTable(db, "daily_hours") && hasColumn(db, "daily_hours", "closing_hours")) {
+    const exact = db.prepare(`
+      SELECT closing_hours
+      FROM daily_hours
+      WHERE asset_id = ?
+        AND work_date = ?
+        AND closing_hours IS NOT NULL
+      LIMIT 1
+    `).get(aid, d);
+    if (exact?.closing_hours != null) {
+      smr = num(exact.closing_hours, 1);
+    } else {
+      const near = db.prepare(`
+        SELECT closing_hours
+        FROM daily_hours
+        WHERE asset_id = ?
+          AND work_date <= ?
+          AND closing_hours IS NOT NULL
+        ORDER BY work_date DESC
+        LIMIT 1
+      `).get(aid, d);
+      if (near?.closing_hours != null) smr = num(near.closing_hours, 1);
+    }
+  }
+  if (smr == null && hasTable(db, "asset_hours")) {
+    const ah = db.prepare(`SELECT total_hours FROM asset_hours WHERE asset_id = ?`).get(aid);
+    if (ah?.total_hours != null) smr = num(ah.total_hours, 1);
+  }
+  cache.set(key, smr);
+  return smr;
+}
+
+function enrichLinesWithSmr(db, lines) {
+  const cache = new Map();
+  return lines.map((line) => ({
+    ...line,
+    smr: resolveSmrForAssetDate(db, line.asset_id, line.usage_date, cache),
+  }));
+}
+
 function stockMovementDateExpr(db) {
   const hasCreated = hasColumn(db, "stock_movements", "created_at");
   const hasMvDate = hasColumn(db, "stock_movements", "movement_date");
@@ -94,6 +142,7 @@ export function fetchLubeUsageLines(db, { start, end, lubeUnitFallback = 4 }) {
       SELECT
         ol.id,
         ol.log_date AS usage_date,
+        ol.asset_id,
         a.asset_code,
         a.asset_name,
         COALESCE(
@@ -125,6 +174,7 @@ export function fetchLubeUsageLines(db, { start, end, lubeUnitFallback = 4 }) {
       lines.push({
         id: Number(r.id || 0),
         usage_date: String(r.usage_date || ""),
+        asset_id: Number(r.asset_id || 0) || null,
         asset_code: String(r.asset_code || ""),
         asset_name: String(r.asset_name || ""),
         part_code: String(r.part_code || "UNSPECIFIED"),
@@ -162,6 +212,7 @@ export function fetchLubeUsageLines(db, { start, end, lubeUnitFallback = 4 }) {
       SELECT
         sm.id,
         ${dateExpr} AS usage_date,
+        COALESCE(aw.id, aa.id) AS asset_id,
         COALESCE(aw.asset_code, aa.asset_code) AS asset_code,
         COALESCE(aw.asset_name, aa.asset_name) AS asset_name,
         p.part_code,
@@ -190,6 +241,7 @@ export function fetchLubeUsageLines(db, { start, end, lubeUnitFallback = 4 }) {
       lines.push({
         id: Number(r.id || 0),
         usage_date: String(r.usage_date || ""),
+        asset_id: Number(r.asset_id || 0) || null,
         asset_code: String(r.asset_code || ""),
         asset_name: String(r.asset_name || ""),
         part_code: String(r.part_code || ""),
@@ -212,5 +264,5 @@ export function fetchLubeUsageLines(db, { start, end, lubeUnitFallback = 4 }) {
     return String(a.part_code).localeCompare(String(b.part_code));
   });
 
-  return lines;
+  return enrichLinesWithSmr(db, lines);
 }
