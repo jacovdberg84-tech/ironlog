@@ -18,18 +18,29 @@ function hasTable(db, table) {
   }
 }
 
-/** SQL fragment: part row is oil / lube / grease (alias e.g. p). */
-export function lubePartWhereSql(alias = "p") {
+function lubePartNameCodeSql(alias = "p") {
   const p = alias;
-  return `(
-    LOWER(COALESCE(${p}.consumable_kind, '')) IN ('oil', 'lube', 'lubricant', 'hydraulic', 'hydraulic_oil', 'coolant', 'grease')
-    OR LOWER(COALESCE(${p}.part_name, '')) LIKE '%oil%'
+  return `
+    LOWER(COALESCE(${p}.part_name, '')) LIKE '%oil%'
     OR LOWER(COALESCE(${p}.part_name, '')) LIKE '%lube%'
     OR LOWER(COALESCE(${p}.part_name, '')) LIKE '%grease%'
     OR LOWER(COALESCE(${p}.part_name, '')) LIKE '%hydraulic%'
     OR LOWER(COALESCE(${p}.part_code, '')) LIKE '%oil%'
     OR LOWER(COALESCE(${p}.part_code, '')) LIKE '%lube%'
-  )`;
+  `;
+}
+
+/** SQL fragment: part row is oil / lube / grease (alias e.g. p). */
+export function lubePartWhereSql(db, alias = "p") {
+  const p = alias;
+  const nameCode = lubePartNameCodeSql(p);
+  if (hasColumn(db, "parts", "consumable_kind")) {
+    return `(
+      LOWER(COALESCE(${p}.consumable_kind, '')) IN ('oil', 'lube', 'lubricant', 'hydraulic', 'hydraulic_oil', 'coolant', 'grease')
+      OR ${nameCode}
+    )`;
+  }
+  return `(${nameCode})`;
 }
 
 const ROLE_OIL_TYPES = new Set(["admin", "supervisor", "manager", "stores", "artisan", "operator"]);
@@ -47,6 +58,15 @@ function num(v, digits = 2) {
   return Number(n.toFixed(digits));
 }
 
+function stockMovementDateExpr(db) {
+  const hasCreated = hasColumn(db, "stock_movements", "created_at");
+  const hasMvDate = hasColumn(db, "stock_movements", "movement_date");
+  if (hasCreated && hasMvDate) return "date(COALESCE(sm.created_at, sm.movement_date))";
+  if (hasCreated) return "date(sm.created_at)";
+  if (hasMvDate) return "date(sm.movement_date)";
+  return "date('1970-01-01')";
+}
+
 /**
  * @param {import('better-sqlite3').Database} db
  * @param {{ start: string, end: string, lubeUnitFallback?: number }} opts
@@ -56,6 +76,18 @@ export function fetchLubeUsageLines(db, { start, end, lubeUnitFallback = 4 }) {
     ? Number(lubeUnitFallback)
     : 4;
   const lines = [];
+  const hasConsumableKind = hasColumn(db, "parts", "consumable_kind");
+  const hasLubeMappings = hasTable(db, "lube_type_mappings");
+  const lubeTypeExpr = hasConsumableKind && hasLubeMappings
+    ? `COALESCE(NULLIF(TRIM(p.consumable_kind), ''), NULLIF(TRIM(ltm.part_code), ''), 'lube')`
+    : hasConsumableKind
+      ? `COALESCE(NULLIF(TRIM(p.consumable_kind), ''), 'lube')`
+      : hasLubeMappings
+        ? `COALESCE(NULLIF(TRIM(ltm.part_code), ''), 'lube')`
+        : `'lube'`;
+  const ltmJoin = hasLubeMappings
+    ? `LEFT JOIN lube_type_mappings ltm ON LOWER(TRIM(ltm.oil_key)) = LOWER(TRIM(COALESCE(ol.oil_type, '')))`
+    : "";
 
   if (hasTable(db, "oil_logs") && hasTable(db, "assets")) {
     const oilRows = db.prepare(`
@@ -73,11 +105,7 @@ export function fetchLubeUsageLines(db, { start, end, lubeUnitFallback = 4 }) {
           'UNSPECIFIED'
         ) AS part_code,
         COALESCE(NULLIF(TRIM(p.part_name), ''), NULLIF(TRIM(ol.oil_type), ''), '') AS part_name,
-        COALESCE(
-          NULLIF(TRIM(p.consumable_kind), ''),
-          NULLIF(TRIM(ltm.part_code), ''),
-          'lube'
-        ) AS lube_type,
+        ${lubeTypeExpr} AS lube_type,
         ol.quantity,
         COALESCE(ol.unit_cost, p.unit_cost, ?) AS unit_cost,
         'oil_log' AS source,
@@ -85,7 +113,7 @@ export function fetchLubeUsageLines(db, { start, end, lubeUnitFallback = 4 }) {
       FROM oil_logs ol
       JOIN assets a ON a.id = ol.asset_id
       LEFT JOIN parts p ON UPPER(TRIM(p.part_code)) = UPPER(TRIM(COALESCE(ol.oil_type, '')))
-      LEFT JOIN lube_type_mappings ltm ON LOWER(TRIM(ltm.oil_key)) = LOWER(TRIM(COALESCE(ol.oil_type, '')))
+      ${ltmJoin}
       WHERE ol.log_date BETWEEN ? AND ?
       ORDER BY ol.log_date ASC, a.asset_code ASC, ol.id ASC
       LIMIT 10000
@@ -112,17 +140,23 @@ export function fetchLubeUsageLines(db, { start, end, lubeUnitFallback = 4 }) {
   }
 
   if (hasTable(db, "stock_movements") && hasTable(db, "parts") && hasTable(db, "assets")) {
-    const hasCreated = hasColumn(db, "stock_movements", "created_at");
-    const hasMvDate = hasColumn(db, "stock_movements", "movement_date");
+    const dateExpr = stockMovementDateExpr(db);
     const hasMvUnit = hasColumn(db, "stock_movements", "unit_cost");
-    const dateExpr = hasCreated
-      ? "date(COALESCE(sm.created_at, sm.movement_date))"
-      : hasMvDate
-        ? "date(sm.movement_date)"
-        : "date(sm.created_at)";
     const unitExpr = hasMvUnit
       ? `COALESCE(sm.unit_cost, p.unit_cost, ${fallback})`
       : `COALESCE(p.unit_cost, ${fallback})`;
+    const hasWorkOrders = hasTable(db, "work_orders");
+    const lubeTypeCol = hasConsumableKind
+      ? `COALESCE(NULLIF(TRIM(p.consumable_kind), ''), 'lube')`
+      : `'lube'`;
+
+    const woJoin = hasWorkOrders
+      ? `LEFT JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
+         LEFT JOIN assets aw ON aw.id = w.asset_id`
+      : `LEFT JOIN assets aw ON 0`;
+    const woIdExpr = hasWorkOrders
+      ? `CASE WHEN sm.reference LIKE 'work_order:%' THEN CAST(substr(sm.reference, 12) AS INTEGER) ELSE NULL END`
+      : `NULL`;
 
     const stockRows = db.prepare(`
       SELECT
@@ -132,21 +166,17 @@ export function fetchLubeUsageLines(db, { start, end, lubeUnitFallback = 4 }) {
         COALESCE(aw.asset_name, aa.asset_name) AS asset_name,
         p.part_code,
         p.part_name,
-        COALESCE(NULLIF(TRIM(p.consumable_kind), ''), 'lube') AS lube_type,
+        ${lubeTypeCol} AS lube_type,
         ABS(sm.quantity) AS quantity,
         ${unitExpr} AS unit_cost,
         CASE WHEN sm.reference LIKE 'work_order:%' THEN 'work_order' ELSE 'stores_issue' END AS source,
-        CASE
-          WHEN sm.reference LIKE 'work_order:%' THEN CAST(substr(sm.reference, 12) AS INTEGER)
-          ELSE NULL
-        END AS work_order_id
+        ${woIdExpr} AS work_order_id
       FROM stock_movements sm
       JOIN parts p ON p.id = sm.part_id
-      LEFT JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
-      LEFT JOIN assets aw ON aw.id = w.asset_id
+      ${woJoin}
       LEFT JOIN assets aa ON sm.reference LIKE ('asset:' || aa.id || ':stores')
       WHERE sm.movement_type = 'out'
-        AND ${lubePartWhereSql("p")}
+        AND ${lubePartWhereSql(db, "p")}
         AND ${dateExpr} BETWEEN ? AND ?
         AND sm.reference NOT LIKE 'lube_issue:%'
         AND COALESCE(aw.id, aa.id) IS NOT NULL

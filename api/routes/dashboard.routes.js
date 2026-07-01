@@ -1615,6 +1615,7 @@ export default async function dashboardRoutes(app) {
 
   // GET /api/dashboard/lube?start=YYYY-MM-DD&end=YYYY-MM-DD
   app.get("/lube", async (req, reply) => {
+    try {
     const start = String(req.query?.start || "").trim();
     const end = String(req.query?.end || "").trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
@@ -1716,6 +1717,10 @@ export default async function dashboardRoutes(app) {
       rows,
       lines,
     };
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ error: err.message || String(err) });
+    }
   });
 
   // GET /api/dashboard/lube/analytics?months=6
