@@ -1,4 +1,8 @@
 import { db } from "../db/client.js";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 
 const ALLOWED_ROLES = new Set([
   "admin",
@@ -8,6 +12,10 @@ const ALLOWED_ROLES = new Set([
   "workshop_manager",
   "executive",
 ]);
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const WORKTREE_BASE = path.join(REPO_ROOT, ".ai-engineer", "worktrees");
 
 function getSiteCode(req) {
   return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
@@ -88,6 +96,38 @@ function nowSql() {
   return "datetime('now')";
 }
 
+function slug(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "request";
+}
+
+function runCmd(command, args, cwd, timeoutMs = 120000) {
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: "utf8",
+    timeout: timeoutMs,
+    shell: false,
+    windowsHide: true,
+  });
+  return {
+    command: `${command} ${args.join(" ")}`,
+    cwd,
+    exit_code: typeof result.status === "number" ? result.status : 1,
+    stdout: String(result.stdout || "").trim(),
+    stderr: String(result.stderr || "").trim(),
+    timed_out: Boolean(result.error && String(result.error.message || "").toLowerCase().includes("timed out")),
+  };
+}
+
+function ensureDir(p) {
+  try {
+    fs.mkdirSync(p, { recursive: true });
+  } catch {}
+}
+
 function fetchRequestById(id, siteCode) {
   return db.prepare(`
     SELECT *
@@ -135,6 +175,75 @@ function mapRun(r) {
     started_by: String(r.started_by || ""),
     started_at: String(r.started_at || ""),
     finished_at: r.finished_at ? String(r.finished_at) : null,
+  };
+}
+
+function latestRunForRequest(requestId) {
+  return db.prepare(`
+    SELECT *
+    FROM ai_engineer_runs
+    WHERE request_id = ?
+    ORDER BY started_at DESC, id DESC
+    LIMIT 1
+  `).get(requestId);
+}
+
+function executeGuardedPipeline({ requestRow, startedBy }) {
+  ensureDir(WORKTREE_BASE);
+  const reqId = Number(requestRow?.id || 0);
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const branch = `aie/${reqId}-${stamp}-${slug(requestRow?.title)}`;
+  const worktreePath = path.join(WORKTREE_BASE, `req-${reqId}-${stamp}`);
+  ensureDir(path.dirname(worktreePath));
+
+  const steps = [];
+  steps.push(runCmd("git", ["worktree", "add", "-b", branch, worktreePath, "HEAD"], REPO_ROOT));
+  if (steps.at(-1)?.exit_code !== 0) {
+    return {
+      ok: false,
+      summary: "Execution stopped: unable to create isolated worktree.",
+      details: {
+        branch,
+        worktree_path: worktreePath,
+        steps,
+      },
+    };
+  }
+
+  const apiDir = path.join(worktreePath, "api");
+  const checks = [];
+  checks.push(runCmd("node", ["-e", "import('./server.js').then(()=>console.log('server-import-ok'))"], apiDir));
+  checks.push(runCmd("git", ["status", "--porcelain"], worktreePath));
+
+  const allOk = checks.every((s) => s.exit_code === 0);
+  const changed = String(checks[1]?.stdout || "")
+    .split(/\r?\n/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  const executionPlan = {
+    request_id: reqId,
+    branch,
+    worktree_path: worktreePath,
+    started_by: startedBy,
+    gates: {
+      server_import: checks[0]?.exit_code === 0,
+      git_clean: checks[1]?.exit_code === 0 && changed.length === 0,
+    },
+    changed_files: changed,
+    notes: [
+      "Pipeline currently validates isolated branch/worktree + baseline server import.",
+      "Next step is wiring autonomous code generation into this execution stage.",
+    ],
+    steps: [...steps, ...checks],
+  };
+
+  return {
+    ok: allOk,
+    summary: allOk
+      ? "Execution pipeline completed in isolated worktree. Ready for agent coding stage."
+      : "Execution pipeline completed with failing gates. Review run details.",
+    details: executionPlan,
   };
 }
 
@@ -270,6 +379,49 @@ export default async function aiEngineerRoutes(app) {
 
     const updated = fetchRequestById(id, siteCode);
     return reply.send({ ok: true, row: mapRequest(updated) });
+  });
+
+  app.post("/requests/:id/execute", async (req, reply) => {
+    if (!requireRole(req, reply)) return;
+    const siteCode = getSiteCode(req);
+    const user = getUserName(req);
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ ok: false, error: "valid id required" });
+    const row = fetchRequestById(id, siteCode);
+    if (!row) return reply.code(404).send({ ok: false, error: "request not found" });
+    const st = String(row.status || "draft").toLowerCase();
+    if (!["approved", "planned", "executed"].includes(st)) {
+      return reply.code(400).send({ ok: false, error: "request must be planned or approved before execute" });
+    }
+
+    const runStart = db.prepare(`
+      INSERT INTO ai_engineer_runs (
+        request_id, run_type, status, summary, details_json, started_by, started_at
+      ) VALUES (?, 'execute', 'running', ?, ?, ?, ${nowSql()})
+    `).run(id, "Execution started.", JSON.stringify({ stage: "starting" }), user);
+    const runId = Number(runStart.lastInsertRowid || 0);
+
+    const result = executeGuardedPipeline({ requestRow: row, startedBy: user });
+    const runStatus = result.ok ? "completed" : "failed";
+    db.prepare(`
+      UPDATE ai_engineer_runs
+      SET status = ?,
+          summary = ?,
+          details_json = ?,
+          finished_at = ${nowSql()}
+      WHERE id = ?
+    `).run(runStatus, result.summary, JSON.stringify(result.details), runId);
+
+    db.prepare(`
+      UPDATE ai_engineer_requests
+      SET status = ?,
+          updated_at = ${nowSql()}
+      WHERE id = ?
+    `).run(result.ok ? "executed" : "planned", id);
+
+    const updated = fetchRequestById(id, siteCode);
+    const run = db.prepare(`SELECT * FROM ai_engineer_runs WHERE id = ?`).get(runId);
+    return reply.send({ ok: result.ok, row: mapRequest(updated), run: mapRun(run) });
   });
 
   app.post("/requests/:id/reject", async (req, reply) => {

@@ -7273,9 +7273,11 @@ function aiEngineerActionButtons(row) {
   const id = Number(row?.id || 0);
   const status = String(row?.status || "draft").toLowerCase();
   const planBtn = `<button type="button" data-aie-plan="${id}">Plan</button>`;
-  const approveBtn = `<button type="button" data-aie-approve="${id}" ${status === "approved" ? "disabled" : ""}>Approve</button>`;
+  const approveBtn = `<button type="button" data-aie-approve="${id}" ${status === "approved" || status === "executed" ? "disabled" : ""}>Approve</button>`;
+  const executeBtn = `<button type="button" data-aie-execute="${id}" ${!["approved", "planned", "executed"].includes(status) ? "disabled" : ""}>Execute</button>`;
   const rejectBtn = `<button type="button" data-aie-reject="${id}">Reject</button>`;
-  return `${planBtn} ${approveBtn} ${rejectBtn}`;
+  const viewBtn = `<button type="button" data-aie-view="${id}">View</button>`;
+  return `${planBtn} ${approveBtn} ${executeBtn} ${rejectBtn} ${viewBtn}`;
 }
 
 async function loadAiEngineerRequests() {
@@ -7349,6 +7351,33 @@ async function runAiEngineerAction(id, action, payload = null) {
     if (!res.ok) throw new Error(data.error || `Failed to ${action}`);
     aiEngineerMsg(`Request #${reqId}: ${action} complete.`);
     await loadAiEngineerRequests();
+  } catch (e) {
+    aiEngineerMsg(e.message || String(e), true);
+  }
+}
+
+async function viewAiEngineerRequest(id) {
+  const reqId = Number(id || 0);
+  if (!reqId) return;
+  aiEngineerMsg(`Loading request #${reqId} details...`);
+  try {
+    const res = await fetch(`${API}/ai-engineer/requests/${reqId}`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load request details");
+    const row = data?.row || {};
+    const runs = Array.isArray(data?.runs) ? data.runs : [];
+    const latest = runs[0] || null;
+    const details = latest?.details ? JSON.stringify(latest.details, null, 2) : "(no run details yet)";
+    window.alert(
+      `Request #${reqId}\n` +
+      `Status: ${row.status || "-"}\n` +
+      `Priority: ${row.priority || "-"}\n` +
+      `Title: ${row.title || "-"}\n` +
+      `Latest run: ${latest ? `${latest.run_type} (${latest.status})` : "none"}\n\n` +
+      `${latest?.summary || ""}\n\n` +
+      `${details}`
+    );
+    aiEngineerMsg(`Loaded request #${reqId}.`);
   } catch (e) {
     aiEngineerMsg(e.message || String(e), true);
   }
@@ -8173,11 +8202,21 @@ document.addEventListener("DOMContentLoaded", () => {
       await runAiEngineerAction(Number(approveBtn.getAttribute("data-aie-approve") || 0), "approve");
       return;
     }
+    const executeBtn = evt.target?.closest?.("button[data-aie-execute]");
+    if (executeBtn) {
+      await runAiEngineerAction(Number(executeBtn.getAttribute("data-aie-execute") || 0), "execute");
+      return;
+    }
     const rejectBtn = evt.target?.closest?.("button[data-aie-reject]");
     if (rejectBtn) {
       const reason = window.prompt("Reason for rejection:");
       if (!reason) return;
       await runAiEngineerAction(Number(rejectBtn.getAttribute("data-aie-reject") || 0), "reject", { reason });
+      return;
+    }
+    const viewBtn = evt.target?.closest?.("button[data-aie-view]");
+    if (viewBtn) {
+      await viewAiEngineerRequest(Number(viewBtn.getAttribute("data-aie-view") || 0));
     }
   });
   document.getElementById("histViewMode")?.addEventListener("change", () => loadHistory());
