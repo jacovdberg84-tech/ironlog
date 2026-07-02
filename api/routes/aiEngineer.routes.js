@@ -128,6 +128,70 @@ function ensureDir(p) {
   } catch {}
 }
 
+function chooseTargetFiles(title, text) {
+  const hay = `${String(title || "")} ${String(text || "")}`.toLowerCase();
+  const files = new Set();
+  if (/maint|service|mechanic|workshop/.test(hay)) {
+    files.add("web/maintenance.html");
+    files.add("web/maintenance.js");
+    files.add("api/routes/maintenance.routes.js");
+  }
+  if (/lube|oil|dashboard/.test(hay)) {
+    files.add("web/app.js");
+    files.add("api/routes/dashboard.routes.js");
+    files.add("api/routes/reports.routes.js");
+  }
+  if (/work.?order|breakdown/.test(hay)) {
+    files.add("api/routes/workorders.routes.js");
+    files.add("api/routes/breakdowns.routes.js");
+  }
+  if (/api|endpoint|route/.test(hay)) {
+    files.add("api/server.js");
+  }
+  if (!files.size) {
+    files.add("web/app.js");
+    files.add("api/routes/maintenance.routes.js");
+  }
+  return [...files];
+}
+
+function buildProposalMarkdown(requestRow, targetFiles) {
+  const title = String(requestRow?.title || "").trim();
+  const requestText = String(requestRow?.request_text || "").trim();
+  const pri = String(requestRow?.priority || "medium");
+  const risk = String(requestRow?.risk_level || "medium");
+  const bullets = [
+    "Implement minimal, backwards-compatible changes.",
+    "Prefer additive API changes and non-breaking UI defaults.",
+    "Add or adjust tests/verification where feasible.",
+    "Keep modified files constrained to target scope.",
+  ];
+  return [
+    `# AI Engineer Proposal`,
+    ``,
+    `## Request`,
+    `- ID: ${Number(requestRow?.id || 0)}`,
+    `- Title: ${title}`,
+    `- Priority: ${pri}`,
+    `- Risk: ${risk}`,
+    ``,
+    `### User request`,
+    requestText || "(empty)",
+    ``,
+    `## Target files`,
+    ...targetFiles.map((f) => `- ${f}`),
+    ``,
+    `## Planned implementation`,
+    ...bullets.map((b) => `- ${b}`),
+    ``,
+    `## Validation gates`,
+    `- API import validation`,
+    `- Git diff produced in isolated worktree`,
+    `- Optional test/lint command execution if available`,
+    ``,
+  ].join("\n");
+}
+
 function fetchRequestById(id, siteCode) {
   return db.prepare(`
     SELECT *
@@ -212,11 +276,49 @@ function executeGuardedPipeline({ requestRow, startedBy }) {
 
   const apiDir = path.join(worktreePath, "api");
   const checks = [];
+  const proposalDir = path.join(worktreePath, ".ai-engineer", "proposals");
+  ensureDir(proposalDir);
+  const targetFiles = chooseTargetFiles(requestRow?.title, requestRow?.request_text);
+  const proposalMarkdown = buildProposalMarkdown(requestRow, targetFiles);
+  const proposalPath = path.join(proposalDir, `request-${reqId}.md`);
+  const proposalJsonPath = path.join(proposalDir, `request-${reqId}.json`);
+  try {
+    fs.writeFileSync(proposalPath, proposalMarkdown, "utf8");
+    fs.writeFileSync(
+      proposalJsonPath,
+      JSON.stringify(
+        {
+          request_id: reqId,
+          title: String(requestRow?.title || ""),
+          request_text: String(requestRow?.request_text || ""),
+          target_files: targetFiles,
+          generated_at: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+  } catch (err) {
+    checks.push({
+      command: "write-proposal-files",
+      cwd: proposalDir,
+      exit_code: 1,
+      stdout: "",
+      stderr: String(err?.message || err || "proposal write failed"),
+      timed_out: false,
+    });
+  }
+
   checks.push(runCmd("node", ["-e", "import('./server.js').then(()=>console.log('server-import-ok'))"], apiDir));
   checks.push(runCmd("git", ["status", "--porcelain"], worktreePath));
+  checks.push(runCmd("git", ["diff", "--", ".ai-engineer/proposals"], worktreePath));
 
   const allOk = checks.every((s) => s.exit_code === 0);
-  const changed = String(checks[1]?.stdout || "")
+  const serverImportStep = checks.find((s) => String(s.command || "").startsWith("node "));
+  const statusStep = checks.find((s) => String(s.command || "").startsWith("git status"));
+  const diffStep = checks.find((s) => String(s.command || "").startsWith("git diff"));
+  const changed = String(statusStep?.stdout || "")
     .split(/\r?\n/)
     .map((x) => x.trim())
     .filter(Boolean);
@@ -227,13 +329,21 @@ function executeGuardedPipeline({ requestRow, startedBy }) {
     worktree_path: worktreePath,
     started_by: startedBy,
     gates: {
-      server_import: checks[0]?.exit_code === 0,
-      git_clean: checks[1]?.exit_code === 0 && changed.length === 0,
+      server_import: Number(serverImportStep?.exit_code || 1) === 0,
+      git_diff_available: Number(diffStep?.exit_code || 1) === 0,
+      has_changes: changed.length > 0,
     },
     changed_files: changed,
+    proposal: {
+      file: path.relative(worktreePath, proposalPath).replace(/\\/g, "/"),
+      json_file: path.relative(worktreePath, proposalJsonPath).replace(/\\/g, "/"),
+      target_files: targetFiles,
+      markdown_preview: proposalMarkdown.slice(0, 1800),
+      diff_preview: String(diffStep?.stdout || "").slice(0, 6000),
+    },
     notes: [
-      "Pipeline currently validates isolated branch/worktree + baseline server import.",
-      "Next step is wiring autonomous code generation into this execution stage.",
+      "Phase 3 start: execution now generates concrete implementation proposal artifacts.",
+      "Next step: replace proposal generator with live code generator and apply patch stage.",
     ],
     steps: [...steps, ...checks],
   };
@@ -241,7 +351,7 @@ function executeGuardedPipeline({ requestRow, startedBy }) {
   return {
     ok: allOk,
     summary: allOk
-      ? "Execution pipeline completed in isolated worktree. Ready for agent coding stage."
+      ? "Execution pipeline completed with generated proposal + diff preview in isolated worktree."
       : "Execution pipeline completed with failing gates. Review run details.",
     details: executionPlan,
   };

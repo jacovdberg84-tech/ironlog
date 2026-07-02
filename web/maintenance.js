@@ -7367,16 +7367,36 @@ async function viewAiEngineerRequest(id) {
     const row = data?.row || {};
     const runs = Array.isArray(data?.runs) ? data.runs : [];
     const latest = runs[0] || null;
-    const details = latest?.details ? JSON.stringify(latest.details, null, 2) : "(no run details yet)";
-    window.alert(
-      `Request #${reqId}\n` +
-      `Status: ${row.status || "-"}\n` +
-      `Priority: ${row.priority || "-"}\n` +
-      `Title: ${row.title || "-"}\n` +
-      `Latest run: ${latest ? `${latest.run_type} (${latest.status})` : "none"}\n\n` +
-      `${latest?.summary || ""}\n\n` +
-      `${details}`
-    );
+    const details = latest?.details || null;
+    const previewLines = [
+      `Request #${reqId}`,
+      `Status: ${row.status || "-"}`,
+      `Priority: ${row.priority || "-"}`,
+      `Title: ${row.title || "-"}`,
+      `Latest run: ${latest ? `${latest.run_type} (${latest.status})` : "none"}`,
+      ``,
+      `${latest?.summary || ""}`,
+      ``,
+    ];
+    if (details?.proposal?.target_files?.length) {
+      previewLines.push("Target files:");
+      for (const f of details.proposal.target_files) previewLines.push(`- ${f}`);
+      previewLines.push("");
+    }
+    if (details?.proposal?.markdown_preview) {
+      previewLines.push("Proposal preview:");
+      previewLines.push(details.proposal.markdown_preview);
+      previewLines.push("");
+    }
+    if (details?.proposal?.diff_preview) {
+      previewLines.push("Diff preview:");
+      previewLines.push(details.proposal.diff_preview);
+      previewLines.push("");
+    } else if (details) {
+      previewLines.push(JSON.stringify(details, null, 2));
+    }
+    const pre = document.getElementById("aiEngRunPreview");
+    if (pre) pre.textContent = previewLines.join("\n");
     aiEngineerMsg(`Loaded request #${reqId}.`);
   } catch (e) {
     aiEngineerMsg(e.message || String(e), true);
