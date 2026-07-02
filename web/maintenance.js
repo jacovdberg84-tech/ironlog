@@ -7273,11 +7273,13 @@ function aiEngineerActionButtons(row) {
   const id = Number(row?.id || 0);
   const status = String(row?.status || "draft").toLowerCase();
   const planBtn = `<button type="button" data-aie-plan="${id}">Plan</button>`;
-  const approveBtn = `<button type="button" data-aie-approve="${id}" ${status === "approved" || status === "executed" ? "disabled" : ""}>Approve</button>`;
+  const approveBtn = `<button type="button" data-aie-approve="${id}" ${["approved", "executed", "patch_ready", "patch_applied"].includes(status) ? "disabled" : ""}>Approve</button>`;
   const executeBtn = `<button type="button" data-aie-execute="${id}" ${!["approved", "planned", "executed"].includes(status) ? "disabled" : ""}>Execute</button>`;
+  const genPatchBtn = `<button type="button" data-aie-gpatch="${id}" ${!["executed", "patch_ready", "patch_applied"].includes(status) ? "disabled" : ""}>Gen Patch</button>`;
+  const applyPatchBtn = `<button type="button" data-aie-apatch="${id}" ${!["patch_ready", "patch_applied"].includes(status) ? "disabled" : ""}>Apply Patch</button>`;
   const rejectBtn = `<button type="button" data-aie-reject="${id}">Reject</button>`;
   const viewBtn = `<button type="button" data-aie-view="${id}">View</button>`;
-  return `${planBtn} ${approveBtn} ${executeBtn} ${rejectBtn} ${viewBtn}`;
+  return `${planBtn} ${approveBtn} ${executeBtn} ${genPatchBtn} ${applyPatchBtn} ${rejectBtn} ${viewBtn}`;
 }
 
 async function loadAiEngineerRequests() {
@@ -8225,6 +8227,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const executeBtn = evt.target?.closest?.("button[data-aie-execute]");
     if (executeBtn) {
       await runAiEngineerAction(Number(executeBtn.getAttribute("data-aie-execute") || 0), "execute");
+      return;
+    }
+    const gPatchBtn = evt.target?.closest?.("button[data-aie-gpatch]");
+    if (gPatchBtn) {
+      await runAiEngineerAction(Number(gPatchBtn.getAttribute("data-aie-gpatch") || 0), "generate-patch");
+      return;
+    }
+    const aPatchBtn = evt.target?.closest?.("button[data-aie-apatch]");
+    if (aPatchBtn) {
+      await runAiEngineerAction(Number(aPatchBtn.getAttribute("data-aie-apatch") || 0), "apply-patch");
       return;
     }
     const rejectBtn = evt.target?.closest?.("button[data-aie-reject]");

@@ -192,6 +192,172 @@ function buildProposalMarkdown(requestRow, targetFiles) {
   ].join("\n");
 }
 
+function getLatestExecuteRun(requestId) {
+  return db.prepare(`
+    SELECT *
+    FROM ai_engineer_runs
+    WHERE request_id = ?
+      AND run_type = 'execute'
+      AND status = 'completed'
+    ORDER BY started_at DESC, id DESC
+    LIMIT 1
+  `).get(requestId);
+}
+
+function parseDetailsJson(raw) {
+  try {
+    return raw ? JSON.parse(String(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildGeneratedPatchPayload({ requestRow, targetFiles }) {
+  return {
+    schema: "ironlog-ai-engineer/patch-v1",
+    request_id: Number(requestRow?.id || 0),
+    title: String(requestRow?.title || ""),
+    request_text: String(requestRow?.request_text || ""),
+    target_files: targetFiles,
+    generated_at: new Date().toISOString(),
+    changes: [
+      {
+        file: "ai-engineer.generated.json",
+        action: "upsert",
+        description: "Track generated patch metadata for AI Engineer request",
+      },
+      {
+        file: ".ai-engineer/applied/request-summary.md",
+        action: "append",
+        description: "Append human-readable request patch summary",
+      },
+    ],
+  };
+}
+
+function generatePatchInWorktree({ requestRow, executeDetails }) {
+  const worktreePath = String(executeDetails?.worktree_path || "").trim();
+  if (!worktreePath) {
+    return { ok: false, summary: "Missing worktree path in execute run details.", details: { execute_details: executeDetails } };
+  }
+  ensureDir(path.join(worktreePath, ".ai-engineer", "patches"));
+  ensureDir(path.join(worktreePath, ".ai-engineer", "applied"));
+  const targetFiles = Array.isArray(executeDetails?.proposal?.target_files)
+    ? executeDetails.proposal.target_files
+    : chooseTargetFiles(requestRow?.title, requestRow?.request_text);
+  const payload = buildGeneratedPatchPayload({ requestRow, targetFiles });
+  const patchPath = path.join(worktreePath, ".ai-engineer", "patches", `request-${Number(requestRow?.id || 0)}.json`);
+
+  try {
+    fs.writeFileSync(patchPath, JSON.stringify(payload, null, 2), "utf8");
+  } catch (err) {
+    return {
+      ok: false,
+      summary: "Failed to write generated patch artifact.",
+      details: { error: String(err?.message || err), patch_path: patchPath, payload },
+    };
+  }
+
+  const diffStep = runCmd("git", ["diff", "--", path.relative(worktreePath, patchPath).replace(/\\/g, "/")], worktreePath);
+  return {
+    ok: diffStep.exit_code === 0,
+    summary: "Generated patch artifact for review.",
+    details: {
+      worktree_path: worktreePath,
+      patch_file: path.relative(worktreePath, patchPath).replace(/\\/g, "/"),
+      payload,
+      diff_preview: String(diffStep.stdout || "").slice(0, 6000),
+      steps: [diffStep],
+    },
+  };
+}
+
+function applyGeneratedPatchInWorktree({ requestRow, executeDetails, patchDetails }) {
+  const worktreePath = String(executeDetails?.worktree_path || "").trim();
+  const patchFileRel = String(patchDetails?.patch_file || "").trim();
+  if (!worktreePath || !patchFileRel) {
+    return {
+      ok: false,
+      summary: "Patch apply failed: missing worktree or patch file.",
+      details: { worktree_path: worktreePath, patch_file: patchFileRel },
+    };
+  }
+
+  const patchPath = path.join(worktreePath, patchFileRel);
+  if (!fs.existsSync(patchPath)) {
+    return {
+      ok: false,
+      summary: "Patch file does not exist in worktree.",
+      details: { patch_file: patchFileRel },
+    };
+  }
+
+  const patchPayload = parseDetailsJson(fs.readFileSync(patchPath, "utf8")) || {};
+  const generatedJsonPath = path.join(worktreePath, "ai-engineer.generated.json");
+  let generatedDoc = { requests: [] };
+  if (fs.existsSync(generatedJsonPath)) {
+    generatedDoc = parseDetailsJson(fs.readFileSync(generatedJsonPath, "utf8")) || { requests: [] };
+  }
+  if (!Array.isArray(generatedDoc.requests)) generatedDoc.requests = [];
+  generatedDoc.requests = generatedDoc.requests.filter((x) => Number(x?.request_id || 0) !== Number(requestRow?.id || 0));
+  generatedDoc.requests.push({
+    request_id: Number(requestRow?.id || 0),
+    title: String(requestRow?.title || ""),
+    priority: String(requestRow?.priority || "medium"),
+    applied_at: new Date().toISOString(),
+    target_files: Array.isArray(patchPayload?.target_files) ? patchPayload.target_files : [],
+  });
+  generatedDoc.last_updated_at = new Date().toISOString();
+
+  ensureDir(path.join(worktreePath, ".ai-engineer", "applied"));
+  const summaryPath = path.join(worktreePath, ".ai-engineer", "applied", "request-summary.md");
+  const summaryEntry = [
+    `## Request #${Number(requestRow?.id || 0)} - ${String(requestRow?.title || "")}`,
+    `- Applied at: ${new Date().toISOString()}`,
+    `- Priority: ${String(requestRow?.priority || "medium")}`,
+    `- Requested by: ${String(requestRow?.requested_by || "")}`,
+    `- Target files: ${(Array.isArray(patchPayload?.target_files) ? patchPayload.target_files : []).join(", ") || "(none)"}`,
+    ``,
+  ].join("\n");
+
+  try {
+    fs.writeFileSync(generatedJsonPath, JSON.stringify(generatedDoc, null, 2), "utf8");
+    fs.appendFileSync(summaryPath, `${summaryEntry}\n`, "utf8");
+  } catch (err) {
+    return {
+      ok: false,
+      summary: "Patch apply failed while writing files.",
+      details: { error: String(err?.message || err) },
+    };
+  }
+
+  const statusStep = runCmd("git", ["status", "--porcelain"], worktreePath);
+  const diffStep = runCmd("git", ["diff", "--", "ai-engineer.generated.json", ".ai-engineer/applied/request-summary.md"], worktreePath);
+  const apiImport = runCmd("node", ["-e", "import('./server.js').then(()=>console.log('server-import-ok'))"], path.join(worktreePath, "api"));
+  const changed = String(statusStep.stdout || "")
+    .split(/\r?\n/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  const ok = statusStep.exit_code === 0 && diffStep.exit_code === 0 && apiImport.exit_code === 0 && changed.length > 0;
+  return {
+    ok,
+    summary: ok
+      ? "Generated patch applied in isolated worktree. Ready for manual review/commit."
+      : "Patch apply completed with issues; inspect run details.",
+    details: {
+      worktree_path: worktreePath,
+      changed_files: changed,
+      diff_preview: String(diffStep.stdout || "").slice(0, 6000),
+      gates: {
+        server_import: apiImport.exit_code === 0,
+        has_changes: changed.length > 0,
+      },
+      steps: [statusStep, diffStep, apiImport],
+    },
+  };
+}
+
 function fetchRequestById(id, siteCode) {
   return db.prepare(`
     SELECT *
@@ -528,6 +694,105 @@ export default async function aiEngineerRoutes(app) {
           updated_at = ${nowSql()}
       WHERE id = ?
     `).run(result.ok ? "executed" : "planned", id);
+
+    const updated = fetchRequestById(id, siteCode);
+    const run = db.prepare(`SELECT * FROM ai_engineer_runs WHERE id = ?`).get(runId);
+    return reply.send({ ok: result.ok, row: mapRequest(updated), run: mapRun(run) });
+  });
+
+  app.post("/requests/:id/generate-patch", async (req, reply) => {
+    if (!requireRole(req, reply)) return;
+    const siteCode = getSiteCode(req);
+    const user = getUserName(req);
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ ok: false, error: "valid id required" });
+    const row = fetchRequestById(id, siteCode);
+    if (!row) return reply.code(404).send({ ok: false, error: "request not found" });
+    if (!row.approved_by) return reply.code(400).send({ ok: false, error: "request must be approved first" });
+
+    const executeRun = getLatestExecuteRun(id);
+    if (!executeRun) return reply.code(400).send({ ok: false, error: "execute run required before generate-patch" });
+    const executeDetails = parseDetailsJson(executeRun.details_json) || {};
+
+    const runStart = db.prepare(`
+      INSERT INTO ai_engineer_runs (
+        request_id, run_type, status, summary, details_json, started_by, started_at
+      ) VALUES (?, 'generate_patch', 'running', ?, ?, ?, ${nowSql()})
+    `).run(id, "Generating patch artifact.", JSON.stringify({ stage: "starting" }), user);
+    const runId = Number(runStart.lastInsertRowid || 0);
+
+    const result = generatePatchInWorktree({ requestRow: row, executeDetails });
+    db.prepare(`
+      UPDATE ai_engineer_runs
+      SET status = ?,
+          summary = ?,
+          details_json = ?,
+          finished_at = ${nowSql()}
+      WHERE id = ?
+    `).run(result.ok ? "completed" : "failed", result.summary, JSON.stringify(result.details), runId);
+    db.prepare(`
+      UPDATE ai_engineer_requests
+      SET status = ?,
+          updated_at = ${nowSql()}
+      WHERE id = ?
+    `).run(result.ok ? "patch_ready" : String(row.status || "executed"), id);
+
+    const updated = fetchRequestById(id, siteCode);
+    const run = db.prepare(`SELECT * FROM ai_engineer_runs WHERE id = ?`).get(runId);
+    return reply.send({ ok: result.ok, row: mapRequest(updated), run: mapRun(run) });
+  });
+
+  app.post("/requests/:id/apply-patch", async (req, reply) => {
+    if (!requireRole(req, reply)) return;
+    const siteCode = getSiteCode(req);
+    const user = getUserName(req);
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ ok: false, error: "valid id required" });
+    const row = fetchRequestById(id, siteCode);
+    if (!row) return reply.code(404).send({ ok: false, error: "request not found" });
+    if (!row.approved_by) return reply.code(400).send({ ok: false, error: "request must be approved first" });
+
+    const executeRun = getLatestExecuteRun(id);
+    if (!executeRun) return reply.code(400).send({ ok: false, error: "execute run required before apply-patch" });
+    const executeDetails = parseDetailsJson(executeRun.details_json) || {};
+    const patchRun = db.prepare(`
+      SELECT *
+      FROM ai_engineer_runs
+      WHERE request_id = ?
+        AND run_type = 'generate_patch'
+        AND status = 'completed'
+      ORDER BY started_at DESC, id DESC
+      LIMIT 1
+    `).get(id);
+    if (!patchRun) return reply.code(400).send({ ok: false, error: "generate-patch run required before apply-patch" });
+    const patchDetails = parseDetailsJson(patchRun.details_json) || {};
+
+    const runStart = db.prepare(`
+      INSERT INTO ai_engineer_runs (
+        request_id, run_type, status, summary, details_json, started_by, started_at
+      ) VALUES (?, 'apply_patch', 'running', ?, ?, ?, ${nowSql()})
+    `).run(id, "Applying generated patch.", JSON.stringify({ stage: "starting" }), user);
+    const runId = Number(runStart.lastInsertRowid || 0);
+
+    const result = applyGeneratedPatchInWorktree({
+      requestRow: row,
+      executeDetails,
+      patchDetails,
+    });
+    db.prepare(`
+      UPDATE ai_engineer_runs
+      SET status = ?,
+          summary = ?,
+          details_json = ?,
+          finished_at = ${nowSql()}
+      WHERE id = ?
+    `).run(result.ok ? "completed" : "failed", result.summary, JSON.stringify(result.details), runId);
+    db.prepare(`
+      UPDATE ai_engineer_requests
+      SET status = ?,
+          updated_at = ${nowSql()}
+      WHERE id = ?
+    `).run(result.ok ? "patch_applied" : String(row.status || "patch_ready"), id);
 
     const updated = fetchRequestById(id, siteCode);
     const run = db.prepare(`SELECT * FROM ai_engineer_runs WHERE id = ?`).get(runId);
