@@ -7339,6 +7339,79 @@ async function createAiEngineerRequest() {
   }
 }
 
+function pickAiEngineerPreviewRun(runs) {
+  const order = ["apply_patch", "generate_patch", "execute", "plan"];
+  for (const runType of order) {
+    const hit = runs.find((r) => String(r?.run_type || "") === runType && r?.details);
+    if (hit) return hit;
+  }
+  return runs[0] || null;
+}
+
+function renderAiEngineerRunPreview({ row, runs }) {
+  const previewRun = pickAiEngineerPreviewRun(runs);
+  const details = previewRun?.details || null;
+  const lines = [
+    `Request #${Number(row?.id || 0)}`,
+    `Status: ${row?.status || "-"}`,
+    `Priority: ${row?.priority || "-"}`,
+    `Title: ${row?.title || "-"}`,
+    `Latest run: ${previewRun ? `${previewRun.run_type} (${previewRun.status})` : "none"}`,
+    ``,
+    `${previewRun?.summary || ""}`,
+    ``,
+  ];
+
+  if (details?.model) {
+    lines.push(`Model: ${details.model}`);
+    lines.push("");
+  }
+  if (details?.patch_file) {
+    lines.push(`Patch file: ${details.patch_file}`);
+    lines.push("");
+  }
+  if (details?.proposal?.target_files?.length) {
+    lines.push("Target files:");
+    for (const f of details.proposal.target_files) lines.push(`- ${f}`);
+    lines.push("");
+  } else if (Array.isArray(details?.target_files) && details.target_files.length) {
+    lines.push("Target files:");
+    for (const f of details.target_files) lines.push(`- ${f}`);
+    lines.push("");
+  }
+  if (details?.proposal?.markdown_preview) {
+    lines.push("Proposal preview:");
+    lines.push(details.proposal.markdown_preview);
+    lines.push("");
+  }
+  if (details?.gates) {
+    lines.push("Gates:");
+    for (const [k, v] of Object.entries(details.gates)) lines.push(`- ${k}: ${v ? "pass" : "fail"}`);
+    lines.push("");
+  }
+  if (details?.changed_files?.length) {
+    lines.push("Changed files:");
+    for (const f of details.changed_files) lines.push(`- ${f}`);
+    lines.push("");
+  }
+  if (details?.diff_preview) {
+    lines.push("Diff preview:");
+    lines.push(String(details.diff_preview));
+    lines.push("");
+  } else if (details?.proposal?.diff_preview) {
+    lines.push("Diff preview:");
+    lines.push(String(details.proposal.diff_preview));
+    lines.push("");
+  } else if (details?.raw_preview) {
+    lines.push("Model output preview:");
+    lines.push(String(details.raw_preview));
+    lines.push("");
+  } else if (details) {
+    lines.push(JSON.stringify(details, null, 2));
+  }
+  return lines.join("\n");
+}
+
 async function runAiEngineerAction(id, action, payload = null) {
   const reqId = Number(id || 0);
   if (!reqId) return;
@@ -7351,8 +7424,24 @@ async function runAiEngineerAction(id, action, payload = null) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Failed to ${action}`);
-    aiEngineerMsg(`Request #${reqId}: ${action} complete.`);
+    if (data?.run?.details || data?.row) {
+      const pre = document.getElementById("aiEngRunPreview");
+      if (pre) {
+        pre.textContent = renderAiEngineerRunPreview({
+          row: data.row || { id: reqId },
+          runs: data.run ? [data.run] : [],
+        });
+      }
+    }
     await loadAiEngineerRequests();
+    if (["generate-patch", "apply-patch", "execute", "plan"].includes(action)) {
+      await viewAiEngineerRequest(reqId);
+    }
+    if (data?.ok === false) {
+      aiEngineerMsg(data?.run?.summary || data?.error || `${action} failed`, true);
+      return;
+    }
+    aiEngineerMsg(`Request #${reqId}: ${action} complete.`);
   } catch (e) {
     aiEngineerMsg(e.message || String(e), true);
   }
@@ -7368,37 +7457,8 @@ async function viewAiEngineerRequest(id) {
     if (!res.ok) throw new Error(data.error || "Failed to load request details");
     const row = data?.row || {};
     const runs = Array.isArray(data?.runs) ? data.runs : [];
-    const latest = runs[0] || null;
-    const details = latest?.details || null;
-    const previewLines = [
-      `Request #${reqId}`,
-      `Status: ${row.status || "-"}`,
-      `Priority: ${row.priority || "-"}`,
-      `Title: ${row.title || "-"}`,
-      `Latest run: ${latest ? `${latest.run_type} (${latest.status})` : "none"}`,
-      ``,
-      `${latest?.summary || ""}`,
-      ``,
-    ];
-    if (details?.proposal?.target_files?.length) {
-      previewLines.push("Target files:");
-      for (const f of details.proposal.target_files) previewLines.push(`- ${f}`);
-      previewLines.push("");
-    }
-    if (details?.proposal?.markdown_preview) {
-      previewLines.push("Proposal preview:");
-      previewLines.push(details.proposal.markdown_preview);
-      previewLines.push("");
-    }
-    if (details?.proposal?.diff_preview) {
-      previewLines.push("Diff preview:");
-      previewLines.push(details.proposal.diff_preview);
-      previewLines.push("");
-    } else if (details) {
-      previewLines.push(JSON.stringify(details, null, 2));
-    }
     const pre = document.getElementById("aiEngRunPreview");
-    if (pre) pre.textContent = previewLines.join("\n");
+    if (pre) pre.textContent = renderAiEngineerRunPreview({ row, runs });
     aiEngineerMsg(`Loaded request #${reqId}.`);
   } catch (e) {
     aiEngineerMsg(e.message || String(e), true);

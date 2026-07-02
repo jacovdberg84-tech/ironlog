@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import OpenAI from "openai";
 
 const ALLOWED_ROLES = new Set([
   "admin",
@@ -16,6 +17,8 @@ const ALLOWED_ROLES = new Set([
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const WORKTREE_BASE = path.join(REPO_ROOT, ".ai-engineer", "worktrees");
+const AI_ENGINEER_MODEL = process.env.AI_ENGINEER_MODEL || "gpt-4o-mini";
+let openaiClient = null;
 
 function getSiteCode(req) {
   return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
@@ -128,6 +131,95 @@ function ensureDir(p) {
   } catch {}
 }
 
+function getOpenAIClient() {
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  if (!apiKey) return null;
+  if (!openaiClient) openaiClient = new OpenAI({ apiKey });
+  return openaiClient;
+}
+
+function extractUnifiedDiff(text) {
+  const s = String(text || "");
+  const fenced = s.match(/```diff\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) return fenced[1].trim();
+  const fallback = s.match(/(diff --git[\s\S]*)/i);
+  return fallback?.[1]?.trim() || "";
+}
+
+function readFileSafe(p, maxChars = 16000) {
+  try {
+    const content = fs.readFileSync(p, "utf8");
+    return content.length > maxChars ? `${content.slice(0, maxChars)}\n/* truncated */` : content;
+  } catch {
+    return "";
+  }
+}
+
+async function generateUnifiedDiffViaModel({ requestRow, worktreePath, targetFiles }) {
+  const client = getOpenAIClient();
+  if (!client) {
+    return {
+      ok: false,
+      error: "OPENAI_API_KEY is not configured on the API service.",
+      model: AI_ENGINEER_MODEL,
+    };
+  }
+
+  const existing = targetFiles
+    .map((rel) => {
+      const abs = path.join(worktreePath, rel);
+      const body = readFileSafe(abs);
+      return body
+        ? `FILE: ${rel}\n-----\n${body}\n-----\n`
+        : `FILE: ${rel}\n-----\n(unreadable or missing)\n-----\n`;
+    })
+    .join("\n");
+
+  const systemPrompt = [
+    "You are a senior software engineer editing an existing JavaScript/HTML codebase.",
+    "Output ONLY a unified diff patch in git format starting with 'diff --git'.",
+    "Rules:",
+    "- Wrap output in a single ```diff fenced block.",
+    "- Limit edits to files provided in TARGET FILES.",
+    "- Keep changes minimal and backward compatible.",
+    "- Ensure code remains syntactically valid.",
+  ].join("\n");
+
+  const userPrompt = [
+    `REQUEST ID: ${Number(requestRow?.id || 0)}`,
+    `TITLE: ${String(requestRow?.title || "")}`,
+    `REQUEST: ${String(requestRow?.request_text || "")}`,
+    "",
+    "TARGET FILES:",
+    ...targetFiles.map((f) => `- ${f}`),
+    "",
+    "CURRENT FILE CONTENTS:",
+    existing,
+    "",
+    "Produce a unified diff now.",
+  ].join("\n");
+
+  const resp = await client.responses.create({
+    model: AI_ENGINEER_MODEL,
+    input: [
+      { role: "system", content: [{ type: "input_text", text: systemPrompt }] },
+      { role: "user", content: [{ type: "input_text", text: userPrompt }] },
+    ],
+  });
+
+  const raw = String(resp.output_text || "").trim();
+  const diff = extractUnifiedDiff(raw);
+  if (!diff) {
+    return {
+      ok: false,
+      error: "Model returned no unified diff.",
+      model: AI_ENGINEER_MODEL,
+      raw_preview: raw.slice(0, 2000),
+    };
+  }
+  return { ok: true, model: AI_ENGINEER_MODEL, diff, raw_preview: raw.slice(0, 2000) };
+}
+
 function chooseTargetFiles(title, text) {
   const hay = `${String(title || "")} ${String(text || "")}`.toLowerCase();
   const files = new Set();
@@ -212,102 +304,158 @@ function parseDetailsJson(raw) {
   }
 }
 
-function buildGeneratedPatchPayload({ requestRow, targetFiles }) {
+function buildGeneratedPatchPayload({ requestRow, targetFiles, model, diffFile }) {
   return {
-    schema: "ironlog-ai-engineer/patch-v1",
+    schema: "ironlog-ai-engineer/patch-v2",
     request_id: Number(requestRow?.id || 0),
     title: String(requestRow?.title || ""),
     request_text: String(requestRow?.request_text || ""),
     target_files: targetFiles,
     generated_at: new Date().toISOString(),
-    changes: [
-      {
-        file: "ai-engineer.generated.json",
-        action: "upsert",
-        description: "Track generated patch metadata for AI Engineer request",
-      },
-      {
-        file: ".ai-engineer/applied/request-summary.md",
-        action: "append",
-        description: "Append human-readable request patch summary",
-      },
-    ],
+    model: model || null,
+    diff_file: diffFile || null,
+    changes: targetFiles.map((f) => ({
+      file: f,
+      action: "modify",
+      description: `AI-generated code change for request #${Number(requestRow?.id || 0)}`,
+    })),
   };
 }
 
-function generatePatchInWorktree({ requestRow, executeDetails }) {
+async function generatePatchInWorktree({ requestRow, executeDetails }) {
   const worktreePath = String(executeDetails?.worktree_path || "").trim();
   if (!worktreePath) {
     return { ok: false, summary: "Missing worktree path in execute run details.", details: { execute_details: executeDetails } };
   }
   ensureDir(path.join(worktreePath, ".ai-engineer", "patches"));
-  ensureDir(path.join(worktreePath, ".ai-engineer", "applied"));
   const targetFiles = Array.isArray(executeDetails?.proposal?.target_files)
     ? executeDetails.proposal.target_files
     : chooseTargetFiles(requestRow?.title, requestRow?.request_text);
-  const payload = buildGeneratedPatchPayload({ requestRow, targetFiles });
-  const patchPath = path.join(worktreePath, ".ai-engineer", "patches", `request-${Number(requestRow?.id || 0)}.json`);
 
-  try {
-    fs.writeFileSync(patchPath, JSON.stringify(payload, null, 2), "utf8");
-  } catch (err) {
+  const modelResult = await generateUnifiedDiffViaModel({
+    requestRow,
+    worktreePath,
+    targetFiles,
+  });
+  if (!modelResult.ok) {
     return {
       ok: false,
-      summary: "Failed to write generated patch artifact.",
-      details: { error: String(err?.message || err), patch_path: patchPath, payload },
+      summary: modelResult.error || "AI patch generation failed.",
+      details: {
+        worktree_path: worktreePath,
+        target_files: targetFiles,
+        model: modelResult.model,
+        raw_preview: modelResult.raw_preview || null,
+      },
     };
   }
 
-  const diffStep = runCmd("git", ["diff", "--", path.relative(worktreePath, patchPath).replace(/\\/g, "/")], worktreePath);
+  const reqId = Number(requestRow?.id || 0);
+  const diffRel = `.ai-engineer/patches/request-${reqId}.patch`;
+  const diffPath = path.join(worktreePath, diffRel);
+  const metaRel = `.ai-engineer/patches/request-${reqId}.json`;
+  const metaPath = path.join(worktreePath, metaRel);
+
+  try {
+    fs.writeFileSync(diffPath, `${modelResult.diff}\n`, "utf8");
+    const payload = buildGeneratedPatchPayload({
+      requestRow,
+      targetFiles,
+      model: modelResult.model,
+      diffFile: diffRel,
+    });
+    fs.writeFileSync(metaPath, JSON.stringify(payload, null, 2), "utf8");
+  } catch (err) {
+    return {
+      ok: false,
+      summary: "Failed to write generated patch files.",
+      details: { error: String(err?.message || err) },
+    };
+  }
+
+  const checkStep = runCmd("git", ["apply", "--check", diffRel], worktreePath);
+  if (checkStep.exit_code !== 0) {
+    return {
+      ok: false,
+      summary: "Generated diff failed git apply --check. Review raw output and retry.",
+      details: {
+        worktree_path: worktreePath,
+        patch_file: diffRel,
+        patch_meta_file: metaRel,
+        model: modelResult.model,
+        diff_preview: String(modelResult.diff || "").slice(0, 12000),
+        raw_preview: modelResult.raw_preview || null,
+        steps: [checkStep],
+      },
+    };
+  }
+
   return {
-    ok: diffStep.exit_code === 0,
-    summary: "Generated patch artifact for review.",
+    ok: true,
+    summary: `Generated real code diff via ${modelResult.model}.`,
     details: {
       worktree_path: worktreePath,
-      patch_file: path.relative(worktreePath, patchPath).replace(/\\/g, "/"),
-      payload,
-      diff_preview: String(diffStep.stdout || "").slice(0, 6000),
-      steps: [diffStep],
+      patch_file: diffRel,
+      patch_meta_file: metaRel,
+      payload: buildGeneratedPatchPayload({
+        requestRow,
+        targetFiles,
+        model: modelResult.model,
+        diffFile: diffRel,
+      }),
+      model: modelResult.model,
+      diff_preview: String(modelResult.diff || "").slice(0, 12000),
+      raw_preview: modelResult.raw_preview || null,
+      steps: [checkStep],
     },
   };
 }
 
 function applyGeneratedPatchInWorktree({ requestRow, executeDetails, patchDetails }) {
   const worktreePath = String(executeDetails?.worktree_path || "").trim();
-  const patchFileRel = String(patchDetails?.patch_file || "").trim();
-  if (!worktreePath || !patchFileRel) {
+  const diffRel = String(patchDetails?.patch_file || patchDetails?.payload?.diff_file || "").trim();
+  if (!worktreePath || !diffRel) {
     return {
       ok: false,
-      summary: "Patch apply failed: missing worktree or patch file.",
-      details: { worktree_path: worktreePath, patch_file: patchFileRel },
+      summary: "Patch apply failed: missing worktree or patch diff file.",
+      details: { worktree_path: worktreePath, patch_file: diffRel, patch_details: patchDetails },
     };
   }
 
-  const patchPath = path.join(worktreePath, patchFileRel);
-  if (!fs.existsSync(patchPath)) {
+  const diffPath = path.join(worktreePath, diffRel);
+  if (!fs.existsSync(diffPath)) {
     return {
       ok: false,
-      summary: "Patch file does not exist in worktree.",
-      details: { patch_file: patchFileRel },
+      summary: "Patch diff file does not exist in worktree.",
+      details: { patch_file: diffRel },
     };
   }
 
-  const patchPayload = parseDetailsJson(fs.readFileSync(patchPath, "utf8")) || {};
-  const generatedJsonPath = path.join(worktreePath, "ai-engineer.generated.json");
-  let generatedDoc = { requests: [] };
-  if (fs.existsSync(generatedJsonPath)) {
-    generatedDoc = parseDetailsJson(fs.readFileSync(generatedJsonPath, "utf8")) || { requests: [] };
+  const steps = [];
+  const checkStep = runCmd("git", ["apply", "--check", diffRel], worktreePath);
+  steps.push(checkStep);
+  if (checkStep.exit_code !== 0) {
+    return {
+      ok: false,
+      summary: "Patch failed git apply --check. Review diff for conflicts.",
+      details: {
+        worktree_path: worktreePath,
+        patch_file: diffRel,
+        steps,
+        diff_preview: readFileSafe(diffPath, 12000),
+      },
+    };
   }
-  if (!Array.isArray(generatedDoc.requests)) generatedDoc.requests = [];
-  generatedDoc.requests = generatedDoc.requests.filter((x) => Number(x?.request_id || 0) !== Number(requestRow?.id || 0));
-  generatedDoc.requests.push({
-    request_id: Number(requestRow?.id || 0),
-    title: String(requestRow?.title || ""),
-    priority: String(requestRow?.priority || "medium"),
-    applied_at: new Date().toISOString(),
-    target_files: Array.isArray(patchPayload?.target_files) ? patchPayload.target_files : [],
-  });
-  generatedDoc.last_updated_at = new Date().toISOString();
+
+  const applyStep = runCmd("git", ["apply", diffRel], worktreePath);
+  steps.push(applyStep);
+  if (applyStep.exit_code !== 0) {
+    return {
+      ok: false,
+      summary: "Patch apply failed during git apply.",
+      details: { worktree_path: worktreePath, patch_file: diffRel, steps },
+    };
+  }
 
   ensureDir(path.join(worktreePath, ".ai-engineer", "applied"));
   const summaryPath = path.join(worktreePath, ".ai-engineer", "applied", "request-summary.md");
@@ -315,45 +463,45 @@ function applyGeneratedPatchInWorktree({ requestRow, executeDetails, patchDetail
     `## Request #${Number(requestRow?.id || 0)} - ${String(requestRow?.title || "")}`,
     `- Applied at: ${new Date().toISOString()}`,
     `- Priority: ${String(requestRow?.priority || "medium")}`,
-    `- Requested by: ${String(requestRow?.requested_by || "")}`,
-    `- Target files: ${(Array.isArray(patchPayload?.target_files) ? patchPayload.target_files : []).join(", ") || "(none)"}`,
+    `- Model: ${String(patchDetails?.model || patchDetails?.payload?.model || "unknown")}`,
+    `- Patch file: ${diffRel}`,
     ``,
   ].join("\n");
-
   try {
-    fs.writeFileSync(generatedJsonPath, JSON.stringify(generatedDoc, null, 2), "utf8");
     fs.appendFileSync(summaryPath, `${summaryEntry}\n`, "utf8");
-  } catch (err) {
-    return {
-      ok: false,
-      summary: "Patch apply failed while writing files.",
-      details: { error: String(err?.message || err) },
-    };
-  }
+  } catch {}
 
   const statusStep = runCmd("git", ["status", "--porcelain"], worktreePath);
-  const diffStep = runCmd("git", ["diff", "--", "ai-engineer.generated.json", ".ai-engineer/applied/request-summary.md"], worktreePath);
-  const apiImport = runCmd("node", ["-e", "import('./server.js').then(()=>console.log('server-import-ok'))"], path.join(worktreePath, "api"));
+  const diffStep = runCmd("git", ["diff"], worktreePath);
+  const apiImport = runCmd(
+    "node",
+    ["-e", "import('./server.js').then(()=>console.log('server-import-ok'))"],
+    path.join(worktreePath, "api"),
+  );
+  steps.push(statusStep, diffStep, apiImport);
+
   const changed = String(statusStep.stdout || "")
     .split(/\r?\n/)
     .map((x) => x.trim())
     .filter(Boolean);
 
-  const ok = statusStep.exit_code === 0 && diffStep.exit_code === 0 && apiImport.exit_code === 0 && changed.length > 0;
+  const ok = applyStep.exit_code === 0 && apiImport.exit_code === 0 && changed.length > 0;
   return {
     ok,
     summary: ok
-      ? "Generated patch applied in isolated worktree. Ready for manual review/commit."
+      ? "AI-generated patch applied in isolated worktree. Review diff before merge/deploy."
       : "Patch apply completed with issues; inspect run details.",
     details: {
       worktree_path: worktreePath,
+      patch_file: diffRel,
       changed_files: changed,
-      diff_preview: String(diffStep.stdout || "").slice(0, 6000),
+      diff_preview: String(diffStep.stdout || "").slice(0, 12000),
       gates: {
+        git_apply: applyStep.exit_code === 0,
         server_import: apiImport.exit_code === 0,
         has_changes: changed.length > 0,
       },
-      steps: [statusStep, diffStep, apiImport],
+      steps,
     },
   };
 }
@@ -718,10 +866,19 @@ export default async function aiEngineerRoutes(app) {
       INSERT INTO ai_engineer_runs (
         request_id, run_type, status, summary, details_json, started_by, started_at
       ) VALUES (?, 'generate_patch', 'running', ?, ?, ?, ${nowSql()})
-    `).run(id, "Generating patch artifact.", JSON.stringify({ stage: "starting" }), user);
+    `).run(id, "Generating code patch via AI.", JSON.stringify({ stage: "starting" }), user);
     const runId = Number(runStart.lastInsertRowid || 0);
 
-    const result = generatePatchInWorktree({ requestRow: row, executeDetails });
+    let result;
+    try {
+      result = await generatePatchInWorktree({ requestRow: row, executeDetails });
+    } catch (err) {
+      result = {
+        ok: false,
+        summary: `AI patch generation error: ${String(err?.message || err)}`,
+        details: { error: String(err?.message || err) },
+      };
+    }
     db.prepare(`
       UPDATE ai_engineer_runs
       SET status = ?,
