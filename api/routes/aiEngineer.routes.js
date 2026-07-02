@@ -3,7 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import OpenAI from "openai";
+import { runAgent } from "../utils/aiEngineer/orchestrator.js";
+import { chooseTargetFiles } from "../utils/aiEngineer/heuristics.js";
+import { buildProposalMarkdown } from "../utils/aiEngineer/agents/planner.js";
 
 const ALLOWED_ROLES = new Set([
   "admin",
@@ -17,8 +19,6 @@ const ALLOWED_ROLES = new Set([
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const WORKTREE_BASE = path.join(REPO_ROOT, ".ai-engineer", "worktrees");
-const AI_ENGINEER_MODEL = process.env.AI_ENGINEER_MODEL || "gpt-4o-mini";
-let openaiClient = null;
 
 function getSiteCode(req) {
   return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
@@ -131,21 +131,6 @@ function ensureDir(p) {
   } catch {}
 }
 
-function getOpenAIClient() {
-  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
-  if (!apiKey) return null;
-  if (!openaiClient) openaiClient = new OpenAI({ apiKey });
-  return openaiClient;
-}
-
-function extractUnifiedDiff(text) {
-  const s = String(text || "");
-  const fenced = s.match(/```diff\s*([\s\S]*?)```/i);
-  if (fenced?.[1]) return fenced[1].trim();
-  const fallback = s.match(/(diff --git[\s\S]*)/i);
-  return fallback?.[1]?.trim() || "";
-}
-
 function readFileSafe(p, maxChars = 16000) {
   try {
     const content = fs.readFileSync(p, "utf8");
@@ -155,133 +140,16 @@ function readFileSafe(p, maxChars = 16000) {
   }
 }
 
-async function generateUnifiedDiffViaModel({ requestRow, worktreePath, targetFiles }) {
-  const client = getOpenAIClient();
-  if (!client) {
-    return {
-      ok: false,
-      error: "OPENAI_API_KEY is not configured on the API service.",
-      model: AI_ENGINEER_MODEL,
-    };
-  }
-
-  const existing = targetFiles
-    .map((rel) => {
-      const abs = path.join(worktreePath, rel);
-      const body = readFileSafe(abs);
-      return body
-        ? `FILE: ${rel}\n-----\n${body}\n-----\n`
-        : `FILE: ${rel}\n-----\n(unreadable or missing)\n-----\n`;
-    })
-    .join("\n");
-
-  const systemPrompt = [
-    "You are a senior software engineer editing an existing JavaScript/HTML codebase.",
-    "Output ONLY a unified diff patch in git format starting with 'diff --git'.",
-    "Rules:",
-    "- Wrap output in a single ```diff fenced block.",
-    "- Limit edits to files provided in TARGET FILES.",
-    "- Keep changes minimal and backward compatible.",
-    "- Ensure code remains syntactically valid.",
-  ].join("\n");
-
-  const userPrompt = [
-    `REQUEST ID: ${Number(requestRow?.id || 0)}`,
-    `TITLE: ${String(requestRow?.title || "")}`,
-    `REQUEST: ${String(requestRow?.request_text || "")}`,
-    "",
-    "TARGET FILES:",
-    ...targetFiles.map((f) => `- ${f}`),
-    "",
-    "CURRENT FILE CONTENTS:",
-    existing,
-    "",
-    "Produce a unified diff now.",
-  ].join("\n");
-
-  const resp = await client.responses.create({
-    model: AI_ENGINEER_MODEL,
-    input: [
-      { role: "system", content: [{ type: "input_text", text: systemPrompt }] },
-      { role: "user", content: [{ type: "input_text", text: userPrompt }] },
-    ],
-  });
-
-  const raw = String(resp.output_text || "").trim();
-  const diff = extractUnifiedDiff(raw);
-  if (!diff) {
-    return {
-      ok: false,
-      error: "Model returned no unified diff.",
-      model: AI_ENGINEER_MODEL,
-      raw_preview: raw.slice(0, 2000),
-    };
-  }
-  return { ok: true, model: AI_ENGINEER_MODEL, diff, raw_preview: raw.slice(0, 2000) };
-}
-
-function chooseTargetFiles(title, text) {
-  const hay = `${String(title || "")} ${String(text || "")}`.toLowerCase();
-  const files = new Set();
-  if (/maint|service|mechanic|workshop/.test(hay)) {
-    files.add("web/maintenance.html");
-    files.add("web/maintenance.js");
-    files.add("api/routes/maintenance.routes.js");
-  }
-  if (/lube|oil|dashboard/.test(hay)) {
-    files.add("web/app.js");
-    files.add("api/routes/dashboard.routes.js");
-    files.add("api/routes/reports.routes.js");
-  }
-  if (/work.?order|breakdown/.test(hay)) {
-    files.add("api/routes/workorders.routes.js");
-    files.add("api/routes/breakdowns.routes.js");
-  }
-  if (/api|endpoint|route/.test(hay)) {
-    files.add("api/server.js");
-  }
-  if (!files.size) {
-    files.add("web/app.js");
-    files.add("api/routes/maintenance.routes.js");
-  }
-  return [...files];
-}
-
-function buildProposalMarkdown(requestRow, targetFiles) {
-  const title = String(requestRow?.title || "").trim();
-  const requestText = String(requestRow?.request_text || "").trim();
-  const pri = String(requestRow?.priority || "medium");
-  const risk = String(requestRow?.risk_level || "medium");
-  const bullets = [
-    "Implement minimal, backwards-compatible changes.",
-    "Prefer additive API changes and non-breaking UI defaults.",
-    "Add or adjust tests/verification where feasible.",
-    "Keep modified files constrained to target scope.",
-  ];
-  return [
-    `# AI Engineer Proposal`,
-    ``,
-    `## Request`,
-    `- ID: ${Number(requestRow?.id || 0)}`,
-    `- Title: ${title}`,
-    `- Priority: ${pri}`,
-    `- Risk: ${risk}`,
-    ``,
-    `### User request`,
-    requestText || "(empty)",
-    ``,
-    `## Target files`,
-    ...targetFiles.map((f) => `- ${f}`),
-    ``,
-    `## Planned implementation`,
-    ...bullets.map((b) => `- ${b}`),
-    ``,
-    `## Validation gates`,
-    `- API import validation`,
-    `- Git diff produced in isolated worktree`,
-    `- Optional test/lint command execution if available`,
-    ``,
-  ].join("\n");
+function getLatestPlanRun(requestId) {
+  return db.prepare(`
+    SELECT *
+    FROM ai_engineer_runs
+    WHERE request_id = ?
+      AND run_type = 'plan'
+      AND status = 'completed'
+    ORDER BY started_at DESC, id DESC
+    LIMIT 1
+  `).get(requestId);
 }
 
 function getLatestExecuteRun(requestId) {
@@ -322,7 +190,7 @@ function buildGeneratedPatchPayload({ requestRow, targetFiles, model, diffFile }
   };
 }
 
-async function generatePatchInWorktree({ requestRow, executeDetails }) {
+async function generatePatchInWorktree({ requestRow, executeDetails, planDetails }) {
   const worktreePath = String(executeDetails?.worktree_path || "").trim();
   if (!worktreePath) {
     return { ok: false, summary: "Missing worktree path in execute run details.", details: { execute_details: executeDetails } };
@@ -330,21 +198,26 @@ async function generatePatchInWorktree({ requestRow, executeDetails }) {
   ensureDir(path.join(worktreePath, ".ai-engineer", "patches"));
   const targetFiles = Array.isArray(executeDetails?.proposal?.target_files)
     ? executeDetails.proposal.target_files
-    : chooseTargetFiles(requestRow?.title, requestRow?.request_text);
+    : Array.isArray(planDetails?.target_files)
+      ? planDetails.target_files
+      : chooseTargetFiles(requestRow?.title, requestRow?.request_text);
 
-  const modelResult = await generateUnifiedDiffViaModel({
+  const modelResult = await runAgent("coder", {
     requestRow,
     worktreePath,
     targetFiles,
+    planDetails,
   });
   if (!modelResult.ok) {
     return {
       ok: false,
-      summary: modelResult.error || "AI patch generation failed.",
+      summary: modelResult.error || "Coder agent failed.",
       details: {
         worktree_path: worktreePath,
         target_files: targetFiles,
+        agent: modelResult.agent || "coder",
         model: modelResult.model,
+        tool_trace: modelResult.tool_trace || null,
         raw_preview: modelResult.raw_preview || null,
       },
     };
@@ -392,7 +265,7 @@ async function generatePatchInWorktree({ requestRow, executeDetails }) {
 
   return {
     ok: true,
-    summary: `Generated real code diff via ${modelResult.model}.`,
+    summary: `Generated code diff via coder agent (${modelResult.model}).`,
     details: {
       worktree_path: worktreePath,
       patch_file: diffRel,
@@ -404,6 +277,8 @@ async function generatePatchInWorktree({ requestRow, executeDetails }) {
         diffFile: diffRel,
       }),
       model: modelResult.model,
+      agent: modelResult.agent || "coder",
+      tool_trace: modelResult.tool_trace || null,
       diff_preview: String(modelResult.diff || "").slice(0, 12000),
       raw_preview: modelResult.raw_preview || null,
       steps: [checkStep],
@@ -728,7 +603,7 @@ function latestRunForRequest(requestId) {
   `).get(requestId);
 }
 
-function executeGuardedPipeline({ requestRow, startedBy }) {
+function executeGuardedPipeline({ requestRow, startedBy, planDetails = null }) {
   ensureDir(WORKTREE_BASE);
   const reqId = Number(requestRow?.id || 0);
   const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
@@ -754,8 +629,15 @@ function executeGuardedPipeline({ requestRow, startedBy }) {
   const checks = [];
   const proposalDir = path.join(worktreePath, ".ai-engineer", "proposals");
   ensureDir(proposalDir);
-  const targetFiles = chooseTargetFiles(requestRow?.title, requestRow?.request_text);
-  const proposalMarkdown = buildProposalMarkdown(requestRow, targetFiles);
+  const targetFiles = Array.isArray(planDetails?.target_files) && planDetails.target_files.length
+    ? planDetails.target_files
+    : chooseTargetFiles(requestRow?.title, requestRow?.request_text);
+  const proposalMarkdown = buildProposalMarkdown(requestRow, {
+    target_files: targetFiles,
+    risk_level: planDetails?.risk_level || requestRow?.risk_level,
+    implementation_steps: planDetails?.implementation_steps || [],
+    acceptance_criteria: planDetails?.acceptance_criteria || [],
+  });
   const proposalPath = path.join(proposalDir, `request-${reqId}.md`);
   const proposalJsonPath = path.join(proposalDir, `request-${reqId}.json`);
   try {
@@ -815,11 +697,13 @@ function executeGuardedPipeline({ requestRow, startedBy }) {
       json_file: path.relative(worktreePath, proposalJsonPath).replace(/\\/g, "/"),
       target_files: targetFiles,
       markdown_preview: proposalMarkdown.slice(0, 1800),
+      implementation_steps: planDetails?.implementation_steps || [],
+      acceptance_criteria: planDetails?.acceptance_criteria || [],
       diff_preview: String(diffStep?.stdout || "").slice(0, 6000),
     },
     notes: [
-      "Phase 3 start: execution now generates concrete implementation proposal artifacts.",
-      "Next step: replace proposal generator with live code generator and apply patch stage.",
+      "Execute stage uses planner agent output when available.",
+      "Gen Patch runs the coder agent with sandboxed tools in the worktree.",
     ],
     steps: [...steps, ...checks],
   };
@@ -910,39 +794,53 @@ export default async function aiEngineerRoutes(app) {
     const row = fetchRequestById(id, siteCode);
     if (!row) return reply.code(404).send({ ok: false, error: "request not found" });
 
-    const details = {
-      phase: "mvp-plan",
-      scope: "planning",
-      next_steps: [
-        "Analyze impacted files",
-        "Generate implementation diff",
-        "Run lint/test checks",
-        "Require approval before deploy",
-      ],
-      note: "This is a foundation planner run. Live autonomous code generation is wired next.",
-    };
-
-    const runInfo = db.prepare(`
+    const runStart = db.prepare(`
       INSERT INTO ai_engineer_runs (
-        request_id, run_type, status, summary, details_json, started_by, started_at, finished_at
-      ) VALUES (?, 'plan', 'completed', ?, ?, ?, ${nowSql()}, ${nowSql()})
-    `).run(
-      id,
-      "MVP plan created. Ready for execution wiring.",
-      JSON.stringify(details),
-      user,
-    );
+        request_id, run_type, status, summary, details_json, started_by, started_at
+      ) VALUES (?, 'plan', 'running', ?, ?, ?, ${nowSql()})
+    `).run(id, "Planner agent running.", JSON.stringify({ stage: "starting", agent: "planner" }), user);
+    const runId = Number(runStart.lastInsertRowid || 0);
+
+    let result;
+    try {
+      result = await runAgent("planner", { requestRow: row, repoRoot: REPO_ROOT });
+    } catch (err) {
+      result = {
+        ok: false,
+        summary: `Planner agent error: ${String(err?.message || err)}`,
+        details: { agent: "planner", error: String(err?.message || err) },
+      };
+    }
 
     db.prepare(`
-      UPDATE ai_engineer_requests
-      SET status = 'planned',
-          updated_at = ${nowSql()}
+      UPDATE ai_engineer_runs
+      SET status = ?,
+          summary = ?,
+          details_json = ?,
+          finished_at = ${nowSql()}
       WHERE id = ?
-    `).run(id);
+    `).run(result.ok ? "completed" : "failed", result.summary, JSON.stringify(result.details || {}), runId);
+
+    if (result.ok && result.details?.risk_level) {
+      db.prepare(`
+        UPDATE ai_engineer_requests
+        SET status = 'planned',
+            risk_level = ?,
+            updated_at = ${nowSql()}
+        WHERE id = ?
+      `).run(String(result.details.risk_level), id);
+    } else {
+      db.prepare(`
+        UPDATE ai_engineer_requests
+        SET status = ?,
+            updated_at = ${nowSql()}
+        WHERE id = ?
+      `).run(result.ok ? "planned" : String(row.status || "draft"), id);
+    }
 
     const updated = fetchRequestById(id, siteCode);
-    const run = db.prepare(`SELECT * FROM ai_engineer_runs WHERE id = ?`).get(runInfo.lastInsertRowid);
-    return reply.send({ ok: true, row: mapRequest(updated), run: mapRun(run) });
+    const run = db.prepare(`SELECT * FROM ai_engineer_runs WHERE id = ?`).get(runId);
+    return reply.send({ ok: result.ok, row: mapRequest(updated), run: mapRun(run) });
   });
 
   app.post("/requests/:id/approve", async (req, reply) => {
@@ -987,7 +885,10 @@ export default async function aiEngineerRoutes(app) {
     `).run(id, "Execution started.", JSON.stringify({ stage: "starting" }), user);
     const runId = Number(runStart.lastInsertRowid || 0);
 
-    const result = executeGuardedPipeline({ requestRow: row, startedBy: user });
+    const planRun = getLatestPlanRun(id);
+    const planDetails = parseDetailsJson(planRun?.details_json) || null;
+
+    const result = executeGuardedPipeline({ requestRow: row, startedBy: user, planDetails });
     const runStatus = result.ok ? "completed" : "failed";
     db.prepare(`
       UPDATE ai_engineer_runs
@@ -1023,17 +924,19 @@ export default async function aiEngineerRoutes(app) {
     const executeRun = getLatestExecuteRun(id);
     if (!executeRun) return reply.code(400).send({ ok: false, error: "execute run required before generate-patch" });
     const executeDetails = parseDetailsJson(executeRun.details_json) || {};
+    const planRun = getLatestPlanRun(id);
+    const planDetails = parseDetailsJson(planRun?.details_json) || null;
 
     const runStart = db.prepare(`
       INSERT INTO ai_engineer_runs (
         request_id, run_type, status, summary, details_json, started_by, started_at
       ) VALUES (?, 'generate_patch', 'running', ?, ?, ?, ${nowSql()})
-    `).run(id, "Generating code patch via AI.", JSON.stringify({ stage: "starting" }), user);
+    `).run(id, "Coder agent generating patch.", JSON.stringify({ stage: "starting", agent: "coder" }), user);
     const runId = Number(runStart.lastInsertRowid || 0);
 
     let result;
     try {
-      result = await generatePatchInWorktree({ requestRow: row, executeDetails });
+      result = await generatePatchInWorktree({ requestRow: row, executeDetails, planDetails });
     } catch (err) {
       result = {
         ok: false,

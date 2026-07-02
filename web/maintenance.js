@@ -7363,6 +7363,10 @@ function renderAiEngineerRunPreview({ row, runs }) {
     ``,
   ];
 
+  if (details?.agent) {
+    lines.push(`Agent: ${details.agent}`);
+    lines.push("");
+  }
   if (details?.model) {
     lines.push(`Model: ${details.model}`);
     lines.push("");
@@ -7383,6 +7387,24 @@ function renderAiEngineerRunPreview({ row, runs }) {
   if (details?.proposal?.markdown_preview) {
     lines.push("Proposal preview:");
     lines.push(details.proposal.markdown_preview);
+    lines.push("");
+  } else if (details?.markdown_preview) {
+    lines.push("Proposal preview:");
+    lines.push(String(details.markdown_preview));
+    lines.push("");
+  }
+  if (Array.isArray(details?.implementation_steps) && details.implementation_steps.length) {
+    lines.push("Implementation steps:");
+    for (const s of details.implementation_steps) lines.push(`- ${s}`);
+    lines.push("");
+  } else if (Array.isArray(details?.proposal?.implementation_steps) && details.proposal.implementation_steps.length) {
+    lines.push("Implementation steps:");
+    for (const s of details.proposal.implementation_steps) lines.push(`- ${s}`);
+    lines.push("");
+  }
+  if (Array.isArray(details?.acceptance_criteria) && details.acceptance_criteria.length) {
+    lines.push("Acceptance criteria:");
+    for (const s of details.acceptance_criteria) lines.push(`- ${s}`);
     lines.push("");
   }
   if (details?.gates) {
@@ -7422,6 +7444,13 @@ function renderAiEngineerRunPreview({ row, runs }) {
     lines.push("");
   } else if (details) {
     lines.push(JSON.stringify(details, null, 2));
+  }
+  if (Array.isArray(details?.tool_trace) && details.tool_trace.length) {
+    lines.push("Agent tool trace:");
+    for (const t of details.tool_trace.slice(-12)) {
+      lines.push(`- ${t.tool} @ ${t.at}`);
+    }
+    lines.push("");
   }
   return lines.join("\n");
 }
