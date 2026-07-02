@@ -106,6 +106,7 @@ function viewForSection(section) {
     "service-history": "service-history",
     "maintenance-insights": "insights",
     "mechanics-cost": "mc",
+    "ai-engineer": "aie",
     "manager-inspections": "mi",
     "artisan-inspections": "ai",
     "weekly-forum": "wf",
@@ -170,6 +171,7 @@ function scrollToSection(section) {
           "sync": "syncAdminSection",
           "insights": "maintenanceInsightsCard",
           "mc": "mechanicsCostSection",
+          "aie": "aiEngineerSection",
           "pto": "partsToOrderSection",
         };
         targetEl = document.getElementById(sectionMap[targetView]);
@@ -233,6 +235,9 @@ function refreshTopViewData(view) {
       break;
     case "mc":
       initMechanicsCostSection().catch(() => {});
+      break;
+    case "aie":
+      loadAiEngineerRequests().catch(() => {});
       break;
     default:
       break;
@@ -2753,6 +2758,7 @@ function setTopView(view, section = "") {
   const sync = document.getElementById("syncAdminSection");
   const pto = document.getElementById("partsToOrderSection");
   const mc = document.getElementById("mechanicsCostSection");
+  const aie = document.getElementById("aiEngineerSection");
   const planSection = document.querySelector("section.panel.page-section");
 
   if (section) currentMaintenanceSection = section;
@@ -2771,6 +2777,7 @@ function setTopView(view, section = "") {
   if (sync) sync.style.display = "none";
   if (pto) pto.style.display = "none";
   if (mc) mc.style.display = "none";
+  if (aie) aie.style.display = "none";
   if (planSection) planSection.style.display = "none";
 
   // Show the selected section
@@ -2816,6 +2823,9 @@ function setTopView(view, section = "") {
       break;
     case "mc":
       if (mc) mc.style.display = "block";
+      break;
+    case "aie":
+      if (aie) aie.style.display = "block";
       break;
   }
 
@@ -2864,6 +2874,15 @@ function setTopView(view, section = "") {
           break;
         case "sync":
           isActive = navSection === "sync-admin";
+          break;
+        case "pto":
+          isActive = navSection === "parts-to-order";
+          break;
+        case "mc":
+          isActive = navSection === "mechanics-cost";
+          break;
+        case "aie":
+          isActive = navSection === "ai-engineer";
           break;
       }
       item.classList.toggle("active", isActive);
@@ -7243,6 +7262,98 @@ async function initMechanicsCostSection() {
   await loadMcDayEntries();
 }
 
+function aiEngineerMsg(text, isError = false) {
+  const el = document.getElementById("aiEngMsg");
+  if (!el) return;
+  el.className = isError ? "message-error" : "muted";
+  el.textContent = String(text || "");
+}
+
+function aiEngineerActionButtons(row) {
+  const id = Number(row?.id || 0);
+  const status = String(row?.status || "draft").toLowerCase();
+  const planBtn = `<button type="button" data-aie-plan="${id}">Plan</button>`;
+  const approveBtn = `<button type="button" data-aie-approve="${id}" ${status === "approved" ? "disabled" : ""}>Approve</button>`;
+  const rejectBtn = `<button type="button" data-aie-reject="${id}">Reject</button>`;
+  return `${planBtn} ${approveBtn} ${rejectBtn}`;
+}
+
+async function loadAiEngineerRequests() {
+  const body = document.getElementById("aiEngBody");
+  if (!body) return;
+  body.innerHTML = `<tr><td colspan="7" class="muted">Loading...</td></tr>`;
+  try {
+    const res = await fetch(`${API}/ai-engineer/requests`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load requests");
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="7" class="muted">No requests yet.</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows.map((r) => `
+      <tr>
+        <td>#${Number(r.id || 0)}</td>
+        <td>${esc(r.status || "-")}</td>
+        <td>${esc(r.priority || "-")}</td>
+        <td>${esc(r.title || "-")}</td>
+        <td>${esc(r.requested_by || "-")}</td>
+        <td>${esc(r.created_at || "-")}</td>
+        <td>${aiEngineerActionButtons(r)}</td>
+      </tr>
+    `).join("");
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="7" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+  }
+}
+
+async function createAiEngineerRequest() {
+  const title = String(document.getElementById("aiEngTitle")?.value || "").trim();
+  const requestText = String(document.getElementById("aiEngRequestText")?.value || "").trim();
+  const priority = String(document.getElementById("aiEngPriority")?.value || "medium").trim().toLowerCase();
+  if (!title) return aiEngineerMsg("Title is required.", true);
+  if (!requestText) return aiEngineerMsg("Request details are required.", true);
+  aiEngineerMsg("Creating request...");
+  try {
+    const res = await fetch(`${API}/ai-engineer/requests`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        title,
+        request_text: requestText,
+        priority,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to create request");
+    aiEngineerMsg(`Created AI engineer request #${Number(data?.row?.id || 0)}.`);
+    const txt = document.getElementById("aiEngRequestText");
+    if (txt) txt.value = "";
+    await loadAiEngineerRequests();
+  } catch (e) {
+    aiEngineerMsg(e.message || String(e), true);
+  }
+}
+
+async function runAiEngineerAction(id, action, payload = null) {
+  const reqId = Number(id || 0);
+  if (!reqId) return;
+  aiEngineerMsg(`Running ${action}...`);
+  try {
+    const res = await fetch(`${API}/ai-engineer/requests/${reqId}/${action}`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: payload ? JSON.stringify(payload) : "{}",
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Failed to ${action}`);
+    aiEngineerMsg(`Request #${reqId}: ${action} complete.`);
+    await loadAiEngineerRequests();
+  } catch (e) {
+    aiEngineerMsg(e.message || String(e), true);
+  }
+}
+
 async function loadWeeklyForumParts() {
   try {
     const res = await fetch(`${API}/maintenance/weekly-forum/parts`);
@@ -8028,6 +8139,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadWeeklyForumParts().catch(() => {});
   loadWeeklyForumInputs().catch(() => {});
   loadMaintenancePackStatus().catch(() => {});
+  loadAiEngineerRequests().catch(() => {});
   if (!document.getElementById("rsgProfilesCard")?.classList.contains("hidden")) {
     loadRsgProfiles().catch(() => {});
   }
@@ -8048,6 +8160,26 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("showAssetKpiBtn")?.addEventListener("click", () => setTopView("kpi"));
   document.getElementById("showHistogramBtn")?.addEventListener("click", () => setTopView("hist"));
   document.getElementById("showSyncAdminBtn")?.addEventListener("click", () => setTopView("sync"));
+  document.getElementById("aiEngRefreshBtn")?.addEventListener("click", () => loadAiEngineerRequests());
+  document.getElementById("aiEngCreateBtn")?.addEventListener("click", () => createAiEngineerRequest());
+  document.getElementById("aiEngBody")?.addEventListener("click", async (evt) => {
+    const planBtn = evt.target?.closest?.("button[data-aie-plan]");
+    if (planBtn) {
+      await runAiEngineerAction(Number(planBtn.getAttribute("data-aie-plan") || 0), "plan");
+      return;
+    }
+    const approveBtn = evt.target?.closest?.("button[data-aie-approve]");
+    if (approveBtn) {
+      await runAiEngineerAction(Number(approveBtn.getAttribute("data-aie-approve") || 0), "approve");
+      return;
+    }
+    const rejectBtn = evt.target?.closest?.("button[data-aie-reject]");
+    if (rejectBtn) {
+      const reason = window.prompt("Reason for rejection:");
+      if (!reason) return;
+      await runAiEngineerAction(Number(rejectBtn.getAttribute("data-aie-reject") || 0), "reject", { reason });
+    }
+  });
   document.getElementById("histViewMode")?.addEventListener("change", () => loadHistory());
   document.getElementById("histClosestLimit")?.addEventListener("change", () => loadHistory());
   document.getElementById("saveHistogramBtn")?.addEventListener("click", () => saveHistogramEvent());
