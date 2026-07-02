@@ -506,6 +506,168 @@ function applyGeneratedPatchInWorktree({ requestRow, executeDetails, patchDetail
   };
 }
 
+function getLatestApplyPatchRun(requestId) {
+  return db.prepare(`
+    SELECT *
+    FROM ai_engineer_runs
+    WHERE request_id = ?
+      AND run_type = 'apply_patch'
+      AND status = 'completed'
+    ORDER BY started_at DESC, id DESC
+    LIMIT 1
+  `).get(requestId);
+}
+
+function listWorktreeProductionChanges(worktreePath, applyDetails) {
+  const fromApply = Array.isArray(applyDetails?.changed_files)
+    ? applyDetails.changed_files
+        .map((line) => String(line || "").trim())
+        .map((line) => line.replace(/^[?MADRCU ]+\s+/, "").trim())
+        .filter((f) => f && !f.startsWith(".ai-engineer/"))
+    : [];
+  if (fromApply.length) return [...new Set(fromApply)];
+
+  const ls = runCmd("git", ["ls-files", "-m", "-o", "--exclude-standard"], worktreePath);
+  return String(ls.stdout || "")
+    .split(/\r?\n/)
+    .map((f) => f.trim())
+    .filter((f) => f && !f.startsWith(".ai-engineer/"));
+}
+
+function mergeAppliedPatchToMain({ requestRow, executeDetails, applyDetails }) {
+  const worktreePath = String(executeDetails?.worktree_path || "").trim();
+  const branch = String(executeDetails?.branch || "").trim();
+  if (!worktreePath || !branch) {
+    return {
+      ok: false,
+      summary: "Merge failed: missing worktree path or branch from execute run.",
+      details: { execute_details: executeDetails },
+    };
+  }
+
+  const steps = [];
+  const mainStatus = runCmd("git", ["status", "--porcelain"], REPO_ROOT);
+  steps.push(mainStatus);
+  if (String(mainStatus.stdout || "").trim()) {
+    return {
+      ok: false,
+      summary: "Main repo has uncommitted changes. Commit or stash before merge.",
+      details: {
+        repo_root: REPO_ROOT,
+        dirty_files: String(mainStatus.stdout || "").trim().split(/\r?\n/).filter(Boolean),
+        steps,
+      },
+    };
+  }
+
+  const prodFiles = listWorktreeProductionChanges(worktreePath, applyDetails);
+  if (!prodFiles.length) {
+    return {
+      ok: false,
+      summary: "No production file changes found in worktree to merge.",
+      details: { worktree_path: worktreePath, branch, steps },
+    };
+  }
+
+  for (const file of prodFiles) {
+    steps.push(runCmd("git", ["add", "--", file], worktreePath));
+  }
+
+  const reqId = Number(requestRow?.id || 0);
+  const title = String(requestRow?.title || "").trim();
+  const commitMsg = `AI Engineer #${reqId}: ${title}`;
+  const commitStep = runCmd("git", ["commit", "-m", commitMsg], worktreePath);
+  steps.push(commitStep);
+  if (commitStep.exit_code !== 0) {
+    return {
+      ok: false,
+      summary: "Failed to commit applied patch in worktree.",
+      details: {
+        worktree_path: worktreePath,
+        branch,
+        merged_files: prodFiles,
+        steps,
+      },
+    };
+  }
+
+  const revStep = runCmd("git", ["rev-parse", "HEAD"], worktreePath);
+  steps.push(revStep);
+  const commitHash = String(revStep.stdout || "").trim();
+  if (!commitHash) {
+    return {
+      ok: false,
+      summary: "Could not resolve worktree commit hash after commit.",
+      details: { worktree_path: worktreePath, steps },
+    };
+  }
+
+  const containsStep = runCmd("git", ["merge-base", "--is-ancestor", commitHash, "HEAD"], REPO_ROOT);
+  steps.push(containsStep);
+  if (containsStep.exit_code === 0) {
+    return {
+      ok: true,
+      summary: `Changes already present on main (${commitHash.slice(0, 8)}).`,
+      details: {
+        worktree_path: worktreePath,
+        branch,
+        commit_hash: commitHash,
+        merged_files: prodFiles,
+        already_merged: true,
+        steps,
+      },
+    };
+  }
+
+  const cherryStep = runCmd("git", ["cherry-pick", commitHash], REPO_ROOT);
+  steps.push(cherryStep);
+  if (cherryStep.exit_code !== 0) {
+    runCmd("git", ["cherry-pick", "--abort"], REPO_ROOT);
+    const conflictDiff = runCmd("git", ["diff"], REPO_ROOT);
+    return {
+      ok: false,
+      summary: "Cherry-pick failed on main repo. Conflicts were aborted; merge manually from worktree branch.",
+      details: {
+        worktree_path: worktreePath,
+        branch,
+        commit_hash: commitHash,
+        merged_files: prodFiles,
+        diff_preview: String(conflictDiff.stdout || "").slice(0, 12000),
+        steps,
+      },
+    };
+  }
+
+  const apiImport = runCmd(
+    "node",
+    ["-e", "import('./server.js').then(()=>console.log('server-import-ok'))"],
+    path.join(REPO_ROOT, "api"),
+  );
+  const showStep = runCmd("git", ["show", "--stat", "--patch", "HEAD"], REPO_ROOT);
+  steps.push(apiImport, showStep);
+
+  const ok = apiImport.exit_code === 0;
+  return {
+    ok,
+    summary: ok
+      ? `Merged to main via cherry-pick ${commitHash.slice(0, 8)} on ${branch}.`
+      : "Cherry-pick succeeded but server import failed on main repo.",
+    details: {
+      repo_root: REPO_ROOT,
+      worktree_path: worktreePath,
+      branch,
+      commit_hash: commitHash,
+      merged_files: prodFiles,
+      diff_preview: String(showStep.stdout || "").slice(0, 12000),
+      gates: {
+        cherry_pick: cherryStep.exit_code === 0,
+        server_import: apiImport.exit_code === 0,
+      },
+      steps,
+    },
+  };
+}
+
 function fetchRequestById(id, siteCode) {
   return db.prepare(`
     SELECT *
@@ -950,6 +1112,71 @@ export default async function aiEngineerRoutes(app) {
           updated_at = ${nowSql()}
       WHERE id = ?
     `).run(result.ok ? "patch_applied" : String(row.status || "patch_ready"), id);
+
+    const updated = fetchRequestById(id, siteCode);
+    const run = db.prepare(`SELECT * FROM ai_engineer_runs WHERE id = ?`).get(runId);
+    return reply.send({ ok: result.ok, row: mapRequest(updated), run: mapRun(run) });
+  });
+
+  app.post("/requests/:id/merge", async (req, reply) => {
+    if (!requireRole(req, reply)) return;
+    const siteCode = getSiteCode(req);
+    const user = getUserName(req);
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ ok: false, error: "valid id required" });
+    const row = fetchRequestById(id, siteCode);
+    if (!row) return reply.code(404).send({ ok: false, error: "request not found" });
+    if (!row.approved_by) return reply.code(400).send({ ok: false, error: "request must be approved first" });
+    if (String(row.status || "").toLowerCase() !== "patch_applied") {
+      return reply.code(400).send({ ok: false, error: "apply-patch must complete before merge" });
+    }
+    if (!req.body?.confirm) {
+      return reply.code(400).send({ ok: false, error: "confirm:true required to merge into main repo" });
+    }
+
+    const executeRun = getLatestExecuteRun(id);
+    if (!executeRun) return reply.code(400).send({ ok: false, error: "execute run required before merge" });
+    const executeDetails = parseDetailsJson(executeRun.details_json) || {};
+    const applyRun = getLatestApplyPatchRun(id);
+    if (!applyRun) return reply.code(400).send({ ok: false, error: "apply-patch run required before merge" });
+    const applyDetails = parseDetailsJson(applyRun.details_json) || {};
+
+    const runStart = db.prepare(`
+      INSERT INTO ai_engineer_runs (
+        request_id, run_type, status, summary, details_json, started_by, started_at
+      ) VALUES (?, 'merge', 'running', ?, ?, ?, ${nowSql()})
+    `).run(id, "Merging applied patch into main repo.", JSON.stringify({ stage: "starting" }), user);
+    const runId = Number(runStart.lastInsertRowid || 0);
+
+    let result;
+    try {
+      result = mergeAppliedPatchToMain({
+        requestRow: row,
+        executeDetails,
+        applyDetails,
+      });
+    } catch (err) {
+      result = {
+        ok: false,
+        summary: `Merge error: ${String(err?.message || err)}`,
+        details: { error: String(err?.message || err) },
+      };
+    }
+
+    db.prepare(`
+      UPDATE ai_engineer_runs
+      SET status = ?,
+          summary = ?,
+          details_json = ?,
+          finished_at = ${nowSql()}
+      WHERE id = ?
+    `).run(result.ok ? "completed" : "failed", result.summary, JSON.stringify(result.details), runId);
+    db.prepare(`
+      UPDATE ai_engineer_requests
+      SET status = ?,
+          updated_at = ${nowSql()}
+      WHERE id = ?
+    `).run(result.ok ? "merged" : String(row.status || "patch_applied"), id);
 
     const updated = fetchRequestById(id, siteCode);
     const run = db.prepare(`SELECT * FROM ai_engineer_runs WHERE id = ?`).get(runId);

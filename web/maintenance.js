@@ -7273,13 +7273,14 @@ function aiEngineerActionButtons(row) {
   const id = Number(row?.id || 0);
   const status = String(row?.status || "draft").toLowerCase();
   const planBtn = `<button type="button" data-aie-plan="${id}">Plan</button>`;
-  const approveBtn = `<button type="button" data-aie-approve="${id}" ${["approved", "executed", "patch_ready", "patch_applied"].includes(status) ? "disabled" : ""}>Approve</button>`;
+  const approveBtn = `<button type="button" data-aie-approve="${id}" ${["approved", "executed", "patch_ready", "patch_applied", "merged"].includes(status) ? "disabled" : ""}>Approve</button>`;
   const executeBtn = `<button type="button" data-aie-execute="${id}" ${!["approved", "planned", "executed"].includes(status) ? "disabled" : ""}>Execute</button>`;
-  const genPatchBtn = `<button type="button" data-aie-gpatch="${id}" ${!["executed", "patch_ready", "patch_applied"].includes(status) ? "disabled" : ""}>Gen Patch</button>`;
-  const applyPatchBtn = `<button type="button" data-aie-apatch="${id}" ${!["patch_ready", "patch_applied"].includes(status) ? "disabled" : ""}>Apply Patch</button>`;
-  const rejectBtn = `<button type="button" data-aie-reject="${id}">Reject</button>`;
+  const genPatchBtn = `<button type="button" data-aie-gpatch="${id}" ${!["executed", "patch_ready", "patch_applied", "merged"].includes(status) ? "disabled" : ""}>Gen Patch</button>`;
+  const applyPatchBtn = `<button type="button" data-aie-apatch="${id}" ${!["patch_ready", "patch_applied", "merged"].includes(status) ? "disabled" : ""}>Apply Patch</button>`;
+  const mergeBtn = `<button type="button" data-aie-merge="${id}" ${status !== "patch_applied" ? "disabled" : ""}>Merge</button>`;
+  const rejectBtn = `<button type="button" data-aie-reject="${id}" ${status === "merged" ? "disabled" : ""}>Reject</button>`;
   const viewBtn = `<button type="button" data-aie-view="${id}">View</button>`;
-  return `${planBtn} ${approveBtn} ${executeBtn} ${genPatchBtn} ${applyPatchBtn} ${rejectBtn} ${viewBtn}`;
+  return `${planBtn} ${approveBtn} ${executeBtn} ${genPatchBtn} ${applyPatchBtn} ${mergeBtn} ${rejectBtn} ${viewBtn}`;
 }
 
 async function loadAiEngineerRequests() {
@@ -7340,7 +7341,7 @@ async function createAiEngineerRequest() {
 }
 
 function pickAiEngineerPreviewRun(runs) {
-  const order = ["apply_patch", "generate_patch", "execute", "plan"];
+  const order = ["merge", "apply_patch", "generate_patch", "execute", "plan"];
   for (const runType of order) {
     const hit = runs.find((r) => String(r?.run_type || "") === runType && r?.details);
     if (hit) return hit;
@@ -7389,9 +7390,22 @@ function renderAiEngineerRunPreview({ row, runs }) {
     for (const [k, v] of Object.entries(details.gates)) lines.push(`- ${k}: ${v ? "pass" : "fail"}`);
     lines.push("");
   }
+  if (details?.commit_hash) {
+    lines.push(`Commit: ${details.commit_hash}`);
+    lines.push("");
+  }
+  if (details?.branch) {
+    lines.push(`Branch: ${details.branch}`);
+    lines.push("");
+  }
   if (details?.changed_files?.length) {
     lines.push("Changed files:");
     for (const f of details.changed_files) lines.push(`- ${f}`);
+    lines.push("");
+  }
+  if (details?.merged_files?.length) {
+    lines.push("Merged files:");
+    for (const f of details.merged_files) lines.push(`- ${f}`);
     lines.push("");
   }
   if (details?.diff_preview) {
@@ -7434,7 +7448,7 @@ async function runAiEngineerAction(id, action, payload = null) {
       }
     }
     await loadAiEngineerRequests();
-    if (["generate-patch", "apply-patch", "execute", "plan"].includes(action)) {
+    if (["generate-patch", "apply-patch", "merge", "execute", "plan"].includes(action)) {
       await viewAiEngineerRequest(reqId);
     }
     if (data?.ok === false) {
@@ -8297,6 +8311,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const aPatchBtn = evt.target?.closest?.("button[data-aie-apatch]");
     if (aPatchBtn) {
       await runAiEngineerAction(Number(aPatchBtn.getAttribute("data-aie-apatch") || 0), "apply-patch");
+      return;
+    }
+    const mergeBtn = evt.target?.closest?.("button[data-aie-merge]");
+    if (mergeBtn) {
+      const reqId = Number(mergeBtn.getAttribute("data-aie-merge") || 0);
+      if (!reqId) return;
+      const ok = window.confirm(
+        "Merge this AI patch into your live main repo checkout?\n\nThis cherry-picks the worktree commit into the current branch. Ensure main has no uncommitted changes.",
+      );
+      if (!ok) return;
+      await runAiEngineerAction(reqId, "merge", { confirm: true });
       return;
     }
     const rejectBtn = evt.target?.closest?.("button[data-aie-reject]");
