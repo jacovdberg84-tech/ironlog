@@ -9095,6 +9095,18 @@ export default async function reportsRoutes(app) {
     const insightsLaborTotal = insightsCostRows.reduce((s, r) => s + Number(r.labor_cost || 0), 0);
     const insightsPartsTotal = insightsCostRows.reduce((s, r) => s + Number(r.parts_cost || 0), 0);
     const insightsMaintTotal = insightsCostRows.reduce((s, r) => s + Number(r.total_cost || 0), 0);
+    const contractorFuelRows = buildPeriodContractorFuelRows(period.start, period.end);
+    const contractorBySupplier = rollupContractorFuelBySupplier(contractorFuelRows);
+    const contractorFuelTotal = contractorFuelRows.reduce(
+      (acc, r) => {
+        acc.fuel_liters += Number(r.fuel_liters || 0);
+        acc.fuel_cost += Number(r.fuel_cost || 0);
+        acc.hours_run += Number(r.hours_run || 0);
+        acc.km_run += Number(r.km_run || 0);
+        return acc;
+      },
+      { fuel_liters: 0, fuel_cost: 0, hours_run: 0, km_run: 0 },
+    );
 
     const siteCandidates = Array.from(new Set([String(site_code || "main").trim().toLowerCase() || "main", "default"]));
     const siteMarks = siteCandidates.map(() => "?").join(", ");
@@ -9178,7 +9190,7 @@ export default async function reportsRoutes(app) {
     s1.addText("Workshop Maintenance Executive Report", { x: 0.4, y: 0.35, w: 12.4, h: 0.55, fontSize: 24, bold: true });
     s1.addText(`Period: ${period.start} to ${period.end} | Site: ${site_code}`, { x: 0.4, y: 0.95, w: 12.4, h: 0.35, fontSize: 11 });
     s1.addText(
-      "Index\n1) Safety (HSE)\n2) Plant Performance\n3) Breakdown & Maintenance Costs\n4) Planned Upcoming Costs\n5) Parts Tracking (Stores)\n6) Lubrication\n7) Manager Inspections\n8) Fuel Anomalies",
+      "Index\n1) Safety (HSE)\n2) Plant Performance\n3) Breakdown & Maintenance Costs\n3b) Contractor Fuel Costs (FAMS)\n4) Planned Upcoming Costs\n5) Parts Tracking (Stores)\n6) Lubrication\n7) Manager Inspections\n8) Fuel Anomalies",
       { x: 0.7, y: 1.6, w: 11.8, h: 3.8, fontSize: 16, bold: true }
     );
     const s2 = pptx.addSlide();
@@ -9286,6 +9298,78 @@ export default async function reportsRoutes(app) {
       `Work-order totals: Parts $${fmtNum(woCostTotals.parts_cost, 2)} | Labor $${fmtNum(woCostTotals.labor_cost, 2)} | Total $${fmtNum(woCostTotals.total_cost, 2)}`,
       { x: 0.45, y: 5.75, w: 12.2, h: 0.35, fontSize: 11, bold: true },
     );
+    if (contractorFuelRows.length) {
+      const sContractor = pptx.addSlide();
+      sContractor.addText("3b) Contractor Fuel Costs (FAMS — hired equipment)", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontSize: 20, bold: true });
+      sContractor.addText(
+        [
+          `Contractor assets: ${contractorFuelRows.length}`,
+          `Fuel liters: ${fmtNum(contractorFuelTotal.fuel_liters, 1)}`,
+          `Fuel cost: $${fmtNum(contractorFuelTotal.fuel_cost, 2)}`,
+          `Run hrs: ${fmtNum(contractorFuelTotal.hours_run, 1)}`,
+          `Run km: ${fmtNum(contractorFuelTotal.km_run, 1)}`,
+          contractorFuelTotal.hours_run > 0 ? `Avg $/hr: $${fmtNum(contractorFuelTotal.fuel_cost / contractorFuelTotal.hours_run, 2)}` : null,
+          contractorFuelTotal.km_run > 0 ? `Avg $/km: $${fmtNum(contractorFuelTotal.fuel_cost / contractorFuelTotal.km_run, 2)}` : null,
+        ].filter(Boolean).join("  |  "),
+        { x: 0.45, y: 0.72, w: 12.2, h: 0.35, fontSize: 10, bold: true },
+      );
+      sContractor.addTable(
+        [
+          [
+            { text: "Supplier", options: { bold: true } },
+            { text: "Assets", options: { bold: true } },
+            { text: "Liters", options: { bold: true } },
+            { text: "Fuel $", options: { bold: true } },
+            { text: "Run hrs", options: { bold: true } },
+            { text: "Run km", options: { bold: true } },
+            { text: "$/hr", options: { bold: true } },
+            { text: "$/km", options: { bold: true } },
+          ],
+          ...contractorBySupplier.map((r) => [
+            String(r.contractor || "-"),
+            fmtNum(r.asset_count, 0),
+            fmtNum(r.fuel_liters, 1),
+            fmtNum(r.fuel_cost, 2),
+            fmtNum(r.hours_run, 1),
+            fmtNum(r.km_run, 1),
+            r.hours_run > 0 ? fmtNum(r.fuel_cost / r.hours_run, 2) : "—",
+            r.km_run > 0 ? fmtNum(r.fuel_cost / r.km_run, 2) : "—",
+          ]),
+        ],
+        { x: 0.35, y: 1.15, w: 12.6, h: 2.0, fontSize: 9.5, border: { pt: 1, color: "C8C8C8" } },
+      );
+      sContractor.addTable(
+        [
+          [
+            { text: "Asset", options: { bold: true } },
+            { text: "Supplier", options: { bold: true } },
+            { text: "Mode", options: { bold: true } },
+            { text: "Liters", options: { bold: true } },
+            { text: "Fuel $", options: { bold: true } },
+            { text: "Run", options: { bold: true } },
+            { text: "Unit", options: { bold: true } },
+            { text: "$/unit", options: { bold: true } },
+            { text: "Fills", options: { bold: true } },
+          ],
+          ...contractorFuelRows.slice(0, 14).map((r) => [
+            String(r.asset_code || "-"),
+            String(r.contractor || "-"),
+            r.metric_mode === "km" ? "km" : "hrs",
+            fmtNum(r.fuel_liters, 1),
+            fmtNum(r.fuel_cost, 2),
+            fmtNum(r.run_value, 1),
+            String(r.run_label || "-"),
+            r.cost_per_run == null ? "N/A" : fmtNum(r.cost_per_run, 2),
+            fmtNum(r.fill_count, 0),
+          ]),
+        ],
+        { x: 0.35, y: 3.35, w: 12.6, h: 2.55, fontSize: 9, border: { pt: 1, color: "C8C8C8" } },
+      );
+      sContractor.addText(
+        `Contractor fuel total: $${fmtNum(contractorFuelTotal.fuel_cost, 2)} (${fmtNum(contractorFuelTotal.fuel_liters, 1)} L from FAMS meter run)`,
+        { x: 0.45, y: 6.05, w: 12.2, h: 0.35, fontSize: 11, bold: true },
+      );
+    }
     const s4b = pptx.addSlide();
     s4b.addText("4) Planned Upcoming Costs", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontSize: 20, bold: true });
     const upcomingKitTotal = upcomingCostRows.reduce((s, r) => s + Number(r?.forecast?.est_service_kit_cost || 0), 0);
