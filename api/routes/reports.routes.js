@@ -26,9 +26,9 @@ import {
 } from "../utils/pdfGenerator.js";
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly, andAssetExcludeLdv } from "../utils/fleetHoursKpiScope.js";
 import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
-import { isOperationalHireAsset } from "../utils/hiredEquipment.js";
+import { isOperationalHireAsset, inferHireContractorLabel, sqlIncludeArchivedHireAssets } from "../utils/hiredEquipment.js";
 import { aggregateFuelBenchmarkByCategory } from "../utils/fuelBenchmarkAggregate.js";
-import { fuelBenchmarkAssetsInRangeSql } from "../utils/fuelMetricMode.js";
+import { fuelBenchmarkAssetsInRangeSql, sqlFuelMetricModeExpr } from "../utils/fuelMetricMode.js";
 import { buildBudgetMeetingDocxBuffer } from "../utils/budgetMeetingDocx.js";
 import { getOperatingBudgetAmount } from "../utils/monthlyBudget.js";
 import {
@@ -2455,6 +2455,133 @@ export default async function reportsRoutes(app) {
         cost_per_run_hour: r.run_hours > 0 ? Number((r.total_cost / r.run_hours).toFixed(2)) : null,
       }))
       .sort((a, b) => b.total_cost - a.total_cost);
+  }
+
+  function buildPeriodContractorFuelRows(start, end) {
+    const defaults = costDefaults();
+    const metricExpr = sqlFuelMetricModeExpr("a");
+    const hireWhere = `
+      COALESCE(a.active, 1) = 1
+      AND (
+        NULLIF(TRIM(COALESCE(a.hire_billing_mode, '')), '') IS NOT NULL
+        OR LOWER(COALESCE(a.category, '')) LIKE '%contractor%'
+        OR LOWER(COALESCE(a.category, '')) LIKE '%hire%'
+        OR UPPER(COALESCE(a.asset_code, '')) LIKE 'BMP%'
+        OR UPPER(COALESCE(a.asset_code, '')) LIKE 'PTT%'
+        OR UPPER(COALESCE(a.asset_code, '')) IN ('E017', 'E018', 'E025', 'BR3', 'BW10', 'BW11')
+      )
+      AND ${sqlIncludeArchivedHireAssets("a")}
+    `;
+
+    const fuelRows = db.prepare(`
+      SELECT
+        a.id AS asset_id,
+        a.asset_code,
+        a.asset_name,
+        a.category,
+        a.hire_billing_mode,
+        COALESCE(a.archived, 0) AS archived,
+        ${metricExpr} AS metric_mode,
+        COALESCE(SUM(fl.liters), 0) AS fuel_liters,
+        COALESCE(SUM(fl.liters * COALESCE(fl.unit_cost_per_liter, a.fuel_cost_per_liter, ?)), 0) AS fuel_cost,
+        COUNT(fl.id) AS fill_count
+      FROM assets a
+      INNER JOIN fuel_logs fl ON fl.asset_id = a.id AND fl.log_date BETWEEN ? AND ?
+      WHERE ${hireWhere}
+      GROUP BY a.id
+      HAVING fuel_liters > 0
+      ORDER BY a.asset_code ASC
+    `).all(defaults.fuel_cost_per_liter_default, start, end);
+
+    const getFuelLogsInRange = db.prepare(`
+      SELECT
+        log_date,
+        COALESCE(LOWER(meter_unit), '') AS meter_unit,
+        COALESCE(meter_run_value, 0) AS meter_run_value,
+        COALESCE(hours_run, 0) AS hours_run,
+        open_meter_value,
+        close_meter_value
+      FROM fuel_logs
+      WHERE asset_id = ?
+        AND log_date BETWEEN ? AND ?
+      ORDER BY log_date ASC, id ASC
+    `);
+    const getFuelLogBeforeRange = db.prepare(`
+      SELECT
+        log_date,
+        COALESCE(LOWER(meter_unit), '') AS meter_unit,
+        COALESCE(meter_run_value, 0) AS meter_run_value,
+        COALESCE(hours_run, 0) AS hours_run,
+        open_meter_value,
+        close_meter_value
+      FROM fuel_logs
+      WHERE asset_id = ?
+        AND log_date < ?
+        AND (COALESCE(meter_run_value, 0) > 0 OR COALESCE(hours_run, 0) > 0)
+      ORDER BY log_date DESC, id DESC
+      LIMIT 1
+    `);
+
+    return fuelRows.map((r) => {
+      const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
+      const logs = getFuelLogsInRange.all(r.asset_id, start, end);
+      const prev = getFuelLogBeforeRange.get(r.asset_id, start);
+      const fuelRun = getRunFromFuelRows(logs, prev, mode) || {};
+      const km_run = Number(fuelRun.km_run || 0);
+      const hours_run = Number(fuelRun.hours_run || 0);
+      const fuel_cost = Number(Number(r.fuel_cost || 0).toFixed(2));
+      const fuel_liters = Number(Number(r.fuel_liters || 0).toFixed(2));
+      const run_value = mode === "km" ? km_run : hours_run;
+      const cost_per_run = run_value > 0 ? Number((fuel_cost / run_value).toFixed(2)) : null;
+      return {
+        asset_code: String(r.asset_code || ""),
+        asset_name: String(r.asset_name || ""),
+        category: String(r.category || ""),
+        contractor: inferHireContractorLabel(r.asset_code, r.category) || "Other",
+        metric_mode: mode,
+        fuel_liters,
+        fuel_cost,
+        fill_count: Number(r.fill_count || 0),
+        km_run: Number(km_run.toFixed(2)),
+        hours_run: Number(hours_run.toFixed(2)),
+        run_value: Number(run_value.toFixed(2)),
+        run_label: mode === "km" ? "km" : "hrs",
+        cost_per_run,
+        archived: Number(r.archived || 0),
+      };
+    }).sort((a, b) => b.fuel_cost - a.fuel_cost);
+  }
+
+  function rollupContractorFuelBySupplier(rows) {
+    const map = new Map();
+    for (const r of rows) {
+      const key = String(r.contractor || "Other");
+      if (!map.has(key)) {
+        map.set(key, {
+          contractor: key,
+          asset_count: 0,
+          fuel_liters: 0,
+          fuel_cost: 0,
+          hours_run: 0,
+          km_run: 0,
+        });
+      }
+      const row = map.get(key);
+      row.asset_count += 1;
+      row.fuel_liters += Number(r.fuel_liters || 0);
+      row.fuel_cost += Number(r.fuel_cost || 0);
+      row.hours_run += Number(r.hours_run || 0);
+      row.km_run += Number(r.km_run || 0);
+    }
+    return Array.from(map.values())
+      .map((r) => ({
+        ...r,
+        fuel_liters: Number(r.fuel_liters.toFixed(2)),
+        fuel_cost: Number(r.fuel_cost.toFixed(2)),
+        hours_run: Number(r.hours_run.toFixed(1)),
+        km_run: Number(r.km_run.toFixed(1)),
+      }))
+      .sort((a, b) => b.fuel_cost - a.fuel_cost);
   }
 
   // =========================
@@ -10622,6 +10749,18 @@ export default async function reportsRoutes(app) {
     const runHours = queryPeriodRunHoursByAsset(start, end);
     const assetRows = mergeAssetCostsWithRunHours(assetCosts, runHours);
     const categoryRows = rollupFleetCostByCategory(assetRows);
+    const contractorFuelRows = buildPeriodContractorFuelRows(start, end);
+    const contractorBySupplier = rollupContractorFuelBySupplier(contractorFuelRows);
+    const contractorFuelTotal = contractorFuelRows.reduce(
+      (acc, r) => {
+        acc.fuel_liters += Number(r.fuel_liters || 0);
+        acc.fuel_cost += Number(r.fuel_cost || 0);
+        acc.hours_run += Number(r.hours_run || 0);
+        acc.km_run += Number(r.km_run || 0);
+        return acc;
+      },
+      { fuel_liters: 0, fuel_cost: 0, hours_run: 0, km_run: 0 },
+    );
 
     const assetPdf = assetRows.slice(0, 50);
     const categoryPdf = categoryRows.slice(0, 20);
@@ -10654,6 +10793,81 @@ export default async function reportsRoutes(app) {
           { k: "Total Fleet Cost", v: fmtNum(costs.total_cost, 2) },
           { k: "Fleet Cost / Run Hour", v: costPerRunHour == null ? "N/A" : fmtNum(costPerRunHour, 2) },
         ], 2);
+
+        if (contractorFuelRows.length) {
+          sectionTitle(doc, "Contractor Fuel Summary (FAMS — hired / archived active)");
+          kvGrid(doc, [
+            { k: "Contractor assets (fuel)", v: fmtNum(contractorFuelRows.length, 0) },
+            { k: "Contractor fuel liters", v: fmtNum(contractorFuelTotal.fuel_liters, 1) },
+            { k: "Contractor fuel cost", v: fmtNum(contractorFuelTotal.fuel_cost, 2) },
+            { k: "Contractor run (hrs)", v: fmtNum(contractorFuelTotal.hours_run, 1) },
+            { k: "Contractor run (km)", v: fmtNum(contractorFuelTotal.km_run, 1) },
+            {
+              k: "Avg fuel $/hr (hour units)",
+              v: contractorFuelTotal.hours_run > 0
+                ? fmtNum(contractorFuelTotal.fuel_cost / contractorFuelTotal.hours_run, 2)
+                : "N/A",
+            },
+            {
+              k: "Avg fuel $/km (km units)",
+              v: contractorFuelTotal.km_run > 0
+                ? fmtNum(contractorFuelTotal.fuel_cost / contractorFuelTotal.km_run, 2)
+                : "N/A",
+            },
+          ], 2);
+
+          sectionTitle(doc, "Contractor Fuel by Supplier");
+          table(
+            doc,
+            [
+              { key: "supplier", label: "Supplier", width: 0.14 },
+              { key: "assets", label: "Assets", width: 0.08, align: "right" },
+              { key: "liters", label: "Liters", width: 0.12, align: "right" },
+              { key: "cost", label: "Fuel $", width: 0.12, align: "right" },
+              { key: "hrs", label: "Run hrs", width: 0.12, align: "right" },
+              { key: "km", label: "Run km", width: 0.12, align: "right" },
+              { key: "cph", label: "$/hr", width: 0.10, align: "right" },
+              { key: "cpk", label: "$/km", width: 0.10, align: "right" },
+            ],
+            contractorBySupplier.map((r) => ({
+              supplier: r.contractor,
+              assets: fmtNum(r.asset_count, 0),
+              liters: fmtNum(r.fuel_liters, 1),
+              cost: fmtNum(r.fuel_cost, 2),
+              hrs: fmtNum(r.hours_run, 1),
+              km: fmtNum(r.km_run, 1),
+              cph: r.hours_run > 0 ? fmtNum(r.fuel_cost / r.hours_run, 2) : "—",
+              cpk: r.km_run > 0 ? fmtNum(r.fuel_cost / r.km_run, 2) : "—",
+            })),
+          );
+
+          sectionTitle(doc, "Contractor Fuel by Asset (FAMS meter run)");
+          table(
+            doc,
+            [
+              { key: "asset", label: "Asset", width: 0.10 },
+              { key: "supplier", label: "Supplier", width: 0.10 },
+              { key: "mode", label: "Mode", width: 0.07 },
+              { key: "liters", label: "Liters", width: 0.10, align: "right" },
+              { key: "cost", label: "Fuel $", width: 0.10, align: "right" },
+              { key: "run", label: "Run", width: 0.10, align: "right" },
+              { key: "unit", label: "Unit", width: 0.06 },
+              { key: "cpu", label: "$/unit", width: 0.10, align: "right" },
+              { key: "fills", label: "Fills", width: 0.07, align: "right" },
+            ],
+            contractorFuelRows.map((r) => ({
+              asset: r.asset_code,
+              supplier: r.contractor,
+              mode: r.metric_mode === "km" ? "km" : "hrs",
+              liters: fmtNum(r.fuel_liters, 1),
+              cost: fmtNum(r.fuel_cost, 2),
+              run: fmtNum(r.run_value, 1),
+              unit: r.run_label,
+              cpu: r.cost_per_run == null ? "N/A" : fmtNum(r.cost_per_run, 2),
+              fills: fmtNum(r.fill_count, 0),
+            })),
+          );
+        }
 
         sectionTitle(doc, "Cost by Category ($/run hr includes labor + lube)");
         table(
