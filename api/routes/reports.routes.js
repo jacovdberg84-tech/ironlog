@@ -26,6 +26,7 @@ import {
 } from "../utils/pdfGenerator.js";
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly, andAssetExcludeLdv } from "../utils/fleetHoursKpiScope.js";
 import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
+import { isOperationalHireAsset } from "../utils/hiredEquipment.js";
 import { aggregateFuelBenchmarkByCategory } from "../utils/fuelBenchmarkAggregate.js";
 import { fuelBenchmarkAssetsInRangeSql } from "../utils/fuelMetricMode.js";
 import { buildBudgetMeetingDocxBuffer } from "../utils/budgetMeetingDocx.js";
@@ -3627,7 +3628,8 @@ export default async function reportsRoutes(app) {
       const fuelRun = getRunFromFuel(r.asset_id, start, end, mode) || {};
       const fuelKm = Number(fuelRun.km_run || 0);
       const fuelHours = Number(fuelRun.hours_run || 0);
-      const dailyHoursRun = mode === "hours"
+      const skipDaily = Number(r.archived || 0) === 1 && isOperationalHireAsset(r);
+      const dailyHoursRun = mode === "hours" && !skipDaily
         ? Number(getDailyHoursRunInRange.get(r.asset_id, start, end)?.v || 0)
         : 0;
       const km = fuelKm > 0 ? fuelKm : 0;
@@ -3650,6 +3652,7 @@ export default async function reportsRoutes(app) {
         metric_mode: mode,
         asset_code: r.asset_code,
         asset_name: r.asset_name,
+        is_hired: isOperationalHireAsset(r) || Boolean(String(r.hire_billing_mode || "").trim()),
         fuel_liters: Number(fuel.toFixed(2)),
         km_run: Number(km.toFixed(2)),
         hours_run: Number(hours.toFixed(2)),

@@ -8045,22 +8045,28 @@ async function loadFuelBenchmark() {
         return;
       }
       const isKm = String(r.metric_mode || "hours") === "km";
+      const hiredTag = r.is_hired ? " <span class='pill' style='font-size:0.65rem;'>HIRED</span>" : "";
+      const archTag = Number(r.archived) ? " <span class='pill' style='font-size:0.65rem;'>ARCH</span>" : "";
+      const modeTag = `<span class='pill blue' style='font-size:0.65rem;'>${isKm ? "km/L" : "L/hr"}</span>`;
+      const runSrc = r.run_source && r.run_source !== "none"
+        ? ` | Run: ${isKm ? `${Number(r.km_run || 0).toFixed(2)} km` : `${Number(r.hours_run || 0).toFixed(2)} h`} (${String(r.run_source).replace(/_/g, " ")})`
+        : "";
       const flag = isRowFlagged(r)
         ? `<span class='pill red'>${isKm ? "UNDER BENCHMARK" : "EXCESSIVE"}</span>`
         : "<span class='pill blue'>OK</span>";
       const machineKey = String(r.asset_code || "").replace(/[^A-Za-z0-9_-]/g, "_");
       list.appendChild(
         item(
-          `<div class="fuel-item-head"><b>${r.asset_code}</b> — ${
-            String(r.metric_mode || "hours") === "km"
+          `<div class="fuel-item-head"><b>${r.asset_code}</b>${hiredTag}${archTag} ${modeTag} — ${
+            isKm
               ? `${r.actual_km_per_l == null ? "-" : Number(r.actual_km_per_l).toFixed(3)} km/L`
               : `${r.actual_lph == null ? "-" : Number(r.actual_lph).toFixed(3)} L/hr`
           } ${flag}</div>` +
           `<small class="fuel-item-desc">${r.asset_name || ""}</small>` +
           `<small class="fuel-item-meta">${
-            String(r.metric_mode || "hours") === "km"
-              ? `OEM: ${Number(r.oem_km_per_l || 0).toFixed(3)} km/L | Fuel: ${Number(r.fuel_liters || 0).toFixed(2)}L | Distance: ${Number(r.km_run || 0).toFixed(2)} km`
-              : `OEM: ${Number(r.oem_lph || 0).toFixed(3)} L/hr | Fuel: ${Number(r.fuel_liters || 0).toFixed(2)}L | Hours: ${Number(r.hours_run || 0).toFixed(2)}`
+            isKm
+              ? `OEM: ${Number(r.oem_km_per_l || 0).toFixed(3)} km/L | Fuel: ${Number(r.fuel_liters || 0).toFixed(2)}L | Distance: ${Number(r.km_run || 0).toFixed(2)} km${runSrc}`
+              : `OEM: ${Number(r.oem_lph || 0).toFixed(3)} L/hr | Fuel: ${Number(r.fuel_liters || 0).toFixed(2)}L | Hours: ${Number(r.hours_run || 0).toFixed(2)}${runSrc}`
           }</small>` +
           `<br><button data-fuel-machine="${String(r.asset_code || "").replace(/"/g, "&quot;")}">Open machine history</button> ` +
           `<button data-fuel-machine-pdf="${String(r.asset_code || "").replace(/"/g, "&quot;")}">Machine PDF</button>` +
@@ -15275,9 +15281,13 @@ function isHiredAsset(a) {
 }
 
 function isKmFuelAsset(a) {
+  const mode = String(a?.utilization_mode || "").trim().toLowerCase();
+  if (mode === "km") return true;
+  if (mode === "hours") return false;
   const cat = String(a?.category || "").toLowerCase();
   const code = String(a?.asset_code || "").toUpperCase();
   const name = String(a?.asset_name || "").toLowerCase();
+  if (code.startsWith("BMP")) return true;
   if (/^V\d{2}AM$/.test(code) || /^T\d{2}AM$/.test(code) || code.startsWith("PTT") || code.startsWith("LDV")) return true;
   const keys = ["truck", "vehicle", "ldv", "pickup", "bakkie", "tipper", "dump", "haul", "spinner"];
   if (keys.some((k) => cat.includes(k) || name.includes(k))) return true;
@@ -15485,7 +15495,10 @@ async function loadPlantHirePanel() {
       plantHireRegisterCache.forEach((r) => {
         const opt = document.createElement("option");
         opt.value = r.asset_code;
-        opt.textContent = `${r.asset_code} — ${r.asset_name || ""}`;
+        const mode = String(r.utilization_mode || "").trim().toLowerCase();
+        const modeLbl = mode === "km" ? "km" : mode === "hours" ? "hrs" : "?";
+        const arch = Number(r.archived) ? " [arch]" : "";
+        opt.textContent = `${r.asset_code} — ${r.asset_name || ""} (${modeLbl}${arch})`;
         sel.appendChild(opt);
       });
       const pick = prev && plantHireRegisterCache.some((r) => r.asset_code === prev) ? prev : "";

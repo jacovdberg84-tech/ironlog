@@ -6,6 +6,7 @@ import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fl
 import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
 import { aggregateFuelBenchmarkByCategory, normalizeEquipmentCategory } from "../utils/fuelBenchmarkAggregate.js";
 import { fuelBenchmarkAssetsInRangeSql, sqlFuelMetricModeExpr } from "../utils/fuelMetricMode.js";
+import { isOperationalHireAsset, sqlIncludeArchivedHireAssets } from "../utils/hiredEquipment.js";
 import { ensureCostAllocationSchema, resolveLogCostCenterCode } from "../utils/costAllocation.js";
 import { fetchLubeUsageLines } from "../utils/lubeUsageLines.js";
 
@@ -2617,7 +2618,7 @@ export default async function dashboardRoutes(app) {
     const metricExpr = sqlFuelMetricModeExpr("a");
     const where = [
       "fl.log_date BETWEEN ? AND ?",
-      "COALESCE(a.archived, 0) = 0",
+      sqlIncludeArchivedHireAssets("a"),
     ];
     const params = [start, end];
     if (assetFilter) {
@@ -2761,13 +2762,19 @@ export default async function dashboardRoutes(app) {
       const fuelRun = getRunFromFuel(r.asset_id, start, end, mode) || {};
       const fuelKm = Number(fuelRun.km_run || 0);
       const fuelHours = Number(fuelRun.hours_run || 0);
-      const dailyHoursRun = mode === "hours"
+      const skipDaily = Number(r.archived || 0) === 1 && isOperationalHireAsset(r);
+      const dailyHoursRun = mode === "hours" && !skipDaily
         ? Number(getDailyHoursRunInRange.get(r.asset_id, start, end)?.v || 0)
         : 0;
       const km = fuelKm > 0 ? fuelKm : 0;
       const hours = mode === "hours"
         ? (fuelHours > 0 ? fuelHours : (dailyHoursRun > 0 ? dailyHoursRun : 0))
         : (fuelHours > 0 ? fuelHours : 0);
+      let run_source = "none";
+      if (mode === "km" && km > 0) run_source = "fams_fuel";
+      else if (mode === "hours" && hours > 0) {
+        run_source = fuelHours > 0 ? "fams_fuel" : dailyHoursRun > 0 ? "daily_hours" : "none";
+      }
       const fuel = Number(r.fuel_liters || 0);
       const oem = Number(r.oem_lph || 5);
       const oemK = Number(r.oem_kmpl || 2);
@@ -2780,12 +2787,16 @@ export default async function dashboardRoutes(app) {
       const is_excessive = hasEnoughSamples && (mode === "km"
         ? (kmpl != null && kmpl < lowThresholdKmpl)
         : (lph != null && lph > excessiveThreshold));
+      const is_hired = isOperationalHireAsset(r) || Boolean(String(r.hire_billing_mode || "").trim());
       return {
         asset_id: Number(r.asset_id),
         asset_code: r.asset_code,
         asset_name: r.asset_name,
         category: normalizeEquipmentCategory(r.category),
         metric_mode: mode,
+        is_hired,
+        archived: Number(r.archived || 0),
+        run_source,
         fuel_liters: Number(fuel.toFixed(2)),
         km_run: Number(km.toFixed(2)),
         hours_run: Number(hours.toFixed(2)),

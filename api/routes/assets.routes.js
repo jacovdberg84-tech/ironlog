@@ -245,6 +245,7 @@ export default async function assetRoutes(app) {
       hire_billing_mode: r.hire_billing_mode || "",
       hire_rate_per_hour: r.hire_rate_per_hour != null ? Number(r.hire_rate_per_hour) : null,
       hire_fixed_monthly: r.hire_fixed_monthly != null ? Number(r.hire_fixed_monthly) : null,
+      utilization_mode: r.utilization_mode || "",
       active: Number(r.active),
       archived: Number(r.archived),
     }));
