@@ -6391,7 +6391,7 @@
               </div>
               <div>
                 <h3>Cost Analysis</h3>
-                <p class="muted small">Monthly cost breakdowns and trends</p>
+                <p class="muted small">Monthly cost breakdowns, fleet $/run hr (fuel, lube, labor), and trends</p>
               </div>
             </div>
             <button class="report-card-toggle" aria-label="Toggle">
@@ -6405,7 +6405,9 @@
               </label>
             </div>
             <div class="report-actions">
-              <button id="downloadCostMonthlyXlsx" class="btn btn-primary">Download Monthly Excel</button>
+              <button id="openMonthlyFleetCostPdf" class="btn btn-primary">Open Monthly Fleet Cost PDF</button>
+              <button id="downloadMonthlyFleetCostPdf" class="btn btn-secondary">Download Monthly Fleet Cost PDF</button>
+              <button id="downloadCostMonthlyXlsx" class="btn btn-secondary">Download Monthly Excel</button>
             </div>
           </div>
         </div>
@@ -7280,6 +7282,6 @@
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=1"></script>
-  <script src="./app.js?v=46"></script>
+  <script src="./app.js?v=47"></script>
 </body>
 </html>

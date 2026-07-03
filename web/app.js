@@ -10248,6 +10248,27 @@ function downloadCostMonthlyXlsx() {
   window.open(`${API}/api/reports/cost-monthly.xlsx?month=${encodeURIComponent(month)}`, "_blank");
 }
 
+function monthlyFleetCostPdfUrl(download = false) {
+  const month = (qs("costMonth")?.value || "").trim();
+  if (!month) return null;
+  const scheduled = qs("scheduled")?.value || 10;
+  const q = new URLSearchParams({ month, scheduled: String(scheduled) });
+  if (download) q.set("download", "1");
+  return `${API}/api/reports/monthly.pdf?${q.toString()}`;
+}
+
+function openMonthlyFleetCostPdf() {
+  const url = monthlyFleetCostPdfUrl(false);
+  if (!url) return alert("Select a cost month first.");
+  window.open(url, "_blank");
+}
+
+function downloadMonthlyFleetCostPdf() {
+  const url = monthlyFleetCostPdfUrl(true);
+  if (!url) return alert("Select a cost month first.");
+  window.open(url, "_blank");
+}
+
 function downloadMaintenanceCostByEquipmentXlsx() {
   const month = (qs("costMonth")?.value || "").trim();
   const start = (qs("maintCostStart")?.value || "").trim();
@@ -16715,6 +16736,8 @@ async function init() {
   qs("openDailyXlsx")?.addEventListener("click", openDailyXlsx);
   qs("openGmWeeklyXlsx")?.addEventListener("click", openGmWeeklyXlsx);
   qs("downloadCostMonthlyXlsx")?.addEventListener("click", downloadCostMonthlyXlsx);
+  qs("openMonthlyFleetCostPdf")?.addEventListener("click", openMonthlyFleetCostPdf);
+  qs("downloadMonthlyFleetCostPdf")?.addEventListener("click", downloadMonthlyFleetCostPdf);
   qs("downloadMtdOpeningHoursXlsx")?.addEventListener("click", downloadMtdOpeningHoursXlsx);
   qs("downloadMaintenanceCostByEquipmentXlsx")?.addEventListener("click", downloadMaintenanceCostByEquipmentXlsx);
   qs("openMaintenanceCostByEquipmentPdf")?.addEventListener("click", () => openMaintenanceCostByEquipmentPdf(false));

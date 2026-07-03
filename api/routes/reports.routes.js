@@ -2177,6 +2177,285 @@ export default async function reportsRoutes(app) {
     return d;
   }
 
+  function stockMovementDateExpr() {
+    const smCols = db.prepare(`PRAGMA table_info(stock_movements)`).all();
+    const hasCreatedAt = smCols.some((c) => String(c.name) === "created_at");
+    return hasCreatedAt ? "DATE(sm.created_at)" : "DATE(sm.movement_date)";
+  }
+
+  function queryPeriodFleetCostTotals(start, end) {
+    const defaults = costDefaults();
+    const smDateExpr = stockMovementDateExpr();
+
+    const fuelCostRow = db.prepare(`
+      SELECT COALESCE(SUM(fl.liters * COALESCE(fl.unit_cost_per_liter, a.fuel_cost_per_liter, ?)), 0) AS value
+      FROM fuel_logs fl
+      JOIN assets a ON a.id = fl.asset_id
+      WHERE fl.log_date BETWEEN ? AND ?
+    `).get(defaults.fuel_cost_per_liter_default, start, end);
+
+    const lubeCostRow = db.prepare(`
+      SELECT COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS value
+      FROM oil_logs ol
+      WHERE ol.log_date BETWEEN ? AND ?
+    `).get(defaults.lube_cost_per_qty_default, start, end);
+
+    const partsCostRow = db.prepare(`
+      SELECT COALESCE(SUM(ABS(sm.quantity) * COALESCE(p.unit_cost, 0)), 0) AS value
+      FROM stock_movements sm
+      JOIN parts p ON p.id = sm.part_id
+      WHERE sm.movement_type = 'out'
+        AND ${smDateExpr} BETWEEN ? AND ?
+    `).get(start, end);
+
+    const laborRow = db.prepare(`
+      SELECT
+        COALESCE(SUM(COALESCE(w.labor_hours, 0)), 0) AS labor_hours,
+        COALESCE(SUM(COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, ?)), 0) AS labor_cost
+      FROM work_orders w
+      WHERE DATE(COALESCE(w.completed_at, w.closed_at)) BETWEEN ? AND ?
+        AND w.status IN ('completed', 'approved', 'closed')
+    `).get(defaults.labor_cost_per_hour_default, start, end);
+
+    const downtimeCostRow = db.prepare(`
+      SELECT COALESCE(SUM(l.hours_down * COALESCE(a.downtime_cost_per_hour, ?)), 0) AS value
+      FROM breakdown_downtime_logs l
+      JOIN breakdowns b ON b.id = l.breakdown_id
+      JOIN assets a ON a.id = b.asset_id
+      WHERE l.log_date BETWEEN ? AND ?
+    `).get(defaults.downtime_cost_per_hour_default, start, end);
+
+    const fuel_cost = Number(fuelCostRow?.value || 0);
+    const lube_cost = Number(lubeCostRow?.value || 0);
+    const parts_cost = Number(partsCostRow?.value || 0);
+    const labor_cost = Number(laborRow?.labor_cost || 0);
+    const labor_hours = Number(laborRow?.labor_hours || 0);
+    const downtime_cost = Number(downtimeCostRow?.value || 0);
+    const total_cost = Number((fuel_cost + lube_cost + parts_cost + labor_cost + downtime_cost).toFixed(2));
+
+    return {
+      defaults,
+      fuel_cost,
+      lube_cost,
+      parts_cost,
+      labor_cost,
+      labor_hours,
+      downtime_cost,
+      total_cost,
+    };
+  }
+
+  function buildPeriodAssetCosts(start, end) {
+    const defaults = costDefaults();
+    const smDateExpr = stockMovementDateExpr();
+
+    const fuelRows = db.prepare(`
+      SELECT a.asset_code, a.asset_name, a.category,
+        COALESCE(SUM(fl.liters * COALESCE(fl.unit_cost_per_liter, a.fuel_cost_per_liter, ?)), 0) AS fuel_cost
+      FROM fuel_logs fl
+      JOIN assets a ON a.id = fl.asset_id
+      WHERE fl.log_date BETWEEN ? AND ?
+      GROUP BY a.id
+    `).all(defaults.fuel_cost_per_liter_default, start, end);
+
+    const lubeRows = db.prepare(`
+      SELECT a.asset_code, a.asset_name, a.category,
+        COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS lube_cost
+      FROM oil_logs ol
+      JOIN assets a ON a.id = ol.asset_id
+      WHERE ol.log_date BETWEEN ? AND ?
+      GROUP BY a.id
+    `).all(defaults.lube_cost_per_qty_default, start, end);
+
+    const partsRows = db.prepare(`
+      SELECT
+        COALESCE(a.asset_code, 'UNLINKED') AS asset_code,
+        COALESCE(a.asset_name, 'Unlinked') AS asset_name,
+        COALESCE(a.category, 'Unassigned') AS category,
+        COALESCE(SUM(ABS(sm.quantity) * COALESCE(p.unit_cost, 0)), 0) AS parts_cost
+      FROM stock_movements sm
+      JOIN parts p ON p.id = sm.part_id
+      LEFT JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
+      LEFT JOIN assets a ON a.id = w.asset_id
+      WHERE sm.movement_type = 'out'
+        AND ${smDateExpr} BETWEEN ? AND ?
+      GROUP BY a.id
+    `).all(start, end);
+
+    const laborRows = db.prepare(`
+      SELECT a.asset_code, a.asset_name, a.category,
+        COALESCE(SUM(COALESCE(w.labor_hours, 0)), 0) AS labor_hours,
+        COALESCE(SUM(COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, ?)), 0) AS labor_cost
+      FROM work_orders w
+      JOIN assets a ON a.id = w.asset_id
+      WHERE DATE(COALESCE(w.completed_at, w.closed_at)) BETWEEN ? AND ?
+        AND w.status IN ('completed', 'approved', 'closed')
+      GROUP BY a.id
+    `).all(defaults.labor_cost_per_hour_default, start, end);
+
+    const downtimeRows = db.prepare(`
+      SELECT a.asset_code, a.asset_name, a.category,
+        COALESCE(SUM(l.hours_down), 0) AS downtime_hours,
+        COALESCE(SUM(l.hours_down * COALESCE(a.downtime_cost_per_hour, ?)), 0) AS downtime_cost
+      FROM breakdown_downtime_logs l
+      JOIN breakdowns b ON b.id = l.breakdown_id
+      JOIN assets a ON a.id = b.asset_id
+      WHERE l.log_date BETWEEN ? AND ?
+      GROUP BY a.id
+    `).all(defaults.downtime_cost_per_hour_default, start, end);
+
+    const map = new Map();
+    const ensure = (r) => {
+      const code = String(r.asset_code || "UNLINKED");
+      if (!map.has(code)) {
+        map.set(code, {
+          asset_code: code,
+          asset_name: r.asset_name || "Unlinked",
+          category: r.category || "Unassigned",
+          fuel_cost: 0,
+          lube_cost: 0,
+          parts_cost: 0,
+          labor_hours: 0,
+          labor_cost: 0,
+          downtime_hours: 0,
+          downtime_cost: 0,
+          total_cost: 0,
+        });
+      }
+      return map.get(code);
+    };
+    for (const r of fuelRows) ensure(r).fuel_cost += Number(r.fuel_cost || 0);
+    for (const r of lubeRows) ensure(r).lube_cost += Number(r.lube_cost || 0);
+    for (const r of partsRows) ensure(r).parts_cost += Number(r.parts_cost || 0);
+    for (const r of laborRows) {
+      const row = ensure(r);
+      row.labor_hours += Number(r.labor_hours || 0);
+      row.labor_cost += Number(r.labor_cost || 0);
+    }
+    for (const r of downtimeRows) {
+      const row = ensure(r);
+      row.downtime_hours += Number(r.downtime_hours || 0);
+      row.downtime_cost += Number(r.downtime_cost || 0);
+    }
+
+    return Array.from(map.values()).map((r) => {
+      const total = Number(r.fuel_cost || 0) + Number(r.lube_cost || 0) + Number(r.parts_cost || 0)
+        + Number(r.labor_cost || 0) + Number(r.downtime_cost || 0);
+      return {
+        ...r,
+        fuel_cost: Number(r.fuel_cost.toFixed(2)),
+        lube_cost: Number(r.lube_cost.toFixed(2)),
+        parts_cost: Number(r.parts_cost.toFixed(2)),
+        labor_hours: Number(r.labor_hours.toFixed(2)),
+        labor_cost: Number(r.labor_cost.toFixed(2)),
+        downtime_hours: Number(r.downtime_hours.toFixed(2)),
+        downtime_cost: Number(r.downtime_cost.toFixed(2)),
+        total_cost: Number(total.toFixed(2)),
+      };
+    });
+  }
+
+  function queryPeriodRunHoursByAsset(start, end) {
+    return db.prepare(`
+      SELECT
+        a.asset_code,
+        a.asset_name,
+        a.category,
+        COALESCE(SUM(dh.hours_run), 0) AS run_hours
+      FROM daily_hours dh
+      JOIN assets a ON a.id = dh.asset_id
+      WHERE dh.work_date BETWEEN ? AND ?
+        AND dh.hours_run > 0
+        ${andDailyHoursFleetHoursOnly("dh", "a")}
+      GROUP BY a.id
+    `).all(start, end).map((r) => ({
+      asset_code: String(r.asset_code || ""),
+      asset_name: String(r.asset_name || ""),
+      category: String(r.category || "Unassigned"),
+      run_hours: Number(Number(r.run_hours || 0).toFixed(1)),
+    }));
+  }
+
+  function mergeAssetCostsWithRunHours(assetCosts, runHoursRows) {
+    const runByCode = new Map(runHoursRows.map((r) => [r.asset_code, r]));
+    const merged = new Map();
+
+    for (const cost of assetCosts) {
+      const code = String(cost.asset_code || "");
+      const run = runByCode.get(code);
+      const run_hours = Number(run?.run_hours || 0);
+      const total_cost = Number(cost.total_cost || 0);
+      merged.set(code, {
+        ...cost,
+        run_hours,
+        cost_per_run_hour: run_hours > 0 ? Number((total_cost / run_hours).toFixed(2)) : null,
+      });
+      if (run) runByCode.delete(code);
+    }
+
+    for (const [code, run] of runByCode) {
+      merged.set(code, {
+        asset_code: code,
+        asset_name: run.asset_name,
+        category: run.category,
+        fuel_cost: 0,
+        lube_cost: 0,
+        parts_cost: 0,
+        labor_hours: 0,
+        labor_cost: 0,
+        downtime_hours: 0,
+        downtime_cost: 0,
+        total_cost: 0,
+        run_hours: Number(run.run_hours || 0),
+        cost_per_run_hour: null,
+      });
+    }
+
+    return Array.from(merged.values())
+      .filter((r) => r.total_cost > 0 || r.run_hours > 0)
+      .sort((a, b) => Number(b.total_cost || 0) - Number(a.total_cost || 0));
+  }
+
+  function rollupFleetCostByCategory(assetRows) {
+    const map = new Map();
+    for (const r of assetRows) {
+      const key = String(r.category || "Unassigned");
+      if (!map.has(key)) {
+        map.set(key, {
+          category: key,
+          run_hours: 0,
+          fuel_cost: 0,
+          lube_cost: 0,
+          parts_cost: 0,
+          labor_cost: 0,
+          downtime_cost: 0,
+          total_cost: 0,
+        });
+      }
+      const row = map.get(key);
+      row.run_hours += Number(r.run_hours || 0);
+      row.fuel_cost += Number(r.fuel_cost || 0);
+      row.lube_cost += Number(r.lube_cost || 0);
+      row.parts_cost += Number(r.parts_cost || 0);
+      row.labor_cost += Number(r.labor_cost || 0);
+      row.downtime_cost += Number(r.downtime_cost || 0);
+      row.total_cost += Number(r.total_cost || 0);
+    }
+    return Array.from(map.values())
+      .map((r) => ({
+        ...r,
+        run_hours: Number(r.run_hours.toFixed(1)),
+        fuel_cost: Number(r.fuel_cost.toFixed(2)),
+        lube_cost: Number(r.lube_cost.toFixed(2)),
+        parts_cost: Number(r.parts_cost.toFixed(2)),
+        labor_cost: Number(r.labor_cost.toFixed(2)),
+        downtime_cost: Number(r.downtime_cost.toFixed(2)),
+        total_cost: Number(r.total_cost.toFixed(2)),
+        cost_per_run_hour: r.run_hours > 0 ? Number((r.total_cost / r.run_hours).toFixed(2)) : null,
+      }))
+      .sort((a, b) => b.total_cost - a.total_cost);
+  }
+
   // =========================
   // WORK ORDER PDF (manual form + sign-off)
   // =========================
@@ -10301,6 +10580,145 @@ export default async function reportsRoutes(app) {
     reply
       .header("Content-Type", "application/pdf")
       .header("Content-Disposition", `inline; filename="AML_Weekly_${end}.pdf"`)
+      .send(pdf);
+  });
+
+  // =========================
+  // MONTHLY FLEET COST PDF
+  // =========================
+  // GET /api/reports/monthly.pdf?month=YYYY-MM&scheduled=10
+  // GET /api/reports/monthly.pdf?start=YYYY-MM-DD&end=YYYY-MM-DD&scheduled=10
+  app.get("/monthly.pdf", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
+
+    const month = String(req.query?.month || "").trim();
+    let start = String(req.query?.start || "").trim();
+    let end = String(req.query?.end || "").trim();
+    const scheduled = Number(req.query?.scheduled ?? 10);
+    const download = String(req.query?.download || "").trim() === "1";
+
+    if (isMonth(month)) {
+      const range = monthRange(month);
+      start = range.start;
+      end = range.end;
+    }
+    if (!isDate(start) || !isDate(end)) {
+      return reply.code(400).send({ error: "month (YYYY-MM) or start and end (YYYY-MM-DD) required" });
+    }
+
+    const logoPath = path.join(process.cwd(), "branding", "logo.png");
+    const kpi = kpiRange(start, end, scheduled);
+    const costs = queryPeriodFleetCostTotals(start, end);
+    const costPerRunHour = Number(kpi.run_hours || 0) > 0
+      ? Number((costs.total_cost / Number(kpi.run_hours || 1)).toFixed(2))
+      : null;
+
+    const assetCosts = buildPeriodAssetCosts(start, end);
+    const runHours = queryPeriodRunHoursByAsset(start, end);
+    const assetRows = mergeAssetCostsWithRunHours(assetCosts, runHours);
+    const categoryRows = rollupFleetCostByCategory(assetRows);
+
+    const assetPdf = assetRows.slice(0, 50);
+    const categoryPdf = categoryRows.slice(0, 20);
+    const periodLabel = month || `${start} to ${end}`;
+    const fileTag = month ? month.replace("-", "") : end.replace(/-/g, "");
+
+    const pdf = await buildPdfBuffer(
+      (doc) => {
+        tryDrawLogo(doc, logoPath);
+
+        sectionTitle(doc, "Fleet KPIs (Period)");
+        kvGrid(doc, [
+          { k: "Period", v: `${start} to ${end}` },
+          { k: "Scheduled hours / asset", v: fmtNum(scheduled, 0) },
+          { k: "Available hours", v: fmtNum(kpi.available_hours, 0) },
+          { k: "Run hours", v: fmtNum(kpi.run_hours, 1) },
+          { k: "Downtime hours", v: fmtNum(kpi.downtime_hours, 1) },
+          { k: "Availability %", v: kpi.availability == null ? "N/A" : `${fmtNum(kpi.availability, 2)}%` },
+          { k: "Utilization %", v: kpi.utilization == null ? "N/A" : `${fmtNum(kpi.utilization, 2)}%` },
+        ], 2);
+
+        sectionTitle(doc, "Fleet Cost Summary (Period)");
+        kvGrid(doc, [
+          { k: "Fuel Cost", v: fmtNum(costs.fuel_cost, 2) },
+          { k: "Oil / Lube Cost", v: fmtNum(costs.lube_cost, 2) },
+          { k: "Parts Cost", v: fmtNum(costs.parts_cost, 2) },
+          { k: "Labor Cost", v: fmtNum(costs.labor_cost, 2) },
+          { k: "Labor Hours", v: fmtNum(costs.labor_hours, 1) },
+          { k: "Downtime Cost", v: fmtNum(costs.downtime_cost, 2) },
+          { k: "Total Fleet Cost", v: fmtNum(costs.total_cost, 2) },
+          { k: "Fleet Cost / Run Hour", v: costPerRunHour == null ? "N/A" : fmtNum(costPerRunHour, 2) },
+        ], 2);
+
+        sectionTitle(doc, "Cost by Category ($/run hr includes labor + lube)");
+        table(
+          doc,
+          [
+            { key: "cat", label: "Category", width: 0.16 },
+            { key: "run", label: "Run hrs", width: 0.10, align: "right" },
+            { key: "fuel", label: "Fuel", width: 0.10, align: "right" },
+            { key: "lube", label: "Lube", width: 0.10, align: "right" },
+            { key: "labor", label: "Labor", width: 0.10, align: "right" },
+            { key: "parts", label: "Parts", width: 0.10, align: "right" },
+            { key: "total", label: "Total", width: 0.12, align: "right" },
+            { key: "cph", label: "$/hr", width: 0.10, align: "right" },
+          ],
+          categoryPdf.map((r) => ({
+            cat: compactCell(r.category ?? "", 24),
+            run: fmtNum(r.run_hours, 1),
+            fuel: fmtNum(r.fuel_cost, 0),
+            lube: fmtNum(r.lube_cost, 0),
+            labor: fmtNum(r.labor_cost, 0),
+            parts: fmtNum(r.parts_cost, 0),
+            total: fmtNum(r.total_cost, 0),
+            cph: r.cost_per_run_hour == null ? "N/A" : fmtNum(r.cost_per_run_hour, 2),
+          })),
+        );
+
+        sectionTitle(doc, "Cost by Asset (Top 50 — labor + lube + fuel + parts + downtime)");
+        table(
+          doc,
+          [
+            { key: "asset", label: "Asset", width: 0.12 },
+            { key: "run", label: "Run hrs", width: 0.09, align: "right" },
+            { key: "fuel", label: "Fuel", width: 0.09, align: "right" },
+            { key: "lube", label: "Lube", width: 0.09, align: "right" },
+            { key: "labor", label: "Labor", width: 0.09, align: "right" },
+            { key: "parts", label: "Parts", width: 0.09, align: "right" },
+            { key: "down", label: "Down", width: 0.09, align: "right" },
+            { key: "total", label: "Total", width: 0.10, align: "right" },
+            { key: "cph", label: "$/hr", width: 0.08, align: "right" },
+          ],
+          assetPdf.map((r) => ({
+            asset: r.asset_code,
+            run: fmtNum(r.run_hours, 1),
+            fuel: fmtNum(r.fuel_cost, 0),
+            lube: fmtNum(r.lube_cost, 0),
+            labor: fmtNum(r.labor_cost, 0),
+            parts: fmtNum(r.parts_cost, 0),
+            down: fmtNum(r.downtime_cost, 0),
+            total: fmtNum(r.total_cost, 0),
+            cph: r.cost_per_run_hour == null ? "N/A" : fmtNum(r.cost_per_run_hour, 2),
+          })),
+        );
+      },
+      {
+        title: "IRONLOG",
+        subtitle: "Monthly Fleet Cost Report",
+        rightText: `Period: ${periodLabel}`,
+        showPageNumbers: true,
+        layout: "landscape",
+      },
+    );
+
+    reply
+      .header("Content-Type", "application/pdf")
+      .header(
+        "Content-Disposition",
+        `${download ? "attachment" : "inline"}; filename="AML_Monthly_Fleet_Cost_${fileTag}.pdf"`,
+      )
       .send(pdf);
   });
 
