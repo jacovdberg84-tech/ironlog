@@ -10077,6 +10077,7 @@ export default async function reportsRoutes(app) {
       SELECT
         b.id,
         a.asset_code,
+        a.asset_name,
         b.description,
         dh.notes AS daily_breakdown_comment,
         COALESCE(b.${breakdownDowntimeCol}, 0) AS downtime_hours,
@@ -10361,6 +10362,7 @@ export default async function reportsRoutes(app) {
         const dailyBdPmRows = [
           ...dailyShortBreakdowns.map((r) => ({
             asset: r.asset_code,
+            equipment: compactCell(r.asset_name ?? "", 48),
             type: "Short breakdown",
             hrs: fmtNum(r.hours_down, 1),
             crit: r.critical ? "YES" : "NO",
@@ -10369,6 +10371,7 @@ export default async function reportsRoutes(app) {
           })),
           ...dailyPlannedMaintenance.map((r) => ({
             asset: r.asset_code,
+            equipment: compactCell(r.asset_name ?? "", 48),
             type: "Planned maintenance",
             hrs: "—",
             crit: "—",
@@ -10382,12 +10385,13 @@ export default async function reportsRoutes(app) {
           table(
             doc,
             [
-              { key: "asset", label: "Asset", width: 0.12 },
-              { key: "type", label: "Type", width: 0.16 },
-              { key: "hrs", label: "Hours down", width: 0.10, align: "right" },
-              { key: "crit", label: "Critical", width: 0.09, align: "center" },
-              { key: "comp", label: "Component / Service", width: 0.16 },
-              { key: "desc", label: "Description", width: 0.37 },
+              { key: "asset", label: "Plant #", width: 0.10 },
+              { key: "equipment", label: "Equipment", width: 0.18 },
+              { key: "type", label: "Type", width: 0.14 },
+              { key: "hrs", label: "Hours down", width: 0.09, align: "right" },
+              { key: "crit", label: "Critical", width: 0.08, align: "center" },
+              { key: "comp", label: "Component / Service", width: 0.14 },
+              { key: "desc", label: "Description", width: 0.27 },
             ],
             dailyBdPmRows,
           );
@@ -10397,15 +10401,17 @@ export default async function reportsRoutes(app) {
         table(
           doc,
           [
-            { key: "asset", label: "Asset", width: 0.14 },
-            { key: "days", label: "Days down", width: 0.12, align: "right" },
-            { key: "hrs", label: "Downtime (hrs)", width: 0.12, align: "right" },
-            { key: "crit", label: "Critical", width: 0.10, align: "center" },
-            { key: "desc", label: "Description", width: 0.30 },
-            { key: "comment", label: "Breakdown comment", width: 0.22 },
+            { key: "asset", label: "Plant #", width: 0.10 },
+            { key: "equipment", label: "Equipment", width: 0.18 },
+            { key: "days", label: "Days down", width: 0.10, align: "right" },
+            { key: "hrs", label: "Downtime (hrs)", width: 0.10, align: "right" },
+            { key: "crit", label: "Critical", width: 0.08, align: "center" },
+            { key: "desc", label: "Description", width: 0.26 },
+            { key: "comment", label: "Breakdown comment", width: 0.18 },
           ],
           breakdownsPdf.map(r => ({
             asset: r.asset_code,
+            equipment: compactCell(r.asset_name ?? "", 48),
             days: fmtNum(r.days_down || 0, 0),
             hrs: fmtNum(r.downtime_hours, 1),
             crit: r.critical ? "YES" : "NO",
