@@ -10208,6 +10208,7 @@ export default async function reportsRoutes(app) {
       SELECT
         w.id,
         a.asset_code,
+        a.asset_name,
         w.source,
         w.status,
         w.assigned_artisan_name,
@@ -10424,16 +10425,18 @@ export default async function reportsRoutes(app) {
         table(
           doc,
           [
-            { key: "wo", label: "WO#", width: 0.08, align: "right" },
-            { key: "asset", label: "Asset", width: 0.10 },
-            { key: "source", label: "Source", width: 0.12 },
-            { key: "status", label: "Status", width: 0.10 },
-            { key: "tech", label: "Technician", width: 0.14 },
-            { key: "progress", label: "Repair progress", width: 0.46 },
+            { key: "wo", label: "WO#", width: 0.07, align: "right" },
+            { key: "asset", label: "Plant #", width: 0.09 },
+            { key: "equipment", label: "Equipment", width: 0.16 },
+            { key: "source", label: "Source", width: 0.10 },
+            { key: "status", label: "Status", width: 0.09 },
+            { key: "tech", label: "Technician", width: 0.12 },
+            { key: "progress", label: "Repair progress", width: 0.37 },
           ],
           openWOsPdf.map(r => ({
             wo: String(r.id),
             asset: r.asset_code,
+            equipment: compactCell(r.asset_name ?? "", 48),
             source: compactCell(r.source ?? "", 20),
             status: compactCell(String(r.status ?? "").replace(/_/g, " "), 16),
             tech: compactCell(r.assigned_artisan_name ?? "", 28),
