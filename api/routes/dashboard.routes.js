@@ -1048,7 +1048,59 @@ export default async function dashboardRoutes(app) {
       });
     });
 
-    [summary, cat, assets, daily, assetDaily].forEach((ws) => {
+    // Month-by-month KPI from January of the end date's year through the end month.
+    const monthRangesForYearUpTo = (endDate) => {
+      const year = Number(endDate.slice(0, 4));
+      const endMonth = Number(endDate.slice(5, 7));
+      const ranges = [];
+      for (let m = 1; m <= endMonth; m += 1) {
+        const mm = String(m).padStart(2, "0");
+        const first = `${year}-${mm}-01`;
+        const lastDay = new Date(Date.UTC(year, m, 0)).getUTCDate();
+        let last = `${year}-${mm}-${String(lastDay).padStart(2, "0")}`;
+        if (last > endDate) last = endDate;
+        ranges.push({ month: `${year}-${mm}`, start: first, end: last });
+      }
+      return ranges;
+    };
+    const monthLabels = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const monthNameOf = (ym) => `${monthLabels[Number(ym.slice(5, 7))] || ym} ${ym.slice(0, 4)}`;
+
+    const monthly = wb.addWorksheet("Monthly KPI");
+    monthly.addRow(["Month", "Scheduled h", "Available h", "Run h", "Downtime h", "Availability %", "Utilization %"]);
+    const monthlyByAsset = wb.addWorksheet("Monthly by Asset");
+    monthlyByAsset.addRow(["Month", "Asset", "Name", "Category", "Mode", "Scheduled h", "Available h", "Run h", "Downtime h", "Availability %", "Utilization %"]);
+
+    monthRangesForYearUpTo(endIn).forEach((mr) => {
+      const md = buildAssetKpiRange(mr.start, mr.end, scheduledFallback, siteCode);
+      const label = monthNameOf(mr.month);
+      monthly.addRow([
+        label,
+        md.fleet.scheduled_hours,
+        md.fleet.available_hours,
+        md.fleet.run_hours,
+        md.fleet.downtime_hours,
+        md.fleet.availability_pct,
+        md.fleet.utilization_pct,
+      ]);
+      md.by_asset.forEach((a) => {
+        monthlyByAsset.addRow([
+          label,
+          a.asset_code,
+          a.asset_name,
+          a.category,
+          a.utilization_mode,
+          a.scheduled_hours,
+          a.available_hours,
+          a.run_hours,
+          a.downtime_hours,
+          a.availability_pct,
+          a.utilization_pct,
+        ]);
+      });
+    });
+
+    [summary, cat, assets, daily, assetDaily, monthly, monthlyByAsset].forEach((ws) => {
       ws.columns?.forEach((col) => { col.width = Math.min(24, Math.max(12, (col.header ? String(col.header).length : 12) + 2)); });
     });
 
