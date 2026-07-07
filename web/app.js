@@ -10207,6 +10207,47 @@ function downloadFuelCsvTemplate() {
   setStatus("Fuel CSV template downloaded.");
 }
 
+function downloadDailyHoursCsvTemplate() {
+  const today = new Date().toISOString().slice(0, 10);
+  const lines = [
+    "asset_code,work_date,scheduled_hours,opening_hours,closing_hours,hours_run,is_used,operator,notes",
+    `A300AM,${today},10,4500.0,4510.0,10.0,1,J Smith,`,
+    `A301AM,${today},10,3200.5,,9.5,1,,`,
+    `A302AM,${today},0,,,0,0,,Standby`,
+  ];
+  const csv = lines.join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "daily_hours_template.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  setStatus("Daily hours CSV template downloaded.");
+}
+
+async function uploadDailyHoursCsv(file) {
+  if (!file) return;
+  const fd = new FormData();
+  fd.append("file", file);
+
+  setStatus("Uploading hours CSV...");
+  try {
+    const res = await fetchJson(`${API}/api/upload/hours`, { method: "POST", body: fd });
+    const imported = Number(res?.imported || 0);
+    const synced = Number(res?.synced_asset_hours || 0);
+    setStatus(`Hours CSV uploaded — ${imported} row(s) processed, ${synced} asset(s) synced.`);
+    await loadDailyInput().catch(() => {});
+  } catch (e) {
+    setStatus("Hours CSV upload failed: " + (e.message || e));
+    alert("Hours CSV upload failed: " + (e.message || e));
+  }
+}
+
 /* =========================
    REPORTS
 ========================= */
@@ -16963,6 +17004,12 @@ async function init() {
   qs("copyYesterday")?.addEventListener("click", () =>
     copyYesterdayToToday().catch((e) => setStatus("Copy yesterday error: " + e.message))
   );
+  qs("dailyHoursCsvBtn")?.addEventListener("click", () => qs("dailyHoursCsvFile")?.click());
+  qs("dailyHoursCsvTemplate")?.addEventListener("click", downloadDailyHoursCsvTemplate);
+  qs("dailyHoursCsvFile")?.addEventListener("change", (e) => {
+    const file = e.target?.files?.[0];
+    if (file) uploadDailyHoursCsv(file).finally(() => { e.target.value = ""; });
+  });
   qs("applyBulkSched")?.addEventListener("click", applyBulkScheduled);
   qs("dailyDownOnly")?.addEventListener("change", () => {
     dailyShowDownOnly = !!qs("dailyDownOnly")?.checked;
