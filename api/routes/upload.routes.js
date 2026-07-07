@@ -67,6 +67,7 @@ export default async function uploadRoutes(app) {
 
   // Helper prepared statements (after schema checks/column additions).
   const getAssetIdByCode = db.prepare(`SELECT id FROM assets WHERE asset_code = ?`);
+  const getAssetForHoursImport = db.prepare(`SELECT id, COALESCE(is_standby, 0) AS is_standby FROM assets WHERE asset_code = ?`);
   const getAssetForFuelImport = db.prepare(`
     SELECT
       a.id,
@@ -319,6 +320,229 @@ export default async function uploadRoutes(app) {
 
     return reply.send({ ok: true, imported: rows.length, synced_asset_hours: syncedAssets });
   });
+
+  // -------------------------
+  // POST /api/upload/hours-matrix?scheduled=10
+  //
+  // Wide "meter-reading matrix" layout:
+  //   - Column 1 = date (YYYY-MM-DD; also accepts YYYY/MM/DD and D/M/YYYY day-first)
+  //   - Remaining columns = one per asset_code (header row)
+  //   - Cells = CUMULATIVE meter reading (hour-meter or odometer) on that date
+  //
+  // Daily run = today's reading − previous reading for that asset (from the file,
+  // or the latest stored closing before the earliest date in the file).
+  // Days with no change are recorded as production-idle (0 run). Meter rollbacks
+  // (reading lower than previous) reset the baseline with 0 run for that day.
+  // Unit (km vs hours) is resolved per asset from its existing setting.
+  // -------------------------
+  app.post("/hours-matrix", async (req, reply) => {
+    if (!requireUploadWrite(req, reply)) return;
+    const file = await req.file();
+    if (!file) return reply.code(400).send({ error: "Upload a CSV file field named 'file'." });
+
+    let scheduledDefault = Number(req.query?.scheduled);
+    if (!Number.isFinite(scheduledDefault) || scheduledDefault < 0 || scheduledDefault > 24) {
+      scheduledDefault = 10;
+    }
+
+    const buf = await file.toBuffer();
+    const text = buf.toString("utf8").replace(/^\uFEFF/, "");
+    const delimiter = ((text.split(/\r?\n/).find((l) => l.trim() !== "") || "").match(/;/g) || []).length >
+      ((text.split(/\r?\n/).find((l) => l.trim() !== "") || "").match(/,/g) || []).length ? ";" : ",";
+
+    let matrix;
+    try {
+      matrix = parse(text, { skip_empty_lines: true, relax_column_count: true, trim: true, delimiter });
+    } catch (e) {
+      return reply.code(400).send({ error: `Could not parse CSV: ${e.message || e}` });
+    }
+    if (!Array.isArray(matrix) || matrix.length < 2) {
+      return reply.code(400).send({ error: "CSV must have a header row of asset codes plus at least one date row." });
+    }
+
+    const normalizeDate = (raw) => {
+      const s = String(raw ?? "").trim();
+      if (!s) return null;
+      let m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/.exec(s);
+      if (m) return `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}`;
+      m = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/.exec(s); // day-first D/M/YYYY
+      if (m) return `${m[3]}-${String(m[2]).padStart(2, "0")}-${String(m[1]).padStart(2, "0")}`;
+      return null;
+    };
+
+    const hasInputUnitCol = hasColumn("daily_hours", "input_unit");
+    const hasMeterSourceCol = hasColumn("daily_hours", "meter_source");
+    const hasAssetInputUnits = Boolean(
+      db.prepare(`SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='asset_input_units' LIMIT 1`).get()
+    );
+    const getAssetUnitPref = hasAssetInputUnits
+      ? db.prepare(`SELECT input_unit FROM asset_input_units WHERE asset_id = ?`)
+      : null;
+    const getLatestDailyUnit = hasInputUnitCol
+      ? db.prepare(`SELECT input_unit FROM daily_hours WHERE asset_id = ? AND NULLIF(TRIM(input_unit), '') IS NOT NULL ORDER BY work_date DESC, id DESC LIMIT 1`)
+      : null;
+    const getUtilMode = hasColumn("assets", "utilization_mode")
+      ? db.prepare(`SELECT utilization_mode FROM assets WHERE id = ?`)
+      : null;
+    const resolveUnit = (assetId) => {
+      const pick = (u) => {
+        const v = String(u || "").trim().toLowerCase();
+        return v === "km" || v === "hours" ? v : null;
+      };
+      if (getAssetUnitPref) { const r = pick(getAssetUnitPref.get(assetId)?.input_unit); if (r) return r; }
+      if (getLatestDailyUnit) { const r = pick(getLatestDailyUnit.get(assetId)?.input_unit); if (r) return r; }
+      if (getUtilMode) { const r = pick(getUtilMode.get(assetId)?.utilization_mode); if (r) return r; }
+      return "hours";
+    };
+
+    const header = matrix[0].map((h) => String(h ?? "").trim());
+    const assetCols = [];
+    const unknownCodes = [];
+    for (let c = 1; c < header.length; c++) {
+      const code = header[c];
+      if (!code) continue;
+      const asset = getAssetForHoursImport.get(code);
+      if (!asset) { unknownCodes.push(code); continue; }
+      assetCols.push({
+        index: c,
+        code,
+        asset_id: Number(asset.id),
+        is_standby: Number(asset.is_standby) === 1,
+        unit: resolveUnit(Number(asset.id)),
+      });
+    }
+    if (!assetCols.length) {
+      return reply.code(400).send({
+        error: "No known asset codes found in the header row.",
+        unknown_codes: unknownCodes.slice(0, 50),
+      });
+    }
+
+    const dataRows = [];
+    const badDates = [];
+    for (let r = 1; r < matrix.length; r++) {
+      const row = matrix[r] || [];
+      const date = normalizeDate(row[0]);
+      if (!date) { if (String(row[0] ?? "").trim()) badDates.push(String(row[0]).trim()); continue; }
+      dataRows.push({ date, row });
+    }
+    dataRows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    if (!dataRows.length) {
+      return reply.code(400).send({ error: "No rows with a valid date in column 1.", bad_dates: badDates.slice(0, 20) });
+    }
+
+    const cols = ["asset_id", "work_date", "scheduled_hours", "opening_hours", "closing_hours", "hours_run", "is_used", "operator", "notes"];
+    if (hasInputUnitCol) cols.push("input_unit");
+    if (hasMeterSourceCol) cols.push("meter_source");
+    const placeholders = cols.map(() => "?").join(", ");
+    const updates = cols.filter((c) => c !== "asset_id" && c !== "work_date").map((c) => `${c} = excluded.${c}`).join(", ");
+    const upsert = db.prepare(`
+      INSERT INTO daily_hours (${cols.join(", ")})
+      VALUES (${placeholders})
+      ON CONFLICT(asset_id, work_date) DO UPDATE SET ${updates}
+    `);
+
+    const getPrevClosing = db.prepare(`
+      SELECT closing_hours FROM daily_hours
+      WHERE asset_id = ? AND work_date < ? AND closing_hours IS NOT NULL
+      ORDER BY work_date DESC, id DESC LIMIT 1
+    `);
+    const ensureAssetHours = db.prepare(`
+      INSERT INTO asset_hours (asset_id, total_hours, last_updated)
+      SELECT ?, 0, datetime('now')
+      WHERE NOT EXISTS (SELECT 1 FROM asset_hours WHERE asset_id = ?)
+    `);
+    const getLatestClosing = db.prepare(`
+      SELECT closing_hours FROM daily_hours
+      WHERE asset_id = ? AND closing_hours IS NOT NULL
+      ORDER BY work_date DESC, id DESC LIMIT 1
+    `);
+    const getExistingTotal = db.prepare(`SELECT total_hours FROM asset_hours WHERE asset_id = ?`);
+    const updateAssetHours = db.prepare(`UPDATE asset_hours SET total_hours = ?, last_updated = datetime('now') WHERE asset_id = ?`);
+
+    const earliestDate = dataRows[0].date;
+    let rowsWritten = 0;
+    let resets = 0;
+
+    const tx = db.transaction(() => {
+      for (const col of assetCols) {
+        let prev = null;
+        const prevRow = getPrevClosing.get(col.asset_id, earliestDate);
+        if (prevRow && prevRow.closing_hours != null) prev = Number(prevRow.closing_hours);
+
+        for (const { date, row } of dataRows) {
+          const cell = row[col.index];
+          if (cell == null || String(cell).trim() === "") continue;
+          const reading = asFloat(cell, null);
+          if (reading == null || !Number.isFinite(reading) || reading < 0) continue;
+
+          let opening = prev;
+          let closing = reading;
+          let run = 0;
+          let note = null;
+
+          if (prev == null) {
+            opening = reading;
+            note = "Matrix import baseline";
+          } else if (reading < prev) {
+            opening = reading;
+            note = `Meter reset (prev ${prev})`;
+            resets += 1;
+          } else {
+            run = reading - prev;
+          }
+
+          const used = col.is_standby ? 0 : 1;
+          const scheduled = col.is_standby ? 0 : scheduledDefault;
+
+          const values = [];
+          for (const c of cols) {
+            switch (c) {
+              case "asset_id": values.push(col.asset_id); break;
+              case "work_date": values.push(date); break;
+              case "scheduled_hours": values.push(scheduled); break;
+              case "opening_hours": values.push(opening); break;
+              case "closing_hours": values.push(closing); break;
+              case "hours_run": values.push(used ? run : 0); break;
+              case "is_used": values.push(used); break;
+              case "operator": values.push(null); break;
+              case "notes": values.push(note); break;
+              case "input_unit": values.push(col.unit); break;
+              case "meter_source": values.push("manual_matrix"); break;
+              default: values.push(null);
+            }
+          }
+          upsert.run(...values);
+          rowsWritten += 1;
+          prev = reading;
+        }
+      }
+
+      for (const col of assetCols) {
+        ensureAssetHours.run(col.asset_id, col.asset_id);
+        const latestClosingRow = getLatestClosing.get(col.asset_id);
+        const latestClosing = latestClosingRow && latestClosingRow.closing_hours != null
+          ? Number(latestClosingRow.closing_hours) : null;
+        const existingTotal = Number(getExistingTotal.get(col.asset_id)?.total_hours || 0);
+        const nextTotal = Math.max(existingTotal, Number.isFinite(latestClosing) ? latestClosing : 0);
+        updateAssetHours.run(nextTotal, col.asset_id);
+      }
+    });
+
+    tx();
+
+    return reply.send({
+      ok: true,
+      assets_matched: assetCols.length,
+      dates: dataRows.length,
+      rows_written: rowsWritten,
+      meter_resets: resets,
+      scheduled_hours_default: scheduledDefault,
+      unknown_codes: unknownCodes.slice(0, 50),
+      bad_dates: badDates.slice(0, 20),
+    });
+  });
+
   // -------------------------
   // POST /api/upload/fuel
   // Columns: asset_code, log_date, liters, source, meter_unit(optional: hours|km), meter_run_value(optional), hours_run(optional legacy)

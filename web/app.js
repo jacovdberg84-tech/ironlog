@@ -10293,6 +10293,68 @@ async function uploadDailyHoursCsv(file) {
   }
 }
 
+async function downloadDailyMatrixCsvTemplate() {
+  const date = qs("date")?.value || todayLocalYmd();
+  setStatus("Building meter-matrix template...");
+  let assets = [];
+  try {
+    assets = await fetchJson(`${API}/api/assets?include_archived=0`);
+  } catch {
+    assets = [];
+  }
+  const codes = (Array.isArray(assets) ? assets : [])
+    .filter((a) => a.active !== 0 && a.active !== false)
+    .map((a) => String(a.asset_code || "").trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+
+  const cols = codes.length ? codes : ["A300AM", "A301AM", "LDV01"];
+  const header = ["date", ...cols].map(csvCell).join(",");
+  // Two example date rows (blank cells to fill in with cumulative meter readings).
+  const prev = prevDateStr(date);
+  const lines = [
+    header,
+    [prev, ...cols.map(() => "")].join(","),
+    [date, ...cols.map(() => "")].join(","),
+  ];
+  saveCsvFile(lines.join("\n"), `meter_matrix_template_${date}.csv`);
+  setStatus(codes.length
+    ? `Meter-matrix template downloaded (${codes.length} asset columns).`
+    : "Meter-matrix template downloaded (sample columns).");
+}
+
+async function uploadDailyMatrixCsv(file) {
+  if (!file) return;
+  const scheduledRaw = Number(qs("bulkSched")?.value);
+  const scheduled = Number.isFinite(scheduledRaw) && scheduledRaw > 0 && scheduledRaw <= 24 ? scheduledRaw : 10;
+  const fd = new FormData();
+  fd.append("file", file);
+
+  setStatus("Uploading meter matrix...");
+  try {
+    const res = await fetchJson(`${API}/api/upload/hours-matrix?scheduled=${encodeURIComponent(scheduled)}`, {
+      method: "POST",
+      body: fd,
+    });
+    const rows = Number(res?.rows_written || 0);
+    const assetsMatched = Number(res?.assets_matched || 0);
+    const dates = Number(res?.dates || 0);
+    const resets = Number(res?.meter_resets || 0);
+    const unknown = Array.isArray(res?.unknown_codes) ? res.unknown_codes : [];
+    let msg = `Meter matrix imported — ${rows} day-row(s) across ${assetsMatched} asset(s) over ${dates} date(s).`;
+    if (resets) msg += ` ${resets} meter reset(s) handled.`;
+    if (unknown.length) msg += ` Skipped unknown codes: ${unknown.join(", ")}.`;
+    setStatus(msg);
+    if (unknown.length) {
+      alert(`Import complete, but these header codes were not found and were skipped:\n\n${unknown.join(", ")}`);
+    }
+    await loadDailyInput().catch(() => {});
+  } catch (e) {
+    setStatus("Meter matrix upload failed: " + (e.message || e));
+    alert("Meter matrix upload failed: " + (e.message || e));
+  }
+}
+
 /* =========================
    REPORTS
 ========================= */
@@ -17054,6 +17116,12 @@ async function init() {
   qs("dailyHoursCsvFile")?.addEventListener("change", (e) => {
     const file = e.target?.files?.[0];
     if (file) uploadDailyHoursCsv(file).finally(() => { e.target.value = ""; });
+  });
+  qs("dailyMatrixCsvBtn")?.addEventListener("click", () => qs("dailyMatrixCsvFile")?.click());
+  qs("dailyMatrixCsvTemplate")?.addEventListener("click", downloadDailyMatrixCsvTemplate);
+  qs("dailyMatrixCsvFile")?.addEventListener("change", (e) => {
+    const file = e.target?.files?.[0];
+    if (file) uploadDailyMatrixCsv(file).finally(() => { e.target.value = ""; });
   });
   qs("applyBulkSched")?.addEventListener("click", applyBulkScheduled);
   qs("dailyDownOnly")?.addEventListener("change", () => {
