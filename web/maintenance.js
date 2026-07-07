@@ -5909,6 +5909,34 @@ function refreshAkpCategoryFilterOptions(data, previousValue) {
   else sel.value = "";
 }
 
+function akpSelectedAssetCodes() {
+  const sel = document.getElementById("akpAssetFilter");
+  if (!sel) return [];
+  return Array.from(sel.selectedOptions || [])
+    .map((o) => String(o.value || "").trim())
+    .filter(Boolean);
+}
+
+// Populate the equipment multi-select from loaded KPI data, preserving any
+// existing selection. Leave empty (nothing selected) = all equipment.
+function refreshAkpAssetFilterOptions(data) {
+  const sel = document.getElementById("akpAssetFilter");
+  if (!sel) return;
+  const prevSelected = new Set(akpSelectedAssetCodes());
+  const assets = Array.isArray(data?.by_asset) ? data.by_asset : [];
+  const opts = assets
+    .map((a) => ({ code: String(a.asset_code || "").trim(), name: String(a.asset_name || "").trim() }))
+    .filter((a) => a.code)
+    .sort((a, b) => a.code.localeCompare(b.code));
+  sel.innerHTML = opts
+    .map((a) => {
+      const label = a.name ? `${a.code} — ${a.name}` : a.code;
+      const selAttr = prevSelected.has(a.code) ? " selected" : "";
+      return `<option value="${escAttr(a.code)}"${selAttr}>${esc(label)}</option>`;
+    })
+    .join("");
+}
+
 function escAttr(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
@@ -6234,18 +6262,23 @@ async function loadAssetKpiWeekly() {
   catBody.innerHTML = `<tr><td colspan="8" class="muted">Loading…</td></tr>`;
   assetBody.innerHTML = `<tr><td colspan="10" class="muted">Loading…</td></tr>`;
   if (fleetEl) fleetEl.textContent = "";
+  const selectedCodes = akpSelectedAssetCodes();
   const q = new URLSearchParams();
   q.set("start", start);
   q.set("end", end);
   q.set("scheduled", String(sched));
+  if (selectedCodes.length) q.set("asset_codes", selectedCodes.join(","));
   try {
     const res = await fetch(`${API}/dashboard/asset-kpi/weekly?${q.toString()}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to load asset KPI");
     akpLastResponse = data;
-    akpLastMeta = { start, end, sched };
+    akpLastMeta = { start, end, sched, asset_codes: selectedCodes };
     akpLastTrendSeries = await akpLoadTrendSeries(start, end, sched);
     refreshAkpCategoryFilterOptions(data, prevFilter);
+    // Only repopulate the equipment picker from a full (unfiltered) load,
+    // so the option list keeps every asset even after a filtered load.
+    if (!selectedCodes.length) refreshAkpAssetFilterOptions(data);
     renderAssetKpiTables(data);
     msg.className = "message-success";
     const fil = String(document.getElementById("akpCategoryFilter")?.value || "").trim();
@@ -6272,6 +6305,10 @@ function exportAssetKpiToExcel() {
   q.set("start", akpLastMeta.start);
   q.set("end", akpLastMeta.end);
   q.set("scheduled", String(akpLastMeta.sched));
+  // Prefer the current picker selection; fall back to whatever was last loaded.
+  const selectedCodes = akpSelectedAssetCodes();
+  const codes = selectedCodes.length ? selectedCodes : (akpLastMeta.asset_codes || []);
+  if (codes.length) q.set("asset_codes", codes.join(","));
   window.open(`${API}/dashboard/asset-kpi.xlsx?${q.toString()}`, "_blank");
 }
 
@@ -8428,6 +8465,11 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("akpCategoryFilter")?.addEventListener("change", () => {
     if (akpLastResponse) renderAssetKpiTables(akpLastResponse);
+  });
+  document.getElementById("akpAssetFilterClear")?.addEventListener("click", () => {
+    const sel = document.getElementById("akpAssetFilter");
+    if (sel) Array.from(sel.options).forEach((o) => { o.selected = false; });
+    loadAssetKpiWeekly();
   });
   document.getElementById("loadWeeklyForumBtn")?.addEventListener("click", loadWeeklyForumSummary);
   document.getElementById("wfPresetThisMonth")?.addEventListener("click", () => wfApplyMonthPreset("this"));

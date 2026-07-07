@@ -1905,6 +1905,12 @@
             <option value="">All types</option>
           </select>
         </label>
+        <label>
+          Equipment (select to limit report)
+          <select id="akpAssetFilter" class="w-200" multiple size="4" title="Ctrl/Cmd-click to select specific equipment. Leave empty for all.">
+          </select>
+        </label>
+        <button id="akpAssetFilterClear" type="button" class="btn-secondary" title="Clear equipment selection (use all assets)">All equipment</button>
         <button id="loadAssetKpiBtn" type="button">Load</button>
         <button id="exportAssetKpiBtn" type="button">Export to Excel</button>
         <button id="exportExecutivePackBtn" type="button">Generate Executive Pack</button>
@@ -2112,6 +2118,6 @@
   <script src="./undercarriage-diagrams.js?v=1"></script>
   <script src="./undercarriage.js?v=5"></script>
   <script src="./tyre-inspection-qr.js?v=1"></script>
-  <script src="./maintenance.js?v=45"></script>
+  <script src="./maintenance.js?v=46"></script>
 </body>
 </html>

@@ -624,27 +624,32 @@ export default async function dashboardRoutes(app) {
     };
   }
 
-  function buildAssetKpiRange(start, end, scheduledFallback, siteCode) {
+  function buildAssetKpiRange(start, end, scheduledFallback, siteCode, assetCodeFilter) {
+    const allowSet = Array.isArray(assetCodeFilter) && assetCodeFilter.length
+      ? new Set(assetCodeFilter.map((c) => String(c || "").trim().toUpperCase()).filter(Boolean))
+      : null;
     const assetMap = new Map();
     const daily_series = [];
     let daysInRange = 0;
     eachDateInclusiveYMD(start, end, (dayStr) => {
       daysInRange += 1;
       const k = computeFleetKpiForDay(dayStr, scheduledFallback, { includePerAsset: true, siteCode });
-      const dayScheduled = Number(k.scheduled_hours || 0);
-      const dayRun = Number(k.run_hours || 0);
-      const dayDown = Number(k.downtime_hours || 0);
-      const dayAvail = Math.max(0, dayScheduled - dayDown);
-      daily_series.push({
-        date: dayStr,
-        scheduled_hours: Number(dayScheduled.toFixed(2)),
-        available_hours: Number(dayAvail.toFixed(2)),
-        run_hours: Number(dayRun.toFixed(2)),
-        downtime_hours: Number(dayDown.toFixed(2)),
-      });
+      let dayScheduled = Number(k.scheduled_hours || 0);
+      let dayRun = Number(k.run_hours || 0);
+      let dayDown = Number(k.downtime_hours || 0);
+      // When filtering to selected equipment, recompute the day's fleet totals
+      // from just the included assets so the trend/fleet reflect the selection.
+      if (allowSet) { dayScheduled = 0; dayRun = 0; dayDown = 0; }
       for (const row of k.per_asset_kpi || []) {
         const id = Number(row.asset_id || 0);
         if (!id) continue;
+        const code = String(row.asset_code || "").trim().toUpperCase();
+        if (allowSet && !allowSet.has(code)) continue;
+        if (allowSet) {
+          dayScheduled += Number(row.scheduled_hours || 0);
+          dayRun += Number(row.run_hours || 0);
+          dayDown += Number(row.downtime_hours || 0);
+        }
         if (!assetMap.has(id)) {
           assetMap.set(id, {
             asset_id: id,
@@ -695,6 +700,14 @@ export default async function dashboardRoutes(app) {
         if (dbg.downtime_source === "open_breakdown_imputed") a.debug_counts.imputed_open_breakdown_days += 1;
         if (s > 0 || r > 0 || d > 0) a.days_with_data += 1;
       }
+      const dayAvail = Math.max(0, dayScheduled - dayDown);
+      daily_series.push({
+        date: dayStr,
+        scheduled_hours: Number(dayScheduled.toFixed(2)),
+        available_hours: Number(dayAvail.toFixed(2)),
+        run_hours: Number(dayRun.toFixed(2)),
+        downtime_hours: Number(dayDown.toFixed(2)),
+      });
     });
 
     const pct = (num, den) =>
@@ -862,7 +875,11 @@ export default async function dashboardRoutes(app) {
     }
 
     const siteCode = siteCodeFromReq(req);
-    return reply.send(buildAssetKpiRange(start, end, scheduledFallback, siteCode));
+    const assetCodes = String(req.query?.asset_codes || "")
+      .split(",")
+      .map((c) => c.trim())
+      .filter(Boolean);
+    return reply.send(buildAssetKpiRange(start, end, scheduledFallback, siteCode, assetCodes));
   });
 
   // GET /api/dashboard/ldv-prestart/compliance?date=YYYY-MM-DD
@@ -972,7 +989,11 @@ export default async function dashboardRoutes(app) {
       return reply.code(400).send({ ok: false, error: "Provide valid start/end dates" });
     }
     const siteCode = siteCodeFromReq(req);
-    const data = buildAssetKpiRange(startIn, endIn, scheduledFallback, siteCode);
+    const assetCodes = String(req.query?.asset_codes || "")
+      .split(",")
+      .map((c) => c.trim())
+      .filter(Boolean);
+    const data = buildAssetKpiRange(startIn, endIn, scheduledFallback, siteCode, assetCodes);
     const wb = new ExcelJS.Workbook();
     wb.creator = "IRONLOG";
     wb.created = new Date();
@@ -981,6 +1002,7 @@ export default async function dashboardRoutes(app) {
     summary.addRow(["Asset KPI Report"]);
     summary.addRow(["Period", `${startIn} to ${endIn}`]);
     summary.addRow(["Scheduled fallback", scheduledFallback]);
+    summary.addRow(["Equipment", assetCodes.length ? assetCodes.join(", ") : "All assets"]);
     summary.addRow([]);
     summary.addRow(["Metric", "Value"]);
     summary.addRow(["Scheduled Hours", data.fleet.scheduled_hours]);
@@ -1072,7 +1094,7 @@ export default async function dashboardRoutes(app) {
     monthlyByAsset.addRow(["Month", "Asset", "Name", "Category", "Mode", "Scheduled h", "Available h", "Run h", "Downtime h", "Availability %", "Utilization %"]);
 
     monthRangesForYearUpTo(endIn).forEach((mr) => {
-      const md = buildAssetKpiRange(mr.start, mr.end, scheduledFallback, siteCode);
+      const md = buildAssetKpiRange(mr.start, mr.end, scheduledFallback, siteCode, assetCodes);
       const label = monthNameOf(mr.month);
       monthly.addRow([
         label,
