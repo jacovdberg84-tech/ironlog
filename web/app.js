@@ -10207,27 +10207,72 @@ function downloadFuelCsvTemplate() {
   setStatus("Fuel CSV template downloaded.");
 }
 
-function downloadDailyHoursCsvTemplate() {
-  const today = new Date().toISOString().slice(0, 10);
-  const lines = [
-    "asset_code,work_date,scheduled_hours,opening_hours,closing_hours,hours_run,is_used,operator,notes",
-    `A300AM,${today},10,4500.0,4510.0,10.0,1,J Smith,`,
-    `A301AM,${today},10,3200.5,,9.5,1,,`,
-    `A302AM,${today},0,,,0,0,,Standby`,
-  ];
-  const csv = lines.join("\n");
-
+function saveCsvFile(csv, filename) {
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "daily_hours_template.csv";
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
 
-  setStatus("Daily hours CSV template downloaded.");
+function csvCell(v) {
+  const s = String(v == null ? "" : v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+async function downloadDailyHoursCsvTemplate() {
+  const date = qs("date")?.value || todayLocalYmd();
+  const header = "asset_code,asset_name,work_date,scheduled_hours,opening_hours,closing_hours,hours_run,is_used,operator,notes";
+
+  setStatus("Building hours CSV template...");
+  let assets = [];
+  try {
+    assets = await fetchJson(`${API}/api/assets?include_archived=0`);
+  } catch {
+    assets = [];
+  }
+
+  const active = (Array.isArray(assets) ? assets : [])
+    .filter((a) => a.active !== 0 && a.active !== false)
+    .sort((a, b) => String(a.asset_code || "").localeCompare(String(b.asset_code || "")));
+
+  let lines;
+  if (active.length) {
+    lines = [header, ...active.map((a) => {
+      const standby = a.is_standby ? 1 : 0;
+      const sched = standby ? 0 : 10;
+      const used = standby ? 0 : 1;
+      return [
+        csvCell(a.asset_code),
+        csvCell(a.asset_name),
+        date,
+        sched,
+        "",
+        "",
+        "",
+        used,
+        "",
+        "",
+      ].join(",");
+    })];
+  } else {
+    // Fallback sample if the asset list could not be loaded.
+    lines = [
+      header,
+      `A300AM,Excavator 300,${date},10,4500.0,4510.0,10.0,1,J Smith,`,
+      `A301AM,Excavator 301,${date},10,3200.5,,9.5,1,,`,
+      `A302AM,Dozer 302,${date},0,,,0,0,,Standby`,
+    ];
+  }
+
+  saveCsvFile(lines.join("\n"), `daily_hours_template_${date}.csv`);
+  setStatus(active.length
+    ? `Daily hours template downloaded (${active.length} asset(s), date ${date}).`
+    : "Daily hours CSV template downloaded (sample rows).");
 }
 
 async function uploadDailyHoursCsv(file) {
