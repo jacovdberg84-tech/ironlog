@@ -220,11 +220,26 @@
         </button>
       </div>
       <div class="maintenance-card-body">
-        <p class="muted mini" style="margin:0 0 12px;">One row per machine — next service is calculated automatically. Expand <strong>Types</strong> to remove duplicate entries.</p>
+        <p class="muted mini" style="margin:0 0 12px;">One row per machine — next service is calculated automatically. Expand <strong>Types</strong> to remove duplicate entries. Tick equipment below, then generate work orders or export the upcoming-services PDF.</p>
+        <div class="row stack-10" style="margin-bottom:12px; flex-wrap:wrap; align-items:flex-end;">
+          <label>
+            Near-due threshold (hours)
+            <input id="dueNearThresholdHours" type="number" min="1" step="1" value="50" style="width:120px;" />
+            <small class="muted" style="display:block;">LDVs on 10000 km cycles use 500 km.</small>
+          </label>
+          <button id="applyDueThresholdBtn" type="button">Apply threshold</button>
+          <button id="akpPlansSelectAllBtn" type="button" class="btn-secondary">Select all</button>
+          <button id="akpPlansClearSelBtn" type="button" class="btn-secondary">Clear selection</button>
+          <span id="dueSelectionCount" class="muted" style="align-self:center;">0 selected</span>
+          <button id="openUpcomingServicesPdfBtn" type="button">Print Upcoming PDF</button>
+          <button id="downloadUpcomingServicesPdfBtn" type="button">Download Upcoming PDF</button>
+          <button id="generateBtn" type="button" class="btn-primary">Generate Work Orders</button>
+        </div>
         <div style="overflow:auto;">
-          <table class="gridTable" style="min-width:920px;">
+          <table class="gridTable" style="min-width:980px;">
             <thead>
               <tr>
+                <th style="width:42px;">WO</th>
                 <th>Asset</th>
                 <th style="text-align:right;">Current h</th>
                 <th style="text-align:right;">Last svc h</th>
@@ -384,25 +399,7 @@
     <div id="dueServicesCard" class="card stack-24">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <h3 style="margin:0;">Due Services</h3>
-        <div class="row" style="gap:8px; align-items:center;">
-          <label style="display:flex; flex-direction:column; gap:4px;">
-            Near-Due (plant, hours)
-            <input id="dueNearThresholdHours" type="number" min="1" step="1" value="50" style="width:120px;" />
-            <small class="muted" style="display:block;">LDVs on 10000 km cycles auto-flag almost due within 500 km.</small>
-          </label>
-          <button id="applyDueThresholdBtn" style="height:40px; margin-top:20px;">Apply</button>
-        </div>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <button id="openUpcomingServicesPdfBtn" style="padding:10px 14px; border-radius:8px; border:1px solid #334155; background:#111827; color:#fff; cursor:pointer;">
-            Print Upcoming PDF
-          </button>
-          <button id="downloadUpcomingServicesPdfBtn" style="padding:10px 14px; border-radius:8px; border:1px solid #334155; background:#111827; color:#fff; cursor:pointer;">
-            Download Upcoming PDF
-          </button>
-          <button id="generateBtn" style="padding:10px 14px; border-radius:8px; border:1px solid #3b82f6; background:#13233c; color:#fff; cursor:pointer;">
-            Generate Work Orders
-          </button>
-        </div>
+        <p class="muted mini" style="margin:0;">Near-due threshold and work-order actions are in <strong>Service Schedules</strong> above.</p>
       </div>
       <div id="dueList" class="card-grid"></div>
     </div>
@@ -2118,6 +2115,6 @@
   <script src="./undercarriage-diagrams.js?v=1"></script>
   <script src="./undercarriage.js?v=5"></script>
   <script src="./tyre-inspection-qr.js?v=1"></script>
-  <script src="./maintenance.js?v=46"></script>
+  <script src="./maintenance.js?v=47"></script>
 </body>
 </html>

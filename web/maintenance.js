@@ -393,12 +393,20 @@ function plansTableRow(group) {
   const near = Number(group.near_due_threshold ?? 50);
   const unit = String(group.meter_unit || "hours") === "km" ? "km" : "h";
   const remClass = remaining <= 0 ? "status-overdue" : remaining <= near ? "status-soon" : "";
+  const statusPill = group.status === "OVERDUE"
+    ? `<br><span class="pill red">Overdue</span>`
+    : group.status === "ALMOST DUE"
+      ? `<br><span class="pill orange">Almost due</span>`
+      : "";
   return `
     <tr data-plan-asset-id="${assetId}" data-plan-id="${planId}">
+      <td style="text-align:center;">
+        ${planId > 0 ? `<input type="checkbox" class="due-plan-select" data-plan-id="${planId}" title="Select for work order / PDF" ${selectedDuePlanIds.has(planId) ? "checked" : ""} />` : ""}
+      </td>
       <td><b>${escBackfill(group.asset_code || "-")}</b><br><small class="muted">${escBackfill(group.asset_name || "")}</small></td>
       <td style="text-align:right;">${fmt1(group.current_hours)}<br><small class="muted">${unit}</small></td>
       <td style="text-align:right;">${fmt1(group.last_service_hours)}<br><small class="muted">${unit}</small></td>
-      <td><strong>${escBackfill(group.next_service_name || "-")}</strong>${String(group.schedule_mode || "") === "rotating" ? `<br><small class="muted">Auto alternates</small>` : ""}${group.status === "ALMOST DUE" ? `<br><span class="pill orange">Almost due</span>` : ""}</td>
+      <td><strong>${escBackfill(group.next_service_name || "-")}</strong>${String(group.schedule_mode || "") === "rotating" ? `<br><small class="muted">Auto alternates</small>` : ""}${statusPill}</td>
       <td style="text-align:right;">${fmt1(group.next_due_hours)}<br><small class="muted">${unit}</small></td>
       <td style="text-align:right;"><span class="${remClass}">${fmt1(group.remaining_hours)}</span><br><small class="muted">${unit}</small></td>
       <td>${types}</td>
@@ -407,6 +415,42 @@ function plansTableRow(group) {
       </td>
     </tr>
   `;
+}
+
+function updateDueSelectionCount() {
+  const el = document.getElementById("dueSelectionCount");
+  if (el) el.textContent = `${selectedDuePlanIds.size} selected`;
+}
+
+function bindDuePlanSelectCheckboxes(root) {
+  (root || document).querySelectorAll(".due-plan-select").forEach((el) => {
+    if (el.dataset.boundDueSelect === "1") return;
+    el.dataset.boundDueSelect = "1";
+    el.addEventListener("change", () => {
+      const pid = Number(el.getAttribute("data-plan-id") || 0);
+      if (!pid) return;
+      if (el.checked) selectedDuePlanIds.add(pid);
+      else selectedDuePlanIds.delete(pid);
+      updateDueSelectionCount();
+    });
+  });
+  updateDueSelectionCount();
+}
+
+function clearDuePlanSelection() {
+  selectedDuePlanIds.clear();
+  document.querySelectorAll(".due-plan-select").forEach((el) => { el.checked = false; });
+  updateDueSelectionCount();
+}
+
+function selectAllDuePlansInTable() {
+  document.querySelectorAll("#plansList .due-plan-select").forEach((el) => {
+    const pid = Number(el.getAttribute("data-plan-id") || 0);
+    if (!pid) return;
+    el.checked = true;
+    selectedDuePlanIds.add(pid);
+  });
+  updateDueSelectionCount();
 }
 
 function planIntervalForMatch(p) {
@@ -2354,7 +2398,7 @@ let __maintenancePlansCache = [];
 async function loadPlans() {
   const container = document.getElementById("plansList");
   if (!container) return;
-  container.innerHTML = `<tr><td colspan="8" class="muted">Loading...</td></tr>`;
+  container.innerHTML = `<tr><td colspan="9" class="muted">Loading...</td></tr>`;
 
   try {
     const res = await fetch(`${API}/maintenance/plans`);
@@ -2372,10 +2416,11 @@ async function loadPlans() {
     const groups = groupPlansByAsset(plans);
     container.innerHTML = groups.length
       ? groups.map(plansTableRow).join("")
-      : `<tr><td colspan="8" class="muted">No service schedules yet — pick an asset and service type above.</td></tr>`;
+      : `<tr><td colspan="9" class="muted">No service schedules yet — pick an asset and service type above.</td></tr>`;
+    bindDuePlanSelectCheckboxes(container);
   } catch (err) {
     console.error("Plans error:", err);
-    container.innerHTML = `<tr><td colspan="8" class="message-error">Error loading plans: ${escBackfill(err.message)}</td></tr>`;
+    container.innerHTML = `<tr><td colspan="9" class="message-error">Error loading plans: ${escBackfill(err.message)}</td></tr>`;
   }
 }
 
@@ -2405,6 +2450,7 @@ async function rebasePlanLastServiceHours(id, fallback = {}) {
 
 async function loadDue() {
   const container = document.getElementById("dueList");
+  if (!container) return;
   container.innerHTML = `<div class="skeleton-block"></div><div class="skeleton-block"></div>`;
   const nearDueHours = getDueThresholdHours();
 
@@ -2441,14 +2487,7 @@ async function loadDue() {
     container.innerHTML = due.length
       ? due.map(dueCard).join("")
       : "<div>No due services found.</div>";
-    container.querySelectorAll(".due-plan-select").forEach((el) => {
-      el.addEventListener("change", () => {
-        const pid = Number(el.getAttribute("data-plan-id") || 0);
-        if (!pid) return;
-        if (el.checked) selectedDuePlanIds.add(pid);
-        else selectedDuePlanIds.delete(pid);
-      });
-    });
+    bindDuePlanSelectCheckboxes(container);
   } catch (err) {
     console.error("Due error:", err);
     container.innerHTML = `<div style="color:#ff8080;">Error loading due services: ${err.message}</div>`;
@@ -2459,6 +2498,8 @@ async function openUpcomingServicesPdf(download = false) {
   const nearDueHours = getDueThresholdHours();
   const q = new URLSearchParams();
   q.set("near_due_hours", String(nearDueHours));
+  const selectedPlans = Array.from(selectedDuePlanIds);
+  if (selectedPlans.length) q.set("plan_ids", selectedPlans.join(","));
   q.set("_", String(Date.now()));
   const url = `${API}/maintenance/due-upcoming.pdf?${q.toString()}`;
   try {
@@ -2644,6 +2685,7 @@ async function generateWO() {
     const mode = selectedPlans.length ? "selected plans" : "overdue plans";
     alert(`Created ${Number(data.created_count || 0)} work orders (${mode})`);
     selectedDuePlanIds.clear();
+    await loadPlans();
     await loadDue();
     await loadHistory();
   } catch (err) {
@@ -7943,8 +7985,11 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("applyDueThresholdBtn")?.addEventListener("click", async () => {
     const v = getDueThresholdHours();
     localStorage.setItem(MAINT_DUE_THRESHOLD_KEY, String(v));
+    await loadPlans();
     await loadDue();
   });
+  document.getElementById("akpPlansSelectAllBtn")?.addEventListener("click", selectAllDuePlansInTable);
+  document.getElementById("akpPlansClearSelBtn")?.addEventListener("click", clearDuePlanSelection);
   document.getElementById("openUpcomingServicesPdfBtn")?.addEventListener("click", () => openUpcomingServicesPdf(false));
   document.getElementById("downloadUpcomingServicesPdfBtn")?.addEventListener("click", () => openUpcomingServicesPdf(true));
 

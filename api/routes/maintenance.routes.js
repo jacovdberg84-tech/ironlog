@@ -4649,7 +4649,7 @@ export default async function maintenanceRoutes(app) {
           const isOverdue = remaining <= 0;
           const isNearDue = remaining <= nearDueHours;
           const isRequestedPlan = requestedPlanIds.includes(Number(p.plan_id || 0));
-          const shouldCreate = requestedPlanIds.length ? (isRequestedPlan && isNearDue) : isOverdue;
+          const shouldCreate = requestedPlanIds.length ? isRequestedPlan : isOverdue;
           if (!shouldCreate) continue;
           if (hasOpenServiceWO.get(p.plan_id)) continue;
 
@@ -4696,6 +4696,10 @@ export default async function maintenanceRoutes(app) {
         return reply.code(400).send({ error: "date must be YYYY-MM-DD" });
       }
       const nearDueHours = Math.max(1, Number(req.query?.near_due_hours || 50));
+      const planIdsRaw = req.query?.plan_ids;
+      const requestedPlanIds = Array.isArray(planIdsRaw)
+        ? [...new Set(planIdsRaw.map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0))]
+        : [...new Set(String(planIdsRaw || "").split(/[,\s]+/).map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0))];
       const asOfLabel = date || new Date().toISOString().slice(0, 10);
       const historyDays = 14;
 
@@ -4756,6 +4760,7 @@ export default async function maintenanceRoutes(app) {
         { as_of: asOfLabel, history_days: historyDays },
       )
         .map((r) => ({
+          plan_id: Number(r.plan_id || 0),
           asset_code: r.asset_code,
           asset_name: r.asset_name,
           service_name: r.service_name,
@@ -4765,7 +4770,7 @@ export default async function maintenanceRoutes(app) {
           estimated_service_date: r.estimated_service_date,
           status: r.status,
         }))
-        .filter((r) => r.status === "OVERDUE" || r.status === "ALMOST DUE")
+        .filter((r) => !requestedPlanIds.length || requestedPlanIds.includes(Number(r.plan_id || 0)))
         .sort((a, b) => Number(a.remaining_hours || 0) - Number(b.remaining_hours || 0));
 
       const pdf = await buildPdfBuffer(
@@ -4774,7 +4779,11 @@ export default async function maintenanceRoutes(app) {
           doc
             .font("Helvetica")
             .fontSize(10)
-            .text(`As of: ${asOfLabel} | Threshold: <= ${nearDueHours.toFixed(0)}h flagged as ALMOST DUE | Est. date from ${historyDays}-day avg usage`);
+            .text(
+              requestedPlanIds.length
+                ? `As of: ${asOfLabel} | Selected equipment only (${requestedPlanIds.length}) | Est. date from ${historyDays}-day avg usage`
+                : `As of: ${asOfLabel} | All active service schedules | <= ${nearDueHours.toFixed(0)}h flagged ALMOST DUE | Est. date from ${historyDays}-day avg usage`,
+            );
           doc.moveDown(0.4);
 
           table(
@@ -4800,7 +4809,7 @@ export default async function maintenanceRoutes(app) {
               : [
                   {
                     asset_code: "-",
-                    asset_name: "No upcoming services within threshold",
+                    asset_name: requestedPlanIds.length ? "No upcoming services for selected equipment" : "No upcoming services",
                     service_name: "-",
                     current_hours: "-",
                     next_due_hours: "-",
