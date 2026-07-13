@@ -1496,12 +1496,16 @@
             <input id="ptoMineOnly" type="checkbox" />
             My requests only
           </label>
+          <button type="button" id="ptoSelectAllBtn" class="btn-secondary">Select all</button>
+          <button type="button" id="ptoClearSelBtn" class="btn-secondary">Clear selection</button>
+          <span id="ptoSelectionCount" class="muted" style="align-self:center;">0 selected</span>
           <button type="button" id="ptoRefreshBtn">Refresh list</button>
         </div>
         <div style="overflow:auto; margin-top:10px;">
-          <table class="gridTable" style="min-width:1100px;">
+          <table class="gridTable" style="min-width:1140px;">
             <thead>
               <tr>
+                <th style="width:42px;">RFQ</th>
                 <th>Requested</th>
                 <th>Asset</th>
                 <th>Part</th>
@@ -1515,9 +1519,70 @@
               </tr>
             </thead>
             <tbody id="ptoListBody">
-              <tr><td colspan="10" class="muted">Loading...</td></tr>
+              <tr><td colspan="11" class="muted">Loading...</td></tr>
             </tbody>
           </table>
+        </div>
+
+        <div id="ptoRfqCard" class="card stack-12" style="margin-top:16px; border:1px solid var(--line);">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+            <h4 style="margin:0;">Request for Quote</h4>
+            <span id="ptoRfqSelectionHint" class="muted mini">Tick parts above, then complete supplier details.</span>
+          </div>
+          <p class="muted mini" style="margin:0;">Build a supplier-ready RFQ PDF from the selected parts requests. Useful when consolidating orders for stores or external suppliers.</p>
+          <div class="form-grid" style="margin-top:8px;">
+            <label>
+              RFQ reference
+              <input id="ptoRfqReference" type="text" placeholder="Auto-generated" class="w-full" />
+            </label>
+            <label>
+              Supplier / company
+              <input id="ptoRfqSupplier" type="text" placeholder="Supplier name" class="w-full" />
+            </label>
+            <label>
+              Contact person
+              <input id="ptoRfqContact" type="text" placeholder="Name" class="w-full" />
+            </label>
+            <label>
+              Email
+              <input id="ptoRfqEmail" type="email" placeholder="quotes@supplier.com" class="w-full" />
+            </label>
+            <label>
+              Phone
+              <input id="ptoRfqPhone" type="text" placeholder="Optional" class="w-full" />
+            </label>
+            <label>
+              Quote required by
+              <input id="ptoRfqRequiredBy" type="date" class="w-full" />
+            </label>
+          </div>
+          <label>
+            RFQ notes / terms
+            <textarea id="ptoRfqNotes" rows="3" placeholder="Delivery address, payment terms, OEM preference, etc." style="width:100%;"></textarea>
+          </label>
+          <div class="row stack-10" style="flex-wrap:wrap;">
+            <button type="button" id="ptoRfqOpenPdfBtn">Open RFQ PDF</button>
+            <button type="button" id="ptoRfqDownloadPdfBtn" class="btn-secondary">Download RFQ PDF</button>
+          </div>
+          <div id="ptoRfqMsg" class="muted"></div>
+          <div style="overflow:auto; margin-top:8px;">
+            <table class="gridTable" style="min-width:900px;">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Part code</th>
+                  <th>Description</th>
+                  <th style="text-align:right;">Qty</th>
+                  <th>Asset</th>
+                  <th>WO #</th>
+                  <th>Urgency</th>
+                </tr>
+              </thead>
+              <tbody id="ptoRfqPreviewBody">
+                <tr><td colspan="7" class="muted">No parts selected.</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -2115,6 +2180,6 @@
   <script src="./undercarriage-diagrams.js?v=1"></script>
   <script src="./undercarriage.js?v=5"></script>
   <script src="./tyre-inspection-qr.js?v=1"></script>
-  <script src="./maintenance.js?v=47"></script>
+  <script src="./maintenance.js?v=48"></script>
 </body>
 </html>

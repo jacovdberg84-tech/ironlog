@@ -10400,6 +10400,157 @@ export default async function maintenanceRoutes(app) {
   const PARTS_REQUEST_URGENCY = new Set(["normal", "urgent", "critical"]);
   const PARTS_REQUEST_MANAGERS = ["admin", "supervisor", "stores", "plant_manager", "site_manager", "workshop_manager"];
 
+  // GET /api/maintenance/parts-requests/rfq.pdf?ids=1,2,3&supplier=...&reference=...
+  app.get("/parts-requests/rfq.pdf", async (req, reply) => {
+    try {
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const idsRaw = req.query?.ids;
+      const requestIds = Array.isArray(idsRaw)
+        ? [...new Set(idsRaw.map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0))]
+        : [...new Set(String(idsRaw || "").split(/[,\s]+/).map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0))];
+      if (!requestIds.length) {
+        return reply.code(400).send({ ok: false, error: "Select at least one parts request (ids)" });
+      }
+
+      const supplier = String(req.query?.supplier || "").trim();
+      if (!supplier) {
+        return reply.code(400).send({ ok: false, error: "supplier is required" });
+      }
+
+      const reference = String(req.query?.reference || "").trim() || `RFQ-${new Date().toISOString().slice(0, 10)}`;
+      const contact = String(req.query?.contact || "").trim();
+      const email = String(req.query?.email || "").trim();
+      const phone = String(req.query?.phone || "").trim();
+      const required_by = String(req.query?.required_by || "").trim();
+      const notes = String(req.query?.notes || "").trim();
+      const requested_by = String(req.query?.requested_by || req.headers?.["x-user-name"] || "").trim() || "system";
+      const asOfLabel = new Date().toISOString().slice(0, 10);
+      const branding = getPdfReportBranding(db);
+
+      const placeholders = requestIds.map(() => "?").join(", ");
+      const rows = db.prepare(`
+        SELECT
+          pr.id,
+          pr.asset_code,
+          pr.part_code,
+          pr.part_name,
+          pr.qty,
+          pr.urgency,
+          pr.notes,
+          pr.work_order_id,
+          pr.status,
+          pr.requested_by,
+          pr.created_at,
+          a.asset_name
+        FROM maintenance_parts_requests pr
+        LEFT JOIN assets a ON a.id = pr.asset_id
+        WHERE pr.id IN (${placeholders})
+          AND COALESCE(pr.site_code, 'main') = ?
+        ORDER BY
+          CASE LOWER(COALESCE(pr.urgency, 'normal'))
+            WHEN 'critical' THEN 0
+            WHEN 'urgent' THEN 1
+            ELSE 2
+          END ASC,
+          pr.asset_code ASC,
+          pr.part_code ASC,
+          pr.id ASC
+      `).all(...requestIds, site_code);
+
+      if (!rows.length) {
+        return reply.code(404).send({ ok: false, error: "No matching parts requests found" });
+      }
+
+      const urgencyLabel = (u) => {
+        const x = String(u || "normal").toLowerCase();
+        if (x === "critical") return "Critical";
+        if (x === "urgent") return "Urgent";
+        return "Normal";
+      };
+
+      const lineRows = rows.map((r, idx) => ({
+        line_no: String(idx + 1),
+        part_code: String(r.part_code || "—"),
+        part_name: String(r.part_name || "—"),
+        qty: Number(r.qty || 0).toFixed(1).replace(/\.0$/, ""),
+        asset: [r.asset_code, r.asset_name].map((x) => String(x || "").trim()).filter(Boolean).join(" — ") || "—",
+        work_order_id: r.work_order_id ? String(r.work_order_id) : "—",
+        urgency: urgencyLabel(r.urgency),
+        notes: String(r.notes || "").trim() || "—",
+      }));
+
+      const pdf = await buildPdfBuffer(
+        (doc) => {
+          sectionTitle(doc, "Request for Quote");
+          doc.font("Helvetica").fontSize(10).fillColor("#0f172a");
+          doc.text(`Reference: ${reference}`);
+          doc.text(`Date: ${asOfLabel}`);
+          if (branding.company_name) doc.text(`From: ${branding.company_name}${branding.site_name ? ` — ${branding.site_name}` : ""}`);
+          doc.text(`Prepared by: ${requested_by}`);
+          doc.moveDown(0.35);
+          doc.font("Helvetica-Bold").text("To:");
+          doc.font("Helvetica");
+          doc.text(supplier);
+          if (contact) doc.text(`Attention: ${contact}`);
+          if (email) doc.text(`Email: ${email}`);
+          if (phone) doc.text(`Phone: ${phone}`);
+          if (required_by) doc.text(`Quote required by: ${required_by}`);
+          doc.moveDown(0.5);
+          doc.font("Helvetica").fontSize(10).text(
+            "Please provide pricing, availability, and lead time for the parts listed below.",
+          );
+          doc.moveDown(0.4);
+
+          table(
+            doc,
+            [
+              { key: "line_no", label: "#", width: 0.04, align: "center" },
+              { key: "part_code", label: "Part code", width: 0.12 },
+              { key: "part_name", label: "Description", width: 0.24 },
+              { key: "qty", label: "Qty", width: 0.06, align: "right" },
+              { key: "asset", label: "Asset", width: 0.16 },
+              { key: "work_order_id", label: "WO #", width: 0.07, align: "center" },
+              { key: "urgency", label: "Urgency", width: 0.09 },
+              { key: "notes", label: "Notes", width: 0.22 },
+            ],
+            lineRows,
+          );
+
+          if (notes) {
+            doc.moveDown(0.6);
+            sectionTitle(doc, "Additional notes / terms");
+            doc.font("Helvetica").fontSize(10).text(notes, { width: doc.page.width - doc.page.margins.left - doc.page.margins.right });
+          }
+
+          doc.moveDown(1.2);
+          doc.font("Helvetica").fontSize(10);
+          doc.text("Authorized by: ________________________________     Date: ________________");
+        },
+        {
+          title: branding.company_name || "IRONLOG",
+          subtitle: "Parts Request for Quote",
+          rightText: reference,
+          layout: "landscape",
+          db,
+        },
+      );
+
+      const isDownload = String(req.query?.download || "").trim() === "1";
+      const safeRef = reference.replace(/[^\w.-]+/g, "_");
+      reply.header("Cache-Control", "no-store, no-cache, must-revalidate");
+      reply.header("Pragma", "no-cache");
+      reply.header("Content-Type", "application/pdf");
+      reply.header(
+        "Content-Disposition",
+        `${isDownload ? "attachment" : "inline"}; filename="${safeRef}.pdf"`,
+      );
+      return reply.send(pdf);
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
   app.get("/parts-requests", async (req, reply) => {
     try {
       const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";

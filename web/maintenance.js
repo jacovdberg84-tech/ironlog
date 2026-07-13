@@ -6627,6 +6627,170 @@ function ptoUrgencyClass(urgency) {
   return "muted";
 }
 
+let ptoRowsCache = [];
+const selectedPtoRequestIds = new Set();
+
+function defaultPtoRfqReference() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const date = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+  const site = getSessionSite().toUpperCase().replace(/[^A-Z0-9]/g, "") || "MAIN";
+  return `RFQ-${site}-${date}`;
+}
+
+function initPtoRfqDefaults() {
+  const ref = document.getElementById("ptoRfqReference");
+  if (ref && !String(ref.value || "").trim()) ref.value = defaultPtoRfqReference();
+  const contact = document.getElementById("ptoRfqContact");
+  if (contact && !String(contact.value || "").trim()) contact.value = getSessionUser();
+  const reqBy = document.getElementById("ptoRfqRequiredBy");
+  if (reqBy && !reqBy.value) {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    reqBy.value = d.toISOString().slice(0, 10);
+  }
+}
+
+function updatePtoSelectionCount() {
+  const el = document.getElementById("ptoSelectionCount");
+  if (el) el.textContent = `${selectedPtoRequestIds.size} selected`;
+  const hint = document.getElementById("ptoRfqSelectionHint");
+  if (hint) {
+    hint.textContent = selectedPtoRequestIds.size
+      ? `${selectedPtoRequestIds.size} part line(s) selected for RFQ`
+      : "Tick parts above, then complete supplier details.";
+  }
+  renderPtoRfqPreview();
+}
+
+function bindPtoRequestCheckboxes(root) {
+  (root || document).querySelectorAll(".pto-request-select").forEach((el) => {
+    if (el.dataset.boundPtoSelect === "1") return;
+    el.dataset.boundPtoSelect = "1";
+    el.addEventListener("change", () => {
+      const id = Number(el.getAttribute("data-pto-id") || 0);
+      if (!id) return;
+      if (el.checked) selectedPtoRequestIds.add(id);
+      else selectedPtoRequestIds.delete(id);
+      updatePtoSelectionCount();
+    });
+  });
+  updatePtoSelectionCount();
+}
+
+function clearPtoSelection() {
+  selectedPtoRequestIds.clear();
+  document.querySelectorAll(".pto-request-select").forEach((el) => { el.checked = false; });
+  updatePtoSelectionCount();
+}
+
+function selectAllPtoRequests() {
+  document.querySelectorAll("#ptoListBody .pto-request-select").forEach((el) => {
+    const id = Number(el.getAttribute("data-pto-id") || 0);
+    if (!id) return;
+    el.checked = true;
+    selectedPtoRequestIds.add(id);
+  });
+  updatePtoSelectionCount();
+}
+
+function getSelectedPtoRows() {
+  const ids = selectedPtoRequestIds;
+  return (ptoRowsCache || []).filter((r) => ids.has(Number(r.id || 0)));
+}
+
+function renderPtoRfqPreview() {
+  const body = document.getElementById("ptoRfqPreviewBody");
+  if (!body) return;
+  const rows = getSelectedPtoRows();
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="7" class="muted">No parts selected.</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map((r, idx) => {
+    const asset = r.asset_code ? esc(r.asset_code) : "—";
+    return `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${r.part_code ? esc(r.part_code) : "—"}</td>
+        <td>${esc(r.part_name || "")}</td>
+        <td style="text-align:right;">${Number(r.qty || 0)}</td>
+        <td>${asset}</td>
+        <td>${r.work_order_id ? esc(String(r.work_order_id)) : "—"}</td>
+        <td>${esc(ptoUrgencyLabel(r.urgency))}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function buildPtoRfqPdfQuery() {
+  const ids = Array.from(selectedPtoRequestIds);
+  if (!ids.length) throw new Error("Select at least one part request for the RFQ.");
+  const supplier = String(document.getElementById("ptoRfqSupplier")?.value || "").trim();
+  if (!supplier) throw new Error("Enter a supplier / company name.");
+  const q = new URLSearchParams();
+  q.set("ids", ids.join(","));
+  q.set("reference", String(document.getElementById("ptoRfqReference")?.value || "").trim() || defaultPtoRfqReference());
+  q.set("supplier", supplier);
+  const contact = String(document.getElementById("ptoRfqContact")?.value || "").trim();
+  const email = String(document.getElementById("ptoRfqEmail")?.value || "").trim();
+  const phone = String(document.getElementById("ptoRfqPhone")?.value || "").trim();
+  const required_by = String(document.getElementById("ptoRfqRequiredBy")?.value || "").trim();
+  const notes = String(document.getElementById("ptoRfqNotes")?.value || "").trim();
+  if (contact) q.set("contact", contact);
+  if (email) q.set("email", email);
+  if (phone) q.set("phone", phone);
+  if (required_by) q.set("required_by", required_by);
+  if (notes) q.set("notes", notes);
+  q.set("requested_by", getSessionUser());
+  q.set("_", String(Date.now()));
+  return q;
+}
+
+async function openPtoRfqPdf(download = false) {
+  const msg = document.getElementById("ptoRfqMsg");
+  try {
+    const q = buildPtoRfqPdfQuery();
+    if (download) q.set("download", "1");
+    const url = `${API}/maintenance/parts-requests/rfq.pdf?${q.toString()}`;
+    if (msg) {
+      msg.className = "muted";
+      msg.textContent = download ? "Preparing download..." : "Opening RFQ PDF...";
+    }
+    const res = await fetch(url, { headers: authHeaders() });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(t || `RFQ PDF failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const ref = String(document.getElementById("ptoRfqReference")?.value || "").trim() || "rfq";
+    if (download) {
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `${ref.replace(/[^\w.-]+/g, "_")}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
+    } else {
+      window.open(blobUrl, "_blank");
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
+    }
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = download ? "RFQ PDF downloaded." : "RFQ PDF opened.";
+    }
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = e.message || String(e);
+    } else {
+      alert(e.message || String(e));
+    }
+  }
+}
+
 function clearPartsToOrderForm() {
   const asset = document.getElementById("ptoAsset");
   const code = document.getElementById("ptoPartCode");
@@ -6687,11 +6851,18 @@ function renderPartsToOrderActions(row) {
 function renderPartsToOrderTable(rows) {
   const body = document.getElementById("ptoListBody");
   if (!body) return;
-  if (!Array.isArray(rows) || !rows.length) {
-    body.innerHTML = `<tr><td colspan="10" class="muted">No parts requests found.</td></tr>`;
+  ptoRowsCache = Array.isArray(rows) ? rows : [];
+  const validIds = new Set(ptoRowsCache.map((r) => Number(r.id || 0)).filter((x) => x > 0));
+  Array.from(selectedPtoRequestIds).forEach((id) => {
+    if (!validIds.has(id)) selectedPtoRequestIds.delete(id);
+  });
+  if (!ptoRowsCache.length) {
+    body.innerHTML = `<tr><td colspan="11" class="muted">No parts requests found.</td></tr>`;
+    updatePtoSelectionCount();
     return;
   }
-  body.innerHTML = rows.map((r) => {
+  body.innerHTML = ptoRowsCache.map((r) => {
+    const id = Number(r.id || 0);
     const asset = r.asset_code
       ? `${esc(r.asset_code)}${r.asset_name ? ` — ${esc(r.asset_name)}` : ""}`
       : "—";
@@ -6701,7 +6872,10 @@ function renderPartsToOrderTable(rows) {
     ].filter(Boolean).join("<br />");
     const noteBits = [r.notes, r.status_notes].map((x) => String(x || "").trim()).filter(Boolean);
     return `
-      <tr>
+      <tr data-pto-id="${id}">
+        <td style="text-align:center;">
+          ${id > 0 ? `<input type="checkbox" class="pto-request-select" data-pto-id="${id}" title="Select for RFQ" ${selectedPtoRequestIds.has(id) ? "checked" : ""} />` : ""}
+        </td>
         <td>${esc(String(r.created_at || "").slice(0, 16).replace("T", " "))}</td>
         <td>${asset}</td>
         <td>${partBits || "—"}</td>
@@ -6715,11 +6889,12 @@ function renderPartsToOrderTable(rows) {
       </tr>
     `;
   }).join("");
+  bindPtoRequestCheckboxes(body);
 }
 
 async function loadPartsToOrderList() {
   const body = document.getElementById("ptoListBody");
-  if (body) body.innerHTML = `<tr><td colspan="10" class="muted">Loading...</td></tr>`;
+  if (body) body.innerHTML = `<tr><td colspan="11" class="muted">Loading...</td></tr>`;
   const status = String(document.getElementById("ptoFilterStatus")?.value || "").trim();
   const mine = document.getElementById("ptoMineOnly")?.checked ? "1" : "";
   const q = new URLSearchParams();
@@ -6735,7 +6910,7 @@ async function loadPartsToOrderList() {
     }
     renderPartsToOrderTable(rows);
   } catch (e) {
-    if (body) body.innerHTML = `<tr><td colspan="10" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+    if (body) body.innerHTML = `<tr><td colspan="11" class="message-error">${esc(e.message || String(e))}</td></tr>`;
   }
 }
 
@@ -6800,6 +6975,7 @@ async function updatePartsToOrderStatus(id, status) {
 
 async function initPartsToOrderSection() {
   bindPtoPartCodeAutofill();
+  initPtoRfqDefaults();
   const mine = document.getElementById("ptoMineOnly");
   if (mine && !mine.dataset.inited) {
     mine.dataset.inited = "1";
@@ -8580,9 +8756,13 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }));
   document.getElementById("ptoClearBtn")?.addEventListener("click", clearPartsToOrderForm);
+  document.getElementById("ptoSelectAllBtn")?.addEventListener("click", selectAllPtoRequests);
+  document.getElementById("ptoClearSelBtn")?.addEventListener("click", clearPtoSelection);
   document.getElementById("ptoRefreshBtn")?.addEventListener("click", () => loadPartsToOrderList().catch(() => {}));
   document.getElementById("ptoFilterStatus")?.addEventListener("change", () => loadPartsToOrderList().catch(() => {}));
   document.getElementById("ptoMineOnly")?.addEventListener("change", () => loadPartsToOrderList().catch(() => {}));
+  document.getElementById("ptoRfqOpenPdfBtn")?.addEventListener("click", () => openPtoRfqPdf(false));
+  document.getElementById("ptoRfqDownloadPdfBtn")?.addEventListener("click", () => openPtoRfqPdf(true));
   document.getElementById("ptoListBody")?.addEventListener("click", (evt) => {
     const btn = evt.target?.closest?.("button[data-pto-status]");
     if (!btn) return;
