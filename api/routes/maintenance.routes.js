@@ -2352,8 +2352,8 @@ export default async function maintenanceRoutes(app) {
         return getAssetCurrentHours(assetId);
       };
       const due = enrichDueRowsWithEstimates(
-        buildDueListFromPlans(rows, getHours, nearDueHours),
         db,
+        buildDueListFromPlans(rows, getHours, nearDueHours),
         { as_of: date || new Date().toISOString().slice(0, 10), history_days: 14 },
       );
 
@@ -4696,6 +4696,10 @@ export default async function maintenanceRoutes(app) {
         return reply.code(400).send({ error: "date must be YYYY-MM-DD" });
       }
       const nearDueHours = Math.max(1, Number(req.query?.near_due_hours || 50));
+      const withinHoursRaw = req.query?.within_hours;
+      const withinHours = withinHoursRaw != null && String(withinHoursRaw).trim() !== ""
+        ? Math.max(0, Number(withinHoursRaw))
+        : null;
       const planIdsRaw = req.query?.plan_ids;
       const requestedPlanIds = Array.isArray(planIdsRaw)
         ? [...new Set(planIdsRaw.map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0))]
@@ -4755,8 +4759,8 @@ export default async function maintenanceRoutes(app) {
       };
 
       const dueRows = enrichDueRowsWithEstimates(
-        buildDueListFromPlans(rows, getHours, nearDueHours),
         db,
+        buildDueListFromPlans(rows, getHours, nearDueHours),
         { as_of: asOfLabel, history_days: historyDays },
       )
         .map((r) => ({
@@ -4770,8 +4774,20 @@ export default async function maintenanceRoutes(app) {
           estimated_service_date: r.estimated_service_date,
           status: r.status,
         }))
-        .filter((r) => !requestedPlanIds.length || requestedPlanIds.includes(Number(r.plan_id || 0)))
+        .filter((r) => {
+          if (requestedPlanIds.length) return requestedPlanIds.includes(Number(r.plan_id || 0));
+          if (withinHours != null && Number.isFinite(withinHours)) {
+            return Number(r.remaining_hours || 0) <= withinHours;
+          }
+          return true;
+        })
         .sort((a, b) => Number(a.remaining_hours || 0) - Number(b.remaining_hours || 0));
+
+      const pdfScopeLabel = requestedPlanIds.length
+        ? `Selected equipment only (${requestedPlanIds.length})`
+        : withinHours != null && Number.isFinite(withinHours)
+          ? `Remaining <= ${withinHours.toFixed(0)}h`
+          : "All active service schedules";
 
       const pdf = await buildPdfBuffer(
         (doc) => {
@@ -4780,9 +4796,7 @@ export default async function maintenanceRoutes(app) {
             .font("Helvetica")
             .fontSize(10)
             .text(
-              requestedPlanIds.length
-                ? `As of: ${asOfLabel} | Selected equipment only (${requestedPlanIds.length}) | Est. date from ${historyDays}-day avg usage`
-                : `As of: ${asOfLabel} | All active service schedules | <= ${nearDueHours.toFixed(0)}h flagged ALMOST DUE | Est. date from ${historyDays}-day avg usage`,
+              `As of: ${asOfLabel} | ${pdfScopeLabel} | <= ${nearDueHours.toFixed(0)}h flagged ALMOST DUE | Est. date from ${historyDays}-day avg usage`,
             );
           doc.moveDown(0.4);
 
@@ -4809,7 +4823,11 @@ export default async function maintenanceRoutes(app) {
               : [
                   {
                     asset_code: "-",
-                    asset_name: requestedPlanIds.length ? "No upcoming services for selected equipment" : "No upcoming services",
+                    asset_name: requestedPlanIds.length
+                      ? "No upcoming services for selected equipment"
+                      : withinHours != null && Number.isFinite(withinHours)
+                        ? `No services with remaining <= ${withinHours.toFixed(0)}h`
+                        : "No upcoming services",
                     service_name: "-",
                     current_hours: "-",
                     next_due_hours: "-",

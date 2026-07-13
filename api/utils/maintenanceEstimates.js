@@ -42,6 +42,12 @@ export function estimateServiceDateFromUsage(db, opts = {}) {
 }
 
 export function enrichDueRowsWithEstimates(db, rows, opts = {}) {
+  // Guard against accidental (rows, db) argument order at call sites.
+  if (Array.isArray(db) && rows && typeof rows.prepare === "function") {
+    const swappedDb = rows;
+    rows = db;
+    db = swappedDb;
+  }
   const list = Array.isArray(rows) ? rows : [];
   return list.map((r) => {
     const est = estimateServiceDateFromUsage(db, {
