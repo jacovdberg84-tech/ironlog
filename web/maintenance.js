@@ -2500,6 +2500,7 @@ async function openUpcomingServicesPdf(download = false) {
   q.set("near_due_hours", String(nearDueHours));
   const selectedPlans = Array.from(selectedDuePlanIds);
   if (selectedPlans.length) q.set("plan_ids", selectedPlans.join(","));
+  else q.set("within_hours", String(nearDueHours));
   q.set("_", String(Date.now()));
   const url = `${API}/maintenance/due-upcoming.pdf?${q.toString()}`;
   try {
