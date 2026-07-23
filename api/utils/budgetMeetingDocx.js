@@ -114,14 +114,23 @@ export async function buildBudgetMeetingDocxBuffer(data) {
     money(r.amount),
   ]);
 
-  const downtimeRows = (data.downtimeDetail || []).map((r) => [
-    r.asset_code,
-    r.asset_name || "",
-    String(r.down_days || 0),
-    Number(r.downtime_hours || 0).toFixed(1),
-    `${money(r.downtime_rate)}/hr`,
-    money(r.downtime_cost),
+  const laborDetail = Array.isArray(data.mechanicLaborDetail) ? data.mechanicLaborDetail : [];
+  const laborRows = laborDetail.map((r) => [
+    r.technician_name || "Unassigned",
+    Number(r.hours || 0).toFixed(1),
+    `${money(r.rate)}/hr`,
+    money(r.labor_cost),
   ]);
+  const laborTotalCost = Number(
+    data.mechanicLaborTotalCost != null
+      ? data.mechanicLaborTotalCost
+      : laborDetail.reduce((s, r) => s + Number(r.labor_cost || 0), 0),
+  );
+  const laborTotalHours = Number(
+    data.mechanicLaborTotalHours != null
+      ? data.mechanicLaborTotalHours
+      : laborDetail.reduce((s, r) => s + Number(r.hours || 0), 0),
+  );
 
   const up = data.upcoming || {};
   const children = [
@@ -132,6 +141,11 @@ export async function buildBudgetMeetingDocxBuffer(data) {
     para(
       `Operating costs: ${money(operatingActual)} actual vs ${money(operatingBudget)} monthly budget ` +
         `(variance ${money(operatingVariance)}).`,
+    ),
+    para(
+      `Mechanics labor (Mechanics Cost log): ${money(laborTotalCost)} ` +
+        `(${laborTotalHours.toFixed(1)} hours across ${laborDetail.length} technician${laborDetail.length === 1 ? "" : "s"}).`,
+      true,
     ),
     para(
       `Plant hire income: ${money(plantIncome)} actual vs ${money(plantBudget)} income target ` +
@@ -164,20 +178,22 @@ export async function buildBudgetMeetingDocxBuffer(data) {
     heading("Last Month vs This Month (Operating Costs)", HeadingLevel.HEADING_2),
     docTable(["Category", data.prevPeriodLabel, data.periodLabel, "Change $", "Change %"], momRows),
     spacer(),
-    heading("Downtime Cost Detail", HeadingLevel.HEADING_2),
+    heading("Mechanics Labor Cost", HeadingLevel.HEADING_2),
     para(
-      downtimeRows.length
-        ? "Each row uses logged breakdown downtime hours × the asset downtime rate (Cost Settings default only when a machine has no rate)."
-        : "No breakdown downtime logged for this period.",
+      laborRows.length
+        ? "From Mechanics Cost daily labor entries for the selected month — mechanic, effective rate, and period total."
+        : "No mechanics labor logged for this period under Maintenance → Mechanics Cost.",
     ),
   ];
 
-  if (downtimeRows.length) {
+  if (laborRows.length) {
     children.push(
-      docTable(["Asset", "Name", "Down days", "Downtime hrs", "Rate", "Cost"], downtimeRows),
+      docTable(["Mechanic", "Hours", "Rate", "Labor $"], laborRows),
       para(
-        `Downtime subtotal: ${money((data.downtimeDetail || []).reduce((s, r) => s + Number(r.downtime_cost || 0), 0))} ` +
-          `(${Number(data.downtimeTotalHours || 0).toFixed(1)} hours)`,
+        `Total labor: ${money(laborTotalCost)} (${laborTotalHours.toFixed(1)} hours)` +
+          (data.mechanicLaborDefaultRate != null
+            ? ` | Default rate when blank: ${money(data.mechanicLaborDefaultRate)}/hr`
+            : ""),
         true,
       ),
       spacer(),

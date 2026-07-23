@@ -32,7 +32,7 @@ import { fuelBenchmarkAssetsInRangeSql, sqlFuelMetricModeExpr } from "../utils/f
 import { buildBudgetMeetingDocxBuffer } from "../utils/budgetMeetingDocx.js";
 import { getOperatingBudgetAmount } from "../utils/monthlyBudget.js";
 import {
-  buildBreakdownDowntimeDetail,
+  buildMechanicLaborDetail,
   buildMonthlyOperatingActuals,
 } from "../utils/monthlyOperatingCosts.js";
 import {
@@ -9918,7 +9918,7 @@ export default async function reportsRoutes(app) {
     const partsArrived = sumStatus("arrived");
     const upcomingTotal = partsOnOrder + partsInTransit + partsArrived + maintenanceTotal;
     const plantHireLines = buildPlantHireLines(db, month);
-    const downtimeCost = buildBreakdownDowntimeDetail(db, month);
+    const mechanicLabor = buildMechanicLaborDetail(db, month, site_code);
 
     const buffer = await buildBudgetMeetingDocxBuffer({
       periodLabel: month,
@@ -9929,8 +9929,10 @@ export default async function reportsRoutes(app) {
       prevActuals,
       plantHireBudget: Number(plantBudget?.budget_amount || 0),
       plantHireLines,
-      downtimeDetail: downtimeCost.detail,
-      downtimeTotalHours: downtimeCost.total_hours,
+      mechanicLaborDetail: mechanicLabor.detail,
+      mechanicLaborTotalHours: mechanicLabor.total_hours,
+      mechanicLaborTotalCost: mechanicLabor.total_cost,
+      mechanicLaborDefaultRate: mechanicLabor.default_rate,
       upcoming: {
         parts_on_order: partsOnOrder,
         parts_in_transit: partsInTransit,

@@ -245,3 +245,53 @@ export function buildBreakdownDowntimeDetail(db, period) {
   const total_cost = Number(detail.reduce((s, r) => s + r.downtime_cost, 0).toFixed(2));
   return { detail, total_hours, total_cost };
 }
+
+/**
+ * Mechanics Cost labor for Word doc — mechanic_labor_entries rolled up by technician.
+ * Rate is the hours-weighted effective rate for the period (entry rate, else default).
+ */
+export function buildMechanicLaborDetail(db, period, siteCode = "main") {
+  const { start, end } = monthPeriodBounds(period);
+  const defs = readCostDefaults(db);
+  const defaultRate = Number(defs.labor_cost_per_hour_default || 35);
+  const site = String(siteCode || "main").trim().toLowerCase() || "main";
+
+  if (!hasTable(db, "mechanic_labor_entries")) {
+    return { detail: [], total_hours: 0, total_cost: 0, default_rate: defaultRate };
+  }
+
+  const rows = db.prepare(`
+    SELECT
+      TRIM(COALESCE(technician_name, '')) AS technician_name,
+      COALESCE(SUM(hours), 0) AS hours,
+      COALESCE(SUM(
+        hours * COALESCE(
+          NULLIF(labor_rate_per_hour, 0),
+          ?
+        )
+      ), 0) AS labor_cost
+    FROM mechanic_labor_entries
+    WHERE work_date BETWEEN ? AND ?
+      AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+      AND COALESCE(hours, 0) > 0
+    GROUP BY LOWER(TRIM(COALESCE(technician_name, '')))
+    HAVING hours > 0
+    ORDER BY labor_cost DESC, technician_name ASC
+  `).all(defaultRate, start, end, site);
+
+  const detail = rows.map((r) => {
+    const hours = Number(Number(r.hours || 0).toFixed(2));
+    const labor_cost = Number(Number(r.labor_cost || 0).toFixed(2));
+    const rate = hours > 0 ? Number((labor_cost / hours).toFixed(2)) : defaultRate;
+    return {
+      technician_name: String(r.technician_name || "Unassigned").trim() || "Unassigned",
+      hours,
+      rate,
+      labor_cost,
+    };
+  });
+
+  const total_hours = Number(detail.reduce((s, r) => s + r.hours, 0).toFixed(2));
+  const total_cost = Number(detail.reduce((s, r) => s + r.labor_cost, 0).toFixed(2));
+  return { detail, total_hours, total_cost, default_rate: defaultRate };
+}
