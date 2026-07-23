@@ -7472,17 +7472,13 @@ async function downloadMcYearXlsx() {
 
 async function downloadMcTimesheetXlsx() {
   const year = mcYearValue();
-  const syntheticThrough = String(document.getElementById("mcSyntheticThrough")?.value || "2026-03-31").trim();
   const msg = document.getElementById("mcFormMsg");
   if (msg) {
     msg.className = "muted";
-    msg.textContent = `Generating ${year} mechanics timesheet…`;
+    msg.textContent = `Downloading ${year} mechanics timesheet…`;
   }
   try {
-    const qs = new URLSearchParams({
-      year: String(year),
-      synthetic_through: syntheticThrough,
-    });
+    const qs = new URLSearchParams({ year: String(year) });
     const res = await fetch(`${API}/maintenance/mechanic-labor/timesheet.xlsx?${qs.toString()}`, {
       headers: authHeaders(),
     });
@@ -7501,8 +7497,52 @@ async function downloadMcTimesheetXlsx() {
     URL.revokeObjectURL(url);
     if (msg) {
       msg.className = "message-success";
-      msg.textContent = `Downloaded mechanics timesheet for ${year} (synthetic through ${syntheticThrough}).`;
+      msg.textContent = `Downloaded mechanics timesheet for ${year} (saved entries only).`;
     }
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = e.message || String(e);
+    }
+  }
+}
+
+async function uploadMcTimesheetFile() {
+  const msg = document.getElementById("mcTimesheetUploadMsg") || document.getElementById("mcFormMsg");
+  const input = document.getElementById("mcTimesheetFile");
+  const file = input?.files?.[0];
+  if (!file) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = "Choose an .xlsx or .csv timesheet file first.";
+    }
+    return;
+  }
+  const replaceDates = Boolean(document.getElementById("mcTimesheetReplaceDates")?.checked);
+  const mode = replaceDates ? "replace_dates" : "append";
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = `Uploading ${file.name}…`;
+  }
+  try {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const res = await fetch(`${API}/maintenance/mechanic-labor/timesheet/import?mode=${encodeURIComponent(mode)}`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: form,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
+    const warn = Array.isArray(data.warnings) && data.warnings.length
+      ? ` (${data.warnings.length} row warning(s))`
+      : "";
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = `Imported ${Number(data.imported || 0)} row(s) across ${Number(data.date_count || 0)} date(s)${replaceDates ? `; replaced ${Number(data.deleted || 0)} existing` : ""}${warn}.`;
+    }
+    if (input) input.value = "";
+    await loadMcDayEntries();
   } catch (e) {
     if (msg) {
       msg.className = "message-error";
@@ -8795,6 +8835,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }));
   document.getElementById("mcDownloadXlsxBtn")?.addEventListener("click", () => downloadMcYearXlsx());
   document.getElementById("mcDownloadTimesheetBtn")?.addEventListener("click", () => downloadMcTimesheetXlsx());
+  document.getElementById("mcUploadTimesheetBtn")?.addEventListener("click", () => uploadMcTimesheetFile().catch((e) => {
+    const msg = document.getElementById("mcTimesheetUploadMsg") || document.getElementById("mcFormMsg");
+    if (msg) { msg.className = "message-error"; msg.textContent = e.message || String(e); }
+  }));
   document.getElementById("mcTechChips")?.addEventListener("click", (evt) => {
     const btn = evt.target?.closest?.("button[data-mc-chip-tech]");
     if (!btn) return;

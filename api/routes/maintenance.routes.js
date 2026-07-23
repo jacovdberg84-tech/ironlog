@@ -27,6 +27,7 @@ import {
   generateMechanicsTimesheet,
   mechanicsTimesheetToExportRows,
 } from "../utils/mechanicsTimesheetGenerator.js";
+import { parseMechanicsTimesheetUpload } from "../utils/mechanicsTimesheetImport.js";
 import { resolveStorageAbs as resolveStorageAbsPath, getDataRoot } from "../utils/storagePaths.js";
 import {
   buildDueListFromPlans,
@@ -11336,9 +11337,7 @@ export default async function maintenanceRoutes(app) {
       from = `${year}-01-01`;
       to = `${year}-12-31`;
     }
-    const syntheticThrough = String(req.query?.synthetic_through || req.query?.syntheticThrough || "2026-03-31").trim();
-    const minTechHours = Number(req.query?.min_tech_hours || req.query?.minTechHours || 6);
-    return { from, to, syntheticThrough, minTechHours };
+    return { from, to };
   }
 
   function buildMechanicsTimesheetWorkbook(exportRows, meta) {
@@ -11396,29 +11395,24 @@ export default async function maintenanceRoutes(app) {
     ];
     wsInfo.addRows([
       { field: "Period", value: `${meta.from} to ${meta.to}` },
-      { field: "Synthetic fill through", value: meta.synthetic_through },
-      { field: "Min technician hours / day", value: meta.min_tech_hours },
-      { field: "Startup fleet (ADT / loader / excavator / crusher+screen)", value: `${meta.startup_fleet.dumptrucks} / ${meta.startup_fleet.loaders} / ${meta.startup_fleet.excavators} / ${meta.startup_fleet.crushers_screens}` },
-      { field: "Days from saved entries", value: meta.days_from_saved },
-      { field: "Days generated (synthetic + breakdowns)", value: meta.days_synthetic },
+      { field: "Days with saved entries", value: meta.days_from_saved },
       { field: "Total rows", value: meta.row_count },
-      { field: "Startup techs", value: "ADT: Sergio & Arnold | Loaders: Ronnie | Excavators: Charles | Crushers/screens: Moses" },
       { field: "Excluded plant", value: (meta.excluded_assets || []).join(", ") },
-      { field: "Service catalog entries", value: meta.service_catalog_entries ?? 0 },
-      { field: "Categories", value: "Startup, Breakdown, Service, Maintenance" },
+      { field: "Source", value: "Saved mechanic labor entries only (no synthetic fill)" },
+      { field: "Upload columns", value: "Date, Plant no, Work Hours, Category, Description Of Work Carried Out, Time Started, Time finished, Technician, Job Card No, SMR" },
     ]);
     wsInfo.getRow(1).font = { bold: true };
 
     return { wb, year };
   }
 
-  // GET /api/maintenance/mechanic-labor/timesheet?from=&to=&synthetic_through=2026-03-31
+  // GET /api/maintenance/mechanic-labor/timesheet?from=&to=&year=
   app.get("/mechanic-labor/timesheet", async (req, reply) => {
     try {
       if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_EDITORS)) return;
       ensureMechanicLaborExtendedColumns();
       const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
-      const { from, to, syntheticThrough, minTechHours } = parseMechanicsTimesheetRange(req);
+      const { from, to } = parseMechanicsTimesheetRange(req);
       if (!isDate(from) || !isDate(to)) {
         return reply.code(400).send({ ok: false, error: "from and to (YYYY-MM-DD), or year=YYYY, required" });
       }
@@ -11429,9 +11423,7 @@ export default async function maintenanceRoutes(app) {
       const { rows, meta } = generateMechanicsTimesheet(db, {
         from,
         to,
-        syntheticThrough,
         siteCode: site_code,
-        minTechHours,
       });
       const exportRows = mechanicsTimesheetToExportRows(rows);
       return reply.send({ ok: true, meta, rows: exportRows });
@@ -11441,13 +11433,13 @@ export default async function maintenanceRoutes(app) {
     }
   });
 
-  // GET /api/maintenance/mechanic-labor/timesheet.xlsx?year=2026&synthetic_through=2026-03-31
+  // GET /api/maintenance/mechanic-labor/timesheet.xlsx?year=2026
   app.get("/mechanic-labor/timesheet.xlsx", async (req, reply) => {
     try {
       if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_EDITORS)) return;
       ensureMechanicLaborExtendedColumns();
       const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
-      const { from, to, syntheticThrough, minTechHours } = parseMechanicsTimesheetRange(req);
+      const { from, to } = parseMechanicsTimesheetRange(req);
       if (!isDate(from) || !isDate(to)) {
         return reply.code(400).send({ ok: false, error: "from and to (YYYY-MM-DD), or year=YYYY, required" });
       }
@@ -11455,9 +11447,7 @@ export default async function maintenanceRoutes(app) {
       const { rows, meta } = generateMechanicsTimesheet(db, {
         from,
         to,
-        syntheticThrough,
         siteCode: site_code,
-        minTechHours,
       });
       const exportRows = mechanicsTimesheetToExportRows(rows);
       const { wb, year } = buildMechanicsTimesheetWorkbook(exportRows, meta);
@@ -11466,6 +11456,118 @@ export default async function maintenanceRoutes(app) {
         .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         .header("Content-Disposition", `attachment; filename="IRONLOG_Mechanics_Timesheet_${year}.xlsx"`)
         .send(buffer);
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // POST /api/maintenance/mechanic-labor/timesheet/import — multipart file (xlsx/csv)
+  // Query/fields: mode=append|replace_dates (default replace_dates)
+  app.post("/mechanic-labor/timesheet/import", async (req, reply) => {
+    try {
+      if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_EDITORS)) return;
+      ensureMechanicLaborExtendedColumns();
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const userName = String(req.headers?.["x-user-name"] || "").trim() || "system";
+
+      const part = await req.file();
+      if (!part) {
+        return reply.code(400).send({ ok: false, error: "Upload file field named 'file' (.xlsx or .csv)" });
+      }
+      const buffer = await part.toBuffer();
+      const filename = String(part.filename || "upload.xlsx");
+
+      const modeRaw = String(
+        req.query?.mode ||
+        (typeof part.fields?.mode?.value === "string" ? part.fields.mode.value : "") ||
+        "replace_dates",
+      ).trim().toLowerCase();
+      const mode = modeRaw === "append" ? "append" : "replace_dates";
+
+      const parsed = await parseMechanicsTimesheetUpload(buffer, filename);
+      if (parsed.errors.length && !parsed.entries.length) {
+        return reply.code(400).send({
+          ok: false,
+          error: parsed.errors.slice(0, 10).join("; "),
+          errors: parsed.errors.slice(0, 50),
+        });
+      }
+      if (!parsed.entries.length) {
+        return reply.code(400).send({ ok: false, error: "No valid timesheet rows found in file" });
+      }
+
+      const insertStmt = db.prepare(`
+        INSERT INTO mechanic_labor_entries (
+          work_date, technician_name, hours, asset_code, reason,
+          labor_rate_per_hour, site_code, created_by, updated_by,
+          category, time_started, time_finished, job_card_no, smr
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const deleteByDateStmt = db.prepare(`
+        DELETE FROM mechanic_labor_entries
+        WHERE work_date = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+      `);
+
+      const dates = [...new Set(parsed.entries.map((e) => e.work_date))].sort();
+      const tx = db.transaction(() => {
+        let deleted = 0;
+        if (mode === "replace_dates") {
+          for (const d of dates) {
+            deleted += Number(deleteByDateStmt.run(d, site_code).changes || 0);
+          }
+        }
+        const ids = [];
+        for (const e of parsed.entries) {
+          const info = insertStmt.run(
+            e.work_date,
+            e.technician_name,
+            e.hours,
+            e.asset_code,
+            e.reason,
+            null,
+            site_code,
+            userName,
+            userName,
+            e.category,
+            e.time_started,
+            e.time_finished,
+            e.job_card_no,
+            e.smr,
+          );
+          ids.push(Number(info.lastInsertRowid || 0));
+        }
+        return { deleted, ids };
+      });
+
+      const result = tx();
+      writeAudit(db, req, {
+        module: "maintenance",
+        action: "mechanic_labor.timesheet_import",
+        entity_type: "mechanic_labor_entry",
+        entity_id: dates[0] || null,
+        payload: {
+          mode,
+          filename,
+          imported: parsed.entries.length,
+          deleted: result.deleted,
+          dates: dates.length,
+          row_errors: parsed.errors.length,
+          skipped: parsed.skipped,
+        },
+      });
+
+      return reply.send({
+        ok: true,
+        mode,
+        filename,
+        imported: parsed.entries.length,
+        deleted: result.deleted,
+        skipped: parsed.skipped,
+        dates,
+        date_count: dates.length,
+        warnings: parsed.errors.slice(0, 20),
+      });
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message || String(err) });

@@ -832,79 +832,38 @@ function mapSavedToRows(savedRows, db, smrCache) {
  * @param {{
  *   from: string,
  *   to: string,
- *   syntheticThrough?: string,
  *   siteCode?: string,
- *   minTechHours?: number,
  * }} opts
  */
 export function generateMechanicsTimesheet(db, opts = {}) {
   const from = String(opts.from || "").trim();
   const to = String(opts.to || "").trim();
-  const syntheticThrough = String(opts.syntheticThrough || DEFAULT_SYNTHETIC_THROUGH).trim();
   const siteCode = String(opts.siteCode || "main").trim().toLowerCase() || "main";
-  const minTechHours = Number.isFinite(Number(opts.minTechHours)) && Number(opts.minTechHours) > 0
-    ? Number(opts.minTechHours)
-    : DEFAULT_MIN_TECH_HOURS;
 
   if (!isDate(from) || !isDate(to)) {
     throw new Error("from and to (YYYY-MM-DD) are required");
   }
   if (from > to) throw new Error("from must be on or before to");
 
-  const fleet = loadStartupFleet(db);
-  const dumptruckCodes = fleet.groups.dumptruck.map((a) => a.asset_code);
-  const breakdownsByDate = loadBreakdownsByDate(db, from, to);
-  const completedWorkByDate = loadCompletedWorkByDate(db, from, to);
-  const serviceCatalog = loadServiceCatalog(db);
   const savedByDate = loadSavedEntriesByDate(db, from, to, siteCode);
   const smrCache = new Map();
-  const usageTracker = new UsageTracker(12);
 
   const allRows = [];
   const meta = {
     from,
     to,
-    synthetic_through: syntheticThrough,
     site_code: siteCode,
-    min_tech_hours: minTechHours,
     excluded_assets: [...EXCLUDED_ASSET_CODES],
-    days_generated: 0,
     days_from_saved: 0,
     days_synthetic: 0,
-    startup_fleet: {
-      dumptrucks: fleet.groups.dumptruck.length,
-      loaders: fleet.groups.loader.length,
-      excavators: fleet.groups.excavator.length,
-      crushers_screens: fleet.groups.crusher_screen.length,
-    },
-    service_catalog_entries: serviceCatalog.length,
+    row_count: 0,
   };
 
   for (const work_date of enumerateDates(from, to)) {
-    const useSynthetic = work_date <= syntheticThrough;
     const saved = savedByDate.get(work_date) || [];
-
-    if (!useSynthetic && saved.length) {
-      allRows.push(...mapSavedToRows(saved, db, smrCache));
-      meta.days_from_saved += 1;
-      continue;
-    }
-
-    const dayRows = generateDayRows({
-      work_date,
-      fleet,
-      breakdowns: breakdownsByDate.get(work_date) || [],
-      completedWork: completedWorkByDate.get(work_date) || [],
-      serviceCatalog,
-      dumptruckCodes,
-      minTechHours,
-      smrCache,
-      usageTracker,
-      db,
-    });
-    allRows.push(...dayRows);
-    meta.days_synthetic += 1;
-    meta.days_generated += 1;
+    if (!saved.length) continue;
+    allRows.push(...mapSavedToRows(saved, db, smrCache));
+    meta.days_from_saved += 1;
   }
 
   meta.row_count = allRows.length;

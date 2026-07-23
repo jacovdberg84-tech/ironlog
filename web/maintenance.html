@@ -1282,20 +1282,25 @@
         </p>
 
         <div class="card stack-16" style="background:var(--surface-2, rgba(255,255,255,0.03)); padding:14px;">
-          <h4 style="margin:0 0 8px 0;">Generate mechanics timesheet (Excel)</h4>
+          <h4 style="margin:0 0 8px 0;">Mechanics timesheet (Excel)</h4>
           <p class="muted small" style="margin:0 0 10px 0;">
-            Builds a log like your workshop sheet: daily <strong>0.5h startup inspections</strong> per ADT (Sergio &amp; Arnold), loader (Ronnie), excavator (Charles), and crusher/screen (Moses);
-            real <strong>services</strong> and <strong>breakdowns</strong> from IRONLOG; varied <strong>Service / Maintenance</strong> fill to <strong>6h minimum</strong> per technician (randomized, de-duplicated).
-            Excludes E017, E018, E025, CRT01AM, FIN694. Jan–Mar (or before <em>synthetic fill through</em>) is generated when you had no manual entries yet.
-            From April onward, saved daily entries are used when present.
+            Download saved labor for the report year in the workshop timesheet layout
+            (<strong>Date, Plant no, Work Hours, Category, Description, Time Started, Time finished, Technician, Job Card No, SMR</strong>).
+            Upload a filled <strong>.xlsx</strong> or <strong>.csv</strong> with the same columns to load a month (or more) in bulk.
           </p>
           <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
-            <label>
-              Synthetic fill through
-              <input id="mcSyntheticThrough" type="date" class="w-160" value="2026-03-31" />
-            </label>
             <button type="button" id="mcDownloadTimesheetBtn">Download timesheet XLSX</button>
+            <label>
+              Upload timesheet
+              <input id="mcTimesheetFile" type="file" accept=".xlsx,.xlsm,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; margin-top:22px;">
+              <input id="mcTimesheetReplaceDates" type="checkbox" checked />
+              Replace existing entries for dates in the file
+            </label>
+            <button type="button" id="mcUploadTimesheetBtn">Upload timesheet</button>
           </div>
+          <div id="mcTimesheetUploadMsg" class="muted" style="margin-top:8px;"></div>
         </div>
 
         <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
@@ -2180,6 +2185,6 @@
   <script src="./undercarriage-diagrams.js?v=1"></script>
   <script src="./undercarriage.js?v=5"></script>
   <script src="./tyre-inspection-qr.js?v=1"></script>
-  <script src="./maintenance.js?v=50"></script>
+  <script src="./maintenance.js?v=51"></script>
 </body>
 </html>
