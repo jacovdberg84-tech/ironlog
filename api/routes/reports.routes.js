@@ -10010,7 +10010,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    const reportRevision = "daily-pdf-prestart-short-bd-r2026-06-18";
+    const reportRevision = "daily-pdf-avail-util-fuel-r2026-07-24";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -10032,10 +10032,12 @@ export default async function reportsRoutes(app) {
     // Production-selected assets only for the selected day.
     const hours = db.prepare(`
       SELECT
+        a.id AS asset_id,
         a.asset_code,
         a.asset_name,
         a.category,
         COALESCE(dh.hours_run, 0) AS hours_run,
+        COALESCE(dh.scheduled_hours, 0) AS scheduled_hours,
         dh.is_used,
         dh.opening_hours,
         dh.closing_hours,
@@ -10258,6 +10260,63 @@ export default async function reportsRoutes(app) {
     const dailyShortBreakdowns = listShortBreakdownsForDate(db, prevDay).slice(0, 40);
     const dailyPlannedMaintenance = listPlannedMaintenanceForDate(db, date).slice(0, 40);
 
+    // Per-asset downtime for availability (same day as hours table).
+    const downtimeByAssetId = new Map();
+    try {
+      const downRows = db.prepare(`
+        SELECT b.asset_id, COALESCE(SUM(l.hours_down), 0) AS hours_down
+        FROM breakdown_downtime_logs l
+        JOIN breakdowns b ON b.id = l.breakdown_id
+        WHERE l.log_date = ?
+        GROUP BY b.asset_id
+      `).all(date);
+      for (const r of downRows) {
+        downtimeByAssetId.set(Number(r.asset_id), Math.max(0, Number(r.hours_down || 0)));
+      }
+    } catch { /* table may be missing */ }
+
+    // Fuel for the report date (same day as hours), shown per equipment on the hours table.
+    const fuelByAssetId = new Map();
+    try {
+      const fuelDayRows = db.prepare(`
+        SELECT a.id AS asset_id, COALESCE(SUM(fl.liters), 0) AS liters
+        FROM fuel_logs fl
+        JOIN assets a ON a.id = fl.asset_id
+        WHERE fl.log_date = ?
+        GROUP BY a.id
+      `).all(date);
+      for (const r of fuelDayRows) {
+        fuelByAssetId.set(Number(r.asset_id), Math.max(0, Number(r.liters || 0)));
+      }
+    } catch { /* ignore */ }
+
+    const scheduledFallback = Math.max(0, Number(scheduled || 0));
+    const hoursPdfEnriched = hoursPdf.map((r) => {
+      const assetId = Number(r.asset_id || 0);
+      const rowScheduled = Number(r.scheduled_hours);
+      const sched = Math.max(
+        0,
+        Number.isFinite(rowScheduled) && rowScheduled > 0 ? rowScheduled : scheduledFallback,
+      );
+      const run = Math.max(0, Number(r.hours_run || 0));
+      const runEff = sched > 0 ? Math.min(run, sched) : run;
+      const downRaw = Math.max(0, Number(downtimeByAssetId.get(assetId) || 0));
+      const down = sched > 0 ? Math.min(downRaw, sched) : downRaw;
+      const available = Math.max(0, sched - down);
+      const availPct = sched > 0 ? (available / sched) * 100 : null;
+      const utilPct = sched > 0 ? (runEff / sched) * 100 : null;
+      const fuelLiters = fuelByAssetId.get(assetId);
+      return {
+        ...r,
+        scheduled_hours_eff: sched,
+        available_hours: available,
+        downtime_hours: down,
+        availability_pct: availPct,
+        utilization_pct: utilPct,
+        fuel_liters: fuelLiters == null ? null : fuelLiters,
+      };
+    });
+
     const speedAlertKmh = getCartrackSpeedAlertKmh();
     let cartrackSpeeding = null;
     if (hasTable("cartrack_events")) {
@@ -10308,18 +10367,22 @@ export default async function reportsRoutes(app) {
         table(
           doc,
           [
-            { key: "asset", label: "Asset", width: 0.14 },
-            { key: "type", label: "Type", width: 0.12 },
-            { key: "name", label: "Name", width: 0.25 },
-            { key: "open", label: "Open", width: 0.13, align: "right" },
-            { key: "close", label: "Close", width: 0.13, align: "right" },
-            { key: "hours", label: "Run Hrs", width: 0.13, align: "right" },
-            { key: "used", label: "Prod", width: 0.10, align: "center" },
+            { key: "asset", label: "Asset", width: 0.10 },
+            { key: "type", label: "Type", width: 0.10 },
+            { key: "name", label: "Name", width: 0.18 },
+            { key: "open", label: "Open", width: 0.08, align: "right" },
+            { key: "close", label: "Close", width: 0.08, align: "right" },
+            { key: "hours", label: "Run Hrs", width: 0.08, align: "right" },
+            { key: "avail", label: "Avail %", width: 0.10, align: "right" },
+            { key: "util", label: "Util %", width: 0.10, align: "right" },
+            { key: "fuel", label: "Fuel L", width: 0.18, align: "right" },
           ],
-          hoursPdf.map((r) => {
+          hoursPdfEnriched.map((r) => {
             const noEntry = !r.has_daily_entry;
             const fmtHm = (v) =>
               v == null || v === "" || !Number.isFinite(Number(v)) ? "—" : fmtNum(v, 1);
+            const fmtPct = (v) => (v == null || !Number.isFinite(Number(v)) ? "—" : `${fmtNum(v, 1)}%`);
+            const fuelLiters = r.fuel_liters;
             return {
               asset: r.asset_code,
               type: compactCell(r.category ?? "", 12),
@@ -10327,7 +10390,9 @@ export default async function reportsRoutes(app) {
               open: noEntry ? "—" : fmtHm(r.opening_hours),
               close: noEntry ? "—" : fmtHm(r.closing_hours),
               hours: fmtNum(r.hours_run, 1),
-              used: noEntry ? "—" : r.is_used ? "Y" : "N",
+              avail: fmtPct(r.availability_pct),
+              util: fmtPct(r.utilization_pct),
+              fuel: fuelLiters == null ? "—" : fmtNum(fuelLiters, 1),
             };
           })
         );
