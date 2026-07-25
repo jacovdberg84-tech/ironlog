@@ -10010,7 +10010,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    const reportRevision = "daily-pdf-avail-util-fuel-r2026-07-24";
+    const reportRevision = "daily-pdf-prevday-fuel-avail-r2026-07-25";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -10257,10 +10257,13 @@ export default async function reportsRoutes(app) {
 
     const kpi = kpiDaily(date, scheduled);
     const prevDay = shiftDateYmd(date, -1);
-    const dailyShortBreakdowns = listShortBreakdownsForDate(db, prevDay).slice(0, 40);
+    // Daily PDF is opened "today" for yesterday's ops — short BDs, fuel, and
+    // per-asset availability downtime all use the previous calendar day.
+    const opsDay = prevDay;
+    const dailyShortBreakdowns = listShortBreakdownsForDate(db, opsDay).slice(0, 40);
     const dailyPlannedMaintenance = listPlannedMaintenanceForDate(db, date).slice(0, 40);
 
-    // Per-asset downtime for availability (same day as hours table).
+    // Per-asset downtime for availability (same day as short breakdowns / fuel).
     const downtimeByAssetId = new Map();
     try {
       const downRows = db.prepare(`
@@ -10269,13 +10272,13 @@ export default async function reportsRoutes(app) {
         JOIN breakdowns b ON b.id = l.breakdown_id
         WHERE l.log_date = ?
         GROUP BY b.asset_id
-      `).all(date);
+      `).all(opsDay);
       for (const r of downRows) {
         downtimeByAssetId.set(Number(r.asset_id), Math.max(0, Number(r.hours_down || 0)));
       }
     } catch { /* table may be missing */ }
 
-    // Fuel for the report date (same day as hours), shown per equipment on the hours table.
+    // Fuel for previous calendar day (ops day), shown per equipment on the hours table.
     const fuelByAssetId = new Map();
     try {
       const fuelDayRows = db.prepare(`
@@ -10284,7 +10287,7 @@ export default async function reportsRoutes(app) {
         JOIN assets a ON a.id = fl.asset_id
         WHERE fl.log_date = ?
         GROUP BY a.id
-      `).all(date);
+      `).all(opsDay);
       for (const r of fuelDayRows) {
         fuelByAssetId.set(Number(r.asset_id), Math.max(0, Number(r.liters || 0)));
       }
@@ -10364,18 +10367,23 @@ export default async function reportsRoutes(app) {
         ], 2);
 
         sectionTitle(doc, "Hours by asset (active fleet, non-standby)");
+        doc.fontSize(9).fillColor("#64748b");
+        doc.text(
+          `Avail % / Util % / Fuel L use downtime & fuel from previous calendar day ${opsDay} (same day as short breakdowns).`,
+        );
+        doc.moveDown(0.35);
         table(
           doc,
           [
             { key: "asset", label: "Asset", width: 0.10 },
             { key: "type", label: "Type", width: 0.10 },
-            { key: "name", label: "Name", width: 0.18 },
+            { key: "name", label: "Name", width: 0.16 },
             { key: "open", label: "Open", width: 0.08, align: "right" },
             { key: "close", label: "Close", width: 0.08, align: "right" },
             { key: "hours", label: "Run Hrs", width: 0.08, align: "right" },
             { key: "avail", label: "Avail %", width: 0.10, align: "right" },
             { key: "util", label: "Util %", width: 0.10, align: "right" },
-            { key: "fuel", label: "Fuel L", width: 0.18, align: "right" },
+            { key: "fuel", label: `Fuel L (${opsDay.slice(5)})`, width: 0.20, align: "right" },
           ],
           hoursPdfEnriched.map((r) => {
             const noEntry = !r.has_daily_entry;
