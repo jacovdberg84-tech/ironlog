@@ -8815,34 +8815,52 @@ export default async function reportsRoutes(app) {
       LIMIT 8
     `).all(period.start, period.end)
       : [];
+    // Aggregate per asset + lube type across the whole period so a month of logs fits one slide.
     const lubeByMachine = db.prepare(`
       SELECT
-        ol.log_date,
+        MIN(ol.log_date) AS first_log_date,
+        MAX(ol.log_date) AS last_log_date,
+        COUNT(*) AS entries,
         a.asset_code,
         a.asset_name,
-        COALESCE(ol.oil_type, p.part_name, p.part_code, '-') AS lube_type,
-        COALESCE(p.part_name, '-') AS issue_part,
+        COALESCE(NULLIF(TRIM(ol.oil_type), ''), '-') AS lube_type,
+        MAX(COALESCE(NULLIF(TRIM(p.part_name), ''), '')) AS issue_part,
         COALESCE(SUM(ol.quantity), 0) AS qty_total,
         COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS lube_cost
       FROM oil_logs ol
       JOIN assets a ON a.id = ol.asset_id
-      LEFT JOIN stock_movements sm ON sm.reference = ('lube_issue:asset:' || ol.asset_id)
-        AND sm.movement_type = 'out'
-        AND ${smDateExprDeck} = ol.log_date
-      LEFT JOIN parts p ON p.id = sm.part_id
+      LEFT JOIN parts p ON UPPER(TRIM(p.part_code)) = UPPER(TRIM(COALESCE(ol.oil_type, '')))
       WHERE ol.log_date BETWEEN ? AND ?
-      GROUP BY ol.id, a.id
-      ORDER BY ol.log_date DESC, lube_cost DESC, a.asset_code ASC
-      LIMIT 14
+      GROUP BY a.id, UPPER(TRIM(COALESCE(ol.oil_type, '')))
+      ORDER BY lube_cost DESC, qty_total DESC, a.asset_code ASC
+      LIMIT 16
     `).all(lubeDefault, period.start, period.end);
-    const lubePeriodTotals = lubeByMachine.reduce(
-      (acc, r) => {
-        acc.qty += Number(r.qty_total || 0);
-        acc.cost += Number(r.lube_cost || 0);
-        return acc;
-      },
-      { qty: 0, cost: 0 },
-    );
+    // Totals must cover every log line in the period, not just the rows shown on the slide.
+    const lubeTotalsRow = db.prepare(`
+      SELECT
+        COUNT(*) AS entries,
+        COALESCE(SUM(ol.quantity), 0) AS qty_total,
+        COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS lube_cost
+      FROM oil_logs ol
+      JOIN assets a ON a.id = ol.asset_id
+      WHERE ol.log_date BETWEEN ? AND ?
+    `).get(lubeDefault, period.start, period.end);
+    const lubeGroupCountRow = db.prepare(`
+      SELECT COUNT(*) AS groups
+      FROM (
+        SELECT 1
+        FROM oil_logs ol
+        JOIN assets a ON a.id = ol.asset_id
+        WHERE ol.log_date BETWEEN ? AND ?
+        GROUP BY a.id, UPPER(TRIM(COALESCE(ol.oil_type, '')))
+      )
+    `).get(period.start, period.end);
+    const lubePeriodTotals = {
+      qty: Number(lubeTotalsRow?.qty_total || 0),
+      cost: Number(lubeTotalsRow?.lube_cost || 0),
+      entries: Number(lubeTotalsRow?.entries || 0),
+      groups: Number(lubeGroupCountRow?.groups || 0),
+    };
     const criticalLowParts = db.prepare(`
       SELECT
         p.part_code,
@@ -9427,22 +9445,36 @@ export default async function reportsRoutes(app) {
     );
     const s7 = pptx.addSlide();
     s7.addText("6) Lubrication", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontSize: 22, bold: true });
+    s7.addText(
+      `Period ${period.start} to ${period.end}`,
+      { x: 0.45, y: 0.72, w: 12.3, h: 0.25, fontSize: 10, color: "555555" },
+    );
     s7.addTable(
       [
-        [{ text: "Date", options: { bold: true } }, { text: "Asset", options: { bold: true } }, { text: "Lube type", options: { bold: true } }, { text: "Issued part", options: { bold: true } }, { text: "Qty", options: { bold: true } }, { text: "Cost", options: { bold: true } }],
-        ...lubeByMachine.map((r) => [
-          String(r.log_date || "-"),
-          `${String(r.asset_code || "")} ${compactCell(r.asset_name || "", 16)}`,
-          compactCell(String(r.lube_type || "-"), 16),
-          compactCell(String(r.issue_part || "-"), 18),
-          Number(r.qty_total || 0).toFixed(1),
-          Number(r.lube_cost || 0).toFixed(2),
-        ]),
+        [{ text: "Dates", options: { bold: true } }, { text: "Asset", options: { bold: true } }, { text: "Lube type", options: { bold: true } }, { text: "Issued part", options: { bold: true } }, { text: "Logs", options: { bold: true } }, { text: "Qty", options: { bold: true } }, { text: "Cost", options: { bold: true } }],
+        ...(lubeByMachine.length
+          ? lubeByMachine.map((r) => {
+            const first = String(r.first_log_date || "").trim();
+            const last = String(r.last_log_date || "").trim();
+            return [
+              first && last && first !== last ? `${first} → ${last}` : (last || first || "-"),
+              `${String(r.asset_code || "")} ${compactCell(r.asset_name || "", 16)}`,
+              compactCell(String(r.lube_type || "-"), 16),
+              compactCell(String(r.issue_part || "-") || "-", 18),
+              String(Number(r.entries || 0)),
+              Number(r.qty_total || 0).toFixed(1),
+              Number(r.lube_cost || 0).toFixed(2),
+            ];
+          })
+          : [["-", "No lube issues in period", "-", "-", "-", "-", "-"]]),
       ],
-      { x: 0.45, y: 0.95, w: 12.3, h: 4.85, fontSize: 9.5, border: { pt: 1, color: "C8C8C8" } }
+      { x: 0.45, y: 1.05, w: 12.3, h: 4.75, fontSize: 9.5, border: { pt: 1, color: "C8C8C8" } }
     );
+    const lubeShownNote = lubePeriodTotals.groups > lubeByMachine.length
+      ? ` | Showing top ${lubeByMachine.length} of ${lubePeriodTotals.groups} asset/lube lines by cost`
+      : "";
     s7.addText(
-      `Period total usage: ${lubePeriodTotals.qty.toFixed(1)} qty | Lube cost: $${fmtNum(lubePeriodTotals.cost, 2)}`,
+      `Period total usage: ${lubePeriodTotals.qty.toFixed(1)} qty | Lube cost: $${fmtNum(lubePeriodTotals.cost, 2)} | Log lines: ${lubePeriodTotals.entries}${lubeShownNote}`,
       { x: 0.5, y: 5.95, w: 12.0, h: 0.35, fontSize: 12, bold: true },
     );
     const s8 = pptx.addSlide();
