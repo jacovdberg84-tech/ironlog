@@ -27,6 +27,7 @@ const PRODUCTION_SITE_TABS = [
   "vehicle",
   "stock",
   "reports",
+  "ironmind",
 ];
 const PRODUCTION_NAV_ENABLED = true;
 /** Dashboard cards hidden during production UI cleanup (remove class `hidden` in index.html to restore). */
