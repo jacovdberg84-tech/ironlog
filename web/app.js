@@ -876,6 +876,8 @@ function getEffectiveAllowedTabs() {
   if (PRODUCTION_NAV_ENABLED) {
     const production = new Set(PRODUCTION_SITE_TABS);
     list = list.filter((t) => production.has(t));
+    // IronMind stays reachable even for saved per-user tab lists created before it was restored.
+    if (!list.includes("ironmind")) list = [...list, "ironmind"];
   } else {
     // Keep task workspace reachable even when older saved tab overrides exist.
     if (!list.includes("tasks")) list = [...list, "tasks"];
