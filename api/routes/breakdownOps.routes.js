@@ -66,6 +66,11 @@ function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
 }
 
+function cleanDateOrNull(v) {
+  const s = String(v || "").trim();
+  return isDate(s) ? s : null;
+}
+
 function getSiteCode(req) {
   return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
 }
@@ -229,6 +234,28 @@ export default async function breakdownOpsRoutes(app) {
   `).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_ops_slip_site_date ON ops_slip_reports(site_code, report_date)`).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_ops_slip_type ON ops_slip_reports(slip_type)`).run();
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS breakdown_offsite_repairs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      site_code TEXT NOT NULL DEFAULT 'main',
+      asset_id INTEGER NOT NULL,
+      breakdown_id INTEGER,
+      repair_status TEXT NOT NULL DEFAULT 'sent_offsite',
+      sent_date TEXT NOT NULL,
+      expected_return_date TEXT,
+      actual_return_date TEXT,
+      vendor TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_by TEXT,
+      updated_by TEXT,
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE RESTRICT,
+      FOREIGN KEY (breakdown_id) REFERENCES breakdowns(id) ON DELETE SET NULL
+    )
+  `).run();
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_offsite_repairs_site_date ON breakdown_offsite_repairs(site_code, sent_date)`).run();
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_offsite_repairs_asset ON breakdown_offsite_repairs(asset_id)`).run();
 
   app.get("/parts/lookup", async (req, reply) => {
     const part_code = String(req.query?.part_code || req.query?.q || "").trim();
@@ -813,5 +840,132 @@ export default async function breakdownOpsRoutes(app) {
         `${download ? "attachment" : "inline"}; filename="ops-slip-${slipLabel}-${id}.pdf"`
       )
       .send(pdf);
+  });
+
+  app.get("/offsite-repairs", async (req, reply) => {
+    const site_code = getSiteCode(req);
+    const include_closed = String(req.query?.include_closed || "").trim() === "1";
+    const from = cleanDateOrNull(req.query?.from);
+    const to = cleanDateOrNull(req.query?.to);
+    const params = [site_code];
+    let where = "r.site_code = ?";
+    if (!include_closed) {
+      where += " AND UPPER(TRIM(COALESCE(r.repair_status, ''))) <> 'RETURNED'";
+    }
+    if (from) {
+      where += " AND r.sent_date >= ?";
+      params.push(from);
+    }
+    if (to) {
+      where += " AND r.sent_date <= ?";
+      params.push(to);
+    }
+    const rows = db.prepare(`
+      SELECT
+        r.id,
+        r.asset_id,
+        a.asset_code,
+        a.asset_name,
+        r.breakdown_id,
+        r.repair_status,
+        r.sent_date,
+        r.expected_return_date,
+        r.actual_return_date,
+        r.vendor,
+        r.notes,
+        r.created_at,
+        r.updated_at,
+        r.created_by,
+        r.updated_by
+      FROM breakdown_offsite_repairs r
+      JOIN assets a ON a.id = r.asset_id
+      WHERE ${where}
+      ORDER BY r.sent_date DESC, r.id DESC
+      LIMIT 300
+    `).all(...params);
+    return reply.send({ ok: true, rows });
+  });
+
+  app.post("/offsite-repairs", async (req, reply) => {
+    const site_code = getSiteCode(req);
+    const user = getUser(req);
+    const asset_code = String(req.body?.asset_code || "").trim();
+    if (!asset_code) return reply.code(400).send({ ok: false, error: "asset_code is required" });
+    const asset = db
+      .prepare(`SELECT id, asset_code FROM assets WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?)) LIMIT 1`)
+      .get(asset_code);
+    if (!asset) return reply.code(404).send({ ok: false, error: "Asset not found" });
+
+    const sent_date = cleanDateOrNull(req.body?.sent_date);
+    if (!sent_date) return reply.code(400).send({ ok: false, error: "sent_date must be YYYY-MM-DD" });
+    const expected_return_date = cleanDateOrNull(req.body?.expected_return_date);
+    const actual_return_date = cleanDateOrNull(req.body?.actual_return_date);
+    const repair_status = String(req.body?.repair_status || "sent_offsite").trim().toLowerCase();
+    const allowed = new Set(["sent_offsite", "diagnosis", "in_repair", "waiting_parts", "ready_return", "returned"]);
+    if (!allowed.has(repair_status)) return reply.code(400).send({ ok: false, error: "Invalid repair_status" });
+    const breakdown_id = Number(req.body?.breakdown_id || 0) || null;
+    const vendor = String(req.body?.vendor || "").trim() || null;
+    const notes = String(req.body?.notes || "").trim() || null;
+
+    const ins = db.prepare(`
+      INSERT INTO breakdown_offsite_repairs (
+        site_code, asset_id, breakdown_id, repair_status, sent_date, expected_return_date, actual_return_date,
+        vendor, notes, created_by, updated_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      site_code,
+      Number(asset.id),
+      breakdown_id,
+      repair_status,
+      sent_date,
+      expected_return_date,
+      actual_return_date,
+      vendor,
+      notes,
+      user,
+      user
+    );
+    return reply.send({ ok: true, id: Number(ins.lastInsertRowid) });
+  });
+
+  app.put("/offsite-repairs/:id", async (req, reply) => {
+    const id = Number(req.params?.id || 0);
+    if (!id) return reply.code(400).send({ ok: false, error: "Invalid id" });
+    const site_code = getSiteCode(req);
+    const user = getUser(req);
+    const row = db
+      .prepare(`SELECT id, site_code FROM breakdown_offsite_repairs WHERE id = ? AND site_code = ?`)
+      .get(id, site_code);
+    if (!row) return reply.code(404).send({ ok: false, error: "Not found" });
+
+    const sent_date = cleanDateOrNull(req.body?.sent_date);
+    if (!sent_date) return reply.code(400).send({ ok: false, error: "sent_date must be YYYY-MM-DD" });
+    const expected_return_date = cleanDateOrNull(req.body?.expected_return_date);
+    const actual_return_date = cleanDateOrNull(req.body?.actual_return_date);
+    const repair_status = String(req.body?.repair_status || "").trim().toLowerCase();
+    const allowed = new Set(["sent_offsite", "diagnosis", "in_repair", "waiting_parts", "ready_return", "returned"]);
+    if (!allowed.has(repair_status)) return reply.code(400).send({ ok: false, error: "Invalid repair_status" });
+    const breakdown_id = Number(req.body?.breakdown_id || 0) || null;
+    const vendor = String(req.body?.vendor || "").trim() || null;
+    const notes = String(req.body?.notes || "").trim() || null;
+
+    db.prepare(`
+      UPDATE breakdown_offsite_repairs
+      SET breakdown_id = ?, repair_status = ?, sent_date = ?, expected_return_date = ?, actual_return_date = ?,
+          vendor = ?, notes = ?, updated_at = datetime('now'), updated_by = ?
+      WHERE id = ? AND site_code = ?
+    `).run(
+      breakdown_id,
+      repair_status,
+      sent_date,
+      expected_return_date,
+      actual_return_date,
+      vendor,
+      notes,
+      user,
+      id,
+      site_code
+    );
+    return reply.send({ ok: true, id });
   });
 }

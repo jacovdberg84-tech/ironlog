@@ -368,6 +368,30 @@ CREATE TABLE IF NOT EXISTS ops_slip_reports (
 CREATE INDEX IF NOT EXISTS idx_ops_slip_site_date ON ops_slip_reports(site_code, report_date);
 CREATE INDEX IF NOT EXISTS idx_ops_slip_type ON ops_slip_reports(slip_type);
 
+/* ============================================================================
+   BREAKDOWN OPS — OFFSITE REPAIRS TRACKER
+   ============================================================================ */
+CREATE TABLE IF NOT EXISTS breakdown_offsite_repairs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  site_code TEXT NOT NULL DEFAULT 'main',
+  asset_id INTEGER NOT NULL,
+  breakdown_id INTEGER,
+  repair_status TEXT NOT NULL DEFAULT 'sent_offsite',
+  sent_date TEXT NOT NULL,                    -- YYYY-MM-DD
+  expected_return_date TEXT,                  -- YYYY-MM-DD
+  actual_return_date TEXT,                    -- YYYY-MM-DD
+  vendor TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_by TEXT,
+  updated_by TEXT,
+  FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE RESTRICT,
+  FOREIGN KEY (breakdown_id) REFERENCES breakdowns(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_offsite_repairs_site_date ON breakdown_offsite_repairs(site_code, sent_date);
+CREATE INDEX IF NOT EXISTS idx_offsite_repairs_asset ON breakdown_offsite_repairs(asset_id);
+
 /* =========================
    TASKS
    Simple task management for team collaboration

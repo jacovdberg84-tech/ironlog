@@ -226,6 +226,148 @@ function refreshBreakdownOpsPanels() {
   loadBreakdownOpsRecent().catch(() => {});
 }
 
+function fmtOffsiteStatusLabel(s) {
+  const map = {
+    sent_offsite: "Sent offsite",
+    diagnosis: "Diagnosis",
+    in_repair: "In repair",
+    waiting_parts: "Waiting parts",
+    ready_return: "Ready for return",
+    returned: "Returned",
+  };
+  const k = String(s || "").trim().toLowerCase();
+  return map[k] || k || "-";
+}
+
+function dayDiffLabel(startYmd, endYmd) {
+  const a = String(startYmd || "").trim();
+  const b = String(endYmd || "").trim();
+  if (!a || !b) return "—";
+  const t0 = Date.parse(`${a}T00:00:00Z`);
+  const t1 = Date.parse(`${b}T00:00:00Z`);
+  if (!Number.isFinite(t0) || !Number.isFinite(t1)) return "—";
+  const days = Math.round((t1 - t0) / 86400000);
+  return `${days} day${days === 1 ? "" : "s"}`;
+}
+
+function collectOffsitePayloadFromForm() {
+  return {
+    asset_code: String(qs("boOffsiteAsset")?.value || "").trim(),
+    breakdown_id: Number(qs("boOffsiteBreakdownId")?.value || 0) || null,
+    sent_date: String(qs("boOffsiteSentDate")?.value || "").trim(),
+    expected_return_date: String(qs("boOffsiteExpectedDate")?.value || "").trim() || null,
+    actual_return_date: String(qs("boOffsiteActualDate")?.value || "").trim() || null,
+    repair_status: String(qs("boOffsiteStatus")?.value || "sent_offsite").trim(),
+    vendor: String(qs("boOffsiteVendor")?.value || "").trim() || null,
+    notes: String(qs("boOffsiteNotes")?.value || "").trim() || null,
+  };
+}
+
+async function saveOffsiteRepair() {
+  const payload = collectOffsitePayloadFromForm();
+  if (!payload.asset_code || !payload.sent_date) {
+    alert("Asset code and sent date are required.");
+    return;
+  }
+  setStatus("Saving offsite repair...");
+  try {
+    const res = await fetchJson(`${API}/breakdown-ops/offsite-repairs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setText("boOffsiteResult", JSON.stringify(res, null, 2));
+    setStatus("Offsite repair saved.");
+    await loadOffsiteRepairs();
+  } catch (e) {
+    setText("boOffsiteResult", String(e.message || e));
+    setStatus("Offsite repair save failed.");
+  }
+}
+
+function renderOffsiteRow(r) {
+  const id = Number(r.id || 0);
+  const sent = String(r.sent_date || "").trim();
+  const expected = String(r.expected_return_date || "").trim();
+  const actual = String(r.actual_return_date || "").trim();
+  const anchor = actual || todayYmd();
+  const elapsed = dayDiffLabel(sent, anchor);
+  const expectedLead = expected ? dayDiffLabel(sent, expected) : "—";
+  return item(
+    `<div><b>#${id}</b> <span class="pill blue">${escapeHtml(r.asset_code || "-")}</span> ` +
+      `<span class="pill ${String(r.repair_status || "").toLowerCase() === "returned" ? "blue" : "orange"}">${escapeHtml(fmtOffsiteStatusLabel(r.repair_status))}</span></div>` +
+      `<small>Sent: ${escapeHtml(sent || "—")} | Expected: ${escapeHtml(expected || "—")} | Actual: ${escapeHtml(actual || "—")}</small><br/>` +
+      `<small>Elapsed: ${escapeHtml(elapsed)} | Planned timeframe: ${escapeHtml(expectedLead)}</small><br/>` +
+      `<small>Vendor: ${escapeHtml(r.vendor || "—")} | Breakdown: ${r.breakdown_id ? `#${Number(r.breakdown_id)}` : "—"}</small><br/>` +
+      `${r.notes ? `<small>${escapeHtml(r.notes)}</small><br/>` : ""}` +
+      `<div class="row stack-6" style="margin-top:6px;flex-wrap:wrap;">` +
+        `<select class="bo-offsite-status" data-id="${id}">` +
+          `<option value="sent_offsite"${String(r.repair_status) === "sent_offsite" ? " selected" : ""}>Sent offsite</option>` +
+          `<option value="diagnosis"${String(r.repair_status) === "diagnosis" ? " selected" : ""}>Diagnosis</option>` +
+          `<option value="in_repair"${String(r.repair_status) === "in_repair" ? " selected" : ""}>In repair</option>` +
+          `<option value="waiting_parts"${String(r.repair_status) === "waiting_parts" ? " selected" : ""}>Waiting parts</option>` +
+          `<option value="ready_return"${String(r.repair_status) === "ready_return" ? " selected" : ""}>Ready for return</option>` +
+          `<option value="returned"${String(r.repair_status) === "returned" ? " selected" : ""}>Returned</option>` +
+        `</select>` +
+        `<label class="chk">Expected <input class="bo-offsite-expected" data-id="${id}" type="date" value="${escapeHtml(expected)}" /></label>` +
+        `<label class="chk">Actual <input class="bo-offsite-actual" data-id="${id}" type="date" value="${escapeHtml(actual)}" /></label>` +
+        `<button type="button" class="bo-offsite-update" data-id="${id}" data-sent="${escapeHtml(sent)}" data-asset="${escapeHtml(r.asset_code || "")}" data-breakdown="${Number(r.breakdown_id || 0) || ""}" data-vendor="${escapeHtml(r.vendor || "")}" data-notes="${escapeHtml(r.notes || "")}">Update</button>` +
+      `</div>`
+  );
+}
+
+async function loadOffsiteRepairs() {
+  const list = qs("boOffsiteList");
+  if (!list) return;
+  const includeClosed = Boolean(qs("boOffsiteIncludeClosed")?.checked);
+  list.innerHTML = `<div class="muted">Loading…</div>`;
+  try {
+    const data = await fetchJson(`${API}/breakdown-ops/offsite-repairs${includeClosed ? "?include_closed=1" : ""}`);
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    list.innerHTML = "";
+    if (!rows.length) {
+      list.appendChild(item("<small>No offsite repairs tracked yet.</small>"));
+      return;
+    }
+    rows.forEach((r) => list.appendChild(renderOffsiteRow(r)));
+  } catch (e) {
+    list.innerHTML = "";
+    list.appendChild(item(`<span class="message-error">${escapeHtml(e.message || String(e))}</span>`));
+  }
+}
+
+async function updateOffsiteRepairFromRow(btn) {
+  const id = Number(btn?.getAttribute("data-id") || 0);
+  if (!id) return;
+  const statusEl = document.querySelector(`.bo-offsite-status[data-id="${id}"]`);
+  const expectedEl = document.querySelector(`.bo-offsite-expected[data-id="${id}"]`);
+  const actualEl = document.querySelector(`.bo-offsite-actual[data-id="${id}"]`);
+  const payload = {
+    asset_code: String(btn.getAttribute("data-asset") || "").trim(),
+    breakdown_id: Number(btn.getAttribute("data-breakdown") || 0) || null,
+    sent_date: String(btn.getAttribute("data-sent") || "").trim(),
+    expected_return_date: String(expectedEl?.value || "").trim() || null,
+    actual_return_date: String(actualEl?.value || "").trim() || null,
+    repair_status: String(statusEl?.value || "sent_offsite").trim(),
+    vendor: String(btn.getAttribute("data-vendor") || "").trim() || null,
+    notes: String(btn.getAttribute("data-notes") || "").trim() || null,
+  };
+  setStatus(`Updating offsite #${id}...`);
+  try {
+    const res = await fetchJson(`${API}/breakdown-ops/offsite-repairs/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setText("boOffsiteResult", JSON.stringify(res, null, 2));
+    setStatus(`Offsite #${id} updated.`);
+    await loadOffsiteRepairs();
+  } catch (e) {
+    setText("boOffsiteResult", String(e.message || e));
+    setStatus(`Offsite #${id} update failed.`);
+  }
+}
+
 function initBoTyreRows() {
   const tb = qs("boTyreTbody");
   if (!tb || tb.dataset.ready === "1") return;
@@ -752,7 +894,7 @@ async function issuePart() {
 
 function setDefaultDates() {
   const today = todayYmd();
-  ["boEnsureDate", "boSlipDate", "bDate", "sqDate"].forEach((id) => {
+  ["boEnsureDate", "boSlipDate", "bDate", "sqDate", "boOffsiteSentDate"].forEach((id) => {
     const el = qs(id);
     if (el && !el.value) el.value = today;
   });
@@ -784,6 +926,13 @@ function bindHandlers() {
     const b = ev.target?.closest?.(".bo-slip-pdf");
     if (b) openBoSlipPdf(b.getAttribute("data-id"));
   });
+  qs("boOffsiteSave")?.addEventListener("click", () => saveOffsiteRepair().catch((e) => setStatus(e.message || e)));
+  qs("boOffsiteRefresh")?.addEventListener("click", () => loadOffsiteRepairs().catch((e) => setStatus(e.message || e)));
+  qs("boOffsiteIncludeClosed")?.addEventListener("change", () => loadOffsiteRepairs().catch((e) => setStatus(e.message || e)));
+  qs("boOffsiteList")?.addEventListener("click", (ev) => {
+    const b = ev.target?.closest?.(".bo-offsite-update");
+    if (b) updateOffsiteRepairFromRow(b).catch((e) => setStatus(e.message || e));
+  });
   qs("makeBreakdown")?.addEventListener("click", () => createBreakdown().catch((e) => setStatus(e.message || e)));
   bindShortBreakdownPartsUi();
   qs("sqSubmit")?.addEventListener("click", () => submitShortBreakdown().catch((e) => setStatus(e.message || e)));
@@ -799,5 +948,6 @@ document.addEventListener("DOMContentLoaded", () => {
   loadCodePickers().then(() => {
     refreshBreakdownOpsPanels();
     loadBoSlipSavedList().catch(() => {});
+    loadOffsiteRepairs().catch(() => {});
   }).catch(() => {});
 });

@@ -50,6 +50,42 @@
       </div>
 
       <div class="card">
+        <div class="section-head-row">
+          <h4>Assets offsite for repairs</h4>
+          <button type="button" class="sectionToggleBtn" data-section-body="boOffsiteBody" data-storage-key="ironlog_section_bo_offsite">Hide</button>
+        </div>
+        <div id="boOffsiteBody" class="section-collapsible">
+          <p class="muted">Track assets sent away for repair, current repair status, and expected/actual return timeframe.</p>
+          <div class="row stack-10" style="flex-wrap:wrap;">
+            <input id="boOffsiteAsset" list="assetCodeOptions" class="w-200" placeholder="Asset code" />
+            <input id="boOffsiteBreakdownId" class="w-140" type="number" min="1" step="1" placeholder="Breakdown ID (optional)" />
+            <label class="chk">Sent date <input id="boOffsiteSentDate" type="date" /></label>
+            <label class="chk">Expected return <input id="boOffsiteExpectedDate" type="date" /></label>
+            <label class="chk">Actual return <input id="boOffsiteActualDate" type="date" /></label>
+          </div>
+          <div class="row stack-10" style="flex-wrap:wrap;">
+            <label>Status
+              <select id="boOffsiteStatus" class="w-180">
+                <option value="sent_offsite">Sent offsite</option>
+                <option value="diagnosis">Diagnosis</option>
+                <option value="in_repair">In repair</option>
+                <option value="waiting_parts">Waiting parts</option>
+                <option value="ready_return">Ready for return</option>
+                <option value="returned">Returned</option>
+              </select>
+            </label>
+            <input id="boOffsiteVendor" class="w-220" placeholder="Vendor / workshop (optional)" />
+            <input id="boOffsiteNotes" class="minw-260" style="flex:1;" placeholder="Notes / scope of repair (optional)" />
+            <button type="button" id="boOffsiteSave">Add offsite repair</button>
+            <label class="chk">Show returned <input id="boOffsiteIncludeClosed" type="checkbox" /></label>
+            <button type="button" id="boOffsiteRefresh">Refresh</button>
+          </div>
+          <div class="list" id="boOffsiteList"></div>
+          <pre class="output" id="boOffsiteResult"></pre>
+        </div>
+      </div>
+
+      <div class="card">
         <h4>Get or create open breakdown</h4>
         <p class="muted">If the asset already has an open incident, returns it; otherwise creates breakdown + primary WO (same as Daily Input).</p>
         <div class="row">
@@ -259,6 +295,6 @@
   <datalist id="assetCodeOptions"></datalist>
   <datalist id="partCodeOptions"></datalist>
 
-  <script src="./breakdown-ops.js?v=1"></script>
+  <script src="./breakdown-ops.js?v=2"></script>
 </body>
 </html>
