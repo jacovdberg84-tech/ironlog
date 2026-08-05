@@ -10294,6 +10294,31 @@ export default async function reportsRoutes(app) {
     const opsDay = prevDay;
     const dailyShortBreakdowns = listShortBreakdownsForDate(db, opsDay).slice(0, 40);
     const dailyPlannedMaintenance = listPlannedMaintenanceForDate(db, date).slice(0, 40);
+    const offsiteRepairsPdf = hasTable("breakdown_offsite_repairs")
+      ? db.prepare(`
+          SELECT
+            r.id,
+            a.asset_code,
+            a.asset_name,
+            r.repair_status,
+            r.sent_date,
+            r.expected_return_date,
+            r.actual_return_date,
+            r.vendor,
+            r.notes
+          FROM breakdown_offsite_repairs r
+          JOIN assets a ON a.id = r.asset_id
+          WHERE r.site_code = ?
+            AND r.sent_date <= ?
+            AND (
+              r.actual_return_date IS NULL
+              OR TRIM(COALESCE(r.actual_return_date, '')) = ''
+              OR r.actual_return_date >= ?
+            )
+          ORDER BY r.sent_date ASC, r.id ASC
+          LIMIT 40
+        `).all(getSiteCode(req), date, date)
+      : [];
 
     // Per-asset downtime for availability (same day as short breakdowns / fuel).
     const downtimeByAssetId = new Map();
@@ -10502,6 +10527,66 @@ export default async function reportsRoutes(app) {
               { key: "desc", label: "Description", width: 0.27 },
             ],
             dailyBdPmRows,
+          );
+        }
+
+        if (offsiteRepairsPdf.length) {
+          const statusLabel = (s) => {
+            const k = String(s || "").trim().toLowerCase();
+            if (k === "sent_offsite") return "Sent offsite";
+            if (k === "in_repair") return "In repair";
+            if (k === "waiting_parts") return "Waiting parts";
+            if (k === "ready_return") return "Ready return";
+            if (k === "returned") return "Returned";
+            if (k === "diagnosis") return "Diagnosis";
+            return k || "—";
+          };
+          const daysBetweenYmd = (from, to) => {
+            const a = String(from || "").trim();
+            const b = String(to || "").trim();
+            if (!a || !b) return null;
+            const t0 = Date.parse(`${a}T00:00:00Z`);
+            const t1 = Date.parse(`${b}T00:00:00Z`);
+            if (!Number.isFinite(t0) || !Number.isFinite(t1)) return null;
+            return Math.round((t1 - t0) / 86400000);
+          };
+          sectionTitle(doc, "Assets offsite for repairs");
+          table(
+            doc,
+            [
+              { key: "asset", label: "Plant #", width: 0.10 },
+              { key: "equipment", label: "Equipment", width: 0.18 },
+              { key: "status", label: "Repair status", width: 0.14 },
+              { key: "sent", label: "Sent", width: 0.10 },
+              { key: "expected", label: "Expected", width: 0.10 },
+              { key: "actual", label: "Actual", width: 0.10 },
+              { key: "elapsed", label: "Elapsed days", width: 0.10, align: "right" },
+              { key: "timeframe", label: "Planned days", width: 0.09, align: "right" },
+              { key: "notes", label: "Vendor / notes", width: 0.19 },
+            ],
+            offsiteRepairsPdf.map((r) => {
+              const sent = String(r.sent_date || "").trim();
+              const expected = String(r.expected_return_date || "").trim();
+              const actual = String(r.actual_return_date || "").trim();
+              const elapsed = daysBetweenYmd(sent, actual || date);
+              const planned = daysBetweenYmd(sent, expected);
+              return {
+                asset: r.asset_code,
+                equipment: compactCell(r.asset_name ?? "", 48),
+                status: statusLabel(r.repair_status),
+                sent: sent || "—",
+                expected: expected || "—",
+                actual: actual || "—",
+                elapsed: elapsed == null ? "—" : String(elapsed),
+                timeframe: planned == null ? "—" : String(planned),
+                notes: compactCell(
+                  [r.vendor ? String(r.vendor).trim() : "", r.notes ? String(r.notes).trim() : ""]
+                    .filter(Boolean)
+                    .join(" | "),
+                  120
+                ),
+              };
+            })
           );
         }
 
