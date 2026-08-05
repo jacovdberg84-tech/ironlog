@@ -54,6 +54,16 @@ function toSqliteWallDatetime(s) {
 }
 
 export default async function breakdownRoutes(app) {
+  const tryAddColumn = (sql) => {
+    try {
+      db.prepare(sql).run();
+    } catch {}
+  };
+  tryAddColumn(`ALTER TABLE breakdowns ADD COLUMN parts_ordered_date TEXT`);
+  tryAddColumn(`ALTER TABLE breakdowns ADD COLUMN parts_status TEXT`);
+  tryAddColumn(`ALTER TABLE breakdowns ADD COLUMN parts_received_date TEXT`);
+  tryAddColumn(`ALTER TABLE breakdowns ADD COLUMN ets_repair_date TEXT`);
+
   /* =====================================================
      PREPARED STATEMENTS
   ===================================================== */
@@ -85,7 +95,15 @@ export default async function breakdownRoutes(app) {
   `);
 
   const getOpenBreakdownByAssetId = db.prepare(`
-    SELECT b.id, b.primary_work_order_id, b.breakdown_date, b.start_at
+    SELECT
+      b.id,
+      b.primary_work_order_id,
+      b.breakdown_date,
+      b.start_at,
+      b.parts_ordered_date,
+      b.parts_status,
+      b.parts_received_date,
+      b.ets_repair_date
     FROM breakdowns b
     WHERE b.asset_id = ?
       AND b.status = 'OPEN'
@@ -101,6 +119,10 @@ export default async function breakdownRoutes(app) {
       b.breakdown_date,
       b.start_at,
       b.description,
+      b.parts_ordered_date,
+      b.parts_status,
+      b.parts_received_date,
+      b.ets_repair_date,
       b.primary_work_order_id,
       wo.status AS primary_work_order_status
     FROM breakdowns b
@@ -119,6 +141,10 @@ export default async function breakdownRoutes(app) {
       b.breakdown_date,
       b.start_at,
       b.description,
+      b.parts_ordered_date,
+      b.parts_status,
+      b.parts_received_date,
+      b.ets_repair_date,
       b.primary_work_order_id,
       wo.status AS primary_work_order_status,
       COALESCE((
@@ -152,11 +178,15 @@ export default async function breakdownRoutes(app) {
       critical,
       downtime_total_hours,
       primary_work_order_id,
+      parts_ordered_date,
+      parts_status,
+      parts_received_date,
+      ets_repair_date,
       get_used,
       get_hours_fitted,
       get_hours_changed
     )
-    VALUES (?, ?, 'OPEN', datetime('now'), ?, ?, ?, 0, NULL, ?, ?, ?)
+    VALUES (?, ?, 'OPEN', datetime('now'), ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertWorkOrder = db.prepare(`
@@ -190,11 +220,25 @@ export default async function breakdownRoutes(app) {
       critical,
       downtime_total_hours,
       primary_work_order_id,
+      parts_ordered_date,
+      parts_status,
+      parts_received_date,
+      ets_repair_date,
       get_used,
       get_hours_fitted,
       get_hours_changed
     )
-    VALUES (?, ?, 'CLOSED', ?, ?, ?, ?, ?, 0, NULL, 0, NULL, NULL)
+    VALUES (?, ?, 'CLOSED', ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL)
+  `);
+
+  const updateBreakdownRepairTracking = db.prepare(`
+    UPDATE breakdowns
+    SET
+      parts_ordered_date = COALESCE(?, parts_ordered_date),
+      parts_status = COALESCE(?, parts_status),
+      parts_received_date = COALESCE(?, parts_received_date),
+      ets_repair_date = COALESCE(?, ets_repair_date)
+    WHERE id = ?
   `);
 
   const closeWorkOrderQuick = db.prepare(`
@@ -331,6 +375,31 @@ export default async function breakdownRoutes(app) {
     };
   }
 
+  function normalizeOptionalDate(v, field, reply) {
+    const s = String(v || "").trim();
+    if (!s) return null;
+    if (!isDate(s)) {
+      reply.code(400).send({ error: `${field} must be YYYY-MM-DD when provided` });
+      return undefined;
+    }
+    return s;
+  }
+
+  function validateRepairTrackingFields(body, reply) {
+    const parts_ordered_date = normalizeOptionalDate(body?.parts_ordered_date, "parts_ordered_date", reply);
+    if (parts_ordered_date === undefined) return null;
+    const parts_received_date = normalizeOptionalDate(body?.parts_received_date, "parts_received_date", reply);
+    if (parts_received_date === undefined) return null;
+    const ets_repair_date = normalizeOptionalDate(body?.ets_repair_date, "ets_repair_date", reply);
+    if (ets_repair_date === undefined) return null;
+    return {
+      parts_ordered_date,
+      parts_status: String(body?.parts_status || "").trim() || null,
+      parts_received_date,
+      ets_repair_date,
+    };
+  }
+
   /* =====================================================
      ROUTES
      Base assumed: /api/breakdowns
@@ -418,6 +487,10 @@ export default async function breakdownRoutes(app) {
       ...b,
       critical: Boolean(b.critical),
       downtime_total_hours: Number(b.downtime_total_hours || 0),
+      parts_ordered_date: b.parts_ordered_date ? String(b.parts_ordered_date) : null,
+      parts_status: b.parts_status ? String(b.parts_status) : null,
+      parts_received_date: b.parts_received_date ? String(b.parts_received_date) : null,
+      ets_repair_date: b.ets_repair_date ? String(b.ets_repair_date) : null,
       get_used: Boolean(b.get_used),
       get_hours_fitted: b.get_hours_fitted == null ? null : Number(b.get_hours_fitted),
       get_hours_changed: b.get_hours_changed == null ? null : Number(b.get_hours_changed),
@@ -451,6 +524,8 @@ export default async function breakdownRoutes(app) {
     // GET validation (optional input)
     const getPack = validateGetFields(body, reply);
     if (!getPack) return;
+    const repairPack = validateRepairTrackingFields(body, reply);
+    if (!repairPack) return;
 
     const asset = getAssetByCode.get(asset_code);
     if (!asset) return reply.code(404).send({ error: "Asset not found" });
@@ -464,6 +539,13 @@ export default async function breakdownRoutes(app) {
           Number(existing.id)
         );
       }
+      updateBreakdownRepairTracking.run(
+        repairPack.parts_ordered_date,
+        repairPack.parts_status,
+        repairPack.parts_received_date,
+        repairPack.ets_repair_date,
+        Number(existing.id)
+      );
       return reply.send({
         ok: true,
         breakdown_id: existing.id,
@@ -479,6 +561,10 @@ export default async function breakdownRoutes(app) {
         description,
         component,
         critical,
+        repairPack.parts_ordered_date,
+        repairPack.parts_status,
+        repairPack.parts_received_date,
+        repairPack.ets_repair_date,
         getPack.get_used,
         getPack.get_hours_fitted,
         getPack.get_hours_changed
@@ -534,6 +620,8 @@ export default async function breakdownRoutes(app) {
     // GET validation (required if get_used true)
     const getPack = validateGetFields(body, reply);
     if (!getPack) return;
+    const repairPack = validateRepairTrackingFields(body, reply);
+    if (!repairPack) return;
 
     const asset = getAssetByCode.get(asset_code);
     if (!asset) return reply.code(404).send({ error: "Asset not found" });
@@ -545,6 +633,10 @@ export default async function breakdownRoutes(app) {
         description,
         component,
         critical,
+        repairPack.parts_ordered_date,
+        repairPack.parts_status,
+        repairPack.parts_received_date,
+        repairPack.ets_repair_date,
         getPack.get_used,
         getPack.get_hours_fitted,
         getPack.get_hours_changed

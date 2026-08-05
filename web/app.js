@@ -11263,13 +11263,17 @@ async function closeBreakdownFromOps(breakdownId) {
 }
 
 async function createBreakdown() {
-  const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
+  const date = (qs("bDate")?.value || qs("date")?.value || new Date().toISOString().slice(0, 10)).trim();
   const payload = {
     asset_code: (qs("bAsset")?.value || "").trim(),
     breakdown_date: date,
     description: (qs("bDesc")?.value || "").trim(),
     downtime_hours: Number(qs("bDown")?.value || 0),
     critical: !!qs("bCrit")?.checked,
+    parts_ordered_date: String(qs("bPartsOrderedDate")?.value || "").trim() || null,
+    parts_status: String(qs("bPartsStatus")?.value || "").trim() || null,
+    parts_received_date: String(qs("bPartsReceivedDate")?.value || "").trim() || null,
+    ets_repair_date: String(qs("bEtsRepairDate")?.value || "").trim() || null,
   };
 
   setStatus("Creating breakdown...");
@@ -14330,6 +14334,10 @@ async function logDownRowToBreakdowns(date, r) {
         start_date: String(r.breakdown_start_date || "").trim() || date,
         description: downDesc,
         critical: false,
+        parts_ordered_date: String(r.parts_ordered_date || "").trim() || null,
+        parts_status: String(r.parts_status || "").trim() || null,
+        parts_received_date: String(r.parts_received_date || "").trim() || null,
+        ets_repair_date: String(r.ets_repair_date || "").trim() || null,
       }),
     });
 
@@ -14495,15 +14503,39 @@ function renderDailyTable() {
             <input type="number" step="0.5" min="0" max="24" value="${fmt(r.down_hours != null ? r.down_hours : Number(r.scheduled_hours || 0))}" class="daily-input" placeholder="0" />
           </div>
           <div class="down-field">
-            <label>Started</label>
-            <input type="date" value="${startYmd}" class="daily-input" />
+            <label>Date down</label>
+            <input type="date" value="${startYmd}" class="daily-input" data-down-field="start" />
+          </div>
+          <div class="down-field">
+            <label>Date parts ordered</label>
+            <input type="date" value="${String(r.parts_ordered_date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || ""}" class="daily-input" data-down-field="parts_ordered" />
+          </div>
+          <div class="down-field">
+            <label>Status of parts</label>
+            <select class="daily-select" data-down-field="parts_status">
+              <option value="">—</option>
+              <option value="Not ordered" ${r.parts_status === "Not ordered" ? "selected" : ""}>Not ordered</option>
+              <option value="Ordered" ${r.parts_status === "Ordered" ? "selected" : ""}>Ordered</option>
+              <option value="In transit" ${r.parts_status === "In transit" ? "selected" : ""}>In transit</option>
+              <option value="Partial" ${r.parts_status === "Partial" ? "selected" : ""}>Partial</option>
+              <option value="Received" ${r.parts_status === "Received" ? "selected" : ""}>Received</option>
+              <option value="Waiting OEM" ${r.parts_status === "Waiting OEM" ? "selected" : ""}>Waiting OEM</option>
+            </select>
+          </div>
+          <div class="down-field">
+            <label>Received date</label>
+            <input type="date" value="${String(r.parts_received_date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || ""}" class="daily-input" data-down-field="parts_received" />
+          </div>
+          <div class="down-field">
+            <label>ETS Repair</label>
+            <input type="date" value="${String(r.ets_repair_date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || ""}" class="daily-input" data-down-field="ets_repair" />
           </div>
           <div class="down-field full">
             <label>Comment</label>
-            <input type="text" value="${r.breakdown_comment || ''}" class="daily-input" placeholder="Breakdown comment..." />
+            <input type="text" value="${r.breakdown_comment || ''}" class="daily-input" placeholder="Breakdown comment..." data-down-field="comment" />
           </div>
         </div>
-        ${startYmd ? `<div class="down-meta">Started: ${startYmd}${calcDaysDown != null ? ` | Days down: ${calcDaysDown}` : ""}</div>` : ""}
+        ${startYmd ? `<div class="down-meta">Date down: ${startYmd}${calcDaysDown != null ? ` | Total days down: ${calcDaysDown}` : ""}</div>` : ""}
         ${r.is_down && r.down_lock ? `<div class="down-lock-notice">Locked until WO is repaired (${r.lock_wo_status || "-"})</div>` : ""}
       `;
       contentGrid.appendChild(downDetails);
@@ -14539,16 +14571,25 @@ function renderDailyTable() {
             r.closing_hours = toNum(input.value);
           }
         } else if (type === "date") {
-          if (input.previousElementSibling?.textContent === "Started") {
+          const downField = String(input.getAttribute("data-down-field") || "").trim();
+          if (downField === "start" || input.previousElementSibling?.textContent === "Date down" || input.previousElementSibling?.textContent === "Started") {
             r.breakdown_start_date = String(input.value || "").trim();
+          } else if (downField === "parts_ordered") {
+            r.parts_ordered_date = String(input.value || "").trim();
+          } else if (downField === "parts_received") {
+            r.parts_received_date = String(input.value || "").trim();
+          } else if (downField === "ets_repair") {
+            r.ets_repair_date = String(input.value || "").trim();
           }
         } else if (type === "text") {
-          if (input.previousElementSibling?.textContent === "Comment") {
+          if (input.getAttribute("data-down-field") === "comment" || input.previousElementSibling?.textContent === "Comment") {
             r.breakdown_comment = String(input.value || "").trim();
           }
         } else if (input.tagName === "SELECT") {
           if (cls.includes("daily-select") && !cls.includes("disabled")) {
-            if (input.closest(".down-field")) {
+            if (input.getAttribute("data-down-field") === "parts_status") {
+              r.parts_status = String(input.value || "").trim();
+            } else if (input.closest(".down-field")) {
               r.down_reason = String(input.value || "");
             } else if (input.value === "hours" || input.value === "km") {
               r.input_unit = input.value;
@@ -14585,6 +14626,10 @@ function renderDailyTable() {
         r.down_hours = null;
         r.breakdown_comment = "";
         r.breakdown_start_date = "";
+        r.parts_ordered_date = "";
+        r.parts_status = "";
+        r.parts_received_date = "";
+        r.ets_repair_date = "";
       }
       validateDailyRows();
       renderDailyTable();
@@ -14722,6 +14767,10 @@ async function loadDailyInput() {
       down_lock: false,
       breakdown_start_date: "",
       breakdown_comment: ex?.notes ? String(ex.notes) : "",
+      parts_ordered_date: "",
+      parts_status: "",
+      parts_received_date: "",
+      ets_repair_date: "",
 
       error: null,
       warning: null,
@@ -14803,6 +14852,10 @@ async function loadDailyInput() {
       row.down_reason = parseDownReasonFromDesc(bd.description);
       row.lock_wo_status = bd.primary_work_order_status || "";
       row.breakdown_start_date = String(bd.start_at || bd.breakdown_date || "").trim();
+      row.parts_ordered_date = String(bd.parts_ordered_date || "").trim();
+      row.parts_status = String(bd.parts_status || "").trim();
+      row.parts_received_date = String(bd.parts_received_date || "").trim();
+      row.ets_repair_date = String(bd.ets_repair_date || "").trim();
       const downForDate = Number(bd.hours_down_for_date);
       row.down_hours = Number.isFinite(downForDate) && downForDate >= 0
         ? downForDate

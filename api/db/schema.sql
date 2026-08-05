@@ -110,6 +110,12 @@ CREATE TABLE IF NOT EXISTS breakdowns (
   -- Primary WO link (ONE per incident by default)
   primary_work_order_id INTEGER,
 
+  -- Repair / parts tracking
+  parts_ordered_date TEXT,                  -- YYYY-MM-DD
+  parts_status TEXT,                        -- free text / short status
+  parts_received_date TEXT,                 -- YYYY-MM-DD
+  ets_repair_date TEXT,                     -- YYYY-MM-DD estimated repair completion / return
+
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
 
   FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE RESTRICT,

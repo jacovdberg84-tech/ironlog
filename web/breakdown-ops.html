@@ -212,15 +212,31 @@
           <button type="button" class="sectionToggleBtn" data-section-body="boCreateBody" data-storage-key="ironlog_section_bo_create">Hide</button>
         </div>
         <div id="boCreateBody" class="section-collapsible">
-        <div class="row">
+        <div class="row" style="flex-wrap:wrap;">
           <input id="bAsset" list="assetCodeOptions" placeholder="Asset code (e.g. A300AM)" />
           <input id="bDesc" class="minw-260" placeholder="Description" />
-          <label class="chk">Date <input id="bDate" type="date" /></label>
-          <input id="bDown" class="w-110" type="number" step="0.5" min="0" max="24" value="0" />
+          <label class="chk">Date down <input id="bDate" type="date" /></label>
+          <input id="bDown" class="w-110" type="number" step="0.5" min="0" max="24" value="0" title="Hours down (optional)" placeholder="Hrs down" />
           <label class="chk">
             <input id="bCrit" type="checkbox" />
             Critical
           </label>
+        </div>
+        <div class="row" style="flex-wrap:wrap; margin-top:8px;">
+          <label class="chk">Date parts ordered <input id="bPartsOrderedDate" type="date" /></label>
+          <label>Status of parts
+            <select id="bPartsStatus" class="w-180">
+              <option value="">—</option>
+              <option value="Not ordered">Not ordered</option>
+              <option value="Ordered">Ordered</option>
+              <option value="In transit">In transit</option>
+              <option value="Partial">Partial</option>
+              <option value="Received">Received</option>
+              <option value="Waiting OEM">Waiting OEM</option>
+            </select>
+          </label>
+          <label class="chk">Received date <input id="bPartsReceivedDate" type="date" /></label>
+          <label class="chk">ETS Repair <input id="bEtsRepairDate" type="date" /></label>
           <button type="button" id="makeBreakdown">Create</button>
         </div>
         <pre class="output" id="breakdownResult"></pre>
@@ -295,6 +311,6 @@
   <datalist id="assetCodeOptions"></datalist>
   <datalist id="partCodeOptions"></datalist>
 
-  <script src="./breakdown-ops.js?v=2"></script>
+  <script src="./breakdown-ops.js?v=3"></script>
 </body>
 </html>

@@ -10107,6 +10107,10 @@ export default async function reportsRoutes(app) {
     const breakdownDateExpr = hasBreakdownStartAt ? "DATE(COALESCE(b.breakdown_date, b.start_at))" : "DATE(b.breakdown_date)";
     const breakdownStatusExpr = hasBreakdownStatus ? "TRIM(LOWER(COALESCE(b.status, '')))" : "''";
     const breakdownStartAtSelect = hasBreakdownStartAt ? "b.start_at" : "NULL AS start_at";
+    const hasPartsOrderedDate = hasColumn("breakdowns", "parts_ordered_date");
+    const hasPartsStatus = hasColumn("breakdowns", "parts_status");
+    const hasPartsReceivedDate = hasColumn("breakdowns", "parts_received_date");
+    const hasEtsRepairDate = hasColumn("breakdowns", "ets_repair_date");
     const breakdownParams = [date, date, date];
     if (hasBreakdownEndAt) breakdownParams.push(date);
     const breakdowns = db.prepare(`
@@ -10115,6 +10119,10 @@ export default async function reportsRoutes(app) {
         a.asset_code,
         a.asset_name,
         b.description,
+        ${hasPartsOrderedDate ? "b.parts_ordered_date" : "NULL AS parts_ordered_date"},
+        ${hasPartsStatus ? "b.parts_status" : "NULL AS parts_status"},
+        ${hasPartsReceivedDate ? "b.parts_received_date" : "NULL AS parts_received_date"},
+        ${hasEtsRepairDate ? "b.ets_repair_date" : "NULL AS ets_repair_date"},
         dh.notes AS daily_breakdown_comment,
         COALESCE(b.${breakdownDowntimeCol}, 0) AS downtime_hours,
         b.critical,
@@ -10594,23 +10602,31 @@ export default async function reportsRoutes(app) {
         table(
           doc,
           [
-            { key: "asset", label: "Plant #", width: 0.10 },
-            { key: "equipment", label: "Equipment", width: 0.18 },
-            { key: "days", label: "Days down", width: 0.10, align: "right" },
-            { key: "hrs", label: "Downtime (hrs)", width: 0.10, align: "right" },
-            { key: "crit", label: "Critical", width: 0.08, align: "center" },
-            { key: "desc", label: "Description", width: 0.26 },
-            { key: "comment", label: "Breakdown comment", width: 0.18 },
+            { key: "asset", label: "Plant #", width: 0.09 },
+            { key: "equipment", label: "Equipment", width: 0.15 },
+            { key: "date_down", label: "Date down", width: 0.11 },
+            { key: "days", label: "Total days down", width: 0.10, align: "right" },
+            { key: "parts_ordered", label: "Date parts ordered", width: 0.12 },
+            { key: "parts_status", label: "Status of parts", width: 0.12 },
+            { key: "received", label: "Received date", width: 0.11 },
+            { key: "ets", label: "ETS Repair", width: 0.10 },
+            { key: "desc", label: "Description", width: 0.10 },
           ],
-          breakdownsPdf.map(r => ({
-            asset: r.asset_code,
-            equipment: compactCell(r.asset_name ?? "", 48),
-            days: fmtNum(r.days_down || 0, 0),
-            hrs: fmtNum(r.downtime_hours, 1),
-            crit: r.critical ? "YES" : "NO",
-            desc: compactCell(r.description ?? "", 180),
-            comment: compactCell(r.daily_breakdown_comment ?? "", 260),
-          }))
+          breakdownsPdf.map((r) => {
+            const dateDownRaw = String(r.start_at || r.breakdown_date || "").trim();
+            const dateDown = dateDownRaw.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || dateDownRaw || "—";
+            return {
+              asset: r.asset_code,
+              equipment: compactCell(r.asset_name ?? "", 40),
+              date_down: dateDown,
+              days: fmtNum(r.days_down || 0, 0),
+              parts_ordered: r.parts_ordered_date || "—",
+              parts_status: compactCell(r.parts_status ?? "", 36) || "—",
+              received: r.parts_received_date || "—",
+              ets: r.ets_repair_date || "—",
+              desc: compactCell(r.description ?? "", 70),
+            };
+          })
         );
 
         sectionTitle(doc, "Open Work Orders");

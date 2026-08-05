@@ -761,6 +761,10 @@ async function createBreakdown() {
     description: (qs("bDesc")?.value || "").trim(),
     downtime_hours: Number(qs("bDown")?.value || 0),
     critical: !!qs("bCrit")?.checked,
+    parts_ordered_date: String(qs("bPartsOrderedDate")?.value || "").trim() || null,
+    parts_status: String(qs("bPartsStatus")?.value || "").trim() || null,
+    parts_received_date: String(qs("bPartsReceivedDate")?.value || "").trim() || null,
+    ets_repair_date: String(qs("bEtsRepairDate")?.value || "").trim() || null,
   };
   setStatus("Creating breakdown...");
   try {
