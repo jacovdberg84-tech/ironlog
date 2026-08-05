@@ -10608,8 +10608,12 @@ async function loadRainDays(opts = {}) {
 function openDailyPdf() {
   const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
   const scheduled = qs("scheduled")?.value || 10;
+  const site = encodeURIComponent(getSessionSite());
   const ts = Date.now();
-  window.open(`${API}/api/reports/daily.pdf?date=${date}&scheduled=${scheduled}&_ts=${ts}`, "_blank");
+  window.open(
+    `${API}/api/reports/daily.pdf?date=${encodeURIComponent(date)}&scheduled=${encodeURIComponent(scheduled)}&site_code=${site}&_ts=${ts}`,
+    "_blank"
+  );
 }
 
 function openWeeklyPdf() {

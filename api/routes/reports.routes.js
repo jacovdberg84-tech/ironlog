@@ -10304,6 +10304,11 @@ export default async function reportsRoutes(app) {
     const opsDay = prevDay;
     const dailyShortBreakdowns = listShortBreakdownsForDate(db, opsDay).slice(0, 40);
     const dailyPlannedMaintenance = listPlannedMaintenanceForDate(db, date).slice(0, 40);
+    const offsiteSiteRaw = String(req.query?.site_code || getSiteCode(req) || "main").trim().toLowerCase() || "main";
+    const offsiteSiteAliases =
+      offsiteSiteRaw === "main" || offsiteSiteRaw === "default"
+        ? ["main", "default"]
+        : [offsiteSiteRaw];
     const offsiteRepairsPdf = hasTable("breakdown_offsite_repairs")
       ? db.prepare(`
           SELECT
@@ -10318,7 +10323,7 @@ export default async function reportsRoutes(app) {
             r.notes
           FROM breakdown_offsite_repairs r
           JOIN assets a ON a.id = r.asset_id
-          WHERE r.site_code = ?
+          WHERE LOWER(TRIM(COALESCE(r.site_code, 'main'))) IN (${offsiteSiteAliases.map(() => "?").join(", ")})
             AND r.sent_date <= ?
             AND (
               r.actual_return_date IS NULL
@@ -10327,7 +10332,7 @@ export default async function reportsRoutes(app) {
             )
           ORDER BY r.sent_date ASC, r.id ASC
           LIMIT 40
-        `).all(getSiteCode(req), date, date)
+        `).all(...offsiteSiteAliases, date, date)
       : [];
 
     // Per-asset downtime for availability (same day as short breakdowns / fuel).
@@ -10540,7 +10545,7 @@ export default async function reportsRoutes(app) {
           );
         }
 
-        if (offsiteRepairsPdf.length) {
+        {
           const statusLabel = (s) => {
             const k = String(s || "").trim().toLowerCase();
             if (k === "sent_offsite") return "Sent offsite";
@@ -10561,43 +10566,51 @@ export default async function reportsRoutes(app) {
             return Math.round((t1 - t0) / 86400000);
           };
           sectionTitle(doc, "Assets offsite for repairs");
-          table(
-            doc,
-            [
-              { key: "asset", label: "Plant #", width: 0.10 },
-              { key: "equipment", label: "Equipment", width: 0.18 },
-              { key: "status", label: "Repair status", width: 0.14 },
-              { key: "sent", label: "Sent", width: 0.10 },
-              { key: "expected", label: "Expected", width: 0.10 },
-              { key: "actual", label: "Actual", width: 0.10 },
-              { key: "elapsed", label: "Elapsed days", width: 0.10, align: "right" },
-              { key: "timeframe", label: "Planned days", width: 0.09, align: "right" },
-              { key: "notes", label: "Vendor / notes", width: 0.19 },
-            ],
-            offsiteRepairsPdf.map((r) => {
-              const sent = String(r.sent_date || "").trim();
-              const expected = String(r.expected_return_date || "").trim();
-              const actual = String(r.actual_return_date || "").trim();
-              const elapsed = daysBetweenYmd(sent, actual || date);
-              const planned = daysBetweenYmd(sent, expected);
-              return {
-                asset: r.asset_code,
-                equipment: compactCell(r.asset_name ?? "", 48),
-                status: statusLabel(r.repair_status),
-                sent: sent || "—",
-                expected: expected || "—",
-                actual: actual || "—",
-                elapsed: elapsed == null ? "—" : String(elapsed),
-                timeframe: planned == null ? "—" : String(planned),
-                notes: compactCell(
-                  [r.vendor ? String(r.vendor).trim() : "", r.notes ? String(r.notes).trim() : ""]
-                    .filter(Boolean)
-                    .join(" | "),
-                  120
-                ),
-              };
-            })
-          );
+          if (!offsiteRepairsPdf.length) {
+            doc.font("Helvetica").fontSize(10).fillColor("#555555")
+              .text("No assets currently tracked as offsite for repairs.", doc.page.margins.left, doc.y, {
+                width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+              });
+            doc.moveDown(0.6);
+          } else {
+            table(
+              doc,
+              [
+                { key: "asset", label: "Plant #", width: 0.10 },
+                { key: "equipment", label: "Equipment", width: 0.18 },
+                { key: "status", label: "Repair status", width: 0.14 },
+                { key: "sent", label: "Sent", width: 0.10 },
+                { key: "expected", label: "Expected", width: 0.10 },
+                { key: "actual", label: "Actual", width: 0.10 },
+                { key: "elapsed", label: "Elapsed days", width: 0.10, align: "right" },
+                { key: "timeframe", label: "Planned days", width: 0.09, align: "right" },
+                { key: "notes", label: "Vendor / notes", width: 0.19 },
+              ],
+              offsiteRepairsPdf.map((r) => {
+                const sent = String(r.sent_date || "").trim();
+                const expected = String(r.expected_return_date || "").trim();
+                const actual = String(r.actual_return_date || "").trim();
+                const elapsed = daysBetweenYmd(sent, actual || date);
+                const planned = daysBetweenYmd(sent, expected);
+                return {
+                  asset: r.asset_code,
+                  equipment: compactCell(r.asset_name ?? "", 48),
+                  status: statusLabel(r.repair_status),
+                  sent: sent || "—",
+                  expected: expected || "—",
+                  actual: actual || "—",
+                  elapsed: elapsed == null ? "—" : String(elapsed),
+                  timeframe: planned == null ? "—" : String(planned),
+                  notes: compactCell(
+                    [r.vendor ? String(r.vendor).trim() : "", r.notes ? String(r.notes).trim() : ""]
+                      .filter(Boolean)
+                      .join(" | "),
+                    120
+                  ),
+                };
+              })
+            );
+          }
         }
 
         sectionTitle(doc, "Breakdowns & Downtime");
