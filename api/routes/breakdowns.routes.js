@@ -186,7 +186,7 @@ export default async function breakdownRoutes(app) {
       get_hours_fitted,
       get_hours_changed
     )
-    VALUES (?, ?, 'OPEN', datetime('now'), ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, 'OPEN', ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertWorkOrder = db.prepare(`
@@ -558,6 +558,7 @@ export default async function breakdownRoutes(app) {
       const b = insertBreakdown.run(
         asset.id,
         effectiveStartDate,
+        `${effectiveStartDate} 00:00:00`,
         description,
         component,
         critical,
@@ -630,6 +631,7 @@ export default async function breakdownRoutes(app) {
       const b = insertBreakdown.run(
         asset.id,
         breakdown_date,
+        `${breakdown_date} 00:00:00`,
         description,
         component,
         critical,

@@ -178,7 +178,9 @@ function parseIsoDate(d) {
 
 function daysDownForBreakdown(bd, reportDate) {
   const logged = Number(bd.logged_days || 0);
-  const startDate = parseIsoDate(bd.start_at) || parseIsoDate(bd.breakdown_date);
+  // Prefer selected calendar date (breakdown_date) over start_at — start_at was historically
+  // set to create time (datetime('now')), which is not the Date down the operator chose.
+  const startDate = parseIsoDate(bd.breakdown_date) || parseIsoDate(bd.start_at);
   if (!startDate) return logged > 0 ? logged : 1;
 
   const asOf = parseIsoDate(reportDate);
@@ -199,7 +201,7 @@ function daysDownForBreakdown(bd, reportDate) {
 }
 
 function daysDownForBreakdownInRange(bd, startDateInclusive, endDateInclusive) {
-  const startDate = parseIsoDate(bd.start_at) || parseIsoDate(bd.breakdown_date);
+  const startDate = parseIsoDate(bd.breakdown_date) || parseIsoDate(bd.start_at);
   if (!startDate) return 0;
   const rangeStart = parseIsoDate(startDateInclusive);
   const rangeEnd = parseIsoDate(endDateInclusive);
@@ -10613,8 +10615,9 @@ export default async function reportsRoutes(app) {
             { key: "desc", label: "Description", width: 0.10 },
           ],
           breakdownsPdf.map((r) => {
-            const dateDownRaw = String(r.start_at || r.breakdown_date || "").trim();
-            const dateDown = dateDownRaw.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || dateDownRaw || "—";
+            // Selected Date down = breakdown_date (operator-chosen). Avoid start_at create-time stamp.
+            const dateDown =
+              parseIsoDate(r.breakdown_date) || parseIsoDate(r.start_at) || "—";
             return {
               asset: r.asset_code,
               equipment: compactCell(r.asset_name ?? "", 40),

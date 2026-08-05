@@ -14851,7 +14851,7 @@ async function loadDailyInput() {
       row.down_lock = true;
       row.down_reason = parseDownReasonFromDesc(bd.description);
       row.lock_wo_status = bd.primary_work_order_status || "";
-      row.breakdown_start_date = String(bd.start_at || bd.breakdown_date || "").trim();
+      row.breakdown_start_date = String(bd.breakdown_date || bd.start_at || "").trim();
       row.parts_ordered_date = String(bd.parts_ordered_date || "").trim();
       row.parts_status = String(bd.parts_status || "").trim();
       row.parts_received_date = String(bd.parts_received_date || "").trim();
