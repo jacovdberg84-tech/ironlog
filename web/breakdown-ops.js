@@ -290,17 +290,18 @@ function renderOffsiteRow(r) {
   const sent = String(r.sent_date || "").trim();
   const expected = String(r.expected_return_date || "").trim();
   const actual = String(r.actual_return_date || "").trim();
+  const vendor = String(r.vendor || "").trim();
+  const notes = String(r.notes || "").trim();
   const anchor = actual || todayYmd();
   const elapsed = dayDiffLabel(sent, anchor);
   const expectedLead = expected ? dayDiffLabel(sent, expected) : "—";
-  return item(
+  const el = item(
     `<div><b>#${id}</b> <span class="pill blue">${escapeHtml(r.asset_code || "-")}</span> ` +
       `<span class="pill ${String(r.repair_status || "").toLowerCase() === "returned" ? "blue" : "orange"}">${escapeHtml(fmtOffsiteStatusLabel(r.repair_status))}</span></div>` +
       `<small>Sent: ${escapeHtml(sent || "—")} | Expected: ${escapeHtml(expected || "—")} | Actual: ${escapeHtml(actual || "—")}</small><br/>` +
       `<small>Elapsed: ${escapeHtml(elapsed)} | Planned timeframe: ${escapeHtml(expectedLead)}</small><br/>` +
-      `<small>Vendor: ${escapeHtml(r.vendor || "—")} | Breakdown: ${r.breakdown_id ? `#${Number(r.breakdown_id)}` : "—"}</small><br/>` +
-      `${r.notes ? `<small>${escapeHtml(r.notes)}</small><br/>` : ""}` +
-      `<div class="row stack-6" style="margin-top:6px;flex-wrap:wrap;">` +
+      `<small>Breakdown: ${r.breakdown_id ? `#${Number(r.breakdown_id)}` : "—"}</small>` +
+      `<div class="row stack-6" style="margin-top:8px;flex-wrap:wrap;align-items:flex-start;">` +
         `<select class="bo-offsite-status" data-id="${id}">` +
           `<option value="sent_offsite"${String(r.repair_status) === "sent_offsite" ? " selected" : ""}>Sent offsite</option>` +
           `<option value="diagnosis"${String(r.repair_status) === "diagnosis" ? " selected" : ""}>Diagnosis</option>` +
@@ -311,9 +312,17 @@ function renderOffsiteRow(r) {
         `</select>` +
         `<label class="chk">Expected <input class="bo-offsite-expected" data-id="${id}" type="date" value="${escapeHtml(expected)}" /></label>` +
         `<label class="chk">Actual <input class="bo-offsite-actual" data-id="${id}" type="date" value="${escapeHtml(actual)}" /></label>` +
-        `<button type="button" class="bo-offsite-update" data-id="${id}" data-sent="${escapeHtml(sent)}" data-asset="${escapeHtml(r.asset_code || "")}" data-breakdown="${Number(r.breakdown_id || 0) || ""}" data-vendor="${escapeHtml(r.vendor || "")}" data-notes="${escapeHtml(r.notes || "")}">Update</button>` +
+        `<input class="bo-offsite-vendor w-220" data-id="${id}" placeholder="Vendor / workshop" value="${escapeHtml(vendor)}" />` +
+      `</div>` +
+      `<div class="stack-6" style="margin-top:8px;">` +
+        `<label class="muted" style="display:block;font-size:12px;">Progress comments</label>` +
+        `<textarea class="bo-offsite-progress minw-260" data-id="${id}" rows="3" style="width:100%;" placeholder="Update repair progress / comments…">${escapeHtml(notes)}</textarea>` +
+      `</div>` +
+      `<div class="row" style="margin-top:8px;">` +
+        `<button type="button" class="bo-offsite-update" data-id="${id}" data-sent="${escapeHtml(sent)}" data-asset="${escapeHtml(r.asset_code || "")}" data-breakdown="${Number(r.breakdown_id || 0) || ""}">Save progress</button>` +
       `</div>`
   );
+  return el;
 }
 
 async function loadOffsiteRepairs() {
@@ -342,6 +351,8 @@ async function updateOffsiteRepairFromRow(btn) {
   const statusEl = document.querySelector(`.bo-offsite-status[data-id="${id}"]`);
   const expectedEl = document.querySelector(`.bo-offsite-expected[data-id="${id}"]`);
   const actualEl = document.querySelector(`.bo-offsite-actual[data-id="${id}"]`);
+  const vendorEl = document.querySelector(`.bo-offsite-vendor[data-id="${id}"]`);
+  const progressEl = document.querySelector(`.bo-offsite-progress[data-id="${id}"]`);
   const payload = {
     asset_code: String(btn.getAttribute("data-asset") || "").trim(),
     breakdown_id: Number(btn.getAttribute("data-breakdown") || 0) || null,
@@ -349,8 +360,8 @@ async function updateOffsiteRepairFromRow(btn) {
     expected_return_date: String(expectedEl?.value || "").trim() || null,
     actual_return_date: String(actualEl?.value || "").trim() || null,
     repair_status: String(statusEl?.value || "sent_offsite").trim(),
-    vendor: String(btn.getAttribute("data-vendor") || "").trim() || null,
-    notes: String(btn.getAttribute("data-notes") || "").trim() || null,
+    vendor: String(vendorEl?.value || "").trim() || null,
+    notes: String(progressEl?.value || "").trim() || null,
   };
   setStatus(`Updating offsite #${id}...`);
   try {
@@ -360,7 +371,7 @@ async function updateOffsiteRepairFromRow(btn) {
       body: JSON.stringify(payload),
     });
     setText("boOffsiteResult", JSON.stringify(res, null, 2));
-    setStatus(`Offsite #${id} updated.`);
+    setStatus(`Offsite #${id} progress saved.`);
     await loadOffsiteRepairs();
   } catch (e) {
     setText("boOffsiteResult", String(e.message || e));

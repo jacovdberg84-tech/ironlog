@@ -55,7 +55,7 @@
           <button type="button" class="sectionToggleBtn" data-section-body="boOffsiteBody" data-storage-key="ironlog_section_bo_offsite">Hide</button>
         </div>
         <div id="boOffsiteBody" class="section-collapsible">
-          <p class="muted">Track assets sent away for repair, current repair status, and expected/actual return timeframe.</p>
+          <p class="muted">Track assets sent away for repair, current repair status, timeframe, and editable progress comments.</p>
           <div class="row stack-10" style="flex-wrap:wrap;">
             <input id="boOffsiteAsset" list="assetCodeOptions" class="w-200" placeholder="Asset code" />
             <input id="boOffsiteBreakdownId" class="w-140" type="number" min="1" step="1" placeholder="Breakdown ID (optional)" />
@@ -75,7 +75,7 @@
               </select>
             </label>
             <input id="boOffsiteVendor" class="w-220" placeholder="Vendor / workshop (optional)" />
-            <input id="boOffsiteNotes" class="minw-260" style="flex:1;" placeholder="Notes / scope of repair (optional)" />
+            <input id="boOffsiteNotes" class="minw-260" style="flex:1;" placeholder="Progress comments / notes (optional)" />
             <button type="button" id="boOffsiteSave">Add offsite repair</button>
             <label class="chk">Show returned <input id="boOffsiteIncludeClosed" type="checkbox" /></label>
             <button type="button" id="boOffsiteRefresh">Refresh</button>
@@ -311,6 +311,6 @@
   <datalist id="assetCodeOptions"></datalist>
   <datalist id="partCodeOptions"></datalist>
 
-  <script src="./breakdown-ops.js?v=3"></script>
+  <script src="./breakdown-ops.js?v=4"></script>
 </body>
 </html>
