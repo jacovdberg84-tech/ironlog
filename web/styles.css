@@ -544,11 +544,83 @@ button.btn-disabled{
   border-radius:2px;
   display:inline-block;
 }
-.fuel-legend-current{
-  background:#2563eb;
+.fuel-legend-actual-bar{
+  background:#4b5563;
+  height:10px;
+  border-radius:2px;
 }
-.fuel-legend-previous{
-  background:#94a3b8;
+.fuel-legend-oem{
+  background:#16a34a;
+}
+.fuel-legend-threshold{
+  background:#dc2626;
+}
+.fuel-equip-chart-wrap{
+  margin:14px 0 4px;
+  padding:12px 14px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:#f9fafb;
+  overflow:visible;
+}
+.fuel-equip-filter-row{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin:10px 0 6px;
+}
+.fuel-equip-filter-label{
+  font-size:13px;
+  font-weight:600;
+  color:var(--text, #0f172a);
+}
+.fuel-equip-filter-actions{
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+}
+.fuel-equip-filter-list{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px 12px;
+  max-height:140px;
+  overflow:auto;
+  padding:8px 10px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:#fff;
+  margin-bottom:10px;
+}
+.fuel-equip-filter-item{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:12px;
+  color:#334155;
+  white-space:nowrap;
+}
+.fuel-equip-filter-item input{
+  margin:0;
+}
+.fuel-equip-chart{
+  min-height:420px;
+  overflow-x:auto;
+  overflow-y:visible;
+  padding:8px 0 4px;
+}
+.fuel-equip-chart svg{
+  display:block;
+  width:100%;
+  min-width:640px;
+  height:420px;
+  min-height:420px;
+  max-width:none;
+}
+.btn-sm{
+  padding:4px 10px;
+  font-size:12px;
 }
 .fuel-period-compare-chart{
   min-height:420px;

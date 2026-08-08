@@ -7901,6 +7901,184 @@ function mountFuelCompareSvg(host, svgMarkup) {
   }
 }
 
+function fuelEquipChartRows(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .filter((r) => String(r.metric_mode || "hours").toLowerCase() !== "km")
+    .filter((r) => Number(r.actual_lph || 0) > 0 || Number(r.oem_lph || 0) > 0)
+    .map((r) => {
+      const oem = Number(r.oem_lph || 0);
+      const threshold = Number(
+        r.excessive_threshold_lph != null
+          ? r.excessive_threshold_lph
+          : r.threshold_lph != null
+            ? r.threshold_lph
+            : oem > 0
+              ? oem * 1.15
+              : 0
+      );
+      return {
+        asset_code: String(r.asset_code || "").trim(),
+        label: String(r.asset_name || r.asset_code || "").trim() || String(r.asset_code || "Unknown"),
+        actual: Number(r.actual_lph || 0),
+        oem,
+        threshold,
+      };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function getSelectedFuelEquipmentCodes() {
+  const host = qs("fuelEquipFilterList");
+  if (!host) return null;
+  const boxes = [...host.querySelectorAll('input[type="checkbox"][data-fuel-equip]')];
+  if (!boxes.length) return [];
+  return boxes.filter((b) => b.checked).map((b) => String(b.getAttribute("data-fuel-equip") || "").trim().toLowerCase());
+}
+
+function renderFuelEquipmentFilter(rows, preserveSelection = true) {
+  const host = qs("fuelEquipFilterList");
+  if (!host) return;
+  const all = fuelEquipChartRows(rows);
+  if (!all.length) {
+    host.className = "fuel-equip-filter-list muted";
+    host.textContent = "No machine (L/hr) equipment in this period.";
+    return;
+  }
+  const prev = preserveSelection ? new Set(getSelectedFuelEquipmentCodes() || []) : null;
+  const selectAllByDefault = !prev || prev.size === 0;
+  host.className = "fuel-equip-filter-list";
+  host.innerHTML = all.map((r) => {
+    const code = r.asset_code;
+    const checked = selectAllByDefault || prev.has(code.toLowerCase()) ? "checked" : "";
+    const title = escapeHtml(`${r.label} (${code})`);
+    return `<label class="fuel-equip-filter-item" title="${title}">
+      <input type="checkbox" data-fuel-equip="${escapeHtml(code)}" ${checked} />
+      <span>${escapeHtml(r.label)}</span>
+    </label>`;
+  }).join("");
+}
+
+function fuelSvgEquipmentConsumption(points) {
+  const rows = Array.isArray(points) ? points : [];
+  const n = Math.max(rows.length, 1);
+  const vals = [];
+  for (const r of rows) {
+    vals.push(Number(r.actual || 0), Number(r.oem || 0), Number(r.threshold || 0));
+  }
+  const rawMax = Math.max(...vals, 1);
+  const max = Math.ceil(rawMax / 5) * 5 || 5;
+  const slot = Math.max(70, Math.min(110, 900 / Math.max(n, 1)));
+  const width = Math.max(720, 80 + n * slot);
+  const height = 440;
+  const left = 52;
+  const right = 20;
+  const top = 36;
+  const bottom = 88;
+  const plotW = width - left - right;
+  const plotH = height - top - bottom;
+  const band = plotW / n;
+  const barW = Math.min(42, Math.max(18, band * 0.45));
+  const xCenter = (i) => left + band * i + band / 2;
+  const yAt = (v) => top + plotH - (Number(v || 0) / max) * plotH;
+
+  const bars = rows.map((r, i) => {
+    const x = xCenter(i) - barW / 2;
+    const y = yAt(r.actual);
+    const h = Math.max(0, top + plotH - y);
+    const labelY = h > 18 ? y + 14 : y - 6;
+    const labelFill = h > 18 ? "#ffffff" : "#111827";
+    return `
+      <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="#4b5563" rx="2"/>
+      <text x="${xCenter(i).toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle" font-size="11" font-weight="600" fill="${labelFill}">${Number(r.actual || 0).toFixed(0)}</text>
+    `;
+  }).join("");
+
+  const linePath = (key, color) => {
+    const pts = rows.map((r, i) => ({ x: xCenter(i), y: yAt(r[key]), v: Number(r[key] || 0) }));
+    const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+    const dots = pts.map((p) => `
+      <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" fill="${color}" stroke="#fff" stroke-width="1"/>
+      <text x="${p.x.toFixed(1)}" y="${(p.y - 10).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="600" fill="#111827">${p.v.toFixed(0)}</text>
+    `).join("");
+    return `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>${dots}`;
+  };
+
+  const xLabels = rows.map((r, i) => {
+    const label = String(r.label || r.asset_code || "").slice(0, 18);
+    return `<text x="${xCenter(i).toFixed(1)}" y="${top + plotH + 18}" text-anchor="end" font-size="11" fill="#334155" transform="rotate(-32 ${xCenter(i).toFixed(1)} ${top + plotH + 18})">${escapeHtml(label)}</text>`;
+  }).join("");
+
+  const yTicks = [];
+  const step = max <= 20 ? 5 : max <= 50 ? 5 : 10;
+  for (let v = 0; v <= max + 0.001; v += step) {
+    const y = yAt(v);
+    yTicks.push(`
+      <line x1="${left}" y1="${y.toFixed(1)}" x2="${width - right}" y2="${y.toFixed(1)}" stroke="#e5e7eb" stroke-width="1"/>
+      <text x="${left - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="#64748b">${v}</text>
+    `);
+  }
+
+  return `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img" aria-label="Equipment fuel consumptions" preserveAspectRatio="xMinYMid meet">
+      <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff" rx="8"/>
+      <text x="${left}" y="18" font-size="14" font-weight="700" fill="#111827">Equipment Fuel Consumptions</text>
+      <text x="${left}" y="34" font-size="11" fill="#64748b">L/hr — Actual (bar) · OEM (green) · Threshold (red)</text>
+      ${yTicks.join("")}
+      <line x1="${left}" y1="${top + plotH}" x2="${width - right}" y2="${top + plotH}" stroke="#94a3b8" stroke-width="1"/>
+      <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotH}" stroke="#94a3b8" stroke-width="1"/>
+      ${bars}
+      ${linePath("oem", "#16a34a")}
+      ${linePath("threshold", "#dc2626")}
+      ${xLabels}
+    </svg>
+  `;
+}
+
+function renderFuelEquipmentChart(rows) {
+  const host = qs("fuelEquipChart");
+  const summaryEl = qs("fuelEquipChartSummary");
+  const wrap = qs("fuelEquipChartWrap");
+  if (!host) return;
+
+  const all = fuelEquipChartRows(rows);
+  if (!all.length) {
+    if (summaryEl) summaryEl.textContent = "No machine (L/hr) rows to chart for this period.";
+    host.className = "fuel-equip-chart muted";
+    host.textContent = "No L/hr equipment data.";
+    return;
+  }
+
+  const selected = new Set(getSelectedFuelEquipmentCodes() || []);
+  const points = selected.size
+    ? all.filter((r) => selected.has(String(r.asset_code || "").toLowerCase()))
+    : [];
+
+  if (!points.length) {
+    if (summaryEl) summaryEl.textContent = "Select one or more machines in the equipment filter to show the chart.";
+    host.className = "fuel-equip-chart muted";
+    host.textContent = "No equipment selected.";
+    if (wrap) wrap.style.display = "";
+    return;
+  }
+
+  if (summaryEl) {
+    summaryEl.textContent = `Showing ${points.length} of ${all.length} machines (L/hr). Actual bars vs OEM (green) and threshold (red).`;
+  }
+  if (wrap) wrap.style.display = "";
+  host.className = "fuel-equip-chart";
+  const svgMarkup = fuelSvgEquipmentConsumption(points);
+  const mounted = mountFuelCompareSvg(host, svgMarkup);
+  if (!mounted) {
+    host.className = "fuel-equip-chart muted";
+    host.textContent = "Chart could not be rendered.";
+  }
+}
+
+function refreshFuelEquipmentChartFromStore() {
+  renderFuelEquipmentFilter(window.__fuelBenchmarkChartRows || [], true);
+  renderFuelEquipmentChart(window.__fuelBenchmarkChartRows || []);
+}
+
 function renderFuelPeriodCompareChart(data) {
   const host = qs("fuelPeriodCompareChart");
   const summaryEl = qs("fuelPeriodCompareSummary");
@@ -8070,6 +8248,19 @@ async function loadFuelBenchmark() {
       compareHost.className = "fuel-period-compare-chart muted";
       compareHost.textContent = "Switch off duplicates filter to view period comparison.";
     }
+    window.__fuelBenchmarkChartRows = [];
+    const equipHost = qs("fuelEquipChart");
+    const equipFilter = qs("fuelEquipFilterList");
+    const equipSummary = qs("fuelEquipChartSummary");
+    if (equipSummary) equipSummary.textContent = "Equipment chart is hidden while viewing duplicates.";
+    if (equipFilter) {
+      equipFilter.className = "fuel-equip-filter-list muted";
+      equipFilter.textContent = "Switch off duplicates filter to select equipment.";
+    }
+    if (equipHost) {
+      equipHost.className = "fuel-equip-chart muted";
+      equipHost.textContent = "Switch off duplicates filter to view equipment chart.";
+    }
   } else {
     // Pills must reflect only the currently selected date range + filters.
     const s = data.summary || {};
@@ -8080,6 +8271,9 @@ async function loadFuelBenchmark() {
     setText("fbAvgKmpl", s.avg_km_per_l == null ? "-" : Number(s.avg_km_per_l).toFixed(3));
     setText("fbExcessive", Number(s.excessive_count || 0));
     renderFuelPeriodCompareChart(compareData);
+    window.__fuelBenchmarkChartRows = benchmarkRows;
+    renderFuelEquipmentFilter(benchmarkRows, false);
+    renderFuelEquipmentChart(benchmarkRows);
   }
 
   const list = qs("fuelBenchmarkList");
@@ -16764,6 +16958,22 @@ async function init() {
   qs("fuelDupOnly")?.addEventListener("change", () =>
     loadFuelBenchmark().catch((e) => setStatus("Fuel benchmark error: " + e.message))
   );
+  qs("fuelEquipSelectAll")?.addEventListener("click", () => {
+    const host = qs("fuelEquipFilterList");
+    host?.querySelectorAll('input[type="checkbox"][data-fuel-equip]')?.forEach((b) => { b.checked = true; });
+    renderFuelEquipmentChart(window.__fuelBenchmarkChartRows || []);
+  });
+  qs("fuelEquipClear")?.addEventListener("click", () => {
+    const host = qs("fuelEquipFilterList");
+    host?.querySelectorAll('input[type="checkbox"][data-fuel-equip]')?.forEach((b) => { b.checked = false; });
+    renderFuelEquipmentChart(window.__fuelBenchmarkChartRows || []);
+  });
+  qs("fuelEquipFilterList")?.addEventListener("change", (evt) => {
+    const t = evt.target;
+    if (!(t instanceof HTMLInputElement) || t.type !== "checkbox") return;
+    if (!t.hasAttribute("data-fuel-equip")) return;
+    renderFuelEquipmentChart(window.__fuelBenchmarkChartRows || []);
+  });
   qs("loadFuelSnapshots")?.addEventListener("click", () =>
     loadFuelSnapshots().catch((e) => setStatus("Fuel snapshots error: " + e.message))
   );

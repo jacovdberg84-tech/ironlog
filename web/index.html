@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=7" />
+  <link rel="stylesheet" href="./styles.css?v=8" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -2962,6 +2962,29 @@
                 <span class="fuel-legend-item"><span class="fuel-legend-swatch fuel-legend-previous"></span> Previous period</span>
               </div>
               <div id="fuelPeriodCompareChart" class="fuel-period-compare-chart muted">Load benchmark to view the comparison chart.</div>
+            </div>
+
+            <div class="fuel-equip-chart-wrap" id="fuelEquipChartWrap">
+              <div class="fuel-period-compare-head">
+                <h4 style="margin:0;">Equipment Fuel Consumptions</h4>
+                <p id="fuelEquipChartSummary" class="muted small" style="margin:4px 0 0;">
+                  Actual L/hr (bars) vs OEM (green) and threshold (red). Select equipment below to show only those units.
+                </p>
+              </div>
+              <div class="fuel-equip-filter-row">
+                <label class="fuel-equip-filter-label">Equipment filter</label>
+                <div class="fuel-equip-filter-actions">
+                  <button type="button" class="btn btn-secondary btn-sm" id="fuelEquipSelectAll">Select all</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="fuelEquipClear">Clear</button>
+                </div>
+              </div>
+              <div id="fuelEquipFilterList" class="fuel-equip-filter-list muted">Load benchmark to choose equipment.</div>
+              <div class="fuel-period-compare-legend">
+                <span class="fuel-legend-item"><span class="fuel-legend-swatch fuel-legend-actual-bar"></span> Actual L/hr</span>
+                <span class="fuel-legend-item"><span class="fuel-legend-swatch fuel-legend-oem"></span> OEM L/hr</span>
+                <span class="fuel-legend-item"><span class="fuel-legend-swatch fuel-legend-threshold"></span> Threshold L/hr</span>
+              </div>
+              <div id="fuelEquipChart" class="fuel-equip-chart muted">Load benchmark to view equipment consumption.</div>
             </div>
             <div class="action-buttons" style="margin-top: 12px;">
               <button id="downloadExecutivePackXlsx" class="btn btn-primary">
@@ -7326,6 +7349,6 @@
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=1"></script>
-  <script src="./app.js?v=57"></script>
+  <script src="./app.js?v=58"></script>
 </body>
 </html>
