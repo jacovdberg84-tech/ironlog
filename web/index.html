@@ -2906,6 +2906,16 @@
                 <input id="fuelEnd" type="date" class="w-full" />
               </div>
               <div class="form-field">
+                <label>Quick period</label>
+                <div class="row" style="gap:6px; flex-wrap:wrap;">
+                  <button type="button" class="btn btn-secondary" id="fuelPresetQ1" title="1 Jan – 31 Mar">Q1</button>
+                  <button type="button" class="btn btn-secondary" id="fuelPresetQ2" title="1 Apr – 30 Jun">Q2</button>
+                  <button type="button" class="btn btn-secondary" id="fuelPresetQ3" title="1 Jul – 30 Sep">Q3</button>
+                  <button type="button" class="btn btn-secondary" id="fuelPresetYtd" title="1 Jan – today">YTD</button>
+                  <button type="button" class="btn btn-secondary" id="fuelPresetMtd" title="Month to date">MTD</button>
+                </div>
+              </div>
+              <div class="form-field">
                 <label>Mode</label>
                 <select id="fuelModeFilter" class="w-full">
                   <option value="">all</option>
@@ -7316,6 +7326,6 @@
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=1"></script>
-  <script src="./app.js?v=55"></script>
+  <script src="./app.js?v=56"></script>
 </body>
 </html>

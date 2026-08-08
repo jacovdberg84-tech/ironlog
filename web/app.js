@@ -7934,6 +7934,41 @@ function renderFuelPeriodCompareChart(data) {
   }
 }
 
+function setFuelPeriodDates(start, end) {
+  if (qs("fuelStart")) qs("fuelStart").value = start;
+  if (qs("fuelEnd")) qs("fuelEnd").value = end;
+}
+
+function applyFuelPeriodPreset(kind) {
+  const today = new Date();
+  const y = today.getUTCFullYear();
+  const m = today.getUTCMonth() + 1;
+  const d = today.getUTCDate();
+  const pad = (n) => String(n).padStart(2, "0");
+  const todayStr = `${y}-${pad(m)}-${pad(d)}`;
+  const clip = (end) => (end > todayStr ? todayStr : end);
+  let start = todayStr;
+  let end = todayStr;
+  if (kind === "q1") {
+    start = `${y}-01-01`;
+    end = clip(`${y}-03-31`);
+  } else if (kind === "q2") {
+    start = `${y}-04-01`;
+    end = clip(`${y}-06-30`);
+  } else if (kind === "q3") {
+    start = `${y}-07-01`;
+    end = clip(`${y}-09-30`);
+  } else if (kind === "ytd") {
+    start = `${y}-01-01`;
+    end = todayStr;
+  } else if (kind === "mtd") {
+    start = `${y}-${pad(m)}-01`;
+    end = todayStr;
+  }
+  setFuelPeriodDates(start, end);
+  return loadFuelBenchmark();
+}
+
 async function loadFuelBenchmark() {
   const start = (qs("fuelStart")?.value || "").trim();
   const end = (qs("fuelEnd")?.value || "").trim();
@@ -7970,20 +8005,42 @@ async function loadFuelBenchmark() {
         fuel_liters: Number(data.summary?.fuel_liters || 0),
         duplicate_rows: Number(data.summary?.duplicate_rows || 0),
       }
-    : benchmarkRows.reduce(
+    : (data.summary && data.summary.avg_lph != null
+      ? {
+          fuel_liters: Number(data.summary.fuel_liters || 0),
+          hours_run: Number(data.summary.hours_run || 0),
+          km_run: Number(data.summary.km_run || 0),
+          avg_lph: data.summary.avg_lph == null ? null : Number(data.summary.avg_lph),
+          avg_km_per_l: data.summary.avg_km_per_l == null ? null : Number(data.summary.avg_km_per_l),
+          excessive_count: Number(data.summary.excessive_count || data.summary.excessive || 0),
+        }
+      : benchmarkRows.reduce(
         (acc, r) => {
-          acc.fuel_liters += Number(r.fuel_liters || 0);
-          acc.hours_run += Number(r.hours_run || 0);
-          if (Number(r.hours_run || 0) > 0) acc.hours_fuel += Number(r.fuel_liters || 0);
+          const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
+          const fuel = Number(r.fuel_liters || 0);
+          const hours = Number(r.hours_run || 0);
+          const km = Number(r.km_run || 0);
+          acc.fuel_liters += fuel;
+          if (mode === "km") {
+            acc.km_run += km;
+            if (km > 0) acc.km_fuel += fuel;
+          } else {
+            acc.hours_run += hours;
+            if (hours > 0) acc.hours_fuel += fuel;
+          }
           if (Number(r.is_excessive || false)) acc.excessive_count += 1;
           return acc;
         },
-        { fuel_liters: 0, hours_run: 0, hours_fuel: 0, excessive_count: 0 }
-      );
-  if (!duplicatesOnly) {
+        { fuel_liters: 0, hours_run: 0, km_run: 0, hours_fuel: 0, km_fuel: 0, excessive_count: 0 }
+      ));
+  if (!duplicatesOnly && benchmarkSummary.avg_lph === undefined) {
     benchmarkSummary.avg_lph =
       benchmarkSummary.hours_run > 0
         ? benchmarkSummary.hours_fuel / benchmarkSummary.hours_run
+        : null;
+    benchmarkSummary.avg_km_per_l =
+      benchmarkSummary.km_fuel > 0
+        ? benchmarkSummary.km_run / benchmarkSummary.km_fuel
         : null;
   }
 
@@ -16676,6 +16733,21 @@ async function init() {
   );
   qs("loadFuelBenchmark")?.addEventListener("click", () =>
     loadFuelBenchmark().catch((e) => setStatus("Fuel benchmark error: " + e.message))
+  );
+  qs("fuelPresetQ1")?.addEventListener("click", () =>
+    applyFuelPeriodPreset("q1").catch((e) => setStatus("Fuel benchmark error: " + e.message))
+  );
+  qs("fuelPresetQ2")?.addEventListener("click", () =>
+    applyFuelPeriodPreset("q2").catch((e) => setStatus("Fuel benchmark error: " + e.message))
+  );
+  qs("fuelPresetQ3")?.addEventListener("click", () =>
+    applyFuelPeriodPreset("q3").catch((e) => setStatus("Fuel benchmark error: " + e.message))
+  );
+  qs("fuelPresetYtd")?.addEventListener("click", () =>
+    applyFuelPeriodPreset("ytd").catch((e) => setStatus("Fuel benchmark error: " + e.message))
+  );
+  qs("fuelPresetMtd")?.addEventListener("click", () =>
+    applyFuelPeriodPreset("mtd").catch((e) => setStatus("Fuel benchmark error: " + e.message))
   );
   qs("fuelDupOnly")?.addEventListener("change", () =>
     loadFuelBenchmark().catch((e) => setStatus("Fuel benchmark error: " + e.message))

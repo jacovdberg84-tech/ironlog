@@ -3,7 +3,7 @@ import ExcelJS from "exceljs";
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
-import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
+import { getRunFromFuelRows, resolveBenchmarkHoursRun, summarizeFuelBenchmarkRows } from "../utils/fuelRunFromLogs.js";
 import { aggregateFuelBenchmarkByCategory, normalizeEquipmentCategory } from "../utils/fuelBenchmarkAggregate.js";
 import { fuelBenchmarkAssetsInRangeSql, sqlFuelMetricModeExpr } from "../utils/fuelMetricMode.js";
 import { isOperationalHireAsset, sqlIncludeArchivedHireAssets } from "../utils/hiredEquipment.js";
@@ -2842,12 +2842,12 @@ export default async function dashboardRoutes(app) {
         : 0;
       const km = fuelKm > 0 ? fuelKm : 0;
       const hours = mode === "hours"
-        ? (fuelHours > 0 ? fuelHours : (dailyHoursRun > 0 ? dailyHoursRun : 0))
+        ? resolveBenchmarkHoursRun(fuelHours, dailyHoursRun, start, end)
         : (fuelHours > 0 ? fuelHours : 0);
       let run_source = "none";
       if (mode === "km" && km > 0) run_source = "fams_fuel";
       else if (mode === "hours" && hours > 0) {
-        run_source = fuelHours > 0 ? "fams_fuel" : dailyHoursRun > 0 ? "daily_hours" : "none";
+        run_source = fuelHours > 0 && hours === fuelHours ? "fams_fuel" : dailyHoursRun > 0 ? "daily_hours" : "none";
       }
       const fuel = Number(r.fuel_liters || 0);
       const oem = Number(r.oem_lph || 5);
@@ -2897,34 +2897,9 @@ export default async function dashboardRoutes(app) {
         return bv - av;
       });
 
-    const summary = rows.reduce(
-      (acc, r) => {
-        acc.assets += 1;
-        acc.fuel_liters += Number(r.fuel_liters || 0);
-        acc.hours_run += Number(r.hours_run || 0);
-        acc.km_run += Number(r.km_run || 0);
-        if (r.metric_mode === "km") {
-          acc.km_assets += 1;
-          if (Number(r.km_run || 0) > 0) acc.km_fuel += Number(r.fuel_liters || 0);
-        } else {
-          acc.hours_assets += 1;
-          if (Number(r.hours_run || 0) > 0) acc.hours_fuel += Number(r.fuel_liters || 0);
-        }
-        if (r.is_excessive) acc.excessive_count += 1;
-        return acc;
-      },
-      { assets: 0, fuel_liters: 0, hours_run: 0, km_run: 0, excessive_count: 0, km_assets: 0, hours_assets: 0, km_fuel: 0, hours_fuel: 0 }
-    );
-
-    summary.fuel_liters = Number(summary.fuel_liters.toFixed(2));
-    summary.hours_run = Number(summary.hours_run.toFixed(2));
-    summary.km_run = Number(summary.km_run.toFixed(2));
-    summary.avg_lph = summary.hours_run > 0
-      ? Number((summary.hours_fuel / summary.hours_run).toFixed(3))
-      : null;
-    summary.avg_km_per_l = summary.km_fuel > 0
-      ? Number((summary.km_run / summary.km_fuel).toFixed(3))
-      : null;
+    const summary = summarizeFuelBenchmarkRows(rows);
+    // Keep legacy key used by UI
+    summary.excessive_count = summary.excessive;
 
     const category_rows = assetFilter
       ? []

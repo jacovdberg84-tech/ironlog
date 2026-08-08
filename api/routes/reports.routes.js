@@ -25,12 +25,12 @@ import {
   ensurePageSpace,
 } from "../utils/pdfGenerator.js";
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly, andAssetExcludeLdv } from "../utils/fleetHoursKpiScope.js";
-import { getRunFromFuelRows } from "../utils/fuelRunFromLogs.js";
+import { getRunFromFuelRows, resolveBenchmarkHoursRun, summarizeFuelBenchmarkRows } from "../utils/fuelRunFromLogs.js";
 import { isOperationalHireAsset, inferHireContractorLabel, sqlIncludeArchivedHireAssets } from "../utils/hiredEquipment.js";
 import { aggregateFuelBenchmarkByCategory } from "../utils/fuelBenchmarkAggregate.js";
 import { fuelBenchmarkAssetsInRangeSql, sqlFuelMetricModeExpr } from "../utils/fuelMetricMode.js";
 import { buildBudgetMeetingDocxBuffer } from "../utils/budgetMeetingDocx.js";
-import { getOperatingBudgetAmount } from "../utils/monthlyBudget.js";
+import { getOperatingBudgetAmount, getMonthlyBudgetRow } from "../utils/monthlyBudget.js";
 import {
   buildMechanicLaborDetail,
   buildMonthlyOperatingActuals,
@@ -257,6 +257,25 @@ function monthsInRange(start, end) {
     }
   }
   return months;
+}
+
+/** Calendar quarters for a year, clipped to an inclusive YTD end date. */
+function calendarQuartersThrough(year, ytdEnd) {
+  const y = Number(year);
+  const endCap = String(ytdEnd || `${y}-12-31`).slice(0, 10);
+  if (!Number.isFinite(y) || !/^\d{4}-\d{2}-\d{2}$/.test(endCap)) return [];
+  const defs = [
+    { key: "Q1", label: `Q1 ${y}`, start: `${y}-01-01`, end: `${y}-03-31` },
+    { key: "Q2", label: `Q2 ${y}`, start: `${y}-04-01`, end: `${y}-06-30` },
+    { key: "Q3", label: `Q3 ${y}`, start: `${y}-07-01`, end: `${y}-09-30` },
+    { key: "Q4", label: `Q4 ${y}`, start: `${y}-10-01`, end: `${y}-12-31` },
+  ];
+  return defs
+    .map((q) => {
+      const end = q.end > endCap ? endCap : q.end;
+      return { ...q, end, active: q.start <= endCap && q.start <= end };
+    })
+    .filter((q) => q.active);
 }
 
 const FUEL_BENCHMARK_BY_ASSET_COLUMNS = [
@@ -3763,7 +3782,7 @@ export default async function reportsRoutes(app) {
         : 0;
       const km = fuelKm > 0 ? fuelKm : 0;
       const hours = mode === "hours"
-        ? (fuelHours > 0 ? fuelHours : (dailyHoursRun > 0 ? dailyHoursRun : 0))
+        ? resolveBenchmarkHoursRun(fuelHours, dailyHoursRun, start, end)
         : (fuelHours > 0 ? fuelHours : 0);
       const fuel = Number(r.fuel_liters || 0);
       const oem = Number(r.oem_lph || 5);
@@ -3814,32 +3833,8 @@ export default async function reportsRoutes(app) {
     );
     const displayRows = categoryRows.length ? categoryRows : rows;
 
-    const summary = rows.reduce(
-      (acc, r) => {
-        acc.assets += 1;
-        acc.fuel_liters += Number(r.fuel_liters || 0);
-        acc.hours_run += Number(r.hours_run || 0);
-        acc.km_run += Number(r.km_run || 0);
-        if (r.metric_mode === "km") {
-          if (Number(r.km_run || 0) > 0) acc.km_fuel += Number(r.fuel_liters || 0);
-        } else {
-          if (Number(r.hours_run || 0) > 0) acc.hours_fuel += Number(r.fuel_liters || 0);
-        }
-        if (r.flag === "EXCESSIVE") acc.excessive += 1;
-        return acc;
-      },
-      { assets: 0, fuel_liters: 0, hours_run: 0, km_run: 0, excessive: 0, hours_fuel: 0, km_fuel: 0 }
-    );
-    summary.categories = categoryRows.length;
-    summary.fuel_liters = Number(summary.fuel_liters.toFixed(2));
-    summary.hours_run = Number(summary.hours_run.toFixed(2));
-    summary.km_run = Number(summary.km_run.toFixed(2));
-    summary.avg_lph = summary.hours_run > 0
-      ? Number((summary.hours_fuel / summary.hours_run).toFixed(3))
-      : null;
-    summary.avg_km_per_l = summary.km_fuel > 0
-      ? Number((summary.km_run / summary.km_fuel).toFixed(3))
-      : null;
+    const summaryBase = summarizeFuelBenchmarkRows(rows);
+    const summary = { ...summaryBase, categories: categoryRows.length };
 
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
     const pdf = await buildPdfBuffer(
@@ -4038,7 +4033,7 @@ export default async function reportsRoutes(app) {
           : 0;
         const km = fuelKm > 0 ? fuelKm : 0;
         const hours = mode === "hours"
-          ? (fuelHours > 0 ? fuelHours : (dailyHoursRun > 0 ? dailyHoursRun : 0))
+          ? resolveBenchmarkHoursRun(fuelHours, dailyHoursRun, start, end)
           : (fuelHours > 0 ? fuelHours : 0);
         const fuel = Number(r.fuel_liters || 0);
         const expected = mode === "km"
@@ -4234,7 +4229,7 @@ export default async function reportsRoutes(app) {
           : 0;
         const km = fuelKm > 0 ? fuelKm : 0;
         const hours = mode === "hours"
-          ? (fuelHours > 0 ? fuelHours : (dailyHoursRun > 0 ? dailyHoursRun : 0))
+          ? resolveBenchmarkHoursRun(fuelHours, dailyHoursRun, start, end)
           : (fuelHours > 0 ? fuelHours : 0);
         const fuel = Number(r.fuel_liters || 0);
         const expected = mode === "km"
@@ -4400,7 +4395,7 @@ export default async function reportsRoutes(app) {
           : 0;
         const km = fuelKm > 0 ? fuelKm : 0;
         const hours = mode === "hours"
-          ? (fuelHours > 0 ? fuelHours : (dailyHoursRun > 0 ? dailyHoursRun : 0))
+          ? resolveBenchmarkHoursRun(fuelHours, dailyHoursRun, periodStart, periodEnd)
           : (fuelHours > 0 ? fuelHours : 0);
         const fuel = Number(r.fuel_liters || 0);
         const oem = Number(r.oem_lph || 5);
@@ -4475,28 +4470,26 @@ export default async function reportsRoutes(app) {
       tolerance
     );
 
-    const summary = rows.reduce(
-      (acc, r) => {
-        acc.assets += 1;
-        acc.fuel_liters += Number(r.fuel_liters || 0);
-        acc.hours_run += Number(r.hours_run || 0);
-        acc.km_run += Number(r.km_run || 0);
-        if (r.metric_mode === "km") {
-          if (Number(r.km_run || 0) > 0) acc.km_fuel += Number(r.fuel_liters || 0);
-        } else {
-          if (Number(r.hours_run || 0) > 0) acc.hours_fuel += Number(r.fuel_liters || 0);
-        }
-        if (r.flag === "EXCESSIVE") acc.excessive += 1;
-        return acc;
-      },
-      { assets: 0, fuel_liters: 0, hours_run: 0, km_run: 0, excessive: 0, hours_fuel: 0, km_fuel: 0 }
-    );
-    summary.categories = categoryRows.length;
-    summary.fuel_liters = Number(summary.fuel_liters.toFixed(2));
-    summary.hours_run = Number(summary.hours_run.toFixed(2));
-    summary.km_run = Number(summary.km_run.toFixed(2));
-    summary.avg_lph = summary.hours_run > 0 ? Number((summary.hours_fuel / summary.hours_run).toFixed(3)) : null;
-    summary.avg_km_per_l = summary.km_fuel > 0 ? Number((summary.km_run / summary.km_fuel).toFixed(3)) : null;
+    const summaryBase = summarizeFuelBenchmarkRows(rows);
+    const summary = { ...summaryBase, categories: categoryRows.length };
+
+    const reportYear = Number(String(end).slice(0, 4));
+    const ytdStart = `${reportYear}-01-01`;
+    const quarters = calendarQuartersThrough(reportYear, end);
+    const quarterSnapshots = quarters.map((q) => {
+      const built = buildRowsForPeriod(q.start, q.end);
+      const qSummary = summarizeFuelBenchmarkRows(built.rows);
+      const costs = queryPeriodFleetCostTotals(q.start, q.end);
+      return {
+        ...q,
+        rows: built.rows,
+        summary: qSummary,
+        costs,
+      };
+    });
+    const ytdBuilt = buildRowsForPeriod(ytdStart, end);
+    const ytdSummary = summarizeFuelBenchmarkRows(ytdBuilt.rows);
+    const ytdCosts = queryPeriodFleetCostTotals(ytdStart, end);
 
     const wb = new ExcelJS.Workbook();
     wb.creator = "IRONLOG";
@@ -4504,12 +4497,15 @@ export default async function reportsRoutes(app) {
 
     const wsSummary = wb.addWorksheet("Summary");
     wsSummary.columns = [
-      { header: "Field", key: "field", width: 30 },
-      { header: "Value", key: "value", width: 24 },
+      { header: "Field", key: "field", width: 34 },
+      { header: "Value", key: "value", width: 28 },
     ];
     wsSummary.addRows([
-      { field: "Period", value: `${start} to ${end}` },
+      { field: "Selected period", value: `${start} to ${end}` },
       { field: "Monthly tabs", value: periodMonths.map((m) => `${m.label} (${m.start} to ${m.end})`).join(", ") || start },
+      { field: "Year context", value: String(reportYear) },
+      { field: "YTD", value: `${ytdStart} to ${end}` },
+      { field: "Quarters included", value: quarters.map((q) => q.key).join(", ") || "-" },
       { field: "Tolerance (%)", value: Number((tolerance * 100).toFixed(2)) },
       { field: "Mode filter", value: modeFilter || "all" },
       { field: "Asset filter", value: assetFilter || "all" },
@@ -4518,10 +4514,13 @@ export default async function reportsRoutes(app) {
       { field: "Missing / Not Shown", value: missingRows.length },
       { field: "Excessive", value: summary.excessive },
       { field: "Fuel Total (L)", value: summary.fuel_liters },
-      { field: "Hours Run", value: summary.hours_run },
+      { field: "Hours Run (machines only)", value: summary.hours_run },
       { field: "Distance Run (km)", value: summary.km_run },
-      { field: "Avg L/hr", value: summary.avg_lph == null ? "" : summary.avg_lph },
-      { field: "Avg km/L", value: summary.avg_km_per_l == null ? "" : summary.avg_km_per_l },
+      { field: "Avg L/hr (machines only)", value: summary.avg_lph == null ? "" : summary.avg_lph },
+      { field: "Avg km/L (LDV only)", value: summary.avg_km_per_l == null ? "" : summary.avg_km_per_l },
+      { field: "YTD Fuel Total (L)", value: ytdSummary.fuel_liters },
+      { field: "YTD Avg L/hr", value: ytdSummary.avg_lph == null ? "" : ytdSummary.avg_lph },
+      { field: "YTD Avg km/L", value: ytdSummary.avg_km_per_l == null ? "" : ytdSummary.avg_km_per_l },
     ]);
 
     for (const month of periodMonths) {
@@ -4534,7 +4533,215 @@ export default async function reportsRoutes(app) {
       );
     }
 
+    for (const q of quarterSnapshots) {
+      addFuelBenchmarkByAssetWorksheet(
+        wb,
+        q.label,
+        q.rows,
+        `No fuel benchmark data for ${q.label} (${q.start} to ${q.end})`
+      );
+    }
+    addFuelBenchmarkByAssetWorksheet(
+      wb,
+      `YTD ${reportYear}`,
+      ytdBuilt.rows,
+      `No fuel benchmark data for YTD ${reportYear} (${ytdStart} to ${end})`
+    );
+
     addFuelBenchmarkByAssetWorksheet(wb, "Totals", rows);
+
+    const wsQuarterCompare = wb.addWorksheet("Quarter Compare");
+    wsQuarterCompare.columns = [
+      { header: "Period", key: "period", width: 14 },
+      { header: "Start", key: "start", width: 12 },
+      { header: "End", key: "end", width: 12 },
+      { header: "Fuel (L)", key: "fuel_liters", width: 12 },
+      { header: "Hours Run", key: "hours_run", width: 12 },
+      { header: "Km Run", key: "km_run", width: 12 },
+      { header: "Avg L/hr", key: "avg_lph", width: 12 },
+      { header: "Avg km/L", key: "avg_km_per_l", width: 12 },
+      { header: "Fuel Cost", key: "fuel_cost", width: 12 },
+      { header: "Lube Cost", key: "lube_cost", width: 12 },
+      { header: "Mechanics / Labor", key: "labor_cost", width: 16 },
+      { header: "Parts Cost", key: "parts_cost", width: 12 },
+      { header: "Downtime Cost", key: "downtime_cost", width: 14 },
+      { header: "Total Cost", key: "total_cost", width: 12 },
+      { header: "Fuel Δ vs prior Q", key: "fuel_delta", width: 16 },
+      { header: "Cost Δ vs prior Q", key: "cost_delta", width: 16 },
+      { header: "L/hr Δ vs prior Q", key: "lph_delta", width: 16 },
+    ];
+    let prevQ = null;
+    for (const q of quarterSnapshots) {
+      const fuelDelta = prevQ ? Number((q.summary.fuel_liters - prevQ.summary.fuel_liters).toFixed(2)) : null;
+      const costDelta = prevQ ? Number((q.costs.total_cost - prevQ.costs.total_cost).toFixed(2)) : null;
+      const lphDelta = prevQ && q.summary.avg_lph != null && prevQ.summary.avg_lph != null
+        ? Number((q.summary.avg_lph - prevQ.summary.avg_lph).toFixed(3))
+        : null;
+      wsQuarterCompare.addRow({
+        period: q.key,
+        start: q.start,
+        end: q.end,
+        fuel_liters: q.summary.fuel_liters,
+        hours_run: q.summary.hours_run,
+        km_run: q.summary.km_run,
+        avg_lph: q.summary.avg_lph == null ? "" : q.summary.avg_lph,
+        avg_km_per_l: q.summary.avg_km_per_l == null ? "" : q.summary.avg_km_per_l,
+        fuel_cost: Number(q.costs.fuel_cost.toFixed(2)),
+        lube_cost: Number(q.costs.lube_cost.toFixed(2)),
+        labor_cost: Number(q.costs.labor_cost.toFixed(2)),
+        parts_cost: Number(q.costs.parts_cost.toFixed(2)),
+        downtime_cost: Number(q.costs.downtime_cost.toFixed(2)),
+        total_cost: q.costs.total_cost,
+        fuel_delta: fuelDelta == null ? "" : fuelDelta,
+        cost_delta: costDelta == null ? "" : costDelta,
+        lph_delta: lphDelta == null ? "" : lphDelta,
+      });
+      prevQ = q;
+    }
+    wsQuarterCompare.addRow({
+      period: `YTD ${reportYear}`,
+      start: ytdStart,
+      end,
+      fuel_liters: ytdSummary.fuel_liters,
+      hours_run: ytdSummary.hours_run,
+      km_run: ytdSummary.km_run,
+      avg_lph: ytdSummary.avg_lph == null ? "" : ytdSummary.avg_lph,
+      avg_km_per_l: ytdSummary.avg_km_per_l == null ? "" : ytdSummary.avg_km_per_l,
+      fuel_cost: Number(ytdCosts.fuel_cost.toFixed(2)),
+      lube_cost: Number(ytdCosts.lube_cost.toFixed(2)),
+      labor_cost: Number(ytdCosts.labor_cost.toFixed(2)),
+      parts_cost: Number(ytdCosts.parts_cost.toFixed(2)),
+      downtime_cost: Number(ytdCosts.downtime_cost.toFixed(2)),
+      total_cost: ytdCosts.total_cost,
+      fuel_delta: "",
+      cost_delta: "",
+      lph_delta: "",
+    });
+
+    // Monthly budget vs actual (yellow budget cells are editable what-if values in Excel)
+    const yearMonths = monthsInRange(ytdStart, end);
+    const wsBudget = wb.addWorksheet("Budget vs Actual");
+    wsBudget.columns = [
+      { header: "Month", key: "month", width: 10 },
+      { header: "Budget Fuel", key: "budget_fuel", width: 12 },
+      { header: "Budget Lube", key: "budget_lube", width: 12 },
+      { header: "Budget Mechanics", key: "budget_labor", width: 16 },
+      { header: "Budget Operating", key: "budget_operating", width: 16 },
+      { header: "Actual Fuel", key: "actual_fuel", width: 12 },
+      { header: "Actual Lube", key: "actual_lube", width: 12 },
+      { header: "Actual Mechanics", key: "actual_labor", width: 16 },
+      { header: "Actual Parts", key: "actual_parts", width: 12 },
+      { header: "Actual Total", key: "actual_total", width: 12 },
+      { header: "Fuel Variance", key: "var_fuel", width: 12 },
+      { header: "Lube Variance", key: "var_lube", width: 12 },
+      { header: "Mechanics Variance", key: "var_labor", width: 16 },
+      { header: "Operating Variance", key: "var_operating", width: 16 },
+    ];
+    wsBudget.getCell("A1").note = "Yellow budget columns pre-fill from Finance budgets when available. Edit yellow cells in Excel for what-if; variances recalculate with formulas.";
+
+    const yellowFill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFFCE8A8" },
+    };
+    yearMonths.forEach((m, idx) => {
+      const costs = queryPeriodFleetCostTotals(m.start, m.end);
+      const mech = buildMechanicLaborDetail(db, m.label);
+      const actualLabor = Number(mech.total_cost || 0) > 0
+        ? Number(mech.total_cost || 0)
+        : Number(costs.labor_cost || 0);
+      const budgetFuel = Number(getMonthlyBudgetRow(db, m.label, "fuel")?.budget_amount || 0);
+      const budgetLube = Number(getMonthlyBudgetRow(db, m.label, "lube")?.budget_amount || 0);
+      const budgetLabor = Number(getMonthlyBudgetRow(db, m.label, "labor")?.budget_amount || 0);
+      const budgetOperating = Number(getOperatingBudgetAmount(db, m.label)?.budget_amount || 0);
+      const rowNum = idx + 2;
+      const row = wsBudget.addRow({
+        month: m.label,
+        budget_fuel: budgetFuel,
+        budget_lube: budgetLube,
+        budget_labor: budgetLabor,
+        budget_operating: budgetOperating,
+        actual_fuel: Number(costs.fuel_cost.toFixed(2)),
+        actual_lube: Number(costs.lube_cost.toFixed(2)),
+        actual_labor: Number(actualLabor.toFixed(2)),
+        actual_parts: Number(costs.parts_cost.toFixed(2)),
+        actual_total: Number((costs.fuel_cost + costs.lube_cost + actualLabor + costs.parts_cost + costs.downtime_cost).toFixed(2)),
+        var_fuel: null,
+        var_lube: null,
+        var_labor: null,
+        var_operating: null,
+      });
+      // Excel formulas: Actual - Budget
+      row.getCell("var_fuel").value = { formula: `F${rowNum}-B${rowNum}` };
+      row.getCell("var_lube").value = { formula: `G${rowNum}-C${rowNum}` };
+      row.getCell("var_labor").value = { formula: `H${rowNum}-D${rowNum}` };
+      row.getCell("var_operating").value = { formula: `J${rowNum}-E${rowNum}` };
+      for (const col of ["B", "C", "D", "E"]) {
+        wsBudget.getCell(`${col}${rowNum}`).fill = yellowFill;
+      }
+    });
+
+    // Quarter rollup of budget vs actual
+    const wsBudgetQ = wb.addWorksheet("Budget by Quarter");
+    wsBudgetQ.columns = [
+      { header: "Period", key: "period", width: 14 },
+      { header: "Budget Fuel", key: "budget_fuel", width: 12 },
+      { header: "Budget Lube", key: "budget_lube", width: 12 },
+      { header: "Budget Mechanics", key: "budget_labor", width: 16 },
+      { header: "Budget Operating", key: "budget_operating", width: 16 },
+      { header: "Actual Fuel", key: "actual_fuel", width: 12 },
+      { header: "Actual Lube", key: "actual_lube", width: 12 },
+      { header: "Actual Mechanics", key: "actual_labor", width: 16 },
+      { header: "Actual Total", key: "actual_total", width: 12 },
+      { header: "Fuel Variance", key: "var_fuel", width: 12 },
+      { header: "Lube Variance", key: "var_lube", width: 12 },
+      { header: "Mechanics Variance", key: "var_labor", width: 16 },
+      { header: "Operating Variance", key: "var_operating", width: 16 },
+      { header: "Cost Δ vs prior Q", key: "cost_delta", width: 16 },
+    ];
+    let prevBudgetQ = null;
+    for (const q of quarterSnapshots) {
+      const qMonths = monthsInRange(q.start, q.end);
+      let budgetFuel = 0;
+      let budgetLube = 0;
+      let budgetLabor = 0;
+      let budgetOperating = 0;
+      let actualFuel = 0;
+      let actualLube = 0;
+      let actualLabor = 0;
+      let actualTotal = 0;
+      for (const m of qMonths) {
+        const costs = queryPeriodFleetCostTotals(m.start, m.end);
+        const mech = buildMechanicLaborDetail(db, m.label);
+        const labor = Number(mech.total_cost || 0) > 0 ? Number(mech.total_cost || 0) : Number(costs.labor_cost || 0);
+        budgetFuel += Number(getMonthlyBudgetRow(db, m.label, "fuel")?.budget_amount || 0);
+        budgetLube += Number(getMonthlyBudgetRow(db, m.label, "lube")?.budget_amount || 0);
+        budgetLabor += Number(getMonthlyBudgetRow(db, m.label, "labor")?.budget_amount || 0);
+        budgetOperating += Number(getOperatingBudgetAmount(db, m.label)?.budget_amount || 0);
+        actualFuel += Number(costs.fuel_cost || 0);
+        actualLube += Number(costs.lube_cost || 0);
+        actualLabor += labor;
+        actualTotal += Number(costs.fuel_cost || 0) + Number(costs.lube_cost || 0) + labor + Number(costs.parts_cost || 0) + Number(costs.downtime_cost || 0);
+      }
+      const row = {
+        period: q.key,
+        budget_fuel: Number(budgetFuel.toFixed(2)),
+        budget_lube: Number(budgetLube.toFixed(2)),
+        budget_labor: Number(budgetLabor.toFixed(2)),
+        budget_operating: Number(budgetOperating.toFixed(2)),
+        actual_fuel: Number(actualFuel.toFixed(2)),
+        actual_lube: Number(actualLube.toFixed(2)),
+        actual_labor: Number(actualLabor.toFixed(2)),
+        actual_total: Number(actualTotal.toFixed(2)),
+        var_fuel: Number((actualFuel - budgetFuel).toFixed(2)),
+        var_lube: Number((actualLube - budgetLube).toFixed(2)),
+        var_labor: Number((actualLabor - budgetLabor).toFixed(2)),
+        var_operating: Number((actualTotal - budgetOperating).toFixed(2)),
+        cost_delta: prevBudgetQ == null ? "" : Number((actualTotal - prevBudgetQ).toFixed(2)),
+      };
+      wsBudgetQ.addRow(row);
+      prevBudgetQ = actualTotal;
+    }
 
     const wsCategory = wb.addWorksheet("Fuel by Category");
     wsCategory.columns = [
