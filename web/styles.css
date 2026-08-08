@@ -551,17 +551,17 @@ button.btn-disabled{
   background:#94a3b8;
 }
 .fuel-period-compare-chart{
-  min-height:260px;
+  min-height:420px;
   overflow-x:auto;
   overflow-y:visible;
-  padding:4px 0;
+  padding:8px 0 4px;
 }
 .fuel-period-compare-chart svg{
   display:block;
   width:100%;
-  min-width:320px;
-  height:260px;
-  min-height:220px;
+  min-width:720px;
+  height:420px;
+  min-height:420px;
   max-width:none;
 }
 .cost-bar{

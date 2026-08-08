@@ -7795,16 +7795,20 @@ function fuelSvgPeriodCompareLines(currentSeries, previousSeries, currentRange, 
     allVals.push(Number(cur[i]?.liters || 0), Number(prev[i]?.liters || 0));
   }
   const max = Math.max(...allVals, 1);
-  const width = Math.min(920, Math.max(420, 56 + n * 28));
-  const height = 240;
-  const left = 44;
-  const right = 12;
-  const top = 24;
-  const bottom = 34;
+  // Wider + taller for quarter-length ranges; scroll horizontally when needed
+  const pxPerDay = n > 60 ? 14 : n > 31 ? 18 : n > 14 ? 22 : 28;
+  const width = Math.max(720, Math.min(2200, 72 + n * pxPerDay));
+  const height = n > 45 ? 460 : 420;
+  const left = 52;
+  const right = 18;
+  const top = 28;
+  const bottom = 42;
   const plotW = width - left - right;
   const plotH = height - top - bottom;
   const xAt = (i) => left + (n === 1 ? plotW / 2 : (i * plotW) / (n - 1));
   const yAt = (v) => top + plotH - (Number(v || 0) / max) * plotH;
+  const showValueLabels = n <= 14;
+  const dotR = n > 60 ? 2 : n > 31 ? 2.5 : 3.5;
 
   const linePath = (series, color) => {
     const pts = [];
@@ -7813,19 +7817,24 @@ function fuelSvgPeriodCompareLines(currentSeries, previousSeries, currentRange, 
       pts.push({ x: xAt(i), y: yAt(v), v });
     }
     const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
-    const dots = pts.map((p) => `
-      <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.5" fill="${color}"/>
-      <text x="${p.x.toFixed(1)}" y="${(p.y - 8).toFixed(1)}" text-anchor="middle" font-size="10" fill="#334155">${p.v.toFixed(0)}</text>
-    `).join("");
+    const dots = pts.map((p) => {
+      const label = showValueLabels
+        ? `<text x="${p.x.toFixed(1)}" y="${(p.y - 8).toFixed(1)}" text-anchor="middle" font-size="10" fill="#334155">${p.v.toFixed(0)}</text>`
+        : "";
+      return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${dotR}" fill="${color}"/>${label}`;
+    }).join("");
     return `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>${dots}`;
   };
 
+  const labelStep = n > 60 ? Math.ceil(n / 10) : n > 31 ? Math.ceil(n / 9) : n > 14 ? Math.ceil(n / 8) : 1;
   const xLabels = [];
   for (let i = 0; i < n; i++) {
-    const step = n > 14 ? Math.ceil(n / 7) : 1;
-    if (i % step !== 0 && i !== n - 1) continue;
-    const label = `D${i + 1}`;
-    xLabels.push(`<text x="${xAt(i).toFixed(1)}" y="${top + plotH + 18}" text-anchor="middle" font-size="10" fill="#64748b">${label}</text>`);
+    if (i % labelStep !== 0 && i !== n - 1 && i !== 0) continue;
+    const rawDate = String(cur[i]?.date || prev[i]?.date || "").slice(0, 10);
+    const label = /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
+      ? `${rawDate.slice(5, 7)}-${rawDate.slice(8, 10)}`
+      : `D${i + 1}`;
+    xLabels.push(`<text x="${xAt(i).toFixed(1)}" y="${top + plotH + 22}" text-anchor="middle" font-size="11" fill="#64748b">${label}</text>`);
   }
 
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((t) => {
@@ -7833,7 +7842,7 @@ function fuelSvgPeriodCompareLines(currentSeries, previousSeries, currentRange, 
     const y = yAt(v);
     return `
       <line x1="${left}" y1="${y.toFixed(1)}" x2="${width - right}" y2="${y.toFixed(1)}" stroke="#e2e8f0" stroke-width="1"/>
-      <text x="${left - 6}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-size="10" fill="#64748b">${v.toFixed(0)}</text>
+      <text x="${left - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="#64748b">${v.toFixed(0)}</text>
     `;
   }).join("");
 
@@ -7845,9 +7854,9 @@ function fuelSvgPeriodCompareLines(currentSeries, previousSeries, currentRange, 
     : "Previous";
 
   return `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img" aria-label="Fuel usage current versus previous period" preserveAspectRatio="xMidYMid meet">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img" aria-label="Fuel usage current versus previous period" preserveAspectRatio="xMinYMid meet">
       <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff" rx="8"/>
-      <text x="${left}" y="14" font-size="11" fill="#475569">${escapeHtml(curLabel)} vs ${escapeHtml(prevLabel)} (liters per day)</text>
+      <text x="${left}" y="16" font-size="12" fill="#475569">${escapeHtml(curLabel)} vs ${escapeHtml(prevLabel)} (liters per day)</text>
       ${yTicks}
       <line x1="${left}" y1="${top + plotH}" x2="${width - right}" y2="${top + plotH}" stroke="#cbd5e1" stroke-width="1"/>
       <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotH}" stroke="#cbd5e1" stroke-width="1"/>
@@ -7862,6 +7871,7 @@ function mountFuelCompareSvg(host, svgMarkup) {
   if (!host) return false;
   const markup = String(svgMarkup || "").trim();
   if (!markup) return false;
+  const chartH = "420px";
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(markup, "image/svg+xml");
@@ -7869,21 +7879,23 @@ function mountFuelCompareSvg(host, svgMarkup) {
     const svg = doc.documentElement;
     if (!svg || String(svg.tagName || "").toLowerCase() !== "svg") throw new Error("svg root missing");
     const node = host.ownerDocument.importNode(svg, true);
+    const h = Number(node.getAttribute("height") || 420) || 420;
     node.setAttribute("width", "100%");
-    node.setAttribute("height", "260");
+    node.setAttribute("height", String(h));
     node.style.display = "block";
     node.style.width = "100%";
-    node.style.height = "260px";
-    node.style.minHeight = "220px";
+    node.style.height = `${h}px`;
+    node.style.minHeight = chartH;
     host.replaceChildren(node);
     return true;
   } catch {
     host.innerHTML = markup;
     const svg = host.querySelector("svg");
     if (svg) {
+      const h = Number(svg.getAttribute("height") || 420) || 420;
       svg.style.display = "block";
       svg.style.width = "100%";
-      svg.style.height = "260px";
+      svg.style.height = `${h}px`;
     }
     return Boolean(svg);
   }
