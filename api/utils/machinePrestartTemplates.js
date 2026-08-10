@@ -455,6 +455,7 @@ const MOBILE_SCREEN_ASSET_CODES = new Set(["FIN694"]);
 /** Explicit site equipment codes for daily pre-start checklists. */
 const FUEL_TRUCK_ASSET_CODES = new Set(["DR01AM"]);
 const DOZER_ASSET_CODES = new Set([]);
+const EXCAVATOR_ASSET_CODES = new Set(["E500AM", "E503AM", "E504AM"]);
 const WHEEL_LOADER_ASSET_CODES = new Set(["FL01AM", "FL03AM"]);
 const BACKHOE_LOADER_ASSET_CODES = new Set(["B01AM"]);
 const GENERATOR_ASSET_CODES = new Set([
@@ -474,6 +475,8 @@ function resolveProfileByAssetCode(assetCode) {
   if (GENERATOR_ASSET_CODES.has(code) || /^GS0[1-9]AM$/.test(code)) return "generator";
   if (FUEL_TRUCK_ASSET_CODES.has(code)) return "fuel_truck";
   if (DOZER_ASSET_CODES.has(code)) return "dozer";
+  // Excavators: E500AM, E503AM, E504AM, and future E###AM fleet codes
+  if (EXCAVATOR_ASSET_CODES.has(code) || /^E\d+AM$/.test(code)) return "excavator";
   if (WHEEL_LOADER_ASSET_CODES.has(code) || /^FL\d+AM$/.test(code)) return "wheel_loader";
   if (BACKHOE_LOADER_ASSET_CODES.has(code) || /^B0[1-9]AM$/.test(code)) return "backhoe_loader";
   return null;

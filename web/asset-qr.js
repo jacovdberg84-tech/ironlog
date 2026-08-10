@@ -146,6 +146,18 @@
     const fireItemCode = `FE-${assetCode}`.toUpperCase();
     const fireChecklistUrl = `./safety-inspection.html?item_code=${encodeURIComponent(fireItemCode)}&asset_code=${encodeURIComponent(assetCode)}&template_key=fire_extinguisher`;
 
+    // Printed asset QRs that land on the hub should open pre-start like machine-specific stickers.
+    // Use ?stay=1 on the URL to remain on the hub page.
+    const stayOnHub = url.searchParams.get("stay") === "1";
+    if (!stayOnHub && isLdv) {
+      window.location.replace(ldvChecklistUrl);
+      return;
+    }
+    if (!stayOnHub && hasMachineChecklist) {
+      window.location.replace(machineChecklistUrl);
+      return;
+    }
+
     const openChecklistQrBtn = qs("openChecklistQrBtn");
     if (openChecklistQrBtn) {
       if (isLdv || hasMachineChecklist) {
