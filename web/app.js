@@ -7940,6 +7940,25 @@ function getSelectedFuelEquipmentCodes() {
   return boxes.filter((b) => b.checked).map((b) => String(b.getAttribute("data-fuel-equip") || "").trim().toLowerCase());
 }
 
+/**
+ * Derive a normalised equipment type from an asset label by stripping trailing
+ * unit identifiers: "#2", "No.3", "(2)", serial numbers, etc.
+ * Returns e.g. "CAT 950K" from "CAT 950K #2" or "Komatsu PC210" from "Komatsu PC210 No.3".
+ */
+function fuelEquipTypeGroup(label) {
+  let s = String(label || "").trim();
+  // Strip trailing patterns like "#1", "No.1", "No 1", "(1)", "- 1", "Unit 1", serial-like all-caps codes
+  s = s
+    .replace(/\s*[-–]?\s*#\s*\d+\s*$/i, "")
+    .replace(/\s+No\.?\s*\d+\s*$/i, "")
+    .replace(/\s*\(\s*\d+\s*\)\s*$/i, "")
+    .replace(/\s+Unit\s+\d+\s*$/i, "")
+    .replace(/\s+[A-Z]{2,}\d{4,}\s*$/i, "")  // strip trailing serial-like codes
+    .trim();
+  // Normalise multiple spaces
+  return s.replace(/\s+/g, " ") || label;
+}
+
 function renderFuelEquipmentFilter(rows, preserveSelection = true) {
   const host = qs("fuelEquipFilterList");
   if (!host) return;
@@ -7947,6 +7966,9 @@ function renderFuelEquipmentFilter(rows, preserveSelection = true) {
   if (!all.length) {
     host.className = "fuel-equip-filter-list muted";
     host.textContent = "No machine (L/hr) equipment in this period.";
+    // Clear type dropdown too
+    const typeSel = qs("fuelEquipTypeFilter");
+    if (typeSel) typeSel.innerHTML = `<option value="">Filter by type…</option>`;
     return;
   }
   const prev = preserveSelection ? new Set(getSelectedFuelEquipmentCodes() || []) : null;
@@ -7956,11 +7978,27 @@ function renderFuelEquipmentFilter(rows, preserveSelection = true) {
     const code = r.asset_code;
     const checked = selectAllByDefault || prev.has(code.toLowerCase()) ? "checked" : "";
     const title = escapeHtml(`${r.label} (${code})`);
-    return `<label class="fuel-equip-filter-item" title="${title}">
+    const typeGroup = fuelEquipTypeGroup(r.label);
+    return `<label class="fuel-equip-filter-item" title="${title}" data-fuel-type="${escapeHtml(typeGroup)}">
       <input type="checkbox" data-fuel-equip="${escapeHtml(code)}" ${checked} />
       <span>${escapeHtml(r.label)}</span>
     </label>`;
   }).join("");
+
+  // Populate type dropdown — unique groups sorted, only show if >1 group or >1 member in a group
+  const typeSel = qs("fuelEquipTypeFilter");
+  if (typeSel) {
+    const groups = new Map();
+    all.forEach((r) => {
+      const g = fuelEquipTypeGroup(r.label);
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(r.asset_code);
+    });
+    // Only offer groups that have ≥2 members (singles are selected individually)
+    const multiGroups = [...groups.entries()].filter(([, codes]) => codes.length >= 2).sort((a, b) => a[0].localeCompare(b[0]));
+    typeSel.innerHTML = `<option value="">Filter by type…</option>` +
+      multiGroups.map(([g]) => `<option value="${escapeHtml(g)}">${escapeHtml(g)} (${groups.get(g).length})</option>`).join("");
+  }
 }
 
 function fuelSvgEquipmentConsumption(points) {
@@ -17366,6 +17404,18 @@ async function init() {
   qs("fuelEquipClear")?.addEventListener("click", () => {
     const host = qs("fuelEquipFilterList");
     host?.querySelectorAll('input[type="checkbox"][data-fuel-equip]')?.forEach((b) => { b.checked = false; });
+    renderFuelEquipmentChart(window.__fuelBenchmarkChartRows || []);
+  });
+  qs("fuelEquipTypeFilter")?.addEventListener("change", (evt) => {
+    const type = String(evt.target?.value || "").trim();
+    if (!type) return;
+    const host = qs("fuelEquipFilterList");
+    if (!host) return;
+    // Uncheck all, then check only the matching type
+    host.querySelectorAll('input[type="checkbox"][data-fuel-equip]').forEach((b) => { b.checked = false; });
+    host.querySelectorAll(`label[data-fuel-type="${CSS.escape(type)}"] input[type="checkbox"]`).forEach((b) => { b.checked = true; });
+    // Reset the select so it can be used again next time
+    evt.target.value = "";
     renderFuelEquipmentChart(window.__fuelBenchmarkChartRows || []);
   });
   qs("fuelEquipFilterList")?.addEventListener("change", (evt) => {
