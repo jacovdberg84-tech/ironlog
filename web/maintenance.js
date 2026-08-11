@@ -5939,6 +5939,129 @@ function renderAssetKpiVisuals(data) {
   utilEl.innerHTML = akpSvgTrend(trendSeries, "utilization_pct", "#16a34a", "Utilization trend by selected day");
 }
 
+/* ---- Availability / Utilization bar chart by type or asset ---- */
+
+function akpKpiChartRows(data) {
+  if (!data) return [];
+  const filterRaw = String(document.getElementById("akpCategoryFilter")?.value || "").trim();
+  const viewMode = String(document.getElementById("akpChartViewMode")?.value || "category");
+  const allAssets = Array.isArray(data.by_asset) ? data.by_asset : [];
+  const filteredAssets = filterRaw
+    ? allAssets.filter((a) => akpCategoryNorm(a.category) === filterRaw)
+    : allAssets;
+
+  if (viewMode === "asset") {
+    return filteredAssets.map((a) => ({
+      label: `${String(a.asset_code || "")} ${String(a.asset_name || "")}`.trim() || "—",
+      availability_pct: a.availability_pct != null ? Number(a.availability_pct) : null,
+      utilization_pct: a.utilization_pct != null ? Number(a.utilization_pct) : null,
+    })).sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  const cats = filterRaw
+    ? akpRollupCategoriesFromAssets(filteredAssets)
+    : Array.isArray(data.by_category) ? data.by_category : [];
+  return cats.map((c) => ({
+    label: String(c.category || "—"),
+    availability_pct: c.availability_pct != null ? Number(c.availability_pct) : null,
+    utilization_pct: c.utilization_pct != null ? Number(c.utilization_pct) : null,
+  }));
+}
+
+function akpSvgKpiBarChart(rows, availTarget, utilTarget) {
+  const n = rows.length;
+  if (!n) return `<div class="muted">No data rows for the current filter.</div>`;
+  const max = 100;
+  const slot = Math.max(70, Math.min(120, 900 / Math.max(n, 1)));
+  const barPair = Math.min(36, Math.max(14, slot * 0.3));
+  const gap = 4;
+  const width = Math.max(600, 80 + n * slot * 2);
+  const height = 380;
+  const left = 52;
+  const right = 20;
+  const top = 36;
+  const bottom = 72;
+  const plotW = width - left - right;
+  const plotH = height - top - bottom;
+  const band = plotW / n;
+  const xCenter = (i) => left + band * i + band / 2;
+  const yAt = (v) => top + plotH - (Math.max(0, Math.min(100, Number(v || 0))) / max) * plotH;
+
+  const bars = rows.map((r, i) => {
+    const av = r.availability_pct;
+    const ut = r.utilization_pct;
+    const xA = xCenter(i) - barPair - gap / 2;
+    const xU = xCenter(i) + gap / 2;
+    const avBar = av != null
+      ? (() => {
+          const y = yAt(av); const h = Math.max(0, top + plotH - y);
+          const ly = h > 16 ? y + 13 : y - 5; const lf = h > 16 ? "#fff" : "#111827";
+          return `<rect x="${xA.toFixed(1)}" y="${y.toFixed(1)}" width="${barPair.toFixed(1)}" height="${h.toFixed(1)}" fill="#2563eb" rx="2"/>
+          <text x="${(xA + barPair / 2).toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" font-size="10" font-weight="600" fill="${lf}">${av.toFixed(1)}</text>`;
+        })()
+      : `<text x="${(xA + barPair / 2).toFixed(1)}" y="${(top + plotH + 14).toFixed(1)}" text-anchor="middle" font-size="10" fill="#94a3b8">—</text>`;
+    const utBar = ut != null
+      ? (() => {
+          const y = yAt(ut); const h = Math.max(0, top + plotH - y);
+          const ly = h > 16 ? y + 13 : y - 5; const lf = h > 16 ? "#fff" : "#111827";
+          return `<rect x="${xU.toFixed(1)}" y="${y.toFixed(1)}" width="${barPair.toFixed(1)}" height="${h.toFixed(1)}" fill="#16a34a" rx="2"/>
+          <text x="${(xU + barPair / 2).toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" font-size="10" font-weight="600" fill="${lf}">${ut.toFixed(1)}</text>`;
+        })()
+      : "";
+    const labelX = xCenter(i);
+    const labelY = top + plotH + 16;
+    const labelText = String(r.label || "").slice(0, 22);
+    return `${avBar}${utBar}<text x="${labelX.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="end" font-size="10" fill="#334155" transform="rotate(-32 ${labelX.toFixed(1)} ${labelY.toFixed(1)})">${esc(labelText)}</text>`;
+  }).join("");
+
+  const yTicks = [];
+  for (let v = 0; v <= 100; v += 20) {
+    const y = yAt(v);
+    yTicks.push(`<line x1="${left}" y1="${y.toFixed(1)}" x2="${width - right}" y2="${y.toFixed(1)}" stroke="#e5e7eb" stroke-width="1"/>
+      <text x="${left - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="#64748b">${v}</text>`);
+  }
+
+  const targetLine = (val, color) => {
+    if (val == null || !Number.isFinite(val) || val < 0 || val > 100) return "";
+    const y = yAt(val);
+    return `<line x1="${left}" y1="${y.toFixed(1)}" x2="${(width - right).toFixed(1)}" y2="${y.toFixed(1)}" stroke="${color}" stroke-width="2" stroke-dasharray="6 4"/>
+      <text x="${(width - right + 4).toFixed(1)}" y="${(y + 4).toFixed(1)}" font-size="10" fill="${color}" font-weight="600">${val}%</text>`;
+  };
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img" aria-label="Asset KPI chart" preserveAspectRatio="xMinYMid meet" style="display:block;width:100%;height:${height}px;">
+    <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff" rx="8"/>
+    <text x="${left}" y="16" font-size="13" font-weight="700" fill="#111827">Availability &amp; Utilization %</text>
+    <text x="${left}" y="30" font-size="11" fill="#64748b">Blue = Availability · Green = Utilization · Dashed = Targets</text>
+    ${yTicks.join("")}
+    <line x1="${left}" y1="${top + plotH}" x2="${width - right}" y2="${top + plotH}" stroke="#94a3b8" stroke-width="1"/>
+    <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotH}" stroke="#94a3b8" stroke-width="1"/>
+    ${bars}
+    ${targetLine(availTarget, "#1d4ed8")}
+    ${targetLine(utilTarget, "#15803d")}
+  </svg>`;
+}
+
+function renderAkpKpiChart(data) {
+  const host = document.getElementById("akpKpiChart");
+  const summaryEl = document.getElementById("akpKpiChartSummary");
+  if (!host) return;
+  const rows = akpKpiChartRows(data);
+  if (!rows.length) {
+    host.className = "muted";
+    host.innerHTML = "No data for current filter. Load KPI data first.";
+    if (summaryEl) summaryEl.textContent = "No data.";
+    return;
+  }
+  const availTarget = parseFloat(document.getElementById("akpAvailTarget")?.value);
+  const utilTarget = parseFloat(document.getElementById("akpUtilTarget")?.value);
+  const viewMode = String(document.getElementById("akpChartViewMode")?.value || "category");
+  host.className = "";
+  host.innerHTML = akpSvgKpiBarChart(rows, availTarget, utilTarget);
+  if (summaryEl) {
+    summaryEl.textContent = `${rows.length} ${viewMode === "asset" ? "asset" : "equipment type"}${rows.length !== 1 ? "s" : ""} · Availability target: ${Number.isFinite(availTarget) ? availTarget + "%" : "—"} · Utilization target: ${Number.isFinite(utilTarget) ? utilTarget + "%" : "—"}`;
+  }
+}
+
 function refreshAkpCategoryFilterOptions(data, previousValue) {
   const sel = document.getElementById("akpCategoryFilter");
   if (!sel) return;
@@ -6066,6 +6189,7 @@ function renderAssetKpiTables(data) {
       }).join("")
     : `<tr><td colspan="10" class="muted">${filterRaw ? "No rows for this type." : "No rows."}</td></tr>`;
   renderAssetKpiVisuals(data);
+  renderAkpKpiChart(data);
 }
 
 let relAssetCatalog = [];
@@ -8727,6 +8851,15 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("akpCategoryFilter")?.addEventListener("change", () => {
     if (akpLastResponse) renderAssetKpiTables(akpLastResponse);
+  });
+  document.getElementById("akpAvailTarget")?.addEventListener("input", () => {
+    if (akpLastResponse) renderAkpKpiChart(akpLastResponse);
+  });
+  document.getElementById("akpUtilTarget")?.addEventListener("input", () => {
+    if (akpLastResponse) renderAkpKpiChart(akpLastResponse);
+  });
+  document.getElementById("akpChartViewMode")?.addEventListener("change", () => {
+    if (akpLastResponse) renderAkpKpiChart(akpLastResponse);
   });
   document.getElementById("akpAssetFilterClear")?.addEventListener("click", () => {
     const sel = document.getElementById("akpAssetFilter");
