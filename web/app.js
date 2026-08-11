@@ -8077,6 +8077,26 @@ function fuelSvgEquipmentConsumption(points) {
   `;
 }
 
+function aggregateFuelByType(points) {
+  const groups = new Map();
+  for (const r of points) {
+    const g = fuelEquipTypeGroup(r.label);
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(r);
+  }
+  const avg = (arr, key) => arr.reduce((s, r) => s + Number(r[key] || 0), 0) / arr.length;
+  return [...groups.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([g, members]) => ({
+      asset_code: g,
+      label: members.length > 1 ? `${g} (avg ${members.length})` : g,
+      actual: avg(members, "actual"),
+      oem: avg(members, "oem"),
+      threshold: avg(members, "threshold"),
+      count: members.length,
+    }));
+}
+
 function renderFuelEquipmentChart(rows) {
   const host = qs("fuelEquipChart");
   const summaryEl = qs("fuelEquipChartSummary");
@@ -8104,12 +8124,21 @@ function renderFuelEquipmentChart(rows) {
     return;
   }
 
+  const viewMode = String(qs("fuelEquipViewMode")?.value || "individual");
+  const chartPoints = viewMode === "type" ? aggregateFuelByType(points) : points;
+
   if (summaryEl) {
-    summaryEl.textContent = `Showing ${points.length} of ${all.length} machines (L/hr). Actual bars vs OEM (green) and threshold (red).`;
+    if (viewMode === "type") {
+      const typeCount = chartPoints.length;
+      const unitCount = points.length;
+      summaryEl.textContent = `Showing ${typeCount} type${typeCount !== 1 ? "s" : ""} averaged from ${unitCount} unit${unitCount !== 1 ? "s" : ""}. Actual L/hr (bar) vs OEM (green) and threshold (red).`;
+    } else {
+      summaryEl.textContent = `Showing ${points.length} of ${all.length} machines (L/hr). Actual bars vs OEM (green) and threshold (red).`;
+    }
   }
   if (wrap) wrap.style.display = "";
   host.className = "fuel-equip-chart";
-  const svgMarkup = fuelSvgEquipmentConsumption(points);
+  const svgMarkup = fuelSvgEquipmentConsumption(chartPoints);
   const mounted = mountFuelCompareSvg(host, svgMarkup);
   if (!mounted) {
     host.className = "fuel-equip-chart muted";
@@ -17416,6 +17445,9 @@ async function init() {
     host.querySelectorAll(`label[data-fuel-type="${CSS.escape(type)}"] input[type="checkbox"]`).forEach((b) => { b.checked = true; });
     // Reset the select so it can be used again next time
     evt.target.value = "";
+    renderFuelEquipmentChart(window.__fuelBenchmarkChartRows || []);
+  });
+  qs("fuelEquipViewMode")?.addEventListener("change", () => {
     renderFuelEquipmentChart(window.__fuelBenchmarkChartRows || []);
   });
   qs("fuelEquipFilterList")?.addEventListener("change", (evt) => {
