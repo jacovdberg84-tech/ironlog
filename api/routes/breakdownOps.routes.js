@@ -246,6 +246,11 @@ export default async function breakdownOpsRoutes(app) {
       actual_return_date TEXT,
       vendor TEXT,
       notes TEXT,
+      invoice_number TEXT,
+      current_location TEXT,
+      estimated_cost REAL,
+      actual_cost REAL,
+      attachment_name TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       created_by TEXT,
@@ -256,6 +261,18 @@ export default async function breakdownOpsRoutes(app) {
   `).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_offsite_repairs_site_date ON breakdown_offsite_repairs(site_code, sent_date)`).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_offsite_repairs_asset ON breakdown_offsite_repairs(asset_id)`).run();
+  const offsiteCols = db.prepare(`PRAGMA table_info(breakdown_offsite_repairs)`).all().map((c) => String(c.name));
+  const ensureOffsiteCol = (name, ddl) => {
+    if (!offsiteCols.includes(name)) {
+      db.prepare(`ALTER TABLE breakdown_offsite_repairs ADD COLUMN ${ddl}`).run();
+      offsiteCols.push(name);
+    }
+  };
+  ensureOffsiteCol("invoice_number", "invoice_number TEXT");
+  ensureOffsiteCol("current_location", "current_location TEXT");
+  ensureOffsiteCol("estimated_cost", "estimated_cost REAL");
+  ensureOffsiteCol("actual_cost", "actual_cost REAL");
+  ensureOffsiteCol("attachment_name", "attachment_name TEXT");
 
   app.get("/parts/lookup", async (req, reply) => {
     const part_code = String(req.query?.part_code || req.query?.q || "").trim();
@@ -873,6 +890,11 @@ export default async function breakdownOpsRoutes(app) {
         r.actual_return_date,
         r.vendor,
         r.notes,
+        r.invoice_number,
+        r.current_location,
+        r.estimated_cost,
+        r.actual_cost,
+        r.attachment_name,
         r.created_at,
         r.updated_at,
         r.created_by,
@@ -882,7 +904,11 @@ export default async function breakdownOpsRoutes(app) {
       WHERE ${where}
       ORDER BY r.sent_date DESC, r.id DESC
       LIMIT 300
-    `).all(...params);
+    `).all(...params).map((r) => ({
+      ...r,
+      estimated_cost: r.estimated_cost != null ? Number(r.estimated_cost) : null,
+      actual_cost: r.actual_cost != null ? Number(r.actual_cost) : null,
+    }));
     return reply.send({ ok: true, rows });
   });
 
@@ -906,12 +932,22 @@ export default async function breakdownOpsRoutes(app) {
     const breakdown_id = Number(req.body?.breakdown_id || 0) || null;
     const vendor = String(req.body?.vendor || "").trim() || null;
     const notes = String(req.body?.notes || "").trim() || null;
+    const invoice_number = String(req.body?.invoice_number || "").trim() || null;
+    const current_location = String(req.body?.current_location || "").trim() || null;
+    const attachment_name = String(req.body?.attachment_name || "").trim() || null;
+    const estimated_cost = req.body?.estimated_cost != null && req.body?.estimated_cost !== ""
+      ? Math.max(0, Number(req.body.estimated_cost))
+      : null;
+    const actual_cost = req.body?.actual_cost != null && req.body?.actual_cost !== ""
+      ? Math.max(0, Number(req.body.actual_cost))
+      : null;
 
     const ins = db.prepare(`
       INSERT INTO breakdown_offsite_repairs (
         site_code, asset_id, breakdown_id, repair_status, sent_date, expected_return_date, actual_return_date,
-        vendor, notes, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        vendor, notes, invoice_number, current_location, estimated_cost, actual_cost, attachment_name,
+        created_by, updated_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       site_code,
       Number(asset.id),
@@ -922,6 +958,11 @@ export default async function breakdownOpsRoutes(app) {
       actual_return_date,
       vendor,
       notes,
+      invoice_number,
+      current_location,
+      Number.isFinite(estimated_cost) ? estimated_cost : null,
+      Number.isFinite(actual_cost) ? actual_cost : null,
+      attachment_name,
       user,
       user
     );
@@ -948,11 +989,33 @@ export default async function breakdownOpsRoutes(app) {
     const breakdown_id = Number(req.body?.breakdown_id || 0) || null;
     const vendor = String(req.body?.vendor || "").trim() || null;
     const notes = String(req.body?.notes || "").trim() || null;
+    const invoice_number = req.body?.invoice_number != null
+      ? String(req.body.invoice_number).trim() || null
+      : undefined;
+    const current_location = req.body?.current_location != null
+      ? String(req.body.current_location).trim() || null
+      : undefined;
+    const attachment_name = req.body?.attachment_name != null
+      ? String(req.body.attachment_name).trim() || null
+      : undefined;
+    const estimated_cost = req.body?.estimated_cost !== undefined
+      ? (req.body.estimated_cost === null || req.body.estimated_cost === ""
+        ? null
+        : Math.max(0, Number(req.body.estimated_cost)))
+      : undefined;
+    const actual_cost = req.body?.actual_cost !== undefined
+      ? (req.body.actual_cost === null || req.body.actual_cost === ""
+        ? null
+        : Math.max(0, Number(req.body.actual_cost)))
+      : undefined;
 
+    const existing = db.prepare(`SELECT * FROM breakdown_offsite_repairs WHERE id = ?`).get(id);
     db.prepare(`
       UPDATE breakdown_offsite_repairs
       SET breakdown_id = ?, repair_status = ?, sent_date = ?, expected_return_date = ?, actual_return_date = ?,
-          vendor = ?, notes = ?, updated_at = datetime('now'), updated_by = ?
+          vendor = ?, notes = ?,
+          invoice_number = ?, current_location = ?, estimated_cost = ?, actual_cost = ?, attachment_name = ?,
+          updated_at = datetime('now'), updated_by = ?
       WHERE id = ? AND site_code = ?
     `).run(
       breakdown_id,
@@ -962,6 +1025,15 @@ export default async function breakdownOpsRoutes(app) {
       actual_return_date,
       vendor,
       notes,
+      invoice_number !== undefined ? invoice_number : existing?.invoice_number ?? null,
+      current_location !== undefined ? current_location : existing?.current_location ?? null,
+      estimated_cost !== undefined
+        ? (Number.isFinite(estimated_cost) || estimated_cost === null ? estimated_cost : existing?.estimated_cost)
+        : existing?.estimated_cost ?? null,
+      actual_cost !== undefined
+        ? (Number.isFinite(actual_cost) || actual_cost === null ? actual_cost : existing?.actual_cost)
+        : existing?.actual_cost ?? null,
+      attachment_name !== undefined ? attachment_name : existing?.attachment_name ?? null,
       user,
       id,
       site_code

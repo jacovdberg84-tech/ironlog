@@ -384,10 +384,15 @@ CREATE TABLE IF NOT EXISTS breakdown_offsite_repairs (
   breakdown_id INTEGER,
   repair_status TEXT NOT NULL DEFAULT 'sent_offsite',
   sent_date TEXT NOT NULL,                    -- YYYY-MM-DD
-  expected_return_date TEXT,                  -- YYYY-MM-DD
+  expected_return_date TEXT,                  -- YYYY-MM-DD (ETA on site)
   actual_return_date TEXT,                    -- YYYY-MM-DD
   vendor TEXT,
   notes TEXT,
+  invoice_number TEXT,
+  current_location TEXT,
+  estimated_cost REAL,
+  actual_cost REAL,
+  attachment_name TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   created_by TEXT,

@@ -26,6 +26,7 @@ const PRODUCTION_SITE_TABS = [
   "lube",
   "vehicle",
   "stock",
+  "parts-tracking",
   "reports",
   "ironmind",
 ];
@@ -821,12 +822,12 @@ function getRoleAllowedTabs(role) {
   const r = String(role || "").toLowerCase();
   if (r === "operator") return ["dash", "daily", "workshop", "fuel", "lube", "legal", "operations", "ironmind", "docs", "vehicle", "tasks", "telematics", "cartrack"];
   if (r === "artisan") return ["workshop", "maintenance", "Breakdowns", "vehicle", "tasks"];
-  if (r === "stores") return ["dash", "maintenance", "stock", "workshop", "uploads", "reports", "finance", "legal", "procurement", "operations", "dispatch", "quality", "ironmind", "docs", "vehicle", "tasks", "telematics", "cartrack"];
-  if (r === "procurement") return ["dash", "stock", "workshop", "reports", "finance", "procurement", "operations", "quality", "docs", "tasks"];
-  if (r === "plant_manager") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
-  if (r === "site_manager") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
+  if (r === "stores" || r === "storeman") return ["dash", "maintenance", "stock", "parts-tracking", "workshop", "uploads", "reports", "finance", "legal", "procurement", "operations", "dispatch", "quality", "ironmind", "docs", "vehicle", "tasks", "telematics", "cartrack"];
+  if (r === "procurement") return ["dash", "stock", "parts-tracking", "workshop", "reports", "finance", "procurement", "operations", "quality", "docs", "tasks"];
+  if (r === "plant_manager") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "parts-tracking", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
+  if (r === "site_manager") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "parts-tracking", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
   if (r === "executive") return ["dash", "workshop", "reports", "finance", "operations", "quality", "audit", "docs", "tasks"];
-  if (r === "supervisor") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "legal", "uploads", "reports", "finance", "enterprise", "exec", "Breakdowns", "approvals", "procurement", "operations", "dispatch", "quality", "audit", "ironmind", "docs", "vehicle", "tasks"];
+  if (r === "supervisor") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "parts-tracking", "legal", "uploads", "reports", "finance", "enterprise", "exec", "Breakdowns", "approvals", "procurement", "operations", "dispatch", "quality", "audit", "ironmind", "docs", "vehicle", "tasks"];
   return [
     "dash",
     "daily",
@@ -838,6 +839,7 @@ function getRoleAllowedTabs(role) {
     "fuel",
     "lube",
     "stock",
+    "parts-tracking",
     "legal",
     "uploads",
     "reports",
@@ -1009,6 +1011,9 @@ function initGlobalSearch() {
         "fuel": "fuel",
         "lube": "lube",
         "stores": "stock",
+        "parts": "parts-tracking",
+        "parts tracking": "parts-tracking",
+        "offsite": "parts-tracking",
         "legal": "legal",
         "reports": "reports",
         "finance": "finance",
@@ -9506,6 +9511,394 @@ async function exportStoresPartOrdersXlsx() {
   setStatus("Parts purchases Excel downloaded.");
 }
 
+/* ========== Parts Tracking tab (parts + off-site repairs) ========== */
+let ptPartsCache = [];
+let ptOffsiteCache = [];
+
+function ptTodayYmd() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function ensurePartsTrackingDates() {
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth(), 1);
+  const pad = (n) => String(n).padStart(2, "0");
+  const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  if (qs("ptPartsFrom") && !qs("ptPartsFrom").value) qs("ptPartsFrom").value = ymd(start);
+  if (qs("ptPartsTo") && !qs("ptPartsTo").value) qs("ptPartsTo").value = ymd(today);
+  if (qs("ptOrderDate") && !qs("ptOrderDate").value) qs("ptOrderDate").value = ymd(today);
+  if (qs("ptOffSent") && !qs("ptOffSent").value) qs("ptOffSent").value = ymd(today);
+}
+
+function ptIsOverdueEta(eta, statusDone) {
+  if (statusDone) return false;
+  const d = String(eta || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  return d < ptTodayYmd();
+}
+
+function updatePartsTrackingKpis() {
+  const partsPending = (ptPartsCache || [])
+    .filter((r) => ["on_order", "in_transit"].includes(String(r.status || "").toLowerCase()))
+    .reduce((s, r) => s + Number(r.line_total || 0), 0);
+  const partsOverdue = (ptPartsCache || []).filter((r) =>
+    ptIsOverdueEta(r.expected_arrival_date, String(r.status || "").toLowerCase() === "arrived" || String(r.status || "").toLowerCase() === "cancelled")
+  ).length;
+  const offEst = (ptOffsiteCache || []).reduce((s, r) => s + Number(r.estimated_cost || 0), 0);
+  const offAct = (ptOffsiteCache || []).reduce((s, r) => s + Number(r.actual_cost || 0), 0);
+  const offOverdue = (ptOffsiteCache || []).filter((r) =>
+    ptIsOverdueEta(r.expected_return_date, String(r.repair_status || "").toLowerCase() === "returned")
+  ).length;
+  setText("ptPartsPending", moneyUsd(partsPending));
+  setText("ptPartsOverdue", String(partsOverdue));
+  setText("ptOffsiteEst", moneyUsd(offEst));
+  setText("ptOffsiteActual", moneyUsd(offAct));
+  setText("ptOffsiteOverdue", String(offOverdue));
+}
+
+function clearPtPartsForm() {
+  ["ptPartCode", "ptPartName", "ptInvoice", "ptLocation", "ptEta", "ptSupplier", "ptPo", "ptNotes"].forEach((id) => {
+    if (qs(id)) qs(id).value = "";
+  });
+  if (qs("ptQty")) qs("ptQty").value = "1";
+  if (qs("ptUnitCost")) qs("ptUnitCost").value = "0";
+  if (qs("ptStatus")) qs("ptStatus").value = "on_order";
+  if (qs("ptOrderDate")) qs("ptOrderDate").value = ptTodayYmd();
+  const msg = qs("ptPartsMsg");
+  if (msg) msg.textContent = "";
+}
+
+function renderPtPartsTable(rows) {
+  const host = qs("ptPartsList");
+  if (!host) return;
+  const q = String(qs("ptPartsSearch")?.value || "").trim().toLowerCase();
+  let list = Array.isArray(rows) ? rows : [];
+  if (q) {
+    list = list.filter((r) => {
+      const hay = `${r.part_code || ""} ${r.part_name || ""} ${r.invoice_number || ""} ${r.current_location || ""} ${r.supplier_name || ""} ${r.po_number || ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }
+  if (!list.length) {
+    host.innerHTML = `<div class="muted small">No purchase lines for this filter.</div>`;
+    return;
+  }
+  host.innerHTML = `
+    <table class="gridTable" style="min-width:1280px;">
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Part</th>
+          <th style="text-align:right;">Qty</th>
+          <th style="text-align:right;">Unit $</th>
+          <th style="text-align:right;">Line $</th>
+          <th>Invoice #</th>
+          <th>Ordered</th>
+          <th>Location</th>
+          <th>ETA on site</th>
+          <th>Supplier / PO</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${list.map((r) => {
+          const id = Number(r.id || 0);
+          const cancelled = String(r.status || "").toLowerCase() === "cancelled";
+          const overdue = ptIsOverdueEta(r.expected_arrival_date, cancelled || String(r.status || "").toLowerCase() === "arrived");
+          const partLabel = r.part_code
+            ? `<strong>${escapeHtml(String(r.part_code))}</strong><br><small class="muted">${escapeHtml(String(r.part_name || ""))}</small>`
+            : escapeHtml(String(r.part_name || ""));
+          const statusOpts = ["on_order", "in_transit", "arrived", "cancelled"]
+            .map((st) => `<option value="${st}"${String(r.status || "").toLowerCase() === st ? " selected" : ""}>${spoStatusLabel(st)}</option>`)
+            .join("");
+          const dis = cancelled ? " disabled" : "";
+          return `
+            <tr data-pt-row="${id}" class="${overdue ? "pt-row-overdue" : ""}">
+              <td><select data-pt-status="${id}" class="w-full" style="min-width:110px;"${dis}>${statusOpts}</select></td>
+              <td>${partLabel}</td>
+              <td style="text-align:right;">${Number(r.qty || 0)}</td>
+              <td style="text-align:right;">${moneyUsd(r.unit_cost)}</td>
+              <td style="text-align:right;"><strong>${moneyUsd(r.line_total)}</strong></td>
+              <td><input type="text" class="spo-inline-input w-full" data-pt-field="invoice_number" value="${spoAttrVal(r.invoice_number || "")}"${dis} /></td>
+              <td>${escapeHtml(String(r.order_date || ""))}</td>
+              <td><input type="text" class="spo-inline-input w-full" data-pt-field="current_location" value="${spoAttrVal(r.current_location || "")}"${dis} /></td>
+              <td><input type="date" class="spo-inline-input w-full" data-pt-field="expected_arrival_date" value="${spoAttrVal(r.expected_arrival_date || "")}"${dis} /></td>
+              <td>
+                <input type="text" class="spo-inline-input w-full" data-pt-field="supplier_name" value="${spoAttrVal(r.supplier_name || "")}" placeholder="Supplier"${dis} />
+                <input type="text" class="spo-inline-input w-full" data-pt-field="po_number" value="${spoAttrVal(r.po_number || "")}" placeholder="PO"${dis} style="margin-top:4px;" />
+              </td>
+              <td>
+                ${cancelled ? `<span class="muted small">Cancelled</span>` : `
+                  <button type="button" class="btn btn-primary btn-sm" data-pt-save="${id}">Save</button>
+                  ${String(r.status || "").toLowerCase() === "arrived" && !r.in_store_inventory
+                    ? `<button type="button" class="btn btn-secondary btn-sm" data-pt-receive="${id}">Receive</button>`
+                    : ""}
+                  <button type="button" class="btn btn-secondary btn-sm" data-pt-del="${id}">Cancel</button>
+                `}
+              </td>
+            </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function readPtPartsRowPatch(rowEl) {
+  if (!rowEl) return null;
+  const read = (field) => {
+    const el = rowEl.querySelector(`[data-pt-field="${field}"]`);
+    if (!el) return null;
+    return String(el.value || "").trim() || null;
+  };
+  const statusEl = rowEl.querySelector("select[data-pt-status]");
+  const patch = {
+    invoice_number: read("invoice_number"),
+    current_location: read("current_location"),
+    expected_arrival_date: read("expected_arrival_date"),
+    supplier_name: read("supplier_name"),
+    po_number: read("po_number"),
+  };
+  if (statusEl && !statusEl.disabled) patch.status = String(statusEl.value || "").trim();
+  return patch;
+}
+
+async function loadPtPartsOrders() {
+  ensurePartsTrackingDates();
+  const start = (qs("ptPartsFrom")?.value || "").trim();
+  const end = (qs("ptPartsTo")?.value || "").trim();
+  const status = (qs("ptPartsStatus")?.value || "").trim();
+  const q = new URLSearchParams();
+  if (start) q.set("start", start);
+  if (end) q.set("end", end);
+  if (status) q.set("status", status);
+  setSkeleton("ptPartsList", 2);
+  const data = await fetchJson(`${API}/api/stock/part-orders?${q.toString()}`);
+  ptPartsCache = Array.isArray(data?.rows) ? data.rows : [];
+  renderPtPartsTable(ptPartsCache);
+  updatePartsTrackingKpis();
+}
+
+async function savePtPartsOrder() {
+  ensurePartsTrackingDates();
+  const msg = qs("ptPartsMsg");
+  const body = {
+    part_code: normalizeStockReportPartInput(qs("ptPartCode")?.value || ""),
+    part_name: String(qs("ptPartName")?.value || "").trim(),
+    qty: Number(qs("ptQty")?.value || 1),
+    unit_cost: Number(qs("ptUnitCost")?.value || 0),
+    invoice_number: String(qs("ptInvoice")?.value || "").trim() || null,
+    current_location: String(qs("ptLocation")?.value || "").trim() || null,
+    order_date: (qs("ptOrderDate")?.value || "").trim(),
+    expected_arrival_date: (qs("ptEta")?.value || "").trim() || null,
+    status: String(qs("ptStatus")?.value || "on_order").trim(),
+    supplier_name: String(qs("ptSupplier")?.value || "").trim() || null,
+    po_number: String(qs("ptPo")?.value || "").trim() || null,
+    notes: String(qs("ptNotes")?.value || "").trim() || null,
+  };
+  if (!body.part_code && !body.part_name) {
+    if (msg) msg.textContent = "Enter a part code or description.";
+    return;
+  }
+  if (!body.order_date) {
+    if (msg) msg.textContent = "Order date is required.";
+    return;
+  }
+  if (msg) msg.textContent = "Saving…";
+  const data = await fetchJson(`${API}/api/stock/part-orders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  handleStoresPartOrderReceipt(data);
+  if (msg) msg.textContent = "Part line saved.";
+  clearPtPartsForm();
+  await loadPtPartsOrders();
+  loadStoresPartOrders().catch(() => {});
+}
+
+function ptOffStatusLabel(s) {
+  const v = String(s || "").toLowerCase();
+  const map = {
+    sent_offsite: "Sent offsite",
+    diagnosis: "Diagnosis",
+    in_repair: "In repair",
+    waiting_parts: "Waiting parts",
+    ready_return: "Ready return",
+    returned: "Returned",
+  };
+  return map[v] || v || "—";
+}
+
+function clearPtOffForm() {
+  ["ptOffAsset", "ptOffAttachment", "ptOffLocation", "ptOffInvoice", "ptOffVendor", "ptOffNotes", "ptOffEta"].forEach((id) => {
+    if (qs(id)) qs(id).value = "";
+  });
+  if (qs("ptOffEstCost")) qs("ptOffEstCost").value = "0";
+  if (qs("ptOffActCost")) qs("ptOffActCost").value = "0";
+  if (qs("ptOffStatus")) qs("ptOffStatus").value = "sent_offsite";
+  if (qs("ptOffSent")) qs("ptOffSent").value = ptTodayYmd();
+  if (qs("ptOffEditId")) qs("ptOffEditId").value = "";
+  const msg = qs("ptOffMsg");
+  if (msg) msg.textContent = "";
+}
+
+function renderPtOffsiteTable(rows) {
+  const host = qs("ptOffList");
+  if (!host) return;
+  const statusFilter = String(qs("ptOffStatusFilter")?.value || "").trim().toLowerCase();
+  let list = Array.isArray(rows) ? rows : [];
+  if (statusFilter) list = list.filter((r) => String(r.repair_status || "").toLowerCase() === statusFilter);
+  if (!list.length) {
+    host.innerHTML = `<div class="muted small">No off-site repairs for this filter.</div>`;
+    return;
+  }
+  host.innerHTML = `
+    <table class="gridTable" style="min-width:1280px;">
+      <thead>
+        <tr>
+          <th>Asset / attachment</th>
+          <th>Status</th>
+          <th>Vendor</th>
+          <th>Invoice #</th>
+          <th>Sent</th>
+          <th>Location</th>
+          <th>ETA on site</th>
+          <th style="text-align:right;">Est. $</th>
+          <th style="text-align:right;">Actual $</th>
+          <th>Notes</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${list.map((r) => {
+          const id = Number(r.id || 0);
+          const overdue = ptIsOverdueEta(r.expected_return_date, String(r.repair_status || "").toLowerCase() === "returned");
+          const attach = String(r.attachment_name || "").trim();
+          const title = `<strong>${escapeHtml(String(r.asset_code || ""))}</strong>${attach ? `<br><small class="muted">${escapeHtml(attach)}</small>` : ""}`;
+          const statusOpts = ["sent_offsite", "diagnosis", "in_repair", "waiting_parts", "ready_return", "returned"]
+            .map((st) => `<option value="${st}"${String(r.repair_status || "").toLowerCase() === st ? " selected" : ""}>${ptOffStatusLabel(st)}</option>`)
+            .join("");
+          return `
+            <tr data-pt-off-row="${id}" class="${overdue ? "pt-row-overdue" : ""}">
+              <td>${title}<div class="muted small">${escapeHtml(String(r.asset_name || ""))}</div></td>
+              <td><select data-pt-off-field="repair_status" class="w-full" style="min-width:120px;">${statusOpts}</select></td>
+              <td><input type="text" class="spo-inline-input w-full" data-pt-off-field="vendor" value="${spoAttrVal(r.vendor || "")}" /></td>
+              <td><input type="text" class="spo-inline-input w-full" data-pt-off-field="invoice_number" value="${spoAttrVal(r.invoice_number || "")}" /></td>
+              <td><input type="date" class="spo-inline-input w-full" data-pt-off-field="sent_date" value="${spoAttrVal(r.sent_date || "")}" /></td>
+              <td><input type="text" class="spo-inline-input w-full" data-pt-off-field="current_location" value="${spoAttrVal(r.current_location || "")}" /></td>
+              <td><input type="date" class="spo-inline-input w-full" data-pt-off-field="expected_return_date" value="${spoAttrVal(r.expected_return_date || "")}" /></td>
+              <td><input type="number" min="0" step="0.01" class="spo-inline-input w-full" data-pt-off-field="estimated_cost" value="${spoAttrVal(r.estimated_cost != null ? r.estimated_cost : "")}" /></td>
+              <td><input type="number" min="0" step="0.01" class="spo-inline-input w-full" data-pt-off-field="actual_cost" value="${spoAttrVal(r.actual_cost != null ? r.actual_cost : "")}" /></td>
+              <td>
+                <input type="text" class="spo-inline-input w-full" data-pt-off-field="notes" value="${spoAttrVal(r.notes || "")}" />
+                <input type="hidden" data-pt-off-field="attachment_name" value="${spoAttrVal(r.attachment_name || "")}" />
+                <input type="hidden" data-pt-off-field="breakdown_id" value="${spoAttrVal(r.breakdown_id || "")}" />
+              </td>
+              <td><button type="button" class="btn btn-primary btn-sm" data-pt-off-save="${id}">Save</button></td>
+            </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+async function loadPtOffsiteRepairs() {
+  ensurePartsTrackingDates();
+  const include = qs("ptOffIncludeReturned")?.checked ? "1" : "0";
+  setSkeleton("ptOffList", 2);
+  const data = await fetchJson(`${API}/api/breakdown-ops/offsite-repairs?include_closed=${include}`);
+  ptOffsiteCache = Array.isArray(data?.rows) ? data.rows : [];
+  renderPtOffsiteTable(ptOffsiteCache);
+  updatePartsTrackingKpis();
+}
+
+async function savePtOffsiteRepair() {
+  ensurePartsTrackingDates();
+  const msg = qs("ptOffMsg");
+  const asset_code = String(qs("ptOffAsset")?.value || "").trim();
+  if (!asset_code) {
+    if (msg) msg.textContent = "Asset code is required.";
+    return;
+  }
+  const sent_date = (qs("ptOffSent")?.value || "").trim();
+  if (!sent_date) {
+    if (msg) msg.textContent = "Date sent is required.";
+    return;
+  }
+  const body = {
+    asset_code,
+    attachment_name: String(qs("ptOffAttachment")?.value || "").trim() || null,
+    repair_status: String(qs("ptOffStatus")?.value || "sent_offsite").trim(),
+    sent_date,
+    expected_return_date: (qs("ptOffEta")?.value || "").trim() || null,
+    current_location: String(qs("ptOffLocation")?.value || "").trim() || null,
+    invoice_number: String(qs("ptOffInvoice")?.value || "").trim() || null,
+    vendor: String(qs("ptOffVendor")?.value || "").trim() || null,
+    estimated_cost: Number(qs("ptOffEstCost")?.value || 0) || 0,
+    actual_cost: Number(qs("ptOffActCost")?.value || 0) || 0,
+    notes: String(qs("ptOffNotes")?.value || "").trim() || null,
+  };
+  if (msg) msg.textContent = "Saving…";
+  await fetchJson(`${API}/api/breakdown-ops/offsite-repairs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (msg) msg.textContent = "Off-site repair saved.";
+  clearPtOffForm();
+  await loadPtOffsiteRepairs();
+}
+
+function readPtOffRowPatch(rowEl) {
+  if (!rowEl) return null;
+  const read = (field) => {
+    const el = rowEl.querySelector(`[data-pt-off-field="${field}"]`);
+    if (!el) return null;
+    return String(el.value || "").trim();
+  };
+  const estimated_cost = read("estimated_cost");
+  const actual_cost = read("actual_cost");
+  const breakdownRaw = read("breakdown_id");
+  return {
+    repair_status: read("repair_status") || "sent_offsite",
+    vendor: read("vendor") || null,
+    invoice_number: read("invoice_number") || null,
+    sent_date: read("sent_date"),
+    current_location: read("current_location") || null,
+    expected_return_date: read("expected_return_date") || null,
+    estimated_cost: estimated_cost === "" ? null : Number(estimated_cost),
+    actual_cost: actual_cost === "" ? null : Number(actual_cost),
+    notes: read("notes") || null,
+    attachment_name: read("attachment_name") || null,
+    breakdown_id: breakdownRaw ? Number(breakdownRaw) : null,
+  };
+}
+
+async function savePtOffsiteRow(id) {
+  const host = qs("ptOffList");
+  const rowEl = host?.querySelector(`tr[data-pt-off-row="${Number(id)}"]`);
+  const patch = readPtOffRowPatch(rowEl);
+  if (!patch || !patch.sent_date) {
+    alert("Sent date is required.");
+    return;
+  }
+  await fetchJson(`${API}/api/breakdown-ops/offsite-repairs/${Number(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  setStatus("Off-site repair updated.");
+  await loadPtOffsiteRepairs();
+}
+
+async function loadPartsTrackingTab() {
+  ensurePartsTrackingDates();
+  await Promise.all([
+    loadPtPartsOrders().catch((e) => setStatus("Parts tracking error: " + (e.message || e))),
+    loadPtOffsiteRepairs().catch((e) => setStatus("Off-site tracking error: " + (e.message || e))),
+  ]);
+}
+
 async function loadAuditLogs() {
   const module = (qs("auditModule")?.value || "").trim();
   const action = (qs("auditAction")?.value || "").trim();
@@ -10027,6 +10420,12 @@ function switchTab(key) {
   if (k === "telematics") {
     loadTelematicsTab().catch(() => {});
   }
+  if (k === "stock") {
+    loadStoresPartOrders().catch(() => {});
+  }
+  if (k === "parts-tracking") {
+    loadPartsTrackingTab().catch(() => {});
+  }
   if (k === "lube") {
     loadLubeUsage().catch(() => {});
   }
@@ -10058,6 +10457,7 @@ const IRONLOG_HELP_OPENERS = {
   fuel: "Need help with fuel logging and benchmarks?",
   lube: "Need help with lube?",
   stock: "Need help with stores / stock?",
+  "parts-tracking": "Need help with parts tracking and off-site repairs?",
   legal: "Need help with legal documents?",
   uploads: "Need help with CSV uploads?",
   reports: "Need help with reports?",
@@ -17117,6 +17517,79 @@ async function init() {
   );
   qs("spoOpenPdf")?.addEventListener("click", () => openStoresPartOrdersPdf(false));
   qs("spoDownloadPdf")?.addEventListener("click", () => openStoresPartOrdersPdf(true));
+
+  qs("ptPartsLoad")?.addEventListener("click", () =>
+    loadPtPartsOrders().catch((e) => setStatus("Parts tracking error: " + e.message))
+  );
+  qs("ptPartsSave")?.addEventListener("click", () =>
+    savePtPartsOrder().catch((e) => {
+      const msg = qs("ptPartsMsg");
+      if (msg) msg.textContent = e.message || String(e);
+    })
+  );
+  qs("ptPartsClear")?.addEventListener("click", clearPtPartsForm);
+  qs("ptPartsStatus")?.addEventListener("change", () => loadPtPartsOrders().catch(() => {}));
+  qs("ptPartsSearch")?.addEventListener("input", () => renderPtPartsTable(ptPartsCache));
+  qs("ptPartsList")?.addEventListener("change", (evt) => {
+    const sel = evt.target?.closest?.("select[data-pt-status]");
+    if (!sel) return;
+    const id = Number(sel.getAttribute("data-pt-status") || 0);
+    if (!id) return;
+    const rowEl = qs("ptPartsList")?.querySelector(`tr[data-pt-row="${id}"]`);
+    const patch = readPtPartsRowPatch(rowEl) || {};
+    patch.status = String(sel.value || "").trim();
+    patchStoresPartOrder(id, patch)
+      .then(() => loadPtPartsOrders())
+      .catch((e) => alert(e.message || String(e)));
+  });
+  qs("ptPartsList")?.addEventListener("click", (evt) => {
+    const saveBtn = evt.target?.closest?.("button[data-pt-save]");
+    if (saveBtn) {
+      const id = Number(saveBtn.getAttribute("data-pt-save") || 0);
+      const rowEl = qs("ptPartsList")?.querySelector(`tr[data-pt-row="${id}"]`);
+      const patch = readPtPartsRowPatch(rowEl);
+      if (!patch) return;
+      patchStoresPartOrder(id, patch)
+        .then(() => {
+          setStatus("Part line saved.");
+          return loadPtPartsOrders();
+        })
+        .catch((e) => alert(e.message || String(e)));
+      return;
+    }
+    const recvBtn = evt.target?.closest?.("button[data-pt-receive]");
+    if (recvBtn) {
+      receiveStoresPartOrderToInventory(Number(recvBtn.getAttribute("data-pt-receive") || 0))
+        .then(() => loadPtPartsOrders())
+        .catch((e) => alert(e.message || String(e)));
+      return;
+    }
+    const delBtn = evt.target?.closest?.("button[data-pt-del]");
+    if (delBtn) {
+      cancelStoresPartOrder(Number(delBtn.getAttribute("data-pt-del") || 0))
+        .then(() => loadPtPartsOrders())
+        .catch((e) => alert(e.message || String(e)));
+    }
+  });
+  qs("ptOffLoad")?.addEventListener("click", () =>
+    loadPtOffsiteRepairs().catch((e) => setStatus("Off-site tracking error: " + e.message))
+  );
+  qs("ptOffSave")?.addEventListener("click", () =>
+    savePtOffsiteRepair().catch((e) => {
+      const msg = qs("ptOffMsg");
+      if (msg) msg.textContent = e.message || String(e);
+    })
+  );
+  qs("ptOffClear")?.addEventListener("click", clearPtOffForm);
+  qs("ptOffStatusFilter")?.addEventListener("change", () => renderPtOffsiteTable(ptOffsiteCache));
+  qs("ptOffIncludeReturned")?.addEventListener("change", () => loadPtOffsiteRepairs().catch(() => {}));
+  qs("ptOffList")?.addEventListener("click", (evt) => {
+    const btn = evt.target?.closest?.("button[data-pt-off-save]");
+    if (!btn) return;
+    savePtOffsiteRow(Number(btn.getAttribute("data-pt-off-save") || 0)).catch((e) =>
+      alert(e.message || String(e))
+    );
+  });
   qs("loadAudit")?.addEventListener("click", () =>
     loadAuditLogs().catch((e) => setStatus("Audit error: " + e.message))
   );

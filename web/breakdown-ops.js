@@ -253,12 +253,21 @@ function dayDiffLabel(startYmd, endYmd) {
 function collectOffsitePayloadFromForm() {
   return {
     asset_code: String(qs("boOffsiteAsset")?.value || "").trim(),
+    attachment_name: String(qs("boOffsiteAttachment")?.value || "").trim() || null,
     breakdown_id: Number(qs("boOffsiteBreakdownId")?.value || 0) || null,
     sent_date: String(qs("boOffsiteSentDate")?.value || "").trim(),
     expected_return_date: String(qs("boOffsiteExpectedDate")?.value || "").trim() || null,
     actual_return_date: String(qs("boOffsiteActualDate")?.value || "").trim() || null,
     repair_status: String(qs("boOffsiteStatus")?.value || "sent_offsite").trim(),
     vendor: String(qs("boOffsiteVendor")?.value || "").trim() || null,
+    current_location: String(qs("boOffsiteLocation")?.value || "").trim() || null,
+    invoice_number: String(qs("boOffsiteInvoice")?.value || "").trim() || null,
+    estimated_cost: qs("boOffsiteEstCost")?.value !== "" && qs("boOffsiteEstCost")?.value != null
+      ? Number(qs("boOffsiteEstCost").value)
+      : null,
+    actual_cost: qs("boOffsiteActCost")?.value !== "" && qs("boOffsiteActCost")?.value != null
+      ? Number(qs("boOffsiteActCost").value)
+      : null,
     notes: String(qs("boOffsiteNotes")?.value || "").trim() || null,
   };
 }
@@ -292,15 +301,23 @@ function renderOffsiteRow(r) {
   const actual = String(r.actual_return_date || "").trim();
   const vendor = String(r.vendor || "").trim();
   const notes = String(r.notes || "").trim();
+  const location = String(r.current_location || "").trim();
+  const invoice = String(r.invoice_number || "").trim();
+  const attachment = String(r.attachment_name || "").trim();
+  const estCost = r.estimated_cost != null && r.estimated_cost !== "" ? Number(r.estimated_cost) : "";
+  const actCost = r.actual_cost != null && r.actual_cost !== "" ? Number(r.actual_cost) : "";
   const anchor = actual || todayYmd();
   const elapsed = dayDiffLabel(sent, anchor);
   const expectedLead = expected ? dayDiffLabel(sent, expected) : "—";
   const el = item(
     `<div><b>#${id}</b> <span class="pill blue">${escapeHtml(r.asset_code || "-")}</span> ` +
+      (attachment ? `<span class="pill">${escapeHtml(attachment)}</span> ` : "") +
       `<span class="pill ${String(r.repair_status || "").toLowerCase() === "returned" ? "blue" : "orange"}">${escapeHtml(fmtOffsiteStatusLabel(r.repair_status))}</span></div>` +
       `<small>Sent: ${escapeHtml(sent || "—")} | Expected: ${escapeHtml(expected || "—")} | Actual: ${escapeHtml(actual || "—")}</small><br/>` +
       `<small>Elapsed: ${escapeHtml(elapsed)} | Planned timeframe: ${escapeHtml(expectedLead)}</small><br/>` +
-      `<small>Breakdown: ${r.breakdown_id ? `#${Number(r.breakdown_id)}` : "—"}</small>` +
+      `<small>Breakdown: ${r.breakdown_id ? `#${Number(r.breakdown_id)}` : "—"}` +
+        `${invoice ? ` | Invoice: ${escapeHtml(invoice)}` : ""}` +
+        `${location ? ` | Location: ${escapeHtml(location)}` : ""}</small>` +
       `<div class="row stack-6" style="margin-top:8px;flex-wrap:wrap;align-items:flex-start;">` +
         `<select class="bo-offsite-status" data-id="${id}">` +
           `<option value="sent_offsite"${String(r.repair_status) === "sent_offsite" ? " selected" : ""}>Sent offsite</option>` +
@@ -313,6 +330,11 @@ function renderOffsiteRow(r) {
         `<label class="chk">Expected <input class="bo-offsite-expected" data-id="${id}" type="date" value="${escapeHtml(expected)}" /></label>` +
         `<label class="chk">Actual <input class="bo-offsite-actual" data-id="${id}" type="date" value="${escapeHtml(actual)}" /></label>` +
         `<input class="bo-offsite-vendor w-220" data-id="${id}" placeholder="Vendor / workshop" value="${escapeHtml(vendor)}" />` +
+        `<input class="bo-offsite-location w-200" data-id="${id}" placeholder="Current location" value="${escapeHtml(location)}" />` +
+        `<input class="bo-offsite-invoice w-140" data-id="${id}" placeholder="Invoice #" value="${escapeHtml(invoice)}" />` +
+        `<input class="bo-offsite-est w-120" data-id="${id}" type="number" min="0" step="0.01" placeholder="Est. $" value="${estCost === "" ? "" : escapeHtml(String(estCost))}" />` +
+        `<input class="bo-offsite-actcost w-120" data-id="${id}" type="number" min="0" step="0.01" placeholder="Actual $" value="${actCost === "" ? "" : escapeHtml(String(actCost))}" />` +
+        `<input type="hidden" class="bo-offsite-attachment" data-id="${id}" value="${escapeHtml(attachment)}" />` +
       `</div>` +
       `<div class="stack-6" style="margin-top:8px;">` +
         `<label class="muted" style="display:block;font-size:12px;">Progress comments</label>` +
@@ -352,6 +374,11 @@ async function updateOffsiteRepairFromRow(btn) {
   const expectedEl = document.querySelector(`.bo-offsite-expected[data-id="${id}"]`);
   const actualEl = document.querySelector(`.bo-offsite-actual[data-id="${id}"]`);
   const vendorEl = document.querySelector(`.bo-offsite-vendor[data-id="${id}"]`);
+  const locationEl = document.querySelector(`.bo-offsite-location[data-id="${id}"]`);
+  const invoiceEl = document.querySelector(`.bo-offsite-invoice[data-id="${id}"]`);
+  const estEl = document.querySelector(`.bo-offsite-est[data-id="${id}"]`);
+  const actCostEl = document.querySelector(`.bo-offsite-actcost[data-id="${id}"]`);
+  const attachmentEl = document.querySelector(`.bo-offsite-attachment[data-id="${id}"]`);
   const progressEl = document.querySelector(`.bo-offsite-progress[data-id="${id}"]`);
   const payload = {
     asset_code: String(btn.getAttribute("data-asset") || "").trim(),
@@ -361,6 +388,11 @@ async function updateOffsiteRepairFromRow(btn) {
     actual_return_date: String(actualEl?.value || "").trim() || null,
     repair_status: String(statusEl?.value || "sent_offsite").trim(),
     vendor: String(vendorEl?.value || "").trim() || null,
+    current_location: String(locationEl?.value || "").trim() || null,
+    invoice_number: String(invoiceEl?.value || "").trim() || null,
+    estimated_cost: estEl?.value !== "" && estEl?.value != null ? Number(estEl.value) : null,
+    actual_cost: actCostEl?.value !== "" && actCostEl?.value != null ? Number(actCostEl.value) : null,
+    attachment_name: String(attachmentEl?.value || "").trim() || null,
     notes: String(progressEl?.value || "").trim() || null,
   };
   setStatus(`Updating offsite #${id}...`);

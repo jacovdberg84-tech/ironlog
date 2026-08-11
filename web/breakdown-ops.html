@@ -58,6 +58,7 @@
           <p class="muted">Track assets sent away for repair, current repair status, timeframe, and editable progress comments.</p>
           <div class="row stack-10" style="flex-wrap:wrap;">
             <input id="boOffsiteAsset" list="assetCodeOptions" class="w-200" placeholder="Asset code" />
+            <input id="boOffsiteAttachment" class="w-200" placeholder="Attachment / bucket (optional)" />
             <input id="boOffsiteBreakdownId" class="w-140" type="number" min="1" step="1" placeholder="Breakdown ID (optional)" />
             <label class="chk">Sent date <input id="boOffsiteSentDate" type="date" /></label>
             <label class="chk">Expected return <input id="boOffsiteExpectedDate" type="date" /></label>
@@ -75,6 +76,10 @@
               </select>
             </label>
             <input id="boOffsiteVendor" class="w-220" placeholder="Vendor / workshop (optional)" />
+            <input id="boOffsiteLocation" class="w-200" placeholder="Current location" />
+            <input id="boOffsiteInvoice" class="w-160" placeholder="Invoice #" />
+            <input id="boOffsiteEstCost" class="w-120" type="number" min="0" step="0.01" placeholder="Est. $" />
+            <input id="boOffsiteActCost" class="w-120" type="number" min="0" step="0.01" placeholder="Actual $" />
             <input id="boOffsiteNotes" class="minw-260" style="flex:1;" placeholder="Progress comments / notes (optional)" />
             <button type="button" id="boOffsiteSave">Add offsite repair</button>
             <label class="chk">Show returned <input id="boOffsiteIncludeClosed" type="checkbox" /></label>
@@ -311,6 +316,6 @@
   <datalist id="assetCodeOptions"></datalist>
   <datalist id="partCodeOptions"></datalist>
 
-  <script src="./breakdown-ops.js?v=4"></script>
+  <script src="./breakdown-ops.js?v=5"></script>
 </body>
 </html>

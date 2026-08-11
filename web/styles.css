@@ -4943,10 +4943,16 @@ body.sidebar-collapsed .main-content {
   font-size: 12px;
 }
 
-.spo-purchases-table .spo-inline-input {
+.spo-purchases-table .spo-inline-input,
+#ptPartsList .spo-inline-input,
+#ptOffList .spo-inline-input {
   min-width: 88px;
   font-size: 12px;
   padding: 4px 6px;
+}
+
+.pt-row-overdue td {
+  background: rgba(254, 226, 226, 0.55);
 }
 
 .spo-purchases-table .spo-row-actions {

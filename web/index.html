@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=8" />
+  <link rel="stylesheet" href="./styles.css?v=9" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -226,6 +226,10 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
           <span>Stores</span>
         </a>
+        <a href="#" class="nav-item" data-tab="parts-tracking">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 9.4l-9-5.19"></path><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+          <span>Parts Tracking</span>
+        </a>
         <a href="#" class="nav-item" data-tab="procurement">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
           <span>Supply Flow</span>
@@ -350,6 +354,7 @@
         <option value="fuel">Fuel</option>
         <option value="lube">Lube</option>
         <option value="stock">Stores</option>
+        <option value="parts-tracking">Parts Tracking</option>
         <option value="legal">Legal Docs</option>
         <option value="uploads">CSV Uploads</option>
         <option value="reports">Reports</option>
@@ -2659,6 +2664,258 @@
             <div class="list" id="sbReplenishmentList" style="margin-top:10px;"></div>
             <div class="list" id="sbCycleSessionsList" style="margin-top:10px;"></div>
             <pre class="output" id="sbResult"></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PARTS TRACKING -->
+    <section class="panel" id="tab-parts-tracking">
+      <div class="asset-cards-grid">
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background:#eff6ff; color:#1d4ed8;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+              </div>
+              <div>
+                <h3>Parts Tracking</h3>
+                <p class="muted small">Track parts on order (invoice, location, ETA, cost) and off-site attachment / equipment repairs in one place. Same purchase lines as Stores.</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="kpi-pills" id="ptKpiStrip">
+              <span class="kpi-pill kpi-pill-orange"><strong>Parts pending:</strong> $<span id="ptPartsPending">0.00</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Parts overdue ETA:</strong> <span id="ptPartsOverdue">0</span></span>
+              <span class="kpi-pill kpi-pill-orange"><strong>Off-site est. cost:</strong> $<span id="ptOffsiteEst">0.00</span></span>
+              <span class="kpi-pill kpi-pill-green"><strong>Off-site actual:</strong> $<span id="ptOffsiteActual">0.00</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Off-site overdue ETA:</strong> <span id="ptOffsiteOverdue">0</span></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section A: Parts on order -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background:#fdf4ff; color:#9333ea;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line></svg>
+              </div>
+              <div>
+                <h3>Parts on order</h3>
+                <p class="muted small">Status, invoice #, date ordered, location, ETA on site, and costing. Marking Arrived can receive into store inventory (part code required).</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Period from</label>
+                <input id="ptPartsFrom" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Period to</label>
+                <input id="ptPartsTo" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Status</label>
+                <select id="ptPartsStatus" class="w-full">
+                  <option value="">All active</option>
+                  <option value="on_order">On order</option>
+                  <option value="in_transit">In transit</option>
+                  <option value="arrived">Arrived</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>Search</label>
+                <input id="ptPartsSearch" type="text" class="w-full" placeholder="Part, invoice, location…" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="ptPartsLoad" type="button" class="btn btn-primary">Load parts</button>
+              </div>
+            </div>
+            <hr class="hr-soft" style="margin:16px 0;" />
+            <p class="muted small" style="margin-top:0;">Add / update purchase line</p>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Part code</label>
+                <input id="ptPartCode" list="partCodeOptions" class="w-full" placeholder="Stores part code" />
+              </div>
+              <div class="form-field" style="flex:1;">
+                <label>Description</label>
+                <input id="ptPartName" class="w-full" placeholder="Part name / description" />
+              </div>
+              <div class="form-field">
+                <label>Qty</label>
+                <input id="ptQty" type="number" min="0.1" step="0.1" value="1" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Unit cost ($)</label>
+                <input id="ptUnitCost" type="number" min="0" step="0.01" value="0" class="w-full" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Invoice #</label>
+                <input id="ptInvoice" class="w-full" placeholder="Invoice number" />
+              </div>
+              <div class="form-field">
+                <label>Date ordered</label>
+                <input id="ptOrderDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Location</label>
+                <input id="ptLocation" class="w-full" placeholder="Supplier / freight / workshop / stores" />
+              </div>
+              <div class="form-field">
+                <label>ETA on site</label>
+                <input id="ptEta" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Status</label>
+                <select id="ptStatus" class="w-full">
+                  <option value="on_order">On order</option>
+                  <option value="in_transit">In transit</option>
+                  <option value="arrived">Arrived</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Supplier</label>
+                <input id="ptSupplier" class="w-full" placeholder="Supplier name" />
+              </div>
+              <div class="form-field">
+                <label>PO #</label>
+                <input id="ptPo" class="w-full" placeholder="Optional" />
+              </div>
+              <div class="form-field" style="flex:1;">
+                <label>Notes</label>
+                <input id="ptNotes" class="w-full" placeholder="Optional" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="ptPartsSave" type="button" class="btn btn-primary">Save part line</button>
+                <button id="ptPartsClear" type="button" class="btn btn-secondary">Clear</button>
+              </div>
+            </div>
+            <div id="ptPartsMsg" class="muted small"></div>
+            <div id="ptPartsList" class="list" style="margin-top:12px; overflow-x:auto;"></div>
+          </div>
+        </div>
+
+        <!-- Section B: Off-site repairs -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background:#fff7ed; color:#c2410c;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              </div>
+              <div>
+                <h3>Off-site repairs</h3>
+                <p class="muted small">Attachments and equipment sent off site — location, ETA on site, invoice, and costing. Shared with Breakdown Ops offsite tracker.</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Status</label>
+                <select id="ptOffStatusFilter" class="w-full">
+                  <option value="">All open</option>
+                  <option value="sent_offsite">Sent offsite</option>
+                  <option value="diagnosis">Diagnosis</option>
+                  <option value="in_repair">In repair</option>
+                  <option value="waiting_parts">Waiting parts</option>
+                  <option value="ready_return">Ready return</option>
+                  <option value="returned">Returned</option>
+                </select>
+              </div>
+              <div class="form-field" style="display:flex; align-items:flex-end;">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="ptOffIncludeReturned" />
+                  <span>Include returned</span>
+                </label>
+              </div>
+              <div class="form-field form-field-action">
+                <button id="ptOffLoad" type="button" class="btn btn-primary">Load off-site</button>
+              </div>
+            </div>
+            <hr class="hr-soft" style="margin:16px 0;" />
+            <p class="muted small" style="margin-top:0;">Add off-site repair / attachment</p>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Asset code *</label>
+                <input id="ptOffAsset" list="assetCodeOptions" class="w-full" placeholder="e.g. E503AM" />
+              </div>
+              <div class="form-field" style="flex:1;">
+                <label>Attachment / component</label>
+                <input id="ptOffAttachment" class="w-full" placeholder="e.g. bucket, boom, hitch" />
+              </div>
+              <div class="form-field">
+                <label>Status</label>
+                <select id="ptOffStatus" class="w-full">
+                  <option value="sent_offsite">Sent offsite</option>
+                  <option value="diagnosis">Diagnosis</option>
+                  <option value="in_repair">In repair</option>
+                  <option value="waiting_parts">Waiting parts</option>
+                  <option value="ready_return">Ready return</option>
+                  <option value="returned">Returned</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Date sent / ordered</label>
+                <input id="ptOffSent" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>ETA on site</label>
+                <input id="ptOffEta" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Location</label>
+                <input id="ptOffLocation" class="w-full" placeholder="Vendor workshop / city" />
+              </div>
+              <div class="form-field">
+                <label>Invoice #</label>
+                <input id="ptOffInvoice" class="w-full" placeholder="Invoice / job #" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Vendor</label>
+                <input id="ptOffVendor" class="w-full" placeholder="Repair shop" />
+              </div>
+              <div class="form-field">
+                <label>Est. cost ($)</label>
+                <input id="ptOffEstCost" type="number" min="0" step="0.01" value="0" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Actual cost ($)</label>
+                <input id="ptOffActCost" type="number" min="0" step="0.01" value="0" class="w-full" />
+              </div>
+              <div class="form-field" style="flex:1;">
+                <label>Notes</label>
+                <input id="ptOffNotes" class="w-full" placeholder="Progress / comments" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="ptOffSave" type="button" class="btn btn-primary">Save off-site</button>
+                <button id="ptOffClear" type="button" class="btn btn-secondary">Clear</button>
+              </div>
+            </div>
+            <div id="ptOffMsg" class="muted small"></div>
+            <div id="ptOffList" class="list" style="margin-top:12px; overflow-x:auto;"></div>
           </div>
         </div>
       </div>
@@ -7349,6 +7606,6 @@
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=1"></script>
-  <script src="./app.js?v=58"></script>
+  <script src="./app.js?v=59"></script>
 </body>
 </html>

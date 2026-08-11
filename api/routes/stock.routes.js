@@ -2051,6 +2051,12 @@ export default async function stockRoutes(app) {
   if (!hasColumn("stores_part_orders", "requisition_number")) {
     db.prepare(`ALTER TABLE stores_part_orders ADD COLUMN requisition_number TEXT`).run();
   }
+  if (!hasColumn("stores_part_orders", "invoice_number")) {
+    db.prepare(`ALTER TABLE stores_part_orders ADD COLUMN invoice_number TEXT`).run();
+  }
+  if (!hasColumn("stores_part_orders", "current_location")) {
+    db.prepare(`ALTER TABLE stores_part_orders ADD COLUMN current_location TEXT`).run();
+  }
 
   function partOrderReceiveRef(orderId) {
     return `part_order:${Number(orderId)}`;
@@ -2260,6 +2266,8 @@ export default async function stockRoutes(app) {
         o.supplier_name,
         o.po_number,
         o.requisition_number,
+        o.invoice_number,
+        o.current_location,
         o.order_date,
         o.expected_arrival_date,
         o.arrived_date,
@@ -2301,6 +2309,8 @@ export default async function stockRoutes(app) {
     const supplier_name = String(body.supplier_name || "").trim() || null;
     const po_number = String(body.po_number || "").trim() || null;
     const requisition_number = String(body.requisition_number || "").trim() || null;
+    const invoice_number = String(body.invoice_number || "").trim() || null;
+    const current_location = String(body.current_location || "").trim() || null;
     const order_date = String(body.order_date || "").trim();
     const expected_arrival_date = String(body.expected_arrival_date || "").trim() || null;
     const notes = String(body.notes || "").trim() || null;
@@ -2327,9 +2337,10 @@ export default async function stockRoutes(app) {
     const info = db.prepare(`
       INSERT INTO stores_part_orders (
         site_code, part_id, part_code, part_name, qty, unit_cost, currency,
-        supplier_name, po_number, requisition_number, order_date, expected_arrival_date, arrived_date,
+        supplier_name, po_number, requisition_number, invoice_number, current_location,
+        order_date, expected_arrival_date, arrived_date,
         status, notes, created_by, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       site_code,
       part_id,
@@ -2341,6 +2352,8 @@ export default async function stockRoutes(app) {
       supplier_name,
       po_number,
       requisition_number,
+      invoice_number,
+      current_location,
       order_date,
       expected_arrival_date,
       arrived_date,
@@ -2411,6 +2424,8 @@ export default async function stockRoutes(app) {
         supplier_name = ?,
         po_number = ?,
         requisition_number = ?,
+        invoice_number = ?,
+        current_location = ?,
         order_date = ?,
         expected_arrival_date = ?,
         arrived_date = ?,
@@ -2428,6 +2443,12 @@ export default async function stockRoutes(app) {
       body.requisition_number != null
         ? String(body.requisition_number).trim() || null
         : existing.requisition_number,
+      body.invoice_number != null
+        ? String(body.invoice_number).trim() || null
+        : existing.invoice_number,
+      body.current_location != null
+        ? String(body.current_location).trim() || null
+        : existing.current_location,
       order_date,
       body.expected_arrival_date != null ? String(body.expected_arrival_date).trim() || null : existing.expected_arrival_date,
       arrived_date,

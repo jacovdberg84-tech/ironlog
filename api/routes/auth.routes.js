@@ -30,6 +30,7 @@ export const ASSIGNABLE_TAB_KEYS = [
   "fuel",
   "lube",
   "stock",
+  "parts-tracking",
   "legal",
   "uploads",
   "reports",
