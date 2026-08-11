@@ -1,5 +1,9 @@
 // IRONLOG/api/routes/dashboard.routes.js
 import ExcelJS from "exceljs";
+import {
+  Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun,
+  AlignmentType, HeadingLevel, BorderStyle, WidthType,
+} from "docx";
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
@@ -1130,6 +1134,160 @@ export default async function dashboardRoutes(app) {
     return reply
       .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
       .header("Content-Disposition", `attachment; filename="IRONLOG_Asset_KPI_${startIn}_to_${endIn}.xlsx"`)
+      .send(buffer);
+  });
+
+  // GET /api/dashboard/asset-kpi.docx?start=&end=&scheduled=&avail_target=&util_target=&view=category|asset
+  app.get("/asset-kpi.docx", async (req, reply) => {
+    const startIn = String(req.query?.start || "").trim();
+    const endIn   = String(req.query?.end   || "").trim();
+    const scheduledRaw = Number(req.query?.scheduled ?? 10);
+    const scheduledFallback = Number.isFinite(scheduledRaw) && scheduledRaw > 0 ? scheduledRaw : 10;
+    const availTarget = req.query?.avail_target != null ? Number(req.query.avail_target) : 85;
+    const utilTarget  = req.query?.util_target  != null ? Number(req.query.util_target)  : 75;
+    const viewMode    = String(req.query?.view || "category");
+    const categoryFilter = String(req.query?.category || "").trim();
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startIn) || !/^\d{4}-\d{2}-\d{2}$/.test(endIn) || startIn > endIn) {
+      return reply.code(400).send({ ok: false, error: "Provide valid start/end dates" });
+    }
+    const siteCode = siteCodeFromReq(req);
+    const assetCodes = String(req.query?.asset_codes || "").split(",").map(c => c.trim()).filter(Boolean);
+    const kpi = buildAssetKpiRange(startIn, endIn, scheduledFallback, siteCode, assetCodes);
+
+    // Fetch breakdowns in range for downtime reasons
+    const breakdownRows = db.prepare(`
+      SELECT b.breakdown_date, b.description, b.component, b.downtime_total_hours, b.status,
+             a.asset_code, a.asset_name, a.category
+      FROM breakdowns b
+      JOIN assets a ON a.id = b.asset_id
+      WHERE b.breakdown_date >= ? AND b.breakdown_date <= ?
+        AND (b.downtime_total_hours > 0 OR b.status = 'OPEN')
+      ORDER BY b.downtime_total_hours DESC NULLS LAST, b.breakdown_date DESC
+      LIMIT 300
+    `).all(startIn, endIn);
+
+    const fmt1 = v => v == null ? "—" : Number(v).toFixed(1);
+    const fmtPct = v => v == null ? "—" : `${Number(v).toFixed(1)}%`;
+    const noBorder = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
+    const thinBorder = { style: BorderStyle.SINGLE, size: 4, color: "D1D5DB" };
+    const cellBorders = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder };
+
+    const headerCell = (text, bgColor = "2563EB") => new TableCell({
+      children: [new Paragraph({ children: [new TextRun({ text: String(text), bold: true, color: "FFFFFF", size: 20 })], alignment: AlignmentType.CENTER })],
+      shading: { fill: bgColor },
+      borders: cellBorders,
+    });
+    const dataCell = (text, right = false, bold = false, color = "111827") => new TableCell({
+      children: [new Paragraph({ children: [new TextRun({ text: String(text ?? "—"), bold, color, size: 18 })], alignment: right ? AlignmentType.RIGHT : AlignmentType.LEFT })],
+      borders: cellBorders,
+    });
+    const pctCell = (val, target) => {
+      const pct = val == null ? null : Number(val);
+      const isBad = pct != null && target != null && pct < target;
+      return new TableCell({
+        children: [new Paragraph({ children: [new TextRun({ text: fmtPct(val), bold: isBad, color: isBad ? "DC2626" : "111827", size: 18 })], alignment: AlignmentType.RIGHT })],
+        borders: cellBorders,
+        shading: isBad ? { fill: "FEF2F2" } : undefined,
+      });
+    };
+
+    // Build rows for chart table
+    const allAssets = Array.isArray(kpi.by_asset) ? kpi.by_asset : [];
+    const filtered = categoryFilter
+      ? allAssets.filter(a => String(a.category || "").trim() === categoryFilter)
+      : allAssets;
+    const chartRows = viewMode === "asset"
+      ? filtered.map(a => ({ label: `${a.asset_code} ${a.asset_name}`.trim(), availability_pct: a.availability_pct, utilization_pct: a.utilization_pct, downtime_hours: a.downtime_hours }))
+      : (() => {
+          const cats = categoryFilter
+            ? (() => {
+                const catMap = new Map();
+                for (const a of filtered) {
+                  const k = String(a.category || "Uncategorized").trim();
+                  if (!catMap.has(k)) catMap.set(k, { label: k, sched: 0, avail: 0, run: 0, down: 0 });
+                  const c = catMap.get(k);
+                  c.sched += a.scheduled_hours; c.avail += a.available_hours; c.run += a.run_hours; c.down += a.downtime_hours;
+                }
+                return [...catMap.values()].map(c => ({ label: c.label, availability_pct: c.sched > 0 ? Number(((c.avail / c.sched) * 100).toFixed(1)) : null, utilization_pct: c.sched > 0 ? Number(((c.run / c.sched) * 100).toFixed(1)) : null, downtime_hours: c.down }));
+              })()
+            : (Array.isArray(kpi.by_category) ? kpi.by_category : []).map(c => ({ label: c.category, availability_pct: c.availability_pct, utilization_pct: c.utilization_pct, downtime_hours: c.downtime_hours }));
+          return cats;
+        })();
+
+    // Group breakdowns by asset/category for reasons section
+    const reasonsByCategory = new Map();
+    for (const b of breakdownRows) {
+      const cat = viewMode === "asset"
+        ? `${b.asset_code} — ${b.asset_name}`
+        : String(b.category || "Uncategorized").trim();
+      if (categoryFilter && viewMode !== "asset" && cat !== categoryFilter) continue;
+      if (!reasonsByCategory.has(cat)) reasonsByCategory.set(cat, []);
+      reasonsByCategory.get(cat).push(b);
+    }
+
+    const children = [];
+
+    // Title
+    children.push(new Paragraph({ text: "Asset KPI Report", heading: HeadingLevel.HEADING_1 }));
+    children.push(new Paragraph({ children: [new TextRun({ text: `Period: ${startIn} to ${endIn}`, size: 20, color: "64748B" })], spacing: { after: 120 } }));
+    children.push(new Paragraph({ children: [new TextRun({ text: `Targets — Availability: ${availTarget}%  |  Utilization: ${utilTarget}%`, size: 20, color: "64748B" })], spacing: { after: 240 } }));
+
+    // Fleet summary
+    const fleet = kpi.fleet || {};
+    children.push(new Paragraph({ text: "Fleet Summary", heading: HeadingLevel.HEADING_2 }));
+    children.push(new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [
+        new TableRow({ children: [headerCell("Scheduled h"), headerCell("Available h"), headerCell("Run h"), headerCell("Downtime h"), headerCell("Availability %"), headerCell("Utilization %")] }),
+        new TableRow({ children: [dataCell(fmt1(fleet.scheduled_hours), true), dataCell(fmt1(fleet.available_hours), true), dataCell(fmt1(fleet.run_hours), true), dataCell(fmt1(fleet.downtime_hours), true), pctCell(fleet.availability_pct, availTarget), pctCell(fleet.utilization_pct, utilTarget)] }),
+      ],
+    }));
+    children.push(new Paragraph({ text: "", spacing: { after: 200 } }));
+
+    // KPI by category / asset table
+    children.push(new Paragraph({ text: viewMode === "asset" ? "KPI per Asset" : "KPI by Equipment Type", heading: HeadingLevel.HEADING_2 }));
+    const kpiTableRows = [
+      new TableRow({ children: [headerCell("Type / Asset"), headerCell("Downtime h"), headerCell("Availability %"), headerCell("Utilization %")] }),
+      ...chartRows.map(r => new TableRow({ children: [
+        dataCell(r.label),
+        dataCell(fmt1(r.downtime_hours), true),
+        pctCell(r.availability_pct, availTarget),
+        pctCell(r.utilization_pct, utilTarget),
+      ]})),
+    ];
+    children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: kpiTableRows }));
+    children.push(new Paragraph({ text: "", spacing: { after: 200 } }));
+
+    // Downtime reasons
+    children.push(new Paragraph({ text: "Downtime Reasons by Equipment Type", heading: HeadingLevel.HEADING_2 }));
+    children.push(new Paragraph({ children: [new TextRun({ text: "Breakdowns with recorded downtime in this period, grouped by equipment type.", size: 18, color: "64748B" })], spacing: { after: 160 } }));
+
+    if (reasonsByCategory.size === 0) {
+      children.push(new Paragraph({ children: [new TextRun({ text: "No breakdowns with downtime recorded in this period.", color: "64748B", size: 18 })] }));
+    } else {
+      for (const [cat, bdRows] of [...reasonsByCategory.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+        children.push(new Paragraph({ text: cat, heading: HeadingLevel.HEADING_3, spacing: { before: 160 } }));
+        const bdTableRows = [
+          new TableRow({ children: [headerCell("Date", "374151"), headerCell("Asset", "374151"), headerCell("Component", "374151"), headerCell("Description", "374151"), headerCell("Downtime h", "374151"), headerCell("Status", "374151")] }),
+          ...bdRows.slice(0, 20).map(b => new TableRow({ children: [
+            dataCell(b.breakdown_date || "—"),
+            dataCell(`${b.asset_code} ${b.asset_name}`),
+            dataCell(b.component || "—"),
+            dataCell(b.description || "—"),
+            dataCell(fmt1(b.downtime_total_hours), true),
+            dataCell(b.status || "—"),
+          ]})),
+        ];
+        children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: bdTableRows }));
+      }
+    }
+
+    const doc = new Document({ sections: [{ children }] });
+    const buffer = await Packer.toBuffer(doc);
+    return reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+      .header("Content-Disposition", `attachment; filename="IRONLOG_Asset_KPI_${startIn}_to_${endIn}.docx"`)
       .send(buffer);
   });
 

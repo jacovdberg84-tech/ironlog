@@ -408,7 +408,15 @@ export default async function breakdownRoutes(app) {
   // ---------------------------
   // List breakdowns
   // ---------------------------
-  app.get("/", async () => {
+  app.get("/", async (req) => {
+    const start = String(req.query?.start || "").trim();
+    const end = String(req.query?.end || "").trim();
+    const isYmd = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const where = [];
+    const params = [];
+    if (isYmd(start)) { where.push("b.breakdown_date >= ?"); params.push(start); }
+    if (isYmd(end)) { where.push("b.breakdown_date <= ?"); params.push(end); }
+    const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const rows = db.prepare(`
       SELECT
         b.id,
@@ -430,9 +438,10 @@ export default async function breakdownRoutes(app) {
         a.category
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
+      ${whereClause}
       ORDER BY b.id DESC
-      LIMIT 200
-    `).all();
+      LIMIT 500
+    `).all(...params);
 
     return rows.map(r => ({
       ...r,

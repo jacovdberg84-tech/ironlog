@@ -5972,8 +5972,9 @@ function akpSvgKpiBarChart(rows, availTarget, utilTarget) {
   const n = rows.length;
   if (!n) return `<div class="muted">No data rows for the current filter.</div>`;
   const max = 100;
-  const slot = Math.max(70, Math.min(120, 900 / Math.max(n, 1)));
-  const barPair = Math.min(36, Math.max(14, slot * 0.3));
+  // Tighter spacing: fixed 52px slot, bars fill 70% of slot split between the pair
+  const slot = Math.max(44, Math.min(72, 700 / Math.max(n, 1)));
+  const barPair = Math.min(26, Math.max(10, slot * 0.38));
   const gap = 4;
   const width = Math.max(600, 80 + n * slot * 2);
   const height = 380;
@@ -6477,6 +6478,30 @@ function exportAssetKpiToExcel() {
   const codes = selectedCodes.length ? selectedCodes : (akpLastMeta.asset_codes || []);
   if (codes.length) q.set("asset_codes", codes.join(","));
   window.open(`${API}/dashboard/asset-kpi.xlsx?${q.toString()}`, "_blank");
+}
+
+function exportAssetKpiDocx() {
+  if (!akpLastMeta) {
+    alert("Load KPI data first before exporting.");
+    return;
+  }
+  const q = new URLSearchParams();
+  q.set("start", akpLastMeta.start);
+  q.set("end", akpLastMeta.end);
+  q.set("scheduled", String(akpLastMeta.sched));
+  const selectedCodes = akpSelectedAssetCodes();
+  const codes = selectedCodes.length ? selectedCodes : (akpLastMeta.asset_codes || []);
+  if (codes.length) q.set("asset_codes", codes.join(","));
+  // Pass current chart settings
+  const viewMode = String(document.getElementById("akpChartViewMode")?.value || "category");
+  const categoryFilter = String(document.getElementById("akpCategoryFilter")?.value || "").trim();
+  const availTarget = String(document.getElementById("akpAvailTarget")?.value || "85").trim();
+  const utilTarget = String(document.getElementById("akpUtilTarget")?.value || "75").trim();
+  q.set("view", viewMode);
+  if (categoryFilter) q.set("category", categoryFilter);
+  q.set("avail_target", availTarget);
+  q.set("util_target", utilTarget);
+  window.open(`${API}/dashboard/asset-kpi.docx?${q.toString()}`, "_blank");
 }
 
 async function exportExecutivePackFromAssetKpi() {
@@ -8861,6 +8886,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("akpChartViewMode")?.addEventListener("change", () => {
     if (akpLastResponse) renderAkpKpiChart(akpLastResponse);
   });
+  document.getElementById("akpExportDocxBtn")?.addEventListener("click", exportAssetKpiDocx);
   document.getElementById("akpAssetFilterClear")?.addEventListener("click", () => {
     const sel = document.getElementById("akpAssetFilter");
     if (sel) Array.from(sel.options).forEach((o) => { o.selected = false; });
