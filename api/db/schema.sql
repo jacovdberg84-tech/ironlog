@@ -54,6 +54,45 @@ CREATE TABLE IF NOT EXISTS fuel_logs (
   FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE RESTRICT
 );
 
+/* FAMS auto-sync unmatched registrations (runtime also ensures this + fuel_logs.fams_id) */
+CREATE TABLE IF NOT EXISTS fams_unmatched_fuel (
+  fams_id INTEGER PRIMARY KEY,
+  fams_tr_id TEXT,
+  fams_equipment_id INTEGER,
+  registration TEXT,
+  asset_name TEXT,
+  log_date TEXT,
+  liters REAL,
+  product TEXT,
+  store TEXT,
+  cost_centre TEXT,
+  opening_reading REAL,
+  closing_reading REAL,
+  total_reading REAL,
+  measurement_name TEXT,
+  litre_per_hour REAL,
+  km_per_litre REAL,
+  fuel_price REAL,
+  payload_json TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS fams_sync_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  enabled INTEGER NOT NULL DEFAULT 1,
+  last_attempt_at TEXT,
+  last_success_at TEXT,
+  last_error TEXT,
+  last_received INTEGER,
+  last_imported INTEGER,
+  last_skipped INTEGER,
+  last_unmatched INTEGER,
+  last_range_start TEXT,
+  last_range_end TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 /* =========================
    OIL LOGS
 ========================= */

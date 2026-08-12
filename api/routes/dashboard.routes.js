@@ -13,6 +13,12 @@ import { fuelBenchmarkAssetsInRangeSql, sqlFuelMetricModeExpr } from "../utils/f
 import { isOperationalHireAsset, sqlIncludeArchivedHireAssets } from "../utils/hiredEquipment.js";
 import { ensureCostAllocationSchema, resolveLogCostCenterCode } from "../utils/costAllocation.js";
 import { fetchLubeUsageLines } from "../utils/lubeUsageLines.js";
+import {
+  ensureFamsFuelSchema,
+  getFamsSyncStatus,
+  listFamsUnmatched,
+  syncFamsFuel,
+} from "../utils/famsFuel.js";
 
 function todayYYYYMMDD() {
   return new Date().toISOString().slice(0, 10);
@@ -2280,6 +2286,45 @@ export default async function dashboardRoutes(app) {
     });
 
     return { ok: true, part_code: part.part_code, part_name: part.part_name, unit_cost: Number(unit_cost.toFixed(4)) };
+  });
+
+  // GET /api/dashboard/fuel/fams/status — FAMS auto-sync status (no secrets)
+  app.get("/fuel/fams/status", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "stores", "operator", "artisan"])) return;
+    try {
+      ensureFamsFuelSchema();
+      return reply.send(getFamsSyncStatus());
+    } catch (err) {
+      return reply.code(500).send({ ok: false, error: err?.message || String(err) });
+    }
+  });
+
+  // GET /api/dashboard/fuel/fams/unmatched — unmatched FAMS registrations
+  app.get("/fuel/fams/unmatched", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
+    try {
+      ensureFamsFuelSchema();
+      const rows = listFamsUnmatched({ limit: Number(req.query?.limit || 200) });
+      return reply.send({ ok: true, rows });
+    } catch (err) {
+      return reply.code(500).send({ ok: false, error: err?.message || String(err) });
+    }
+  });
+
+  // POST /api/dashboard/fuel/fams/sync — manual "Sync FAMS Now" (same logic as hourly job)
+  app.post("/fuel/fams/sync", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
+    try {
+      const force = Boolean(req.body?.force);
+      const result = await syncFamsFuel({ log: req.log || console, force });
+      if (!result?.ok && result?.error) {
+        return reply.code(502).send(result);
+      }
+      return reply.send({ ...result, status: getFamsSyncStatus() });
+    } catch (err) {
+      // Never crash the API on FAMS failure
+      return reply.code(500).send({ ok: false, error: err?.message || String(err) });
+    }
   });
 
   // POST /api/dashboard/fuel/log

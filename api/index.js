@@ -12,6 +12,7 @@ import { fileURLToPath } from "url";
 import { runIronmindAutoScheduler } from "./utils/ironmind.js";
 import { runCartrackAutoScheduler } from "./utils/cartrack.js";
 import { runUnitechAutoScheduler } from "./utils/unitech.js";
+import { runFamsAutoScheduler } from "./utils/famsFuel.js";
 import { startDbAutoBackup } from "./db/autoBackup.js";
 import { bootstrapSmtpFromEnv } from "./utils/mail.js";
 
@@ -115,6 +116,9 @@ try {
   await runIronmindAutoScheduler(app.log);
   runCartrackAutoScheduler(app.log);
   runUnitechAutoScheduler(app.log);
+  runFamsAutoScheduler(app.log).catch((err) => {
+    app.log.warn?.(`[FAMS] scheduler failed to start: ${err?.message || err}`);
+  });
   app.log.info(`IRONLOG API running on http://${HOST}:${effectivePort}`);
   app.log.info(`IRONLOG UI  running on http://${HOST}:${effectivePort}/web/index.html`);
 } catch (err) {

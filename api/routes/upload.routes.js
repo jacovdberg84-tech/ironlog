@@ -66,14 +66,14 @@ export default async function uploadRoutes(app) {
   }
 
   // Helper prepared statements (after schema checks/column additions).
-  const getAssetIdByCode = db.prepare(`SELECT id FROM assets WHERE asset_code = ?`);
-  const getAssetForHoursImport = db.prepare(`SELECT id, COALESCE(is_standby, 0) AS is_standby FROM assets WHERE asset_code = ?`);
+  const getAssetIdByCode = db.prepare(`SELECT id FROM assets WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?))`);
+  const getAssetForHoursImport = db.prepare(`SELECT id, COALESCE(is_standby, 0) AS is_standby FROM assets WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?))`);
   const getAssetForFuelImport = db.prepare(`
     SELECT
       a.id,
       ${sqlFuelMetricModeExpr("a")} AS metric_mode
     FROM assets a
-    WHERE a.asset_code = ?
+    WHERE UPPER(TRIM(a.asset_code)) = UPPER(TRIM(?))
   `);
   const getPartIdByCode = db.prepare(`SELECT id, unit_cost FROM parts WHERE part_code = ?`);
   const getWorkOrderById = db.prepare(`SELECT id, asset_id FROM work_orders WHERE id = ?`);

@@ -3030,8 +3030,8 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
               </div>
               <div>
-                <h3>Import FAMS Fuel File</h3>
-                <p class="muted small">Upload FAMS export directly</p>
+                <h3>FAMS Fuel</h3>
+                <p class="muted small">Auto sync from FAMS API (normal) · CSV upload remains as fallback. Fuel only — equipment hours stay on QR pre-start.</p>
               </div>
             </div>
             <button class="report-card-toggle" aria-label="Toggle">
@@ -3039,6 +3039,26 @@
             </button>
           </div>
           <div class="report-card-body">
+            <div id="fuelFamsStatusPanel" class="kpi-pills" style="margin-bottom:12px;">
+              <span class="kpi-pill"><strong>Status:</strong> <span id="fuelFamsStatusLabel">—</span></span>
+              <span class="kpi-pill"><strong>Last success:</strong> <span id="fuelFamsLastSuccess">—</span></span>
+              <span class="kpi-pill"><strong>Last attempt:</strong> <span id="fuelFamsLastAttempt">—</span></span>
+              <span class="kpi-pill"><strong>Received:</strong> <span id="fuelFamsReceived">—</span></span>
+              <span class="kpi-pill kpi-pill-green"><strong>Imported:</strong> <span id="fuelFamsImported">—</span></span>
+              <span class="kpi-pill"><strong>Skipped:</strong> <span id="fuelFamsSkipped">—</span></span>
+              <span class="kpi-pill kpi-pill-orange"><strong>Unmatched:</strong> <span id="fuelFamsUnmatched">—</span></span>
+            </div>
+            <p id="fuelFamsStatusMsg" class="muted small" style="margin:0 0 12px;"></p>
+            <div class="action-buttons" style="margin-bottom:14px;">
+              <button id="fuelFamsSyncNowBtn" class="btn btn-primary" type="button">
+                Sync FAMS Now
+              </button>
+              <button id="fuelFamsRefreshStatusBtn" class="btn btn-secondary" type="button">
+                Refresh status
+              </button>
+            </div>
+            <hr class="hr-soft" style="margin:12px 0;" />
+            <p class="muted small" style="margin-top:0;">CSV fallback (emergency / manual)</p>
             <div class="form-row">
               <div class="form-field">
                 <label>Upload FAMS File</label>
@@ -7613,6 +7633,6 @@
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=1"></script>
-  <script src="./app.js?v=61"></script>
+  <script src="./app.js?v=62"></script>
 </body>
 </html>

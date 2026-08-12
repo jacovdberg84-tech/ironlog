@@ -10493,6 +10493,9 @@ function switchTab(key) {
   if (k === "parts-tracking") {
     loadPartsTrackingTab().catch(() => {});
   }
+  if (k === "fuel") {
+    loadFamsFuelStatus().catch(() => {});
+  }
   if (k === "lube") {
     loadLubeUsage().catch(() => {});
   }
@@ -10724,9 +10727,84 @@ async function importFamsFuelFile() {
     resultEl.textContent = JSON.stringify(res, null, 2);
     setStatus("FAMS fuel import complete.");
     await loadDashboard().catch(() => {});
+    loadFamsFuelStatus().catch(() => {});
   } catch (e) {
     resultEl.textContent = String(e.message || e);
     setStatus("FAMS fuel import failed.");
+  }
+}
+
+function renderFamsFuelStatus(data) {
+  const status = String(data?.status || (data?.enabled ? "idle" : "disabled"));
+  const labelMap = {
+    connected: "Connected",
+    error: "Error",
+    disabled: "Disabled",
+    idle: "Idle",
+    syncing: "Syncing…",
+  };
+  setText("fuelFamsStatusLabel", labelMap[status] || status);
+  setText("fuelFamsLastSuccess", data?.last_success_at ? String(data.last_success_at).replace("T", " ").slice(0, 19) : "—");
+  setText("fuelFamsLastAttempt", data?.last_attempt_at ? String(data.last_attempt_at).replace("T", " ").slice(0, 19) : "—");
+  setText("fuelFamsReceived", data?.last_received != null ? String(data.last_received) : "—");
+  setText("fuelFamsImported", data?.last_imported != null ? String(data.last_imported) : "—");
+  setText("fuelFamsSkipped", data?.last_skipped != null ? String(data.last_skipped) : "—");
+  const unmatched = data?.unmatched_open != null ? data.unmatched_open : data?.last_unmatched;
+  setText("fuelFamsUnmatched", unmatched != null ? String(unmatched) : "—");
+  const msg = qs("fuelFamsStatusMsg");
+  if (msg) {
+    if (!data?.enabled) {
+      msg.textContent = "Auto sync is off. Set FAMS_ENABLED=true and FAMS_AUTH in api/.env, then restart the API.";
+    } else if (!data?.configured) {
+      msg.textContent = "FAMS_AUTH is missing on the server.";
+    } else if (data?.last_error) {
+      msg.textContent = `Last error: ${data.last_error}`;
+    } else if (data?.last_range_start && data?.last_range_end) {
+      msg.textContent = `Last range ${data.last_range_start} → ${data.last_range_end}. Fuel only — hours stay on QR pre-start.`;
+    } else {
+      msg.textContent = data?.note || "";
+    }
+  }
+}
+
+async function loadFamsFuelStatus() {
+  try {
+    const data = await fetchJson(`${API}/api/dashboard/fuel/fams/status`);
+    renderFamsFuelStatus(data);
+    return data;
+  } catch (e) {
+    setText("fuelFamsStatusLabel", "Error");
+    const msg = qs("fuelFamsStatusMsg");
+    if (msg) msg.textContent = e.message || String(e);
+    throw e;
+  }
+}
+
+async function syncFamsFuelNow() {
+  const resultEl = qs("fuelFamsResult");
+  setStatus("Syncing FAMS fuel…");
+  if (resultEl) resultEl.textContent = "Syncing…";
+  try {
+    const res = await fetchJson(`${API}/api/dashboard/fuel/fams/sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ force: true }),
+    });
+    if (resultEl) resultEl.textContent = JSON.stringify(res, null, 2);
+    if (res?.status) renderFamsFuelStatus(res.status);
+    else await loadFamsFuelStatus().catch(() => {});
+    if (res?.ok) {
+      setStatus(
+        `FAMS sync done: ${Number(res.imported || 0)} imported, ${Number(res.skipped || 0)} skipped, ${Number(res.unmatched || 0)} unmatched.`
+      );
+      await loadDashboard().catch(() => {});
+    } else {
+      setStatus(`FAMS sync failed: ${res?.error || res?.reason || "unknown"}`);
+    }
+  } catch (e) {
+    if (resultEl) resultEl.textContent = String(e.message || e);
+    setStatus("FAMS sync failed.");
+    loadFamsFuelStatus().catch(() => {});
   }
 }
 
@@ -17776,6 +17854,12 @@ async function init() {
   );
   qs("fuelFamsUploadBtn")?.addEventListener("click", () =>
     importFamsFuelFile().catch((e) => setStatus("FAMS import error: " + e.message))
+  );
+  qs("fuelFamsSyncNowBtn")?.addEventListener("click", () =>
+    syncFamsFuelNow().catch((e) => setStatus("FAMS sync error: " + e.message))
+  );
+  qs("fuelFamsRefreshStatusBtn")?.addEventListener("click", () =>
+    loadFamsFuelStatus().catch((e) => setStatus("FAMS status error: " + e.message))
   );
   qs("fuelRepairMeterChainBtn")?.addEventListener("click", () =>
     repairFuelMeterChain().catch((e) => setStatus("Meter chain repair error: " + e.message))
