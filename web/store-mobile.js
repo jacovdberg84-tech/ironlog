@@ -1,5 +1,8 @@
 (function () {
-  const API = "/api";
+  const APP_ORIGIN = /^https?:$/.test(window.location?.protocol || "")
+    ? window.location.origin
+    : "http://localhost:3001";
+  const API = `${APP_ORIGIN}/api`;
   const LABEL_QUEUE_KEY = "ironlog_store_label_queue";
 
   let state = {
@@ -321,7 +324,7 @@
   }
 
   function partLabelQrUrl(partCode) {
-    const origin = window.location.origin;
+    const origin = APP_ORIGIN;
     const site = encodeURIComponent(state.site || "main");
     const code = encodeURIComponent(partCode);
     const scan = `${origin}/web/store-mobile.html?site=${site}&part_code=${code}`;

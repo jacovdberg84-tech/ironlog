@@ -1,5 +1,7 @@
 // IRONLOG/web/app.js
-const API = window.location?.origin || "http://localhost:3001";
+const API = /^https?:$/.test(window.location?.protocol || "")
+  ? window.location.origin
+  : "http://localhost:3001";
 
 // Safe getElementById
 const qs = (id) => document.getElementById(id) || null;

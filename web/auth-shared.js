@@ -3,7 +3,9 @@
  * (technician terminal, work order QR, work orders board).
  */
 (function (global) {
-  const API = global.location?.origin || "http://localhost:3001";
+  const API = /^https?:$/.test(global.location?.protocol || "")
+    ? global.location.origin
+    : "http://localhost:3001";
   const ROLE_KEY = "ironlog_session_role";
   const ROLES_KEY = "ironlog_session_roles";
   const USER_KEY = "ironlog_session_user";

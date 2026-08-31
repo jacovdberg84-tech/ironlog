@@ -2,7 +2,9 @@
  * IRONLOG Notify — download banner + Expo install QR for technician pages.
  */
 (function () {
-  const API = window.location?.origin || "http://localhost:3001";
+  const API = /^https?:$/.test(window.location?.protocol || "")
+    ? window.location.origin
+    : "http://localhost:3001";
 
   function qrImageUrl(targetUrl, size) {
     const s = size || 320;
