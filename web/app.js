@@ -48,6 +48,7 @@ const SIDEBAR_COLLAPSED_KEY = "ironlog_sidebar_collapsed";
 const DEFAULT_LANG = "en";
 const TASK_WORKSPACE_COLLAPSED_KEY = "ironlog_task_workspace_collapsed";
 const TASK_SAVED_VIEWS_KEY = "ironlog_task_saved_views";
+const DASHBOARD_DETAIL_KEY = "ironlog_dashboard_detail";
 const WORKSHOP_LIBRARY_SETTINGS_KEY = "ironlog_workshop_library_settings";
 const DEFAULT_WORKSHOP_LIBRARY_SETTINGS = Object.freeze({
   siteUrl: "https://iron-library.base44.app",
@@ -212,6 +213,20 @@ function initDashboardActionHub() {
       if (tab) switchTab(tab);
       else if (href) window.location.href = href;
     });
+  });
+
+  const grid = qs("dashboardGrid");
+  const detailToggle = qs("dashboardDetailToggle");
+  const setDetailed = (detailed) => {
+    grid?.classList.toggle("show-details", Boolean(detailed));
+    detailToggle?.setAttribute("aria-expanded", detailed ? "true" : "false");
+    if (detailToggle) detailToggle.textContent = detailed ? "Show focused view" : "Show operational detail";
+  };
+  setDetailed(localStorage.getItem(DASHBOARD_DETAIL_KEY) === "1");
+  detailToggle?.addEventListener("click", () => {
+    const detailed = !grid?.classList.contains("show-details");
+    setDetailed(detailed);
+    localStorage.setItem(DASHBOARD_DETAIL_KEY, detailed ? "1" : "0");
   });
 }
 

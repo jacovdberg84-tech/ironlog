@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=11" />
+  <link rel="stylesheet" href="./styles.css?v=12" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -466,11 +466,20 @@
       </div>
 
       <!-- Main Dashboard Grid -->
-      <div class="dashboard-grid">
+      <div class="dashboard-section-heading">
+        <div>
+          <span class="eyebrow">Needs attention</span>
+          <h2>Today at a glance</h2>
+        </div>
+        <button type="button" id="dashboardDetailToggle" class="btn-secondary" aria-expanded="false">
+          Show operational detail
+        </button>
+      </div>
+      <div class="dashboard-grid dashboard-streamlined" id="dashboardGrid">
         
         <!-- Left Column: Downtime & Stock -->
         <div class="dashboard-column">
-          <div class="dash-card">
+          <div class="dash-card dashboard-primary">
             <div class="dash-card-header">
               <h3>Major Downtime</h3>
               <span class="dash-card-badge">Today</span>
@@ -555,7 +564,7 @@
             <p class="muted small">V01AM-V15AM checklist completion for selected date.</p>
           </div>
 
-          <div class="dash-card">
+          <div class="dash-card dashboard-primary">
             <div class="dash-card-header">
               <h3>Critical Low Stock</h3>
               <span class="dash-card-badge dash-card-badge-red">Urgent</span>
@@ -567,7 +576,7 @@
 
         <!-- Center Column: Work Orders -->
         <div class="dashboard-column">
-          <div class="dash-card">
+          <div class="dash-card dashboard-primary">
             <div class="dash-card-header">
               <h3>Open Work Orders</h3>
               <button class="btn-link" onclick="switchTab('maintenance')">View All</button>
@@ -670,7 +679,7 @@
             <div class="list" id="costTrendList"></div>
           </div>
 
-          <div class="dash-card">
+          <div class="dash-card dashboard-primary">
             <div class="dash-card-header">
               <h3>Cost Engine (Daily)</h3>
             </div>
@@ -7656,6 +7665,6 @@
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=2"></script>
-  <script src="./app.js?v=65"></script>
+  <script src="./app.js?v=66"></script>
 </body>
 </html>

@@ -161,7 +161,9 @@ export async function ironlogAuthHook(req, reply) {
       const roles = parseRoles(row.roles_json, row.role);
       const allowedLocations = parseAllowedLocations(row.allowed_locations);
       const requestedSite = String(req.headers["x-site-code"] || "").trim().toLowerCase();
-      if (Array.isArray(allowedLocations) && allowedLocations.length) {
+      // Main administrators have global site access even if a stale or narrow
+      // location list remains on their account.
+      if (!roles.includes("admin") && Array.isArray(allowedLocations) && allowedLocations.length) {
         const effective = requestedSite || allowedLocations[0];
         if (!allowedLocations.includes(effective)) {
           return reply.code(403).send({
