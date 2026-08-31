@@ -194,6 +194,25 @@ function updateSidebarProfile() {
   if (initialEl) initialEl.textContent = user.charAt(0).toUpperCase() || "U";
 }
 
+function initDashboardActionHub() {
+  const welcome = qs("dashboardWelcome");
+  const today = qs("dashboardToday");
+  if (welcome) welcome.textContent = `Welcome, ${getSessionUser() || "User"}`;
+  if (today) {
+    today.textContent = new Intl.DateTimeFormat(undefined, {
+      weekday: "long", day: "numeric", month: "long", year: "numeric"
+    }).format(new Date());
+  }
+  document.querySelectorAll(".dashboard-quick-action").forEach((button) => {
+    button.addEventListener("click", () => {
+      const tab = String(button.dataset.goTab || "").trim();
+      const href = String(button.dataset.goHref || "").trim();
+      if (tab) switchTab(tab);
+      else if (href) window.location.href = href;
+    });
+  });
+}
+
 function isMaintenanceChildTab(tabKey) {
   return MAINT_CHILD_TABS.has(String(tabKey || "").trim());
 }
@@ -944,6 +963,9 @@ function applyRoleVisibility() {
   renderSessionRolesBadge();
   const allowedList = getEffectiveAllowedTabs();
   const allowed = new Set(allowedList);
+  document.querySelectorAll(".dashboard-quick-action[data-required-tab]").forEach((button) => {
+    button.hidden = !allowed.has(String(button.dataset.requiredTab || ""));
+  });
   const tabSelect = qs("tabSelect");
   if (tabSelect) {
     Array.from(tabSelect.options).forEach((opt) => {
@@ -4428,10 +4450,45 @@ function initVehicleCheckTab() {
   vcLoadChecksList().catch(() => {});
 }
 
+let lastToastKey = "";
+let lastToastAt = 0;
+
+function statusToastTone(message) {
+  const text = String(message || "").toLowerCase();
+  if (/error|failed|cannot|blocked|invalid|denied/.test(text)) return "error";
+  if (/warning|with issues|queued for sync/.test(text)) return "warning";
+  if (/saved|created|updated|uploaded|downloaded|removed|added|sent|copied|complete\s*✅|successfully/.test(text)) return "success";
+  return "";
+}
+
+function showToast(message, tone = "info") {
+  const region = qs("toastRegion");
+  const text = String(message || "").trim();
+  if (!region || !text) return;
+  const key = `${tone}:${text}`;
+  const now = Date.now();
+  if (key === lastToastKey && now - lastToastAt < 1500) return;
+  lastToastKey = key;
+  lastToastAt = now;
+  const toast = document.createElement("div");
+  toast.className = `app-toast ${tone}`;
+  toast.setAttribute("role", tone === "error" ? "alert" : "status");
+  toast.textContent = text;
+  region.replaceChildren(toast);
+  const delay = tone === "error" ? 7000 : 4200;
+  window.setTimeout(() => {
+    toast.classList.add("is-leaving");
+    window.setTimeout(() => toast.remove(), 180);
+  }, delay);
+}
+
 function setStatus(msg) {
   const el = qs("status");
   if (!el) return;
-  el.textContent = translateStatusMessage(msg, getLang());
+  const translated = translateStatusMessage(msg, getLang());
+  el.textContent = translated;
+  const tone = statusToastTone(translated);
+  if (tone) showToast(translated, tone);
 }
 function setText(id, value) {
   const el = qs(id);
@@ -17076,6 +17133,7 @@ async function init() {
   await loadAuthConfig();
   await tryInitialSession();
   initSidebar();
+  initDashboardActionHub();
   initTabs();
   initWorkshopLibraryTab();
   initIronmindHelpUi();
