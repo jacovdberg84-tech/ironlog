@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=12" />
+  <link rel="stylesheet" href="./styles.css?v=13" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -1472,48 +1472,12 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
             Load Day
           </button>
-          <button id="copyYesterday" class="btn btn-secondary">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-            Copy Yesterday
-          </button>
           <button id="saveDaily" class="btn btn-accent">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
             Save Day
           </button>
-          <details class="daily-import-tools">
-            <summary>Import tools</summary>
-            <div class="daily-import-tools-menu">
-              <button id="dailyHoursCsvBtn" class="btn btn-secondary" title="Bulk upload previous hours from a CSV file (one row per asset/day)">Upload hours CSV</button>
-              <button id="dailyHoursCsvTemplate" class="btn btn-secondary btn-sm" title="Download a CSV template for bulk hours upload">Hours template</button>
-              <input id="dailyHoursCsvFile" type="file" accept=".csv" style="display:none" />
-              <button id="dailyMatrixCsvBtn" class="btn btn-secondary" title="Bulk upload a meter-reading matrix">Upload meter matrix</button>
-              <button id="dailyMatrixCsvTemplate" class="btn btn-secondary btn-sm" title="Download a meter-matrix template">Matrix template</button>
-              <input id="dailyMatrixCsvFile" type="file" accept=".csv" style="display:none" />
-            </div>
-          </details>
-        </div>
-        <div class="daily-actions-center">
-          <label class="daily-filter-toggle">
-            <input id="dailyDownOnly" type="checkbox" />
-            <span class="toggle-label">Show DOWN only</span>
-          </label>
-          <div class="bulk-sched">
-            <label>
-              <span>Bulk scheduled hrs</span>
-              <input id="bulkSched" class="w-80" type="number" value="10" min="0" max="24" step="0.5" />
-            </label>
-            <button id="applyBulkSched" class="btn btn-secondary btn-sm">Apply</button>
-          </div>
         </div>
         <div class="daily-actions-right">
-          <button id="runShiftSelfCheck" class="btn btn-secondary">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-            Self-Check
-          </button>
-          <button id="exportShiftSelfCheck" class="btn btn-secondary">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-            Export TXT
-          </button>
           <div class="daily-summary" id="dailySummary"></div>
         </div>
       </div>
@@ -1521,7 +1485,7 @@
       <!-- Info Banner -->
       <div class="daily-info-banner">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-        <span>Opening hours auto-load from yesterday closing. Production assets must generate hours. Standby assets are excluded from KPI. For vehicle rows, switch unit to KM. Pre-start time is deducted from availability preview.</span>
+        <span>Scheduled hours default to 10. Choose Production, Standby, or Maintenance / Breakdown for every machine. Maintenance details create or update the breakdown and work order when you save the day.</span>
       </div>
 
       <div id="dailyPrestartPanel" class="daily-prestart-panel is-empty"></div>
@@ -1533,7 +1497,6 @@
 
       <!-- Output areas -->
       <pre class="output" id="dailyResult"></pre>
-      <pre class="output" id="shiftSelfCheckResult"></pre>
     </section>
 
     <!-- TELEMATICS -->
@@ -7665,6 +7628,6 @@
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=2"></script>
-  <script src="./app.js?v=67"></script>
+  <script src="./app.js?v=68"></script>
 </body>
 </html>

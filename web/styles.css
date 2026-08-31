@@ -5346,6 +5346,33 @@ body.sidebar-collapsed .main-content {
   align-items: flex-start;
 }
 
+.daily-status-field {
+  display: grid;
+  gap: 5px;
+  min-width: 210px;
+}
+.daily-status-field label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.daily-status-select {
+  width: 100%;
+  border-width: 2px;
+}
+.daily-status-select.status-production { border-color: #86efac; background: #f0fdf4; color: #166534; }
+.daily-status-select.status-standby { border-color: #cbd5e1; background: #f8fafc; color: #475569; }
+.daily-status-select.status-maintenance { border-color: #fca5a5; background: #fef2f2; color: #991b1b; }
+
+.daily-down-title {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 10px; color: #991b1b;
+}
+.daily-down-title strong { font-size: 14px; }
+.daily-down-title span { color: var(--muted); font-size: 12px; }
+
 .daily-toggle-group {
   display: flex;
   gap: 8px;
@@ -5487,6 +5514,11 @@ body.sidebar-collapsed .main-content {
 
 .down-details-grid .down-field.full {
   grid-column: 1 / -1;
+}
+
+.down-field .daily-input,
+.down-field .daily-select {
+  width: 100%;
 }
 
 .down-field label {

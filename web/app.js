@@ -15254,7 +15254,8 @@ async function logDownRowToBreakdowns(date, r) {
         breakdown_date: date,
         start_date: String(r.breakdown_start_date || "").trim() || date,
         description: downDesc,
-        critical: false,
+        component: String(r.breakdown_component || "").trim() || null,
+        critical: Boolean(r.breakdown_critical),
         parts_ordered_date: String(r.parts_ordered_date || "").trim() || null,
         parts_status: String(r.parts_status || "").trim() || null,
         parts_received_date: String(r.parts_received_date || "").trim() || null,
@@ -15358,22 +15359,20 @@ function renderDailyTable() {
     const controlsCol = document.createElement("div");
     controlsCol.className = "daily-controls-col";
 
-    // Production Toggle
-    const prodToggle = document.createElement("div");
-    prodToggle.className = "daily-toggle-group";
-    prodToggle.innerHTML = `
-      <label class="daily-toggle ${r.is_used ? 'active' : ''} ${r.is_master_standby ? 'disabled' : ''}">
-        <input type="checkbox" ${r.is_used ? 'checked' : ''} ${r.is_master_standby ? 'disabled' : ''} />
-        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-        <span class="toggle-label">PROD</span>
-      </label>
-      <label class="daily-toggle down ${r.is_down ? 'active' : ''} ${r.is_master_standby || (r.is_down && r.down_lock) ? 'disabled' : ''}">
-        <input type="checkbox" ${r.is_down ? 'checked' : ''} ${r.is_master_standby || (r.is_down && r.down_lock) ? 'disabled' : ''} />
-        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-        <span class="toggle-label">DOWN</span>
-      </label>
+    // One clear operating status replaces separate production/down toggles.
+    const statusField = document.createElement("div");
+    statusField.className = "daily-status-field";
+    const statusValue = r.is_down ? "maintenance" : r.is_used ? "production" : "standby";
+    statusField.innerHTML = `
+      <label>Machine status</label>
+      <select class="daily-select daily-status-select status-${statusValue}" data-daily-status
+        ${r.is_master_standby || (r.is_down && r.down_lock) ? "disabled" : ""}>
+        <option value="production" ${statusValue === "production" ? "selected" : ""}>Production</option>
+        <option value="standby" ${statusValue === "standby" ? "selected" : ""}>Standby</option>
+        <option value="maintenance" ${statusValue === "maintenance" ? "selected" : ""}>Maintenance / Breakdown</option>
+      </select>
     `;
-    controlsCol.appendChild(prodToggle);
+    controlsCol.appendChild(statusField);
 
     // Unit selector
     const unitSelect = document.createElement("div");
@@ -15405,6 +15404,10 @@ function renderDailyTable() {
       })();
 
       downDetails.innerHTML = `
+        <div class="daily-down-title">
+          <strong>Maintenance / breakdown details</strong>
+          <span>Saved directly to the breakdown and work-order records</span>
+        </div>
         <div class="down-details-grid">
           <div class="down-field">
             <label>Reason</label>
@@ -15415,6 +15418,8 @@ function renderDailyTable() {
               <option value="Hydraulics" ${r.down_reason === "Hydraulics" ? 'selected' : ''}>Hydraulics</option>
               <option value="Tyres/Undercarriage" ${r.down_reason === "Tyres/Undercarriage" ? 'selected' : ''}>Tyres/Undercarriage</option>
               <option value="Waiting parts" ${r.down_reason === "Waiting parts" ? 'selected' : ''}>Waiting parts</option>
+              <option value="Planned maintenance" ${r.down_reason === "Planned maintenance" ? 'selected' : ''}>Planned maintenance</option>
+              <option value="Service" ${r.down_reason === "Service" ? 'selected' : ''}>Service</option>
               <option value="No operator" ${r.down_reason === "No operator" ? 'selected' : ''}>No operator</option>
               <option value="Weather/Access" ${r.down_reason === "Weather/Access" ? 'selected' : ''}>Weather/Access</option>
             </select>
@@ -15422,6 +15427,17 @@ function renderDailyTable() {
           <div class="down-field">
             <label>Down Hours</label>
             <input type="number" step="0.5" min="0" max="24" value="${fmt(r.down_hours != null ? r.down_hours : Number(r.scheduled_hours || 0))}" class="daily-input" placeholder="0" />
+          </div>
+          <div class="down-field">
+            <label>Component / Area</label>
+            <input type="text" value="${r.breakdown_component || ''}" class="daily-input" placeholder="Engine, hydraulics, tyres..." data-down-field="component" />
+          </div>
+          <div class="down-field">
+            <label>Priority</label>
+            <select class="daily-select" data-down-field="critical">
+              <option value="normal" ${!r.breakdown_critical ? "selected" : ""}>Normal</option>
+              <option value="critical" ${r.breakdown_critical ? "selected" : ""}>Critical</option>
+            </select>
           </div>
           <div class="down-field">
             <label>Date down</label>
@@ -15452,8 +15468,8 @@ function renderDailyTable() {
             <input type="date" value="${String(r.ets_repair_date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || ""}" class="daily-input" data-down-field="ets_repair" />
           </div>
           <div class="down-field full">
-            <label>Comment</label>
-            <input type="text" value="${r.breakdown_comment || ''}" class="daily-input" placeholder="Breakdown comment..." data-down-field="comment" />
+            <label>Breakdown details / action taken</label>
+            <input type="text" value="${r.breakdown_comment || ''}" class="daily-input" placeholder="Describe the fault, inspection, repair or action required..." data-down-field="comment" />
           </div>
         </div>
         ${startYmd ? `<div class="down-meta">Date down: ${startYmd}${calcDaysDown != null ? ` | Total days down: ${calcDaysDown}` : ""}</div>` : ""}
@@ -15503,13 +15519,38 @@ function renderDailyTable() {
             r.ets_repair_date = String(input.value || "").trim();
           }
         } else if (type === "text") {
-          if (input.getAttribute("data-down-field") === "comment" || input.previousElementSibling?.textContent === "Comment") {
+          if (input.getAttribute("data-down-field") === "component") {
+            r.breakdown_component = String(input.value || "").trim();
+          } else if (input.getAttribute("data-down-field") === "comment" || input.previousElementSibling?.textContent === "Comment") {
             r.breakdown_comment = String(input.value || "").trim();
           }
         } else if (input.tagName === "SELECT") {
-          if (cls.includes("daily-select") && !cls.includes("disabled")) {
+          if (input.hasAttribute("data-daily-status")) {
+            const nextStatus = String(input.value || "standby");
+            r.is_down = nextStatus === "maintenance";
+            r.is_used = nextStatus !== "standby";
+            if (r.is_down) {
+              if (r.opening_hours != null) r.closing_hours = r.opening_hours;
+              r.hours_run = 0;
+              if (r.down_hours == null) r.down_hours = Number(r.scheduled_hours || 10);
+              if (!r.breakdown_start_date) r.breakdown_start_date = String(qs("date")?.value || todayLocalYmd());
+            } else {
+              r.down_reason = "";
+              r.down_hours = null;
+              r.breakdown_comment = "";
+              r.breakdown_component = "";
+              r.breakdown_critical = false;
+              r.breakdown_start_date = "";
+              r.parts_ordered_date = "";
+              r.parts_status = "";
+              r.parts_received_date = "";
+              r.ets_repair_date = "";
+            }
+          } else if (cls.includes("daily-select") && !cls.includes("disabled")) {
             if (input.getAttribute("data-down-field") === "parts_status") {
               r.parts_status = String(input.value || "").trim();
+            } else if (input.getAttribute("data-down-field") === "critical") {
+              r.breakdown_critical = input.value === "critical";
             } else if (input.closest(".down-field")) {
               r.down_reason = String(input.value || "");
             } else if (input.value === "hours" || input.value === "km") {
@@ -15522,39 +15563,6 @@ function renderDailyTable() {
         renderDailyTable();
         renderDailyPreview();
       });
-    });
-
-    // Toggle listeners
-    const prodCheckbox = prodToggle.querySelector('input[type="checkbox"]:first-child');
-    const downCheckbox = prodToggle.querySelector('input[type="checkbox"]:last-child');
-
-    prodCheckbox?.addEventListener("change", () => {
-      r.is_used = prodCheckbox.checked;
-      if (r.is_master_standby) r.is_used = false;
-      validateDailyRows();
-      renderDailyTable();
-      renderDailyPreview();
-    });
-
-    downCheckbox?.addEventListener("change", () => {
-      r.is_down = downCheckbox.checked;
-      if (r.is_down) {
-        if (r.opening_hours != null) r.closing_hours = r.opening_hours;
-        r.hours_run = 0;
-        if (r.down_hours == null) r.down_hours = Number(r.scheduled_hours || 0);
-      } else {
-        r.down_reason = "";
-        r.down_hours = null;
-        r.breakdown_comment = "";
-        r.breakdown_start_date = "";
-        r.parts_ordered_date = "";
-        r.parts_status = "";
-        r.parts_received_date = "";
-        r.ets_repair_date = "";
-      }
-      validateDailyRows();
-      renderDailyTable();
-      renderDailyPreview();
     });
 
     // Reset unit button
@@ -15688,6 +15696,8 @@ async function loadDailyInput() {
       down_lock: false,
       breakdown_start_date: "",
       breakdown_comment: ex?.notes ? String(ex.notes) : "",
+      breakdown_component: "",
+      breakdown_critical: false,
       parts_ordered_date: "",
       parts_status: "",
       parts_received_date: "",
@@ -15761,7 +15771,7 @@ async function loadDailyInput() {
       }
     }
 
-    if (row.scheduled_hours == null) row.scheduled_hours = 0;
+    if (row.scheduled_hours == null) row.scheduled_hours = row.is_master_standby ? 0 : 10;
     if (row.is_master_standby) row.is_used = false;
     row.hours_run = calcRun(row.opening_hours, row.closing_hours);
 
@@ -15773,6 +15783,8 @@ async function loadDailyInput() {
       row.down_reason = parseDownReasonFromDesc(bd.description);
       row.lock_wo_status = bd.primary_work_order_status || "";
       row.breakdown_start_date = String(bd.breakdown_date || bd.start_at || "").trim();
+      row.breakdown_component = String(bd.component || "").trim();
+      row.breakdown_critical = Boolean(bd.critical);
       row.parts_ordered_date = String(bd.parts_ordered_date || "").trim();
       row.parts_status = String(bd.parts_status || "").trim();
       row.parts_received_date = String(bd.parts_received_date || "").trim();
