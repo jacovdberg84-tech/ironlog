@@ -8,6 +8,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon --watch . --ext js,json,sql --exec node index.js",
+    "test": "node --test test/*.test.js",
     "desktop": "electron desktop/main.cjs",
     "desktop:dev": "electron desktop/main.cjs --devtools",
     "desktop:status": "node desktop/status.cjs",

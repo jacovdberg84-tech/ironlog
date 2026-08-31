@@ -11,8 +11,20 @@
   const TOKEN_KEY = "ironlog_auth_token";
   const TABS_OVERRIDE_KEY = "ironlog_allowed_tabs";
   const DEFAULT_SITE = "main";
-  /** Set true to require sign-in on standalone pages (terminal, work orders). */
-  const LOGIN_GATE_ENABLED = false;
+  // Fail closed until the server explicitly confirms local legacy mode.
+  let LOGIN_GATE_ENABLED = true;
+
+  async function loadConfig() {
+    try {
+      const res = await fetch(`${API}/api/auth/config`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`Auth config failed (${res.status})`);
+      const data = await res.json();
+      LOGIN_GATE_ENABLED = data?.auth_required !== false;
+    } catch {
+      LOGIN_GATE_ENABLED = true;
+    }
+    return { auth_required: LOGIN_GATE_ENABLED };
+  }
 
   function getAuthToken() {
     return String(localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY) || "").trim();
@@ -224,7 +236,8 @@
 
   global.IronlogAuth = {
     API,
-    LOGIN_GATE_ENABLED,
+    get LOGIN_GATE_ENABLED() { return LOGIN_GATE_ENABLED; },
+    loadConfig,
     getAuthToken,
     setAuthToken,
     getSessionRole,

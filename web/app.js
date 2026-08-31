@@ -38,8 +38,8 @@ function isDashSectionVisible(id) {
 }
 const DEFAULT_ROLE = "admin";
 const DEFAULT_USER = "admin";
-/** Set true to require password sign-in before using the dashboard. */
-const LOGIN_GATE_ENABLED = false;
+// Fail closed until the public server config confirms local legacy mode.
+let LOGIN_GATE_ENABLED = true;
 const DEFAULT_SITE = "main";
 const LANG_KEY = "ironlog_lang";
 const SIDEBAR_COLLAPSED_KEY = "ironlog_sidebar_collapsed";
@@ -791,6 +791,18 @@ async function fetchJson(url, opts) {
     throw new Error(data.error || data.message || text || `Request failed (${res.status})`);
   }
   return data;
+}
+
+async function loadAuthConfig() {
+  try {
+    const res = await fetch(`${API}/api/auth/config`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`Auth config failed (${res.status})`);
+    const data = await res.json();
+    LOGIN_GATE_ENABLED = data?.auth_required !== false;
+  } catch (e) {
+    LOGIN_GATE_ENABLED = true;
+    console.warn("Unable to load auth config; sign-in remains required.", e);
+  }
 }
 
 /** Opens a PDF (or other binary) in a new tab using the same auth headers as API calls. */
@@ -10160,11 +10172,11 @@ async function loadLegalDepartments() {
   const deps = Array.isArray(data.departments) ? data.departments : [];
 
   if (depEl) {
-    depEl.innerHTML = deps.map((d) => `<option value="${d}">${d}</option>`).join("");
+    depEl.innerHTML = deps.map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join("");
   }
   if (filterEl) {
     const options = [`<option value="">All departments</option>`]
-      .concat(deps.map((d) => `<option value="${d}">${d}</option>`));
+      .concat(deps.map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`));
     filterEl.innerHTML = options.join("");
   }
 }
@@ -13160,7 +13172,7 @@ async function loadLubeStockOnHand() {
     setText("mlAvailablePart", "-");
     updateLubeQtyWarning();
     const msg = String(e.message || e);
-    if (list) list.innerHTML = `<div class="item"><small>Lube stock load failed: ${msg}</small></div>`;
+    if (list) list.innerHTML = `<div class="item"><small>Lube stock load failed: ${escapeHtml(msg)}</small></div>`;
     setStatus("Lube stock load failed: " + msg);
   }
 }
@@ -13247,15 +13259,15 @@ async function loadLubeReorderAlerts() {
         const pill = low ? "<span class='pill red'>REORDER</span>" : "<span class='pill orange'>NEAR MIN</span>";
         list.appendChild(
           item(
-            `<b>${r.part_code}</b> ${pill} — On hand ${r.on_hand.toFixed(1)} | Min ${r.min_stock.toFixed(1)}` +
-              `<br><small>${r.part_name || ""}</small>`
+            `<b>${escapeHtml(r.part_code)}</b> ${pill} — On hand ${r.on_hand.toFixed(1)} | Min ${r.min_stock.toFixed(1)}` +
+              `<br><small>${escapeHtml(r.part_name || "")}</small>`
           )
         );
       });
       if (!flagged.length) list.appendChild(item("<small>No lube items near/below minimum.</small>"));
     }
   } catch (e) {
-    if (list) list.innerHTML = `<div class="item"><small>${String(e.message || e)}</small></div>`;
+    if (list) list.innerHTML = `<div class="item"><small>${escapeHtml(String(e.message || e))}</small></div>`;
   }
 }
 
@@ -17043,6 +17055,7 @@ async function unarchiveSelectedAsset() {
 
 async function init() {
   await disableLegacyServiceWorkers();
+  await loadAuthConfig();
   await tryInitialSession();
   initSidebar();
   initTabs();

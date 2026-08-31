@@ -255,6 +255,7 @@
   }
 
   async function boot() {
+    await A.loadConfig();
     if (!A.LOGIN_GATE_ENABLED) {
       if (!A.getSessionUser()) A.setSessionContext("admin", "admin", "main");
       showLogin(false);

@@ -1,10 +1,7 @@
 // IRONLOG/api/auth/hook.js — optional Bearer session + IRONLOG_AUTH_REQUIRED
 import { db } from "../db/client.js";
-
-export function isAuthRequired() {
-  const v = process.env.IRONLOG_AUTH_REQUIRED;
-  return v === "1" || String(v).toLowerCase() === "true";
-}
+export { isAuthRequired } from "./config.js";
+import { isAuthRequired } from "./config.js";
 
 function resolveSession(token) {
   try {
