@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=9" />
+  <link rel="stylesheet" href="./styles.css?v=10" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -160,21 +160,28 @@
 
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-content">
+      <div class="sidebar-profile" aria-label="Signed-in user">
+        <div class="sidebar-profile-avatar" id="sidebarUserInitial" aria-hidden="true">A</div>
+        <div class="sidebar-profile-copy">
+          <strong id="sidebarUserName">admin</strong>
+          <span id="sidebarRoleName">Admin</span>
+        </div>
+      </div>
       <div class="nav-section">
-        <div class="nav-section-title">Operations</div>
+        <div class="nav-section-title">Daily Work</div>
         <a href="#" class="nav-item" data-tab="dash">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
           <span>Dashboard</span>
         </a>
         <a href="#" class="nav-item" data-tab="daily">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
-          <span>Daily Input</span>
+          <span>Daily Log</span>
         </a>
         <a href="maintenance.html" class="nav-item" data-nav="maintenance">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
           <span>Maintenance</span>
         </a>
-        <a href="breakdown-ops.html" class="nav-item">
+        <a href="breakdown-ops.html" class="nav-item" data-nav="maintenance">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
           <span>Breakdown Ops</span>
         </a>
@@ -189,7 +196,7 @@
       </div>
 
       <div class="nav-section">
-        <div class="nav-section-title">Assets & Equipment</div>
+        <div class="nav-section-title">Fleet & Workshop</div>
         <a href="#" class="nav-item" data-tab="assets">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
           <span>Assets</span>
@@ -204,31 +211,31 @@
         </a>
         <a href="#" class="nav-item" data-tab="workshop">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
-          <span>Workshop Library</span>
+          <span>Workshop Help</span>
         </a>
         <a href="#" class="nav-item" data-tab="fuel">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 22h18"></path><path d="M5 22V9a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v13"></path><path d="M11 9V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v3"></path><path d="M17 13h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2"></path></svg>
-          <span>Fuel</span>
+          <span>Fuel Log</span>
         </a>
         <a href="#" class="nav-item" data-tab="lube">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 2v8L8 12l-2-2V2"></path><path d="M14 2v8l2 2 2-2V2"></path><rect x="7" y="12" width="10" height="10"></rect></svg>
-          <span>Lube</span>
+          <span>Lubricants</span>
         </a>
         <a href="#" class="nav-item" data-tab="vehicle">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-          <span>Checklists</span>
+          <span>Inspections</span>
         </a>
       </div>
 
       <div class="nav-section">
-        <div class="nav-section-title">Inventory</div>
+        <div class="nav-section-title">Stores & Parts</div>
         <a href="#" class="nav-item" data-tab="stock">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-          <span>Stores</span>
+          <span>Stock Control</span>
         </a>
         <a href="#" class="nav-item" data-tab="parts-tracking">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 9.4l-9-5.19"></path><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-          <span>Parts Tracking</span>
+          <span>Parts Orders</span>
         </a>
         <a href="#" class="nav-item" data-tab="procurement">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
@@ -253,10 +260,10 @@
       </div>
 
       <div class="nav-section">
-        <div class="nav-section-title">Intelligence</div>
+        <div class="nav-section-title">Assistance</div>
         <a href="#" class="nav-item" data-tab="ironmind">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.5-.8 2.8-2 3.5V11h2a3 3 0 0 1 3 3v1H5v-1a3 3 0 0 1 3-3h2V9.5A4 4 0 0 1 12 2z"></path><path d="M9 14l2 2 4-4"></path></svg>
-          <span>IronMind AI</span>
+          <span>Ask IronMind</span>
         </a>
         <a href="#" class="nav-item" data-tab="docs">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
@@ -265,10 +272,10 @@
       </div>
 
       <div class="nav-section">
-        <div class="nav-section-title">System</div>
+        <div class="nav-section-title">Reports & Administration</div>
         <a href="#" class="nav-item" data-tab="reports">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
-          <span>Reports</span>
+          <span>Reports & Exports</span>
         </a>
         <a href="#" class="nav-item" data-tab="finance">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
@@ -323,7 +330,7 @@
         </div>
         <a href="#" class="nav-item" data-tab="admin" id="navAdmin">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-          <span>User Admin</span>
+          <span>Users & Access</span>
         </a>
       </div>
     </div>
@@ -7633,6 +7640,6 @@
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=1"></script>
-  <script src="./app.js?v=62"></script>
+  <script src="./app.js?v=63"></script>
 </body>
 </html>

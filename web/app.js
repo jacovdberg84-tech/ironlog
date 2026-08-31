@@ -168,6 +168,30 @@ function updateSidebarActiveState(activeTab) {
   if (userDisplay) userDisplay.textContent = getSessionUser();
   const siteDisplay = qs("sessionSiteDisplay");
   if (siteDisplay) siteDisplay.textContent = getSessionSite();
+  updateSidebarProfile();
+}
+
+function roleDisplayName(role) {
+  const labels = {
+    admin: "Admin",
+    plant_manager: "Plant Manager",
+    workshop_admin: "Workshop Admin",
+    storeman: "Stores",
+    stores: "Stores",
+    plant_clerk: "Plant Clerk",
+  };
+  const key = String(role || "").trim().toLowerCase();
+  return labels[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) || "User";
+}
+
+function updateSidebarProfile() {
+  const user = getSessionUser() || "User";
+  const nameEl = qs("sidebarUserName");
+  const roleEl = qs("sidebarRoleName");
+  const initialEl = qs("sidebarUserInitial");
+  if (nameEl) nameEl.textContent = user;
+  if (roleEl) roleEl.textContent = getSessionRoles().map(roleDisplayName).join(" · ");
+  if (initialEl) initialEl.textContent = user.charAt(0).toUpperCase() || "U";
 }
 
 function isMaintenanceChildTab(tabKey) {
@@ -836,9 +860,9 @@ function getRoleAllowedTabs(role) {
   if (r === "workshop_admin") return ["dash", "daily", "assets", "telematics", "workshop", "maintenance", "stock", "parts-tracking", "reports", "Breakdowns", "approvals", "procurement", "ironmind", "docs", "vehicle", "tasks"];
   if (r === "operator") return ["dash", "daily", "workshop", "fuel", "lube", "legal", "operations", "ironmind", "docs", "vehicle", "tasks", "telematics", "cartrack"];
   if (r === "artisan") return ["workshop", "maintenance", "Breakdowns", "vehicle", "tasks"];
-  if (r === "stores" || r === "storeman") return ["dash", "maintenance", "stock", "parts-tracking", "workshop", "uploads", "reports", "finance", "legal", "procurement", "operations", "dispatch", "quality", "ironmind", "docs", "vehicle", "tasks", "telematics", "cartrack"];
+  if (r === "stores" || r === "storeman") return ["dash", "stock", "parts-tracking", "workshop", "reports", "procurement", "tasks"];
   if (r === "procurement") return ["dash", "stock", "parts-tracking", "workshop", "reports", "finance", "procurement", "operations", "quality", "docs", "tasks"];
-  if (r === "plant_manager") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "parts-tracking", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
+  if (r === "plant_manager") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "parts-tracking", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "ironmind", "docs", "vehicle", "tasks"];
   if (r === "site_manager") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "parts-tracking", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
   if (r === "executive") return ["dash", "workshop", "reports", "finance", "operations", "quality", "audit", "docs", "tasks"];
   if (r === "supervisor") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "parts-tracking", "legal", "uploads", "reports", "finance", "enterprise", "exec", "Breakdowns", "approvals", "procurement", "operations", "dispatch", "quality", "audit", "ironmind", "docs", "vehicle", "tasks"];
@@ -924,7 +948,7 @@ function applyRoleVisibility() {
   if (tabSelect) {
     Array.from(tabSelect.options).forEach((opt) => {
       if (opt.value === "admin") {
-        opt.hidden = !roles.some((r) => ["admin", "supervisor"].includes(r));
+        opt.hidden = !roles.includes("admin");
         return;
       }
       opt.hidden = !isAllowedDashboardTab(opt.value, allowed);
@@ -939,7 +963,7 @@ function applyRoleVisibility() {
       const navKey = item.dataset.nav || tab;
       if (!navKey) return;
       if (tab === "admin") {
-        item.style.display = roles.some((r) => ["admin", "supervisor"].includes(r)) ? "" : "none";
+        item.style.display = roles.includes("admin") ? "" : "none";
         return;
       }
       if (navKey === "maintenance") {
@@ -958,7 +982,7 @@ function applyRoleVisibility() {
   }
 
   const reopenBtn = qs("reopenOperationsDay");
-  if (reopenBtn) reopenBtn.style.display = roles.some((r) => ["admin", "supervisor"].includes(r)) ? "" : "none";
+  if (reopenBtn) reopenBtn.style.display = roles.some((r) => ["admin", "plant_manager", "workshop_admin"].includes(r)) ? "" : "none";
 
   const activePanel = document.querySelector(".panel.show");
   const activeKey = String(activePanel?.id || "").replace(/^tab-/, "");
