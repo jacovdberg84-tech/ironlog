@@ -116,12 +116,57 @@ function initSectionCollapseToggles() {
       btn.textContent = hidden ? "Show" : "Hide";
       btn.setAttribute("aria-expanded", hidden ? "false" : "true");
     }
-    applyHidden(localStorage.getItem(key) === "1");
+    const saved = localStorage.getItem(key);
+    const defaultCollapsed = btn.getAttribute("data-default-collapsed") === "1";
+    applyHidden(saved == null ? defaultCollapsed : saved === "1");
     btn.addEventListener("click", () => {
       const willHide = body.style.display !== "none";
       applyHidden(willHide);
       localStorage.setItem(key, willHide ? "1" : "0");
     });
+  });
+}
+
+let openBreakdownRows = [];
+let showAllOpenBreakdowns = false;
+
+function renderBreakdownOpsOpen(rows) {
+  const list = qs("boOpenList");
+  if (!list) return;
+  const search = String(qs("boOpenSearch")?.value || "").trim().toLowerCase();
+  const filtered = (Array.isArray(rows) ? rows : []).filter((r) => {
+    if (!search) return true;
+    return `${r.id || ""} ${r.asset_code || ""} ${r.description || ""} ${r.primary_work_order_id || ""}`
+      .toLowerCase()
+      .includes(search);
+  });
+  const visible = showAllOpenBreakdowns || search ? filtered : filtered.slice(0, 8);
+  setText("boOpenSummary", `${visible.length < filtered.length ? `Showing ${visible.length} of ` : ""}${filtered.length} active incident${filtered.length === 1 ? "" : "s"}${search ? ` matching “${search}”` : ""}.`);
+  const moreBtn = qs("boOpenMore");
+  if (moreBtn) {
+    moreBtn.style.display = filtered.length > 8 && !search ? "" : "none";
+    moreBtn.textContent = showAllOpenBreakdowns ? "Show fewer incidents" : `Show all ${filtered.length} incidents`;
+  }
+  list.innerHTML = "";
+  if (!filtered.length) {
+    list.appendChild(item("<small>No active incidents match this view.</small>"));
+    return;
+  }
+  visible.forEach((r) => {
+    const bid = Number(r.id || 0);
+    const wo = r.primary_work_order_id != null ? Number(r.primary_work_order_id) : "";
+    const fullDescription = String(r.description || "").trim();
+    const description = fullDescription.length > 180 ? `${fullDescription.slice(0, 180)}…` : fullDescription;
+    const code = escapeHtml(r.asset_code || "");
+    const woSt = escapeHtml(String(r.primary_work_order_status || ""));
+    const row = item(
+      `<div class="bo-incident-head"><div><span class="wo-number">INCIDENT #${bid}</span><h3>${code || "Unknown asset"}</h3></div><span class="status-overdue">OPEN</span></div>` +
+      `<p class="bo-incident-description" title="${escapeHtml(fullDescription)}">${escapeHtml(description || "No description recorded.")}</p>` +
+      `<div class="bo-incident-meta"><span><strong>Started</strong> ${escapeHtml(String(r.start_at || r.breakdown_date || "—"))}</span><span><strong>Work order</strong> ${wo ? `#${wo} · ${woSt.replace(/_/g, " ")}` : "Not linked"}</span></div>` +
+      `<div class="bo-incident-actions">${wo ? `<button type="button" class="bo-open-wo btn-primary" data-wo="${wo}">Open work order</button>` : ""}<button type="button" class="bo-close-bdn" data-id="${bid}">Close incident</button></div>`
+    );
+    row.classList.add("bo-incident-card");
+    list.appendChild(row);
   });
 }
 
@@ -166,28 +211,8 @@ async function loadBreakdownOpsOpen() {
   setSkeleton("boOpenList", 1);
   try {
     const data = await fetchJson(`${API}/breakdowns/open-all${q}`);
-    const rows = Array.isArray(data.rows) ? data.rows : [];
-    list.innerHTML = "";
-    if (!rows.length) {
-      list.appendChild(item("<small>No open incidents for this filter.</small>"));
-      return;
-    }
-    rows.forEach((r) => {
-      const bid = Number(r.id || 0);
-      const wo = r.primary_work_order_id != null ? Number(r.primary_work_order_id) : "";
-      const desc = escapeHtml(r.description || "");
-      const code = escapeHtml(r.asset_code || "");
-      const woSt = escapeHtml(String(r.primary_work_order_status || ""));
-      list.appendChild(
-        item(
-          `<div><b>#${bid}</b> <span class="pill blue">${code}</span> <span class="pill orange">OPEN</span></div>` +
-            `<small>${desc}</small><br/>` +
-            `<small>WO: ${wo ? `#${wo} (${woSt})` : "—"} | Start: ${escapeHtml(String(r.start_at || r.breakdown_date || "—"))}</small><br/>` +
-            `<button type="button" class="bo-copy-wo" data-wo="${wo}">Copy WO #</button> ` +
-            `<button type="button" class="bo-close-bdn" data-id="${bid}">Close incident</button>`
-        )
-      );
-    });
+    openBreakdownRows = Array.isArray(data.rows) ? data.rows : [];
+    renderBreakdownOpsOpen(openBreakdownRows);
   } catch (e) {
     list.innerHTML = "";
     list.appendChild(item(`<span class="message-error">${escapeHtml(e.message || String(e))}</span>`));
@@ -208,12 +233,14 @@ async function loadBreakdownOpsRecent() {
     }
     slice.forEach((r) => {
       const st = String(r.status || "").toUpperCase();
-      list.appendChild(
-        item(
-          `<b>#${r.id}</b> ${escapeHtml(r.asset_code || "")} <span class="pill ${st === "OPEN" ? "orange" : "blue"}">${escapeHtml(r.status || "")}</span> ` +
-            `${escapeHtml(r.breakdown_date || "")}<br/><small>${escapeHtml(r.description || "")}</small>`
-        )
+      const full = String(r.description || "");
+      const short = full.length > 160 ? `${full.slice(0, 160)}…` : full;
+      const row = item(
+        `<div class="bo-recent-head"><strong>#${r.id} · ${escapeHtml(r.asset_code || "")}</strong><span class="pill ${st === "OPEN" ? "orange" : "blue"}">${escapeHtml(r.status || "")}</span></div>` +
+        `<div class="muted small">${escapeHtml(r.breakdown_date || "")}</div><p>${escapeHtml(short)}</p>`
       );
+      row.classList.add("bo-recent-row");
+      list.appendChild(row);
     });
   } catch (e) {
     list.innerHTML = "";
@@ -809,6 +836,10 @@ async function createBreakdown() {
     parts_received_date: String(qs("bPartsReceivedDate")?.value || "").trim() || null,
     ets_repair_date: String(qs("bEtsRepairDate")?.value || "").trim() || null,
   };
+  if (!payload.asset_code || !payload.description) {
+    setText("breakdownResult", "Asset and problem description are required.");
+    return;
+  }
   setStatus("Creating breakdown...");
   try {
     const res = await fetchJson(`${API}/breakdowns`, {
@@ -816,8 +847,14 @@ async function createBreakdown() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    setText("breakdownResult", JSON.stringify(res, null, 2));
-    setStatus("Breakdown created.");
+    const incidentId = Number(res?.breakdown_id || res?.id || 0);
+    const workOrderId = Number(res?.primary_work_order_id || res?.work_order_id || 0);
+    setText("breakdownResult", `Incident${incidentId ? ` #${incidentId}` : ""} created${workOrderId ? ` with work order #${workOrderId}` : ""}.`);
+    ["bAsset", "bDesc", "bPartsOrderedDate", "bPartsReceivedDate", "bEtsRepairDate"].forEach((id) => { if (qs(id)) qs(id).value = ""; });
+    if (qs("bDown")) qs("bDown").value = "0";
+    if (qs("bPartsStatus")) qs("bPartsStatus").value = "";
+    if (qs("bCrit")) qs("bCrit").checked = false;
+    setStatus("Breakdown and linked work order created.");
     refreshBreakdownOpsPanels();
   } catch (e) {
     setText("breakdownResult", String(e.message || e));
@@ -949,15 +986,20 @@ function setDefaultDates() {
 
 function bindHandlers() {
   qs("boRefreshOpen")?.addEventListener("click", () => loadBreakdownOpsOpen().catch((e) => setStatus(e.message || e)));
+  qs("boOpenSearch")?.addEventListener("input", () => renderBreakdownOpsOpen(openBreakdownRows));
+  qs("boOpenMore")?.addEventListener("click", () => {
+    showAllOpenBreakdowns = !showAllOpenBreakdowns;
+    renderBreakdownOpsOpen(openBreakdownRows);
+  });
+  qs("boOpenDate")?.addEventListener("change", () => loadBreakdownOpsOpen().catch((e) => setStatus(e.message || e)));
   qs("boRefreshRecent")?.addEventListener("click", () => loadBreakdownOpsRecent().catch((e) => setStatus(e.message || e)));
   qs("boEnsureOpen")?.addEventListener("click", () => ensureOpenBreakdownOps().catch((e) => setStatus(e.message || e)));
   qs("boPullLiveHours")?.addEventListener("click", () => pullBreakdownOpsLiveHours().catch((e) => setStatus(e.message || e)));
   qs("boOpenList")?.addEventListener("click", (ev) => {
-    const w = ev.target?.closest?.(".bo-copy-wo");
+    const w = ev.target?.closest?.(".bo-open-wo");
     if (w) {
       const wo = w.getAttribute("data-wo");
-      if (wo && qs("iWo")) qs("iWo").value = String(wo);
-      setStatus(`Copied WO #${wo} for parts issue.`);
+      if (wo) location.href = `workorders.html?wo=${encodeURIComponent(wo)}`;
       return;
     }
     const c = ev.target?.closest?.(".bo-close-bdn");

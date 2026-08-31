@@ -5636,6 +5636,63 @@ body.sidebar-collapsed .main-content {
   .wo-detail-facts > div { grid-template-columns: 1fr; gap: 3px; }
 }
 
+/* Breakdowns — focused incident queue */
+.bo-page-subtitle { margin: 4px 0 0; }
+.bo-page-status { margin: 0 0 10px; min-height: 18px; font-size: 13px; }
+.bo-layout { display: flex; flex-direction: column; gap: 12px; }
+.bo-layout > .card { min-height: 0; margin: 0; }
+.bo-create-card { order: 1; }
+.bo-open-card { order: 2; }
+.bo-recent-card { order: 3; }
+.bo-offsite-card { order: 4; }
+.bo-slip-card { order: 5; }
+.bo-short-card { order: 6; }
+.bo-queue-tools {
+  display: grid; grid-template-columns: minmax(260px, 1fr) auto auto;
+  align-items: end; gap: 10px; margin-bottom: 8px;
+}
+.bo-queue-tools input { width: 100%; min-height: 40px; }
+.bo-incident-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px; margin-top: 10px;
+}
+.bo-incident-card { display: grid; gap: 10px; padding: 14px; border-radius: 11px; }
+.bo-incident-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.bo-incident-head h3 { margin: 3px 0 0; font-size: 17px; }
+.bo-incident-description {
+  margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.bo-incident-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 12px; color: var(--muted); font-size: 12px; }
+.bo-incident-meta strong { color: var(--text); margin-right: 4px; }
+.bo-incident-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.bo-open-more { justify-self: center; margin: 12px auto 0; }
+.bo-recent-row { display: grid; gap: 5px; }
+.bo-recent-row p { margin: 0; color: var(--muted); font-size: 13px; }
+.bo-recent-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.bo-create-grid {
+  display: grid; grid-template-columns: minmax(170px, .55fr) minmax(155px, .45fr) minmax(260px, 1fr) auto;
+  gap: 10px; align-items: end;
+}
+.bo-create-grid label:not(.chk) { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
+.bo-create-grid input { width: 100%; min-height: 40px; }
+.bo-description-field { grid-column: span 2; }
+.bo-critical-field { align-self: center; }
+.bo-create-advanced { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.bo-create-advanced > summary { cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 700; }
+.bo-layout .section-head-row h4 { margin: 0; }
+
+@media (max-width: 900px) {
+  .bo-incident-grid { grid-template-columns: 1fr; }
+  .bo-create-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bo-description-field { grid-column: span 2; }
+}
+@media (max-width: 600px) {
+  .bo-queue-tools, .bo-create-grid { grid-template-columns: 1fr; }
+  .bo-description-field { grid-column: auto; }
+  .bo-incident-meta { grid-template-columns: 1fr; }
+}
+
 .down-lock-notice {
   margin-top: 8px;
   padding: 8px 12px;
