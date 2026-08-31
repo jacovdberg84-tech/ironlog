@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isAuthRequired } from "../auth/config.js";
+import { isAuthRequired, isPublicAuthRequest } from "../auth/config.js";
 
 test("requires authentication for the default network host", () => {
   assert.equal(isAuthRequired({}), true);
@@ -19,4 +19,10 @@ test("honors an explicit authentication setting", () => {
   assert.equal(isAuthRequired({ IRONLOG_AUTH_REQUIRED: "1", HOST: "localhost" }), true);
   assert.equal(isAuthRequired({ IRONLOG_AUTH_REQUIRED: "false", HOST: "0.0.0.0" }), false);
   assert.equal(isAuthRequired({ IRONLOG_AUTH_REQUIRED: "0", HOST: "0.0.0.0" }), false);
+});
+
+test("allows first-time password setup without an existing session", () => {
+  assert.equal(isPublicAuthRequest("/api/auth/setup-password", "POST"), true);
+  assert.equal(isPublicAuthRequest("/api/auth/setup-password", "GET"), false);
+  assert.equal(isPublicAuthRequest("/api/auth/users", "POST"), false);
 });

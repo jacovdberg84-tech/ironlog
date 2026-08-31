@@ -13,6 +13,8 @@ export const VALID_ROLES = [
   "quality_manager",
   "site_manager",
   "plant_manager",
+  "workshop_admin",
+  "plant_clerk",
   "supervisor",
   "artisan",
   "operator",
@@ -72,6 +74,8 @@ const ROLE_PERMISSION_MAP = {
   quality_manager: ["procurement.requisition.approve", "reports.export.read", "maintenance.read"],
   site_manager: ["procurement.requisition.approve", "workorders.close.approve", "workorders.reopen", "reports.export.read", "reports.executive.read", "reports.maintenance_master.manage", "maintenance.read"],
   plant_manager: ["procurement.requisition.approve", "workorders.close.approve", "workorders.reopen", "reports.export.read", "reports.executive.read", "reports.maintenance_master.manage", "maintenance.read"],
+  workshop_admin: ["procurement.requisition.create", "procurement.requisition.request_approval", "workorders.close.request", "workorders.delete.request", "workorders.reopen", "workorders.close.approve", "reports.export.read", "reports.maintenance_master.manage", "maintenance.read"],
+  plant_clerk: ["procurement.requisition.create", "workorders.close.request", "reports.export.read", "maintenance.read"],
   supervisor: ["procurement.requisition.approve", "workorders.close.request", "workorders.delete.request", "workorders.reopen", "workorders.close.approve", "reports.export.read", "reports.executive.read", "reports.maintenance_master.manage", "maintenance.read"],
   artisan: ["workorders.close.request", "reports.export.read", "maintenance.read"],
   operator: ["reports.export.read", "maintenance.read"],
@@ -322,8 +326,8 @@ export default async function authRoutes(app) {
 
   function requireAdmin(req, reply) {
     const roles = getRequestRoles(req);
-    if (!roles.includes("admin") && !roles.includes("supervisor")) {
-      reply.code(403).send({ error: "admin or supervisor role required" });
+    if (!roles.includes("admin")) {
+      reply.code(403).send({ error: "administrator role required" });
       return false;
     }
     return true;

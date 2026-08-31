@@ -1,7 +1,7 @@
 // IRONLOG/api/auth/hook.js — optional Bearer session + IRONLOG_AUTH_REQUIRED
 import { db } from "../db/client.js";
 export { isAuthRequired } from "./config.js";
-import { isAuthRequired } from "./config.js";
+import { isAuthRequired, isPublicAuthRequest } from "./config.js";
 
 function resolveSession(token) {
   try {
@@ -67,12 +67,53 @@ const VALID_ROLES = [
   "quality_manager",
   "site_manager",
   "plant_manager",
+  "workshop_admin",
+  "plant_clerk",
   "supervisor",
   "artisan",
   "operator",
   // Legacy role retained for backward compatibility.
   "stores",
 ];
+
+const WORKSHOP_ADMIN_PREFIXES = [
+  "/api/assets",
+  "/api/maintenance",
+  "/api/workorders",
+  "/api/breakdowns",
+  "/api/breakdown-ops",
+  "/api/alerts",
+  "/api/approvals",
+  "/api/stock",
+  "/api/procurement",
+  "/api/reports",
+  "/api/telematics",
+  "/api/safety",
+];
+
+function expandRouteRoles(roles, url = "") {
+  const out = new Set(roles);
+  if (out.has("workshop_admin") && WORKSHOP_ADMIN_PREFIXES.some((prefix) => url.startsWith(prefix))) {
+    out.add("supervisor");
+  }
+  if (out.has("plant_clerk")) out.add("operator");
+  if (out.has("storeman")) out.add("stores");
+  if (out.has("stores")) out.add("storeman");
+  return [...out];
+}
+
+function applyLegacyRouteRoles(req) {
+  const roles = [
+    ...String(req.headers["x-user-roles"] || "").split(","),
+    ...String(req.headers["x-user-role"] || "").split(","),
+  ]
+    .map((role) => role.trim().toLowerCase())
+    .filter((role) => VALID_ROLES.includes(role));
+  if (!roles.length) return;
+  const routeRoles = expandRouteRoles([...new Set(roles)], req.url.split("?")[0]);
+  req.headers["x-user-role"] = routeRoles.find((role) => role !== "workshop_admin" && role !== "plant_clerk") || routeRoles[0];
+  req.headers["x-user-roles"] = routeRoles.join(",");
+}
 
 function parseRoles(raw, fallbackRole = "operator") {
   let arr = [];
@@ -108,11 +149,7 @@ export async function ironlogAuthHook(req, reply) {
     return;
   }
 
-  if (url === "/api/auth/login" && req.method === "POST") return;
-  if (url === "/api/auth/pin/login" && req.method === "POST") return;
-  if (url === "/api/auth/pin/roster" && req.method === "GET") return;
-  if (url === "/api/auth/config" && req.method === "GET") return;
-  if (url === "/api/auth/tabs" && req.method === "GET") return;
+  if (isPublicAuthRequest(url, req.method)) return;
   if (url === "/api/notifications/config" && req.method === "GET") return;
 
   const auth = String(req.headers.authorization || "");
@@ -134,9 +171,10 @@ export async function ironlogAuthHook(req, reply) {
         }
         req.headers["x-site-code"] = effective;
       }
+      const routeRoles = expandRouteRoles(roles, url);
       req.headers["x-user-name"] = row.username;
-      req.headers["x-user-role"] = roles[0];
-      req.headers["x-user-roles"] = roles.join(",");
+      req.headers["x-user-role"] = routeRoles.find((r) => r !== "workshop_admin" && r !== "plant_clerk") || roles[0];
+      req.headers["x-user-roles"] = routeRoles.join(",");
       req.headers["x-user-department"] = String(row.department || "").trim().toLowerCase();
       const perms = getPermissionsForRoles(roles);
       if (perms.length) req.headers["x-user-permissions"] = perms.join(",");
@@ -145,10 +183,12 @@ export async function ironlogAuthHook(req, reply) {
     if (isAuthRequired()) {
       return reply.code(401).send({ error: "invalid or expired session" });
     }
+    applyLegacyRouteRoles(req);
     return;
   }
 
   if (isAuthRequired()) {
     return reply.code(401).send({ error: "login required" });
   }
+  applyLegacyRouteRoles(req);
 }

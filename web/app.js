@@ -832,6 +832,8 @@ async function openAuthedPdf(url) {
 
 function getRoleAllowedTabs(role) {
   const r = String(role || "").toLowerCase();
+  if (r === "plant_clerk") return ["dash", "daily", "assets", "fuel", "lube", "vehicle", "reports", "docs", "tasks"];
+  if (r === "workshop_admin") return ["dash", "daily", "assets", "telematics", "workshop", "maintenance", "stock", "parts-tracking", "reports", "Breakdowns", "approvals", "procurement", "ironmind", "docs", "vehicle", "tasks"];
   if (r === "operator") return ["dash", "daily", "workshop", "fuel", "lube", "legal", "operations", "ironmind", "docs", "vehicle", "tasks", "telematics", "cartrack"];
   if (r === "artisan") return ["workshop", "maintenance", "Breakdowns", "vehicle", "tasks"];
   if (r === "stores" || r === "storeman") return ["dash", "maintenance", "stock", "parts-tracking", "workshop", "uploads", "reports", "finance", "legal", "procurement", "operations", "dispatch", "quality", "ironmind", "docs", "vehicle", "tasks", "telematics", "cartrack"];
@@ -908,7 +910,7 @@ function getEffectiveAllowedTabs() {
     }
   }
   // "admin" is not an assignable section in the multiselect; always allow the User admin tab for these roles
-  if (roles.some((r) => ["admin", "supervisor"].includes(r)) && !list.includes("admin")) list = [...list, "admin"];
+  if (roles.includes("admin") && !list.includes("admin")) list = [...list, "admin"];
   return list;
 }
 
@@ -1649,19 +1651,11 @@ async function logoutAuth() {
 let __adminTabKeysLoaded = false;
 
 const ADMIN_ROLE_OPTIONS = [
-  { value: "admin", label: "admin — system administrator" },
-  { value: "supervisor", label: "supervisor — workshop supervisor" },
-  { value: "artisan", label: "artisan — technician (workshop terminal)" },
-  { value: "operator", label: "operator — field operator" },
-  { value: "storeman", label: "storeman — stores / stock" },
-  { value: "stores", label: "stores — stores (legacy)" },
-  { value: "procurement", label: "procurement — purchasing" },
-  { value: "finance", label: "finance — finance & costing" },
-  { value: "executive", label: "executive — executive reports" },
-  { value: "site_manager", label: "site_manager — site manager" },
-  { value: "plant_manager", label: "plant_manager — plant manager" },
-  { value: "quality_manager", label: "quality_manager — quality" },
-  { value: "hr_manager", label: "hr_manager — HR" },
+  { value: "admin", label: "Admin — unrestricted system access" },
+  { value: "plant_manager", label: "Plant Manager — fleet, operations and reports" },
+  { value: "workshop_admin", label: "Workshop Admin — maintenance and workshop control" },
+  { value: "storeman", label: "Stores — stock, parts and receiving" },
+  { value: "plant_clerk", label: "Plant Clerk — daily operational data capture" },
 ];
 
 function populateAdminRolesSelect(rolesSel, selectedValues = null) {
@@ -1681,7 +1675,7 @@ function populateAdminRolesSelect(rolesSel, selectedValues = null) {
     rolesSel.appendChild(opt);
   });
   if (!selected.size) {
-    const op = rolesSel.querySelector('option[value="operator"]');
+    const op = rolesSel.querySelector('option[value="plant_clerk"]');
     if (op) op.selected = true;
   }
 }
