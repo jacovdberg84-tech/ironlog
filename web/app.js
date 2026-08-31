@@ -15008,6 +15008,7 @@ async function loadDispatchTrips() {
 
 let dailyRows = [];
 let dailyShowDownOnly = false;
+let dailyScheduledOverride = null;
 let dailyPrestartRows = [];
 let dailyPrestartMeta = {
   deduction_hours_per_check: 0.5,
@@ -15025,6 +15026,26 @@ function toNum(v) {
   if (s === "") return null;
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
+}
+function getDayScheduledHours() {
+  const value = toNum(qs("scheduled")?.value);
+  return value != null && value > 0 && value <= 24 ? value : 10;
+}
+
+function applyDayScheduledHours(value = getDayScheduledHours()) {
+  const scheduled = Number(value);
+  if (!Number.isFinite(scheduled) || scheduled <= 0 || scheduled > 24) return false;
+  dailyScheduledOverride = scheduled;
+  for (const row of dailyRows) {
+    if (row.is_master_standby) continue;
+    if (row.is_used || row.is_down) row.scheduled_hours = scheduled;
+  }
+  if (dailyRows.length) {
+    validateDailyRows();
+    renderDailyTable();
+    renderDailyPreview();
+  }
+  return true;
 }
 function calcRun(opening, closing) {
   if (opening == null || closing == null) return 0;
@@ -15771,7 +15792,7 @@ async function loadDailyInput() {
       }
     }
 
-    if (row.scheduled_hours == null) row.scheduled_hours = row.is_master_standby ? 0 : 10;
+    if (row.scheduled_hours == null) row.scheduled_hours = row.is_master_standby ? 0 : getDayScheduledHours();
     if (row.is_master_standby) row.is_used = false;
     row.hours_run = calcRun(row.opening_hours, row.closing_hours);
 
@@ -15801,6 +15822,11 @@ async function loadDailyInput() {
 
     if (row.is_down && !String(row.breakdown_start_date || "").trim()) {
       row.breakdown_start_date = date;
+    }
+
+    if (dailyScheduledOverride != null && !row.is_master_standby && (row.is_used || row.is_down)) {
+      row.scheduled_hours = dailyScheduledOverride;
+      if (row.is_down && row.down_hours == null) row.down_hours = dailyScheduledOverride;
     }
 
     dailyRows.push(row);
@@ -18219,6 +18245,20 @@ async function init() {
   qs("saveDaily")?.addEventListener("click", () =>
     saveDailyInput().catch((e) => setStatus("Daily save error: " + e.message))
   );
+  qs("scheduled")?.addEventListener("input", () => {
+    const raw = toNum(qs("scheduled")?.value);
+    if (raw == null || raw <= 0 || raw > 24) return;
+    applyDayScheduledHours(raw);
+    setStatus(`Production hours updated to ${raw} in Daily Log.`);
+  });
+  qs("scheduled")?.addEventListener("change", () => {
+    const scheduled = getDayScheduledHours();
+    if (qs("scheduled")) qs("scheduled").value = String(scheduled);
+    applyDayScheduledHours(scheduled);
+    loadDashboard()
+      .then(() => setStatus(`Production hours set to ${scheduled} for the selected day.`))
+      .catch((e) => setStatus("Scheduled hours update error: " + e.message));
+  });
   qs("runShiftSelfCheck")?.addEventListener("click", () =>
     runShiftSelfCheck().catch((e) => setStatus("Self-check error: " + e.message))
   );
