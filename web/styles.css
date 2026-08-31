@@ -5586,16 +5586,54 @@ body.sidebar-collapsed .main-content {
 .wo-card-more { border-top: 1px solid var(--line); padding-top: 9px; }
 .wo-card-more-actions { display: flex; gap: 7px; flex-wrap: wrap; padding-top: 9px; }
 .wo-card-more-actions button { font-size: 12px; padding: 7px 9px; }
+.wo-detail-card { padding: 20px; }
+.wo-detail-placeholder-title { margin: 0 0 12px; }
+.wo-detail-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--line);
+}
+.wo-detail-head h2 { margin: 4px 0; font-size: 24px; }
+.wo-detail-head h2 span { color: var(--muted); font-size: 16px; font-weight: 500; }
+.wo-detail-summary { color: var(--muted); font-size: 13px; }
+.wo-detail-status { padding: 7px 10px; border-radius: 999px; background: color-mix(in srgb, currentColor 10%, transparent); }
+.wo-detail-workflow { display: grid; gap: 14px; padding: 16px 0; }
+.wo-detail-workflow .workflow-steps { margin: 0 !important; }
+.wo-detail-next-action {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 13px 14px; border-radius: 10px; background: color-mix(in srgb, #2563eb 7%, var(--card));
+}
+.wo-detail-next-action > div:first-child { display: grid; gap: 3px; }
+.wo-detail-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, .65fr); gap: 14px; }
+.wo-detail-section { padding: 15px; border: 1px solid var(--line); border-radius: 11px; }
+.wo-detail-section h3 { margin: 0 0 12px; font-size: 16px; }
+.wo-job-description { display: grid; gap: 5px; padding: 12px; background: color-mix(in srgb, var(--muted) 7%, var(--card)); border-radius: 9px; }
+.wo-job-description p { margin: 0; white-space: pre-wrap; color: var(--muted); }
+.wo-detail-facts { display: grid; gap: 0; margin: 0; }
+.wo-detail-facts > div { display: grid; grid-template-columns: 1fr 1.25fr; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.wo-detail-facts > div:last-child { border-bottom: 0; }
+.wo-detail-facts dt { color: var(--muted); }
+.wo-detail-facts dd { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
+.wo-detail-support { display: grid; gap: 9px; margin-top: 14px; }
+.wo-detail-support > details { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.wo-detail-support > details > summary { cursor: pointer; font-weight: 750; }
+.wo-detail-support > details > summary .pill { margin-left: 5px; font-size: 11px; }
+.wo-detail-support > details[open] > summary { margin-bottom: 11px; }
+.wo-detail-support .card { min-height: 0; box-shadow: none; }
+.wo-detail-support .item { margin-top: 0 !important; }
 
 @media (max-width: 850px) {
   .wo-overview-card { align-items: stretch; flex-direction: column; }
   .wo-primary-filters { grid-template-columns: 1fr; }
   .wo-advanced-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wo-detail-grid { grid-template-columns: 1fr; }
+  .wo-detail-next-action { align-items: stretch; flex-direction: column; }
 }
 @media (max-width: 540px) {
   .wo-advanced-grid, .wo-card-meta { grid-template-columns: 1fr; }
   .wo-card-head { flex-direction: column; }
   .wo-card-badges { justify-content: flex-start; }
+  .wo-detail-head { flex-direction: column; }
+  .wo-detail-facts > div { grid-template-columns: 1fr; gap: 3px; }
 }
 
 .down-lock-notice {

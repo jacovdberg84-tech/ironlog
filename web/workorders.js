@@ -583,63 +583,80 @@ function renderDetail(payload) {
     return `<div class="message-error">Work order detail not available.</div>`;
   }
 
+  const status = String(wo.status || "open").toLowerCase();
+  const technician = wo.assigned_artisan_name || "Unassigned";
+  const workflowActions = workflowActionButtons(wo);
+  const partsCount = nonLubeIssued.length;
+  const lubeCount = lubeIssued.length;
+
   return `
-    <div class="row" style="gap:20px; align-items:flex-start;">
-      <div style="min-width:280px; flex:1;">
-        <h4 style="margin:0 0 8px 0;">Core</h4>
-        <div class="item">
-          <div><strong>WO #:</strong> ${wo.id}</div>
-          <div><strong>Asset:</strong> ${wo.asset_code || "-"} - ${wo.asset_name || "-"}</div>
-          <div><strong>Source:</strong> ${sourceLabel(wo.source)}</div>
-          <div><strong>Reference:</strong> ${wo.reference_id ?? "-"}</div>
-          <div><strong>Status:</strong> ${String(wo.status || "").toUpperCase()}</div>
-          <div><strong>Assigned technician:</strong> ${wo.assigned_artisan_name || "Unassigned"}</div>
-          <div><strong>Assigned at:</strong> ${wo.assigned_at || "-"}</div>
-          <div><strong>Started:</strong> ${wo.started_at || "-"}</div>
-          <div><strong>Completed:</strong> ${wo.completed_at || "-"}</div>
-          <div><strong>Technician sign-off:</strong> ${wo.artisan_name || "-"}</div>
-          <div><strong>Supervisor sign-off:</strong> ${wo.supervisor_name || "-"}</div>
-          ${wo.job_description ? `<div style="margin-top:8px;"><strong>Job description / findings:</strong><pre style="white-space:pre-wrap; margin:4px 0 0 0; font-family:inherit;">${escapeHtml(wo.job_description)}</pre></div>` : ""}
-          ${renderRepairProgressPanel(wo)}
-          ${renderRepairCostsPanel(wo)}
-          <div><strong>Opened:</strong> ${wo.opened_at || "-"}</div>
-          <div><strong>Closed:</strong> ${wo.closed_at || "-"}</div>
-          ${workflowStepsHtml(wo)}
-          ${isSupervisorRole(getSessionRole()) ? `
-            <div class="row" style="gap:8px; flex-wrap:wrap; margin-top:10px;">
-              ${["open", "assigned"].includes(String(wo.status || "").toLowerCase()) ? `<button type="button" data-assign-id="${wo.id}">Assign technician</button>` : ""}
-              ${String(wo.status || "").toLowerCase() === "assigned" ? `<button type="button" data-set-status-id="${wo.id}" data-set-status="in_progress">Start job</button>` : ""}
-              ${String(wo.status || "").toLowerCase() === "in_progress" ? `<button type="button" data-complete-id="${wo.id}">Mark complete</button>` : ""}
-              ${String(wo.status || "").toLowerCase() === "completed" ? `<button type="button" data-approve-id="${wo.id}">Approve job</button>` : ""}
-              ${String(wo.status || "").toLowerCase() === "approved" ? `<button type="button" data-close-id="${wo.id}" data-close-source="${String(wo.source || "").toLowerCase()}">Close work order</button>` : ""}
-            </div>
-          ` : ""}
-          ${isArtisanRole(getSessionRole()) && isAssignedToMe(wo) ? `
-            <div class="row" style="gap:8px; flex-wrap:wrap; margin-top:10px;">
-              ${String(wo.status || "").toLowerCase() === "assigned" ? `<button type="button" data-set-status-id="${wo.id}" data-set-status="in_progress">Start job</button>` : ""}
-              ${String(wo.status || "").toLowerCase() === "in_progress" ? `<button type="button" data-complete-id="${wo.id}">Mark complete</button>` : ""}
-            </div>
-          ` : ""}
+    <div class="wo-detail-head">
+      <div>
+        <span class="wo-number">WORK ORDER #${wo.id}</span>
+        <h2>${escapeHtml(wo.asset_code || "-")} <span>${escapeHtml(wo.asset_name || "")}</span></h2>
+        <div class="wo-detail-summary">${sourceLabel(wo.source)} · Opened ${escapeHtml(wo.opened_at || "-")} · ${escapeHtml(technician)}</div>
+      </div>
+      <span class="${statusClass(status)} wo-detail-status">${status.replace(/_/g, " ").toUpperCase()}</span>
+    </div>
+
+    <div class="wo-detail-workflow">
+      ${workflowStepsHtml(wo)}
+      <div class="wo-detail-next-action">
+        <div>
+          <strong>${status === "closed" ? "Workflow complete" : "Next action"}</strong>
+          <span class="muted small">${status === "closed" ? "This work order is closed." : "Only actions allowed for your role are shown."}</span>
         </div>
-      </div>
-
-      <div style="min-width:280px; flex:1;">
-        <h4 style="margin:0 0 8px 0;">Linked Breakdown</h4>
-        ${renderBreakdown(breakdown)}
+        <div class="wo-card-actions">${workflowActions || `<span class="muted small">No action required from your role.</span>`}</div>
       </div>
     </div>
 
-    <div style="margin-top:12px;">
-      <h4 style="margin:0 0 8px 0;">Issued Parts</h4>
-      ${renderParts(nonLubeIssued)}
+    <div class="wo-detail-grid">
+      <section class="wo-detail-section">
+        <h3>Job and repair progress</h3>
+        ${wo.job_description
+          ? `<div class="wo-job-description"><strong>Job description / findings</strong><p>${escapeHtml(wo.job_description)}</p></div>`
+          : `<div class="muted">No job description recorded.</div>`}
+        ${renderRepairProgressPanel(wo)}
+      </section>
+      <section class="wo-detail-section">
+        <h3>Responsibility and sign-off</h3>
+        <dl class="wo-detail-facts">
+          <div><dt>Assigned technician</dt><dd>${escapeHtml(technician)}</dd></div>
+          <div><dt>Technician sign-off</dt><dd>${escapeHtml(wo.artisan_name || "Pending")}</dd></div>
+          <div><dt>Supervisor sign-off</dt><dd>${escapeHtml(wo.supervisor_name || "Pending")}</dd></div>
+          <div><dt>Reference</dt><dd>${wo.reference_id ?? "-"}</dd></div>
+        </dl>
+      </section>
     </div>
 
-    <div style="margin-top:12px;">
-      <h4 style="margin:0 0 8px 0;">Issued Lube</h4>
-      ${renderParts(lubeIssued)}
+    <div class="wo-detail-support">
+      <details open>
+        <summary>Repair hours and costs</summary>
+        ${renderRepairCostsPanel(wo) || `<div class="muted">No repair costs recorded.</div>`}
+      </details>
+      ${breakdown ? `<details><summary>Linked breakdown</summary>${renderBreakdown(breakdown)}</details>` : ""}
+      <details>
+        <summary>Issued parts <span class="pill">${partsCount}</span></summary>
+        ${renderParts(nonLubeIssued)}
+      </details>
+      <details>
+        <summary>Issued lube <span class="pill">${lubeCount}</span></summary>
+        ${renderParts(lubeIssued)}
+      </details>
+      <details>
+        <summary>Issue stock to this work order</summary>
+        ${renderIssuePanel(wo)}
+      </details>
+      <details>
+        <summary>Work-order history</summary>
+        <dl class="wo-detail-facts wo-detail-history">
+          <div><dt>Assigned</dt><dd>${escapeHtml(wo.assigned_at || "-")}</dd></div>
+          <div><dt>Started</dt><dd>${escapeHtml(wo.started_at || "-")}</dd></div>
+          <div><dt>Completed</dt><dd>${escapeHtml(wo.completed_at || "-")}</dd></div>
+          <div><dt>Closed</dt><dd>${escapeHtml(wo.closed_at || "-")}</dd></div>
+        </dl>
+      </details>
     </div>
-
-    ${renderIssuePanel(wo)}
   `;
 }
 
@@ -944,6 +961,10 @@ async function loadWorkOrderDetail(id) {
     }
     lastWorkOrderDetail = data;
     detailEl.innerHTML = renderDetail(data);
+    detailEl.closest(".wo-detail-card")?.scrollIntoView({
+      behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth",
+      block: "start",
+    });
     const techSelect = document.getElementById("woRepairCostTechnician");
     if (techSelect) {
       await loadTechnicians();
