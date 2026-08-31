@@ -463,12 +463,22 @@ export default async function workOrderRoutes(app) {
     return { profile, qrText };
   }
 
-  // List work orders (filter by status optional)
+  // List work orders (filter by status / date range / equipment type optional)
   app.get("/", async (req) => {
     const status = (req.query?.status ? String(req.query.status) : "").trim();
+    const fromDate = String(req.query?.from_date || "").trim().slice(0, 10);
+    const toDate = String(req.query?.to_date || "").trim().slice(0, 10);
+    const category = String(req.query?.category || req.query?.equipment_type || "").trim();
     const siteCode = getSiteCode(req);
 
-    const baseSql = `
+    const openedExpr = `
+      CASE
+        WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(b.start_at), ''), NULLIF(TRIM(b.breakdown_date), ''), w.opened_at)
+        ELSE w.opened_at
+      END
+    `;
+
+    let sql = `
       SELECT
         w.id,
         w.source,
@@ -485,10 +495,7 @@ export default async function workOrderRoutes(app) {
         w.completed_at,
         w.artisan_name,
         w.supervisor_name,
-        CASE
-          WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(b.start_at), ''), NULLIF(TRIM(b.breakdown_date), ''), w.opened_at)
-          ELSE w.opened_at
-        END AS opened_at,
+        ${openedExpr} AS opened_at,
         w.closed_at,
         a.asset_code,
         a.asset_name,
@@ -498,10 +505,29 @@ export default async function workOrderRoutes(app) {
       LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
       WHERE LOWER(TRIM(COALESCE(w.site_code, 'main'))) = ?
     `;
+    const params = [siteCode];
 
-    let rows = status
-      ? db.prepare(baseSql + ` AND w.status = ? ORDER BY w.id DESC LIMIT 200`).all(siteCode, status)
-      : db.prepare(baseSql + ` ORDER BY w.id DESC LIMIT 200`).all(siteCode);
+    if (status) {
+      sql += ` AND w.status = ?`;
+      params.push(status);
+    }
+    if (category) {
+      sql += ` AND LOWER(TRIM(COALESCE(a.category, ''))) = LOWER(?)`;
+      params.push(category);
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) {
+      sql += ` AND date(${openedExpr}) >= date(?)`;
+      params.push(fromDate);
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(toDate)) {
+      sql += ` AND date(${openedExpr}) <= date(?)`;
+      params.push(toDate);
+    }
+
+    const limit = fromDate || toDate || category ? 2000 : 200;
+    sql += ` ORDER BY w.id DESC LIMIT ${limit}`;
+
+    let rows = db.prepare(sql).all(...params);
 
     const role = getRole(req);
     const userName = String(req.headers["x-user-name"] || "").trim().toLowerCase();

@@ -5,11 +5,14 @@
   <title>IRONLOG Work Orders</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./styles.css?v=2" />
+  <link rel="stylesheet" href="./styles.css?v=14" />
 </head>
 <body class="page-shell">
   <div class="page-header">
-    <h2 style="margin:0;">Work Orders</h2>
+    <div>
+      <h2 style="margin:0;">Work Orders</h2>
+      <p class="muted small wo-page-subtitle">Assign, repair and close workshop jobs from one focused queue.</p>
+    </div>
     <div class="page-header-actions">
       <button onclick="location.href='index.html'">Dashboard</button>
       <button onclick="location.href='maintenance.html'">Maintenance</button>
@@ -17,11 +20,11 @@
   </div>
 
   <section class="panel show page-section">
-    <div class="card">
-      <div id="woRoleBadge" class="muted" style="margin-bottom:8px;">Role: -</div>
-      <div id="woPermissionLegend" class="muted" style="margin-bottom:8px;"></div>
-      <div class="muted small" style="margin-bottom:10px;">
-        Workflow: <strong>Assign technician</strong> → <strong>Start job</strong> → <strong>Save repair progress</strong> → <strong>Mark complete</strong> → <strong>Approve</strong> → <strong>Close</strong>
+    <div class="card wo-overview-card">
+      <div class="wo-overview-copy">
+        <strong>Workshop queue</strong>
+        <span id="woPermissionLegend" class="muted small"></span>
+        <span id="woRoleBadge" class="muted small">Role: -</span>
       </div>
       <div id="woKpiStrip" class="row" style="gap:8px; flex-wrap:wrap;">
         <button class="pill blue" data-kpi-filter="">All: 0</button>
@@ -33,13 +36,14 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="row" style="gap:10px; align-items:flex-end;">
+    <div class="card wo-filter-card">
+      <div class="wo-primary-filters">
         <label>
           Status
           <select id="woStatus">
             <option value="">All</option>
-            <option value="open" selected>Open</option>
+            <option value="active" selected>Active Work</option>
+            <option value="open">Open</option>
             <option value="in_progress">In Progress</option>
             <option value="assigned">Assigned</option>
             <option value="completed">Completed</option>
@@ -48,32 +52,37 @@
           </select>
         </label>
 
-        <label>
-          Source
-          <select id="woSource">
-            <option value="">All</option>
-            <option value="service">Service</option>
-            <option value="breakdown">Breakdown</option>
-            <option value="inspection">Inspection repair</option>
-            <option value="manual">Manual repair</option>
-          </select>
-        </label>
-
-        <label>
+        <label class="wo-search-field">
           Search
           <input id="woSearch" type="text" placeholder="Asset code, name, WO id" />
         </label>
-
-        <button id="woAwaitingApprovalBtn" type="button">Awaiting Approval</button>
-        <button id="woRefreshBtn">Refresh</button>
+        <button id="woRefreshBtn" class="btn-primary">Refresh</button>
       </div>
-      <div class="row" style="gap:10px; align-items:flex-end; margin-top:10px; flex-wrap:wrap;">
-        <label>
-          Labor &amp; oil report year
-          <input id="woLaborReportYear" type="number" min="2020" max="2099" step="1" style="width:100px;" />
-        </label>
-        <button id="woLaborReportBtn" type="button">Download Plant Labor &amp; Oil XLSX</button>
-      </div>
+      <details class="wo-advanced-filters">
+        <summary>Advanced filters &amp; reports</summary>
+        <div class="wo-advanced-grid">
+          <label>Source
+            <select id="woSource">
+              <option value="">All</option>
+              <option value="service">Service</option>
+              <option value="breakdown">Breakdown</option>
+              <option value="inspection">Inspection repair</option>
+              <option value="manual">Manual repair</option>
+            </select>
+          </label>
+          <label>Equipment type
+            <select id="woEquipmentType"><option value="">All</option></select>
+          </label>
+          <label>From date <input id="woFromDate" type="date" /></label>
+          <label>To date <input id="woToDate" type="date" /></label>
+          <button id="woAwaitingApprovalBtn" type="button">Awaiting Approval</button>
+          <button id="woClearFiltersBtn" type="button">Clear filters</button>
+          <label>Report year
+            <input id="woLaborReportYear" type="number" min="2020" max="2099" step="1" />
+          </label>
+          <button id="woLaborReportBtn" type="button">Download Labor &amp; Oil XLSX</button>
+        </div>
+      </details>
       <div id="woMessage" style="margin-top:10px;"></div>
     </div>
 
@@ -140,10 +149,10 @@
       <div id="woRepairMsg" class="muted" style="margin-top:10px;"></div>
     </details>
 
-    <div class="card">
-      <h3 style="margin-top:0;">Inspection Quality Score</h3>
+    <details class="card wo-quality-panel">
+      <summary>Inspection Quality Score</summary>
       <div id="woInspectionQuality" class="muted">Loading quality score...</div>
-    </div>
+    </details>
 
     <div class="stack-12">
       <div id="woList" class="card-grid"></div>
@@ -244,6 +253,6 @@
     </div>
   </div>
 
-  <script src="./workorders.js?v=7"></script>
+  <script src="./workorders.js?v=9"></script>
 </body>
 </html>

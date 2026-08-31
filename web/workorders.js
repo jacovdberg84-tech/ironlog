@@ -132,7 +132,7 @@ function sourceLabel(source) {
   const s = String(source || "").toLowerCase();
   if (s === "service") return "Service";
   if (s === "breakdown") return "Breakdown";
-  if (s === "inspection") return "Inspection repair";
+  if (s === "inspection" || s === "manager_inspection") return "Inspection repair";
   if (s === "manual") return "Manual repair";
   return s || "Unknown";
 }
@@ -151,6 +151,12 @@ function woAgeHours(openedAt) {
   const t = Date.parse(String(openedAt || ""));
   if (!Number.isFinite(t)) return 0;
   return Math.max(0, Math.floor((Date.now() - t) / 3600000));
+}
+
+function woAgeLabel(hours) {
+  const value = Number(hours || 0);
+  if (value < 48) return `${value}h`;
+  return `${Math.floor(value / 24)}d`;
 }
 
 function woPriority(status, openedAt) {
@@ -321,30 +327,46 @@ function workOrderCard(wo) {
   const ageHours = woAgeHours(wo.opened_at);
   const p = woPriority(wo.status, wo.opened_at);
   const pClass = p === "P1" ? "pri-p1" : p === "P2" ? "pri-p2" : "pri-p3";
+  const equipmentType = String(wo.category || "").trim();
+  const technician = wo.assigned_artisan_name || wo.artisan_name || "Unassigned";
+  const workflowActions = workflowActionButtons(wo);
   return `
-    <div class="card" data-wo-id="${wo.id}">
-      <div><strong>WO #${wo.id}</strong></div>
-      <div><strong>Asset:</strong> ${wo.asset_code || "-"} - ${wo.asset_name || "-"}</div>
-      <div><strong>Source:</strong> ${sourceLabel(wo.source)}</div>
-      <div><strong>Reference:</strong> ${wo.reference_id ?? "-"}</div>
-      <div><strong>Opened:</strong> ${wo.opened_at || "-"}</div>
-      <div><strong>Age:</strong> ${ageHours}h <span class="pill ${pClass}">${p}</span></div>
-      <div><strong>Closed:</strong> ${wo.closed_at || "-"}</div>
-      <div><strong>Technician:</strong> ${wo.assigned_artisan_name || wo.artisan_name || "Unassigned"}</div>
+    <article class="card wo-queue-card" data-wo-id="${wo.id}">
+      <div class="wo-card-head">
+        <div>
+          <span class="wo-number">WO #${wo.id}</span>
+          <h3>${escapeHtml(wo.asset_code || "-")} <span>${escapeHtml(wo.asset_name || "")}</span></h3>
+        </div>
+        <div class="wo-card-badges">
+          <span class="pill ${pClass}">${p}</span>
+          <span class="${statusClass(wo.status)}">${String(wo.status || "unknown").replace(/_/g, " ").toUpperCase()}</span>
+        </div>
+      </div>
+      <div class="wo-card-meta">
+        <span><strong>Age</strong> ${woAgeLabel(ageHours)}</span>
+        <span><strong>Technician</strong> ${escapeHtml(technician)}</span>
+        <span><strong>Source</strong> ${sourceLabel(wo.source)}</span>
+        ${equipmentType ? `<span><strong>Type</strong> ${escapeHtml(equipmentType)}</span>` : ""}
+      </div>
       ${Number(wo.labor_hours || 0) > 0 ? `<div><strong>Repair hours:</strong> ${Number(wo.labor_hours).toFixed(2)}</div>` : ""}
       ${Number(wo.total_oil_cost || wo.oil_cost || 0) > 0 ? `<div><strong>Oil cost:</strong> $${Number(wo.total_oil_cost || wo.oil_cost || 0).toFixed(2)}</div>` : ""}
-      ${wo.repair_progress ? `<div><strong>Progress:</strong> ${escapeHtml(String(wo.repair_progress).slice(0, 160))}${String(wo.repair_progress).length > 160 ? "…" : ""}</div>` : ""}
-      ${workflowStepsHtml(wo)}
-      <div class="${statusClass(wo.status)}">${String(wo.status || "unknown").toUpperCase()}</div>
-      ${workflowActionButtons(wo)}
-      <button data-pdf-id="${wo.id}" style="margin-top:8px;">Open PDF</button>
-      <button data-pdf-download-id="${wo.id}" style="margin-top:8px;">Download PDF</button>
-      <button data-view-id="${wo.id}" style="margin-top:8px;">View Detail</button>
-      <button data-wo-qr-open="${wo.id}" style="margin-top:8px;">Open QR Page</button>
-      <button data-wo-qr-print="${wo.id}" style="margin-top:8px;">Print WO QR</button>
-      <button data-wo-qr-png="${wo.id}" style="margin-top:8px;">Download WO QR PNG</button>
-      <button data-wo-qr-link="${wo.id}" style="margin-top:8px;">Copy WO Link</button>
-    </div>
+      ${wo.repair_progress ? `<div class="wo-progress-preview"><strong>Latest progress</strong><span>${escapeHtml(String(wo.repair_progress).slice(0, 160))}${String(wo.repair_progress).length > 160 ? "…" : ""}</span></div>` : ""}
+      <div class="wo-card-actions">
+        ${workflowActions}
+        <button data-view-id="${wo.id}" class="btn-primary">View details</button>
+      </div>
+      <details class="wo-card-more">
+        <summary>Documents &amp; QR</summary>
+        <div class="wo-card-more-actions">
+          <button data-pdf-id="${wo.id}">Open PDF</button>
+          <button data-pdf-download-id="${wo.id}">Download PDF</button>
+          <button data-wo-qr-open="${wo.id}">Open QR page</button>
+          <button data-wo-qr-print="${wo.id}">Print QR</button>
+          <button data-wo-qr-png="${wo.id}">Download QR PNG</button>
+          <button data-wo-qr-link="${wo.id}">Copy WO link</button>
+        </div>
+      </details>
+    </article>
   `;
 }
 
@@ -657,10 +679,54 @@ function updateKpiStrip(rows) {
   `;
 }
 
+async function loadEquipmentTypeOptions() {
+  const el = document.getElementById("woEquipmentType");
+  if (!el) return;
+  try {
+    const rows = await fetchJson(`${API}/assets?include_archived=0`, { headers: authHeaders() });
+    const list = Array.isArray(rows) ? rows : Array.isArray(rows?.rows) ? rows.rows : [];
+    const cats = [
+      ...new Set(
+        list
+          .map((r) => String(r.category || "").trim())
+          .filter(Boolean)
+      ),
+    ].sort((a, b) => a.localeCompare(b));
+    const cur = String(el.value || "").trim();
+    el.innerHTML =
+      `<option value="">All</option>` +
+      cats.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+    if (cur && cats.some((c) => c.toLowerCase() === cur.toLowerCase())) {
+      el.value = cats.find((c) => c.toLowerCase() === cur.toLowerCase()) || cur;
+    }
+  } catch (err) {
+    console.warn("Load equipment types failed:", err);
+  }
+}
+
+function clearDateAndTypeFilters() {
+  const statusEl = document.getElementById("woStatus");
+  const sourceEl = document.getElementById("woSource");
+  const searchEl = document.getElementById("woSearch");
+  const fromEl = document.getElementById("woFromDate");
+  const toEl = document.getElementById("woToDate");
+  const typeEl = document.getElementById("woEquipmentType");
+  if (statusEl) statusEl.value = "active";
+  if (sourceEl) sourceEl.value = "";
+  if (searchEl) searchEl.value = "";
+  if (fromEl) fromEl.value = "";
+  if (toEl) toEl.value = "";
+  if (typeEl) typeEl.value = "";
+  fetchWorkOrders();
+}
+
 async function fetchWorkOrders() {
   const statusEl = document.getElementById("woStatus");
   const sourceEl = document.getElementById("woSource");
   const searchEl = document.getElementById("woSearch");
+  const fromEl = document.getElementById("woFromDate");
+  const toEl = document.getElementById("woToDate");
+  const typeEl = document.getElementById("woEquipmentType");
   const listEl = document.getElementById("woList");
   const msgEl = document.getElementById("woMessage");
 
@@ -669,13 +735,21 @@ async function fetchWorkOrders() {
   const status = String(statusEl.value || "").trim();
   const source = String(sourceEl.value || "").trim().toLowerCase();
   const q = String(searchEl.value || "").trim().toLowerCase();
+  const fromDate = String(fromEl?.value || "").trim().slice(0, 10);
+  const toDate = String(toEl?.value || "").trim().slice(0, 10);
+  const equipmentType = String(typeEl?.value || "").trim();
 
   listEl.innerHTML = `<div class="skeleton-block"></div><div class="skeleton-block"></div>`;
   msgEl.className = "";
   msgEl.textContent = "";
 
   try {
-    const res = await fetch(`${API}/workorders`, { headers: authHeaders() });
+    const params = new URLSearchParams();
+    if (fromDate) params.set("from_date", fromDate);
+    if (toDate) params.set("to_date", toDate);
+    if (equipmentType) params.set("category", equipmentType);
+    const qs = params.toString();
+    const res = await fetch(`${API}/workorders${qs ? `?${qs}` : ""}`, { headers: authHeaders() });
     const data = await res.json();
 
     if (!res.ok) {
@@ -686,14 +760,32 @@ async function fetchWorkOrders() {
     updateKpiStrip(rows);
 
     const filtered = rows.filter((r) => {
-      const statusOk = !status || String(r.status || "").toLowerCase() === status.toLowerCase();
+      const rowStatus = String(r.status || "").toLowerCase();
+      const statusOk = !status
+        || (status === "active" && rowStatus !== "closed")
+        || rowStatus === status.toLowerCase();
       if (!statusOk) return false;
 
-      const sourceOk = !source || String(r.source || "").toLowerCase() === source;
+      const rowSource = String(r.source || "").toLowerCase();
+      const sourceOk = !source
+        || (source === "inspection" && ["inspection", "manager_inspection"].includes(rowSource))
+        || rowSource === source;
       if (!sourceOk) return false;
 
+      if (equipmentType) {
+        const cat = String(r.category || "").trim().toLowerCase();
+        if (cat !== equipmentType.toLowerCase()) return false;
+      }
+
+      if (fromDate || toDate) {
+        const opened = String(r.opened_at || "").slice(0, 10);
+        if (fromDate && opened && opened < fromDate) return false;
+        if (toDate && opened && opened > toDate) return false;
+        if ((fromDate || toDate) && !opened) return false;
+      }
+
       if (!q) return true;
-      const hay = `${r.id} ${r.asset_code || ""} ${r.asset_name || ""}`.toLowerCase();
+      const hay = `${r.id} ${r.asset_code || ""} ${r.asset_name || ""} ${r.category || ""}`.toLowerCase();
       return hay.includes(q);
     });
 
@@ -708,7 +800,10 @@ async function fetchWorkOrders() {
     }
 
     msgEl.className = "message-success";
-    msgEl.textContent = `Showing ${filtered.length} work order(s).`;
+    const filterBits = [];
+    if (fromDate || toDate) filterBits.push(`dates ${fromDate || "…"} → ${toDate || "…"}`);
+    if (equipmentType) filterBits.push(`type ${equipmentType}`);
+    msgEl.textContent = `Showing ${filtered.length} work order(s)${filterBits.length ? ` (${filterBits.join(", ")})` : ""}.`;
   } catch (err) {
     console.error("Load work orders error:", err);
     listEl.innerHTML = `<div style="color:#ff8080;">Error loading work orders: ${err.message}</div>`;
@@ -1514,6 +1609,10 @@ document.addEventListener("DOMContentLoaded", () => {
   if (statusEl) statusEl.addEventListener("change", fetchWorkOrders);
   if (sourceEl) sourceEl.addEventListener("change", fetchWorkOrders);
   if (searchEl) searchEl.addEventListener("input", fetchWorkOrders);
+  document.getElementById("woFromDate")?.addEventListener("change", fetchWorkOrders);
+  document.getElementById("woToDate")?.addEventListener("change", fetchWorkOrders);
+  document.getElementById("woEquipmentType")?.addEventListener("change", fetchWorkOrders);
+  document.getElementById("woClearFiltersBtn")?.addEventListener("click", clearDateAndTypeFilters);
   const requested = getRequestedWorkOrderId();
   if (requested && searchEl) searchEl.value = String(requested);
   if (closeConfirmBtn) closeConfirmBtn.addEventListener("click", submitCloseWorkOrder);
@@ -1670,6 +1769,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  loadEquipmentTypeOptions().catch(() => {});
   fetchWorkOrders();
   loadInspectionQuality();
   loadTechnicians().catch(() => {});

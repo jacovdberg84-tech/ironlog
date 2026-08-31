@@ -5536,6 +5536,68 @@ body.sidebar-collapsed .main-content {
   color: #6b7280;
 }
 
+/* Work Orders — focused workshop queue */
+.wo-page-subtitle { margin: 4px 0 0; }
+.wo-overview-card {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 18px; padding: 14px 16px;
+}
+.wo-overview-copy { display: grid; gap: 3px; min-width: 220px; }
+.wo-filter-card { padding: 14px 16px; }
+.wo-primary-filters {
+  display: grid; grid-template-columns: minmax(150px, .5fr) minmax(260px, 1fr) auto;
+  gap: 12px; align-items: end;
+}
+.wo-primary-filters label,
+.wo-advanced-grid label { display: grid; gap: 5px; font-size: 12px; color: var(--muted); }
+.wo-primary-filters input,
+.wo-primary-filters select,
+.wo-advanced-grid input,
+.wo-advanced-grid select { width: 100%; min-height: 40px; }
+.wo-advanced-filters { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.wo-advanced-filters > summary,
+.wo-quality-panel > summary,
+.wo-card-more > summary { cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 700; }
+.wo-advanced-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: 10px; align-items: end; padding-top: 12px;
+}
+.wo-quality-panel > summary { color: var(--text); }
+.wo-quality-panel[open] #woInspectionQuality { margin-top: 12px; }
+#woTechniciansPanel:not([open]),
+#woCreateRepairPanel:not([open]),
+.wo-quality-panel:not([open]) {
+  min-height: 0;
+  padding: 13px 16px;
+}
+.wo-queue-card { display: grid; gap: 12px; padding: 16px; }
+.wo-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.wo-number { color: #2563eb; font-size: 12px; font-weight: 800; letter-spacing: .04em; }
+.wo-card-head h3 { margin: 3px 0 0; font-size: 17px; }
+.wo-card-head h3 span { color: var(--muted); font-size: 13px; font-weight: 500; }
+.wo-card-badges { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.wo-card-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 14px; font-size: 13px; }
+.wo-card-meta span { color: var(--muted); }
+.wo-card-meta strong { color: var(--text); margin-right: 4px; }
+.wo-progress-preview { display: grid; gap: 3px; padding: 10px 12px; border-radius: 9px; background: color-mix(in srgb, #2563eb 7%, var(--card)); font-size: 13px; }
+.wo-progress-preview span { color: var(--muted); }
+.wo-card-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.wo-card-actions button { margin-top: 0 !important; }
+.wo-card-more { border-top: 1px solid var(--line); padding-top: 9px; }
+.wo-card-more-actions { display: flex; gap: 7px; flex-wrap: wrap; padding-top: 9px; }
+.wo-card-more-actions button { font-size: 12px; padding: 7px 9px; }
+
+@media (max-width: 850px) {
+  .wo-overview-card { align-items: stretch; flex-direction: column; }
+  .wo-primary-filters { grid-template-columns: 1fr; }
+  .wo-advanced-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 540px) {
+  .wo-advanced-grid, .wo-card-meta { grid-template-columns: 1fr; }
+  .wo-card-head { flex-direction: column; }
+  .wo-card-badges { justify-content: flex-start; }
+}
+
 .down-lock-notice {
   margin-top: 8px;
   padding: 8px 12px;
