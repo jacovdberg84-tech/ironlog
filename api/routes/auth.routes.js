@@ -131,12 +131,17 @@ function parseAllowedLocations(raw) {
   if (Array.isArray(raw)) {
     arr = raw;
   } else {
-    arr = String(raw)
-      .split(",")
-      .map((x) => String(x || "").trim().toLowerCase())
-      .filter(Boolean);
+    const text = String(raw).trim();
+    try {
+      const parsed = JSON.parse(text);
+      arr = Array.isArray(parsed) ? parsed : text.split(",");
+    } catch {
+      arr = text.split(",");
+    }
   }
-  const out = Array.from(new Set(arr));
+  const out = Array.from(new Set(
+    arr.map((x) => String(x || "").trim().toLowerCase()).filter(Boolean)
+  ));
   return out.length ? out : null;
 }
 

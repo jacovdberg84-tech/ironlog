@@ -197,7 +197,7 @@ function updateSidebarProfile() {
   if (initialEl) initialEl.textContent = user.charAt(0).toUpperCase() || "U";
 }
 
-function initDashboardActionHub() {
+function updateDashboardGreeting() {
   const welcome = qs("dashboardWelcome");
   const today = qs("dashboardToday");
   if (welcome) welcome.textContent = `Welcome, ${getSessionUser() || "User"}`;
@@ -206,6 +206,10 @@ function initDashboardActionHub() {
       weekday: "long", day: "numeric", month: "long", year: "numeric"
     }).format(new Date());
   }
+}
+
+function initDashboardActionHub() {
+  updateDashboardGreeting();
   document.querySelectorAll(".dashboard-quick-action").forEach((button) => {
     button.addEventListener("click", () => {
       const tab = String(button.dataset.goTab || "").trim();
@@ -1563,6 +1567,7 @@ function applySessionFromMeUser(user) {
     localStorage.removeItem(TABS_OVERRIDE_KEY);
   }
   renderSessionRolesBadge();
+  updateDashboardGreeting();
 }
 
 async function tryInitialSession() {
