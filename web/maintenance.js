@@ -2394,6 +2394,60 @@ async function deleteMaintenancePlan(planId) {
 }
 
 let __maintenancePlansCache = [];
+let __maintenancePlanGroupsCache = [];
+let maintenancePlanFilter = "all";
+
+function maintenancePlanGroupBucket(group) {
+  const remaining = Number(group?.remaining_hours ?? 0);
+  const near = Number(group?.near_due_threshold ?? 50);
+  if (remaining <= 0) return "overdue";
+  if (remaining <= near) return "due";
+  return "upcoming";
+}
+
+function renderMaintenancePlanningKpis(groups) {
+  const list = Array.isArray(groups) ? groups : [];
+  const counts = {
+    all: list.length,
+    overdue: list.filter((g) => maintenancePlanGroupBucket(g) === "overdue").length,
+    due: list.filter((g) => maintenancePlanGroupBucket(g) === "due").length,
+    upcoming: list.filter((g) => maintenancePlanGroupBucket(g) === "upcoming").length,
+  };
+  document.querySelectorAll("#maintenancePlanningKpis [data-maint-plan-filter]").forEach((button) => {
+    const key = String(button.getAttribute("data-maint-plan-filter") || "all");
+    const value = button.querySelector("strong");
+    if (value) value.textContent = String(counts[key] ?? 0);
+    button.classList.toggle("is-active", key === maintenancePlanFilter);
+  });
+}
+
+function renderMaintenancePlanQueue() {
+  const container = document.getElementById("plansList");
+  if (!container) return;
+  const search = String(document.getElementById("maintenancePlanSearch")?.value || "").trim().toLowerCase();
+  const groups = __maintenancePlanGroupsCache.filter((group) => {
+    if (maintenancePlanFilter !== "all" && maintenancePlanGroupBucket(group) !== maintenancePlanFilter) return false;
+    if (!search) return true;
+    const services = (group.plans || []).map((p) => p.service_name || p.interval_hours || "").join(" ");
+    return `${group.asset_code || ""} ${group.asset_name || ""} ${services}`.toLowerCase().includes(search);
+  });
+  container.innerHTML = groups.length
+    ? groups.map(plansTableRow).join("")
+    : `<tr><td colspan="9" class="muted">No service schedules match this view.</td></tr>`;
+  bindDuePlanSelectCheckboxes(container);
+  const meta = document.getElementById("maintenancePlanQueueMeta");
+  if (meta) meta.textContent = `Showing ${groups.length} of ${__maintenancePlanGroupsCache.length} planned asset(s).`;
+  document.querySelectorAll(".maintenance-filter-buttons [data-maint-plan-filter]").forEach((button) => {
+    button.classList.toggle("is-active", button.getAttribute("data-maint-plan-filter") === maintenancePlanFilter);
+  });
+  renderMaintenancePlanningKpis(__maintenancePlanGroupsCache);
+}
+
+function setMaintenancePlanFilter(filter) {
+  const next = ["all", "overdue", "due", "upcoming"].includes(String(filter)) ? String(filter) : "all";
+  maintenancePlanFilter = next;
+  renderMaintenancePlanQueue();
+}
 
 async function loadPlans() {
   const container = document.getElementById("plansList");
@@ -2414,10 +2468,8 @@ async function loadPlans() {
     }));
     __maintenancePlansCache = plans;
     const groups = groupPlansByAsset(plans);
-    container.innerHTML = groups.length
-      ? groups.map(plansTableRow).join("")
-      : `<tr><td colspan="9" class="muted">No service schedules yet — pick an asset and service type above.</td></tr>`;
-    bindDuePlanSelectCheckboxes(container);
+    __maintenancePlanGroupsCache = groups;
+    renderMaintenancePlanQueue();
   } catch (err) {
     console.error("Plans error:", err);
     container.innerHTML = `<tr><td colspan="9" class="message-error">Error loading plans: ${escBackfill(err.message)}</td></tr>`;
@@ -2754,8 +2806,8 @@ function applyMaintenanceHubMode(mode) {
       planSection: true,
       plans: true,
       serviceRecords: false,
-      serviceSchedule: true,
-      due: true,
+      serviceSchedule: false,
+      due: false,
       insights: false,
     },
     "service-history": {
@@ -8356,6 +8408,13 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("akpPlansSelectAllBtn")?.addEventListener("click", selectAllDuePlansInTable);
   document.getElementById("akpPlansClearSelBtn")?.addEventListener("click", clearDuePlanSelection);
+  document.getElementById("maintenancePlanSearch")?.addEventListener("input", renderMaintenancePlanQueue);
+  document.querySelectorAll("[data-maint-plan-filter]").forEach((button) => {
+    button.addEventListener("click", () => setMaintenancePlanFilter(button.getAttribute("data-maint-plan-filter")));
+  });
+  document.getElementById("refreshMaintenancePlanningBtn")?.addEventListener("click", async () => {
+    await Promise.all([loadPlans(), loadDue(), loadHistory()]);
+  });
   document.getElementById("openUpcomingServicesPdfBtn")?.addEventListener("click", () => openUpcomingServicesPdf(false));
   document.getElementById("downloadUpcomingServicesPdfBtn")?.addEventListener("click", () => openUpcomingServicesPdf(true));
 

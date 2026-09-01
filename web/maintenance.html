@@ -5,7 +5,7 @@
   <title>IRONLOG Maintenance</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./styles.css?v=4" />
+  <link rel="stylesheet" href="./styles.css?v=17" />
 </head>
 <body class="page-shell has-sidebar">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -150,10 +150,23 @@
 
   <div class="main-content" id="mainContent">
 
-  <section class="panel show page-section">
-  <div class="panel-header">
-    <h3>Service Schedule Setup</h3>
+  <section class="panel show page-section maintenance-planning-shell">
+  <div class="maintenance-planning-head">
+    <div>
+      <h2>Maintenance Planning</h2>
+      <p class="muted">Prioritize upcoming services and create the work needed to complete them.</p>
+    </div>
+    <button id="refreshMaintenancePlanningBtn" type="button">Refresh planning</button>
   </div>
+  <div id="maintenancePlanningKpis" class="maintenance-planning-kpis">
+    <button type="button" data-maint-plan-filter="all"><strong>0</strong><span>Planned assets</span></button>
+    <button type="button" data-maint-plan-filter="overdue"><strong>0</strong><span>Overdue</span></button>
+    <button type="button" data-maint-plan-filter="due"><strong>0</strong><span>Due soon</span></button>
+    <button type="button" data-maint-plan-filter="upcoming"><strong>0</strong><span>Upcoming</span></button>
+  </div>
+
+  <details class="maintenance-setup-panel">
+  <summary>Add or change a service schedule</summary>
 
   <div class="form-grid">
     <label>
@@ -208,33 +221,45 @@
   </div>
 
   <div id="planFormMessage" style="margin-top:10px;"></div>
+  </details>
 </section>
 
   <div class="page-section">
     <div id="mainMaintenanceCards">
     <div id="maintenancePlansCard" class="maintenance-card collapsible" data-collapsed="false">
       <div class="maintenance-card-header">
-        <h3>Service Schedules</h3>
+        <div><h3>Service Planning Queue</h3><p class="muted mini">Select equipment that needs action, then create its service work order.</p></div>
         <button class="maintenance-card-toggle" aria-label="Toggle">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
         </button>
       </div>
       <div class="maintenance-card-body">
-        <p class="muted mini" style="margin:0 0 12px;">One row per machine — next service is calculated automatically. Expand <strong>Types</strong> to remove duplicate entries. Tick equipment below, then generate work orders or export the upcoming-services PDF.</p>
-        <div class="row stack-10" style="margin-bottom:12px; flex-wrap:wrap; align-items:flex-end;">
-          <label>
-            Near-due threshold (hours)
-            <input id="dueNearThresholdHours" type="number" min="1" step="1" value="50" style="width:120px;" />
-            <small class="muted" style="display:block;">LDVs on 10000 km cycles use 500 km.</small>
-          </label>
-          <button id="applyDueThresholdBtn" type="button">Apply threshold</button>
+        <div class="maintenance-queue-toolbar">
+          <input id="maintenancePlanSearch" type="search" placeholder="Search equipment or service" />
+          <div class="maintenance-filter-buttons">
+            <button type="button" data-maint-plan-filter="all" class="is-active">All</button>
+            <button type="button" data-maint-plan-filter="overdue">Overdue</button>
+            <button type="button" data-maint-plan-filter="due">Due soon</button>
+            <button type="button" data-maint-plan-filter="upcoming">Upcoming</button>
+          </div>
           <button id="akpPlansSelectAllBtn" type="button" class="btn-secondary">Select all</button>
           <button id="akpPlansClearSelBtn" type="button" class="btn-secondary">Clear selection</button>
           <span id="dueSelectionCount" class="muted" style="align-self:center;">0 selected</span>
-          <button id="openUpcomingServicesPdfBtn" type="button">Print Upcoming PDF</button>
-          <button id="downloadUpcomingServicesPdfBtn" type="button">Download Upcoming PDF</button>
           <button id="generateBtn" type="button" class="btn-primary">Generate Work Orders</button>
         </div>
+        <details class="maintenance-queue-options">
+          <summary>Threshold and PDF options</summary>
+          <div class="row stack-10" style="margin-top:10px; flex-wrap:wrap; align-items:flex-end;">
+            <label>Near-due threshold (hours)
+              <input id="dueNearThresholdHours" type="number" min="1" step="1" value="50" style="width:120px;" />
+              <small class="muted" style="display:block;">LDVs use 500 km.</small>
+            </label>
+            <button id="applyDueThresholdBtn" type="button">Apply threshold</button>
+            <button id="openUpcomingServicesPdfBtn" type="button">Print Upcoming PDF</button>
+            <button id="downloadUpcomingServicesPdfBtn" type="button">Download Upcoming PDF</button>
+          </div>
+        </details>
+        <div id="maintenancePlanQueueMeta" class="muted mini"></div>
         <div style="overflow:auto;">
           <table class="gridTable" style="min-width:980px;">
             <thead>
@@ -2221,6 +2246,6 @@
   <script src="./undercarriage-diagrams.js?v=1"></script>
   <script src="./undercarriage.js?v=5"></script>
   <script src="./tyre-inspection-qr.js?v=1"></script>
-  <script src="./maintenance.js?v=53"></script>
+  <script src="./maintenance.js?v=54"></script>
 </body>
 </html>

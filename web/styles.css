@@ -5693,6 +5693,44 @@ body.sidebar-collapsed .main-content {
   .bo-incident-meta { grid-template-columns: 1fr; }
 }
 
+/* Maintenance Planning — one prioritized service queue */
+.maintenance-planning-shell { display: grid; gap: 14px; }
+.maintenance-planning-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.maintenance-planning-head h2 { margin: 0; font-size: 23px; }
+.maintenance-planning-head p { margin: 4px 0 0; }
+.maintenance-planning-kpis {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;
+}
+.maintenance-planning-kpis button {
+  display: grid; justify-items: start; gap: 3px; padding: 13px 15px;
+  background: var(--card); border: 1px solid var(--line); text-align: left;
+}
+.maintenance-planning-kpis button strong { font-size: 23px; line-height: 1; }
+.maintenance-planning-kpis button span { color: var(--muted); font-size: 12px; }
+.maintenance-planning-kpis button.is-active { border-color: #2563eb; box-shadow: inset 0 0 0 1px #2563eb; }
+.maintenance-setup-panel { border: 1px solid var(--line); border-radius: 11px; padding: 12px 15px; background: var(--card); }
+.maintenance-setup-panel > summary { cursor: pointer; font-weight: 750; }
+.maintenance-setup-panel[open] > summary { margin-bottom: 14px; }
+.maintenance-queue-toolbar {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px;
+}
+.maintenance-queue-toolbar > input { min-width: 250px; flex: 1; }
+.maintenance-filter-buttons { display: inline-flex; gap: 5px; flex-wrap: wrap; }
+.maintenance-filter-buttons button.is-active { background: #2563eb; border-color: #2563eb; color: #fff; }
+.maintenance-queue-options { margin: 8px 0; border-top: 1px solid var(--line); padding-top: 9px; }
+.maintenance-queue-options > summary { cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 700; }
+#maintenancePlansCard .maintenance-card-header > div { display: grid; gap: 3px; }
+#maintenancePlansCard .maintenance-card-header h3,
+#maintenancePlansCard .maintenance-card-header p { margin: 0; }
+
+@media (max-width: 760px) {
+  .maintenance-planning-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .maintenance-planning-head { align-items: stretch; flex-direction: column; }
+  .maintenance-queue-toolbar > input { min-width: 100%; }
+}
+
 .down-lock-notice {
   margin-top: 8px;
   padding: 8px 12px;
