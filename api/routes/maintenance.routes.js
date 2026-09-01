@@ -1412,6 +1412,39 @@ function buildInsightsBreakdownLaborIncidents(dbConn, startDate, endDate, opts =
 
 export default async function maintenanceRoutes(app) {
   ensureAuditTable(db);
+  // A standard plant service schedule is one automatic 500h/1000h rotation.
+  // Backfill the companion plan so existing assets no longer require two
+  // schedules to be configured manually and generated work orders retain the
+  // correct service type through their maintenance-plan reference.
+  const standardPlanRows = db.prepare(`
+    SELECT mp.*, a.asset_code
+    FROM maintenance_plans mp
+    JOIN assets a ON a.id = mp.asset_id
+    WHERE mp.active = 1
+      AND mp.interval_hours IN (500, 1000)
+      AND a.asset_code NOT LIKE 'V__AM'
+  `).all();
+  const standardPlansByAsset = groupActivePlansByAsset(standardPlanRows);
+  const insertStandardPlan = db.prepare(`
+    INSERT INTO maintenance_plans (asset_id, service_name, interval_hours, last_service_hours, active)
+    VALUES (?, ?, ?, ?, 1)
+  `);
+  const ensureStandardPlans = db.transaction(() => {
+    for (const [assetId, plans] of standardPlansByAsset) {
+      const intervals = new Set(plans.map(planIntervalHours));
+      const seed = plans[0];
+      for (const interval of [500, 1000]) {
+        if (intervals.has(interval)) continue;
+        insertStandardPlan.run(
+          assetId,
+          `${interval} hour service`,
+          interval,
+          snapLastServiceHours(Number(seed.last_service_hours || 0), interval, seed.asset_code),
+        );
+      }
+    }
+  });
+  ensureStandardPlans();
   const dataRoot = getDataRoot();
   function resolveStorageAbs(relPath) {
     return resolveStorageAbsPath(relPath, dataRoot);
@@ -4589,6 +4622,9 @@ export default async function maintenanceRoutes(app) {
               mp.service_name,
               mp.interval_hours,
               mp.last_service_hours,
+              a.asset_code,
+              a.asset_name,
+              a.category,
               IFNULL((
                 SELECT SUM(dh.hours_run)
                 FROM daily_hours dh
@@ -4611,6 +4647,9 @@ export default async function maintenanceRoutes(app) {
               mp.service_name,
               mp.interval_hours,
               mp.last_service_hours,
+              a.asset_code,
+              a.asset_name,
+              a.category,
               IFNULL((
                 SELECT SUM(dh.hours_run)
                 FROM daily_hours dh
@@ -4640,15 +4679,27 @@ export default async function maintenanceRoutes(app) {
         VALUES (?, 'service', ?, 'open')
       `);
 
+      const currentByAsset = new Map();
+      for (const plan of plans) {
+        const assetId = Number(plan.asset_id || 0);
+        if (!currentByAsset.has(assetId)) {
+          currentByAsset.set(assetId, date ? Number(plan.current_hours || 0) : getAssetCurrentHours(assetId));
+        }
+      }
+      const nextServices = buildDueListFromPlans(
+        plans,
+        (assetId) => Number(currentByAsset.get(Number(assetId)) || 0),
+        nearDueHours,
+      );
+
       const tx = db.transaction(() => {
         const created = [];
 
-        for (const p of plans) {
-          const current = getAssetCurrentHours(p.asset_id);
-          const next_due = Number(p.last_service_hours || 0) + Number(p.interval_hours || 0);
-          const remaining = next_due - current;
+        for (const p of nextServices) {
+          const current = Number(p.current_hours || 0);
+          const next_due = Number(p.next_due_hours || 0);
+          const remaining = Number(p.remaining_hours || 0);
           const isOverdue = remaining <= 0;
-          const isNearDue = remaining <= nearDueHours;
           const isRequestedPlan = requestedPlanIds.includes(Number(p.plan_id || 0));
           const shouldCreate = requestedPlanIds.length ? isRequestedPlan : isOverdue;
           if (!shouldCreate) continue;

@@ -24,11 +24,7 @@ export function planIntervalHours(plan) {
 /** Map plan interval to a fixed service grid step. */
 export function normalizeGridStep(intervalHours, assetCode = null) {
   const iv = Number(intervalHours) || 0;
-  if (isLdvServiceAssetCode(assetCode)) {
-    if (iv >= 5000 || iv === 10000) return 10000;
-    if (iv > 0) return iv;
-    return 10000;
-  }
+  if (isLdvServiceAssetCode(assetCode)) return 10000;
   if (STANDARD_SERVICE_GRIDS.includes(iv)) return iv;
   if (iv > 0 && iv <= 250) return 250;
   if (iv <= 500) return 500;
@@ -64,6 +60,20 @@ export function groupActivePlansByAsset(plans) {
 export function hasRotatingSchedule(plans) {
   const intervals = [...new Set((plans || []).map(planIntervalHours).filter((x) => x > 0))];
   return intervals.length >= 2;
+}
+
+/**
+ * Standard plant schedules alternate automatically: every 500h milestone is a
+ * 500h service, except multiples of 1000h which are 1000h services. A single
+ * saved 500/1000 plan is enough to opt an asset into this standard schedule.
+ */
+export function automaticServiceIntervals(plans, assetCode = null) {
+  if (isLdvServiceAssetCode(assetCode)) return [10000];
+  const configured = [...new Set((plans || []).map(planIntervalHours).filter((x) => x > 0))];
+  if (configured.some((iv) => iv === 500 || iv === 1000)) {
+    return [...new Set([...configured, 500, 1000])].sort((a, b) => a - b);
+  }
+  return configured.sort((a, b) => a - b);
 }
 
 function gridBaseInterval(plans, assetCode = null) {
@@ -122,7 +132,8 @@ function findPlanForInterval(plans, targetInterval) {
 
 export function resolveLegacyPlanDue(plan, currentHours, assetCode = null) {
   const current = Number(currentHours) || 0;
-  const interval = planIntervalHours(plan);
+  const configuredInterval = planIntervalHours(plan);
+  const interval = isLdvServiceAssetCode(assetCode) ? 10000 : configuredInterval;
   const gridStep = normalizeGridStep(interval, assetCode);
   const last = snapToServiceMilestone(Number(plan.last_service_hours || 0), gridStep);
   const nextDue = nextMilestoneHours(current, gridStep);
@@ -131,7 +142,9 @@ export function resolveLegacyPlanDue(plan, currentHours, assetCode = null) {
     schedule_mode: "grid",
     plan_id: Number(plan.id ?? plan.plan_id ?? 0),
     asset_id: Number(plan.asset_id || 0),
-    service_name: String(plan.service_name || ""),
+    service_name: isLdvServiceAssetCode(assetCode) && configuredInterval !== 10000
+      ? "10000 km service"
+      : String(plan.service_name || ""),
     interval_hours: interval,
     grid_step_hours: gridStep,
     last_service_hours: last,
@@ -149,16 +162,17 @@ export function resolveNextServiceForAssetPlans(plans, currentHours, assetCode =
   if (!activePlans.length) return null;
 
   const code = assetCode || String(activePlans[0]?.asset_code || "");
-  const intervals = [...new Set(activePlans.map(planIntervalHours).filter((x) => x > 0))].sort((a, b) => a - b);
+  const intervals = automaticServiceIntervals(activePlans, code);
   if (intervals.length < 2) {
     return resolveLegacyPlanDue(activePlans[0], currentHours, code);
   }
 
-  const baseInterval = gridBaseInterval(activePlans, code);
+  const baseInterval = Math.min(...intervals.map((iv) => normalizeGridStep(iv, code)));
   const current = Number(currentHours) || 0;
   const nextDue = nextMilestoneHours(current, baseInterval);
   const serviceInterval = milestoneServiceInterval(nextDue, intervals, code);
   const matchedPlan = findPlanForInterval(activePlans, serviceInterval);
+  const exactPlan = activePlans.find((plan) => Math.abs(planIntervalHours(plan) - serviceInterval) < 1e-6);
   const remaining = nextDue - current;
   const lastService = snapToServiceMilestone(Math.max(0, nextDue - serviceInterval), baseInterval);
 
@@ -166,7 +180,7 @@ export function resolveNextServiceForAssetPlans(plans, currentHours, assetCode =
     schedule_mode: "rotating",
     plan_id: Number(matchedPlan?.id ?? matchedPlan?.plan_id ?? activePlans[0]?.id ?? 0),
     asset_id: Number(activePlans[0].asset_id || 0),
-    service_name: String(matchedPlan?.service_name || `${serviceInterval}`),
+    service_name: String(exactPlan?.service_name || `${serviceInterval} ${isLdvServiceAssetCode(code) ? "km" : "hour"} service`),
     interval_hours: serviceInterval,
     grid_step_hours: baseInterval,
     last_service_hours: lastService,
@@ -193,7 +207,8 @@ export function enrichPlansWithNextService(plans, getCurrentHours, defaultNearDu
     const assetPlans = byAsset.get(assetId) || [];
     const current = typeof getCurrentHours === "function" ? getCurrentHours(assetId) : 0;
     const code = String(plan.asset_code || assetPlans[0]?.asset_code || "");
-    const rotating = hasRotatingSchedule(assetPlans);
+    const resolved = nextByAsset.get(assetId);
+    const rotating = String(resolved?.schedule_mode || "") === "rotating";
     const snappedLast = snapLastServiceHours(
       Number(plan.last_service_hours || 0),
       planIntervalHours(plan),
@@ -201,7 +216,7 @@ export function enrichPlansWithNextService(plans, getCurrentHours, defaultNearDu
     );
 
     if (rotating) {
-      const next = nextByAsset.get(assetId);
+      const next = resolved;
       const planId = Number(plan.id ?? plan.plan_id ?? 0);
       const isNext = Number(next?.plan_id || 0) === planId;
       const remaining = isNext ? next?.remaining_hours ?? null : null;
