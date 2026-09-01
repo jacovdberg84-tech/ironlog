@@ -106,7 +106,6 @@ function viewForSection(section) {
     "service-history": "service-history",
     "maintenance-insights": "insights",
     "mechanics-cost": "mc",
-    "ai-engineer": "aie",
     "manager-inspections": "mi",
     "artisan-inspections": "ai",
     "weekly-forum": "wf",
@@ -171,7 +170,6 @@ function scrollToSection(section) {
           "sync": "syncAdminSection",
           "insights": "maintenanceInsightsCard",
           "mc": "mechanicsCostSection",
-          "aie": "aiEngineerSection",
           "pto": "partsToOrderSection",
         };
         targetEl = document.getElementById(sectionMap[targetView]);
@@ -235,9 +233,6 @@ function refreshTopViewData(view) {
       break;
     case "mc":
       initMechanicsCostSection().catch(() => {});
-      break;
-    case "aie":
-      loadAiEngineerRequests().catch(() => {});
       break;
     default:
       break;
@@ -2853,7 +2848,6 @@ function setTopView(view, section = "") {
   const sync = document.getElementById("syncAdminSection");
   const pto = document.getElementById("partsToOrderSection");
   const mc = document.getElementById("mechanicsCostSection");
-  const aie = document.getElementById("aiEngineerSection");
   const planSection = document.querySelector("section.panel.page-section");
 
   if (section) currentMaintenanceSection = section;
@@ -2872,7 +2866,6 @@ function setTopView(view, section = "") {
   if (sync) sync.style.display = "none";
   if (pto) pto.style.display = "none";
   if (mc) mc.style.display = "none";
-  if (aie) aie.style.display = "none";
   if (planSection) planSection.style.display = "none";
 
   // Show the selected section
@@ -2918,9 +2911,6 @@ function setTopView(view, section = "") {
       break;
     case "mc":
       if (mc) mc.style.display = "block";
-      break;
-    case "aie":
-      if (aie) aie.style.display = "block";
       break;
   }
 
@@ -2975,9 +2965,6 @@ function setTopView(view, section = "") {
           break;
         case "mc":
           isActive = navSection === "mechanics-cost";
-          break;
-        case "aie":
-          isActive = navSection === "ai-engineer";
           break;
       }
       item.classList.toggle("active", isActive);
@@ -8806,7 +8793,6 @@ document.addEventListener("DOMContentLoaded", () => {
   loadWeeklyForumParts().catch(() => {});
   loadWeeklyForumInputs().catch(() => {});
   loadMaintenancePackStatus().catch(() => {});
-  loadAiEngineerRequests().catch(() => {});
   if (!document.getElementById("rsgProfilesCard")?.classList.contains("hidden")) {
     loadRsgProfiles().catch(() => {});
   }
@@ -8827,57 +8813,6 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("showAssetKpiBtn")?.addEventListener("click", () => setTopView("kpi"));
   document.getElementById("showHistogramBtn")?.addEventListener("click", () => setTopView("hist"));
   document.getElementById("showSyncAdminBtn")?.addEventListener("click", () => setTopView("sync"));
-  document.getElementById("aiEngRefreshBtn")?.addEventListener("click", () => loadAiEngineerRequests());
-  document.getElementById("aiEngCreateBtn")?.addEventListener("click", () => createAiEngineerRequest());
-  document.getElementById("aiEngBody")?.addEventListener("click", async (evt) => {
-    const planBtn = evt.target?.closest?.("button[data-aie-plan]");
-    if (planBtn) {
-      await runAiEngineerAction(Number(planBtn.getAttribute("data-aie-plan") || 0), "plan");
-      return;
-    }
-    const approveBtn = evt.target?.closest?.("button[data-aie-approve]");
-    if (approveBtn) {
-      await runAiEngineerAction(Number(approveBtn.getAttribute("data-aie-approve") || 0), "approve");
-      return;
-    }
-    const executeBtn = evt.target?.closest?.("button[data-aie-execute]");
-    if (executeBtn) {
-      await runAiEngineerAction(Number(executeBtn.getAttribute("data-aie-execute") || 0), "execute");
-      return;
-    }
-    const gPatchBtn = evt.target?.closest?.("button[data-aie-gpatch]");
-    if (gPatchBtn) {
-      await runAiEngineerAction(Number(gPatchBtn.getAttribute("data-aie-gpatch") || 0), "generate-patch");
-      return;
-    }
-    const aPatchBtn = evt.target?.closest?.("button[data-aie-apatch]");
-    if (aPatchBtn) {
-      await runAiEngineerAction(Number(aPatchBtn.getAttribute("data-aie-apatch") || 0), "apply-patch");
-      return;
-    }
-    const mergeBtn = evt.target?.closest?.("button[data-aie-merge]");
-    if (mergeBtn) {
-      const reqId = Number(mergeBtn.getAttribute("data-aie-merge") || 0);
-      if (!reqId) return;
-      const ok = window.confirm(
-        "Merge this AI patch into your live main repo checkout?\n\nThis cherry-picks the worktree commit into the current branch. Ensure main has no uncommitted changes.",
-      );
-      if (!ok) return;
-      await runAiEngineerAction(reqId, "merge", { confirm: true });
-      return;
-    }
-    const rejectBtn = evt.target?.closest?.("button[data-aie-reject]");
-    if (rejectBtn) {
-      const reason = window.prompt("Reason for rejection:");
-      if (!reason) return;
-      await runAiEngineerAction(Number(rejectBtn.getAttribute("data-aie-reject") || 0), "reject", { reason });
-      return;
-    }
-    const viewBtn = evt.target?.closest?.("button[data-aie-view]");
-    if (viewBtn) {
-      await viewAiEngineerRequest(Number(viewBtn.getAttribute("data-aie-view") || 0));
-    }
-  });
   document.getElementById("histViewMode")?.addEventListener("change", () => loadHistory());
   document.getElementById("histClosestLimit")?.addEventListener("change", () => loadHistory());
   document.getElementById("saveHistogramBtn")?.addEventListener("click", () => saveHistogramEvent());
