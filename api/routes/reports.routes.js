@@ -52,7 +52,7 @@ import {
 } from "../utils/imagePdf.js";
 import { resolveStorageAbs as resolveStorageAbsUtil, getDataRoot, normalizeStorageRel } from "../utils/storagePaths.js";
 import { getPdfReportBranding, savePdfReportBranding, resolvePdfCompanyLogoAbs, setPdfCompanyLogoPath, clearPdfCompanyLogo, getPdfBrandingLogoDir } from "../utils/reportSettings.js";
-import { prestartDeductionForProductionFleet, PRESTART_DEDUCTION_HOURS } from "../utils/prestartDaily.js";
+import { listDailyPrestarts, prestartDeductionForProductionFleet, PRESTART_DEDUCTION_HOURS } from "../utils/prestartDaily.js";
 import { listPlannedMaintenanceForDate, shiftDateYmd } from "../utils/shortBreakdowns.js";
 
 let maintenanceMasterSchedulerStarted = false;
@@ -10582,6 +10582,10 @@ export default async function reportsRoutes(app) {
       }
     } catch { /* ignore */ }
 
+    const prestartAssetIds = new Set(
+      listDailyPrestarts(db, opsDay).rows.map((r) => Number(r.asset_id || 0)).filter((id) => id > 0),
+    );
+
     const scheduledFallback = Math.max(0, Number(scheduled || 0));
     const hoursPdfEnriched = hoursPdf.map((r) => {
       const assetId = Number(r.asset_id || 0);
@@ -10594,7 +10598,11 @@ export default async function reportsRoutes(app) {
       const runEff = sched > 0 ? Math.min(run, sched) : run;
       const downRaw = Math.max(0, Number(downtimeByAssetId.get(assetId) || 0));
       const down = sched > 0 ? Math.min(downRaw, sched) : downRaw;
-      const available = Math.max(0, sched - down);
+      const prestartDone = prestartAssetIds.has(assetId);
+      const inspection = prestartDone && sched > down
+        ? Math.min(PRESTART_DEDUCTION_HOURS, sched - down)
+        : 0;
+      const available = Math.max(0, sched - down - inspection);
       const availPct = sched > 0 ? (available / sched) * 100 : null;
       const utilPct = sched > 0 ? (runEff / sched) * 100 : null;
       const fuelLiters = fuelByAssetId.get(assetId);
@@ -10603,6 +10611,8 @@ export default async function reportsRoutes(app) {
         scheduled_hours_eff: sched,
         available_hours: available,
         downtime_hours: down,
+        prestart_done: prestartDone,
+        inspection_hours: inspection,
         availability_pct: availPct,
         utilization_pct: utilPct,
         fuel_liters: fuelLiters == null ? null : fuelLiters,
@@ -10665,15 +10675,16 @@ export default async function reportsRoutes(app) {
         table(
           doc,
           [
-            { key: "asset", label: "Asset", width: 0.10 },
-            { key: "type", label: "Type", width: 0.10 },
-            { key: "name", label: "Name", width: 0.16 },
-            { key: "open", label: "Open", width: 0.08, align: "right" },
-            { key: "close", label: "Close", width: 0.08, align: "right" },
-            { key: "hours", label: "Run Hrs", width: 0.08, align: "right" },
-            { key: "avail", label: "Avail %", width: 0.10, align: "right" },
-            { key: "util", label: "Util %", width: 0.10, align: "right" },
-            { key: "fuel", label: `Fuel L (${opsDay.slice(5)})`, width: 0.20, align: "right" },
+            { key: "asset", label: "Asset", width: 0.09 },
+            { key: "type", label: "Type", width: 0.09 },
+            { key: "name", label: "Name", width: 0.14 },
+            { key: "open", label: "Open", width: 0.07, align: "right" },
+            { key: "close", label: "Close", width: 0.07, align: "right" },
+            { key: "hours", label: "Run Hrs", width: 0.07, align: "right" },
+            { key: "prestart", label: "Pre-start", width: 0.11, align: "center" },
+            { key: "avail", label: "Avail %", width: 0.09, align: "right" },
+            { key: "util", label: "Util %", width: 0.09, align: "right" },
+            { key: "fuel", label: `Fuel L (${opsDay.slice(5)})`, width: 0.18, align: "right" },
           ],
           hoursPdfEnriched.map((r) => {
             const noEntry = !r.has_daily_entry;
@@ -10688,6 +10699,7 @@ export default async function reportsRoutes(app) {
               open: noEntry ? "—" : fmtHm(r.opening_hours),
               close: noEntry ? "—" : fmtHm(r.closing_hours),
               hours: fmtNum(r.hours_run, 1),
+              prestart: r.prestart_done ? `Done (-${fmtNum(r.inspection_hours, 2)}h)` : "—",
               avail: fmtPct(r.availability_pct),
               util: fmtPct(r.utilization_pct),
               fuel: fuelLiters == null ? "—" : fmtNum(fuelLiters, 1),
