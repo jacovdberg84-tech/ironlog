@@ -9147,6 +9147,15 @@ function openStockAction(card, action) {
   setTimeout(() => target.querySelector("input:not([disabled]), select:not([disabled])")?.focus(), 350);
 }
 
+function openUtilityWorkflow(cardId) {
+  const card = document.getElementById(String(cardId || ""));
+  if (!card) return;
+  card.classList.remove("collapsed");
+  card.dataset.collapsed = "false";
+  card.scrollIntoView({ behavior: "smooth", block: "start" });
+  setTimeout(() => card.querySelector("input:not([disabled]), select:not([disabled]), button.btn-primary")?.focus(), 350);
+}
+
 function renderStockRecentTable(recent) {
   const host = qs("spRecent");
   if (!host) return;
@@ -17318,6 +17327,13 @@ async function init() {
   initSettingsDropdown();
   initGlobalSearch();
   initReportCardCollapsible();
+  document.querySelectorAll("[data-utility-hub]").forEach((hub) => {
+    hub.addEventListener("click", (evt) => {
+      const btn = evt.target?.closest?.("button[data-open-card]");
+      if (!btn) return;
+      openUtilityWorkflow(btn.dataset.openCard);
+    });
+  });
   initReportsHub();
   initTasks();
   initTelematicsFaultBanner();

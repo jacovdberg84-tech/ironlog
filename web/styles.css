@@ -5750,6 +5750,14 @@ body.sidebar-collapsed .main-content {
 [data-theme="dark"] .stores-stock-metrics > div { background:#1e293b; }
 [data-theme="dark"] .stores-stock-metrics strong { color:#f8fafc; }
 [data-theme="dark"] .stores-stock-card > footer { border-color:#334155; }
+.utility-action-hub { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin:0 0 16px; }
+.utility-action-hub button { display:grid; gap:3px; padding:12px 14px; border:1px solid #dbe4f0; border-radius:11px; background:#fff; color:#0f172a; text-align:left; cursor:pointer; box-shadow:0 1px 4px rgba(15,23,42,.04); }
+.utility-action-hub button:hover { border-color:#60a5fa; box-shadow:0 3px 10px rgba(37,99,235,.10); }
+.utility-action-hub button.is-primary { border-color:#2563eb; background:#eff6ff; }
+.utility-action-hub strong { font-size:14px; }
+.utility-action-hub small { color:#64748b; line-height:1.3; }
+[data-theme="dark"] .utility-action-hub button { background:#111827; border-color:#334155; color:#f8fafc; }
+[data-theme="dark"] .utility-action-hub button.is-primary { background:#172554; border-color:#3b82f6; }
 .bo-slip-card { order: 5; }
 .bo-short-card { order: 6; }
 .bo-queue-tools {

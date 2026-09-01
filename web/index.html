@@ -1107,10 +1107,17 @@
           <p class="muted">Track lubricant usage, manage stock, and set reorder alerts</p>
         </div>
       </div>
+      <div class="utility-action-hub" data-utility-hub>
+        <button type="button" class="is-primary" data-open-card="lubeIssueCard"><strong>Issue lubricant</strong><small>Book usage to equipment</small></button>
+        <button type="button" data-open-card="lubeUsageCard"><strong>Review usage</strong><small>Entries, assets and reports</small></button>
+        <button type="button" data-open-card="lubeReceiveCard"><strong>Receive stock</strong><small>Record a delivery</small></button>
+        <button type="button" data-open-card="lubeReorderCard"><strong>Reorder alerts</strong><small>Minimum levels and shortages</small></button>
+        <button type="button" data-open-card="lubeAnalyticsCard"><strong>Analytics</strong><small>Trends and mappings</small></button>
+      </div>
 
       <div class="asset-cards-grid">
         <!-- Lube Usage Card -->
-        <div class="dash-card collapsible" data-collapsed="false">
+        <div id="lubeUsageCard" class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon">
@@ -1178,7 +1185,7 @@
         </div>
 
         <!-- Issue Lube Card -->
-        <div class="dash-card collapsible" data-collapsed="false">
+        <div id="lubeIssueCard" class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon">
@@ -1246,7 +1253,7 @@
         </div>
 
         <!-- Reorder Alerts Card -->
-        <div class="dash-card collapsible" data-collapsed="false">
+        <div id="lubeReorderCard" class="dash-card collapsible collapsed" data-collapsed="true">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon dash-card-icon-warning">
@@ -1295,7 +1302,7 @@
         </div>
 
         <!-- Receive Stock Card -->
-        <div class="dash-card collapsible" data-collapsed="false">
+        <div id="lubeReceiveCard" class="dash-card collapsible collapsed" data-collapsed="true">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon dash-card-icon-success">
@@ -1343,7 +1350,7 @@
         </div>
 
         <!-- Lube Analytics Card -->
-        <div class="dash-card collapsible" data-collapsed="true">
+        <div id="lubeAnalyticsCard" class="dash-card collapsible collapsed" data-collapsed="true">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon dash-card-icon-purple">
@@ -2944,9 +2951,23 @@
 
     <!-- FUEL -->
     <section class="panel" id="tab-fuel">
+      <div class="section-header">
+        <div class="section-header-left">
+          <h2>Fuel Management</h2>
+          <p class="muted">Capture fuel, monitor consumption exceptions, and keep FAMS reconciled</p>
+        </div>
+      </div>
+      <div class="utility-action-hub" data-utility-hub>
+        <button type="button" class="is-primary" data-open-card="fuelManualCard"><strong>Record fuel</strong><small>Enter a single fill</small></button>
+        <button type="button" data-open-card="fuelBenchmarkCard"><strong>Review exceptions</strong><small>Actual versus OEM usage</small></button>
+        <button type="button" data-open-card="fuelFamsCard"><strong>FAMS sync</strong><small>Status, sync and fallback import</small></button>
+        <button type="button" data-open-card="fuelMassCard"><strong>Bulk capture</strong><small>Paste multiple entries</small></button>
+        <button type="button" data-open-card="fuelBaselineCard"><strong>OEM baselines</strong><small>Set consumption targets</small></button>
+        <button type="button" data-open-card="fuelSnapshotsCard"><strong>Snapshots</strong><small>Daily, weekly and monthly</small></button>
+      </div>
       <div class="asset-cards-grid">
         <!-- Manual Fuel Input Card -->
-        <div class="dash-card collapsible" data-collapsed="false">
+        <div id="fuelManualCard" class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon">
@@ -3008,7 +3029,7 @@
         </div>
 
         <!-- Mass Fuel Input Card -->
-        <div class="dash-card collapsible" data-collapsed="false">
+        <div id="fuelMassCard" class="dash-card collapsible collapsed" data-collapsed="true">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon">
@@ -3044,7 +3065,7 @@
         </div>
 
         <!-- FAMS Import Card -->
-        <div class="dash-card collapsible" data-collapsed="false">
+        <div id="fuelFamsCard" class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon">
@@ -3133,7 +3154,7 @@
         </div>
 
         <!-- OEM Baseline Card -->
-        <div class="dash-card collapsible" data-collapsed="false">
+        <div id="fuelBaselineCard" class="dash-card collapsible collapsed" data-collapsed="true">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon">
@@ -3178,7 +3199,7 @@
         </div>
 
         <!-- Fuel Benchmark Card -->
-        <div class="dash-card collapsible full-width" data-collapsed="false">
+        <div id="fuelBenchmarkCard" class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon">
@@ -3340,7 +3361,7 @@
         </div>
 
         <!-- Fuel Snapshots Card -->
-        <div class="dash-card collapsible full-width" data-collapsed="false">
+        <div id="fuelSnapshotsCard" class="dash-card collapsible collapsed full-width" data-collapsed="true">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon">
