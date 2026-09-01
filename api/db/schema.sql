@@ -432,6 +432,14 @@ CREATE TABLE IF NOT EXISTS breakdown_offsite_repairs (
   estimated_cost REAL,
   actual_cost REAL,
   attachment_name TEXT,
+  repair_reason TEXT,
+  approval_status TEXT NOT NULL DEFAULT 'not_required',
+  quote_number TEXT,
+  responsible_person TEXT,
+  approved_by TEXT,
+  approved_date TEXT,
+  return_confirmed_by TEXT,
+  return_confirmed_date TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   created_by TEXT,
@@ -441,6 +449,17 @@ CREATE TABLE IF NOT EXISTS breakdown_offsite_repairs (
 );
 CREATE INDEX IF NOT EXISTS idx_offsite_repairs_site_date ON breakdown_offsite_repairs(site_code, sent_date);
 CREATE INDEX IF NOT EXISTS idx_offsite_repairs_asset ON breakdown_offsite_repairs(asset_id);
+CREATE TABLE IF NOT EXISTS breakdown_offsite_repair_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  offsite_repair_id INTEGER NOT NULL,
+  repair_status TEXT NOT NULL,
+  approval_status TEXT,
+  notes TEXT,
+  changed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  changed_by TEXT,
+  FOREIGN KEY (offsite_repair_id) REFERENCES breakdown_offsite_repairs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_offsite_history_repair ON breakdown_offsite_repair_history(offsite_repair_id, changed_at);
 
 /* =========================
    TASKS

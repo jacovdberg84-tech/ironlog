@@ -87,6 +87,10 @@
             <input id="boOffsiteEstCost" class="w-120" type="number" min="0" step="0.01" placeholder="Est. $" />
             <input id="boOffsiteActCost" class="w-120" type="number" min="0" step="0.01" placeholder="Actual $" />
             <input id="boOffsiteNotes" class="minw-260" style="flex:1;" placeholder="Progress comments / notes (optional)" />
+            <input id="boOffsiteReason" class="minw-260" style="flex:1;" placeholder="Repair reason" />
+            <input id="boOffsiteResponsible" class="w-200" placeholder="Responsible person" />
+            <select id="boOffsiteApproval" class="w-180"><option value="not_required">No approval needed</option><option value="quote_required">Quote required</option><option value="awaiting_approval">Awaiting approval</option><option value="approved">Approved</option><option value="declined">Declined</option></select>
+            <input id="boOffsiteQuote" class="w-160" placeholder="Quote #" />
             <button type="button" id="boOffsiteSave">Add offsite repair</button>
             <label class="chk">Show returned <input id="boOffsiteIncludeClosed" type="checkbox" /></label>
             <button type="button" id="boOffsiteRefresh">Refresh</button>

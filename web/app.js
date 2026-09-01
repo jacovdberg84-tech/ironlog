@@ -9976,12 +9976,13 @@ function ptOffStatusLabel(s) {
 }
 
 function clearPtOffForm() {
-  ["ptOffAsset", "ptOffAttachment", "ptOffLocation", "ptOffInvoice", "ptOffVendor", "ptOffNotes", "ptOffEta"].forEach((id) => {
+  ["ptOffAsset", "ptOffAttachment", "ptOffLocation", "ptOffInvoice", "ptOffVendor", "ptOffNotes", "ptOffEta", "ptOffReason", "ptOffResponsible", "ptOffQuote"].forEach((id) => {
     if (qs(id)) qs(id).value = "";
   });
   if (qs("ptOffEstCost")) qs("ptOffEstCost").value = "0";
   if (qs("ptOffActCost")) qs("ptOffActCost").value = "0";
   if (qs("ptOffStatus")) qs("ptOffStatus").value = "sent_offsite";
+  if (qs("ptOffApproval")) qs("ptOffApproval").value = "not_required";
   if (qs("ptOffSent")) qs("ptOffSent").value = ptTodayYmd();
   if (qs("ptOffEditId")) qs("ptOffEditId").value = "";
   const msg = qs("ptOffMsg");
@@ -9998,54 +9999,44 @@ function renderPtOffsiteTable(rows) {
     host.innerHTML = `<div class="muted small">No off-site repairs for this filter.</div>`;
     return;
   }
-  host.innerHTML = `
-    <table class="gridTable" style="min-width:1280px;">
-      <thead>
-        <tr>
-          <th>Asset / attachment</th>
-          <th>Status</th>
-          <th>Vendor</th>
-          <th>Invoice #</th>
-          <th>Sent</th>
-          <th>Location</th>
-          <th>ETA on site</th>
-          <th style="text-align:right;">Est. $</th>
-          <th style="text-align:right;">Actual $</th>
-          <th>Notes</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        ${list.map((r) => {
+  const approvalLabel = (value) => ({ not_required: "Not required", quote_required: "Quote required", awaiting_approval: "Awaiting approval", approved: "Approved", declined: "Declined" }[value] || value || "Not required");
+  host.innerHTML = `<div class="offsite-workflow-grid">
+    ${list.map((r) => {
           const id = Number(r.id || 0);
           const overdue = ptIsOverdueEta(r.expected_return_date, String(r.repair_status || "").toLowerCase() === "returned");
           const attach = String(r.attachment_name || "").trim();
-          const title = `<strong>${escapeHtml(String(r.asset_code || ""))}</strong>${attach ? `<br><small class="muted">${escapeHtml(attach)}</small>` : ""}`;
           const statusOpts = ["sent_offsite", "diagnosis", "in_repair", "waiting_parts", "ready_return", "returned"]
             .map((st) => `<option value="${st}"${String(r.repair_status || "").toLowerCase() === st ? " selected" : ""}>${ptOffStatusLabel(st)}</option>`)
             .join("");
+          const approvalOpts = ["not_required", "quote_required", "awaiting_approval", "approved", "declined"]
+            .map((st) => `<option value="${st}"${String(r.approval_status || "not_required").toLowerCase() === st ? " selected" : ""}>${approvalLabel(st)}</option>`)
+            .join("");
           return `
-            <tr data-pt-off-row="${id}" class="${overdue ? "pt-row-overdue" : ""}">
-              <td>${title}<div class="muted small">${escapeHtml(String(r.asset_name || ""))}</div></td>
-              <td><select data-pt-off-field="repair_status" class="w-full" style="min-width:120px;">${statusOpts}</select></td>
-              <td><input type="text" class="spo-inline-input w-full" data-pt-off-field="vendor" value="${spoAttrVal(r.vendor || "")}" /></td>
-              <td><input type="text" class="spo-inline-input w-full" data-pt-off-field="invoice_number" value="${spoAttrVal(r.invoice_number || "")}" /></td>
-              <td><input type="date" class="spo-inline-input w-full" data-pt-off-field="sent_date" value="${spoAttrVal(r.sent_date || "")}" /></td>
-              <td><input type="text" class="spo-inline-input w-full" data-pt-off-field="current_location" value="${spoAttrVal(r.current_location || "")}" /></td>
-              <td><input type="date" class="spo-inline-input w-full" data-pt-off-field="expected_return_date" value="${spoAttrVal(r.expected_return_date || "")}" /></td>
-              <td><input type="number" min="0" step="0.01" class="spo-inline-input w-full" data-pt-off-field="estimated_cost" value="${spoAttrVal(r.estimated_cost != null ? r.estimated_cost : "")}" /></td>
-              <td><input type="number" min="0" step="0.01" class="spo-inline-input w-full" data-pt-off-field="actual_cost" value="${spoAttrVal(r.actual_cost != null ? r.actual_cost : "")}" /></td>
-              <td>
-                <input type="text" class="spo-inline-input w-full" data-pt-off-field="notes" value="${spoAttrVal(r.notes || "")}" />
+            <article data-pt-off-row="${id}" class="offsite-workflow-card ${overdue ? "is-overdue" : ""}">
+              <header><div><strong>${escapeHtml(String(r.asset_code || ""))}</strong> · ${escapeHtml(String(r.asset_name || ""))}${attach ? `<div class="muted small">${escapeHtml(attach)}</div>` : ""}</div><span class="pill ${overdue ? "red" : "blue"}">${overdue ? "OVERDUE" : `${Number(r.days_offsite || 0)} days offsite`}</span></header>
+              <div class="offsite-workflow-fields">
+                <label>Status<select data-pt-off-field="repair_status">${statusOpts}</select></label>
+                <label>Approval<select data-pt-off-field="approval_status">${approvalOpts}</select></label>
+                <label>Responsible<input data-pt-off-field="responsible_person" value="${spoAttrVal(r.responsible_person || "")}" /></label>
+                <label>Vendor<input data-pt-off-field="vendor" value="${spoAttrVal(r.vendor || "")}" /></label>
+                <label>Location<input data-pt-off-field="current_location" value="${spoAttrVal(r.current_location || "")}" /></label>
+                <label>Sent<input type="date" data-pt-off-field="sent_date" value="${spoAttrVal(r.sent_date || "")}" /></label>
+                <label>Expected return<input type="date" data-pt-off-field="expected_return_date" value="${spoAttrVal(r.expected_return_date || "")}" /></label>
+                <label>Actual return<input type="date" data-pt-off-field="actual_return_date" value="${spoAttrVal(r.actual_return_date || "")}" /></label>
+                <label>Quote #<input data-pt-off-field="quote_number" value="${spoAttrVal(r.quote_number || "")}" /></label>
+                <label>Invoice #<input data-pt-off-field="invoice_number" value="${spoAttrVal(r.invoice_number || "")}" /></label>
+                <label>Estimated cost<input type="number" min="0" step="0.01" data-pt-off-field="estimated_cost" value="${spoAttrVal(r.estimated_cost ?? "")}" /></label>
+                <label>Actual cost<input type="number" min="0" step="0.01" data-pt-off-field="actual_cost" value="${spoAttrVal(r.actual_cost ?? "")}" /></label>
+              </div>
+              <label class="offsite-wide-field">Repair reason<input data-pt-off-field="repair_reason" value="${spoAttrVal(r.repair_reason || "")}" /></label>
+              <label class="offsite-wide-field">Progress / next action<textarea rows="2" data-pt-off-field="notes">${escapeHtml(r.notes || "")}</textarea></label>
                 <input type="hidden" data-pt-off-field="attachment_name" value="${spoAttrVal(r.attachment_name || "")}" />
                 <input type="hidden" data-pt-off-field="breakdown_id" value="${spoAttrVal(r.breakdown_id || "")}" />
-              </td>
-              <td><button type="button" class="btn btn-primary btn-sm" data-pt-off-save="${id}">Save</button></td>
-            </tr>`;
+              <footer><span class="muted small">${r.return_confirmed_by ? `Return confirmed by ${escapeHtml(r.return_confirmed_by)}` : `Updated ${escapeHtml(r.updated_at || "—")}`}</span><div><button type="button" class="btn btn-secondary btn-sm" data-pt-off-history="${id}">History</button> <button type="button" class="btn btn-primary btn-sm" data-pt-off-save="${id}">Save progress</button></div></footer>
+              <div class="offsite-history" data-pt-off-history-host="${id}" hidden></div>
+            </article>`;
         }).join("")}
-      </tbody>
-    </table>
-  `;
+    </div>`;
 }
 
 async function loadPtOffsiteRepairs() {
@@ -10083,7 +10074,15 @@ async function savePtOffsiteRepair() {
     estimated_cost: Number(qs("ptOffEstCost")?.value || 0) || 0,
     actual_cost: Number(qs("ptOffActCost")?.value || 0) || 0,
     notes: String(qs("ptOffNotes")?.value || "").trim() || null,
+    repair_reason: String(qs("ptOffReason")?.value || "").trim() || null,
+    responsible_person: String(qs("ptOffResponsible")?.value || "").trim() || null,
+    approval_status: String(qs("ptOffApproval")?.value || "not_required").trim(),
+    quote_number: String(qs("ptOffQuote")?.value || "").trim() || null,
   };
+  if (!body.repair_reason) {
+    if (msg) msg.textContent = "Repair reason is required.";
+    return;
+  }
   if (msg) msg.textContent = "Saving…";
   await fetchJson(`${API}/api/breakdown-ops/offsite-repairs`, {
     method: "POST",
@@ -10112,9 +10111,14 @@ function readPtOffRowPatch(rowEl) {
     sent_date: read("sent_date"),
     current_location: read("current_location") || null,
     expected_return_date: read("expected_return_date") || null,
+    actual_return_date: read("actual_return_date") || null,
     estimated_cost: estimated_cost === "" ? null : Number(estimated_cost),
     actual_cost: actual_cost === "" ? null : Number(actual_cost),
     notes: read("notes") || null,
+    repair_reason: read("repair_reason") || null,
+    responsible_person: read("responsible_person") || null,
+    approval_status: read("approval_status") || "not_required",
+    quote_number: read("quote_number") || null,
     attachment_name: read("attachment_name") || null,
     breakdown_id: breakdownRaw ? Number(breakdownRaw) : null,
   };
@@ -11405,6 +11409,23 @@ async function openMonthlyFleetCostPdf() {
   const url = monthlyFleetCostPdfUrl(false);
   if (!url) return alert("Select a cost month first.");
   try { await openAuthedPdf(url); } catch (err) { alert(`Could not open Monthly Fleet Cost PDF: ${err.message || err}`); }
+}
+
+async function togglePtOffsiteHistory(id) {
+  const host = qs("ptOffList")?.querySelector(`[data-pt-off-history-host="${Number(id)}"]`);
+  if (!host) return;
+  if (!host.hidden) { host.hidden = true; return; }
+  host.hidden = false;
+  host.innerHTML = `<div class="muted small">Loading history…</div>`;
+  try {
+    const data = await fetchJson(`${API}/api/breakdown-ops/offsite-repairs/${Number(id)}/history`);
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    host.innerHTML = rows.length
+      ? rows.map((r) => `<div class="offsite-history-row"><strong>${escapeHtml(ptOffStatusLabel(r.repair_status))}</strong><span>${escapeHtml(r.approval_status || "")}</span><span>${escapeHtml(r.changed_by || "user")} · ${escapeHtml(r.changed_at || "")}</span><div>${escapeHtml(r.notes || "No comment")}</div></div>`).join("")
+      : `<div class="muted small">No progress history recorded yet.</div>`;
+  } catch (e) {
+    host.innerHTML = `<div class="message-error">${escapeHtml(e.message || String(e))}</div>`;
+  }
 }
 
 function downloadMonthlyFleetCostPdf() {
@@ -17979,6 +18000,11 @@ async function init() {
   qs("ptOffStatusFilter")?.addEventListener("change", () => renderPtOffsiteTable(ptOffsiteCache));
   qs("ptOffIncludeReturned")?.addEventListener("change", () => loadPtOffsiteRepairs().catch(() => {}));
   qs("ptOffList")?.addEventListener("click", (evt) => {
+    const historyBtn = evt.target?.closest?.("button[data-pt-off-history]");
+    if (historyBtn) {
+      togglePtOffsiteHistory(Number(historyBtn.getAttribute("data-pt-off-history") || 0));
+      return;
+    }
     const btn = evt.target?.closest?.("button[data-pt-off-save]");
     if (!btn) return;
     savePtOffsiteRow(Number(btn.getAttribute("data-pt-off-save") || 0)).catch((e) =>

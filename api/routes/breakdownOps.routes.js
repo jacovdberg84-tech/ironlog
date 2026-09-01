@@ -251,6 +251,14 @@ export default async function breakdownOpsRoutes(app) {
       estimated_cost REAL,
       actual_cost REAL,
       attachment_name TEXT,
+      repair_reason TEXT,
+      approval_status TEXT NOT NULL DEFAULT 'not_required',
+      quote_number TEXT,
+      responsible_person TEXT,
+      approved_by TEXT,
+      approved_date TEXT,
+      return_confirmed_by TEXT,
+      return_confirmed_date TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       created_by TEXT,
@@ -273,6 +281,27 @@ export default async function breakdownOpsRoutes(app) {
   ensureOffsiteCol("estimated_cost", "estimated_cost REAL");
   ensureOffsiteCol("actual_cost", "actual_cost REAL");
   ensureOffsiteCol("attachment_name", "attachment_name TEXT");
+  ensureOffsiteCol("repair_reason", "repair_reason TEXT");
+  ensureOffsiteCol("approval_status", "approval_status TEXT NOT NULL DEFAULT 'not_required'");
+  ensureOffsiteCol("quote_number", "quote_number TEXT");
+  ensureOffsiteCol("responsible_person", "responsible_person TEXT");
+  ensureOffsiteCol("approved_by", "approved_by TEXT");
+  ensureOffsiteCol("approved_date", "approved_date TEXT");
+  ensureOffsiteCol("return_confirmed_by", "return_confirmed_by TEXT");
+  ensureOffsiteCol("return_confirmed_date", "return_confirmed_date TEXT");
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS breakdown_offsite_repair_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      offsite_repair_id INTEGER NOT NULL,
+      repair_status TEXT NOT NULL,
+      approval_status TEXT,
+      notes TEXT,
+      changed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      changed_by TEXT,
+      FOREIGN KEY (offsite_repair_id) REFERENCES breakdown_offsite_repairs(id) ON DELETE CASCADE
+    )
+  `).run();
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_offsite_history_repair ON breakdown_offsite_repair_history(offsite_repair_id, changed_at)`).run();
 
   app.get("/parts/lookup", async (req, reply) => {
     const part_code = String(req.query?.part_code || req.query?.q || "").trim();
@@ -895,6 +924,14 @@ export default async function breakdownOpsRoutes(app) {
         r.estimated_cost,
         r.actual_cost,
         r.attachment_name,
+        r.repair_reason,
+        r.approval_status,
+        r.quote_number,
+        r.responsible_person,
+        r.approved_by,
+        r.approved_date,
+        r.return_confirmed_by,
+        r.return_confirmed_date,
         r.created_at,
         r.updated_at,
         r.created_by,
@@ -908,7 +945,24 @@ export default async function breakdownOpsRoutes(app) {
       ...r,
       estimated_cost: r.estimated_cost != null ? Number(r.estimated_cost) : null,
       actual_cost: r.actual_cost != null ? Number(r.actual_cost) : null,
+      days_offsite: Math.max(0, Math.floor((Date.parse(`${r.actual_return_date || new Date().toISOString().slice(0, 10)}T00:00:00Z`) - Date.parse(`${r.sent_date}T00:00:00Z`)) / 86400000)),
+      overdue: Boolean(r.repair_status !== "returned" && r.expected_return_date && r.expected_return_date < new Date().toISOString().slice(0, 10)),
     }));
+    return reply.send({ ok: true, rows });
+  });
+
+  app.get("/offsite-repairs/:id/history", async (req, reply) => {
+    const id = Number(req.params?.id || 0);
+    const site_code = getSiteCode(req);
+    if (!id) return reply.code(400).send({ ok: false, error: "Invalid id" });
+    const exists = db.prepare(`SELECT 1 FROM breakdown_offsite_repairs WHERE id = ? AND site_code = ?`).get(id, site_code);
+    if (!exists) return reply.code(404).send({ ok: false, error: "Not found" });
+    const rows = db.prepare(`
+      SELECT id, repair_status, approval_status, notes, changed_at, changed_by
+      FROM breakdown_offsite_repair_history
+      WHERE offsite_repair_id = ?
+      ORDER BY id DESC
+    `).all(id);
     return reply.send({ ok: true, rows });
   });
 
@@ -935,6 +989,13 @@ export default async function breakdownOpsRoutes(app) {
     const invoice_number = String(req.body?.invoice_number || "").trim() || null;
     const current_location = String(req.body?.current_location || "").trim() || null;
     const attachment_name = String(req.body?.attachment_name || "").trim() || null;
+    const repair_reason = String(req.body?.repair_reason || "").trim() || null;
+    const approval_status = String(req.body?.approval_status || "not_required").trim().toLowerCase();
+    if (!new Set(["not_required", "quote_required", "awaiting_approval", "approved", "declined"]).has(approval_status)) {
+      return reply.code(400).send({ ok: false, error: "Invalid approval_status" });
+    }
+    const quote_number = String(req.body?.quote_number || "").trim() || null;
+    const responsible_person = String(req.body?.responsible_person || "").trim() || null;
     const estimated_cost = req.body?.estimated_cost != null && req.body?.estimated_cost !== ""
       ? Math.max(0, Number(req.body.estimated_cost))
       : null;
@@ -946,8 +1007,9 @@ export default async function breakdownOpsRoutes(app) {
       INSERT INTO breakdown_offsite_repairs (
         site_code, asset_id, breakdown_id, repair_status, sent_date, expected_return_date, actual_return_date,
         vendor, notes, invoice_number, current_location, estimated_cost, actual_cost, attachment_name,
-        created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        repair_reason, approval_status, quote_number, responsible_person, approved_by, approved_date,
+        return_confirmed_by, return_confirmed_date, created_by, updated_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       site_code,
       Number(asset.id),
@@ -963,10 +1025,24 @@ export default async function breakdownOpsRoutes(app) {
       Number.isFinite(estimated_cost) ? estimated_cost : null,
       Number.isFinite(actual_cost) ? actual_cost : null,
       attachment_name,
+      repair_reason,
+      approval_status,
+      quote_number,
+      responsible_person,
+      approval_status === "approved" ? user : null,
+      approval_status === "approved" ? sent_date : null,
+      repair_status === "returned" ? user : null,
+      repair_status === "returned" ? (actual_return_date || sent_date) : null,
       user,
       user
     );
-    return reply.send({ ok: true, id: Number(ins.lastInsertRowid) });
+    const newId = Number(ins.lastInsertRowid);
+    db.prepare(`
+      INSERT INTO breakdown_offsite_repair_history
+        (offsite_repair_id, repair_status, approval_status, notes, changed_by)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(newId, repair_status, approval_status, notes || "Offsite repair created", user);
+    return reply.send({ ok: true, id: newId });
   });
 
   app.put("/offsite-repairs/:id", async (req, reply) => {
@@ -998,6 +1074,13 @@ export default async function breakdownOpsRoutes(app) {
     const attachment_name = req.body?.attachment_name != null
       ? String(req.body.attachment_name).trim() || null
       : undefined;
+    const repair_reason = req.body?.repair_reason != null ? String(req.body.repair_reason).trim() || null : undefined;
+    const approval_status = String(req.body?.approval_status ?? "").trim().toLowerCase() || undefined;
+    if (approval_status && !new Set(["not_required", "quote_required", "awaiting_approval", "approved", "declined"]).has(approval_status)) {
+      return reply.code(400).send({ ok: false, error: "Invalid approval_status" });
+    }
+    const quote_number = req.body?.quote_number != null ? String(req.body.quote_number).trim() || null : undefined;
+    const responsible_person = req.body?.responsible_person != null ? String(req.body.responsible_person).trim() || null : undefined;
     const estimated_cost = req.body?.estimated_cost !== undefined
       ? (req.body.estimated_cost === null || req.body.estimated_cost === ""
         ? null
@@ -1015,6 +1098,8 @@ export default async function breakdownOpsRoutes(app) {
       SET breakdown_id = ?, repair_status = ?, sent_date = ?, expected_return_date = ?, actual_return_date = ?,
           vendor = ?, notes = ?,
           invoice_number = ?, current_location = ?, estimated_cost = ?, actual_cost = ?, attachment_name = ?,
+          repair_reason = ?, approval_status = ?, quote_number = ?, responsible_person = ?,
+          approved_by = ?, approved_date = ?, return_confirmed_by = ?, return_confirmed_date = ?,
           updated_at = datetime('now'), updated_by = ?
       WHERE id = ? AND site_code = ?
     `).run(
@@ -1034,10 +1119,28 @@ export default async function breakdownOpsRoutes(app) {
         ? (Number.isFinite(actual_cost) || actual_cost === null ? actual_cost : existing?.actual_cost)
         : existing?.actual_cost ?? null,
       attachment_name !== undefined ? attachment_name : existing?.attachment_name ?? null,
+      repair_reason !== undefined ? repair_reason : existing?.repair_reason ?? null,
+      approval_status || existing?.approval_status || "not_required",
+      quote_number !== undefined ? quote_number : existing?.quote_number ?? null,
+      responsible_person !== undefined ? responsible_person : existing?.responsible_person ?? null,
+      approval_status === "approved" && existing?.approval_status !== "approved" ? user : existing?.approved_by ?? null,
+      approval_status === "approved" && existing?.approval_status !== "approved" ? new Date().toISOString().slice(0, 10) : existing?.approved_date ?? null,
+      repair_status === "returned" && existing?.repair_status !== "returned" ? user : existing?.return_confirmed_by ?? null,
+      repair_status === "returned" && existing?.repair_status !== "returned"
+        ? (actual_return_date || new Date().toISOString().slice(0, 10))
+        : existing?.return_confirmed_date ?? null,
       user,
       id,
       site_code
     );
+    const effectiveApproval = approval_status || existing?.approval_status || "not_required";
+    if (repair_status !== existing?.repair_status || effectiveApproval !== existing?.approval_status || notes !== existing?.notes) {
+      db.prepare(`
+        INSERT INTO breakdown_offsite_repair_history
+          (offsite_repair_id, repair_status, approval_status, notes, changed_by)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(id, repair_status, effectiveApproval, notes, user);
+    }
     return reply.send({ ok: true, id });
   });
 }

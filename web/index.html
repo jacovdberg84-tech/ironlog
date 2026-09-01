@@ -2902,9 +2902,15 @@
                 <input id="ptOffActCost" type="number" min="0" step="0.01" value="0" class="w-full" />
               </div>
               <div class="form-field" style="flex:1;">
-                <label>Notes</label>
-                <input id="ptOffNotes" class="w-full" placeholder="Progress / comments" />
+                <label>Repair reason *</label>
+                <input id="ptOffReason" class="w-full" placeholder="What is being repaired and why?" />
               </div>
+              <div class="form-field"><label>Responsible person</label><input id="ptOffResponsible" class="w-full" placeholder="Owner / coordinator" /></div>
+            </div>
+            <div class="form-row">
+              <div class="form-field"><label>Approval</label><select id="ptOffApproval" class="w-full"><option value="not_required">Not required</option><option value="quote_required">Quote required</option><option value="awaiting_approval">Awaiting approval</option><option value="approved">Approved</option><option value="declined">Declined</option></select></div>
+              <div class="form-field"><label>Quote #</label><input id="ptOffQuote" class="w-full" placeholder="Quotation reference" /></div>
+              <div class="form-field" style="flex:1;"><label>Progress update</label><input id="ptOffNotes" class="w-full" placeholder="Latest status / next action" /></div>
               <div class="form-field form-field-action">
                 <button id="ptOffSave" type="button" class="btn btn-primary">Save off-site</button>
                 <button id="ptOffClear" type="button" class="btn btn-secondary">Clear</button>

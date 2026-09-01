@@ -10538,6 +10538,12 @@ export default async function reportsRoutes(app) {
             r.actual_return_date,
             r.vendor,
             r.notes
+            ,r.repair_reason
+            ,r.approval_status
+            ,r.quote_number
+            ,r.responsible_person
+            ,r.estimated_cost
+            ,r.actual_cost
           FROM breakdown_offsite_repairs r
           JOIN assets a ON a.id = r.asset_id
           WHERE LOWER(TRIM(COALESCE(r.site_code, 'main'))) IN (${offsiteSiteAliases.map(() => "?").join(", ")})
@@ -10738,15 +10744,16 @@ export default async function reportsRoutes(app) {
             table(
               doc,
               [
-                { key: "asset", label: "Plant #", width: 0.08 },
-                { key: "equipment", label: "Equipment", width: 0.16 },
-                { key: "status", label: "Repair status", width: 0.11 },
-                { key: "vendor", label: "Repairer", width: 0.11 },
-                { key: "sent", label: "Sent", width: 0.08 },
-                { key: "expected", label: "Expected", width: 0.09 },
-                { key: "elapsed", label: "Days out", width: 0.07, align: "right" },
-                { key: "tracking", label: "Return tracking", width: 0.13 },
-                { key: "notes", label: "Progress / next action", width: 0.17 },
+                { key: "asset", label: "Plant #", width: 0.07 },
+                { key: "equipment", label: "Equipment", width: 0.13 },
+                { key: "status", label: "Repair status", width: 0.10 },
+                { key: "owner", label: "Owner / repairer", width: 0.12 },
+                { key: "sent", label: "Sent", width: 0.07 },
+                { key: "expected", label: "Expected", width: 0.08 },
+                { key: "elapsed", label: "Days out", width: 0.06, align: "right" },
+                { key: "tracking", label: "Return tracking", width: 0.11 },
+                { key: "approval", label: "Approval", width: 0.10 },
+                { key: "notes", label: "Reason / next action", width: 0.16 },
               ],
               offsiteRepairsPdf.map((r) => {
                 const sent = String(r.sent_date || "").trim();
@@ -10767,18 +10774,20 @@ export default async function reportsRoutes(app) {
                   asset: r.asset_code,
                   equipment: compactCell(r.asset_name ?? "", 48),
                   status: statusLabel(r.repair_status),
-                  vendor: compactCell(r.vendor ?? "", 36) || "—",
+                  owner: compactCell([r.responsible_person, r.vendor].filter(Boolean).join(" / "), 44) || "—",
                   sent: sent || "—",
                   expected: expected || "—",
                   elapsed: elapsed == null ? "—" : String(elapsed),
                   tracking,
-                  notes: compactCell(r.notes ?? "", 120) || "—",
+                  approval: compactCell(String(r.approval_status || "not required").replaceAll("_", " "), 28),
+                  notes: compactCell([r.repair_reason, r.notes].filter(Boolean).join(" · "), 120) || "—",
                 };
               })
             );
           }
         }
 
+        ensurePageSpace(doc, 245);
         sectionTitle(doc, "Breakdown incidents");
         table(
           doc,

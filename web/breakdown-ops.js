@@ -296,6 +296,10 @@ function collectOffsitePayloadFromForm() {
       ? Number(qs("boOffsiteActCost").value)
       : null,
     notes: String(qs("boOffsiteNotes")?.value || "").trim() || null,
+    repair_reason: String(qs("boOffsiteReason")?.value || "").trim() || null,
+    responsible_person: String(qs("boOffsiteResponsible")?.value || "").trim() || null,
+    approval_status: String(qs("boOffsiteApproval")?.value || "not_required").trim(),
+    quote_number: String(qs("boOffsiteQuote")?.value || "").trim() || null,
   };
 }
 
@@ -342,6 +346,7 @@ function renderOffsiteRow(r) {
       `<span class="pill ${String(r.repair_status || "").toLowerCase() === "returned" ? "blue" : "orange"}">${escapeHtml(fmtOffsiteStatusLabel(r.repair_status))}</span></div>` +
       `<small>Sent: ${escapeHtml(sent || "—")} | Expected: ${escapeHtml(expected || "—")} | Actual: ${escapeHtml(actual || "—")}</small><br/>` +
       `<small>Elapsed: ${escapeHtml(elapsed)} | Planned timeframe: ${escapeHtml(expectedLead)}</small><br/>` +
+      `<small>Owner: ${escapeHtml(r.responsible_person || "—")} | Approval: ${escapeHtml(String(r.approval_status || "not_required").replaceAll("_", " "))} | Reason: ${escapeHtml(r.repair_reason || "—")}</small><br/>` +
       `<small>Breakdown: ${r.breakdown_id ? `#${Number(r.breakdown_id)}` : "—"}` +
         `${invoice ? ` | Invoice: ${escapeHtml(invoice)}` : ""}` +
         `${location ? ` | Location: ${escapeHtml(location)}` : ""}</small>` +
