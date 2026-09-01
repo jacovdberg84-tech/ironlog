@@ -53,7 +53,7 @@ import {
 import { resolveStorageAbs as resolveStorageAbsUtil, getDataRoot, normalizeStorageRel } from "../utils/storagePaths.js";
 import { getPdfReportBranding, savePdfReportBranding, resolvePdfCompanyLogoAbs, setPdfCompanyLogoPath, clearPdfCompanyLogo, getPdfBrandingLogoDir } from "../utils/reportSettings.js";
 import { prestartDeductionForProductionFleet, PRESTART_DEDUCTION_HOURS } from "../utils/prestartDaily.js";
-import { listShortBreakdownsForDate, listPlannedMaintenanceForDate, shiftDateYmd } from "../utils/shortBreakdowns.js";
+import { listPlannedMaintenanceForDate, shiftDateYmd } from "../utils/shortBreakdowns.js";
 
 let maintenanceMasterSchedulerStarted = false;
 let reportSubscriptionsSchedulerStarted = false;
@@ -10255,7 +10255,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    const reportRevision = "daily-pdf-prevday-fuel-avail-r2026-07-25";
+    const reportRevision = "daily-pdf-ops-focus-r2026-09-01";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -10297,22 +10297,6 @@ export default async function reportsRoutes(app) {
       ORDER BY a.asset_code
     `).all(date);
 
-    const fuel = db.prepare(`
-      SELECT a.asset_code, fl.liters, fl.source
-      FROM fuel_logs fl
-      JOIN assets a ON a.id = fl.asset_id
-      WHERE fl.log_date = ?
-      ORDER BY a.asset_code
-    `).all(date);
-
-    const oil = db.prepare(`
-      SELECT a.asset_code, ol.oil_type, ol.quantity
-      FROM oil_logs ol
-      JOIN assets a ON a.id = ol.asset_id
-      WHERE ol.log_date = ?
-      ORDER BY a.asset_code
-    `).all(date);
-
     const breakdownDowntimeCol = getBreakdownDowntimeColumn();
     const hasBreakdownStatus = hasColumn("breakdowns", "status");
     const hasBreakdownEndAt = hasColumn("breakdowns", "end_at");
@@ -10326,6 +10310,7 @@ export default async function reportsRoutes(app) {
     const hasEtsRepairDate = hasColumn("breakdowns", "ets_repair_date");
     const breakdownParams = [date, date, date];
     if (hasBreakdownEndAt) breakdownParams.push(date);
+    const breakdownAssetSeen = new Set();
     const breakdowns = db.prepare(`
       SELECT
         b.id,
@@ -10352,6 +10337,8 @@ export default async function reportsRoutes(app) {
       JOIN assets a ON a.id = b.asset_id
       LEFT JOIN daily_hours dh ON dh.asset_id = b.asset_id AND dh.work_date = ?
       WHERE ${breakdownDateExpr} <= ?
+        AND UPPER(COALESCE(b.description, '')) NOT LIKE '%WORK ORDER COMPLETED%'
+        AND UPPER(COALESCE(b.description, '')) NOT LIKE 'MANAGER INSPECTION ALERT%'
         AND (
           ${hasBreakdownEndAt ? "b.end_at IS NULL OR DATE(b.end_at) >= ?" : "1 = 1"}
           OR ${breakdownStatusExpr} IN ('open', 'in_progress')
@@ -10373,7 +10360,16 @@ export default async function reportsRoutes(app) {
         // Align displayed downtime with selected daily scheduled hours.
         downtime_hours: Number(daysDown) * Number(scheduled || 0),
       };
-    });
+    }).sort((a, b) => {
+      const bDate = String(b.breakdown_date || b.start_at || "");
+      const aDate = String(a.breakdown_date || a.start_at || "");
+      return bDate.localeCompare(aDate) || Number(b.id || 0) - Number(a.id || 0);
+    }).filter((row) => {
+      const key = String(row.asset_code || row.asset_name || row.id || "");
+      if (breakdownAssetSeen.has(key)) return false;
+      breakdownAssetSeen.add(key);
+      return true;
+    }).sort((a, b) => Number(b.days_down || 0) - Number(a.days_down || 0));
 
     const hasWOCompletedAt = hasColumn("work_orders", "completed_at");
     const woCompletedFilter = hasWOCompletedAt
@@ -10470,6 +10466,7 @@ export default async function reportsRoutes(app) {
         w.status,
         w.assigned_artisan_name,
         w.repair_progress,
+        ${hasPartsStatus ? "b.parts_status" : "NULL AS parts_status"},
         CASE
           WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(b.start_at), ''), NULLIF(TRIM(b.breakdown_date), ''), w.opened_at)
           ELSE w.opened_at
@@ -10488,33 +10485,35 @@ export default async function reportsRoutes(app) {
       LIMIT 30
     `).all().filter((r) => !staleClosedWoIds.has(Number(r.id)));
 
-    const stockCritical = db.prepare(`
-      SELECT p.part_code, p.part_name, p.min_stock, IFNULL(SUM(sm.quantity),0) AS on_hand
-      FROM parts p
-      LEFT JOIN stock_movements sm ON sm.part_id = p.id
-      WHERE p.critical = 1
-      GROUP BY p.id
-      ORDER BY on_hand ASC
-      LIMIT 20
-    `).all().map(r => ({
-      ...r,
-      on_hand: Number(r.on_hand),
-      below_min: Number(r.on_hand) < Number(r.min_stock),
-    }));
     const hoursPdf = hours.slice(0, 500);
-    const fuelPdf = fuel.slice(0, 40);
-    const oilPdf = oil.slice(0, 40);
     const breakdownsPdf = breakdowns.slice(0, 40);
     const openWOsPdf = openWOs.slice(0, 40);
-    const stockCriticalPdf = stockCritical.slice(0, 40);
 
     const kpi = kpiDaily(date, scheduled);
     const prevDay = shiftDateYmd(date, -1);
     // Daily PDF is opened "today" for yesterday's ops — short BDs, fuel, and
     // per-asset availability downtime all use the previous calendar day.
     const opsDay = prevDay;
-    const dailyShortBreakdowns = listShortBreakdownsForDate(db, opsDay).slice(0, 40);
-    const dailyPlannedMaintenance = listPlannedMaintenanceForDate(db, date).slice(0, 40);
+    const dailyPlannedMaintenance = listPlannedMaintenanceForDate(db, opsDay).slice(0, 40);
+    const dailyDowntimeLogs = hasTable("breakdown_downtime_logs")
+      ? db.prepare(`
+          SELECT
+            l.id,
+            a.asset_code,
+            a.asset_name,
+            b.description,
+            b.component,
+            b.critical,
+            l.hours_down,
+            l.notes,
+            l.log_date
+          FROM breakdown_downtime_logs l
+          JOIN breakdowns b ON b.id = l.breakdown_id
+          JOIN assets a ON a.id = b.asset_id
+          WHERE l.log_date = ?
+          ORDER BY l.hours_down DESC, a.asset_code ASC, l.id ASC
+        `).all(opsDay).slice(0, 60)
+      : [];
     const offsiteSiteRaw = String(req.query?.site_code || getSiteCode(req) || "main").trim().toLowerCase() || "main";
     const offsiteSiteAliases =
       offsiteSiteRaw === "main" || offsiteSiteRaw === "default"
@@ -10649,10 +10648,10 @@ export default async function reportsRoutes(app) {
             : []),
         ], 2);
 
-        sectionTitle(doc, "Hours by asset (active fleet, non-standby)");
+        sectionTitle(doc, "Equipment hours and fuel");
         doc.fontSize(9).fillColor("#64748b");
         doc.text(
-          `Avail % / Util % / Fuel L use downtime & fuel from previous calendar day ${opsDay} (same day as short breakdowns).`,
+          `Production hours are for ${date}. Fuel, availability and downtime align to the operations day ${opsDay}.`,
         );
         doc.moveDown(0.35);
         table(
@@ -10688,74 +10687,6 @@ export default async function reportsRoutes(app) {
           })
         );
 
-        sectionTitle(doc, "Fuel");
-        table(
-          doc,
-          [
-            { key: "asset", label: "Asset", width: 0.20 },
-            { key: "liters", label: "Liters", width: 0.14, align: "right" },
-            { key: "source", label: "Source", width: 0.66 },
-          ],
-          fuelPdf.map(r => ({
-            asset: r.asset_code,
-            liters: fmtNum(r.liters, 1),
-            source: compactCell(r.source ?? "", 90),
-          }))
-        );
-
-        sectionTitle(doc, "Oil");
-        table(
-          doc,
-          [
-            { key: "asset", label: "Asset", width: 0.20 },
-            { key: "type", label: "Type", width: 0.50 },
-            { key: "qty", label: "Qty", width: 0.30, align: "right" },
-          ],
-          oilPdf.map(r => ({
-            asset: r.asset_code,
-            type: compactCell(r.oil_type ?? "", 80),
-            qty: fmtNum(r.quantity, 1),
-          }))
-        );
-
-        const dailyBdPmRows = [
-          ...dailyShortBreakdowns.map((r) => ({
-            asset: r.asset_code,
-            equipment: compactCell(r.asset_name ?? "", 48),
-            type: "Short breakdown",
-            hrs: fmtNum(r.hours_down, 1),
-            crit: r.critical ? "YES" : "NO",
-            comp: compactCell(r.component ?? "", 40),
-            desc: compactCell(r.description ?? "", 260),
-          })),
-          ...dailyPlannedMaintenance.map((r) => ({
-            asset: r.asset_code,
-            equipment: compactCell(r.asset_name ?? "", 48),
-            type: "Planned maintenance",
-            hrs: "—",
-            crit: "—",
-            comp: compactCell(r.service_name ?? "", 40),
-            desc: compactCell(r.description ?? "", 260),
-          })),
-        ];
-
-        if (dailyBdPmRows.length) {
-          sectionTitle(doc, "Daily breakdowns and planned maintenance");
-          table(
-            doc,
-            [
-              { key: "asset", label: "Plant #", width: 0.10 },
-              { key: "equipment", label: "Equipment", width: 0.18 },
-              { key: "type", label: "Type", width: 0.14 },
-              { key: "hrs", label: "Hours down", width: 0.09, align: "right" },
-              { key: "crit", label: "Critical", width: 0.08, align: "center" },
-              { key: "comp", label: "Component / Service", width: 0.14 },
-              { key: "desc", label: "Description", width: 0.27 },
-            ],
-            dailyBdPmRows,
-          );
-        }
-
         {
           const statusLabel = (s) => {
             const k = String(s || "").trim().toLowerCase();
@@ -10776,7 +10707,7 @@ export default async function reportsRoutes(app) {
             if (!Number.isFinite(t0) || !Number.isFinite(t1)) return null;
             return Math.round((t1 - t0) / 86400000);
           };
-          sectionTitle(doc, "Assets offsite for repairs");
+          sectionTitle(doc, "Offsite repair tracking");
           if (!offsiteRepairsPdf.length) {
             doc.font("Helvetica").fontSize(10).fillColor("#555555")
               .text("No assets currently tracked as offsite for repairs.", doc.page.margins.left, doc.y, {
@@ -10787,44 +10718,48 @@ export default async function reportsRoutes(app) {
             table(
               doc,
               [
-                { key: "asset", label: "Plant #", width: 0.10 },
-                { key: "equipment", label: "Equipment", width: 0.18 },
-                { key: "status", label: "Repair status", width: 0.14 },
-                { key: "sent", label: "Sent", width: 0.10 },
-                { key: "expected", label: "Expected", width: 0.10 },
-                { key: "actual", label: "Actual", width: 0.10 },
-                { key: "elapsed", label: "Elapsed days", width: 0.10, align: "right" },
-                { key: "timeframe", label: "Planned days", width: 0.09, align: "right" },
-                { key: "notes", label: "Vendor / notes", width: 0.19 },
+                { key: "asset", label: "Plant #", width: 0.08 },
+                { key: "equipment", label: "Equipment", width: 0.16 },
+                { key: "status", label: "Repair status", width: 0.11 },
+                { key: "vendor", label: "Repairer", width: 0.11 },
+                { key: "sent", label: "Sent", width: 0.08 },
+                { key: "expected", label: "Expected", width: 0.09 },
+                { key: "elapsed", label: "Days out", width: 0.07, align: "right" },
+                { key: "tracking", label: "Return tracking", width: 0.13 },
+                { key: "notes", label: "Progress / next action", width: 0.17 },
               ],
               offsiteRepairsPdf.map((r) => {
                 const sent = String(r.sent_date || "").trim();
                 const expected = String(r.expected_return_date || "").trim();
                 const actual = String(r.actual_return_date || "").trim();
                 const elapsed = daysBetweenYmd(sent, actual || date);
-                const planned = daysBetweenYmd(sent, expected);
+                const dueDelta = daysBetweenYmd(date, expected);
+                const tracking = actual
+                  ? `Returned ${actual}`
+                  : !expected
+                    ? "Return date required"
+                    : dueDelta < 0
+                      ? `OVERDUE ${Math.abs(dueDelta)} day(s)`
+                      : dueDelta === 0
+                        ? "Due today"
+                        : `Due in ${dueDelta} day(s)`;
                 return {
                   asset: r.asset_code,
                   equipment: compactCell(r.asset_name ?? "", 48),
                   status: statusLabel(r.repair_status),
+                  vendor: compactCell(r.vendor ?? "", 36) || "—",
                   sent: sent || "—",
                   expected: expected || "—",
-                  actual: actual || "—",
                   elapsed: elapsed == null ? "—" : String(elapsed),
-                  timeframe: planned == null ? "—" : String(planned),
-                  notes: compactCell(
-                    [r.vendor ? String(r.vendor).trim() : "", r.notes ? String(r.notes).trim() : ""]
-                      .filter(Boolean)
-                      .join(" | "),
-                    120
-                  ),
+                  tracking,
+                  notes: compactCell(r.notes ?? "", 120) || "—",
                 };
               })
             );
           }
         }
 
-        sectionTitle(doc, "Breakdowns & Downtime");
+        sectionTitle(doc, "Breakdown incidents");
         table(
           doc,
           [
@@ -10836,7 +10771,7 @@ export default async function reportsRoutes(app) {
             { key: "parts_status", label: "Status of parts", width: 0.12 },
             { key: "received", label: "Received date", width: 0.11 },
             { key: "ets", label: "ETS Repair", width: 0.10 },
-            { key: "desc", label: "Description", width: 0.10 },
+            { key: "desc", label: "Fault / action", width: 0.10 },
           ],
           breakdownsPdf.map((r) => {
             // Selected Date down = breakdown_date (operator-chosen). Avoid start_at create-time stamp.
@@ -10856,6 +10791,49 @@ export default async function reportsRoutes(app) {
           })
         );
 
+        const maintenanceWords = /planned maintenance|service|maintenance/i;
+        const loggedMaintenanceAssets = new Set();
+        const dailyDowntimeRows = dailyDowntimeLogs.map((r) => {
+          const detail = [r.description, r.notes, r.component].filter(Boolean).join(" | ");
+          const isMaintenance = maintenanceWords.test(detail);
+          if (isMaintenance) loggedMaintenanceAssets.add(String(r.asset_code || ""));
+          return {
+            asset: r.asset_code,
+            equipment: compactCell(r.asset_name ?? "", 48),
+            type: isMaintenance ? "Maintenance" : "Breakdown",
+            hrs: fmtNum(r.hours_down, 1),
+            area: compactCell(r.component ?? "", 42) || "—",
+            detail: compactCell(String(r.notes || r.description || "").replace(/^Auto from Daily Input \(DOWN\)\s*[—-]?\s*/i, ""), 220),
+          };
+        });
+        for (const r of dailyPlannedMaintenance) {
+          if (loggedMaintenanceAssets.has(String(r.asset_code || ""))) continue;
+          dailyDowntimeRows.push({
+            asset: r.asset_code,
+            equipment: compactCell(r.asset_name ?? "", 48),
+            type: "Maintenance",
+            hrs: "—",
+            area: compactCell(r.service_name ?? "", 42) || "Service",
+            detail: compactCell(r.description ?? "", 220),
+          });
+        }
+
+        sectionTitle(doc, `Daily downtime (${opsDay})`);
+        table(
+          doc,
+          [
+            { key: "asset", label: "Plant #", width: 0.10 },
+            { key: "equipment", label: "Equipment", width: 0.20 },
+            { key: "type", label: "Downtime type", width: 0.14 },
+            { key: "hrs", label: "Hours down", width: 0.11, align: "right" },
+            { key: "area", label: "Component / service", width: 0.17 },
+            { key: "detail", label: "Reason / work completed", width: 0.28 },
+          ],
+          dailyDowntimeRows.length
+            ? dailyDowntimeRows
+            : [{ asset: "—", equipment: "No downtime recorded", type: "—", hrs: "0.0", area: "—", detail: "—" }],
+        );
+
         sectionTitle(doc, "Open Work Orders");
         table(
           doc,
@@ -10865,22 +10843,29 @@ export default async function reportsRoutes(app) {
             { key: "equipment", label: "Equipment", width: 0.16 },
             { key: "source", label: "Source", width: 0.10 },
             { key: "status", label: "Status", width: 0.09 },
-            { key: "tech", label: "Technician", width: 0.12 },
-            { key: "progress", label: "Repair progress", width: 0.37 },
+            { key: "parts", label: "Parts status", width: 0.12 },
+            { key: "tech", label: "Technician", width: 0.11 },
+            { key: "progress", label: "Progress / next action", width: 0.26 },
           ],
           openWOsPdf.map(r => ({
             wo: String(r.id),
             asset: r.asset_code,
             equipment: compactCell(r.asset_name ?? "", 48),
-            source: compactCell(r.source ?? "", 20),
+            source: ({
+              breakdown: "Breakdown",
+              service: "Maintenance",
+              manager_inspection: "Inspection",
+              inspection: "Inspection",
+            })[String(r.source || "").toLowerCase()] || compactCell(r.source ?? "", 20),
             status: compactCell(String(r.status ?? "").replace(/_/g, " "), 16),
+            parts: compactCell(r.parts_status ?? "", 26) || "—",
             tech: compactCell(r.assigned_artisan_name ?? "", 28),
-            progress: compactCell(r.repair_progress ?? "", 320),
+            progress: compactCell(r.repair_progress ?? "", 260) || "No progress update",
           }))
         );
 
         if (cartrackSpeeding) {
-          sectionTitle(doc, `Cartrack fleet — speeding above ${speedAlertKmh} km/h`);
+          sectionTitle(doc, `Fleet Tracking - speeding above ${speedAlertKmh} km/h`);
           if (!cartrackSpeeding.total_speeding_events) {
             doc.fontSize(10).fillColor("#64748b");
             doc.text(`No speeding events above ${speedAlertKmh} km/h recorded for ${date}.`);
@@ -10906,24 +10891,6 @@ export default async function reportsRoutes(app) {
           }
         }
 
-        sectionTitle(doc, "Critical Stock (Top 20)");
-        table(
-          doc,
-          [
-            { key: "part", label: "Part", width: 0.18 },
-            { key: "name", label: "Name", width: 0.46 },
-            { key: "on", label: "On hand", width: 0.12, align: "right" },
-            { key: "min", label: "Min", width: 0.10, align: "right" },
-            { key: "below", label: "Below min", width: 0.14, align: "center" },
-          ],
-          stockCriticalPdf.map(r => ({
-            part: r.part_code,
-            name: r.part_name ?? "",
-            on: fmtNum(r.on_hand, 0),
-            min: fmtNum(r.min_stock, 0),
-            below: r.below_min ? "YES" : "NO",
-          }))
-        );
       },
       {
         title: "IRONLOG",
