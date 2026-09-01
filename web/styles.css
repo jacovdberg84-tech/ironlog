@@ -5688,6 +5688,26 @@ body.sidebar-collapsed .main-content {
 .parts-order-card > footer { margin-top:12px; padding-top:10px; border-top:1px solid #e5e7eb; }
 @media (max-width:1100px) { .parts-order-fields { grid-template-columns:repeat(2,minmax(145px,1fr)); } }
 @media (max-width:650px) { .parts-order-fields { grid-template-columns:1fr; } .parts-order-card > header,.parts-order-card > footer { align-items:flex-start; flex-direction:column; } }
+.stores-stock-grid { display:grid; grid-template-columns:repeat(2,minmax(280px,1fr)); gap:12px; margin-top:14px; }
+.stores-stock-card { border:1px solid #dbe4f0; border-left:4px solid #16a34a; border-radius:12px; background:#fff; padding:14px; box-shadow:0 2px 8px rgba(15,23,42,.05); }
+.stores-stock-card.is-low { border-left-color:#dc2626; background:#fffafa; }
+.stores-stock-card.is-critical:not(.is-low) { border-left-color:#f59e0b; }
+.stores-stock-card > header,.stores-stock-card > footer { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.stores-stock-name { margin-top:3px; color:#475569; font-size:13px; }
+.stores-stock-metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:12px 0; }
+.stores-stock-metrics > div { padding:8px; border-radius:8px; background:#f8fafc; }
+.stores-stock-metrics span { display:block; color:#64748b; font-size:11px; }
+.stores-stock-metrics strong { display:block; margin-top:2px; color:#0f172a; font-size:16px; }
+.stores-stock-card > footer { padding-top:10px; border-top:1px solid #e5e7eb; }
+.stores-stock-actions { display:flex; flex-wrap:wrap; gap:6px; }
+@media (max-width:900px) { .stores-stock-grid { grid-template-columns:1fr; } }
+@media (max-width:520px) { .stores-stock-metrics { grid-template-columns:repeat(2,1fr); } .stores-stock-card > header,.stores-stock-card > footer { align-items:flex-start; flex-direction:column; } }
+[data-theme="dark"] .stores-stock-card { background:#111827; border-color:#334155; }
+[data-theme="dark"] .stores-stock-card.is-low { background:#211516; }
+[data-theme="dark"] .stores-stock-name,[data-theme="dark"] .stores-stock-metrics span { color:#94a3b8; }
+[data-theme="dark"] .stores-stock-metrics > div { background:#1e293b; }
+[data-theme="dark"] .stores-stock-metrics strong { color:#f8fafc; }
+[data-theme="dark"] .stores-stock-card > footer { border-color:#334155; }
 .bo-slip-card { order: 5; }
 .bo-short-card { order: 6; }
 .bo-queue-tools {

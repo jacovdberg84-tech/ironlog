@@ -2058,8 +2058,8 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
               </div>
               <div>
-                <h3>Stock On Hand</h3>
-                <p class="muted small">View and manage inventory levels</p>
+                <h3>Stores Inventory</h3>
+                <p class="muted small">See stock health and act on each part without searching through forms</p>
               </div>
             </div>
             <button class="report-card-toggle" aria-label="Toggle">
@@ -2323,8 +2323,8 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><polyline points="17 11 19 13 23 9"></polyline></svg>
               </div>
               <div>
-                <h3>Stores Allocation</h3>
-                <p class="muted small">Allocate parts to assets or work orders</p>
+                <h3>Issue a Part</h3>
+                <p class="muted small">Issue stock directly to an asset or work order</p>
               </div>
             </div>
             <button class="report-card-toggle" aria-label="Toggle">
@@ -2374,7 +2374,7 @@
               <div class="form-field form-field-action">
                 <button id="allocateStore" class="btn btn-primary">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><polyline points="17 11 19 13 23 9"></polyline></svg>
-                  Allocate
+                  Issue Part
                 </button>
                 <button id="refreshAllocations" class="btn btn-secondary btn-sm">Refresh</button>
               </div>
@@ -2402,8 +2402,8 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
               </div>
               <div>
-                <h3>Manual Stock Entry</h3>
-                <p class="muted small">Add or adjust stock manually</p>
+                <h3>Receive or Adjust Stock</h3>
+                <p class="muted small">Receive deliveries or record a controlled stock adjustment</p>
               </div>
             </div>
             <button class="report-card-toggle" aria-label="Toggle">
@@ -2431,9 +2431,9 @@
               <div class="form-field">
                 <label>Type</label>
                 <select id="msType" class="w-full">
-                  <option value="in">in</option>
-                  <option value="out">out</option>
-                  <option value="adjust">adjust</option>
+                  <option value="in">Receive stock</option>
+                  <option value="out">Remove stock</option>
+                  <option value="adjust">Adjustment</option>
                 </select>
               </div>
             </div>
@@ -2453,7 +2453,7 @@
               <div class="form-field form-field-action">
                 <button id="saveManualStock" class="btn btn-primary">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
-                  Save Stock
+                  Save Movement
                 </button>
               </div>
             </div>

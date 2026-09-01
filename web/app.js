@@ -9067,7 +9067,7 @@ function renderStockInventoryTable(rows) {
     return;
   }
 
-  const bodyRows = rows
+  const cards = rows
     .map((r) => {
       const onHand = Number(r.on_hand || 0);
       const min = Number(r.min_stock || 0);
@@ -9075,10 +9075,10 @@ function renderStockInventoryTable(rows) {
       const value = Number(r.stock_value ?? onHand * unit);
       const below = Boolean(r.below_min);
       const critical = Boolean(r.critical);
-      const rowCls = [
-        "stores-inv-row",
-        below ? "stores-inv-row--low" : "",
-        critical && !below ? "stores-inv-row--critical" : "",
+      const cardCls = [
+        "stores-stock-card",
+        below ? "is-low" : "",
+        critical && !below ? "is-critical" : "",
       ]
         .filter(Boolean)
         .join(" ");
@@ -9087,43 +9087,64 @@ function renderStockInventoryTable(rows) {
         : critical
           ? `<span class="stores-inv-status stores-inv-status--watch">Critical</span>`
           : `<span class="stores-inv-status stores-inv-status--ok">OK</span>`;
-      const flag = below
-        ? `<span class="stores-inv-flag" title="Below minimum stock">!</span>`
-        : `<span class="stores-inv-flag stores-inv-flag--clear" aria-hidden="true"></span>`;
-
-      return `<tr class="${rowCls}">
-        <td class="stores-inv-col-flag">${flag}</td>
-        <td class="stores-inv-col-code"><span class="stores-inv-code">${escapeHtml(r.part_code || "")}</span></td>
-        <td class="stores-inv-col-desc">${escapeHtml(r.part_name || "—")}</td>
-        <td class="stores-inv-col-num">${onHand.toFixed(1)}</td>
-        <td class="stores-inv-col-num">${min.toFixed(1)}</td>
-        <td class="stores-inv-col-num">$${unit.toFixed(2)}</td>
-        <td class="stores-inv-col-num stores-inv-col-value">$${value.toFixed(2)}</td>
-        <td class="stores-inv-col-status">${status}</td>
-      </tr>`;
+      const shortage = Math.max(0, min - onHand);
+      return `<article class="${cardCls}" data-stock-code="${spoAttrVal(r.part_code || "")}" data-stock-name="${spoAttrVal(r.part_name || "")}">
+        <header>
+          <div><span class="stores-inv-code">${escapeHtml(r.part_code || "")}</span><div class="stores-stock-name">${escapeHtml(r.part_name || "—")}</div></div>
+          ${status}
+        </header>
+        <div class="stores-stock-metrics">
+          <div><span>On hand</span><strong>${onHand.toFixed(1)}</strong></div>
+          <div><span>Minimum</span><strong>${min.toFixed(1)}</strong></div>
+          <div><span>${below ? "Short by" : "Buffer"}</span><strong>${below ? shortage.toFixed(1) : Math.max(0, onHand - min).toFixed(1)}</strong></div>
+          <div><span>Stock value</span><strong>$${value.toFixed(2)}</strong></div>
+        </div>
+        <footer>
+          <span class="muted small">Unit price $${unit.toFixed(2)}</span>
+          <div class="stores-stock-actions">
+            <button type="button" class="btn btn-secondary btn-sm" data-stock-action="receive">Receive</button>
+            <button type="button" class="btn btn-primary btn-sm" data-stock-action="issue"${onHand <= 0 ? " disabled" : ""}>Issue</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-stock-action="count">Count</button>
+          </div>
+        </footer>
+      </article>`;
     })
     .join("");
 
   host.innerHTML = `
-    <div class="stores-inventory-scroll">
-      <table class="stores-inventory-table">
-        <thead>
-          <tr>
-            <th class="stores-inv-col-flag" scope="col" title="Reorder needed">!</th>
-            <th class="stores-inv-col-code" scope="col">Part code</th>
-            <th class="stores-inv-col-desc" scope="col">Description</th>
-            <th class="stores-inv-col-num" scope="col">On hand</th>
-            <th class="stores-inv-col-num" scope="col">Min stock</th>
-            <th class="stores-inv-col-num" scope="col">Unit price</th>
-            <th class="stores-inv-col-num" scope="col">Stock value</th>
-            <th class="stores-inv-col-status" scope="col">Status</th>
-          </tr>
-        </thead>
-        <tbody>${bodyRows}</tbody>
-      </table>
-    </div>
+    <div class="stores-stock-grid">${cards}</div>
     <div class="stores-inventory-foot muted small">${rows.length} item${rows.length === 1 ? "" : "s"} shown</div>
   `;
+}
+
+function openStockAction(card, action) {
+  const code = String(card?.dataset?.stockCode || "").trim();
+  const name = String(card?.dataset?.stockName || "").trim();
+  if (!code) return;
+  let target = null;
+  if (action === "receive") {
+    if (qs("msPart")) qs("msPart").value = code;
+    if (qs("msPartDesc")) qs("msPartDesc").value = name;
+    if (qs("msType")) qs("msType").value = "in";
+    if (qs("msQty")) qs("msQty").value = "1";
+    updateManualStockCostRowVisibility();
+    target = qs("msPart")?.closest(".dash-card");
+    setStatus(`Ready to receive ${code}.`);
+  } else if (action === "issue") {
+    if (qs("saPart")) qs("saPart").value = code;
+    if (qs("saQty")) qs("saQty").value = "1";
+    target = qs("saPart")?.closest(".dash-card");
+    setStatus(`Ready to issue ${code}. Select an asset or work order.`);
+  } else if (action === "count") {
+    if (qs("icPartCode")) qs("icPartCode").value = code;
+    target = qs("icPartCode")?.closest(".dash-card");
+    loadInventoryControl().catch((e) => setStatus(`Inventory count load failed: ${e.message}`));
+    setStatus(`Ready to count ${code}.`);
+  }
+  if (!target) return;
+  target.dataset.collapsed = "false";
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  setTimeout(() => target.querySelector("input:not([disabled]), select:not([disabled])")?.focus(), 350);
 }
 
 function renderStockRecentTable(recent) {
@@ -9224,7 +9245,7 @@ async function loadStockOnHandPage() {
   setText("spBelowMin", Number(data.summary?.below_min || 0));
   setText("spCriticalBelow", Number(data.summary?.critical_below_min || 0));
   setText("spTotalOnHand", Number(data.summary?.total_on_hand || 0).toFixed(1));
-  setText("spTotalValue", `$${Number(data.summary?.total_stock_value || 0).toFixed(2)}`);
+  setText("spTotalValue", Number(data.summary?.total_stock_value || 0).toFixed(2));
 
   refreshStockInventoryDisplay();
   renderStockRecentTable(stockPageData.recent);
@@ -17873,6 +17894,11 @@ async function init() {
   );
   qs("spSort")?.addEventListener("change", () => refreshStockInventoryDisplay());
   qs("spOnlyLow")?.addEventListener("change", () => refreshStockInventoryDisplay());
+  qs("spList")?.addEventListener("click", (evt) => {
+    const btn = evt.target?.closest?.("button[data-stock-action]");
+    if (!btn) return;
+    openStockAction(btn.closest("[data-stock-code]"), btn.getAttribute("data-stock-action"));
+  });
   qs("spFilter")?.addEventListener("input", () => {
     if (stockPageData.rows.length) refreshStockInventoryDisplay();
   });
