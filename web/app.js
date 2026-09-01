@@ -10126,7 +10126,7 @@ function readPtOffRowPatch(rowEl) {
 
 async function savePtOffsiteRow(id) {
   const host = qs("ptOffList");
-  const rowEl = host?.querySelector(`tr[data-pt-off-row="${Number(id)}"]`);
+  const rowEl = host?.querySelector(`[data-pt-off-row="${Number(id)}"]`);
   const patch = readPtOffRowPatch(rowEl);
   if (!patch || !patch.sent_date) {
     alert("Sent date is required.");
