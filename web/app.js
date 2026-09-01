@@ -894,6 +894,44 @@ async function openAuthedPdf(url) {
   setTimeout(() => URL.revokeObjectURL(u), 120000);
 }
 
+/** Downloads a protected report/export using the current IRONLOG login token. */
+async function downloadAuthedFile(url, fallbackName = "ironlog-report") {
+  try {
+    const res = await fetch(url, { headers: authHeaders() });
+    const blob = await res.blob();
+    if (!res.ok) {
+      if (res.status === 401 && LOGIN_GATE_ENABLED) {
+        const had = Boolean(getAuthToken());
+        clearAuthSession();
+        if (had) {
+          showLoginGate(true);
+          updateAuthChrome();
+        }
+      }
+      let msg = await blob.text().catch(() => "");
+      try {
+        const parsed = JSON.parse(msg);
+        msg = parsed.error || parsed.message || msg;
+      } catch {}
+      throw new Error(msg || `Request failed (${res.status})`);
+    }
+    const disposition = String(res.headers.get("content-disposition") || "");
+    const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+    const plain = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+    const name = encoded ? decodeURIComponent(encoded) : (plain || fallbackName);
+    const blobUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = blobUrl;
+    anchor.download = name;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+  } catch (err) {
+    alert(`Could not download report: ${err.message || err}`);
+  }
+}
+
 function getRoleAllowedTabs(role) {
   const r = String(role || "").toLowerCase();
   if (r === "plant_clerk") return ["dash", "daily", "assets", "fuel", "lube", "vehicle", "reports", "docs", "tasks"];
@@ -1568,6 +1606,38 @@ function applySessionFromMeUser(user) {
   }
   renderSessionRolesBadge();
   updateDashboardGreeting();
+}
+
+function initReportsHub() {
+  const panel = qs("tab-reports");
+  if (!panel) return;
+  const cards = Array.from(panel.querySelectorAll(".reports-grid > .report-card[data-report-category]"));
+  const search = qs("reportHubSearch");
+  const count = qs("reportHubCount");
+  let activeFilter = "all";
+
+  const render = () => {
+    const term = String(search?.value || "").trim().toLowerCase();
+    let visible = 0;
+    cards.forEach((card) => {
+      const categories = String(card.getAttribute("data-report-category") || "").split(/\s+/);
+      const matchesCategory = activeFilter === "all" || categories.includes(activeFilter);
+      const matchesSearch = !term || String(card.textContent || "").toLowerCase().includes(term);
+      card.hidden = !(matchesCategory && matchesSearch);
+      if (!card.hidden) visible += 1;
+    });
+    if (count) count.textContent = `${visible} report group${visible === 1 ? "" : "s"}`;
+  };
+
+  search?.addEventListener("input", render);
+  panel.querySelectorAll("[data-report-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      activeFilter = String(button.getAttribute("data-report-filter") || "all");
+      panel.querySelectorAll("[data-report-filter]").forEach((item) => item.classList.toggle("is-active", item === button));
+      render();
+    });
+  });
+  render();
 }
 
 async function tryInitialSession() {
@@ -11319,7 +11389,7 @@ function downloadCostMonthlyXlsx() {
     alert("Select a month first.");
     return;
   }
-  window.open(`${API}/api/reports/cost-monthly.xlsx?month=${encodeURIComponent(month)}`, "_blank");
+  downloadAuthedFile(`${API}/api/reports/cost-monthly.xlsx?month=${encodeURIComponent(month)}`, `fleet-cost-${month}.xlsx`);
 }
 
 function monthlyFleetCostPdfUrl(download = false) {
@@ -11331,16 +11401,16 @@ function monthlyFleetCostPdfUrl(download = false) {
   return `${API}/api/reports/monthly.pdf?${q.toString()}`;
 }
 
-function openMonthlyFleetCostPdf() {
+async function openMonthlyFleetCostPdf() {
   const url = monthlyFleetCostPdfUrl(false);
   if (!url) return alert("Select a cost month first.");
-  window.open(url, "_blank");
+  try { await openAuthedPdf(url); } catch (err) { alert(`Could not open Monthly Fleet Cost PDF: ${err.message || err}`); }
 }
 
 function downloadMonthlyFleetCostPdf() {
   const url = monthlyFleetCostPdfUrl(true);
   if (!url) return alert("Select a cost month first.");
-  window.open(url, "_blank");
+  downloadAuthedFile(url, "monthly-fleet-cost.pdf");
 }
 
 function downloadMaintenanceCostByEquipmentXlsx() {
@@ -11354,16 +11424,16 @@ function downloadMaintenanceCostByEquipmentXlsx() {
   const q = month
     ? `month=${encodeURIComponent(month)}`
     : `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
-  window.open(`${API}/api/reports/maintenance-cost-by-equipment.xlsx?${q}`, "_blank");
+  downloadAuthedFile(`${API}/api/reports/maintenance-cost-by-equipment.xlsx?${q}`, "maintenance-cost-by-equipment.xlsx");
 }
 
 function downloadMtdOpeningHoursXlsx() {
   const month = (qs("mtdOpeningMonth")?.value || "").trim();
   const q = month ? `?month=${encodeURIComponent(month)}` : "";
-  window.open(`${API}/api/reports/mtd-opening-hours.xlsx${q}`, "_blank");
+  downloadAuthedFile(`${API}/api/reports/mtd-opening-hours.xlsx${q}`, "mtd-opening-hours.xlsx");
 }
 
-function openMaintenanceCostByEquipmentPdf(download = false) {
+async function openMaintenanceCostByEquipmentPdf(download = false) {
   const month = (qs("costMonth")?.value || "").trim();
   const start = (qs("maintCostStart")?.value || "").trim();
   const end = (qs("maintCostEnd")?.value || "").trim();
@@ -11375,7 +11445,11 @@ function openMaintenanceCostByEquipmentPdf(download = false) {
     ? `month=${encodeURIComponent(month)}`
     : `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
   const q = `${qBase}${download ? "&download=1" : ""}`;
-  window.open(`${API}/api/reports/maintenance-cost-by-equipment.pdf?${q}`, "_blank");
+  const url = `${API}/api/reports/maintenance-cost-by-equipment.pdf?${q}`;
+  if (download) downloadAuthedFile(url, "maintenance-cost-by-equipment.pdf");
+  else {
+    try { await openAuthedPdf(url); } catch (err) { alert(`Could not open Maintenance Cost PDF: ${err.message || err}`); }
+  }
 }
 
 function downloadMaintenanceExecutivePptx() {
@@ -11391,7 +11465,7 @@ function downloadMaintenanceExecutivePptx() {
     : `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
   const site = encodeURIComponent(getSessionSite());
   const q = `${qCore}&site_code=${site}`;
-  window.open(`${API}/api/reports/maintenance-exec.pptx?${q}`, "_blank");
+  downloadAuthedFile(`${API}/api/reports/maintenance-exec.pptx?${q}`, "maintenance-executive.pptx");
 }
 
 function downloadGMUpcomingCostsPptx() {
@@ -11407,7 +11481,7 @@ function downloadGMUpcomingCostsPptx() {
     : `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
   const site = encodeURIComponent(getSessionSite());
   const q = `${qCore}&site_code=${site}`;
-  window.open(`${API}/api/reports/gm-upcoming-costs.pptx?${q}`, "_blank");
+  downloadAuthedFile(`${API}/api/reports/gm-upcoming-costs.pptx?${q}`, "gm-upcoming-costs.pptx");
 }
 
 function downloadGMBudgetMeetingDocx() {
@@ -11418,9 +11492,9 @@ function downloadGMBudgetMeetingDocx() {
   }
   const site = encodeURIComponent(getSessionSite() || "main");
   const ts = Date.now();
-  window.open(
+  downloadAuthedFile(
     `${API}/api/reports/gm-budget-meeting.docx?month=${encodeURIComponent(month)}&site_code=${site}&_ts=${ts}`,
-    "_blank",
+    `gm-budget-meeting-${month}.docx`,
   );
   setStatus("Budget meeting Word export started.");
 }
@@ -11547,11 +11621,15 @@ async function openWeeklyPdf() {
   }
 }
 
-function openLubePdf() {
+async function openLubePdf() {
   const start = qs("lubeStart")?.value || "";
   const end = qs("lubeEnd")?.value || "";
   if (!start || !end) return alert("Select lube period first.");
-  window.open(`${API}/api/reports/lube.pdf?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`, "_blank");
+  try {
+    await openAuthedPdf(`${API}/api/reports/lube.pdf?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+  } catch (err) {
+    alert(`Could not open Lube PDF: ${err.message || err}`);
+  }
 }
 
 function downloadLubeUsageXlsx() {
@@ -11614,10 +11692,10 @@ async function loadLubeMonthStock() {
   }
 }
 
-function openStockMonitorPdf() {
+async function openStockMonitorPdf() {
   const filter = (qs("stockPartFilter")?.value || "").trim();
   const q = filter ? `?part_code=${encodeURIComponent(filter)}` : "";
-  window.open(`${API}/api/reports/stock-monitor.pdf${q}`, "_blank");
+  try { await openAuthedPdf(`${API}/api/reports/stock-monitor.pdf${q}`); } catch (err) { alert(`Could not open Stock PDF: ${err.message || err}`); }
 }
 
 function downloadStockMonitorPdf() {
@@ -11625,7 +11703,7 @@ function downloadStockMonitorPdf() {
   const q = filter
     ? `?part_code=${encodeURIComponent(filter)}&download=1`
     : "?download=1";
-  window.open(`${API}/api/reports/stock-monitor.pdf${q}`, "_blank");
+  downloadAuthedFile(`${API}/api/reports/stock-monitor.pdf${q}`, "stock-monitor.pdf");
 }
 
 function downloadAssetHistoryPdf() {
@@ -17210,6 +17288,7 @@ async function init() {
   initSettingsDropdown();
   initGlobalSearch();
   initReportCardCollapsible();
+  initReportsHub();
   initTasks();
   initTelematicsFaultBanner();
   initCartrackSpeedFloat();

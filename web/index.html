@@ -6653,12 +6653,23 @@
     <section class="panel" id="tab-reports">
       <div class="reports-header">
         <h2>Reports Center</h2>
-        <p class="muted">Generate and download operational reports</p>
+        <p class="muted">Open the reports your team uses most, or filter by work area.</p>
+        <div class="reports-toolbar">
+          <input id="reportHubSearch" type="search" placeholder="Search reports…" />
+          <div class="report-hub-filters" role="group" aria-label="Report categories">
+            <button type="button" class="is-active" data-report-filter="all">All</button>
+            <button type="button" data-report-filter="operations">Operations</button>
+            <button type="button" data-report-filter="maintenance">Maintenance</button>
+            <button type="button" data-report-filter="stock">Stores</button>
+            <button type="button" data-report-filter="management">Management</button>
+          </div>
+          <span id="reportHubCount" class="muted small"></span>
+        </div>
       </div>
 
       <div class="reports-grid">
         <!-- Daily Reports -->
-        <div class="report-card collapsible" data-collapsed="false">
+        <div class="report-card report-card-wide collapsible" data-report-category="operations" data-collapsed="false">
           <div class="report-card-header">
             <div class="report-card-title">
               <div class="report-card-icon">
@@ -6689,7 +6700,7 @@
         </div>
 
         <!-- Stock Reports -->
-        <div class="report-card collapsible" data-collapsed="false">
+        <div class="report-card collapsible" data-report-category="stock" data-collapsed="false">
           <div class="report-card-header">
             <div class="report-card-title">
               <div class="report-card-icon">
@@ -6713,7 +6724,7 @@
         </div>
 
         <!-- Cost Reports -->
-        <div class="report-card collapsible" data-collapsed="false">
+        <div class="report-card collapsible" data-report-category="management" data-collapsed="false">
           <div class="report-card-header">
             <div class="report-card-title">
               <div class="report-card-icon">
@@ -6743,7 +6754,7 @@
         </div>
 
         <!-- Maintenance Cost Reports -->
-        <div class="report-card collapsible" data-collapsed="false">
+        <div class="report-card collapsible" data-report-category="maintenance management" data-collapsed="false">
           <div class="report-card-header">
             <div class="report-card-title">
               <div class="report-card-icon">
@@ -6779,7 +6790,7 @@
         </div>
 
         <!-- Equipment Hours Report -->
-        <div class="report-card collapsible report-card-wide" data-collapsed="false">
+        <div class="report-card collapsible report-card-wide" data-report-category="operations maintenance" data-collapsed="false">
           <div class="report-card-header">
             <div class="report-card-title">
               <div class="report-card-icon">
@@ -6805,7 +6816,7 @@
         </div>
 
         <!-- Weather / Rain Days -->
-        <div class="report-card collapsible" data-collapsed="false">
+        <div class="report-card collapsible" data-report-category="operations" data-collapsed="false">
           <div class="report-card-header">
             <div class="report-card-title">
               <div class="report-card-icon">
@@ -7629,6 +7640,6 @@
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=2"></script>
-  <script src="./app.js?v=72"></script>
+  <script src="./app.js?v=73"></script>
 </body>
 </html>
