@@ -7239,10 +7239,16 @@ function mcTechnicianSelectOptions(selected = "") {
 
 function renderMcTechChips() {
   const el = document.getElementById("mcTechChips");
+  const dl = document.getElementById("mcTechList");
   if (!el) return;
   const users = Array.isArray(mcTechnicianOptions) ? mcTechnicianOptions : [];
+  if (dl) {
+    dl.innerHTML = users
+      .map((t) => `<option value="${esc(mcTechnicianValue(t))}">${esc(mcTechnicianLabel(t))}</option>`)
+      .join("");
+  }
   if (!users.length) {
-    el.innerHTML = `<span class="muted small">No technicians on roster — add them under Work Orders.</span>`;
+    el.innerHTML = `<span class="muted small">No roster loaded — type the mechanic's name directly in the sheet.</span>`;
     return;
   }
   el.innerHTML = users
@@ -7266,9 +7272,8 @@ function refreshMcDraftEditor() {
       (row, idx) => `
     <tr data-mc-draft-idx="${idx}">
       <td>
-        <select data-mc-draft-field="technician_name" data-mc-draft-idx="${idx}" style="min-width:160px;">
-          ${mcTechnicianSelectOptions(row.technician_name)}
-        </select>
+        <input data-mc-draft-field="technician_name" data-mc-draft-idx="${idx}" type="text" list="mcTechList"
+          value="${esc(row.technician_name || "")}" placeholder="Mechanic name" style="min-width:160px;" autocomplete="off" />
       </td>
       <td>
         <input data-mc-draft-field="hours" data-mc-draft-idx="${idx}" type="number" min="0" step="0.25"
