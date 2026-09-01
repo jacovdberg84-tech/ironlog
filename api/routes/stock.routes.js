@@ -2057,6 +2057,17 @@ export default async function stockRoutes(app) {
   if (!hasColumn("stores_part_orders", "current_location")) {
     db.prepare(`ALTER TABLE stores_part_orders ADD COLUMN current_location TEXT`).run();
   }
+  for (const [name, ddl] of [
+    ["asset_id", "asset_id INTEGER"],
+    ["work_order_id", "work_order_id INTEGER"],
+    ["breakdown_id", "breakdown_id INTEGER"],
+    ["offsite_repair_id", "offsite_repair_id INTEGER"],
+    ["responsible_person", "responsible_person TEXT"],
+  ]) {
+    if (!hasColumn("stores_part_orders", name)) db.prepare(`ALTER TABLE stores_part_orders ADD COLUMN ${ddl}`).run();
+  }
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_stores_part_orders_asset ON stores_part_orders(asset_id)`).run();
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_stores_part_orders_work_order ON stores_part_orders(work_order_id)`).run();
 
   function partOrderReceiveRef(orderId) {
     return `part_order:${Number(orderId)}`;
@@ -2229,6 +2240,50 @@ export default async function stockRoutes(app) {
     };
   }
 
+  function syncLinkedPartOrder(orderId) {
+    const row = db.prepare(`SELECT * FROM stores_part_orders WHERE id = ?`).get(Number(orderId || 0));
+    if (!row) return;
+    let breakdownId = Number(row.breakdown_id || 0) || null;
+    if (!breakdownId && row.work_order_id) {
+      const wo = db.prepare(`SELECT source, reference_id FROM work_orders WHERE id = ?`).get(Number(row.work_order_id));
+      if (String(wo?.source || "").toLowerCase() === "breakdown") breakdownId = Number(wo?.reference_id || 0) || null;
+    }
+    if (!breakdownId && row.offsite_repair_id) {
+      const offsite = db.prepare(`SELECT breakdown_id FROM breakdown_offsite_repairs WHERE id = ?`).get(Number(row.offsite_repair_id));
+      breakdownId = Number(offsite?.breakdown_id || 0) || null;
+    }
+    if (!breakdownId) return;
+    const label = { on_order: "Ordered", in_transit: "In transit", arrived: "Received", cancelled: "Cancelled" }[String(row.status || "on_order").toLowerCase()] || "Ordered";
+    db.prepare(`
+      UPDATE breakdowns
+      SET parts_ordered_date = COALESCE(parts_ordered_date, ?),
+          parts_status = ?,
+          parts_received_date = CASE WHEN ? = 'arrived' THEN COALESCE(?, date('now')) ELSE parts_received_date END,
+          ets_repair_date = COALESCE(?, ets_repair_date)
+      WHERE id = ?
+    `).run(row.order_date, label, String(row.status || ""), row.arrived_date, row.expected_arrival_date, breakdownId);
+  }
+
+  function validatePartOrderLinks({ asset_id, work_order_id, breakdown_id, offsite_repair_id }) {
+    const linked = [
+      ["work order", work_order_id, "work_orders"],
+      ["breakdown", breakdown_id, "breakdowns"],
+      ["offsite repair", offsite_repair_id, "breakdown_offsite_repairs"],
+    ];
+    const linkedAssetIds = [];
+    for (const [label, id, table] of linked) {
+      if (!id) continue;
+      const row = db.prepare(`SELECT asset_id FROM ${table} WHERE id = ?`).get(Number(id));
+      if (!row) return { error: `${label} not found`, status: 404 };
+      if (Number(row.asset_id || 0) > 0) linkedAssetIds.push(Number(row.asset_id));
+    }
+    const distinct = [...new Set(linkedAssetIds)];
+    if (distinct.length > 1 || (asset_id && distinct[0] && Number(asset_id) !== distinct[0])) {
+      return { error: "asset and linked records do not belong to the same machine", status: 400 };
+    }
+    return { asset_id: Number(asset_id || distinct[0] || 0) || null };
+  }
+
   // GET /api/stock/part-orders?start=&end=&status=
   app.get("/part-orders", async (req, reply) => {
     const site_code = getSiteCode(req);
@@ -2268,6 +2323,13 @@ export default async function stockRoutes(app) {
         o.requisition_number,
         o.invoice_number,
         o.current_location,
+        o.asset_id,
+        a.asset_code,
+        a.asset_name,
+        o.work_order_id,
+        o.breakdown_id,
+        o.offsite_repair_id,
+        o.responsible_person,
         o.order_date,
         o.expected_arrival_date,
         o.arrived_date,
@@ -2280,6 +2342,7 @@ export default async function stockRoutes(app) {
         p.part_name AS catalog_part_name
       FROM stores_part_orders o
       LEFT JOIN parts p ON p.id = o.part_id
+      LEFT JOIN assets a ON a.id = o.asset_id
       WHERE ${where.join(" AND ")}
       ORDER BY o.order_date DESC, o.id DESC
       LIMIT 2000
@@ -2311,6 +2374,19 @@ export default async function stockRoutes(app) {
     const requisition_number = String(body.requisition_number || "").trim() || null;
     const invoice_number = String(body.invoice_number || "").trim() || null;
     const current_location = String(body.current_location || "").trim() || null;
+    const asset_code = String(body.asset_code || "").trim();
+    const linkedAsset = asset_code
+      ? db.prepare(`SELECT id, asset_code FROM assets WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?)) LIMIT 1`).get(asset_code)
+      : null;
+    if (asset_code && !linkedAsset) return reply.code(404).send({ error: "linked asset not found" });
+    let asset_id = linkedAsset ? Number(linkedAsset.id) : null;
+    const work_order_id = Number(body.work_order_id || 0) || null;
+    const breakdown_id = Number(body.breakdown_id || 0) || null;
+    const offsite_repair_id = Number(body.offsite_repair_id || 0) || null;
+    const responsible_person = String(body.responsible_person || "").trim() || null;
+    const linkCheck = validatePartOrderLinks({ asset_id, work_order_id, breakdown_id, offsite_repair_id });
+    if (linkCheck.error) return reply.code(linkCheck.status).send({ error: linkCheck.error });
+    asset_id = linkCheck.asset_id;
     const order_date = String(body.order_date || "").trim();
     const expected_arrival_date = String(body.expected_arrival_date || "").trim() || null;
     const notes = String(body.notes || "").trim() || null;
@@ -2338,9 +2414,10 @@ export default async function stockRoutes(app) {
       INSERT INTO stores_part_orders (
         site_code, part_id, part_code, part_name, qty, unit_cost, currency,
         supplier_name, po_number, requisition_number, invoice_number, current_location,
+        asset_id, work_order_id, breakdown_id, offsite_repair_id, responsible_person,
         order_date, expected_arrival_date, arrived_date,
         status, notes, created_by, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       site_code,
       part_id,
@@ -2354,6 +2431,11 @@ export default async function stockRoutes(app) {
       requisition_number,
       invoice_number,
       current_location,
+      asset_id,
+      work_order_id,
+      breakdown_id,
+      offsite_repair_id,
+      responsible_person,
       order_date,
       expected_arrival_date,
       arrived_date,
@@ -2378,6 +2460,7 @@ export default async function stockRoutes(app) {
       const row = db.prepare(`SELECT * FROM stores_part_orders WHERE id = ?`).get(newId);
       stock_receipt = receivePartOrderToStock(row, req);
     }
+    syncLinkedPartOrder(newId);
 
     return reply.send({ ok: true, id: newId, stock_receipt });
   });
@@ -2413,6 +2496,22 @@ export default async function stockRoutes(app) {
     }
     if (status !== "arrived") arrived_date = body.arrived_date === null ? null : arrived_date;
 
+    let asset_id = existing.asset_id ?? null;
+    if (body.asset_code != null) {
+      const assetCode = String(body.asset_code || "").trim();
+      const linked = assetCode
+        ? db.prepare(`SELECT id FROM assets WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?)) LIMIT 1`).get(assetCode)
+        : null;
+      if (assetCode && !linked) return reply.code(404).send({ error: "linked asset not found" });
+      asset_id = linked ? Number(linked.id) : null;
+    }
+    const work_order_id = body.work_order_id !== undefined ? (Number(body.work_order_id || 0) || null) : existing.work_order_id;
+    const breakdown_id = body.breakdown_id !== undefined ? (Number(body.breakdown_id || 0) || null) : existing.breakdown_id;
+    const offsite_repair_id = body.offsite_repair_id !== undefined ? (Number(body.offsite_repair_id || 0) || null) : existing.offsite_repair_id;
+    const linkCheck = validatePartOrderLinks({ asset_id, work_order_id, breakdown_id, offsite_repair_id });
+    if (linkCheck.error) return reply.code(linkCheck.status).send({ error: linkCheck.error });
+    asset_id = linkCheck.asset_id;
+
     const now = new Date().toISOString();
     db.prepare(`
       UPDATE stores_part_orders
@@ -2426,6 +2525,11 @@ export default async function stockRoutes(app) {
         requisition_number = ?,
         invoice_number = ?,
         current_location = ?,
+        asset_id = ?,
+        work_order_id = ?,
+        breakdown_id = ?,
+        offsite_repair_id = ?,
+        responsible_person = ?,
         order_date = ?,
         expected_arrival_date = ?,
         arrived_date = ?,
@@ -2449,6 +2553,11 @@ export default async function stockRoutes(app) {
       body.current_location != null
         ? String(body.current_location).trim() || null
         : existing.current_location,
+      asset_id,
+      work_order_id,
+      breakdown_id,
+      offsite_repair_id,
+      body.responsible_person !== undefined ? String(body.responsible_person || "").trim() || null : existing.responsible_person,
       order_date,
       body.expected_arrival_date != null ? String(body.expected_arrival_date).trim() || null : existing.expected_arrival_date,
       arrived_date,
@@ -2473,6 +2582,7 @@ export default async function stockRoutes(app) {
       const updated = db.prepare(`SELECT * FROM stores_part_orders WHERE id = ?`).get(id);
       stock_receipt = receivePartOrderToStock(updated, req);
     }
+    syncLinkedPartOrder(id);
 
     return reply.send({ ok: true, id, stock_receipt });
   });

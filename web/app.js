@@ -9803,7 +9803,7 @@ function updatePartsTrackingKpis() {
 }
 
 function clearPtPartsForm() {
-  ["ptPartCode", "ptPartName", "ptInvoice", "ptLocation", "ptEta", "ptSupplier", "ptPo", "ptNotes"].forEach((id) => {
+  ["ptPartCode", "ptPartName", "ptInvoice", "ptLocation", "ptEta", "ptSupplier", "ptPo", "ptNotes", "ptAsset", "ptWorkOrderId", "ptBreakdownId", "ptOffsiteRepairId", "ptResponsible"].forEach((id) => {
     if (qs(id)) qs(id).value = "";
   });
   if (qs("ptQty")) qs("ptQty").value = "1";
@@ -9829,25 +9829,8 @@ function renderPtPartsTable(rows) {
     host.innerHTML = `<div class="muted small">No purchase lines for this filter.</div>`;
     return;
   }
-  host.innerHTML = `
-    <table class="gridTable" style="min-width:1280px;">
-      <thead>
-        <tr>
-          <th>Status</th>
-          <th>Part</th>
-          <th style="text-align:right;">Qty</th>
-          <th style="text-align:right;">Unit $</th>
-          <th style="text-align:right;">Line $</th>
-          <th>Invoice #</th>
-          <th>Ordered</th>
-          <th>Location</th>
-          <th>ETA on site</th>
-          <th>Supplier / PO</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        ${list.map((r) => {
+  host.innerHTML = `<div class="parts-order-grid">
+    ${list.map((r) => {
           const id = Number(r.id || 0);
           const cancelled = String(r.status || "").toLowerCase() === "cancelled";
           const overdue = ptIsOverdueEta(r.expected_arrival_date, cancelled || String(r.status || "").toLowerCase() === "arrived");
@@ -9858,22 +9841,26 @@ function renderPtPartsTable(rows) {
             .map((st) => `<option value="${st}"${String(r.status || "").toLowerCase() === st ? " selected" : ""}>${spoStatusLabel(st)}</option>`)
             .join("");
           const dis = cancelled ? " disabled" : "";
+          const links = [r.asset_code ? `Asset ${r.asset_code}` : "", r.work_order_id ? `WO #${r.work_order_id}` : "", r.breakdown_id ? `BD #${r.breakdown_id}` : "", r.offsite_repair_id ? `Offsite #${r.offsite_repair_id}` : ""].filter(Boolean);
           return `
-            <tr data-pt-row="${id}" class="${overdue ? "pt-row-overdue" : ""}">
-              <td><select data-pt-status="${id}" class="w-full" style="min-width:110px;"${dis}>${statusOpts}</select></td>
-              <td>${partLabel}</td>
-              <td style="text-align:right;">${Number(r.qty || 0)}</td>
-              <td style="text-align:right;">${moneyUsd(r.unit_cost)}</td>
-              <td style="text-align:right;"><strong>${moneyUsd(r.line_total)}</strong></td>
-              <td><input type="text" class="spo-inline-input w-full" data-pt-field="invoice_number" value="${spoAttrVal(r.invoice_number || "")}"${dis} /></td>
-              <td>${escapeHtml(String(r.order_date || ""))}</td>
-              <td><input type="text" class="spo-inline-input w-full" data-pt-field="current_location" value="${spoAttrVal(r.current_location || "")}"${dis} /></td>
-              <td><input type="date" class="spo-inline-input w-full" data-pt-field="expected_arrival_date" value="${spoAttrVal(r.expected_arrival_date || "")}"${dis} /></td>
-              <td>
-                <input type="text" class="spo-inline-input w-full" data-pt-field="supplier_name" value="${spoAttrVal(r.supplier_name || "")}" placeholder="Supplier"${dis} />
-                <input type="text" class="spo-inline-input w-full" data-pt-field="po_number" value="${spoAttrVal(r.po_number || "")}" placeholder="PO"${dis} style="margin-top:4px;" />
-              </td>
-              <td>
+            <article data-pt-row="${id}" class="parts-order-card ${overdue ? "is-overdue" : ""}">
+              <header><div>${partLabel}<div class="muted small">Qty ${Number(r.qty || 0)} · ${moneyUsd(r.line_total)} total</div></div><div><span class="pill ${overdue ? "red" : "blue"}">${overdue ? "OVERDUE" : spoStatusLabel(r.status)}</span></div></header>
+              <div class="parts-order-links">${links.length ? links.map((x) => `<span class="pill">${escapeHtml(x)}</span>`).join(" ") : `<span class="muted small">Not linked to equipment yet</span>`}</div>
+              <div class="parts-order-fields">
+                <label>Status<select data-pt-status="${id}"${dis}>${statusOpts}</select></label>
+                <label>Asset<input data-pt-field="asset_code" list="assetCodeOptions" value="${spoAttrVal(r.asset_code || "")}"${dis} /></label>
+                <label>WO #<input type="number" min="1" data-pt-field="work_order_id" value="${spoAttrVal(r.work_order_id || "")}"${dis} /></label>
+                <label>Breakdown #<input type="number" min="1" data-pt-field="breakdown_id" value="${spoAttrVal(r.breakdown_id || "")}"${dis} /></label>
+                <label>Offsite #<input type="number" min="1" data-pt-field="offsite_repair_id" value="${spoAttrVal(r.offsite_repair_id || "")}"${dis} /></label>
+                <label>Responsible<input data-pt-field="responsible_person" value="${spoAttrVal(r.responsible_person || "")}"${dis} /></label>
+                <label>Supplier<input data-pt-field="supplier_name" value="${spoAttrVal(r.supplier_name || "")}"${dis} /></label>
+                <label>PO #<input data-pt-field="po_number" value="${spoAttrVal(r.po_number || "")}"${dis} /></label>
+                <label>Invoice #<input data-pt-field="invoice_number" value="${spoAttrVal(r.invoice_number || "")}"${dis} /></label>
+                <label>Location<input data-pt-field="current_location" value="${spoAttrVal(r.current_location || "")}"${dis} /></label>
+                <label>Ordered<input type="date" value="${spoAttrVal(r.order_date || "")}" disabled /></label>
+                <label>ETA on site<input type="date" data-pt-field="expected_arrival_date" value="${spoAttrVal(r.expected_arrival_date || "")}"${dis} /></label>
+              </div>
+              <footer><span class="muted small">${r.in_store_inventory ? "Received into Stores inventory" : escapeHtml(r.notes || "No progress note")}</span><div>
                 ${cancelled ? `<span class="muted small">Cancelled</span>` : `
                   <button type="button" class="btn btn-primary btn-sm" data-pt-save="${id}">Save</button>
                   ${String(r.status || "").toLowerCase() === "arrived" && !r.in_store_inventory
@@ -9881,12 +9868,10 @@ function renderPtPartsTable(rows) {
                     : ""}
                   <button type="button" class="btn btn-secondary btn-sm" data-pt-del="${id}">Cancel</button>
                 `}
-              </td>
-            </tr>`;
+              </div></footer>
+            </article>`;
         }).join("")}
-      </tbody>
-    </table>
-  `;
+    </div>`;
 }
 
 function readPtPartsRowPatch(rowEl) {
@@ -9903,6 +9888,11 @@ function readPtPartsRowPatch(rowEl) {
     expected_arrival_date: read("expected_arrival_date"),
     supplier_name: read("supplier_name"),
     po_number: read("po_number"),
+    asset_code: read("asset_code"),
+    work_order_id: read("work_order_id") ? Number(read("work_order_id")) : null,
+    breakdown_id: read("breakdown_id") ? Number(read("breakdown_id")) : null,
+    offsite_repair_id: read("offsite_repair_id") ? Number(read("offsite_repair_id")) : null,
+    responsible_person: read("responsible_person"),
   };
   if (statusEl && !statusEl.disabled) patch.status = String(statusEl.value || "").trim();
   return patch;
@@ -9940,6 +9930,11 @@ async function savePtPartsOrder() {
     supplier_name: String(qs("ptSupplier")?.value || "").trim() || null,
     po_number: String(qs("ptPo")?.value || "").trim() || null,
     notes: String(qs("ptNotes")?.value || "").trim() || null,
+    asset_code: String(qs("ptAsset")?.value || "").trim() || null,
+    work_order_id: Number(qs("ptWorkOrderId")?.value || 0) || null,
+    breakdown_id: Number(qs("ptBreakdownId")?.value || 0) || null,
+    offsite_repair_id: Number(qs("ptOffsiteRepairId")?.value || 0) || null,
+    responsible_person: String(qs("ptResponsible")?.value || "").trim() || null,
   };
   if (!body.part_code && !body.part_name) {
     if (msg) msg.textContent = "Enter a part code or description.";
@@ -17951,7 +17946,7 @@ async function init() {
     if (!sel) return;
     const id = Number(sel.getAttribute("data-pt-status") || 0);
     if (!id) return;
-    const rowEl = qs("ptPartsList")?.querySelector(`tr[data-pt-row="${id}"]`);
+    const rowEl = qs("ptPartsList")?.querySelector(`[data-pt-row="${id}"]`);
     const patch = readPtPartsRowPatch(rowEl) || {};
     patch.status = String(sel.value || "").trim();
     patchStoresPartOrder(id, patch)
@@ -17962,7 +17957,7 @@ async function init() {
     const saveBtn = evt.target?.closest?.("button[data-pt-save]");
     if (saveBtn) {
       const id = Number(saveBtn.getAttribute("data-pt-save") || 0);
-      const rowEl = qs("ptPartsList")?.querySelector(`tr[data-pt-row="${id}"]`);
+      const rowEl = qs("ptPartsList")?.querySelector(`[data-pt-row="${id}"]`);
       const patch = readPtPartsRowPatch(rowEl);
       if (!patch) return;
       patchStoresPartOrder(id, patch)
