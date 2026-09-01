@@ -11752,7 +11752,7 @@ function downloadStockMonitorPdf() {
   downloadAuthedFile(`${API}/api/reports/stock-monitor.pdf${q}`, "stock-monitor.pdf");
 }
 
-function downloadAssetHistoryPdf() {
+async function downloadAssetHistoryPdf() {
   const asset_code = getSelectedAssetCode();
   if (!asset_code) {
     alert("Select a fleet card first.");
@@ -11763,7 +11763,15 @@ function downloadAssetHistoryPdf() {
   const url =
     `${API}/api/reports/asset-history/${encodeURIComponent(asset_code)}.pdf` +
     `?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&download=1`;
-  window.open(url, "_blank");
+  const filename = `machine-history-${asset_code}-${start || "all"}-to-${end || "today"}.pdf`;
+  setStatus(`Preparing machine history PDF for ${asset_code}...`);
+  try {
+    await downloadAuthedFile(url, filename);
+    setStatus(`Machine history PDF downloaded for ${asset_code}.`);
+  } catch (err) {
+    setStatus("Machine history PDF failed: " + (err.message || err));
+    alert(`Could not download machine history PDF: ${err.message || err}`);
+  }
 }
 
 function openOperationsPdf(download = false) {
