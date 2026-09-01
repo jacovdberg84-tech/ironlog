@@ -543,7 +543,7 @@ function kpiDaily(date, scheduled) {
       ${andDailyHoursFleetHoursOnly("dh", "a")}
   `).get(Number(scheduled || 0), date);
   const utilization_base_hours = Number(utilBaseRow?.utilization_base_hours || 0);
-  const available_hours = utilization_base_hours;
+  let available_hours = utilization_base_hours;
 
   const breakdownCols = db.prepare("PRAGMA table_info(breakdowns)").all();
   const hasBreakdownStatus = breakdownCols.some((r) => String(r.name || "") === "status");
@@ -568,6 +568,7 @@ function kpiDaily(date, scheduled) {
     WHERE l.log_date = ?
       AND DATE(COALESCE(b.breakdown_date, l.log_date)) <= ?
       AND ${activeBreakdownPredicate}
+      AND UPPER(TRIM(COALESCE(b.description, ''))) NOT LIKE 'MANAGER INSPECTION ALERT%'
       ${andAssetFleetHoursOnly("a")}
       AND NOT EXISTS (
         SELECT 1
@@ -581,39 +582,43 @@ function kpiDaily(date, scheduled) {
   const openNoLogParams = [Number(scheduled || 0), date, date, date];
   if (hasBreakdownEndAt) openNoLogParams.push(date);
   const openNoLogRow = db.prepare(`
-    SELECT IFNULL(SUM(
-      CASE
-        WHEN COALESCE(dh.scheduled_hours, 0) > 0 THEN dh.scheduled_hours
-        ELSE ?
-      END
-    ), 0) AS assumed_down_hours
-    FROM breakdowns b
-    JOIN assets a ON a.id = b.asset_id
-    LEFT JOIN daily_hours dh ON dh.asset_id = b.asset_id AND dh.work_date = ? AND dh.is_used = 1
-    WHERE ${activeBreakdownPredicate}
-      AND b.breakdown_date <= ?
-      AND NOT EXISTS (
-        SELECT 1
-        FROM breakdown_downtime_logs l
-        WHERE l.breakdown_id = b.id
-          AND l.log_date = ?
-      )
-      AND NOT EXISTS (
-        SELECT 1
-        FROM work_orders wbx
-        WHERE wbx.source = 'breakdown'
-          AND COALESCE(wbx.reference_id, -1) = b.id
-          AND REPLACE(TRIM(LOWER(COALESCE(wbx.status, ''))), ' ', '_') IN ('completed', 'approved', 'closed')
-      )
-      ${andAssetFleetHoursOnly("a")}
+    SELECT
+      IFNULL(SUM(x.scheduled), 0) AS assumed_down_hours,
+      IFNULL(SUM(CASE WHEN x.has_daily_row = 0 THEN x.scheduled ELSE 0 END), 0) AS missing_planned_hours
+    FROM (
+      SELECT
+        b.asset_id,
+        MAX(CASE WHEN COALESCE(dh.scheduled_hours, 0) > 0 THEN dh.scheduled_hours ELSE ? END) AS scheduled,
+        MAX(CASE WHEN dh.asset_id IS NULL THEN 0 ELSE 1 END) AS has_daily_row
+      FROM breakdowns b
+      JOIN assets a ON a.id = b.asset_id
+      LEFT JOIN daily_hours dh ON dh.asset_id = b.asset_id AND dh.work_date = ? AND dh.is_used = 1
+      WHERE ${activeBreakdownPredicate}
+        AND b.breakdown_date <= ?
+        AND UPPER(TRIM(COALESCE(b.description, ''))) NOT LIKE 'MANAGER INSPECTION ALERT%'
+        AND NOT EXISTS (
+          SELECT 1 FROM breakdown_downtime_logs l
+          WHERE l.breakdown_id = b.id AND l.log_date = ?
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM work_orders wbx
+          WHERE wbx.source = 'breakdown'
+            AND COALESCE(wbx.reference_id, -1) = b.id
+            AND REPLACE(TRIM(LOWER(COALESCE(wbx.status, ''))), ' ', '_') IN ('completed', 'approved', 'closed')
+        )
+        ${andAssetFleetHoursOnly("a")}
+      GROUP BY b.asset_id
+    ) x
   `).get(...openNoLogParams);
   downtime_hours += Number(openNoLogRow?.assumed_down_hours || 0);
+  // A down asset still belongs in planned hours even when no Daily Log row was entered.
+  available_hours += Number(openNoLogRow?.missing_planned_hours || 0);
 
   const prestart = prestartDeductionForProductionFleet(db, date);
   const prestart_hours = Number(prestart.hours || 0);
   const effective_loss_hours = downtime_hours + prestart_hours;
   const availability = available_hours > 0
-    ? ((available_hours - effective_loss_hours) / available_hours) * 100
+    ? (Math.max(0, available_hours - effective_loss_hours) / available_hours) * 100
     : null;
   const utilization = utilization_base_hours > 0 ? (run_hours / utilization_base_hours) * 100 : null;
 

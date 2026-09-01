@@ -7,6 +7,7 @@ import {
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { andDailyHoursFleetHoursOnly, andAssetFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
+import { listDailyPrestarts, PRESTART_DEDUCTION_HOURS } from "../utils/prestartDaily.js";
 import { getRunFromFuelRows, resolveBenchmarkHoursRun, summarizeFuelBenchmarkRows } from "../utils/fuelRunFromLogs.js";
 import { aggregateFuelBenchmarkByCategory, normalizeEquipmentCategory } from "../utils/fuelBenchmarkAggregate.js";
 import { fuelBenchmarkAssetsInRangeSql, sqlFuelMetricModeExpr } from "../utils/fuelMetricMode.js";
@@ -312,6 +313,48 @@ export default async function dashboardRoutes(app) {
   `)
     : null;
 
+  // A breakdown can be valid before its linked work order is created. Include the
+  // incident itself so an open/down machine can never leave availability at 100%.
+  const breakdownStatusSql = hasColumn("breakdowns", "status")
+    ? `REPLACE(TRIM(LOWER(COALESCE(b.status, 'open'))), ' ', '_') IN ('open', 'in_progress')`
+    : "1 = 1";
+  const breakdownEndSql = hasColumn("breakdowns", "end_at")
+    ? `(b.end_at IS NULL OR TRIM(COALESCE(b.end_at, '')) = '' OR DATE(b.end_at) >= ?)`
+    : "1 = 1";
+  const getOpenIncidentAssetIdsByDayNoSite = db.prepare(`
+    SELECT DISTINCT b.asset_id
+    FROM breakdowns b
+    JOIN assets a ON a.id = b.asset_id
+    WHERE DATE(b.breakdown_date) <= ?
+      AND ${breakdownEndSql}
+      AND ${breakdownStatusSql}
+      AND UPPER(TRIM(COALESCE(b.description, ''))) NOT LIKE 'MANAGER INSPECTION ALERT%'
+      AND NOT EXISTS (
+        SELECT 1 FROM work_orders wx
+        WHERE wx.source = 'breakdown' AND COALESCE(wx.reference_id, -1) = b.id
+          AND REPLACE(TRIM(LOWER(COALESCE(wx.status, ''))), ' ', '_') IN ('completed', 'approved', 'closed')
+      )
+      ${andAssetFleetHoursOnly("a")}
+  `);
+  const getOpenIncidentAssetIdsByDayWithSite = bdOnlySiteSql
+    ? db.prepare(`
+      SELECT DISTINCT b.asset_id
+      FROM breakdowns b
+      JOIN assets a ON a.id = b.asset_id
+      WHERE DATE(b.breakdown_date) <= ?
+        AND ${breakdownEndSql}
+        AND ${breakdownStatusSql}
+        AND UPPER(TRIM(COALESCE(b.description, ''))) NOT LIKE 'MANAGER INSPECTION ALERT%'
+        AND NOT EXISTS (
+          SELECT 1 FROM work_orders wx
+          WHERE wx.source = 'breakdown' AND COALESCE(wx.reference_id, -1) = b.id
+            AND REPLACE(TRIM(LOWER(COALESCE(wx.status, ''))), ' ', '_') IN ('completed', 'approved', 'closed')
+        )
+        ${andAssetFleetHoursOnly("a")}
+        ${bdOnlySiteSql}
+    `)
+    : null;
+
   const breakdownDowntimeCol = getBreakdownDowntimeColumn();
   const getDayAssetDowntimeFallbackNoSite = db.prepare(`
     SELECT
@@ -464,11 +507,21 @@ export default async function dashboardRoutes(app) {
       const fallback = Number(fallbackDowntimeByAsset.get(assetId) || 0);
       downtimeByAsset.set(assetId, logged > 0 ? logged : fallback);
     }
-    const openBreakdownAssets = new Set(
-      (getOpenBreakdownAssetIdsByDayWithSite && bdOnlySiteSql
+    const openWorkOrderAssetIds = getOpenBreakdownAssetIdsByDayWithSite && bdOnlySiteSql
         ? getOpenBreakdownAssetIdsByDayWithSite.all(dayStr, dayStr, siteCode)
-        : getOpenBreakdownAssetIdsByDayNoSite.all(dayStr, dayStr)
-      )
+        : getOpenBreakdownAssetIdsByDayNoSite.all(dayStr, dayStr);
+    const incidentParams = hasColumn("breakdowns", "end_at") ? [dayStr, dayStr] : [dayStr];
+    if (getOpenIncidentAssetIdsByDayWithSite && bdOnlySiteSql) incidentParams.push(siteCode);
+    const openIncidentAssetIds = getOpenIncidentAssetIdsByDayWithSite && bdOnlySiteSql
+      ? getOpenIncidentAssetIdsByDayWithSite.all(...incidentParams)
+      : getOpenIncidentAssetIdsByDayNoSite.all(...incidentParams);
+    const openBreakdownAssets = new Set(
+      [...openWorkOrderAssetIds, ...openIncidentAssetIds]
+        .map((r) => Number(r.asset_id || 0))
+        .filter((assetId) => activeFleetIds.has(assetId))
+    );
+    const prestartAssetIds = new Set(
+      listDailyPrestarts(db, dayStr).rows
         .map((r) => Number(r.asset_id || 0))
         .filter((assetId) => activeFleetIds.has(assetId))
     );
@@ -481,6 +534,8 @@ export default async function dashboardRoutes(app) {
     let scheduled_hours = 0;
     let run_hours = 0;
     let downtime_hours = 0;
+    let inspection_hours = 0;
+    let availability_loss_hours = 0;
     let utilization_base_hours = 0;
     const per_asset_kpi = includePerAsset ? [] : null;
     const contributingAssetIds = new Set();
@@ -509,11 +564,15 @@ export default async function dashboardRoutes(app) {
         ? loggedDownRaw
         : (allowOpenBreakdownImpute && openBreakdownAssets.has(assetId) ? scheduled : 0);
       const cappedDown = Math.min(loggedDown, scheduled);
+      const inspection = prestartAssetIds.has(assetId) ? PRESTART_DEDUCTION_HOURS : 0;
+      const cappedLoss = Math.min(scheduled, cappedDown + inspection);
       const contributes_to_kpi = true;
       const runEff = Math.min(run, scheduled);
       scheduled_hours += scheduled;
       run_hours += runEff;
       downtime_hours += cappedDown;
+      inspection_hours += Math.max(0, cappedLoss - cappedDown);
+      availability_loss_hours += cappedLoss;
       utilization_base_hours += scheduled;
       const s = Number(scheduled.toFixed(2));
       const runN = Number(runEff.toFixed(2));
@@ -535,7 +594,8 @@ export default async function dashboardRoutes(app) {
           meter_run_value: Number(runRaw.toFixed(2)),
           run_hours: runN,
           downtime_hours: downN,
-          available_hours: Number(Math.max(0, scheduled - cappedDown).toFixed(2)),
+          inspection_hours: Number(Math.max(0, cappedLoss - cappedDown).toFixed(2)),
+          available_hours: Number(Math.max(0, scheduled - cappedLoss).toFixed(2)),
           debug: {
             has_daily_row: true,
             is_used: rowIsUsed === 1,
@@ -580,6 +640,8 @@ export default async function dashboardRoutes(app) {
           ? loggedDownRaw
           : (openBreakdownAssets.has(assetId) ? scheduled : 0);
         const cappedDown = Math.min(loggedDown, scheduled);
+        const inspection = prestartAssetIds.has(assetId) ? PRESTART_DEDUCTION_HOURS : 0;
+        const cappedLoss = Math.min(scheduled, cappedDown + inspection);
         const cat = String(a.category || "");
         const mode = isToyotaHiluxAsset(a) ? "km" : "hours";
         const kmPerHour = Math.max(0.1, Number(a.km_per_hour_factor || 10));
@@ -590,6 +652,8 @@ export default async function dashboardRoutes(app) {
         scheduled_hours += scheduled;
         run_hours += runEff;
         downtime_hours += cappedDown;
+        inspection_hours += Math.max(0, cappedLoss - cappedDown);
+        availability_loss_hours += cappedLoss;
         utilization_base_hours += scheduled;
 
         const s = Number(scheduled.toFixed(2));
@@ -612,7 +676,8 @@ export default async function dashboardRoutes(app) {
             meter_run_value: Number(runRaw.toFixed(2)),
             run_hours: runN,
             downtime_hours: downN,
-            available_hours: Number(Math.max(0, scheduled - cappedDown).toFixed(2)),
+            inspection_hours: Number(Math.max(0, cappedLoss - cappedDown).toFixed(2)),
+            available_hours: Number(Math.max(0, scheduled - cappedLoss).toFixed(2)),
             debug: {
               has_daily_row: false,
               is_used: false,
@@ -628,6 +693,8 @@ export default async function dashboardRoutes(app) {
       scheduled_hours,
       run_hours,
       downtime_hours,
+      inspection_hours,
+      availability_loss_hours,
       utilization_base_hours,
       contributingAssetIds,
       per_asset_kpi: includePerAsset ? per_asset_kpi : [],
@@ -1329,6 +1396,8 @@ export default async function dashboardRoutes(app) {
     let mtd_scheduled = 0;
     let mtd_run = 0;
     let mtd_downtime = 0;
+    let mtd_inspection = 0;
+    let mtd_availability_loss = 0;
     let mtd_day_count = 0;
     const mtdAssetIds = new Set();
     eachDateInclusiveYMD(mtdStart, date, (dayStr) => {
@@ -1337,6 +1406,8 @@ export default async function dashboardRoutes(app) {
       mtd_scheduled += dr.scheduled_hours;
       mtd_run += dr.run_hours;
       mtd_downtime += dr.downtime_hours;
+      mtd_inspection += dr.inspection_hours;
+      mtd_availability_loss += dr.availability_loss_hours;
       dr.contributingAssetIds.forEach((id) => mtdAssetIds.add(id));
     });
 
@@ -1354,7 +1425,7 @@ export default async function dashboardRoutes(app) {
       }
     }
 
-    const available_hours_mtd = Math.max(0, mtd_scheduled - mtd_downtime);
+    const available_hours_mtd = Math.max(0, mtd_scheduled - mtd_availability_loss);
     const availability_mtd =
       mtd_scheduled > 0 ? (available_hours_mtd / mtd_scheduled) * 100 : null;
     const utilization_mtd =
@@ -1364,7 +1435,9 @@ export default async function dashboardRoutes(app) {
     const day_scheduled = dayK.scheduled_hours;
     const day_run = dayK.run_hours;
     const day_downtime = dayK.downtime_hours;
-    const available_hours_day = Math.max(0, day_scheduled - day_downtime);
+    const day_inspection = dayK.inspection_hours;
+    const day_availability_loss = dayK.availability_loss_hours;
+    const available_hours_day = Math.max(0, day_scheduled - day_availability_loss);
     const availability_day =
       day_scheduled > 0 ? (available_hours_day / day_scheduled) * 100 : null;
     const utilization_day =
@@ -1801,6 +1874,7 @@ export default async function dashboardRoutes(app) {
         run_hours: day_run,
         run_hours_mtd: Number(mtd_run.toFixed(2)),
         downtime_hours,
+        inspection_hours: Number(mtd_inspection.toFixed(2)),
         availability: availability == null ? null : Number(availability.toFixed(2)),
         utilization: utilization == null ? null : Number(utilization.toFixed(2)),
         availability_day: availability_day == null ? null : Number(availability_day.toFixed(2)),
@@ -1809,6 +1883,8 @@ export default async function dashboardRoutes(app) {
         utilization_mtd: utilization_mtd == null ? null : Number(utilization_mtd.toFixed(2)),
         scheduled_hours_day: Number(day_scheduled.toFixed(2)),
         downtime_hours_day: Number(day_downtime.toFixed(2)),
+        inspection_hours_day: Number(day_inspection.toFixed(2)),
+        inspection_deduction_hours_per_check: PRESTART_DEDUCTION_HOURS,
         basis: "gauges_day_or_mtd_fallback_meta_mtd",
         mtd_start: mtdStart,
         mtd_end: date,

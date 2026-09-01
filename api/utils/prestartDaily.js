@@ -1,10 +1,10 @@
 import { getMachinePrestartTemplate } from "./machinePrestartTemplates.js";
 import { andDailyHoursFleetHoursOnly } from "./fleetHoursKpiScope.js";
 
-/** Default non-productive time per completed pre-start (30 minutes). Override via PRESTART_DEDUCTION_HOURS. */
+/** Default non-productive time per completed pre-start (15 minutes). Override via PRESTART_DEDUCTION_HOURS. */
 export const PRESTART_DEDUCTION_HOURS = (() => {
-  const n = Number(process.env.PRESTART_DEDUCTION_HOURS ?? 0.5);
-  return Number.isFinite(n) && n > 0 ? n : 0.5;
+  const n = Number(process.env.PRESTART_DEDUCTION_HOURS ?? 0.25);
+  return Number.isFinite(n) && n > 0 ? n : 0.25;
 })();
 
 export function isPrestartCheckMode(checkMode) {
