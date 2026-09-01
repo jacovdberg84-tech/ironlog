@@ -5,7 +5,7 @@
   <title>IRONLOG Maintenance</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./styles.css?v=17" />
+  <link rel="stylesheet" href="./styles.css?v=18" />
 </head>
 <body class="page-shell has-sidebar">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -156,7 +156,10 @@
       <h2>Maintenance Planning</h2>
       <p class="muted">Prioritize upcoming services and create the work needed to complete them.</p>
     </div>
-    <button id="refreshMaintenancePlanningBtn" type="button">Refresh planning</button>
+    <div class="maintenance-planning-actions">
+      <button id="shareUpcomingServicesPdfBtn" type="button" class="btn-primary">Open Upcoming Services PDF</button>
+      <button id="refreshMaintenancePlanningBtn" type="button">Refresh planning</button>
+    </div>
   </div>
   <div id="maintenancePlanningKpis" class="maintenance-planning-kpis">
     <button type="button" data-maint-plan-filter="all"><strong>0</strong><span>Planned assets</span></button>
@@ -183,7 +186,7 @@
         <option value="1000">1000 hour service</option>
         <option value="10000" data-ldv-only="1">10000 km service (LDV)</option>
       </select>
-      <small class="muted">Pick 500 + 1000 on the same machine for alternating services. IRONLOG calculates which is due next from the hourmeter.</small>
+      <small class="muted">Plant equipment automatically alternates between 500h and 1000h services. LDVs use 10000 km intervals.</small>
     </label>
 
     <label>
@@ -2246,6 +2249,6 @@
   <script src="./undercarriage-diagrams.js?v=1"></script>
   <script src="./undercarriage.js?v=5"></script>
   <script src="./tyre-inspection-qr.js?v=1"></script>
-  <script src="./maintenance.js?v=54"></script>
+  <script src="./maintenance.js?v=55"></script>
 </body>
 </html>

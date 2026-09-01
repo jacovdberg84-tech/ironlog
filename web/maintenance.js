@@ -2546,13 +2546,13 @@ async function loadDue() {
   }
 }
 
-async function openUpcomingServicesPdf(download = false) {
+async function openUpcomingServicesPdf(download = false, includeAll = false) {
   const nearDueHours = getDueThresholdHours();
   const q = new URLSearchParams();
   q.set("near_due_hours", String(nearDueHours));
   const selectedPlans = Array.from(selectedDuePlanIds);
-  if (selectedPlans.length) q.set("plan_ids", selectedPlans.join(","));
-  else q.set("within_hours", String(nearDueHours));
+  if (!includeAll && selectedPlans.length) q.set("plan_ids", selectedPlans.join(","));
+  else if (!includeAll) q.set("within_hours", String(nearDueHours));
   q.set("_", String(Date.now()));
   const url = `${API}/maintenance/due-upcoming.pdf?${q.toString()}`;
   try {
@@ -8415,6 +8415,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("refreshMaintenancePlanningBtn")?.addEventListener("click", async () => {
     await Promise.all([loadPlans(), loadDue(), loadHistory()]);
   });
+  document.getElementById("shareUpcomingServicesPdfBtn")?.addEventListener("click", () => openUpcomingServicesPdf(false, true));
   document.getElementById("openUpcomingServicesPdfBtn")?.addEventListener("click", () => openUpcomingServicesPdf(false));
   document.getElementById("downloadUpcomingServicesPdfBtn")?.addEventListener("click", () => openUpcomingServicesPdf(true));
 
