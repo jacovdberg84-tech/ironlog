@@ -26,3 +26,18 @@ test("allows first-time password setup without an existing session", () => {
   assert.equal(isPublicAuthRequest("/api/auth/setup-password", "GET"), false);
   assert.equal(isPublicAuthRequest("/api/auth/users", "POST"), false);
 });
+
+test("allows QR pre-start capture without opening maintenance administration", () => {
+  assert.equal(isPublicAuthRequest("/api/maintenance/machine-prestart/context", "GET"), true);
+  assert.equal(isPublicAuthRequest("/api/maintenance/machine-prestart", "POST"), true);
+  assert.equal(isPublicAuthRequest("/api/maintenance/vehicle-ldv-checks/prestart-context", "GET"), true);
+  assert.equal(isPublicAuthRequest("/api/maintenance/vehicle-ldv-checks/prestart", "POST"), true);
+  assert.equal(isPublicAuthRequest("/api/maintenance/vehicle-ldv-checks/123/photo", "POST"), true);
+  assert.equal(isPublicAuthRequest("/api/assets/A300AM/qr-profile", "GET"), true);
+
+  assert.equal(isPublicAuthRequest("/api/maintenance/machine-prestart/hours-correction", "POST"), false);
+  assert.equal(isPublicAuthRequest("/api/maintenance/vehicle-ldv-checks/prestart", "GET"), false);
+  assert.equal(isPublicAuthRequest("/api/maintenance/vehicle-ldv-checks/123/photo", "GET"), false);
+  assert.equal(isPublicAuthRequest("/api/assets/A300AM/qr-profile", "POST"), false);
+  assert.equal(isPublicAuthRequest("/api/maintenance", "GET"), false);
+});

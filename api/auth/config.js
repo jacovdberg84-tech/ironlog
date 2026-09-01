@@ -19,5 +19,29 @@ const PUBLIC_AUTH_REQUESTS = new Set([
 ]);
 
 export function isPublicAuthRequest(url, method) {
-  return PUBLIC_AUTH_REQUESTS.has(`${String(method || "GET").toUpperCase()} ${String(url || "")}`);
+  const normalizedMethod = String(method || "GET").toUpperCase();
+  const normalizedUrl = String(url || "");
+  const requestKey = `${normalizedMethod} ${normalizedUrl}`;
+  if (PUBLIC_AUTH_REQUESTS.has(requestKey)) return true;
+
+  // Field operators open these forms by scanning an asset QR code. Keep only
+  // capture endpoints public; maintenance administration stays protected.
+  const publicPrestartRequests = new Set([
+    "GET /api/maintenance/machine-prestart/context",
+    "POST /api/maintenance/machine-prestart",
+    "GET /api/maintenance/vehicle-ldv-checks/prestart-context",
+    "POST /api/maintenance/vehicle-ldv-checks/prestart",
+  ]);
+  if (publicPrestartRequests.has(requestKey)) return true;
+  if (
+    normalizedMethod === "POST" &&
+    /^\/api\/maintenance\/vehicle-ldv-checks\/\d+\/photo$/.test(normalizedUrl)
+  ) return true;
+  // Older printed asset QR labels land on the hub first; its read-only profile
+  // is needed to route the operator to the correct LDV or machine checklist.
+  if (
+    normalizedMethod === "GET" &&
+    /^\/api\/assets\/[^/]+\/qr-profile$/.test(normalizedUrl)
+  ) return true;
+  return false;
 }
