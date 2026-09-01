@@ -10494,11 +10494,13 @@ export default async function reportsRoutes(app) {
     const breakdownsPdf = breakdowns.slice(0, 40);
     const openWOsPdf = openWOs.slice(0, 40);
 
-    const kpi = kpiDaily(date, scheduled);
     const prevDay = shiftDateYmd(date, -1);
     // Daily PDF is opened "today" for yesterday's ops — short BDs, fuel, and
     // per-asset availability downtime all use the previous calendar day.
     const opsDay = prevDay;
+    // Availability must use the same operations day as the downtime, fuel and
+    // pre-start sections. Using the report issue date here could falsely show 100%.
+    const kpi = kpiDaily(opsDay, scheduled);
     const dailyPlannedMaintenance = listPlannedMaintenanceForDate(db, opsDay).slice(0, 40);
     const dailyDowntimeLogs = hasTable("breakdown_downtime_logs")
       ? db.prepare(`
@@ -10629,7 +10631,8 @@ export default async function reportsRoutes(app) {
 
         sectionTitle(doc, "KPIs");
         kvGrid(doc, [
-          { k: "Date", v: date },
+          { k: "Report date", v: date },
+          { k: "Operations date", v: opsDay },
           { k: "Scheduled hours / asset", v: fmtNum(scheduled, 0) },
           { k: "Used assets", v: fmtNum(kpi.used_assets, 0) },
           { k: "Available hours", v: fmtNum(kpi.available_hours, 0) },
@@ -10637,8 +10640,8 @@ export default async function reportsRoutes(app) {
           { k: "Downtime hours", v: fmtNum(kpi.downtime_hours, 1) },
           ...(kpi.prestart_count > 0
             ? [{
-                k: `Pre-start checks (${fmtNum(kpi.prestart_deduction_hours_per_check, 1)} hr each)`,
-                v: `${fmtNum(kpi.prestart_count, 0)} check(s) · ${fmtNum(kpi.prestart_hours, 1)} hr deducted`,
+                k: `Pre-start checks (${fmtNum(kpi.prestart_deduction_hours_per_check, 2)} hr each)`,
+                v: `${fmtNum(kpi.prestart_count, 0)} check(s) · ${fmtNum(kpi.prestart_hours, 2)} hr deducted`,
               }]
             : []),
           { k: "Availability %", v: kpi.availability == null ? "N/A" : `${fmtNum(kpi.availability, 2)}%` },
