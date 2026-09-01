@@ -16694,7 +16694,14 @@ function renderAssetFleetGrid(cards) {
   const grid = qs("assetFleetGrid");
   if (!grid) return;
   const filter = String(qs("assetsFleetFilter")?.value || "").trim().toLowerCase();
+  const statusFilter = String(qs("assetsFleetStatus")?.value || "").trim().toUpperCase();
+  const liveCards = (cards || []).filter((c) => !Number(c.archived));
+  setText("assetsCountAll", liveCards.length);
+  setText("assetsCountProduction", liveCards.filter((c) => String(c.status || "").toUpperCase() === "PRODUCTION").length);
+  setText("assetsCountStandby", liveCards.filter((c) => String(c.status || "").toUpperCase() === "STANDBY").length);
+  setText("assetsCountDown", liveCards.filter((c) => String(c.status || "").toUpperCase() === "DOWN").length);
   const filtered = (cards || []).filter((c) => {
+    if (statusFilter && String(c.status || "").toUpperCase() !== statusFilter) return false;
     if (!filter) return true;
     const hay = `${c.asset_code} ${c.asset_name} ${c.category || ""}`.toLowerCase();
     return hay.includes(filter);
@@ -16710,19 +16717,20 @@ function renderAssetFleetGrid(cards) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "asset-fleet-card";
+    btn.classList.add(`status-${String(c.status || "unknown").toLowerCase()}`);
     if (Number(c.archived)) btn.classList.add("archived");
     if (c.asset_code === assetsSelectedCode) btn.classList.add("selected");
     btn.dataset.assetCode = c.asset_code;
     const hired = isHiredAsset(c);
     btn.innerHTML = `
-      <div class="asset-fleet-code">${escapeHtml(c.asset_code)}${hired ? " <span class='pill' style='font-size:0.65rem;'>HIRED</span>" : ""}${Number(c.archived) ? " <span class='pill red' style='font-size:0.65rem;'>ARCH</span>" : ""}</div>
+      <div class="asset-fleet-card-head"><div class="asset-fleet-code">${escapeHtml(c.asset_code)}</div>${fleetStatusPill(c.status)}</div>
       <div class="asset-fleet-name">${escapeHtml(c.asset_name || "")}</div>
       <div class="asset-fleet-meta">
-        ${fleetStatusPill(c.status)}
         ${c.category ? `<span class="pill">${escapeHtml(String(c.category))}</span>` : ""}
-        <span class="pill blue">${Number(c.current_hours || 0).toFixed(0)}h</span>
-        ${Number(c.fuel_liters_30d) > 0 ? `<span class="pill green">${Number(c.fuel_liters_30d).toFixed(0)}L/30d</span>` : ""}
+        ${hired ? "<span class='pill'>HIRED</span>" : ""}${Number(c.archived) ? "<span class='pill red'>ARCHIVED</span>" : ""}
       </div>
+      <div class="asset-fleet-card-metrics"><span><small>Meter</small><strong>${Number(c.current_hours || 0).toFixed(0)} h</strong></span><span><small>Fuel 30d</small><strong>${Number(c.fuel_liters_30d || 0).toFixed(0)} L</strong></span></div>
+      <div class="asset-fleet-open">Open machine profile →</div>
     `;
     grid.appendChild(btn);
   }
@@ -16971,16 +16979,13 @@ async function loadAssetDetailHeader(asset_code) {
     const hours = p.meter?.current_hours ?? card?.current_hours ?? 0;
     const fuel30 = p.fuel?.liters_last_30_days ?? card?.fuel_liters_30d ?? 0;
     header.innerHTML = `
-      ${fleetStatusPill(p.status || card?.status)}
-      <span class="pill blue">${Number(hours).toFixed(1)} h meter</span>
-      <span class="pill green">${Number(fuel30).toFixed(1)} L fuel (30d)</span>
-      ${
-        nextSvc
-          ? `<span class="pill orange">Next ${escapeHtml(nextSvc.service_name || "service")}: ${Number(nextSvc.remaining_hours ?? 0).toFixed(0)} h</span>`
-          : ""
-      }
-      ${insp ? `<span class="pill blue">Last inspection ${escapeHtml(String(insp))}</span>` : ""}
-      ${Number(card?.archived) ? `<span class="pill red">Archived</span>` : ""}
+      <div class="asset-profile-status">${fleetStatusPill(p.status || card?.status)}${Number(card?.archived) ? `<span class="pill red">Archived</span>` : ""}</div>
+      <div class="asset-profile-metrics">
+        <div><span>Current meter</span><strong>${Number(hours).toFixed(1)} h</strong></div>
+        <div><span>Fuel used · 30 days</span><strong>${Number(fuel30).toFixed(1)} L</strong></div>
+        <div class="${nextSvc && Number(nextSvc.remaining_hours ?? 0) <= 50 ? "is-warning" : ""}"><span>Next service</span><strong>${nextSvc ? `${escapeHtml(nextSvc.service_name || "Service")} · ${Number(nextSvc.remaining_hours ?? 0).toFixed(0)} h` : "Not scheduled"}</strong></div>
+        <div><span>Last inspection</span><strong>${insp ? escapeHtml(String(insp)) : "No inspection"}</strong></div>
+      </div>
     `;
   } catch (_) {
     const card = assetsFleetCache.find((c) => c.asset_code === asset_code);
@@ -17166,25 +17171,13 @@ async function loadAssetHistory() {
   const totals = summary.totals || {};
   if (summaryEl) {
     summaryEl.innerHTML = `
-      <div class="pill blue">Events: ${Number(counts.events_total || 0)}</div>
-      <div class="pill red">Breakdowns: ${Number(counts.breakdowns || 0)}</div>
-      <div class="pill blue">Work Orders: ${Number(counts.work_orders || 0)}</div>
-      <div class="pill" style="background:#5b21b6;color:#fff;">Ops slips: ${Number(counts.ops_slips || 0)}</div>
-      <div class="pill blue">GET Slips: ${Number(counts.get_slips || 0)}</div>
-      <div class="pill blue">Component Slips: ${Number(counts.component_slips || 0)}</div>
-      <div class="pill red">Damage Reports: ${Number(counts.damage_reports || 0)}</div>
-      <div class="pill orange">Tyre Changes: ${Number(counts.tyre_changes || 0)}</div>
-      <div class="pill blue">Tyre Inspections: ${Number(counts.tyre_inspections || 0)}</div>
-      <div class="pill" style="background:#334155;color:#fff;">Undercarriage: ${Number(counts.undercarriage_inspections || 0)}</div>
-      <div class="pill green">Fuel logs: ${Number(counts.fuel_logs || 0)}</div>
-      <div class="pill" style="background:#0d9488;color:#fff;">Lube logs: ${Number(counts.lube_logs || 0)}</div>
-      <div class="pill blue">Inspections: ${Number(counts.inspections || 0)}</div>
-      <div class="pill green">Fuel total: ${Number(totals.fuel_liters_total || 0).toFixed(1)} L</div>
-      <div class="pill orange">Parts Qty: ${Number(totals.parts_qty_total || 0).toFixed(1)}</div>
-      <div class="pill orange">Oil Qty: ${Number(totals.oil_qty_total || 0).toFixed(1)}</div>
-      <div class="pill red">Parts Cost: ${Number(totals.parts_cost_total || 0).toFixed(2)}</div>
-      <div class="pill red">Oil Cost: ${Number(totals.oil_cost_total || 0).toFixed(2)}</div>
-      <div class="pill red">Maintenance Cost: ${Number(summary.maintenance_cost_total || 0).toFixed(2)}</div>
+      <div class="asset-history-metric"><span>Events</span><strong>${Number(counts.events_total || 0)}</strong></div>
+      <div class="asset-history-metric is-danger"><span>Breakdowns</span><strong>${Number(counts.breakdowns || 0)}</strong></div>
+      <div class="asset-history-metric"><span>Work orders</span><strong>${Number(counts.work_orders || 0)}</strong></div>
+      <div class="asset-history-metric"><span>Inspections</span><strong>${Number(counts.inspections || 0)}</strong></div>
+      <div class="asset-history-metric"><span>Fuel used</span><strong>${Number(totals.fuel_liters_total || 0).toFixed(1)} L</strong></div>
+      <div class="asset-history-metric"><span>Parts cost</span><strong>$${Number(totals.parts_cost_total || 0).toFixed(2)}</strong></div>
+      <div class="asset-history-metric"><span>Maintenance cost</span><strong>$${Number(summary.maintenance_cost_total || 0).toFixed(2)}</strong></div>
     `;
   }
 
@@ -18700,6 +18693,13 @@ async function init() {
   });
 
   qs("assetsFleetFilter")?.addEventListener("input", () => {
+    renderAssetFleetGrid(assetsFleetCache);
+  });
+  qs("assetsFleetStatus")?.addEventListener("change", () => renderAssetFleetGrid(assetsFleetCache));
+  qs("assetFleetCard")?.addEventListener("click", (e) => {
+    const filterBtn = e.target.closest("button[data-fleet-status]");
+    if (!filterBtn) return;
+    if (qs("assetsFleetStatus")) qs("assetsFleetStatus").value = filterBtn.dataset.fleetStatus || "";
     renderAssetFleetGrid(assetsFleetCache);
   });
 

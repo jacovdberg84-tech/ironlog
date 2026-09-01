@@ -3421,14 +3421,15 @@ body.sidebar-collapsed .main-content {
 
 .asset-fleet-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
 }
 
 .asset-fleet-card {
   border: 1px solid var(--line, #e5e7eb);
   border-radius: 10px;
-  padding: 12px;
+  padding: 14px;
+  border-left: 4px solid #94a3b8;
   cursor: pointer;
   background: var(--card);
   color: var(--ink);
@@ -3449,6 +3450,11 @@ body.sidebar-collapsed .main-content {
 .asset-fleet-card.archived {
   opacity: 0.7;
 }
+
+.asset-fleet-card.status-production { border-left-color:#16a34a; }
+.asset-fleet-card.status-standby { border-left-color:#f59e0b; }
+.asset-fleet-card.status-down { border-left-color:#dc2626; background:#fffafa; }
+.asset-fleet-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 
 .asset-fleet-code {
   font-weight: 700;
@@ -3474,12 +3480,32 @@ body.sidebar-collapsed .main-content {
   margin-top: 8px;
 }
 
+.asset-fleet-card-metrics { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-top:10px; }
+.asset-fleet-card-metrics span { padding:7px 8px; border-radius:7px; background:#f8fafc; }
+.asset-fleet-card-metrics small,.asset-profile-metrics span,.asset-history-metric span { display:block; color:#64748b; font-size:11px; }
+.asset-fleet-card-metrics strong { display:block; margin-top:2px; font-size:13px; }
+.asset-fleet-open { margin-top:10px; color:#2563eb; font-size:12px; font-weight:600; }
+.asset-fleet-health { display:grid; grid-template-columns:repeat(4,minmax(110px,1fr)); gap:10px; margin:0 0 14px; }
+.asset-fleet-health button { display:grid; gap:2px; padding:10px 12px; border:1px solid #dbe4f0; border-radius:10px; background:#f8fafc; color:#0f172a; text-align:left; cursor:pointer; }
+.asset-fleet-health button:hover { border-color:#60a5fa; }
+.asset-fleet-health span { font-size:20px; font-weight:750; }
+.asset-fleet-health small { color:#64748b; }
+.asset-fleet-health .is-danger span { color:#dc2626; }
+#assetFleetCard { order:1; }
+#assetDetailPanel { order:2; }
+#assetPlantHireCard { order:3; }
+
 .asset-detail-header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  gap: 10px;
   margin-bottom: 12px;
 }
+
+.asset-profile-status { display:flex; flex-wrap:wrap; gap:6px; }
+.asset-profile-metrics { display:grid; grid-template-columns:repeat(4,minmax(130px,1fr)); gap:10px; }
+.asset-profile-metrics > div,.asset-history-metric { padding:11px 12px; border:1px solid #e2e8f0; border-radius:9px; background:#f8fafc; }
+.asset-profile-metrics strong,.asset-history-metric strong { display:block; margin-top:3px; color:#0f172a; font-size:15px; }
+.asset-profile-metrics .is-warning { border-color:#f59e0b; background:#fffbeb; }
 
 .checklist-hub-summary {
   display: flex;
@@ -4173,8 +4199,8 @@ body.sidebar-collapsed .main-content {
 
 /* History Summary */
 .history-summary {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
   gap: 8px;
   padding: 12px;
   background: #f9fafb;
@@ -4509,6 +4535,22 @@ body.sidebar-collapsed .main-content {
 .reports-header {
   margin-bottom: 24px;
 }
+
+.asset-history-metric.is-danger strong { color:#dc2626; }
+@media (max-width:800px) {
+  .asset-profile-metrics,.history-summary { grid-template-columns:repeat(2,1fr); }
+  .asset-fleet-health { grid-template-columns:repeat(2,1fr); }
+}
+@media (max-width:460px) { .asset-profile-metrics,.history-summary { grid-template-columns:1fr; } }
+[data-theme="dark"] .asset-fleet-card.status-down { background:#211516; }
+[data-theme="dark"] .asset-fleet-card-metrics span,
+[data-theme="dark"] .asset-fleet-health button,
+[data-theme="dark"] .asset-profile-metrics > div,
+[data-theme="dark"] .asset-history-metric { background:#1e293b; border-color:#334155; color:#f8fafc; }
+[data-theme="dark"] .asset-fleet-card-metrics strong,
+[data-theme="dark"] .asset-fleet-health span,
+[data-theme="dark"] .asset-profile-metrics strong,
+[data-theme="dark"] .asset-history-metric strong { color:#f8fafc; }
 
 .reports-toolbar {
   display: flex;

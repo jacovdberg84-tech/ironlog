@@ -1618,6 +1618,12 @@
           <div class="report-card-body">
             <div class="asset-fleet-toolbar">
               <input id="assetsFleetFilter" class="w-full" type="search" placeholder="Search code, name, or category…" style="max-width: 320px;" />
+              <select id="assetsFleetStatus" aria-label="Filter fleet by status">
+                <option value="">All statuses</option>
+                <option value="PRODUCTION">Production</option>
+                <option value="STANDBY">Standby</option>
+                <option value="DOWN">Down</option>
+              </select>
               <label class="checkbox-label">
                 <input type="checkbox" id="showArchived" />
                 <span>Show archived / scrapped</span>
@@ -1627,6 +1633,12 @@
                 Cost Centers XLSX
               </button>
             </div>
+            <div class="asset-fleet-health" aria-label="Fleet health summary">
+              <button type="button" data-fleet-status=""><span id="assetsCountAll">0</span><small>Active fleet</small></button>
+              <button type="button" data-fleet-status="PRODUCTION"><span id="assetsCountProduction">0</span><small>Production</small></button>
+              <button type="button" data-fleet-status="STANDBY"><span id="assetsCountStandby">0</span><small>Standby</small></button>
+              <button type="button" data-fleet-status="DOWN" class="is-danger"><span id="assetsCountDown">0</span><small>Down</small></button>
+            </div>
             <div id="assetFleetGrid" class="asset-fleet-grid">
               <div class="muted small">Loading fleet…</div>
             </div>
@@ -1634,7 +1646,7 @@
         </div>
 
         <!-- Plant hire rates & monthly budget -->
-        <div class="dash-card collapsible full-width" data-collapsed="false">
+        <div id="assetPlantHireCard" class="dash-card collapsible collapsed full-width" data-collapsed="true">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon" style="background: #fef3c7; color: #b45309;">
@@ -1713,7 +1725,7 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
               </div>
               <div>
-                <h3 id="assetDetailTitle">Machine history</h3>
+                <h3 id="assetDetailTitle">Machine profile</h3>
                 <p class="muted small" id="assetDetailSubtitle">Select a fleet card above</p>
               </div>
             </div>
