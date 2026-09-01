@@ -11522,22 +11522,29 @@ async function loadRainDays(opts = {}) {
   }
 }
 
-function openDailyPdf() {
+async function openDailyPdf() {
   const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
   const scheduled = qs("scheduled")?.value || 10;
   const site = encodeURIComponent(getSessionSite());
   const ts = Date.now();
-  window.open(
-    `${API}/api/reports/daily.pdf?date=${encodeURIComponent(date)}&scheduled=${encodeURIComponent(scheduled)}&site_code=${site}&_ts=${ts}`,
-    "_blank"
-  );
+  try {
+    await openAuthedPdf(
+      `${API}/api/reports/daily.pdf?date=${encodeURIComponent(date)}&scheduled=${encodeURIComponent(scheduled)}&site_code=${site}&_ts=${ts}`,
+    );
+  } catch (err) {
+    alert(`Could not open Daily PDF: ${err.message || err}`);
+  }
 }
 
-function openWeeklyPdf() {
+async function openWeeklyPdf() {
   const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
   const scheduled = qs("scheduled")?.value || 10;
   const r = getLast7Range(date);
-  window.open(`${API}/api/reports/weekly.pdf?start=${r.start}&end=${r.end}&scheduled=${scheduled}`, "_blank");
+  try {
+    await openAuthedPdf(`${API}/api/reports/weekly.pdf?start=${r.start}&end=${r.end}&scheduled=${scheduled}`);
+  } catch (err) {
+    alert(`Could not open Weekly PDF: ${err.message || err}`);
+  }
 }
 
 function openLubePdf() {
