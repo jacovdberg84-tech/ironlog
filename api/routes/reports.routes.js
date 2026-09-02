@@ -10261,7 +10261,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    const reportRevision = "daily-pdf-ops-focus-r2026-09-01";
+    const reportRevision = "daily-pdf-downtime-reconcile-r2026-09-02";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -10521,6 +10521,18 @@ export default async function reportsRoutes(app) {
             b.description,
             b.component,
             b.critical,
+            CASE
+              WHEN ${breakdownStatusExpr} IN ('open', 'in_progress')
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM work_orders wd
+                  WHERE wd.source = 'breakdown'
+                    AND wd.reference_id = b.id
+                    AND REPLACE(TRIM(LOWER(COALESCE(wd.status, ''))), ' ', '_')
+                      IN ('completed', 'approved', 'closed')
+                )
+              THEN 1 ELSE 0
+            END AS effective_active,
             l.hours_down,
             l.notes,
             l.log_date
@@ -10529,7 +10541,9 @@ export default async function reportsRoutes(app) {
           JOIN assets a ON a.id = b.asset_id
           WHERE l.log_date = ?
           ORDER BY l.hours_down DESC, a.asset_code ASC, l.id ASC
-        `).all(opsDay).slice(0, 60)
+        `).all(opsDay)
+          .filter((r) => Number(r.hours_down || 0) > 0 || Number(r.effective_active || 0) === 1)
+          .slice(0, 60)
       : [];
     const offsiteSiteRaw = String(req.query?.site_code || getSiteCode(req) || "main").trim().toLowerCase() || "main";
     const offsiteSiteAliases =
@@ -10569,6 +10583,7 @@ export default async function reportsRoutes(app) {
       : [];
 
     // Per-asset downtime for availability (same day as short breakdowns / fuel).
+    const scheduledFallback = Math.max(0, Number(scheduled || 0));
     const downtimeByAssetId = new Map();
     try {
       const downRows = db.prepare(`
@@ -10580,6 +10595,30 @@ export default async function reportsRoutes(app) {
       `).all(opsDay);
       for (const r of downRows) {
         downtimeByAssetId.set(Number(r.asset_id), Math.max(0, Number(r.hours_down || 0)));
+      }
+
+      // A machine that remained on an active breakdown for the operations day is
+      // unavailable for that day even when its automatically-created log is still 0.
+      const activeDownAssets = db.prepare(`
+        SELECT DISTINCT b.asset_id
+        FROM breakdowns b
+        WHERE ${breakdownDateExpr} <= ?
+          AND ${breakdownStatusExpr} IN ('open', 'in_progress')
+          AND ${hasBreakdownEndAt ? "(b.end_at IS NULL OR DATE(b.end_at) >= ?)" : "1 = 1"}
+          AND NOT EXISTS (
+            SELECT 1
+            FROM work_orders wa
+            WHERE wa.source = 'breakdown'
+              AND wa.reference_id = b.id
+              AND REPLACE(TRIM(LOWER(COALESCE(wa.status, ''))), ' ', '_')
+                IN ('completed', 'approved', 'closed')
+          )
+      `).all(...(hasBreakdownEndAt ? [opsDay, opsDay] : [opsDay]));
+      for (const r of activeDownAssets) {
+        const assetId = Number(r.asset_id || 0);
+        if (assetId > 0 && Number(downtimeByAssetId.get(assetId) || 0) <= 0) {
+          downtimeByAssetId.set(assetId, scheduledFallback);
+        }
       }
     } catch { /* table may be missing */ }
 
@@ -10602,7 +10641,6 @@ export default async function reportsRoutes(app) {
       listDailyPrestarts(db, opsDay).rows.map((r) => Number(r.asset_id || 0)).filter((id) => id > 0),
     );
 
-    const scheduledFallback = Math.max(0, Number(scheduled || 0));
     const hoursPdfEnriched = hoursPdf.map((r) => {
       const assetId = Number(r.asset_id || 0);
       const rowScheduled = Number(r.scheduled_hours);
@@ -10840,7 +10878,10 @@ export default async function reportsRoutes(app) {
             asset: r.asset_code,
             equipment: compactCell(r.asset_name ?? "", 48),
             type: isMaintenance ? "Maintenance" : "Breakdown",
-            hrs: fmtNum(r.hours_down, 1),
+            hrs: fmtNum(
+              Number(r.hours_down || 0) > 0 ? r.hours_down : scheduledFallback,
+              1,
+            ),
             area: compactCell(r.component ?? "", 42) || "—",
             detail: compactCell(String(r.notes || r.description || "").replace(/^Auto from Daily Input \(DOWN\)\s*[—-]?\s*/i, ""), 220),
           };
