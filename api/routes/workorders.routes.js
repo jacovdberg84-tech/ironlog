@@ -1934,6 +1934,22 @@ export default async function workOrderRoutes(app) {
       WHERE asset_id = ?
         AND active = 1
     `);
+    const closeLinkedBreakdownWhenWorkIsFinished = db.prepare(`
+      UPDATE breakdowns
+      SET
+        status = 'CLOSED',
+        end_at = COALESCE(NULLIF(TRIM(end_at), ''), datetime('now'))
+      WHERE id = ?
+        AND NOT EXISTS (
+          SELECT 1
+          FROM work_orders linked
+          WHERE linked.source = 'breakdown'
+            AND linked.reference_id = breakdowns.id
+            AND linked.id <> ?
+            AND REPLACE(TRIM(LOWER(COALESCE(linked.status, ''))), ' ', '_')
+              NOT IN ('completed', 'approved', 'closed')
+        )
+    `);
 
     const tx = db.transaction(() => {
       closeWorkOrder.run(
@@ -1944,6 +1960,10 @@ export default async function workOrderRoutes(app) {
         supervisor_name,
         id
       );
+
+      if (String(wo.source || "").trim().toLowerCase() === "breakdown" && Number(wo.reference_id || 0) > 0) {
+        closeLinkedBreakdownWhenWorkIsFinished.run(Number(wo.reference_id), id);
+      }
 
       let rolled_plan_id = null;
       let rolled_last_service_hours = null;

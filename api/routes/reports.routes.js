@@ -178,10 +178,11 @@ function parseIsoDate(d) {
 
 function daysDownForBreakdown(bd, reportDate) {
   const logged = Number(bd.logged_days || 0);
+  const calculated = Number(bd.calendar_days_down || 0);
   // Prefer selected calendar date (breakdown_date) over start_at — start_at was historically
   // set to create time (datetime('now')), which is not the Date down the operator chose.
   const startDate = parseIsoDate(bd.breakdown_date) || parseIsoDate(bd.start_at);
-  if (!startDate) return logged > 0 ? logged : 1;
+  if (!startDate) return Math.max(logged, calculated, 1);
 
   const asOf = parseIsoDate(reportDate);
   const endDate = parseIsoDate(bd.end_at);
@@ -194,10 +195,10 @@ function daysDownForBreakdown(bd, reportDate) {
   const spanDays = spanEnd >= startDate ? inclusiveDaysBetween(startDate, spanEnd) : 0;
   if (logged > 0) {
     // If daily logs are sparse/missing on some days, do not under-report days down.
-    return Math.max(logged, spanDays);
+    return Math.max(logged, calculated, spanDays);
   }
 
-  return spanDays || 1;
+  return Math.max(calculated, spanDays, 1);
 }
 
 function daysDownForBreakdownInRange(bd, startDateInclusive, endDateInclusive) {
@@ -10332,6 +10333,15 @@ export default async function reportsRoutes(app) {
         b.breakdown_date,
         ${breakdownStartAtSelect},
         ${hasBreakdownEndAt ? "b.end_at" : "NULL AS end_at"},
+        CAST(
+          julianday(
+            MIN(
+              DATE(?),
+              DATE(COALESCE(${hasBreakdownEndAt ? "b.end_at" : "NULL"}, ?))
+            )
+          ) - julianday(${breakdownDateExpr}) + 1
+          AS INTEGER
+        ) AS calendar_days_down,
         COALESCE((
           SELECT COUNT(DISTINCT l.log_date)
           FROM breakdown_downtime_logs l
@@ -10356,7 +10366,7 @@ export default async function reportsRoutes(app) {
             AND REPLACE(TRIM(LOWER(COALESCE(wbx.status, ''))), ' ', '_') IN ('completed', 'approved', 'closed')
         )
       ORDER BY downtime_hours DESC
-    `).all(...breakdownParams).map((r) => {
+    `).all(date, date, ...breakdownParams).map((r) => {
       const daysDown = daysDownForBreakdown(r, date);
       return {
         ...r,
