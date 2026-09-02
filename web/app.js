@@ -16250,6 +16250,17 @@ const QR_SHEET_PRESETS = {
   small: { cols: 5, qr: 22, cell: 32, gap: 2 },
   medium: { cols: 4, qr: 28, cell: 45, gap: 4 },
   large: { cols: 3, qr: 35, cell: 55, gap: 5 },
+  vinyl_45up: {
+    cols: 5,
+    qr: 22,
+    cell: 29.9,
+    gap: 2,
+    cellWidthMm: 38.5,
+    rowGapMm: 0,
+    pageMarginTopMm: 13.95,
+    pageMarginSideMm: 4.75,
+    exactSheet: true,
+  },
   avery_3474: { cols: 4, qr: 23, cell: 34, gap: 2 },
   avery_l7163: { cols: 2, qr: 35, cell: 43, gap: 4 },
 };
@@ -16275,21 +16286,46 @@ function qrSheetFieldIds(scope) {
 
 function readQrSheetLayout(scope) {
   const ids = qrSheetFieldIds(scope);
+  const preset = String(qs(ids.preset)?.value || "custom");
+  const presetLayout = QR_SHEET_PRESETS[preset] || {};
   const defaults = scope === "safety"
     ? { cols: 5, qr: 22, cell: 32, gap: 2 }
     : { cols: 4, qr: 28, cell: 45, gap: 4 };
   return {
+    preset,
     cols: Math.max(1, Math.min(8, Number(toNum(qs(ids.cols)?.value) ?? defaults.cols))),
     qrSizeMm: Math.max(12, Math.min(60, Number(toNum(qs(ids.qr)?.value) ?? defaults.qr))),
     cellMm: Math.max(20, Math.min(80, Number(toNum(qs(ids.cell)?.value) ?? defaults.cell))),
     gapMm: Math.max(0, Math.min(20, Number(toNum(qs(ids.gap)?.value) ?? defaults.gap))),
+    cellWidthMm: Number(presetLayout.cellWidthMm) || null,
+    rowGapMm: Number.isFinite(Number(presetLayout.rowGapMm)) ? Number(presetLayout.rowGapMm) : null,
+    pageMarginTopMm: Number(presetLayout.pageMarginTopMm) || null,
+    pageMarginSideMm: Number(presetLayout.pageMarginSideMm) || null,
+    exactSheet: presetLayout.exactSheet === true,
   };
 }
 
 function openQrLabelSheetPrintWindow(labels, layout, sheetTitle) {
   const safeLabels = Array.isArray(labels) ? labels.filter((l) => l?.qrUrl && l?.code) : [];
   if (!safeLabels.length) throw new Error("No QR labels to print.");
-  const { cols, qrSizeMm, cellMm, gapMm } = layout || readQrSheetLayout("daily");
+  const {
+    cols,
+    qrSizeMm,
+    cellMm,
+    gapMm,
+    cellWidthMm,
+    rowGapMm,
+    pageMarginTopMm,
+    pageMarginSideMm,
+    exactSheet,
+  } = layout || readQrSheetLayout("daily");
+  const verticalGapMm = rowGapMm == null ? Math.max(1, Math.round(gapMm * 1.2)) : rowGapMm;
+  const pageMargin = exactSheet
+    ? `${pageMarginTopMm}mm ${pageMarginSideMm}mm`
+    : "8mm";
+  const columnTemplate = cellWidthMm
+    ? `repeat(${cols}, ${cellWidthMm}mm)`
+    : `repeat(${cols}, 1fr)`;
   const win = window.open("", "_blank", "width=1100,height=800");
   if (!win) {
     alert("Pop-up blocked. Allow pop-ups and try again.");
@@ -16311,22 +16347,23 @@ function openQrLabelSheetPrintWindow(labels, layout, sheetTitle) {
   <meta charset="utf-8" />
   <title>${escapeHtml(sheetTitle || "IRONLOG QR Label Sheet")}</title>
   <style>
-    @page { size: A4 portrait; margin: 8mm; }
+    @page { size: A4 portrait; margin: ${pageMargin}; }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: Arial, sans-serif; color: #111; }
-    .sheet { padding: 8mm; }
-    .head { margin-bottom: 6mm; font-size: 12px; }
+    .sheet { padding: ${exactSheet ? "0" : "8mm"}; }
+    .head { margin-bottom: 6mm; font-size: 12px; ${exactSheet ? "display:none;" : ""} }
     .grid {
       display: grid;
-      grid-template-columns: repeat(${cols}, 1fr);
-      gap: ${Math.max(1, Math.round(gapMm * 1.2))}mm ${gapMm}mm;
+      grid-template-columns: ${columnTemplate};
+      gap: ${verticalGapMm}mm ${gapMm}mm;
     }
     .cell {
-      border: 1px solid #bbb;
-      border-radius: 4px;
-      padding: 3mm 2mm;
+      border: ${exactSheet ? "0" : "1px solid #bbb"};
+      border-radius: ${exactSheet ? "0" : "4px"};
+      padding: ${exactSheet ? "1.2mm 1mm 0.7mm" : "3mm 2mm"};
       text-align: center;
       min-height: ${cellMm}mm;
+      height: ${exactSheet ? `${cellMm}mm` : "auto"};
       break-inside: avoid;
     }
     .cell img {
@@ -16334,10 +16371,10 @@ function openQrLabelSheetPrintWindow(labels, layout, sheetTitle) {
       height: ${qrSizeMm}mm;
       image-rendering: pixelated;
       display: block;
-      margin: 0 auto 2mm;
+      margin: 0 auto ${exactSheet ? "0.5mm" : "2mm"};
     }
     .code {
-      font-size: 10px;
+      font-size: ${exactSheet ? "9px" : "10px"};
       font-weight: 700;
       letter-spacing: 0.2px;
       overflow-wrap: anywhere;
