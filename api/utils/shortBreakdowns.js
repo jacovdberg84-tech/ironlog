@@ -70,12 +70,13 @@ export function listPlannedMaintenanceForDate(db, logDate) {
     JOIN assets a ON a.id = w.asset_id
     ${planJoin}
     WHERE LOWER(COALESCE(w.source, '')) = 'service'
-      AND (
-        DATE(COALESCE(w.opened_at, '')) = ?
-        OR DATE(COALESCE(w.completed_at, w.closed_at, '')) = ?
-      )
+      AND DATE(COALESCE(w.opened_at, '')) <= ?
+      AND REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_')
+        IN ('open', 'assigned', 'in_progress')
+      AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')
+      AND (w.closed_at IS NULL OR TRIM(COALESCE(w.closed_at, '')) = '')
     ORDER BY a.asset_code ASC, w.id ASC
-  `).all(logDate, logDate).map((r) => {
+  `).all(logDate).map((r) => {
     const status = String(r.status || "").replace(/_/g, " ").trim();
     const service = r.service_name ? String(r.service_name).trim() : "Service";
     const woId = Number(r.wo_id || 0);
