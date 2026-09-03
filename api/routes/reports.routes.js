@@ -599,7 +599,9 @@ function kpiDaily(date, scheduled) {
         AND UPPER(TRIM(COALESCE(b.description, ''))) NOT LIKE 'MANAGER INSPECTION ALERT%'
         AND NOT EXISTS (
           SELECT 1 FROM breakdown_downtime_logs l
-          WHERE l.breakdown_id = b.id AND l.log_date = ?
+          WHERE l.breakdown_id = b.id
+            AND l.log_date = ?
+            AND COALESCE(l.hours_down, 0) > 0
         )
         AND NOT EXISTS (
           SELECT 1 FROM work_orders wbx
@@ -10261,7 +10263,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    const reportRevision = "daily-pdf-active-maintenance-r2026-09-03";
+    const reportRevision = "daily-pdf-previous-day-alignment-r2026-09-03";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -10270,6 +10272,8 @@ export default async function reportsRoutes(app) {
     const date = String(req.query?.date || "").trim();
     const scheduled = Number(req.query?.scheduled ?? 10);
     if (!isDate(date)) return reply.code(400).send({ error: "date (YYYY-MM-DD) required" });
+    // The report is issued today for the previous completed operations day.
+    const opsDay = shiftDateYmd(date, -1);
 
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
 
@@ -10280,7 +10284,7 @@ export default async function reportsRoutes(app) {
       ? "AND COALESCE(a.active, 1) = 1"
       : "";
 
-    // Production-selected assets only for the selected day.
+    // Production-selected assets for the completed operations day (yesterday).
     const hours = db.prepare(`
       SELECT
         a.id AS asset_id,
@@ -10301,7 +10305,7 @@ export default async function reportsRoutes(app) {
         ${activeClause}
         ${archivedClause}
       ORDER BY a.asset_code
-    `).all(date);
+    `).all(opsDay);
 
     const breakdownDowntimeCol = getBreakdownDowntimeColumn();
     const hasBreakdownStatus = hasColumn("breakdowns", "status");
@@ -10504,10 +10508,8 @@ export default async function reportsRoutes(app) {
     const breakdownsPdf = breakdowns.slice(0, 40);
     const openWOsPdf = openWOs.slice(0, 40);
 
-    const prevDay = shiftDateYmd(date, -1);
     // Daily PDF is opened "today" for yesterday's ops — short BDs, fuel, and
     // per-asset availability downtime all use the previous calendar day.
-    const opsDay = prevDay;
     // Availability must use the same operations day as the downtime, fuel and
     // pre-start sections. Using the report issue date here could falsely show 100%.
     const kpi = kpiDaily(opsDay, scheduled);
@@ -10723,7 +10725,7 @@ export default async function reportsRoutes(app) {
         sectionTitle(doc, "Equipment hours and fuel");
         doc.fontSize(9).fillColor("#64748b");
         doc.text(
-          `Production hours are for ${date}. Fuel, availability and downtime align to the operations day ${opsDay}.`,
+          `Production hours, fuel, availability and downtime are for the completed operations day ${opsDay}.`,
         );
         doc.moveDown(0.35);
         table(
