@@ -1506,16 +1506,58 @@ async function setWorkOrderStatus(id, status, extraBody = {}) {
   }
 }
 
-function openWorkOrderPdf(id) {
+async function fetchWorkOrderPdf(id, download = false) {
   const woId = Number(id || 0);
-  if (!woId) return;
-  window.open(`${API}/reports/workorder/${woId}.pdf`, "_blank");
+  if (!Number.isSafeInteger(woId) || woId <= 0) return;
+  // Reserve the preview tab during the click, before awaiting the protected file.
+  const preview = download ? null : window.open("", "_blank");
+  if (!download && !preview) {
+    alert("Allow pop-ups for IRONLOG, then try opening the PDF again.");
+    return;
+  }
+  if (preview) preview.opener = null;
+  try {
+    const res = await fetch(`${API}/reports/workorder/${woId}.pdf${download ? "?download=1" : ""}`, {
+      headers: authHeaders(),
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(res.status === 401
+        ? "Your session has expired. Please sign in again."
+        : body.error || body.message || `Request failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    if (!String(blob.type).toLowerCase().includes("application/pdf")) {
+      throw new Error("The server did not return a PDF. Please try again.");
+    }
+    const url = URL.createObjectURL(blob);
+    try {
+      if (download) {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `IRONLOG_WorkOrder_${woId}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } else if (!preview.closed) {
+        preview.location.replace(url);
+      }
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(url), 120000);
+    }
+  } catch (err) {
+    if (preview && !preview.closed) preview.close();
+    alert(`Could not ${download ? "download" : "open"} work order PDF: ${err.message || err}`);
+  }
+}
+
+function openWorkOrderPdf(id) {
+  return fetchWorkOrderPdf(id);
 }
 
 function downloadWorkOrderPdf(id) {
-  const woId = Number(id || 0);
-  if (!woId) return;
-  window.open(`${API}/reports/workorder/${woId}.pdf?download=1`, "_blank");
+  return fetchWorkOrderPdf(id, true);
 }
 
 async function downloadPlantLaborOilReport() {
