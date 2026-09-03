@@ -511,14 +511,14 @@ function reliabilityMetricsForRange(start, end, opts = {}) {
   };
 }
 
-function kpiDaily(date, scheduled) {
+function kpiDaily(date, scheduled, dailyHoursDate = date) {
   const usedRow = db.prepare(`
     SELECT COUNT(DISTINCT dh.asset_id) AS used_assets
     FROM daily_hours dh
     JOIN assets a ON a.id = dh.asset_id
     WHERE dh.work_date = ?
       ${andDailyHoursFleetHoursOnly("dh", "a")}
-  `).get(date);
+  `).get(dailyHoursDate);
 
   const used_assets = Number(usedRow.used_assets || 0);
 
@@ -528,7 +528,7 @@ function kpiDaily(date, scheduled) {
     JOIN assets a ON a.id = dh.asset_id
     WHERE dh.work_date = ?
       ${andDailyHoursFleetHoursOnly("dh", "a")}
-  `).get(date);
+  `).get(dailyHoursDate);
 
   const run_hours = Number(runRow.run_hours || 0);
   const utilBaseRow = db.prepare(`
@@ -542,7 +542,7 @@ function kpiDaily(date, scheduled) {
     JOIN assets a ON a.id = dh.asset_id
     WHERE dh.work_date = ?
       ${andDailyHoursFleetHoursOnly("dh", "a")}
-  `).get(Number(scheduled || 0), date);
+  `).get(Number(scheduled || 0), dailyHoursDate);
   const utilization_base_hours = Number(utilBaseRow?.utilization_base_hours || 0);
   let available_hours = utilization_base_hours;
 
@@ -580,7 +580,7 @@ function kpiDaily(date, scheduled) {
       )
   `).get(...dtLogParams);
   let downtime_hours = Number(dtLogsRow?.downtime_hours || 0);
-  const openNoLogParams = [Number(scheduled || 0), date, date, date];
+  const openNoLogParams = [Number(scheduled || 0), dailyHoursDate, date, date];
   if (hasBreakdownEndAt) openNoLogParams.push(date);
   const openNoLogRow = db.prepare(`
     SELECT
@@ -10263,7 +10263,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    const reportRevision = "daily-pdf-previous-day-alignment-r2026-09-03";
+    const reportRevision = "daily-pdf-capture-date-hours-r2026-09-03";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -10284,7 +10284,7 @@ export default async function reportsRoutes(app) {
       ? "AND COALESCE(a.active, 1) = 1"
       : "";
 
-    // Production-selected assets for the completed operations day (yesterday).
+    // Daily Input is captured on the report issue date for the previous operations day.
     const hours = db.prepare(`
       SELECT
         a.id AS asset_id,
@@ -10305,7 +10305,7 @@ export default async function reportsRoutes(app) {
         ${activeClause}
         ${archivedClause}
       ORDER BY a.asset_code
-    `).all(opsDay);
+    `).all(date);
 
     const breakdownDowntimeCol = getBreakdownDowntimeColumn();
     const hasBreakdownStatus = hasColumn("breakdowns", "status");
@@ -10512,7 +10512,7 @@ export default async function reportsRoutes(app) {
     // per-asset availability downtime all use the previous calendar day.
     // Availability must use the same operations day as the downtime, fuel and
     // pre-start sections. Using the report issue date here could falsely show 100%.
-    const kpi = kpiDaily(opsDay, scheduled);
+    const kpi = kpiDaily(opsDay, scheduled, date);
     const dailyPlannedMaintenance = listPlannedMaintenanceForDate(db, opsDay).slice(0, 40);
     const dailyDowntimeLogs = hasTable("breakdown_downtime_logs")
       ? db.prepare(`
@@ -10725,7 +10725,7 @@ export default async function reportsRoutes(app) {
         sectionTitle(doc, "Equipment hours and fuel");
         doc.fontSize(9).fillColor("#64748b");
         doc.text(
-          `Production hours, fuel, availability and downtime are for the completed operations day ${opsDay}.`,
+          `Production hours captured on ${date} apply to ${opsDay}; fuel, availability and downtime are also for ${opsDay}.`,
         );
         doc.moveDown(0.35);
         table(
