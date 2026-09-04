@@ -620,11 +620,20 @@ export default async function breakdownRoutes(app) {
     const asset_code = String(body.asset_code || "").trim();
     const breakdown_date = String(body.breakdown_date || "").trim();
     const description = String(body.description || "").trim();
+    const timeDownRaw = String(body.time_down || "").trim();
+    const startAt = timeDownRaw ? toSqliteWallDatetime(timeDownRaw) : `${breakdown_date} 00:00:00`;
+    const initialDowntimeHours = Number(body.downtime_hours || 0);
     const component = body.component ? String(body.component).trim() : null;
     const critical = body.critical ? 1 : 0;
 
     if (!asset_code || !isDate(breakdown_date) || !description) {
       return reply.code(400).send({ error: "asset_code, breakdown_date, description required" });
+    }
+    if (timeDownRaw && (!startAt || !timeDownRaw.startsWith(`${breakdown_date}T`))) {
+      return reply.code(400).send({ error: "time_down must match breakdown_date and use YYYY-MM-DDTHH:mm" });
+    }
+    if (!Number.isFinite(initialDowntimeHours) || initialDowntimeHours < 0 || initialDowntimeHours > 24) {
+      return reply.code(400).send({ error: "downtime_hours must be between 0 and 24" });
     }
 
     // GET validation (required if get_used true)
@@ -640,7 +649,7 @@ export default async function breakdownRoutes(app) {
       const b = insertBreakdown.run(
         asset.id,
         breakdown_date,
-        `${breakdown_date} 00:00:00`,
+        startAt,
         description,
         component,
         critical,
@@ -659,6 +668,9 @@ export default async function breakdownRoutes(app) {
       const workOrderId = Number(wo.lastInsertRowid);
 
       linkPrimaryWO.run(workOrderId, breakdownId);
+      if (initialDowntimeHours > 0) {
+        upsertDowntimeLog.run(breakdownId, breakdown_date, initialDowntimeHours, "Manual breakdown capture");
+      }
 
       return { breakdownId, workOrderId };
     });

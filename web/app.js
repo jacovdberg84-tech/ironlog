@@ -12327,6 +12327,7 @@ async function createBreakdown() {
   const payload = {
     asset_code: (qs("bAsset")?.value || "").trim(),
     breakdown_date: date,
+    time_down: qs("bTime")?.value ? `${date}T${qs("bTime").value}` : null,
     description: (qs("bDesc")?.value || "").trim(),
     downtime_hours: Number(qs("bDown")?.value || 0),
     critical: !!qs("bCrit")?.checked,

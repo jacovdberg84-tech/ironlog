@@ -580,17 +580,24 @@ function kpiDaily(date, scheduled, dailyHoursDate = date) {
       )
   `).get(...dtLogParams);
   let downtime_hours = Number(dtLogsRow?.downtime_hours || 0);
-  const openNoLogParams = [Number(scheduled || 0), dailyHoursDate, date, date];
+  const openNoLogParams = [Number(scheduled || 0), date, dailyHoursDate];
   if (hasBreakdownEndAt) openNoLogParams.push(date);
+  openNoLogParams.push(date, date);
   const openNoLogRow = db.prepare(`
     SELECT
-      IFNULL(SUM(x.scheduled), 0) AS assumed_down_hours,
+      IFNULL(SUM(CASE WHEN x.run_hours <= 0 AND x.timed_first_day = 0 THEN x.scheduled ELSE 0 END), 0) AS assumed_down_hours,
       IFNULL(SUM(CASE WHEN x.has_daily_row = 0 THEN x.scheduled ELSE 0 END), 0) AS missing_planned_hours
     FROM (
       SELECT
         b.asset_id,
         MAX(CASE WHEN COALESCE(dh.scheduled_hours, 0) > 0 THEN dh.scheduled_hours ELSE ? END) AS scheduled,
-        MAX(CASE WHEN dh.asset_id IS NULL THEN 0 ELSE 1 END) AS has_daily_row
+        MAX(CASE WHEN dh.asset_id IS NULL THEN 0 ELSE 1 END) AS has_daily_row,
+        MAX(COALESCE(dh.hours_run, 0)) AS run_hours,
+        MAX(CASE
+          WHEN DATE(COALESCE(b.start_at, '')) = ?
+            AND TIME(COALESCE(b.start_at, '00:00:00')) > '00:00:00'
+          THEN 1 ELSE 0
+        END) AS timed_first_day
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
       LEFT JOIN daily_hours dh ON dh.asset_id = b.asset_id AND dh.work_date = ? AND dh.is_used = 1
@@ -10263,7 +10270,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    const reportRevision = "daily-pdf-capture-date-hours-r2026-09-03";
+    const reportRevision = "daily-pdf-timed-breakdowns-r2026-09-04";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");

@@ -833,6 +833,7 @@ async function createBreakdown() {
   const payload = {
     asset_code: (qs("bAsset")?.value || "").trim(),
     breakdown_date: date,
+    time_down: qs("bTime")?.value ? `${date}T${qs("bTime").value}` : null,
     description: (qs("bDesc")?.value || "").trim(),
     downtime_hours: Number(qs("bDown")?.value || 0),
     critical: !!qs("bCrit")?.checked,
@@ -855,7 +856,7 @@ async function createBreakdown() {
     const incidentId = Number(res?.breakdown_id || res?.id || 0);
     const workOrderId = Number(res?.primary_work_order_id || res?.work_order_id || 0);
     setText("breakdownResult", `Incident${incidentId ? ` #${incidentId}` : ""} created${workOrderId ? ` with work order #${workOrderId}` : ""}.`);
-    ["bAsset", "bDesc", "bPartsOrderedDate", "bPartsReceivedDate", "bEtsRepairDate"].forEach((id) => { if (qs(id)) qs(id).value = ""; });
+    ["bAsset", "bDesc", "bTime", "bPartsOrderedDate", "bPartsReceivedDate", "bEtsRepairDate"].forEach((id) => { if (qs(id)) qs(id).value = ""; });
     if (qs("bDown")) qs("bDown").value = "0";
     if (qs("bPartsStatus")) qs("bPartsStatus").value = "";
     if (qs("bCrit")) qs("bCrit").checked = false;

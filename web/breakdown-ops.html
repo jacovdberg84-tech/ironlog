@@ -220,6 +220,8 @@
         <div class="bo-create-grid">
           <label>Equipment <input id="bAsset" list="assetCodeOptions" placeholder="Asset code" /></label>
           <label>Date down <input id="bDate" type="date" /></label>
+          <label>Time down <input id="bTime" type="time" /></label>
+          <label>Hours down on this date <input id="bDown" type="number" min="0" max="24" step="0.25" value="0" /></label>
           <label class="bo-description-field">Problem description <input id="bDesc" placeholder="What failed or stopped the machine?" /></label>
           <label class="chk bo-critical-field">
             <input id="bCrit" type="checkbox" />
@@ -304,6 +306,6 @@
   <datalist id="assetCodeOptions"></datalist>
   <datalist id="partCodeOptions"></datalist>
 
-  <script src="./breakdown-ops.js?v=6"></script>
+  <script src="./breakdown-ops.js?v=7"></script>
 </body>
 </html>
