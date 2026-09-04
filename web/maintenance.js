@@ -2400,6 +2400,46 @@ function maintenancePlanGroupBucket(group) {
   return "upcoming";
 }
 
+async function openProtectedPdf(url, { download = false, filename = "IRONLOG-report.pdf" } = {}) {
+  const preview = download ? null : window.open("", "_blank");
+  if (!download && !preview) {
+    alert("Allow pop-ups for IRONLOG, then try opening the PDF again.");
+    return;
+  }
+  if (preview) preview.opener = null;
+  try {
+    const res = await fetch(url, { headers: authHeaders(), cache: "no-store" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(res.status === 401
+        ? "Your session has expired. Please sign in again."
+        : body.error || body.message || `PDF request failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    if (!String(blob.type).toLowerCase().includes("application/pdf")) {
+      throw new Error("The server did not return a PDF.");
+    }
+    const blobUrl = URL.createObjectURL(blob);
+    try {
+      if (download) {
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } else if (!preview.closed) {
+        preview.location.replace(blobUrl);
+      }
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+    }
+  } catch (err) {
+    if (preview && !preview.closed) preview.close();
+    alert(`Could not ${download ? "download" : "open"} PDF: ${err.message || err}`);
+  }
+}
+
 function renderMaintenancePlanningKpis(groups) {
   const list = Array.isArray(groups) ? groups : [];
   const counts = {
@@ -5402,7 +5442,10 @@ function openArtisanInspectionPdf(id, download = false) {
   const n = Number(id || 0);
   if (!n) return;
   const q = download ? "?download=1" : "";
-  window.open(`${API}/reports/artisan-inspection/${n}.pdf${q}`, "_blank");
+  return openProtectedPdf(`${API}/reports/artisan-inspection/${n}.pdf${q}`, {
+    download,
+    filename: `IRONLOG_Artisan_Inspection_${n}.pdf`,
+  });
 }
 
 function artisanInspectionCard(r) {
@@ -5451,7 +5494,10 @@ function openArtisanBlankFormPdf(download = false) {
   if (inspector) q.set("inspector_name", inspector);
   if (formNo) q.set("form_number", formNo);
   if (download) q.set("download", "1");
-  window.open(`${API}/reports/artisan-inspection-form.pdf?${q.toString()}`, "_blank");
+  return openProtectedPdf(`${API}/reports/artisan-inspection-form.pdf?${q.toString()}`, {
+    download,
+    filename: `IRONLOG_Artisan_Inspection_Blank_${date || "form"}.pdf`,
+  });
 }
 
 async function loadArtisanInspections() {
