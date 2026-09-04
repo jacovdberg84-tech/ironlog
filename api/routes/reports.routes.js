@@ -10270,7 +10270,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    const reportRevision = "daily-pdf-timed-breakdowns-r2026-09-04";
+    const reportRevision = "daily-pdf-partial-breakdown-r2026-09-04";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -10460,7 +10460,7 @@ export default async function reportsRoutes(app) {
             AND wn.id > w.id
           )
         )
-        AND REPLACE(TRIM(LOWER(COALESCE(wn.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress', 'completed', 'approved', 'closed')
+        AND REPLACE(TRIM(LOWER(COALESCE(wn.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
     )`;
     const hasApprovalRequestsTable = (() => {
       try {
@@ -10594,6 +10594,7 @@ export default async function reportsRoutes(app) {
     // Per-asset downtime for availability (same day as short breakdowns / fuel).
     const scheduledFallback = Math.max(0, Number(scheduled || 0));
     const downtimeByAssetId = new Map();
+    const imputedActiveDownAssetIds = new Set();
     try {
       const downRows = db.prepare(`
         SELECT b.asset_id, COALESCE(SUM(l.hours_down), 0) AS hours_down
@@ -10627,6 +10628,7 @@ export default async function reportsRoutes(app) {
         const assetId = Number(r.asset_id || 0);
         if (assetId > 0 && Number(downtimeByAssetId.get(assetId) || 0) <= 0) {
           downtimeByAssetId.set(assetId, scheduledFallback);
+          imputedActiveDownAssetIds.add(assetId);
         }
       }
     } catch { /* table may be missing */ }
@@ -10659,7 +10661,12 @@ export default async function reportsRoutes(app) {
       );
       const run = Math.max(0, Number(r.hours_run || 0));
       const runEff = sched > 0 ? Math.min(run, sched) : run;
-      const downRaw = Math.max(0, Number(downtimeByAssetId.get(assetId) || 0));
+      // Recorded production proves the asset was not unavailable for the full shift.
+      // Keep explicit downtime, but discard a full-day value that was only imputed
+      // from an active incident with a zero-hour placeholder.
+      const downRaw = imputedActiveDownAssetIds.has(assetId) && run > 0
+        ? 0
+        : Math.max(0, Number(downtimeByAssetId.get(assetId) || 0));
       const down = sched > 0 ? Math.min(downRaw, sched) : downRaw;
       const prestartDone = prestartAssetIds.has(assetId);
       const inspection = prestartDone && sched > down

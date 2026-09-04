@@ -15406,14 +15406,17 @@ function renderDailyPrestartSection() {
 
 async function logDownRowToBreakdowns(date, r) {
   try {
+    const captureDay = new Date(`${date}T12:00:00`);
+    captureDay.setDate(captureDay.getDate() - 1);
+    const operationsDate = captureDay.toISOString().slice(0, 10);
     const downDesc = r.down_reason ? `DOWN — ${r.down_reason}` : "DOWN";
     const b = await fetchJson(`${API}/api/breakdowns/ensure-open`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         asset_code: r.asset_code,
-        breakdown_date: date,
-        start_date: String(r.breakdown_start_date || "").trim() || date,
+        breakdown_date: operationsDate,
+        start_date: String(r.breakdown_start_date || "").trim() || operationsDate,
         description: downDesc,
         component: String(r.breakdown_component || "").trim() || null,
         critical: Boolean(r.breakdown_critical),
@@ -15438,7 +15441,7 @@ async function logDownRowToBreakdowns(date, r) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        log_date: date,
+        log_date: operationsDate,
         hours_down: downHours,
         notes,
       }),
