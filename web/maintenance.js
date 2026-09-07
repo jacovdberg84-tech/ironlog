@@ -375,18 +375,16 @@ function plansTableRow(group) {
   const assetId = Number(group.asset_id || 0);
   const nextPlan = group.next;
   const planId = Number(nextPlan?.id ?? nextPlan?.plan_id ?? 0);
-  const types = (group.plans || []).map((p) => {
-    const pid = Number(p.id ?? p.plan_id ?? 0);
-    const iv = Number(p.interval_hours || 0);
-    const isNext = Boolean(p.is_next_for_asset);
-    return `<span class="pill ${isNext ? "orange" : "blue"}" style="margin:2px 4px 2px 0; display:inline-flex; align-items:center; gap:4px;">
-      ${escBackfill(String(p.service_name || iv))}
-      ${pid > 0 ? `<button type="button" class="plan-type-remove" data-plan-delete-id="${pid}" title="Remove duplicate" style="border:none;background:transparent;color:inherit;cursor:pointer;padding:0 2px;">×</button>` : ""}
-    </span>`;
-  }).join("") || "—";
   const remaining = Number(group.remaining_hours ?? 0);
   const near = Number(group.near_due_threshold ?? 50);
   const unit = String(group.meter_unit || "hours") === "km" ? "km" : "h";
+  const intervals = [...new Set((group.plans || [])
+    .map((p) => Number(p.interval_hours || 0))
+    .filter((interval) => interval > 0))]
+    .sort((a, b) => a - b);
+  const cycle = intervals.length
+    ? `${intervals.map((interval) => `${interval.toFixed(0)}${unit}`).join(" / ")}${intervals.length > 1 ? " alternating" : " interval"}`
+    : "—";
   const remClass = remaining <= 0 ? "status-overdue" : remaining <= near ? "status-soon" : "";
   const statusPill = group.status === "OVERDUE"
     ? `<br><span class="pill red">Overdue</span>`
@@ -401,12 +399,12 @@ function plansTableRow(group) {
       <td><b>${escBackfill(group.asset_code || "-")}</b><br><small class="muted">${escBackfill(group.asset_name || "")}</small></td>
       <td style="text-align:right;">${fmt1(group.current_hours)}<br><small class="muted">${unit}</small></td>
       <td style="text-align:right;">${fmt1(group.last_service_hours)}<br><small class="muted">${unit}</small></td>
-      <td><strong>${escBackfill(group.next_service_name || "-")}</strong>${String(group.schedule_mode || "") === "rotating" ? `<br><small class="muted">Auto alternates</small>` : ""}${statusPill}</td>
+      <td><strong>${escBackfill(group.next_service_name || "-")}</strong>${statusPill}</td>
       <td style="text-align:right;">${fmt1(group.next_due_hours)}<br><small class="muted">${unit}</small></td>
       <td style="text-align:right;"><span class="${remClass}">${fmt1(group.remaining_hours)}</span><br><small class="muted">${unit}</small></td>
-      <td>${types}</td>
+      <td><small class="muted">${cycle}</small></td>
       <td>
-        ${planId > 0 ? `<button type="button" data-plan-rebase-id="${planId}">Rebase</button>` : ""}
+        ${planId > 0 ? `<button type="button" data-plan-rebase-id="${planId}" title="Use only after the service has been completed">Mark serviced</button>` : ""}
       </td>
     </tr>
   `;
@@ -8497,13 +8495,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (plansList) {
     plansList.addEventListener("click", (e) => {
-      const delBtn = e.target instanceof HTMLElement ? e.target.closest("button.plan-type-remove") : null;
-      if (delBtn) {
-        deleteMaintenancePlan(Number(delBtn.getAttribute("data-plan-delete-id") || 0)).catch((err) =>
-          alert(err.message || err),
-        );
-        return;
-      }
       const btn = e.target instanceof HTMLElement ? e.target.closest("button[data-plan-rebase-id]") : null;
       if (!btn) return;
       const row = btn.closest("tr");

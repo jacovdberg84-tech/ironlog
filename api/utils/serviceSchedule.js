@@ -136,15 +136,16 @@ export function resolveLegacyPlanDue(plan, currentHours, assetCode = null) {
   const interval = isLdvServiceAssetCode(assetCode) ? 10000 : configuredInterval;
   const gridStep = normalizeGridStep(interval, assetCode);
   const last = snapToServiceMilestone(Number(plan.last_service_hours || 0), gridStep);
-  const nextDue = nextMilestoneHours(current, gridStep);
+  // A due point must be anchored to the last completed service, not the
+  // current meter reading. Calculating from the current reading makes a
+  // missed service disappear as soon as the meter passes its due point.
+  const nextDue = last + gridStep;
   const remaining = nextDue - current;
   return {
     schedule_mode: "grid",
     plan_id: Number(plan.id ?? plan.plan_id ?? 0),
     asset_id: Number(plan.asset_id || 0),
-    service_name: isLdvServiceAssetCode(assetCode) && configuredInterval !== 10000
-      ? "10000 km service"
-      : String(plan.service_name || ""),
+    service_name: serviceNameForInterval(plan.service_name, interval, assetCode),
     interval_hours: interval,
     grid_step_hours: gridStep,
     last_service_hours: last,
@@ -154,6 +155,17 @@ export function resolveLegacyPlanDue(plan, currentHours, assetCode = null) {
     next_service_interval: interval,
     is_next_for_asset: true,
   };
+}
+
+function serviceNameForInterval(serviceName, interval, assetCode = null) {
+  if (isLdvServiceAssetCode(assetCode)) return "10000 km service";
+  const supplied = String(serviceName || "").trim();
+  // Old records sometimes contain only "500" or "1000". Present those as
+  // a useful service name without changing historical database records.
+  if (!supplied || /^\d+(?:\.0+)?$/.test(supplied)) {
+    return `${Number(interval || 0).toFixed(0)} hour service`;
+  }
+  return supplied;
 }
 
 /** Pick the next service type from active plans on a shared hourmeter grid. */
@@ -169,18 +181,24 @@ export function resolveNextServiceForAssetPlans(plans, currentHours, assetCode =
 
   const baseInterval = Math.min(...intervals.map((iv) => normalizeGridStep(iv, code)));
   const current = Number(currentHours) || 0;
-  const nextDue = nextMilestoneHours(current, baseInterval);
+  // Companion plans can have different old values (for example, a 1000h
+  // companion seeded from a 500h schedule). The latest recorded service is
+  // the authoritative service point for the shared rotating schedule.
+  const lastService = snapToServiceMilestone(
+    Math.max(0, ...activePlans.map((plan) => Number(plan.last_service_hours || 0))),
+    baseInterval,
+  );
+  const nextDue = lastService + baseInterval;
   const serviceInterval = milestoneServiceInterval(nextDue, intervals, code);
   const matchedPlan = findPlanForInterval(activePlans, serviceInterval);
   const exactPlan = activePlans.find((plan) => Math.abs(planIntervalHours(plan) - serviceInterval) < 1e-6);
   const remaining = nextDue - current;
-  const lastService = snapToServiceMilestone(Math.max(0, nextDue - serviceInterval), baseInterval);
 
   return {
     schedule_mode: "rotating",
     plan_id: Number(matchedPlan?.id ?? matchedPlan?.plan_id ?? activePlans[0]?.id ?? 0),
     asset_id: Number(activePlans[0].asset_id || 0),
-    service_name: String(exactPlan?.service_name || `${serviceInterval} ${isLdvServiceAssetCode(code) ? "km" : "hour"} service`),
+    service_name: serviceNameForInterval(exactPlan?.service_name, serviceInterval, code),
     interval_hours: serviceInterval,
     grid_step_hours: baseInterval,
     last_service_hours: lastService,
