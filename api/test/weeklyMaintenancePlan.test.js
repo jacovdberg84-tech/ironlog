@@ -49,7 +49,9 @@ test('weekly route selects the next rotating service and returns a draft without
  const routeSource=fs.readFileSync(new URL('../routes/maintenance.routes.js',import.meta.url),'utf8');
  const route=routeSource.slice(routeSource.indexOf("  app.get('/weekly-plan'"),routeSource.indexOf('  app.get("/weekly-forum/summary"'));
  let handler, reads=0;
- const plans=[250,500,1000].map((n,i)=>({id:i+1,plan_id:i+1,asset_id:1,asset_code:'G01AM',service_name:n+'h',interval_hours:n,last_service_hours:0,active:1}));
+ // The 250h service was completed at 250h, so the next scheduled milestone
+ // is the 500h service. The schedule must not infer completion from 499h.
+ const plans=[250,500,1000].map((n,i)=>({id:i+1,plan_id:i+1,asset_id:1,asset_code:'G01AM',service_name:n+'h',interval_hours:n,last_service_hours:250,active:1}));
  const context=vm.createContext({Intl,Date,Map,Number,
    app:{get:(path,fn)=>{assert.equal(path,'/weekly-plan');handler=fn;}},
    db:{prepare:sql=>{reads++; if(sql.includes('FROM maintenance_plans'))return {all:()=>plans}; if(sql.includes('SUM(day_run)'))return {get:()=>({total_run:140,day_count:14,invalid_days:0})};throw Error('unexpected query');}},
