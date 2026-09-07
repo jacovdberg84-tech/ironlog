@@ -7234,6 +7234,21 @@ async function refreshIronmindInsight() {
   }
 }
 
+async function planIronmindWeek() {
+  const button = qs('ironmindWeeklyPlanBtn');
+  const out = qs('ironmindAskResult');
+  if (button) button.disabled = true;
+  if (out) out.textContent = 'Borris is preparing next week’s maintenance draft...';
+  try {
+    const plan = await fetchJson(`${API}/api/maintenance/weekly-plan`);
+    if (!plan.ok) throw new Error(plan.error || 'Planning failed');
+    if (out) { out.textContent = plan.short_answer; out.style.whiteSpace = 'pre-wrap'; }
+    setStatus('Weekly maintenance draft ready for review.');
+  } catch (err) {
+    if (out) out.textContent = 'Weekly plan failed: ' + (err.message || err);
+  } finally { if (button) button.disabled = false; }
+}
+
 async function askIronmindQuestion() {
   const input = qs("ironmindAskInput");
   const out = qs("ironmindAskResult");
@@ -17418,6 +17433,7 @@ async function init() {
   qs("ironmindSaveSettingsBtn")?.addEventListener("click", () =>
     saveIronmindSettings().catch((e) => setStatus("Borris settings error: " + (e.message || e)))
   );
+  qs("ironmindWeeklyPlanBtn")?.addEventListener("click", planIronmindWeek);
   qs("ironmindAskBtn")?.addEventListener("click", () =>
     askIronmindQuestion().catch((e) => setStatus("BORRIS ask error: " + e.message))
   );

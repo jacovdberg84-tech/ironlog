@@ -1,3 +1,4 @@
+import { buildWeeklyMaintenancePlan } from '../utils/weeklyMaintenancePlan.js';
 // IRONLOG/api/routes/maintenance.routes.js
 import { db } from "../db/client.js";
 import multipart from "@fastify/multipart";
@@ -5283,6 +5284,29 @@ export default async function maintenanceRoutes(app) {
   // WEEKLY FORUM SUMMARY (cross-functional alignment)
   // GET /api/maintenance/weekly-forum/summary?start=YYYY-MM-DD&end=YYYY-MM-DD&near_due_hours=50
   // =====================================================
+  // Read-only Borris plan using the same rotating service rules as the queue.
+  app.get('/weekly-plan', async (req, reply) => {
+    try {
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Johannesburg', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+      const plans = db.prepare(`SELECT mp.*, mp.id AS plan_id, a.asset_code, a.asset_name, a.category
+        FROM maintenance_plans mp JOIN assets a ON a.id=mp.asset_id
+        WHERE mp.active=1 AND a.active=1 AND a.is_standby=0 AND a.archived=0`).all();
+      const due = buildDueListFromPlans(plans, id => getAssetCurrentHours(id), 50);
+      const usageQuery = db.prepare(`SELECT SUM(day_run) AS total_run, COUNT(*) AS day_count,
+        SUM(CASE WHEN day_run < 0 OR day_run > 24 THEN 1 ELSE 0 END) AS invalid_days
+        FROM (SELECT work_date, SUM(hours_run) AS day_run FROM daily_hours
+          WHERE asset_id=? AND is_used=1 AND work_date BETWEEN date(?, '-13 days') AND ? GROUP BY work_date)`);
+      const forecasts = buildUpcomingServiceCostForecasts(db, due.map(r => ({...r, last_service_hours: r.next_due_hours-r.interval_hours})), {maxRemainingHours: Number.MAX_SAFE_INTEGER});
+      const byPlan = new Map(forecasts.map(r => [r.plan_id, r.forecast]));
+      const rows = due.map(r => ({...r, meter_unit: meterUnitForAsset(r.asset_code),
+        meter_source: getAssetCurrentHoursInfo(r.asset_id).source, usage: usageQuery.get(r.asset_id, today, today), forecast: byPlan.get(r.plan_id)}));
+      return reply.send(buildWeeklyMaintenancePlan(rows, today));
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ok:false, error:'Unable to build weekly maintenance plan'});
+    }
+  });
+
   app.get("/weekly-forum/summary", async (req, reply) => {
     try {
       const data = await buildWeeklyForumSummary(req.query || {});
