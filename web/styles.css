@@ -2523,6 +2523,60 @@ body {
   white-space: nowrap;
 }
 
+/* Maintenance uses clear text states instead of rounded status badges. */
+.maintenance-status {
+  display: inline-block;
+  margin-top: 4px;
+  padding-left: 7px;
+  border-left: 2px solid currentColor;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.055em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.maintenance-status.is-overdue { color: #b91c1c; }
+.maintenance-status.is-soon { color: #a16207; }
+
+.maintenance-source {
+  display: inline-block;
+  margin-left: 5px;
+  padding-left: 6px;
+  border-left: 1px solid #cbd5e1;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.maintenance-inline-metric {
+  display: inline-flex;
+  gap: 5px;
+  margin: 2px 14px 2px 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.maintenance-inline-metric strong { color: var(--ink); }
+
+.mc-tech-chip {
+  margin: 2px 5px 2px 0;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.mc-tech-chip:hover { border-color: var(--accent); color: var(--accent); }
+
 .session-meta {
   font-size: 13px;
   color: #6b7280;
@@ -6072,6 +6126,9 @@ body.sidebar-collapsed .main-content {
   border-right-color: var(--line);
   color: #cbd5e1;
 }
+
+[data-theme="dark"] .maintenance-source { border-left-color: var(--line); color: var(--muted); }
+[data-theme="dark"] .maintenance-inline-metric { color: var(--muted); }
 
 /* Tasks Layout */
 .tasks-layout {

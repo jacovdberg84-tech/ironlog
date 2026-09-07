@@ -253,6 +253,28 @@ function getSessionRoles() {
   } catch {}
   return [getSessionRole()];
 }
+
+function roleDisplayName(role) {
+  const labels = {
+    admin: "Admin",
+    plant_manager: "Plant Manager",
+    workshop_admin: "Workshop Admin",
+    storeman: "Stores",
+    stores: "Stores",
+    plant_clerk: "Plant Clerk",
+  };
+  const key = String(role || "").trim().toLowerCase();
+  return labels[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) || "User";
+}
+
+function renderSessionRoleLabel() {
+  const label = document.getElementById("sessionRolesBadge");
+  if (!label) return;
+  const roles = getSessionRoles().map(roleDisplayName);
+  label.className = "session-role";
+  label.textContent = roles.join(" · ");
+  label.title = `Active session ${roles.length === 1 ? "role" : "roles"}: ${roles.join(", ")}`;
+}
 function getSessionUser() {
   return String(localStorage.getItem(USER_KEY) || "admin").trim() || "admin";
 }
@@ -387,9 +409,9 @@ function plansTableRow(group) {
     : "—";
   const remClass = remaining <= 0 ? "status-overdue" : remaining <= near ? "status-soon" : "";
   const statusPill = group.status === "OVERDUE"
-    ? `<br><span class="pill red">Overdue</span>`
+    ? `<br><span class="maintenance-status is-overdue">Overdue</span>`
     : group.status === "ALMOST DUE"
-      ? `<br><span class="pill orange">Almost due</span>`
+      ? `<br><span class="maintenance-status is-soon">Almost due</span>`
       : "";
   return `
     <tr data-plan-asset-id="${assetId}" data-plan-id="${planId}">
@@ -507,7 +529,7 @@ function histRow(r) {
   const assetId = Number(r.asset_id || 0);
   const lastSvcHrs = r.last_service_hours != null ? fmt1(r.last_service_hours) : null;
   const lastSrc = String(r.last_service_source || "").trim();
-  const srcLabel = lastSrc === "backfill" ? " <span class='pill orange' style='font-size:0.65rem;'>record</span>" : lastSrc === "work_order" ? " <span class='pill blue' style='font-size:0.65rem;'>WO</span>" : "";
+  const srcLabel = lastSrc === "backfill" ? " <span class='maintenance-source'>Service record</span>" : lastSrc === "work_order" ? " <span class='maintenance-source'>Work order</span>" : "";
   const nextDue = r.next_due_hours != null ? `<br><small class="muted">Due @ ${fmt1(r.next_due_hours)}h</small>` : "";
   return `
     <tr class="${hrsToNext <= 0 ? "downRow" : ""}">
@@ -515,7 +537,7 @@ function histRow(r) {
       <td>${escBackfill(r.service_name || "-")}${nextDue}</td>
       <td>${escBackfill(last)}${srcLabel}</td>
       <td style="text-align:right;">${fmt1(r.current_hours)}<br><small class="muted">(${escBackfill(src)}, ${unit})</small></td>
-      <td style="text-align:right;"><span class="${warn}">${fmt1(r.remaining_hours)}</span>${r.status === "ALMOST DUE" ? `<br><small class="pill orange">Almost due</small>` : ""}</td>
+      <td style="text-align:right;"><span class="${warn}">${fmt1(r.remaining_hours)}</span>${r.status === "ALMOST DUE" ? `<br><small class="maintenance-status is-soon">Almost due</small>` : ""}</td>
       <td style="text-align:right;">${fmt1(r.avg_daily_hours)}</td>
       <td>
         ${escBackfill(est)}
@@ -599,7 +621,7 @@ function backfillRow(r) {
   const hours = r.service_hours == null ? "-" : Number(r.service_hours).toFixed(1);
   const source = String(r.record_source || "backfill");
   const isWo = source === "work_order";
-  const srcBadge = isWo ? ` <span class="pill blue" style="font-size:0.65rem;">WO #${Number(r.id || 0)}</span>` : "";
+  const srcBadge = isWo ? ` <span class="maintenance-source">Work order #${Number(r.id || 0)}</span>` : "";
   const actions = isWo
     ? `<span class="muted">Closed work order</span>`
     : `<button data-backfill-action="edit">Edit</button>
@@ -7286,7 +7308,7 @@ function renderMcTechChips() {
     .map((t) => {
       const label = mcTechnicianLabel(t);
       const value = mcTechnicianValue(t);
-      return `<button type="button" class="pill" data-mc-chip-tech="${esc(value)}" title="Add row for ${esc(label)}">+ ${esc(label)}</button>`;
+      return `<button type="button" class="mc-tech-chip" data-mc-chip-tech="${esc(value)}" title="Add row for ${esc(label)}">+ ${esc(label)}</button>`;
     })
     .join("");
 }
@@ -7547,9 +7569,9 @@ function renderMcDaySummary(totals) {
   const cost = Number(totals?.labor_cost || 0);
   const entries = Number(totals?.entries || 0);
   el.innerHTML = `
-    <span class="pill blue">Entries: ${entries}</span>
-    <span class="pill">Total hours: ${hours.toFixed(2)}</span>
-    <span class="pill">Labor cost: $${cost.toFixed(2)}</span>
+    <span class="maintenance-inline-metric">Entries <strong>${entries}</strong></span>
+    <span class="maintenance-inline-metric">Total hours <strong>${hours.toFixed(2)}</strong></span>
+    <span class="maintenance-inline-metric">Labor cost <strong>$${cost.toFixed(2)}</strong></span>
   `;
 }
 
@@ -8404,6 +8426,8 @@ function initMaintDarkMode() {
 
 document.addEventListener("DOMContentLoaded", () => {
   console.log("Maintenance UI loaded");
+
+  renderSessionRoleLabel();
 
   // Dark mode toggle
   initMaintDarkMode();
