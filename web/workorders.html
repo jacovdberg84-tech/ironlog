@@ -5,7 +5,7 @@
   <title>IRONLOG Work Orders</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./styles.css?v=15" />
+  <link rel="stylesheet" href="./styles.css?v=16" />
 </head>
 <body class="page-shell">
   <div class="page-header">
@@ -24,15 +24,15 @@
       <div class="wo-overview-copy">
         <strong>Workshop queue</strong>
         <span id="woPermissionLegend" class="muted small"></span>
-        <span id="woRoleBadge" class="muted small">Role: -</span>
+        <span id="woRoleBadge" class="muted small">-</span>
       </div>
-      <div id="woKpiStrip" class="row" style="gap:8px; flex-wrap:wrap;">
-        <button class="pill blue" data-kpi-filter="">All: 0</button>
-        <button class="pill red" data-kpi-filter="open">Open: 0</button>
-        <button class="pill orange" data-kpi-filter="in_progress">In Progress: 0</button>
-        <button class="pill orange" data-kpi-filter="completed">Awaiting Approval: 0</button>
-        <button class="pill blue" data-kpi-filter="approved">Approved: 0</button>
-        <button class="pill blue" data-kpi-filter="closed">Closed: 0</button>
+      <div id="woKpiStrip" aria-label="Work order status summary">
+        <button class="wo-kpi is-all" data-kpi-filter=""><span>All</span><strong>0</strong></button>
+        <button class="wo-kpi is-open" data-kpi-filter="open"><span>Open</span><strong>0</strong></button>
+        <button class="wo-kpi is-active" data-kpi-filter="in_progress"><span>In progress</span><strong>0</strong></button>
+        <button class="wo-kpi is-awaiting" data-kpi-filter="completed"><span>Awaiting approval</span><strong>0</strong></button>
+        <button class="wo-kpi is-approved" data-kpi-filter="approved"><span>Approved today</span><strong>0</strong></button>
+        <button class="wo-kpi is-closed" data-kpi-filter="closed"><span>Closed today</span><strong>0</strong></button>
       </div>
     </div>
 
@@ -253,6 +253,6 @@
     </div>
   </div>
 
-  <script src="./workorders.js?v=11"></script>
+  <script src="./workorders.js?v=12"></script>
 </body>
 </html>

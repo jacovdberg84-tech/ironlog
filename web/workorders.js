@@ -88,22 +88,22 @@ function workflowStepClass(current, step) {
   const order = ["open", "assigned", "in_progress", "completed", "approved", "closed"];
   const curIdx = order.indexOf(String(current || "").toLowerCase());
   const stepIdx = order.indexOf(step);
-  if (curIdx < 0 || stepIdx < 0) return "pill";
-  if (curIdx > stepIdx) return "pill green";
-  if (curIdx === stepIdx) return "pill blue";
-  return "pill";
+  if (curIdx < 0 || stepIdx < 0) return "wo-workflow-step";
+  if (curIdx > stepIdx) return "wo-workflow-step is-complete";
+  if (curIdx === stepIdx) return "wo-workflow-step is-current";
+  return "wo-workflow-step";
 }
 
 function workflowStepsHtml(wo) {
   const s = String(wo?.status || "open").toLowerCase();
   return `
-    <div class="row" style="gap:6px; flex-wrap:wrap; margin:8px 0;">
-      <span class="${workflowStepClass(s, "open")}" style="font-size:0.65rem;">Open</span>
-      <span class="${workflowStepClass(s, "assigned")}" style="font-size:0.65rem;">Assigned</span>
-      <span class="${workflowStepClass(s, "in_progress")}" style="font-size:0.65rem;">In progress</span>
-      <span class="${workflowStepClass(s, "completed")}" style="font-size:0.65rem;">Awaiting approval</span>
-      <span class="${workflowStepClass(s, "approved")}" style="font-size:0.65rem;">Approved</span>
-      <span class="${workflowStepClass(s, "closed")}" style="font-size:0.65rem;">Closed</span>
+    <div class="wo-workflow-steps" aria-label="Work order workflow">
+      <span class="${workflowStepClass(s, "open")}">Open</span>
+      <span class="${workflowStepClass(s, "assigned")}">Assigned</span>
+      <span class="${workflowStepClass(s, "in_progress")}">In progress</span>
+      <span class="${workflowStepClass(s, "completed")}">Awaiting approval</span>
+      <span class="${workflowStepClass(s, "approved")}">Approved</span>
+      <span class="${workflowStepClass(s, "closed")}">Closed</span>
     </div>
   `;
 }
@@ -338,8 +338,8 @@ function workOrderCard(wo) {
           <h3>${escapeHtml(wo.asset_code || "-")} <span>${escapeHtml(wo.asset_name || "")}</span></h3>
         </div>
         <div class="wo-card-badges">
-          <span class="pill ${pClass}">${p}</span>
-          <span class="${statusClass(wo.status)}">${String(wo.status || "unknown").replace(/_/g, " ").toUpperCase()}</span>
+          <span class="wo-priority ${pClass}">Priority ${p}</span>
+          <span class="wo-status-label ${statusClass(wo.status)}">${String(wo.status || "unknown").replace(/_/g, " ")}</span>
         </div>
       </div>
       <div class="wo-card-meta">
@@ -380,12 +380,12 @@ async function loadInspectionQuality() {
     const s = data?.score || {};
     el.className = "";
     el.innerHTML = `
-      <div class="row" style="gap:10px; flex-wrap:wrap;">
-        <span class="pill blue">Overall: ${Number(s.overall || 0).toFixed(1)} / 100</span>
-        <span class="pill">Completeness: ${Number(s.completeness || 0).toFixed(1)}</span>
-        <span class="pill">Photo Evidence: ${Number(s.photo_evidence || 0).toFixed(1)}</span>
-        <span class="pill">Comment Quality: ${Number(s.comment_quality || 0).toFixed(1)}</span>
-        <span class="pill">Repeat Issue Rate: ${Number(s.repeat_issue_rate || 0).toFixed(1)}%</span>
+      <div class="wo-quality-metrics">
+        <div class="wo-quality-metric is-overall"><span>Overall</span><strong>${Number(s.overall || 0).toFixed(1)} / 100</strong></div>
+        <div class="wo-quality-metric"><span>Completeness</span><strong>${Number(s.completeness || 0).toFixed(1)}</strong></div>
+        <div class="wo-quality-metric"><span>Photo evidence</span><strong>${Number(s.photo_evidence || 0).toFixed(1)}</strong></div>
+        <div class="wo-quality-metric"><span>Comment quality</span><strong>${Number(s.comment_quality || 0).toFixed(1)}</strong></div>
+        <div class="wo-quality-metric"><span>Repeat issue rate</span><strong>${Number(s.repeat_issue_rate || 0).toFixed(1)}%</strong></div>
       </div>
     `;
   } catch (err) {
@@ -596,7 +596,7 @@ function renderDetail(payload) {
         <h2>${escapeHtml(wo.asset_code || "-")} <span>${escapeHtml(wo.asset_name || "")}</span></h2>
         <div class="wo-detail-summary">${sourceLabel(wo.source)} · Opened ${escapeHtml(wo.opened_at || "-")} · ${escapeHtml(technician)}</div>
       </div>
-      <span class="${statusClass(status)} wo-detail-status">${status.replace(/_/g, " ").toUpperCase()}</span>
+      <span class="wo-status-label ${statusClass(status)} wo-detail-status">${status.replace(/_/g, " ")}</span>
     </div>
 
     <div class="wo-detail-workflow">
@@ -636,11 +636,11 @@ function renderDetail(payload) {
       </details>
       ${breakdown ? `<details><summary>Linked breakdown</summary>${renderBreakdown(breakdown)}</details>` : ""}
       <details>
-        <summary>Issued parts <span class="pill">${partsCount}</span></summary>
+        <summary>Issued parts <span class="wo-detail-count">${partsCount}</span></summary>
         ${renderParts(nonLubeIssued)}
       </details>
       <details>
-        <summary>Issued lube <span class="pill">${lubeCount}</span></summary>
+        <summary>Issued lube <span class="wo-detail-count">${lubeCount}</span></summary>
         ${renderParts(lubeIssued)}
       </details>
       <details>
@@ -687,12 +687,12 @@ function updateKpiStrip(rows) {
   ).length;
 
   strip.innerHTML = `
-    <button class="pill blue" data-kpi-filter="">All: ${all}</button>
-    <button class="pill red" data-kpi-filter="open">Open: ${open}</button>
-    <button class="pill orange" data-kpi-filter="in_progress">In Progress: ${inProgress}</button>
-    <button class="pill orange" data-kpi-filter="completed">Awaiting Approval: ${awaitingApproval}</button>
-    <button class="pill blue" data-kpi-filter="approved">Approved Today: ${approvedToday}</button>
-    <button class="pill blue" data-kpi-filter="closed">Closed Today: ${closedToday}</button>
+    <button class="wo-kpi is-all" data-kpi-filter=""><span>All</span><strong>${all}</strong></button>
+    <button class="wo-kpi is-open" data-kpi-filter="open"><span>Open</span><strong>${open}</strong></button>
+    <button class="wo-kpi is-active" data-kpi-filter="in_progress"><span>In progress</span><strong>${inProgress}</strong></button>
+    <button class="wo-kpi is-awaiting" data-kpi-filter="completed"><span>Awaiting approval</span><strong>${awaitingApproval}</strong></button>
+    <button class="wo-kpi is-approved" data-kpi-filter="approved"><span>Approved today</span><strong>${approvedToday}</strong></button>
+    <button class="wo-kpi is-closed" data-kpi-filter="closed"><span>Closed today</span><strong>${closedToday}</strong></button>
   `;
 }
 
@@ -1639,7 +1639,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   } catch {}
   const roleBadge = document.getElementById("woRoleBadge");
-  if (roleBadge) roleBadge.textContent = `Role: ${role}`;
+  if (roleBadge) roleBadge.textContent = `Signed in as ${role.replace(/_/g, " ")}`;
   const legend = document.getElementById("woPermissionLegend");
   if (legend) legend.textContent = rolePermissionText(role);
 
@@ -1700,7 +1700,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (kpiStrip && statusEl) {
     kpiStrip.addEventListener("click", (evt) => {
-      const target = evt.target;
+      const target = evt.target instanceof Element
+        ? evt.target.closest("[data-kpi-filter]")
+        : null;
       if (!(target instanceof HTMLElement)) return;
       const filter = target.getAttribute("data-kpi-filter");
       if (filter == null) return;
