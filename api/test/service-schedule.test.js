@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveNextServiceForAssetPlans } from "../utils/serviceSchedule.js";
+import { buildDueListFromPlans, resolveNextServiceForAssetPlans } from "../utils/serviceSchedule.js";
 
 const plantPlan = {
   id: 7,
@@ -65,4 +65,35 @@ test("a 250 hour schedule stays due from its last recorded service", () => {
   }], 1305, "A300AM");
   assert.equal(next.next_due_hours, 1250);
   assert.equal(next.remaining_hours, -55);
+});
+
+test("a duplicated legacy interval consistently uses the newest service record", () => {
+  const plans = [
+    {
+      id: 14,
+      asset_id: 27,
+      asset_code: "DR01AM",
+      service_name: "500",
+      interval_hours: 250,
+      last_service_hours: 1797,
+      active: 1,
+    },
+    {
+      id: 49,
+      asset_id: 27,
+      asset_code: "DR01AM",
+      service_name: "250",
+      interval_hours: 250,
+      last_service_hours: 2000,
+      active: 1,
+    },
+  ];
+
+  const next = resolveNextServiceForAssetPlans(plans, 2252.4, "DR01AM");
+  assert.equal(next.plan_id, 49);
+  assert.equal(next.next_due_hours, 2250);
+  assert.equal(next.remaining_hours, -2.4);
+
+  const [due] = buildDueListFromPlans(plans, () => 2252.4);
+  assert.equal(due.plan_id, 49);
 });

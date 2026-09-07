@@ -130,6 +130,30 @@ function findPlanForInterval(plans, targetInterval) {
   return exact || closest;
 }
 
+/**
+ * Older imports can leave more than one plan for the same service interval.
+ * Treat the record with the latest completed-service meter as authoritative so
+ * the Planning Queue, service PDFs and work-order generator all select the
+ * same plan.  Plan ID is only a stable tie-breaker.
+ */
+function selectCanonicalLegacyPlan(plans, assetCode = null) {
+  return [...(plans || [])]
+    .sort((a, b) => {
+      const aLast = snapLastServiceHours(
+        Number(a?.last_service_hours || 0),
+        planIntervalHours(a),
+        assetCode,
+      );
+      const bLast = snapLastServiceHours(
+        Number(b?.last_service_hours || 0),
+        planIntervalHours(b),
+        assetCode,
+      );
+      if (bLast !== aLast) return bLast - aLast;
+      return Number(a?.id ?? a?.plan_id ?? 0) - Number(b?.id ?? b?.plan_id ?? 0);
+    })[0] || null;
+}
+
 export function resolveLegacyPlanDue(plan, currentHours, assetCode = null) {
   const current = Number(currentHours) || 0;
   const configuredInterval = planIntervalHours(plan);
@@ -176,7 +200,7 @@ export function resolveNextServiceForAssetPlans(plans, currentHours, assetCode =
   const code = assetCode || String(activePlans[0]?.asset_code || "");
   const intervals = automaticServiceIntervals(activePlans, code);
   if (intervals.length < 2) {
-    return resolveLegacyPlanDue(activePlans[0], currentHours, code);
+    return resolveLegacyPlanDue(selectCanonicalLegacyPlan(activePlans, code), currentHours, code);
   }
 
   const baseInterval = Math.min(...intervals.map((iv) => normalizeGridStep(iv, code)));
@@ -258,6 +282,7 @@ export function enrichPlansWithNextService(plans, getCurrentHours, defaultNearDu
     }
 
     const legacy = resolveLegacyPlanDue(plan, current, code);
+    const isNext = Number(resolved?.plan_id || 0) === Number(plan.id ?? plan.plan_id ?? 0);
     const dueMeta = classifyServiceDue(legacy.remaining_hours, code, planIntervalHours(plan), defaultNearDue);
     return {
       ...plan,
@@ -266,8 +291,8 @@ export function enrichPlansWithNextService(plans, getCurrentHours, defaultNearDu
       current_hours: Number(Number(current).toFixed(2)),
       next_due_hours: legacy.next_due_hours,
       remaining_hours: legacy.remaining_hours,
-      is_next_for_asset: true,
-      next_service_name: legacy.service_name,
+      is_next_for_asset: isNext,
+      next_service_name: isNext ? resolved?.service_name || legacy.service_name : null,
       meter_unit: dueMeta.meter_unit,
       near_due_threshold: dueMeta.near_due_threshold,
       status: dueMeta.status,
