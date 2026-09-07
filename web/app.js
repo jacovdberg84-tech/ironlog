@@ -992,7 +992,7 @@ function getEffectiveAllowedTabs() {
   if (PRODUCTION_NAV_ENABLED) {
     const production = new Set(PRODUCTION_SITE_TABS);
     list = list.filter((t) => production.has(t));
-    // IronMind stays reachable even for saved per-user tab lists created before it was restored.
+    // Borris stays reachable even for saved per-user tab lists created before it was restored.
     if (!list.includes("ironmind")) list = [...list, "ironmind"];
   } else {
     // Keep task workspace reachable even when older saved tab overrides exist.
@@ -6679,7 +6679,7 @@ async function loadDashboard() {
           )
         );
       });
-      if (!rows.length) riskBoardList.appendChild(item("<small>No risk-board data yet. Refresh IronMind insight first.</small>"));
+      if (!rows.length) riskBoardList.appendChild(item("<small>No risk-board data yet. Refresh Borris insight first.</small>"));
     } catch (e) {
       riskBoardList.appendChild(item(`<small>Risk board unavailable: ${escapeHtml(e.message || String(e))}</small>`));
     }
@@ -7027,7 +7027,7 @@ async function loadIronmindInsight(options = {}) {
     if (!report) {
       if (summaryEl) {
         const emptySections = parseIronmindSections(
-          ["IRONMIND DAILY INSIGHT", "", "Repairs Needed", "- Insufficient data",
+          ["BORRIS DAILY INSIGHT", "", "Repairs Needed", "- Insufficient data",
            "", "Operational Risks", "- Insufficient data",
            "", "Suggestions", "- Insufficient data",
            "", "Data Gaps", "- Insufficient data",
@@ -7036,15 +7036,15 @@ async function loadIronmindInsight(options = {}) {
         renderIronmindSections(summaryEl, emptySections);
       }
       if (metaEl) metaEl.textContent = "No report generated yet.";
-      if (!silent) setStatus("IRONMIND insight not available yet.");
+      if (!silent) setStatus("BORRIS insight not available yet.");
       return;
     }
 
     renderIronmindReport(report);
-    if (!silent) setStatus("IRONMIND insight loaded.");
+    if (!silent) setStatus("BORRIS insight loaded.");
   } catch (err) {
     if (metaEl) metaEl.textContent = "Insight unavailable right now.";
-    if (!silent) setStatus("IRONMIND load error: " + err.message);
+    if (!silent) setStatus("BORRIS load error: " + err.message);
     throw err;
   }
 }
@@ -7100,7 +7100,7 @@ async function saveIronmindSettings() {
     max_daily_run_hours_truck: readNum("ironmindMaxRunTruck", 18),
     max_daily_run_hours_heavy: readNum("ironmindMaxRunHeavy", 24),
   };
-  setStatus("Saving IronMind thresholds...");
+  setStatus("Saving Borris thresholds...");
   try {
     await fetchJson(`${API}/api/ironmind/settings`, {
       method: "PUT",
@@ -7108,17 +7108,17 @@ async function saveIronmindSettings() {
       body: JSON.stringify(payload),
     });
     if (meta) meta.textContent = "Saved. Click Refresh Insight to apply now.";
-    setStatus("IronMind thresholds saved.");
+    setStatus("Borris thresholds saved.");
   } catch (err) {
     if (meta) meta.textContent = `Save failed: ${err.message || err}`;
-    setStatus("IronMind threshold save failed.");
+    setStatus("Borris threshold save failed.");
   }
 }
 
 function summarizeIronmindText(text) {
   const oneLine = String(text || "")
     .replace(/\s+/g, " ")
-    .replace(/^IRONMIND DAILY INSIGHT\s*/i, "")
+    .replace(/^(?:BORRIS|IRONMIND) DAILY INSIGHT\s*/i, "")
     .trim();
   if (!oneLine) return "No summary text.";
   return oneLine.length > 150 ? `${oneLine.slice(0, 147)}...` : oneLine;
@@ -7173,15 +7173,15 @@ async function loadIronmindHistory(options = {}) {
             report_date: ymd,
             report_type: "daily_admin",
             created_at: "-",
-            summary: "IRONMIND DAILY INSIGHT\n\nRepairs Needed\n- Insufficient data\n\nOperational Risks\n- Insufficient data\n\nSuggestions\n- Insufficient data\n\nData Gaps\n- Insufficient data",
+            summary: "BORRIS DAILY INSIGHT\n\nRepairs Needed\n- Insufficient data\n\nOperational Risks\n- Insufficient data\n\nSuggestions\n- Insufficient data\n\nData Gaps\n- Insufficient data",
             synthetic_missing: true,
           };
         })
       : rowsRaw;
     listEl.innerHTML = "";
     if (!rows.length) {
-      listEl.appendChild(item("<small>No IRONMIND history yet.</small>"));
-      if (!silent) setStatus("No IRONMIND history found.");
+      listEl.appendChild(item("<small>No BORRIS history yet.</small>"));
+      if (!silent) setStatus("No BORRIS history found.");
       return;
     }
 
@@ -7200,10 +7200,10 @@ async function loadIronmindHistory(options = {}) {
       node.dataset.ironmindRow = JSON.stringify(r);
       listEl.appendChild(node);
     });
-    if (!silent) setStatus("IRONMIND history loaded.");
+    if (!silent) setStatus("BORRIS history loaded.");
   } catch (err) {
     listEl.innerHTML = `<small class="muted">History unavailable right now.</small>`;
-    if (!silent) setStatus("IRONMIND history error: " + err.message);
+    if (!silent) setStatus("BORRIS history error: " + err.message);
     throw err;
   }
 }
@@ -7213,7 +7213,7 @@ async function refreshIronmindInsight() {
   const contextNotes = String(qs("ironmindContext")?.value || "").trim();
   const detailMode = Boolean(qs("ironmindDetailMode")?.checked);
   if (btn) btn.disabled = true;
-  setStatus("Refreshing IRONMIND insight...");
+  setStatus("Refreshing BORRIS insight...");
   try {
     await fetchJson(`${API}/api/ironmind/run`, {
       method: "POST",
@@ -7228,7 +7228,7 @@ async function refreshIronmindInsight() {
     });
     await loadIronmindInsight({ silent: true });
     await loadIronmindHistory({ silent: true });
-    setStatus("IRONMIND insight refreshed.");
+    setStatus("BORRIS insight refreshed.");
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -7245,7 +7245,7 @@ async function askIronmindQuestion() {
     if (out) out.innerHTML = `<small class="muted">Type a question first.</small>`;
     return;
   }
-  if (out) out.innerHTML = `<small class="muted">Asking IRONMIND...</small>`;
+  if (out) out.innerHTML = `<small class="muted">Asking BORRIS...</small>`;
   try {
     const res = await fetchJson(`${API}/api/ironmind/ask`, {
       method: "POST",
@@ -7270,10 +7270,10 @@ async function askIronmindQuestion() {
       body: JSON.stringify({ session_id: sid, question, answer: short }),
     }).catch(() => {});
     loadIronmindHealth().catch(() => {});
-    setStatus("IRONMIND question answered.");
+    setStatus("BORRIS question answered.");
   } catch (e) {
     if (out) out.innerHTML = `<small class="muted">Question failed: ${escapeHtml(e.message || String(e))}</small>`;
-    setStatus("IRONMIND ask error: " + (e.message || e));
+    setStatus("BORRIS ask error: " + (e.message || e));
   }
 }
 
@@ -7316,7 +7316,7 @@ function renderIronmindAskHistory() {
   out.innerHTML = rows.map((h) => `
     <div style="margin-bottom:10px;">
       <div><b>You:</b> ${escapeHtml(String(h.question || ""))}</div>
-      <div><b>IronMind:</b> ${escapeHtml(String(h.answer || "")).replace(/\n/g, "<br>")}</div>
+      <div><b>Borris:</b> ${escapeHtml(String(h.answer || "")).replace(/\n/g, "<br>")}</div>
     </div>
   `).join("");
 }
@@ -7354,7 +7354,7 @@ async function resetIronmindAskMemory() {
     });
   } catch {}
   if (out) out.innerHTML = `<small class="muted">Memory cleared.</small>`;
-  setStatus("IronMind chat memory reset.");
+  setStatus("Borris chat memory reset.");
 }
 
 async function generateIronmindRsgPlan(createWo = false) {
@@ -7474,7 +7474,7 @@ function renderIronmindSections(summaryEl, sections) {
   };
   // Pattern: UPPERCASE asset code at start of item before ":"
   const assetPat = /^([A-Z][A-Z0-9_-]{1,9}):\s/;
-  let html = `<div class="ironmind-header-line">IRONMIND DAILY INSIGHT</div>`;
+  let html = `<div class="ironmind-header-line">BORRIS DAILY INSIGHT</div>`;
   for (const sec of sections) {
     const nav = navMap[sec.key];
     const drillBtn = nav
@@ -10749,7 +10749,7 @@ const IRONLOG_HELP_OPENERS = {
   admin: "Need help with user admin?",
   docs: "Need help with AI documents?",
   ironmind:
-    "IronMind analyses fleet data here — use this Help button only for how to use IRONLOG screens.",
+    "Borris analyses fleet data here — use this Help button only for how to use IRONLOG screens.",
   finance: "Need help with finance?",
   enterprise: "Need help with enterprise views?",
   exec: "Need help with executive dashboards?",
@@ -17410,24 +17410,24 @@ async function init() {
     loadDashboard().catch((e) => setStatus("Dashboard error: " + e.message))
   );
   qs("ironmindRefreshBtn")?.addEventListener("click", () =>
-    refreshIronmindInsight().catch((e) => setStatus("IRONMIND refresh error: " + e.message))
+    refreshIronmindInsight().catch((e) => setStatus("BORRIS refresh error: " + e.message))
   );
   setInterval(() => {
     loadIronmindHealth().catch(() => {});
   }, 30000);
   qs("ironmindSaveSettingsBtn")?.addEventListener("click", () =>
-    saveIronmindSettings().catch((e) => setStatus("IronMind settings error: " + (e.message || e)))
+    saveIronmindSettings().catch((e) => setStatus("Borris settings error: " + (e.message || e)))
   );
   qs("ironmindAskBtn")?.addEventListener("click", () =>
-    askIronmindQuestion().catch((e) => setStatus("IRONMIND ask error: " + e.message))
+    askIronmindQuestion().catch((e) => setStatus("BORRIS ask error: " + e.message))
   );
   qs("ironmindResetMemoryBtn")?.addEventListener("click", () =>
-    resetIronmindAskMemory().catch((e) => setStatus("IRONMIND reset memory error: " + e.message))
+    resetIronmindAskMemory().catch((e) => setStatus("BORRIS reset memory error: " + e.message))
   );
   qs("ironmindAskInput")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      askIronmindQuestion().catch((err) => setStatus("IRONMIND ask error: " + err.message));
+      askIronmindQuestion().catch((err) => setStatus("BORRIS ask error: " + err.message));
     }
   });
   hydrateIronmindAskMemory().catch(() => {});
@@ -17449,9 +17449,9 @@ async function init() {
     try {
       const row = JSON.parse(rowEl.dataset.ironmindRow);
       renderIronmindReport(row);
-      setStatus(`Opened IRONMIND report for ${row?.report_date || "-"}.`);
+      setStatus(`Opened BORRIS report for ${row?.report_date || "-"}.`);
     } catch (_) {
-      setStatus("Unable to open selected IRONMIND report.");
+      setStatus("Unable to open selected BORRIS report.");
     }
   });
   qs("riskBoardList")?.addEventListener("click", (e) => {
@@ -17469,7 +17469,7 @@ async function init() {
       const code = String(woBtn.getAttribute("data-ironmind-risk-wo") || "").trim();
       if (!code) return;
       (async () => {
-        const downDesc = "IRONMIND predicted risk work order";
+        const downDesc = "BORRIS predicted risk work order";
         const res = await fetchJson(`${API}/api/breakdowns/ensure-open`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -17490,7 +17490,7 @@ async function init() {
     loadIronmindHistory({ silent: true }).catch(() => {});
   });
   qs("ironmindReloadHistory")?.addEventListener("click", () => {
-    loadIronmindHistory().catch((e) => setStatus("IRONMIND history error: " + e.message));
+    loadIronmindHistory().catch((e) => setStatus("BORRIS history error: " + e.message));
   });
   qs("ironmindRsgPlanBtn")?.addEventListener("click", () => {
     generateIronmindRsgPlan(false).catch((e) => setStatus("RSG plan error: " + (e.message || e)));

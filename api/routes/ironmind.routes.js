@@ -593,7 +593,7 @@ export default async function ironmindRoutes(app) {
       return Number.isFinite(n) && n > 0 ? n : 45000;
     })();
     const system = [
-      "You are IronMind, a maintenance intelligence assistant for plant operations.",
+      "You are Borris, a maintenance intelligence assistant for plant operations.",
       "Respond naturally to brief greetings or thanks (e.g. match a short 'good morning'), then invite a maintenance question or offer a concise fleet tip when context allows.",
       "Answer practically and clearly with operational context.",
       "Keep the answer brief: one short paragraph or up to 4 compact bullets.",
@@ -928,7 +928,7 @@ export default async function ironmindRoutes(app) {
         "Use the left sidebar to switch areas; the mobile menu at the top of the page lists the same sections.",
         "The top bar has the report date, scheduled hours, and session (user / role / site).",
         "Tabs you do not see are usually hidden by your role.",
-        "For fleet and maintenance analysis (downtime, risk, PM), use the IronMind tab — not this help assistant.",
+        "For fleet and maintenance analysis (downtime, risk, PM), use the Borris tab — not this help assistant.",
       ],
     },
     dash: {
@@ -1048,11 +1048,11 @@ export default async function ironmindRoutes(app) {
     docs: {
       title: "AI documents",
       hints: [
-        "Organisation documents indexed for search — not the same as IronMind fleet analysis.",
+        "Organisation documents indexed for search — not the same as Borris fleet analysis.",
       ],
     },
     ironmind: {
-      title: "IronMind (maintenance intelligence)",
+      title: "Borris (maintenance intelligence)",
       hints: [
         "This tab is for downtime, risk, PM, and fleet-style questions using live data.",
         "Use the Ask box there for maintenance intelligence — use the floating Help button only for how-to on using IRONLOG screens.",
@@ -1281,8 +1281,8 @@ export default async function ironmindRoutes(app) {
     })();
     const system = [
       "You are IRONLOG Help — you ONLY explain how to use the IRONLOG web application (navigation, fields, workflows).",
-      "You are NOT the IronMind maintenance assistant: do not analyse downtime hours, fleet KPIs, or asset risk unless the user is asking where in the UI to find those features.",
-      "If the user wants data-driven maintenance insight, say briefly that the IronMind tab is for that, and continue with UI guidance when relevant.",
+      "You are NOT the Borris maintenance assistant: do not analyse downtime hours, fleet KPIs, or asset risk unless the user is asking where in the UI to find those features.",
+      "If the user wants data-driven maintenance insight, say briefly that the Borris tab is for that, and continue with UI guidance when relevant.",
       "For brief greetings or thanks, reply in a short friendly line first, then offer UI help for the active section when it fits.",
       "Answer in clear short paragraphs or bullet steps.",
       "Keep the answer brief: one short paragraph or up to 4 compact bullets.",
@@ -1481,7 +1481,7 @@ export default async function ironmindRoutes(app) {
         if (firstLine) {
           return reply.send({
             ok: true,
-            short_answer: `IronMind: ${firstLine}\n\n${broad}\n\nTip: include an asset code for deep analysis (e.g. G01AM from 2026-02-14 to 2026-04-07).`,
+            short_answer: `Borris: ${firstLine}\n\n${broad}\n\nTip: include an asset code for deep analysis (e.g. G01AM from 2026-02-14 to 2026-04-07).`,
           });
         }
         return reply.send({

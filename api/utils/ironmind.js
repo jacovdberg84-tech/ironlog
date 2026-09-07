@@ -394,7 +394,7 @@ function toIronmindFormat({ repairsNeeded, operationalRisks, suggestions, dataGa
   };
 
   return [
-    "IRONMIND DAILY INSIGHT",
+    "BORRIS DAILY INSIGHT",
     "",
     block("Repairs Needed", repairsNeeded),
     "",
@@ -521,7 +521,7 @@ async function callIronmindAi(structuredData, opts = {}) {
   const detailMode = Boolean(opts.detailMode);
 
   const systemPrompt = [
-    "You are IRONMIND, the operational intelligence layer for IRONLOG.",
+    "You are BORRIS, the operational intelligence layer for IRONLOG.",
     "",
     "Rules:",
     "- Use only the provided data.",

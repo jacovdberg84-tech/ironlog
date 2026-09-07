@@ -264,7 +264,7 @@
         <div class="nav-section-title">Assistance</div>
         <a href="#" class="nav-item" data-tab="ironmind">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.5-.8 2.8-2 3.5V11h2a3 3 0 0 1 3 3v1H5v-1a3 3 0 0 1 3-3h2V9.5A4 4 0 0 1 12 2z"></path><path d="M9 14l2 2 4-4"></path></svg>
-          <span>Ask IronMind</span>
+          <span>Ask Borris</span>
         </a>
         <a href="#" class="nav-item" data-tab="docs">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
@@ -362,7 +362,7 @@
         <option value="audit">Audit Trail</option>
         <option value="vehicle">Checklists</option>
         <option value="admin">User admin</option>
-        <option value="ironmind">IronMind AI</option>
+        <option value="ironmind">Borris AI</option>
         <option value="docs">AI Documents</option>
       </select>
     </div>
@@ -721,10 +721,10 @@
       <div id="kpiAlertBanner" class="kpi-alert-banner" style="display:none;"></div>
     </section>
 
-    <!-- IRONMIND -->
+    <!-- BORRIS -->
     <section class="panel" id="tab-ironmind">
       <div class="asset-cards-grid">
-        <!-- IronMind Header Card -->
+        <!-- Borris Header Card -->
         <div class="dash-card full-width">
           <div class="dash-card-header">
             <div class="dash-card-title">
@@ -732,10 +732,11 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.5-.8 2.8-2 3.5V11h2a3 3 0 0 1 3 3v1H5v-1a3 3 0 0 1 3-3h2V9.5A4 4 0 0 1 12 2z"></path></svg>
               </div>
               <div>
-                <h3>IronMind (Maintenance Intelligence)</h3>
-                <p class="muted small">Daily insights, predicted failures, and RSG work-order generation.</p>
+                <h3>Borris (Maintenance Intelligence)</h3>
+                <p class="muted small">Learning IRONLOG's code and operational context before predictive planning is enabled.</p>
               </div>
             </div>
+            <span class="dash-card-badge">Code Learning Mode</span>
           </div>
         </div>
 
@@ -747,7 +748,7 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
               </div>
               <div>
-                <h3>IRONMIND Daily Insight</h3>
+                <h3>BORRIS Daily Insight</h3>
                 <p class="muted small" id="ironmindMeta">No report loaded yet.</p>
               </div>
             </div>
@@ -770,7 +771,7 @@
             <div class="form-row">
               <div class="form-field form-field-full">
                 <label>Extra Context</label>
-                <textarea id="ironmindContext" class="ironmind-context" rows="3" placeholder="Optional context for Refresh Insight and Ask IronMind (weather, incidents, priorities, constraints)..."></textarea>
+                <textarea id="ironmindContext" class="ironmind-context" rows="3" placeholder="Optional context for Refresh Insight and Ask Borris (weather, incidents, priorities, constraints)..."></textarea>
               </div>
             </div>
             <div class="form-row">
@@ -783,8 +784,8 @@
             </div>
             <div class="form-row">
               <div class="form-field form-field-full">
-                <label>Ask IronMind</label>
-                <textarea id="ironmindAskInput" class="ironmind-context" rows="2" placeholder="Ask IronMind anything about maintenance, risk, downtime, PM overdue, fuel trends... (Ctrl+Enter to send)"></textarea>
+                <label>Ask Borris</label>
+                <textarea id="ironmindAskInput" class="ironmind-context" rows="2" placeholder="Ask Borris anything about maintenance, risk, downtime, PM overdue, fuel trends... (Ctrl+Enter to send)"></textarea>
               </div>
             </div>
             <div class="action-buttons">
@@ -801,10 +802,10 @@
               <small class="muted">Ask a question for short operational answers.</small>
             </div>
             <div class="output ironmind-body" id="ironmindSummary">
-              <small class="muted">Loading IRONMIND insight...</small>
+              <small class="muted">Loading BORRIS insight...</small>
             </div>
             <details class="ironmind-history-pane" style="margin-top: 16px;">
-              <summary><b>IRONMIND history (last 7 days)</b></summary>
+              <summary><b>BORRIS history (last 7 days)</b></summary>
               <div class="row stack-6 ironmind-history-controls" style="margin-top: 10px;">
                 <label class="checkbox-label">
                   <input id="ironmindShowMissingDays" type="checkbox" />
@@ -7656,7 +7657,7 @@
         <button type="button" id="ironmindHelpClose" class="btn btn-secondary btn-sm">Close</button>
       </div>
       <p class="muted small" style="margin: 0 0 10px;">
-        Ask how to use buttons and flows on this screen. For fleet analysis and downtime insight, open the <strong>IronMind</strong> tab.
+        Ask how to use buttons and flows on this screen. For fleet analysis and downtime insight, open the <strong>Borris</strong> tab.
       </p>
       <textarea id="ironmindHelpInput" rows="4" class="w-full" placeholder="What would you like to do here? (Ctrl+Enter to send)"></textarea>
       <div class="ironmind-help-actions">
@@ -7677,6 +7678,6 @@
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=2"></script>
-  <script src="./app.js?v=76"></script>
+  <script src="./app.js?v=77"></script>
 </body>
 </html>
