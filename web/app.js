@@ -690,12 +690,10 @@ function renderSessionRolesBadge() {
   const badge = qs("sessionRolesBadge");
   if (!badge) return;
   const roles = getSessionRoles();
-  const isAdmin = roles.includes("admin");
-  const isSupervisor = roles.includes("supervisor");
-  const tone = isAdmin ? "red" : isSupervisor ? "orange" : "blue";
-  badge.className = `pill ${tone}`;
-  badge.textContent = `Roles: ${roles.join(", ")}`;
-  badge.title = `Active session roles: ${roles.join(", ")}`;
+  const labels = roles.map(roleDisplayName);
+  badge.className = "session-role";
+  badge.textContent = labels.join(" · ");
+  badge.title = `Active session ${roles.length === 1 ? "role" : "roles"}: ${labels.join(", ")}`;
 }
 function getSessionUser() {
   return String(localStorage.getItem(USER_KEY) || DEFAULT_USER).trim() || DEFAULT_USER;
