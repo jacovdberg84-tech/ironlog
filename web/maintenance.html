@@ -1291,29 +1291,29 @@
     <div id="mechanicsCostSection" class="maint-section" style="display:none;">
       <div class="card stack-24">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
-          <h3 style="margin:0;">Mechanics Cost — daily labor allocation</h3>
+          <h3 style="margin:0;">Mechanics Cost — daily workshop timesheet</h3>
           <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
             <label>
               Report year
               <input id="mcReportYear" type="number" min="2020" max="2099" step="1" class="w-120" />
             </label>
-            <button type="button" id="mcDownloadXlsxBtn">Download year XLSX</button>
+            <button type="button" id="mcDownloadXlsxBtn" class="btn-secondary">Download cost summary</button>
           </div>
         </div>
         <p class="muted" style="margin-top:0;">
-          Log all technician work for a day on one sheet — add multiple rows per tech, then <strong>Save all</strong> once.
-          Example <strong>20 Jun 2026</strong>: Sergio 0.5h A300AM (startup inspection), Charles 4h F501AM (500hr service), and more rows as needed.
+          Use the same layout as the workshop submission sheet: plant, hours, category, work description, start and finish times,
+          technician, job card and SMR. Add all work for the selected day, then <strong>Save all</strong> once.
         </p>
 
         <div class="card stack-16" style="background:var(--surface-2, rgba(255,255,255,0.03)); padding:14px;">
-          <h4 style="margin:0 0 8px 0;">Mechanics timesheet (Excel)</h4>
+          <h4 style="margin:0 0 8px 0;">Workshop submission template (Excel)</h4>
           <p class="muted small" style="margin:0 0 10px 0;">
             Download saved labor for the report year in the workshop timesheet layout
             (<strong>Date, Plant no, Work Hours, Category, Description, Time Started, Time finished, Technician, Job Card No, SMR</strong>).
             Upload a filled <strong>.xlsx</strong> or <strong>.csv</strong> with the same columns to load a month (or more) in bulk.
           </p>
           <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
-            <button type="button" id="mcDownloadTimesheetBtn">Download timesheet XLSX</button>
+            <button type="button" id="mcDownloadTimesheetBtn">Download submission XLSX</button>
             <label>
               Upload timesheet
               <input id="mcTimesheetFile" type="file" accept=".xlsx,.xlsm,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
@@ -1329,7 +1329,7 @@
 
         <div class="row stack-10" style="flex-wrap:wrap; align-items:flex-end;">
           <label>
-            Default labor rate ($/hr)
+            Rate per hour ($)
             <input id="mcDefaultRate" type="number" min="0" step="0.01" class="w-140" />
           </label>
           <button type="button" id="mcSaveRateBtn">Save default rate</button>
@@ -1342,7 +1342,7 @@
 
         <hr class="hr-soft" />
         <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
-          <h4 style="margin:0;">Daily entry sheet</h4>
+          <h4 style="margin:0;">Daily workshop timesheet</h4>
           <div id="mcTechChips" class="row stack-10" style="flex-wrap:wrap;"></div>
         </div>
         <div class="row stack-10" style="flex-wrap:wrap; margin-bottom:10px;">
@@ -1352,20 +1352,26 @@
           <button type="button" id="mcLoadDayBtn" class="btn-secondary">Load saved day into sheet</button>
           <button type="button" id="mcClearDraftBtn" class="btn-secondary">Clear sheet</button>
         </div>
+        <p class="muted small" style="margin:-2px 0 10px 0;">Work hours calculate automatically when both start and finish times are entered; you can also enter the hours directly.</p>
         <div style="overflow:auto;">
-          <table class="gridTable" style="min-width:1080px;">
+          <table class="gridTable" style="min-width:1510px;">
             <thead>
               <tr>
-                <th>Technician</th>
-                <th style="text-align:right; width:90px;">Hours</th>
+                <th>Date</th>
                 <th>Plant no</th>
-                <th>Reason / job</th>
-                <th style="text-align:right; width:100px;">Rate</th>
+                <th style="text-align:right; width:100px;">Work hours</th>
+                <th>Category</th>
+                <th>Description of work carried out</th>
+                <th>Time started</th>
+                <th>Time finished</th>
+                <th>Technician</th>
+                <th>Job card no</th>
+                <th style="text-align:right; width:110px;">SMR</th>
                 <th style="width:70px;"></th>
               </tr>
             </thead>
             <tbody id="mcDraftBody">
-              <tr><td colspan="6" class="muted">Click <strong>+ Row per technician</strong> or <strong>+ Add row</strong> to start.</td></tr>
+              <tr><td colspan="11" class="muted">Click <strong>+ Row per technician</strong> or <strong>+ Add row</strong> to start.</td></tr>
             </tbody>
           </table>
         </div>
@@ -1378,26 +1384,33 @@
         </div>
         <datalist id="mcTechList"></datalist>
         <datalist id="mcAssetList"></datalist>
+        <datalist id="mcJobCardList"></datalist>
         <div id="mcFormMsg" class="muted" style="margin-top:8px;"></div>
 
         <div id="mcDaySummary" class="row stack-10" style="margin-top:12px; flex-wrap:wrap;"></div>
 
         <h4 style="margin:16px 0 8px 0;">Saved for this date</h4>
         <div style="overflow:auto;">
-          <table class="gridTable" style="min-width:980px;">
+          <table class="gridTable" style="min-width:1590px;">
             <thead>
               <tr>
-                <th>Technician</th>
-                <th style="text-align:right;">Hours</th>
+                <th>Date</th>
                 <th>Plant no</th>
-                <th>Reason</th>
+                <th style="text-align:right;">Work hours</th>
+                <th>Category</th>
+                <th>Description of work carried out</th>
+                <th>Time started</th>
+                <th>Time finished</th>
+                <th>Technician</th>
+                <th>Job card no</th>
+                <th style="text-align:right;">SMR</th>
                 <th style="text-align:right;">Rate</th>
                 <th style="text-align:right;">Labor $</th>
                 <th></th>
               </tr>
             </thead>
             <tbody id="mcDayBody">
-              <tr><td colspan="7" class="muted">Select a date and click Refresh.</td></tr>
+              <tr><td colspan="13" class="muted">Select a date and click Refresh.</td></tr>
             </tbody>
           </table>
         </div>
@@ -2188,6 +2201,6 @@
   <script src="./undercarriage-diagrams.js?v=1"></script>
   <script src="./undercarriage.js?v=5"></script>
   <script src="./tyre-inspection-qr.js?v=1"></script>
-  <script src="./maintenance.js?v=59"></script>
+  <script src="./maintenance.js?v=60"></script>
 </body>
 </html>

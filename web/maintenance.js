@@ -7243,14 +7243,21 @@ async function initPartsToOrderSection() {
 let mcTechnicianOptions = [];
 let mcDayRowsCache = [];
 let mcDraftRows = [];
+let mcWorkOrderOptions = [];
+
+const MC_CATEGORIES = ["Startup", "Breakdown", "Service", "Maintenance", "Inspection", "Other"];
 
 function mcEmptyDraftRow(technician_name = "") {
   return {
     technician_name: String(technician_name || "").trim(),
     hours: "",
     asset_code: "",
+    category: "",
     reason: "",
-    labor_rate_per_hour: "",
+    time_started: "",
+    time_finished: "",
+    job_card_no: "",
+    smr: "",
   };
 }
 
@@ -7290,6 +7297,42 @@ function mcTechnicianSelectOptions(selected = "") {
   );
 }
 
+function mcCategorySelectOptions(selected = "") {
+  const current = String(selected || "").trim();
+  const known = [...MC_CATEGORIES];
+  if (current && !known.some((category) => category.toLowerCase() === current.toLowerCase())) {
+    known.unshift(current);
+  }
+  return [
+    `<option value="">Select…</option>`,
+    ...known.map((category) => `<option value="${esc(category)}"${category.toLowerCase() === current.toLowerCase() ? " selected" : ""}>${esc(category)}</option>`),
+  ].join("");
+}
+
+function mcDisplayDate(ymd) {
+  const value = String(ymd || "").trim();
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return value || "—";
+  const date = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(date);
+}
+
+function mcHoursFromTimes(start, finish) {
+  const parse = (value) => {
+    const match = String(value || "").trim().match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return null;
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+    return hours * 60 + minutes;
+  };
+  const startMinutes = parse(start);
+  const finishMinutes = parse(finish);
+  if (startMinutes == null || finishMinutes == null || finishMinutes <= startMinutes) return null;
+  return Number(((finishMinutes - startMinutes) / 60).toFixed(2));
+}
+
 function renderMcTechChips() {
   const el = document.getElementById("mcTechChips");
   const dl = document.getElementById("mcTechList");
@@ -7317,33 +7360,57 @@ function refreshMcDraftEditor() {
   const body = document.getElementById("mcDraftBody");
   if (!body) return;
   if (!mcDraftRows.length) {
-    body.innerHTML = `<tr><td colspan="6" class="muted">Click <strong>+ Row per technician</strong> or a technician chip above to start.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="11" class="muted">Click <strong>+ Row per technician</strong> or a technician chip above to start.</td></tr>`;
     return;
   }
+  const workDate = mcDisplayDate(document.getElementById("mcWorkDate")?.value);
   body.innerHTML = mcDraftRows
     .map(
       (row, idx) => `
     <tr data-mc-draft-idx="${idx}">
       <td>
-        <input data-mc-draft-field="technician_name" data-mc-draft-idx="${idx}" type="text" list="mcTechList"
-          value="${esc(row.technician_name || "")}" placeholder="Mechanic name" style="min-width:160px;" autocomplete="off" />
-      </td>
-      <td>
-        <input data-mc-draft-field="hours" data-mc-draft-idx="${idx}" type="number" min="0" step="0.25"
-          value="${esc(row.hours !== "" && row.hours != null ? String(row.hours) : "")}" placeholder="0" style="width:80px;" />
+        <span class="muted small">${esc(workDate)}</span>
       </td>
       <td>
         <input data-mc-draft-field="asset_code" data-mc-draft-idx="${idx}" type="text" list="mcAssetList"
           value="${esc(row.asset_code || "")}" placeholder="A300AM" style="width:110px;" autocomplete="off" />
       </td>
       <td>
-        <input data-mc-draft-field="reason" data-mc-draft-idx="${idx}" type="text"
-          value="${esc(row.reason || "")}" placeholder="Job description" style="width:100%; min-width:200px;" />
+        <input data-mc-draft-field="hours" data-mc-draft-idx="${idx}" type="number" min="0" step="0.25"
+          value="${esc(row.hours !== "" && row.hours != null ? String(row.hours) : "")}" placeholder="0.00" style="width:88px; text-align:right;" />
       </td>
       <td>
-        <input data-mc-draft-field="labor_rate_per_hour" data-mc-draft-idx="${idx}" type="number" min="0" step="0.01"
-          value="${esc(row.labor_rate_per_hour !== "" && row.labor_rate_per_hour != null ? String(row.labor_rate_per_hour) : "")}"
-          placeholder="Default" style="width:90px;" />
+        <select data-mc-draft-field="category" data-mc-draft-idx="${idx}" style="min-width:125px;">
+          ${mcCategorySelectOptions(row.category)}
+        </select>
+      </td>
+      <td style="min-width:260px;">
+        <input data-mc-draft-field="reason" data-mc-draft-idx="${idx}" type="text"
+          value="${esc(row.reason || "")}" placeholder="Description of work carried out" style="width:100%; min-width:240px;" />
+      </td>
+      <td>
+        <input data-mc-draft-field="time_started" data-mc-draft-idx="${idx}" type="time"
+          value="${esc(row.time_started || "")}" style="width:112px;" />
+      </td>
+      <td>
+        <input data-mc-draft-field="time_finished" data-mc-draft-idx="${idx}" type="time"
+          value="${esc(row.time_finished || "")}" style="width:112px;" />
+      </td>
+      <td>
+        ${mcTechnicianOptions.length
+          ? `<select data-mc-draft-field="technician_name" data-mc-draft-idx="${idx}" style="min-width:145px;">
+              ${mcTechnicianSelectOptions(row.technician_name)}
+            </select>`
+          : `<input data-mc-draft-field="technician_name" data-mc-draft-idx="${idx}" type="text" list="mcTechList"
+              value="${esc(row.technician_name || "")}" placeholder="Technician" style="min-width:145px;" autocomplete="off" />`}
+      </td>
+      <td>
+        <input data-mc-draft-field="job_card_no" data-mc-draft-idx="${idx}" type="text" list="mcJobCardList"
+          value="${esc(row.job_card_no || "")}" placeholder="WO #123" style="width:120px;" autocomplete="off" />
+      </td>
+      <td>
+        <input data-mc-draft-field="smr" data-mc-draft-idx="${idx}" type="number" min="0" step="0.1"
+          value="${esc(row.smr !== "" && row.smr != null ? String(row.smr) : "")}" placeholder="0.0" style="width:96px; text-align:right;" />
       </td>
       <td style="text-align:right;">
         <button type="button" data-mc-draft-del="${idx}">Remove</button>
@@ -7409,9 +7476,12 @@ function loadMcSavedIntoDraft() {
     technician_name: String(r.technician_name || ""),
     hours: r.hours != null ? String(r.hours) : "",
     asset_code: String(r.asset_code || ""),
+    category: String(r.category || ""),
     reason: String(r.reason || ""),
-    labor_rate_per_hour:
-      r.labor_rate_per_hour != null && Number(r.labor_rate_per_hour) > 0 ? String(r.labor_rate_per_hour) : "",
+    time_started: String(r.time_started || ""),
+    time_finished: String(r.time_finished || ""),
+    job_card_no: String(r.job_card_no || ""),
+    smr: r.smr != null ? String(r.smr) : "",
   }));
   refreshMcDraftEditor();
   const msg = document.getElementById("mcFormMsg");
@@ -7430,19 +7500,35 @@ function readMcDraftEntriesForSave() {
     const technician_name = String(row.technician_name || "").trim();
     const hours = Math.max(0, Number(row.hours || 0));
     const asset_code = String(row.asset_code || "").trim().toUpperCase();
+    const category = String(row.category || "").trim();
     const reason = String(row.reason || "").trim();
-    const rateRaw = String(row.labor_rate_per_hour ?? "").trim();
-    const empty = !technician_name && !asset_code && !reason && !hours;
+    const time_started = String(row.time_started || "").trim();
+    const time_finished = String(row.time_finished || "").trim();
+    const job_card_no = String(row.job_card_no || "").trim();
+    const smrRaw = String(row.smr ?? "").trim();
+    const smr = smrRaw === "" ? null : Number(smrRaw);
+    const empty = !technician_name && !asset_code && !category && !reason && !hours && !time_started && !time_finished && !job_card_no && smrRaw === "";
     if (empty) return;
     const line = idx + 1;
     if (!technician_name) errors.push(`Row ${line}: technician required`);
     if (!Number.isFinite(hours) || hours <= 0) errors.push(`Row ${line}: hours must be > 0`);
     if (!asset_code) errors.push(`Row ${line}: plant / asset required`);
+    if (!category) errors.push(`Row ${line}: category required`);
     if (!reason) errors.push(`Row ${line}: reason required`);
-    if (!technician_name || !Number.isFinite(hours) || hours <= 0 || !asset_code || !reason) return;
-    const entry = { technician_name, hours, asset_code, reason };
-    if (rateRaw !== "") entry.labor_rate_per_hour = Math.max(0, Number(rateRaw));
-    else if (defaultRate > 0) entry.labor_rate_per_hour = defaultRate;
+    if (smrRaw !== "" && (!Number.isFinite(smr) || smr < 0)) errors.push(`Row ${line}: SMR must be 0 or more`);
+    if (!technician_name || !Number.isFinite(hours) || hours <= 0 || !asset_code || !category || !reason || (smrRaw !== "" && (!Number.isFinite(smr) || smr < 0))) return;
+    const entry = {
+      technician_name,
+      hours,
+      asset_code,
+      category,
+      reason,
+      time_started: time_started || null,
+      time_finished: time_finished || null,
+      job_card_no: job_card_no || null,
+      smr: smrRaw === "" ? null : smr,
+    };
+    if (defaultRate > 0) entry.labor_rate_per_hour = defaultRate;
     entries.push(entry);
   });
   return { entries, errors };
@@ -7500,6 +7586,31 @@ async function loadMcAssetDatalist() {
       .map((a) => `<option value="${esc(String(a.asset_code || ""))}">${esc(String(a.asset_name || ""))}</option>`)
       .join("");
   } catch {
+    dl.innerHTML = "";
+  }
+}
+
+async function loadMcJobCardDatalist() {
+  const dl = document.getElementById("mcJobCardList");
+  if (!dl) return;
+  try {
+    const year = mcYearValue();
+    const params = new URLSearchParams({ from_date: `${year}-01-01`, to_date: `${year}-12-31` });
+    const res = await fetch(`${API}/workorders?${params.toString()}`, { headers: authHeaders() });
+    const rows = await res.json();
+    if (!res.ok) throw new Error(rows.error || "Failed to load work orders");
+    mcWorkOrderOptions = Array.isArray(rows) ? rows : [];
+    dl.innerHTML = mcWorkOrderOptions
+      .map((wo) => {
+        const id = Number(wo?.id || 0);
+        if (!id) return "";
+        const label = `WO #${id}`;
+        const detail = `${wo.asset_code || "-"} — ${wo.source || "work order"}`;
+        return `<option value="${esc(label)}">${esc(detail)}</option>`;
+      })
+      .join("");
+  } catch {
+    mcWorkOrderOptions = [];
     dl.innerHTML = "";
   }
 }
@@ -7580,17 +7691,23 @@ function renderMcDayTable(rows) {
   if (!body) return;
   const list = Array.isArray(rows) ? rows : [];
   if (!list.length) {
-    body.innerHTML = `<tr><td colspan="7" class="muted">No labor entries for this date.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="13" class="muted">No labor entries for this date.</td></tr>`;
     return;
   }
   body.innerHTML = list
     .map((r) => {
       const id = Number(r.id || 0);
       return `<tr data-mc-id="${id}">
-        <td>${esc(r.technician_name || "")}</td>
-        <td style="text-align:right;">${Number(r.hours || 0).toFixed(2)}</td>
+        <td>${esc(mcDisplayDate(r.work_date))}</td>
         <td>${esc(r.asset_code || "")}</td>
+        <td style="text-align:right;">${Number(r.hours || 0).toFixed(2)}</td>
+        <td>${esc(r.category || "—")}</td>
         <td>${esc(r.reason || "")}</td>
+        <td>${esc(r.time_started || "—")}</td>
+        <td>${esc(r.time_finished || "—")}</td>
+        <td>${esc(r.technician_name || "")}</td>
+        <td>${esc(r.job_card_no || "—")}</td>
+        <td style="text-align:right;">${r.smr != null && r.smr !== "" ? Number(r.smr).toFixed(1) : "—"}</td>
         <td style="text-align:right;">$${Number(r.labor_rate_per_hour || 0).toFixed(2)}</td>
         <td style="text-align:right;">$${Number(r.labor_cost || 0).toFixed(2)}</td>
         <td>
@@ -7607,10 +7724,10 @@ async function loadMcDayEntries() {
   const date = String(document.getElementById("mcWorkDate")?.value || "").trim();
   const body = document.getElementById("mcDayBody");
   if (!date) {
-    if (body) body.innerHTML = `<tr><td colspan="7" class="muted">Pick a work date.</td></tr>`;
+    if (body) body.innerHTML = `<tr><td colspan="13" class="muted">Pick a work date.</td></tr>`;
     return;
   }
-  if (body) body.innerHTML = `<tr><td colspan="7" class="muted">Loading…</td></tr>`;
+  if (body) body.innerHTML = `<tr><td colspan="13" class="muted">Loading…</td></tr>`;
   try {
     const res = await fetch(`${API}/maintenance/mechanic-labor?date=${encodeURIComponent(date)}`, {
       headers: authHeaders(),
@@ -7625,7 +7742,7 @@ async function loadMcDayEntries() {
     mcDayRowsCache = Array.isArray(data.rows) ? data.rows : [];
     renderMcDaySummary(data.totals);
   } catch (e) {
-    if (body) body.innerHTML = `<tr><td colspan="7" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+    if (body) body.innerHTML = `<tr><td colspan="13" class="message-error">${esc(e.message || String(e))}</td></tr>`;
   }
 }
 
@@ -7669,11 +7786,12 @@ function addMcDraftRowFromSaved(row) {
     technician_name: String(row.technician_name || ""),
     hours: row.hours != null ? String(row.hours) : "",
     asset_code: String(row.asset_code || ""),
+    category: String(row.category || ""),
     reason: String(row.reason || ""),
-    labor_rate_per_hour:
-      row.labor_rate_per_hour != null && Number(row.labor_rate_per_hour) > 0
-        ? String(row.labor_rate_per_hour)
-        : "",
+    time_started: String(row.time_started || ""),
+    time_finished: String(row.time_finished || ""),
+    job_card_no: String(row.job_card_no || ""),
+    smr: row.smr != null ? String(row.smr) : "",
   });
   refreshMcDraftEditor();
   document.getElementById("mcDraftBody")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -7812,8 +7930,7 @@ async function uploadMcTimesheetFile() {
 
 async function initMechanicsCostSection() {
   syncMcDateBounds();
-  await loadMcTechnicians();
-  await loadMcAssetDatalist();
+  await Promise.all([loadMcTechnicians(), loadMcAssetDatalist(), loadMcJobCardDatalist()]);
   await loadMcDayEntries();
 }
 
@@ -9047,7 +9164,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("mcReportYear")?.addEventListener("change", () => {
     syncMcDateBounds();
-    loadMcDayEntries().catch(() => {});
+    Promise.all([loadMcDayEntries(), loadMcJobCardDatalist()]).catch(() => {});
   });
   document.getElementById("mcSaveRateBtn")?.addEventListener("click", () => saveMcDefaultRate().catch((e) => {
     const msg = document.getElementById("mcFormMsg");
@@ -9072,6 +9189,21 @@ document.addEventListener("DOMContentLoaded", () => {
     if (idx < 0 || idx >= mcDraftRows.length) return;
     mcDraftRows.splice(idx, 1);
     refreshMcDraftEditor();
+  });
+  document.getElementById("mcDraftBody")?.addEventListener("input", (evt) => {
+    const fieldEl = evt.target?.closest?.("[data-mc-draft-field]");
+    if (!fieldEl) return;
+    const idx = Number(fieldEl.getAttribute("data-mc-draft-idx") || -1);
+    const field = String(fieldEl.getAttribute("data-mc-draft-field") || "");
+    if (idx < 0 || idx >= mcDraftRows.length || !field) return;
+    mcDraftRows[idx][field] = String(fieldEl.value || "").trim();
+    if (field !== "time_started" && field !== "time_finished") return;
+    const row = mcDraftRows[idx];
+    const calculated = mcHoursFromTimes(row.time_started, row.time_finished);
+    if (calculated == null) return;
+    row.hours = String(calculated);
+    const hoursEl = document.querySelector(`#mcDraftBody [data-mc-draft-idx="${idx}"][data-mc-draft-field="hours"]`);
+    if (hoursEl) hoursEl.value = row.hours;
   });
   document.getElementById("mcDayBody")?.addEventListener("click", (evt) => {
     const addBtn = evt.target?.closest?.("button[data-mc-add-sheet]");

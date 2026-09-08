@@ -10890,13 +10890,32 @@ export default async function maintenanceRoutes(app) {
     const labor_rate_per_hour = body.labor_rate_per_hour != null
       ? Math.max(0, Number(body.labor_rate_per_hour))
       : null;
-    return { work_date, technician_name, asset_code, reason, hours, labor_rate_per_hour };
+    const category = String(body.category || "").trim() || null;
+    const time_started = String(body.time_started || "").trim() || null;
+    const time_finished = String(body.time_finished || "").trim() || null;
+    const job_card_no = String(body.job_card_no || "").trim() || null;
+    const smrValue = body.smr;
+    const smr = smrValue === "" || smrValue == null ? null : Number(smrValue);
+    return {
+      work_date,
+      technician_name,
+      asset_code,
+      reason,
+      hours,
+      labor_rate_per_hour,
+      category,
+      time_started,
+      time_finished,
+      job_card_no,
+      smr: Number.isFinite(smr) ? Number(smr.toFixed(1)) : null,
+    };
   }
 
   // GET /api/maintenance/mechanic-labor?date=YYYY-MM-DD
   app.get("/mechanic-labor", async (req, reply) => {
     try {
       if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_EDITORS)) return;
+      ensureMechanicLaborExtendedColumns();
       const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
       const date = String(req.query?.date || "").trim();
       if (!isDate(date)) {
@@ -10904,7 +10923,9 @@ export default async function maintenanceRoutes(app) {
       }
       const defaultRate = readMechanicLaborDefaultRate();
       const rows = db.prepare(`
-        SELECT id, work_date, technician_name, hours, asset_code, reason, labor_rate_per_hour, created_by, updated_at
+        SELECT
+          id, work_date, technician_name, hours, asset_code, reason, labor_rate_per_hour,
+          category, time_started, time_finished, job_card_no, smr, created_by, updated_at
         FROM mechanic_labor_entries
         WHERE work_date = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
         ORDER BY id ASC
@@ -10967,6 +10988,7 @@ export default async function maintenanceRoutes(app) {
   app.post("/mechanic-labor", async (req, reply) => {
     try {
       if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_EDITORS)) return;
+      ensureMechanicLaborExtendedColumns();
       const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
       const userName = String(req.headers?.["x-user-name"] || "").trim() || "system";
       const parsed = mechanicLaborEntryBody(req.body || {});
@@ -10989,8 +11011,9 @@ export default async function maintenanceRoutes(app) {
       const info = db.prepare(`
         INSERT INTO mechanic_labor_entries (
           work_date, technician_name, hours, asset_code, reason,
-          labor_rate_per_hour, site_code, created_by, updated_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          labor_rate_per_hour, site_code, created_by, updated_by,
+          category, time_started, time_finished, job_card_no, smr
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         parsed.work_date,
         parsed.technician_name,
@@ -11001,6 +11024,11 @@ export default async function maintenanceRoutes(app) {
         site_code,
         userName,
         userName,
+        parsed.category,
+        parsed.time_started,
+        parsed.time_finished,
+        parsed.job_card_no,
+        parsed.smr,
       );
 
       writeAudit(db, req, {
@@ -11027,6 +11055,7 @@ export default async function maintenanceRoutes(app) {
   app.post("/mechanic-labor/batch", async (req, reply) => {
     try {
       if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_EDITORS)) return;
+      ensureMechanicLaborExtendedColumns();
       const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
       const userName = String(req.headers?.["x-user-name"] || "").trim() || "system";
       const body = req.body || {};
@@ -11072,8 +11101,9 @@ export default async function maintenanceRoutes(app) {
       const insertStmt = db.prepare(`
         INSERT INTO mechanic_labor_entries (
           work_date, technician_name, hours, asset_code, reason,
-          labor_rate_per_hour, site_code, created_by, updated_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          labor_rate_per_hour, site_code, created_by, updated_by,
+          category, time_started, time_finished, job_card_no, smr
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       const tx = db.transaction(() => {
@@ -11097,6 +11127,11 @@ export default async function maintenanceRoutes(app) {
             site_code,
             userName,
             userName,
+            parsed.category,
+            parsed.time_started,
+            parsed.time_finished,
+            parsed.job_card_no,
+            parsed.smr,
           );
           ids.push(Number(info.lastInsertRowid || 0));
         }
@@ -11137,6 +11172,7 @@ export default async function maintenanceRoutes(app) {
   app.patch("/mechanic-labor/:id", async (req, reply) => {
     try {
       if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_EDITORS)) return;
+      ensureMechanicLaborExtendedColumns();
       const id = Number(req.params?.id || 0);
       if (!id) return reply.code(400).send({ ok: false, error: "Invalid id" });
       const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
@@ -11167,6 +11203,11 @@ export default async function maintenanceRoutes(app) {
           asset_code = ?,
           reason = ?,
           labor_rate_per_hour = ?,
+          category = ?,
+          time_started = ?,
+          time_finished = ?,
+          job_card_no = ?,
+          smr = ?,
           updated_by = ?,
           updated_at = datetime('now')
         WHERE id = ?
@@ -11177,6 +11218,11 @@ export default async function maintenanceRoutes(app) {
         parsed.asset_code,
         parsed.reason,
         parsed.labor_rate_per_hour,
+        parsed.category,
+        parsed.time_started,
+        parsed.time_finished,
+        parsed.job_card_no,
+        parsed.smr,
         userName,
         id,
       );
@@ -11231,6 +11277,7 @@ export default async function maintenanceRoutes(app) {
   app.get("/mechanic-labor.xlsx", async (req, reply) => {
     try {
       if (!requireMaintenanceRoles(req, reply, MECHANIC_LABOR_EDITORS)) return;
+      ensureMechanicLaborExtendedColumns();
       const year = String(req.query?.year || new Date().getFullYear()).trim();
       if (!/^\d{4}$/.test(year)) {
         return reply.code(400).send({ ok: false, error: "year (YYYY) required" });
@@ -11241,7 +11288,9 @@ export default async function maintenanceRoutes(app) {
       const end = `${year}-12-31`;
 
       const rawRows = db.prepare(`
-        SELECT id, work_date, technician_name, hours, asset_code, reason, labor_rate_per_hour
+        SELECT
+          id, work_date, technician_name, hours, asset_code, reason, labor_rate_per_hour,
+          category, time_started, time_finished, job_card_no, smr
         FROM mechanic_labor_entries
         WHERE work_date >= ? AND work_date <= ?
           AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
@@ -11272,10 +11321,15 @@ export default async function maintenanceRoutes(app) {
 
       const monthCols = [
         { header: "Date", key: "work_date", width: 14 },
-        { header: "Technician", key: "technician_name", width: 22 },
-        { header: "Hours", key: "hours", width: 10 },
         { header: "Plant no", key: "asset_code", width: 14 },
-        { header: "Reason", key: "reason", width: 36 },
+        { header: "Work Hours", key: "hours", width: 12 },
+        { header: "Category", key: "category", width: 18 },
+        { header: "Description Of Work Carried Out", key: "reason", width: 42 },
+        { header: "Time Started", key: "time_started", width: 14 },
+        { header: "Time finished", key: "time_finished", width: 14 },
+        { header: "Technician", key: "technician_name", width: 22 },
+        { header: "Job Card No", key: "job_card_no", width: 16 },
+        { header: "SMR", key: "smr", width: 12 },
         { header: "Rate ($/hr)", key: "labor_rate_per_hour", width: 12 },
         { header: "Labor cost ($)", key: "labor_cost", width: 14 },
       ];
@@ -11290,10 +11344,15 @@ export default async function maintenanceRoutes(app) {
         if (!monthRows.length) {
           ws.addRow({
             work_date: "-",
-            technician_name: "No entries",
-            hours: 0,
             asset_code: "",
+            hours: 0,
+            category: "",
             reason: "",
+            time_started: "",
+            time_finished: "",
+            technician_name: "No entries",
+            job_card_no: "",
+            smr: "",
             labor_rate_per_hour: defaultRate,
             labor_cost: 0,
           });
@@ -11303,10 +11362,15 @@ export default async function maintenanceRoutes(app) {
         ws.addRow({});
         ws.addRow({
           work_date: "TOTAL",
-          technician_name: "",
-          hours: Number(monthHours.toFixed(2)),
           asset_code: "",
+          hours: Number(monthHours.toFixed(2)),
+          category: "",
           reason: "",
+          time_started: "",
+          time_finished: "",
+          technician_name: "",
+          job_card_no: "",
+          smr: "",
           labor_rate_per_hour: "",
           labor_cost: Number(monthCost.toFixed(2)),
         });
