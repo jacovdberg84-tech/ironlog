@@ -9431,29 +9431,91 @@ export default async function reportsRoutes(app) {
       ORDER BY anomaly_days DESC, d.asset_code ASC
       LIMIT 12
     `).all(period.start, period.end);
+    const upcomingKitTotal = upcomingCostRows.reduce((s, r) => s + Number(r?.forecast?.est_service_kit_cost || 0), 0);
+    const upcomingLaborTotal = upcomingCostRows.reduce((s, r) => s + Number(r?.forecast?.est_labor_cost || 0), 0);
+    const upcomingGrandTotal = upcomingCostRows.reduce((s, r) => s + Number(r?.forecast?.est_total_cost || 0), 0);
     const pptx = new PptxGenJS();
     pptx.layout = "LAYOUT_WIDE";
     pptx.author = "IRONLOG";
     pptx.subject = "Maintenance executive report";
     pptx.title = `Maintenance Executive - ${label}`;
+    const deckNavy = "12355B";
+    const deckTeal = "0F766E";
+    const deckBlue = "2563EB";
+    const deckMist = "F4F8FC";
+    const deckLine = "C9D8E6";
+    const deckText = "1F2937";
+    const deckMuted = "64748B";
+    const deckHeaderFont = "Aptos Display";
+    const deckBodyFont = "Aptos";
+    const tableHeader = (...labels) => labels.map((text) => ({
+      text,
+      options: { bold: true, color: "FFFFFF", fill: { color: deckNavy }, fontFace: deckBodyFont },
+    }));
+    const tableOptions = { border: { pt: 0.75, color: deckLine }, color: deckText, fontFace: deckBodyFont };
+    const tableHeightFor = (rows, min = 0.9, max = 4.8, rowHeight = 0.43) =>
+      Math.max(min, Math.min(max, 0.36 + (Math.max(1, rows) * rowHeight)));
+    const addExecutiveFrame = (slide) => {
+      slide.background = { color: deckMist };
+      slide.addShape(pptx.ShapeType.rect, {
+        x: 0, y: 0, w: 13.333, h: 0.08,
+        line: { color: deckTeal, transparency: 100 },
+        fill: { color: deckTeal },
+      });
+      slide.addShape(pptx.ShapeType.line, {
+        x: 0.4, y: 7.1, w: 12.45, h: 0,
+        line: { color: deckLine, pt: 0.6 },
+      });
+      slide.addText(`IRONLOG | Maintenance Executive Pack | ${period.start} to ${period.end}`, {
+        x: 0.4, y: 7.17, w: 10.5, h: 0.18, fontFace: deckBodyFont, fontSize: 7.5, color: deckMuted,
+      });
+      slide.addText(String(site_code || "main").toUpperCase(), {
+        x: 11.15, y: 7.17, w: 1.7, h: 0.18, fontFace: deckBodyFont, fontSize: 7.5, bold: true, color: deckMuted, align: "right",
+      });
+    };
+    const addMetric = (slide, x, labelText, valueText, accent) => {
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x, y: 4.95, w: 3.82, h: 1.1,
+        rectRadius: 0.08,
+        line: { color: accent, transparency: 100 },
+        fill: { color: "FFFFFF" },
+        shadow: { type: "outer", color: "AAB7C4", opacity: 0.14, blur: 1, angle: 45, distance: 1 },
+      });
+      slide.addShape(pptx.ShapeType.rect, {
+        x, y: 4.95, w: 0.08, h: 1.1,
+        line: { color: accent, transparency: 100 }, fill: { color: accent },
+      });
+      slide.addText(labelText, {
+        x: x + 0.24, y: 5.15, w: 3.35, h: 0.2, fontFace: deckBodyFont, fontSize: 8.5, bold: true, color: deckMuted,
+      });
+      slide.addText(valueText, {
+        x: x + 0.24, y: 5.46, w: 3.35, h: 0.33, fontFace: deckHeaderFont, fontSize: 20, bold: true, color: accent,
+      });
+    };
     const s1 = pptx.addSlide();
-    s1.addText("Workshop Maintenance Executive Report", { x: 0.4, y: 0.35, w: 12.4, h: 0.55, fontSize: 24, bold: true });
-    s1.addText(`Period: ${period.start} to ${period.end} | Site: ${site_code}`, { x: 0.4, y: 0.95, w: 12.4, h: 0.35, fontSize: 11 });
-    s1.addText(
-      "Index\n1) Safety (HSE)\n2) Plant Performance\n3) Breakdown & Maintenance Costs\n3b) Contractor Fuel Costs (FAMS)\n4) Planned Upcoming Costs\n5) Parts Tracking (Stores)\n6) Lubrication\n7) Manager Inspections\n8) Fuel Anomalies",
-      { x: 0.7, y: 1.6, w: 11.8, h: 3.8, fontSize: 16, bold: true }
-    );
+    s1.background = { color: deckNavy };
+    s1.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.333, h: 0.12, line: { color: deckTeal, transparency: 100 }, fill: { color: deckTeal } });
+    s1.addText("IRONLOG", { x: 0.55, y: 0.48, w: 2.1, h: 0.26, fontFace: deckBodyFont, fontSize: 12, bold: true, color: "84E1D2", charSpacing: 1.1 });
+    s1.addText("Maintenance Executive Pack", { x: 0.55, y: 1.2, w: 8.2, h: 0.75, fontFace: deckHeaderFont, fontSize: 34, bold: true, color: "FFFFFF" });
+    s1.addText(`Weekly forum | ${period.start} to ${period.end}`, { x: 0.58, y: 2.08, w: 6.7, h: 0.28, fontFace: deckBodyFont, fontSize: 15, color: "D9E6F2" });
+    s1.addText("A concise review of fleet performance, maintenance risk, upcoming work, stores, lubrication and assurance activity.", { x: 0.58, y: 2.75, w: 8.7, h: 0.7, fontFace: deckBodyFont, fontSize: 17, color: "EAF2F8", breakLine: false });
+    s1.addShape(pptx.ShapeType.line, { x: 0.58, y: 4.35, w: 12.1, h: 0, line: { color: "5C7592", pt: 0.75 } });
+    addMetric(s1, 0.58, "FLEET AVAILABILITY", fleetAvailPct == null ? "No data" : `${fleetAvailPct.toFixed(1)}%`, deckTeal);
+    addMetric(s1, 4.76, "BREAKDOWNS LOGGED", String(breakdownCount), "F59E0B");
+    addMetric(s1, 8.94, "UPCOMING MAINTENANCE", `$${fmtNum(upcomingGrandTotal, 0)}`, deckBlue);
+    s1.addText(`${String(site_code || "main").toUpperCase()} SITE`, { x: 10.6, y: 0.55, w: 2.15, h: 0.22, fontFace: deckBodyFont, fontSize: 10, bold: true, color: "84E1D2", align: "right" });
     const s2 = pptx.addSlide();
-    s2.addText("1) Safety (HSE)", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontSize: 22, bold: true });
-    s2.addText(`Damage reports: ${Number(hseSummary?.reports || 0)} | HSE reports: ${Number(hseSummary?.hse_reports || 0)} | Pending: ${Number(hseSummary?.pending_investigation || 0)} | Out of service: ${Number(hseSummary?.out_of_service || 0)}`, { x: 0.5, y: 0.8, w: 12.2, h: 0.3, fontSize: 11, bold: true });
+    addExecutiveFrame(s2);
+    s2.addText("1) Safety and HSE", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontFace: deckHeaderFont, fontSize: 22, bold: true, color: deckNavy });
+    s2.addText(`Damage reports: ${Number(hseSummary?.reports || 0)} | HSE reports: ${Number(hseSummary?.hse_reports || 0)} | Pending: ${Number(hseSummary?.pending_investigation || 0)} | Out of service: ${Number(hseSummary?.out_of_service || 0)}`, { x: 0.5, y: 0.8, w: 12.2, h: 0.3, fontFace: deckBodyFont, fontSize: 11, bold: true, color: deckText });
     s2.addTable(
       [
-        [{ text: "Date", options: { bold: true } }, { text: "Asset", options: { bold: true } }, { text: "Severity", options: { bold: true } }, { text: "Fault", options: { bold: true } }, { text: "Action", options: { bold: true } }],
+        tableHeader("Date", "Asset", "Severity", "Fault", "Action"),
         ...(hseRows.length
           ? hseRows.slice(0, 5).map((r) => [String(r.report_date || "-"), String(r.asset_code || "-"), String(r.severity || "-"), compactCell(String(r.damage_description || r.damage_location || "-"), 44), compactCell(String(r.immediate_action || "-"), 40)])
           : [["-", "-", "-", "No HSE damage reports in selected period", "-"]]),
       ],
-      { x: 0.45, y: 1.2, w: 12.35, h: 2.2, fontSize: 9.5, border: { pt: 1, color: "D0D0D0" } }
+      { x: 0.45, y: 1.2, w: 12.35, h: tableHeightFor(1 + (hseRows.length ? Math.min(5, hseRows.length) : 1), 1.0, 2.2), fontSize: 9.5, ...tableOptions }
     );
     const hsePhotoAbs = hsePhotoRows
       .map((p) => resolveStorageAbs(String(p.file_path || "").replace(/\\/g, "/").replace(/^\/+/, "")))
@@ -9468,10 +9530,11 @@ export default async function reportsRoutes(app) {
       s2.addImage({ path: abs, ...photoSlots[idx] });
     });
     const s3 = pptx.addSlide();
-    s3.addText("2) Plant Performance", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontSize: 22, bold: true });
+    addExecutiveFrame(s3);
+    s3.addText("2) Plant Performance", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontFace: deckHeaderFont, fontSize: 22, bold: true, color: deckNavy });
     s3.addText(
       `Fleet (excl. LDVs): Availability ${fleetAvailPct == null ? "—" : `${fleetAvailPct.toFixed(1)}%`} | Utilization ${fleetUtilPct == null ? "—" : `${fleetUtilPct.toFixed(1)}%`} | Scheduled ${fleetScheduled.toFixed(1)}h | Run ${fleetRun.toFixed(1)}h | Downtime ${fleetDown.toFixed(1)}h`,
-      { x: 0.45, y: 0.72, w: 12.3, h: 0.35, fontSize: 11, bold: true, color: "1E3A5F" },
+      { x: 0.45, y: 0.72, w: 12.3, h: 0.35, fontFace: deckBodyFont, fontSize: 11, bold: true, color: deckText },
     );
     s3.addChart(pptx.ChartType.bar, [
       { name: "Scheduled", labels: dailyKpiRows.map((r) => String(r.day_key || "").slice(5)), values: dailyKpiRows.map((r) => Number(r.scheduled_hours || 0)) },
@@ -9484,7 +9547,7 @@ export default async function reportsRoutes(app) {
     ], { x: 6.75, y: 1.1, w: 6.0, h: 2.05, ...akpLineOpts });
     s3.addTable(
       [
-        [{ text: "Highest performing equipment by type", options: { bold: true } }, { text: "Avail %", options: { bold: true } }, { text: "Util %", options: { bold: true } }],
+        tableHeader("Highest performing equipment by type", "Avail %", "Util %"),
         ...availabilityByType
           .filter((r) => !String(r.equipment_type || "").toLowerCase().includes("ldv"))
           .slice()
@@ -9492,32 +9555,45 @@ export default async function reportsRoutes(app) {
           .slice(0, 6)
           .map((r) => [String(r.equipment_type || "-"), `${Number(r.availability_pct || 0).toFixed(2)}%`, `${Number(r.utilization_pct || 0).toFixed(2)}%`]),
       ],
-      { x: 0.45, y: 3.35, w: 4.05, h: 3.1, fontSize: 9.5, border: { pt: 1, color: "D0D0D0" } }
+      { x: 0.45, y: 3.35, w: 4.05, h: tableHeightFor(1 + Math.min(6, availabilityByType.length), 0.9, 3.1), fontSize: 9.5, ...tableOptions }
     );
     const perfCompact = (r) => `${String(r.asset_code || "-")} (${Number(r.utilization_pct || 0).toFixed(1)}%)`;
     s3.addTable(
       [
-        [{ text: "Top 2 Assets", options: { bold: true } }],
+        tableHeader("Top 2 Assets"),
         ...(topAssets.length ? topAssets.map((r) => [perfCompact(r)]) : [["-"]]),
-        [{ text: "Mid 2 Assets", options: { bold: true } }],
+        [{ text: "Mid 2 Assets", options: { bold: true, color: deckNavy, fill: { color: "E6F4F1" }, fontFace: deckBodyFont } }],
         ...(midAssets.length ? midAssets.map((r) => [perfCompact(r)]) : [["-"]]),
-        [{ text: "Lowest 2 (with data)", options: { bold: true } }],
+        [{ text: "Lowest 2 (with data)", options: { bold: true, color: "9F1239", fill: { color: "FDECEC" }, fontFace: deckBodyFont } }],
         ...(bottomAssets.length ? bottomAssets.map((r) => [perfCompact(r)]) : [["-"]]),
       ],
-      { x: 4.7, y: 3.35, w: 2.85, h: 3.1, fontSize: 10, border: { pt: 1, color: "D0D0D0" } }
+      {
+        x: 4.7, y: 3.35, w: 2.85,
+        h: tableHeightFor(
+          3
+            + (topAssets.length || 1)
+            + (midAssets.length || 1)
+            + (bottomAssets.length || 1),
+          2.4,
+          3.1,
+        ),
+        fontSize: 10,
+        ...tableOptions,
+      }
     );
     s3.addChart(pptx.ChartType.bar, [
       { name: "Utilization %", labels: [...topAssets, ...midAssets, ...bottomAssets].map((r) => String(r.asset_code || "")), values: [...topAssets, ...midAssets, ...bottomAssets].map((r) => Number(r.utilization_pct || 0)) },
     ], { x: 7.75, y: 3.35, w: 5.0, h: 3.1, showLegend: false, chartColors: ["16A34A"], valAxisMinVal: 0, valAxisMaxVal: 100 });
     const s4 = pptx.addSlide();
-    s4.addText("3) Breakdown & Maintenance Costs", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontSize: 20, bold: true });
+    addExecutiveFrame(s4);
+    s4.addText("3) Breakdown and Maintenance Costs", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontFace: deckHeaderFont, fontSize: 20, bold: true, color: deckNavy });
     s4.addText(
       `Labor from Asset Insights: $${fmtNum(insightsLaborTotal, 2)} | Parts: $${fmtNum(insightsPartsTotal, 2)} | Maintenance total: $${fmtNum(insightsMaintTotal, 2)}`,
-      { x: 0.45, y: 0.72, w: 12.2, h: 0.3, fontSize: 10, bold: true },
+      { x: 0.45, y: 0.72, w: 12.2, h: 0.3, fontFace: deckBodyFont, fontSize: 10, bold: true, color: deckText },
     );
     s4.addTable(
       [
-        [{ text: "WO", options: { bold: true } }, { text: "Asset", options: { bold: true } }, { text: "Type", options: { bold: true } }, { text: "Reason (from WO / breakdown)", options: { bold: true } }, { text: "Parts", options: { bold: true } }, { text: "Labor", options: { bold: true } }, { text: "Total", options: { bold: true } }],
+        tableHeader("WO", "Asset", "Type", "Reason", "Parts", "Labor", "Total"),
         ...(woCostDetailRows.length
           ? woCostDetailRows.map((r) => {
             const parts = Number(r.parts_cost || 0);
@@ -9542,7 +9618,12 @@ export default async function reportsRoutes(app) {
             Number(r.total_cost || 0).toFixed(2),
           ])),
       ],
-      { x: 0.35, y: 1.05, w: 12.6, h: 4.55, fontSize: 9, border: { pt: 1, color: "C8C8C8" } }
+      {
+        x: 0.35, y: 1.05, w: 12.6,
+        h: tableHeightFor(1 + (woCostDetailRows.length || Math.min(10, insightsCostRows.length)), 1.2, 4.55),
+        fontSize: 9,
+        ...tableOptions,
+      }
     );
     s4.addText(
       `Work-order totals: Parts $${fmtNum(woCostTotals.parts_cost, 2)} | Labor $${fmtNum(woCostTotals.labor_cost, 2)} | Total $${fmtNum(woCostTotals.total_cost, 2)}`,
@@ -9550,7 +9631,8 @@ export default async function reportsRoutes(app) {
     );
     if (contractorFuelRows.length) {
       const sContractor = pptx.addSlide();
-      sContractor.addText("3b) Contractor Fuel Costs (FAMS — hired equipment)", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontSize: 20, bold: true });
+      addExecutiveFrame(sContractor);
+      sContractor.addText("3b) Contractor Fuel Costs", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontFace: deckHeaderFont, fontSize: 20, bold: true, color: deckNavy });
       sContractor.addText(
         [
           `Contractor assets: ${contractorFuelRows.length}`,
@@ -9561,20 +9643,11 @@ export default async function reportsRoutes(app) {
           contractorFuelTotal.hours_run > 0 ? `Avg $/hr: $${fmtNum(contractorFuelTotal.fuel_cost / contractorFuelTotal.hours_run, 2)}` : null,
           contractorFuelTotal.km_run > 0 ? `Avg $/km: $${fmtNum(contractorFuelTotal.fuel_cost / contractorFuelTotal.km_run, 2)}` : null,
         ].filter(Boolean).join("  |  "),
-        { x: 0.45, y: 0.72, w: 12.2, h: 0.35, fontSize: 10, bold: true },
+        { x: 0.45, y: 0.72, w: 12.2, h: 0.35, fontFace: deckBodyFont, fontSize: 10, bold: true, color: deckText },
       );
       sContractor.addTable(
         [
-          [
-            { text: "Supplier", options: { bold: true } },
-            { text: "Assets", options: { bold: true } },
-            { text: "Liters", options: { bold: true } },
-            { text: "Fuel $", options: { bold: true } },
-            { text: "Run hrs", options: { bold: true } },
-            { text: "Run km", options: { bold: true } },
-            { text: "$/hr", options: { bold: true } },
-            { text: "$/km", options: { bold: true } },
-          ],
+          tableHeader("Supplier", "Assets", "Liters", "Fuel $", "Run hrs", "Run km", "$/hr", "$/km"),
           ...contractorBySupplier.map((r) => [
             String(r.contractor || "-"),
             fmtNum(r.asset_count, 0),
@@ -9586,21 +9659,11 @@ export default async function reportsRoutes(app) {
             r.km_run > 0 ? fmtNum(r.fuel_cost / r.km_run, 2) : "—",
           ]),
         ],
-        { x: 0.35, y: 1.15, w: 12.6, h: 2.0, fontSize: 9.5, border: { pt: 1, color: "C8C8C8" } },
+        { x: 0.35, y: 1.15, w: 12.6, h: tableHeightFor(1 + contractorBySupplier.length, 1.0, 2.0), fontSize: 9.5, ...tableOptions },
       );
       sContractor.addTable(
         [
-          [
-            { text: "Asset", options: { bold: true } },
-            { text: "Supplier", options: { bold: true } },
-            { text: "Mode", options: { bold: true } },
-            { text: "Liters", options: { bold: true } },
-            { text: "Fuel $", options: { bold: true } },
-            { text: "Run", options: { bold: true } },
-            { text: "Unit", options: { bold: true } },
-            { text: "$/unit", options: { bold: true } },
-            { text: "Fills", options: { bold: true } },
-          ],
+          tableHeader("Asset", "Supplier", "Mode", "Liters", "Fuel $", "Run", "Unit", "$/unit", "Fills"),
           ...contractorFuelRows.slice(0, 14).map((r) => [
             String(r.asset_code || "-"),
             String(r.contractor || "-"),
@@ -9613,7 +9676,7 @@ export default async function reportsRoutes(app) {
             fmtNum(r.fill_count, 0),
           ]),
         ],
-        { x: 0.35, y: 3.35, w: 12.6, h: 2.55, fontSize: 9, border: { pt: 1, color: "C8C8C8" } },
+        { x: 0.35, y: 3.35, w: 12.6, h: tableHeightFor(1 + Math.min(14, contractorFuelRows.length), 1.0, 2.55), fontSize: 9, ...tableOptions },
       );
       sContractor.addText(
         `Contractor fuel total: $${fmtNum(contractorFuelTotal.fuel_cost, 2)} (${fmtNum(contractorFuelTotal.fuel_liters, 1)} L from FAMS meter run)`,
@@ -9621,13 +9684,12 @@ export default async function reportsRoutes(app) {
       );
     }
     const s4b = pptx.addSlide();
-    s4b.addText("4) Planned Upcoming Costs", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontSize: 20, bold: true });
-    const upcomingKitTotal = upcomingCostRows.reduce((s, r) => s + Number(r?.forecast?.est_service_kit_cost || 0), 0);
-    const upcomingLaborTotal = upcomingCostRows.reduce((s, r) => s + Number(r?.forecast?.est_labor_cost || 0), 0);
-    const upcomingGrandTotal = upcomingCostRows.reduce((s, r) => s + Number(r?.forecast?.est_total_cost || 0), 0);
+    addExecutiveFrame(s4b);
+    s4b.addText("4) Planned Upcoming Costs", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontFace: deckHeaderFont, fontSize: 20, bold: true, color: deckNavy });
+    const upcomingTableH = tableHeightFor(1 + (upcomingCostRows.length ? Math.min(12, upcomingCostRows.length) : 1), 1.2, 4.8);
     s4b.addTable(
       [
-        [{ text: "Asset", options: { bold: true } }, { text: "Service", options: { bold: true } }, { text: "Rem. Hrs", options: { bold: true } }, { text: "Status", options: { bold: true } }, { text: "Kit $", options: { bold: true } }, { text: "Labor $", options: { bold: true } }, { text: "Total $", options: { bold: true } }, { text: "Source", options: { bold: true } }],
+        tableHeader("Asset", "Service", "Remaining hours", "Status", "Kit $", "Labor $", "Total $", "Source"),
         ...(upcomingCostRows.length
           ? upcomingCostRows.slice(0, 12).map((r) => [
             `${String(r.asset_code || "-")} ${compactCell(String(r.asset_name || ""), 14)}`,
@@ -9641,21 +9703,23 @@ export default async function reportsRoutes(app) {
           ])
           : [["-", "No upcoming services in forecast window", "-", "-", "-", "-", "-", "-"]]),
       ],
-      { x: 0.35, y: 0.95, w: 12.6, h: 4.8, fontSize: 9.2, border: { pt: 1, color: "C8C8C8" } }
+      { x: 0.35, y: 0.95, w: 12.6, h: upcomingTableH, fontSize: 9.2, ...tableOptions }
     );
     s4b.addText(
       `Totals: Kit $${fmtNum(upcomingKitTotal, 2)} | Labor $${fmtNum(upcomingLaborTotal, 2)} | Upcoming maintenance $${fmtNum(upcomingGrandTotal, 2)}`,
-      { x: 0.45, y: 5.9, w: 12.2, h: 0.35, fontSize: 11, bold: true },
+      { x: 0.45, y: Math.min(5.9, 0.95 + upcomingTableH + 0.2), w: 12.2, h: 0.35, fontFace: deckBodyFont, fontSize: 11, bold: true, color: deckText },
     );
     const s5 = pptx.addSlide();
-    s5.addText("5) Parts Tracking (Stores)", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontSize: 22, bold: true });
+    addExecutiveFrame(s5);
+    s5.addText("5) Parts Tracking", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontFace: deckHeaderFont, fontSize: 22, bold: true, color: deckNavy });
     s5.addText(
       `On order: $${fmtNum(storesPartsTotals.on_order, 2)} | En route (in transit): $${fmtNum(storesPartsTotals.in_transit, 2)} | Combined: $${fmtNum(storesPartsTotals.value, 2)}`,
-      { x: 0.45, y: 0.72, w: 12.2, h: 0.3, fontSize: 10, bold: true },
+      { x: 0.45, y: 0.72, w: 12.2, h: 0.3, fontFace: deckBodyFont, fontSize: 10, bold: true, color: deckText },
     );
+    const partsTableH = tableHeightFor(1 + (partsTrackingRows.length || 1), 1.2, 5.0);
     s5.addTable(
       [
-        [{ text: "Status", options: { bold: true } }, { text: "Part", options: { bold: true } }, { text: "Description", options: { bold: true } }, { text: "Qty", options: { bold: true } }, { text: "Line $", options: { bold: true } }, { text: "Supplier", options: { bold: true } }, { text: "PO #", options: { bold: true } }, { text: "ETA", options: { bold: true } }],
+        tableHeader("Status", "Part", "Description", "Qty", "Line $", "Supplier", "PO #", "ETA"),
         ...(partsTrackingRows.length
           ? partsTrackingRows.map((r) => {
             const st = String(r.status || "").toLowerCase() === "in_transit" ? "En route" : "On order";
@@ -9673,17 +9737,19 @@ export default async function reportsRoutes(app) {
           })
           : [["-", "No parts on order or en route", "-", "-", "-", "-", "-", "-"]]),
       ],
-      { x: 0.35, y: 1.05, w: 12.6, h: 5.0, fontSize: 8.8, border: { pt: 1, color: "C8C8C8" } }
+      { x: 0.35, y: 1.05, w: 12.6, h: partsTableH, fontSize: 8.8, ...tableOptions }
     );
     const s7 = pptx.addSlide();
-    s7.addText("6) Lubrication", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontSize: 22, bold: true });
+    addExecutiveFrame(s7);
+    s7.addText("6) Lubrication", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontFace: deckHeaderFont, fontSize: 22, bold: true, color: deckNavy });
     s7.addText(
       `Period ${period.start} to ${period.end}`,
-      { x: 0.45, y: 0.72, w: 12.3, h: 0.25, fontSize: 10, color: "555555" },
+      { x: 0.45, y: 0.72, w: 12.3, h: 0.25, fontFace: deckBodyFont, fontSize: 10, color: deckMuted },
     );
+    const lubeTableH = tableHeightFor(1 + (lubeByMachine.length || 1), 1.2, 4.75);
     s7.addTable(
       [
-        [{ text: "Dates", options: { bold: true } }, { text: "Asset", options: { bold: true } }, { text: "Lube type", options: { bold: true } }, { text: "Issued part", options: { bold: true } }, { text: "Logs", options: { bold: true } }, { text: "Qty", options: { bold: true } }, { text: "Cost", options: { bold: true } }],
+        tableHeader("Dates", "Asset", "Lube type", "Issued part", "Logs", "Qty", "Cost"),
         ...(lubeByMachine.length
           ? lubeByMachine.map((r) => {
             const first = String(r.first_log_date || "").trim();
@@ -9700,17 +9766,18 @@ export default async function reportsRoutes(app) {
           })
           : [["-", "No lube issues in period", "-", "-", "-", "-", "-"]]),
       ],
-      { x: 0.45, y: 1.05, w: 12.3, h: 4.75, fontSize: 9.5, border: { pt: 1, color: "C8C8C8" } }
+      { x: 0.45, y: 1.05, w: 12.3, h: lubeTableH, fontSize: 9.5, ...tableOptions }
     );
     const lubeShownNote = lubePeriodTotals.groups > lubeByMachine.length
       ? ` | Showing top ${lubeByMachine.length} of ${lubePeriodTotals.groups} asset/lube lines by cost`
       : "";
     s7.addText(
       `Period total usage: ${lubePeriodTotals.qty.toFixed(1)} qty | Lube cost: $${fmtNum(lubePeriodTotals.cost, 2)} | Log lines: ${lubePeriodTotals.entries}${lubeShownNote}`,
-      { x: 0.5, y: 5.95, w: 12.0, h: 0.35, fontSize: 12, bold: true },
+      { x: 0.5, y: Math.min(5.95, 1.05 + lubeTableH + 0.2), w: 12.0, h: 0.35, fontFace: deckBodyFont, fontSize: 12, bold: true, color: deckText },
     );
     const s8 = pptx.addSlide();
-    s8.addText("7) Manager Inspections", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontSize: 22, bold: true });
+    addExecutiveFrame(s8);
+    s8.addText("7) Manager Inspections", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontFace: deckHeaderFont, fontSize: 22, bold: true, color: deckNavy });
     const inspectionDisplayRows = inspectionsFaultRows.map((r) => {
       let faultNotes = [];
       try {
@@ -9729,14 +9796,14 @@ export default async function reportsRoutes(app) {
       ].filter(Boolean).join(" | ") || "Inspection completed";
       return { ...r, description: desc };
     });
-    s8.addText(`Inspections completed: ${Number(inspectionsSummary?.inspections_done || 0)} | Assets covered: ${Number(inspectionsSummary?.assets_covered || 0)}`, { x: 0.7, y: 0.75, w: 12.0, h: 0.35, fontSize: 12, bold: true });
+    s8.addText(`Inspections completed: ${Number(inspectionsSummary?.inspections_done || 0)} | Assets covered: ${Number(inspectionsSummary?.assets_covered || 0)}`, { x: 0.7, y: 0.75, w: 12.0, h: 0.35, fontFace: deckBodyFont, fontSize: 12, bold: true, color: deckText });
     let inspY = 1.2;
     for (const r of inspectionDisplayRows.slice(0, 4)) {
       s8.addText(
         `${String(r.inspection_date || "-")} — ${String(r.asset_code || "-")} ${compactCell(String(r.asset_name || ""), 22)}`,
-        { x: 0.55, y: inspY, w: 7.8, h: 0.28, fontSize: 10, bold: true },
+        { x: 0.55, y: inspY, w: 7.8, h: 0.28, fontFace: deckBodyFont, fontSize: 10, bold: true, color: deckNavy },
       );
-      s8.addText(compactCell(String(r.description || "-"), 120), { x: 0.55, y: inspY + 0.28, w: 7.8, h: 0.55, fontSize: 9 });
+      s8.addText(compactCell(String(r.description || "-"), 120), { x: 0.55, y: inspY + 0.28, w: 7.8, h: 0.55, fontFace: deckBodyFont, fontSize: 9, color: deckText });
       const photoAbs = r.photo_path
         ? resolveStorageAbs(String(r.photo_path || "").replace(/\\/g, "/").replace(/^\/+/, ""))
         : null;
@@ -9746,14 +9813,16 @@ export default async function reportsRoutes(app) {
       inspY += 1.05;
     }
     if (!inspectionDisplayRows.length) {
-      s8.addText("No manager inspections recorded for selected period.", { x: 0.7, y: 1.5, w: 11.5, h: 0.4, fontSize: 11 });
+      s8.addText("No manager inspections recorded for the selected period.", { x: 0.7, y: 1.5, w: 11.5, h: 0.4, fontFace: deckBodyFont, fontSize: 11, color: deckMuted });
     }
     const s9 = pptx.addSlide();
-    s9.addText("8) Fuel Anomalies", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontSize: 22, bold: true });
-    s9.addText(`Total fuel anomaly days: ${Number(totalFuelAnomalyDays || 0)}`, { x: 0.75, y: 0.75, w: 6.2, h: 0.35, fontSize: 13, bold: true });
+    addExecutiveFrame(s9);
+    s9.addText("8) Fuel Anomalies", { x: 0.4, y: 0.25, w: 12.4, h: 0.45, fontFace: deckHeaderFont, fontSize: 22, bold: true, color: deckNavy });
+    s9.addText(`Total fuel anomaly days: ${Number(totalFuelAnomalyDays || 0)}`, { x: 0.75, y: 0.75, w: 6.2, h: 0.35, fontFace: deckBodyFont, fontSize: 13, bold: true, color: deckText });
+    const anomalyTableH = tableHeightFor(1 + (fuelAnomalyExpanded.length || 1), 1.2, 5.0);
     s9.addTable(
       [
-        [{ text: "Asset", options: { bold: true } }, { text: "Anomaly days", options: { bold: true } }, { text: "Variance (LPH)", options: { bold: true } }, { text: "Variance %", options: { bold: true } }, { text: "Total usage (L)", options: { bold: true } }],
+        tableHeader("Asset", "Anomaly days", "Variance (LPH)", "Variance %", "Total usage (L)"),
         ...(fuelAnomalyExpanded.length
           ? fuelAnomalyExpanded.map((r) => [
             String(r.asset_code || ""),
@@ -9764,7 +9833,7 @@ export default async function reportsRoutes(app) {
           ])
           : [["-", "0", "-", "-", "-"]]),
       ],
-      { x: 0.75, y: 1.2, w: 11.4, h: 5.0, fontSize: 11, border: { pt: 1, color: "C8C8C8" } }
+      { x: 0.75, y: 1.2, w: 11.4, h: anomalyTableH, fontSize: 11, ...tableOptions }
     );
     const buffer = await pptx.write({ outputType: "nodebuffer" });
     return Buffer.from(buffer);

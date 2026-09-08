@@ -2698,8 +2698,9 @@ async function mpGenerate(reportType) {
   }
 }
 
-function openMaintenancePackLatest(reportType, download = false) {
+async function openMaintenancePackLatest(reportType, download = false) {
   const type = String(reportType || "").toLowerCase() === "monthly" ? "monthly" : "weekly";
+  const msg = document.getElementById("mpStatusMsg");
   const q = new URLSearchParams();
   q.set("period_type", type);
   const sel = getMpSelectedRange(type);
@@ -2709,7 +2710,52 @@ function openMaintenancePackLatest(reportType, download = false) {
     q.set("end", sel.end);
   }
   if (download) q.set("download", "1");
-  window.open(`${API}/reports/maintenance-master/latest.pptx?${q.toString()}`, "_blank");
+  const popup = download ? null : window.open("", "_blank");
+  const url = `${API}/reports/maintenance-master/latest.pptx?${q.toString()}`;
+  try {
+    if (msg) {
+      msg.className = "muted";
+      msg.textContent = `${download ? "Downloading" : "Opening"} ${type} presentation...`;
+    }
+    const res = await fetch(url, { headers: authHeaders() });
+    const blob = await res.blob();
+    if (!res.ok) {
+      let detail = await blob.text().catch(() => "");
+      try {
+        const parsed = JSON.parse(detail);
+        detail = parsed.error || parsed.message || detail;
+      } catch { /* use response text */ }
+      throw new Error(detail || `Presentation request failed (${res.status})`);
+    }
+    const blobUrl = URL.createObjectURL(blob);
+    if (download) {
+      const disposition = String(res.headers.get("content-disposition") || "");
+      const match = disposition.match(/filename="?([^";]+)"?/i);
+      const anchor = document.createElement("a");
+      anchor.href = blobUrl;
+      anchor.download = match?.[1] || `IRONLOG_Maintenance_Master_${type}.pptx`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+    } else if (popup) {
+      popup.location.href = blobUrl;
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+    } else {
+      window.open(blobUrl, "_blank");
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+    }
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = `${type} presentation ${download ? "downloaded" : "opened"}.`;
+    }
+  } catch (e) {
+    if (popup && !popup.closed) popup.close();
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = `Presentation error: ${e.message || e}`;
+    }
+  }
 }
 
 async function loadMaintenancePackStatus() {
