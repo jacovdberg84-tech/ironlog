@@ -925,8 +925,10 @@ async function downloadAuthedFile(url, fallbackName = "ironlog-report") {
     anchor.click();
     anchor.remove();
     setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+    return true;
   } catch (err) {
     alert(`Could not download report: ${err.message || err}`);
+    return false;
   }
 }
 
@@ -11691,7 +11693,7 @@ async function openLubePdf() {
   }
 }
 
-function downloadLubeUsageXlsx() {
+async function downloadLubeUsageXlsx() {
   const start = qs("lubeStart")?.value || "";
   const end = qs("lubeEnd")?.value || "";
   if (!start || !end) return alert("Select lube period first.");
@@ -11700,7 +11702,12 @@ function downloadLubeUsageXlsx() {
   const loc = String(qs("lubeStockLoc")?.value || "").trim().toUpperCase();
   const q = new URLSearchParams({ start, end, month });
   if (loc) q.set("location_code", loc);
-  window.open(`${API}/api/reports/lube-usage-by-asset.xlsx?${q}`, "_blank");
+  setStatus("Preparing lube usage Excel export…");
+  const downloaded = await downloadAuthedFile(
+    `${API}/api/reports/lube-usage-by-asset.xlsx?${q.toString()}`,
+    `IRONLOG_Lube_Usage_${start}_to_${end}.xlsx`,
+  );
+  if (downloaded) setStatus("Lube usage Excel downloaded.");
 }
 
 function renderLubeMonthStockTable(data) {
