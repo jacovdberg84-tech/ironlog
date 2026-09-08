@@ -126,6 +126,10 @@ export function fetchLubeUsageLines(db, { start, end, lubeUnitFallback = 4 }) {
   const lines = [];
   const hasConsumableKind = hasColumn(db, "parts", "consumable_kind");
   const hasLubeMappings = hasTable(db, "lube_type_mappings");
+  const hasOilLogPartId = hasColumn(db, "oil_logs", "part_id");
+  const hasOilLogCreatedAt = hasColumn(db, "oil_logs", "created_at");
+  const hasStockMovements = hasTable(db, "stock_movements");
+  const hasStockMovementCreatedAt = hasColumn(db, "stock_movements", "created_at");
   const lubeTypeExpr = hasConsumableKind && hasLubeMappings
     ? `COALESCE(NULLIF(TRIM(p.consumable_kind), ''), NULLIF(TRIM(ltm.part_code), ''), 'lube')`
     : hasConsumableKind
@@ -137,6 +141,53 @@ export function fetchLubeUsageLines(db, { start, end, lubeUnitFallback = 4 }) {
     ? `LEFT JOIN lube_type_mappings ltm ON LOWER(TRIM(ltm.oil_key)) = LOWER(TRIM(COALESCE(ol.oil_type, '')))`
     : "";
 
+  // New lube issues retain the actual stock part on the oil log. Historical
+  // issues predate that field, but their stock movement and oil log were
+  // created together in one transaction, so use that deterministic pairing
+  // as a read-only compatibility fallback for the Excel export.
+  const directPartJoin = hasOilLogPartId
+    ? "LEFT JOIN parts p_direct ON p_direct.id = ol.part_id"
+    : "LEFT JOIN parts p_direct ON 0";
+  const historicalIssuePartJoin = hasStockMovements && hasOilLogCreatedAt && hasStockMovementCreatedAt
+    ? `
+      LEFT JOIN stock_movements sm_issue ON sm_issue.id = (
+        SELECT sm2.id
+        FROM stock_movements sm2
+        WHERE sm2.movement_type = 'out'
+          AND sm2.reference = ('lube_issue:asset:' || ol.asset_id)
+          AND sm2.created_at = ol.created_at
+          AND ABS(sm2.quantity) = ABS(ol.quantity)
+        ORDER BY sm2.id DESC
+        LIMIT 1
+      )
+      LEFT JOIN parts p_issue ON p_issue.id = sm_issue.part_id
+    `
+    : "LEFT JOIN parts p_issue ON 0";
+  const oilLogPartCodeExpr = `
+    COALESCE(
+      NULLIF(TRIM(p_direct.part_code), ''),
+      NULLIF(TRIM(p_issue.part_code), ''),
+      NULLIF(TRIM(p.part_code), ''),
+      CASE
+        WHEN LOWER(TRIM(COALESCE(ol.oil_type, ''))) IN ('admin','supervisor','manager','stores','artisan','operator') THEN NULL
+        ELSE NULLIF(TRIM(ol.oil_type), '')
+      END,
+      'UNSPECIFIED'
+    )
+  `;
+  const oilLogPartNameExpr = `
+    COALESCE(
+      NULLIF(TRIM(p_direct.part_name), ''),
+      NULLIF(TRIM(p_issue.part_name), ''),
+      NULLIF(TRIM(p.part_name), ''),
+      NULLIF(TRIM(ol.oil_type), ''),
+      ''
+    )
+  `;
+  const oilLogLubeTypeExpr = hasConsumableKind
+    ? `COALESCE(NULLIF(TRIM(p_direct.consumable_kind), ''), NULLIF(TRIM(p_issue.consumable_kind), ''), ${lubeTypeExpr})`
+    : lubeTypeExpr;
+
   if (hasTable(db, "oil_logs") && hasTable(db, "assets")) {
     const oilRows = db.prepare(`
       SELECT
@@ -145,22 +196,17 @@ export function fetchLubeUsageLines(db, { start, end, lubeUnitFallback = 4 }) {
         ol.asset_id,
         a.asset_code,
         a.asset_name,
-        COALESCE(
-          NULLIF(TRIM(p.part_code), ''),
-          CASE
-            WHEN LOWER(TRIM(COALESCE(ol.oil_type, ''))) IN ('admin','supervisor','manager','stores','artisan','operator') THEN NULL
-            ELSE NULLIF(TRIM(ol.oil_type), '')
-          END,
-          'UNSPECIFIED'
-        ) AS part_code,
-        COALESCE(NULLIF(TRIM(p.part_name), ''), NULLIF(TRIM(ol.oil_type), ''), '') AS part_name,
-        ${lubeTypeExpr} AS lube_type,
+        ${oilLogPartCodeExpr} AS part_code,
+        ${oilLogPartNameExpr} AS part_name,
+        ${oilLogLubeTypeExpr} AS lube_type,
         ol.quantity,
-        COALESCE(ol.unit_cost, p.unit_cost, ?) AS unit_cost,
+        COALESCE(ol.unit_cost, p_direct.unit_cost, p_issue.unit_cost, p.unit_cost, ?) AS unit_cost,
         'oil_log' AS source,
         NULL AS work_order_id
       FROM oil_logs ol
       JOIN assets a ON a.id = ol.asset_id
+      ${directPartJoin}
+      ${historicalIssuePartJoin}
       LEFT JOIN parts p ON UPPER(TRIM(p.part_code)) = UPPER(TRIM(COALESCE(ol.oil_type, '')))
       ${ltmJoin}
       WHERE ol.log_date BETWEEN ? AND ?

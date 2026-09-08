@@ -3584,30 +3584,33 @@ export default async function reportsRoutes(app) {
       resolvedLocationCode = String(loc.location_code || location_code);
     }
 
-    const usageRows = db.prepare(`
-      SELECT
-        a.asset_code,
-        a.asset_name,
-        CASE
-          WHEN LOWER(TRIM(COALESCE(ol.oil_type, ''))) IN ('admin','supervisor','manager','stores','artisan','operator') THEN 'UNSPECIFIED'
-          ELSE COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED')
-        END AS oil_type,
-        MAX(COALESCE(NULLIF(TRIM(p.part_name), ''), '')) AS stock_description,
-        COALESCE(SUM(ol.quantity), 0) AS qty_total,
-        COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS total_lube_cost,
-        COUNT(*) AS entries
-      FROM oil_logs ol
-      JOIN assets a ON a.id = ol.asset_id
-      LEFT JOIN parts p ON UPPER(TRIM(p.part_code)) = UPPER(TRIM(COALESCE(ol.oil_type, '')))
-      WHERE ol.log_date BETWEEN ? AND ?
-      GROUP BY a.asset_code, a.asset_name,
-        CASE
-          WHEN LOWER(TRIM(COALESCE(ol.oil_type, ''))) IN ('admin','supervisor','manager','stores','artisan','operator') THEN 'UNSPECIFIED'
-          ELSE COALESCE(NULLIF(TRIM(ol.oil_type), ''), 'UNSPECIFIED')
-        END
-      ORDER BY a.asset_code ASC, qty_total DESC, 3 ASC
-      LIMIT 5000
-    `).all(lubeUnitFallback, start, end);
+    const usageLines = fetchLubeUsageLines(db, { start, end, lubeUnitFallback });
+    const usageSummary = new Map();
+    for (const line of usageLines) {
+      // This sheet is the daily oil-log usage summary. Stores/work-order
+      // movements are listed on the line sheet but must not be mixed into it.
+      if (line.source !== "oil_log") continue;
+      const key = [line.asset_code, line.part_code, line.part_name, line.lube_type].join("\u001F");
+      const current = usageSummary.get(key) || {
+        asset_code: line.asset_code,
+        asset_name: line.asset_name,
+        part_code: line.part_code,
+        part_name: line.part_name,
+        lube_type: line.lube_type,
+        qty_total: 0,
+        total_lube_cost: 0,
+        entries: 0,
+      };
+      current.qty_total += Number(line.quantity || 0);
+      current.total_lube_cost += Number(line.line_cost || 0);
+      current.entries += 1;
+      usageSummary.set(key, current);
+    }
+    const usageRows = [...usageSummary.values()].sort((a, b) =>
+      String(a.asset_code).localeCompare(String(b.asset_code))
+      || String(a.part_name).localeCompare(String(b.part_name))
+      || Number(b.qty_total) - Number(a.qty_total)
+    );
 
     let stockSnap;
     try {
@@ -3622,8 +3625,9 @@ export default async function reportsRoutes(app) {
     wsUsage.columns = [
       { header: "Asset code", key: "asset_code", width: 14 },
       { header: "Asset name", key: "asset_name", width: 28 },
-      { header: "Oil type", key: "oil_type", width: 22 },
-      { header: "Matched stock description", key: "stock_description", width: 36 },
+      { header: "Lube part no", key: "part_code", width: 16 },
+      { header: "Description", key: "part_name", width: 36 },
+      { header: "Type", key: "lube_type", width: 14 },
       { header: "Qty", key: "qty_total", width: 12 },
       { header: "Est. cost", key: "total_lube_cost", width: 12 },
       { header: "Log lines", key: "entries", width: 10 },
@@ -3632,8 +3636,9 @@ export default async function reportsRoutes(app) {
       wsUsage.addRow({
         asset_code: r.asset_code,
         asset_name: r.asset_name,
-        oil_type: r.oil_type,
-        stock_description: r.stock_description || "",
+        part_code: r.part_code,
+        part_name: r.part_name || "",
+        lube_type: r.lube_type,
         qty_total: Number(r.qty_total || 0),
         total_lube_cost: Number(r.total_lube_cost || 0),
         entries: Number(r.entries || 0),
@@ -3641,7 +3646,6 @@ export default async function reportsRoutes(app) {
     }
     wsUsage.getRow(1).font = { bold: true };
 
-    const usageLines = fetchLubeUsageLines(db, { start, end, lubeUnitFallback });
     const wsLines = wb.addWorksheet("Usage lines", { views: [{ state: "frozen", ySplit: 1 }] });
     wsLines.columns = [
       { header: "Date", key: "usage_date", width: 12 },

@@ -111,6 +111,9 @@ export default async function stockRoutes(app) {
   if (!hasColumn("parts", "unit_cost")) {
     db.prepare(`ALTER TABLE parts ADD COLUMN unit_cost REAL DEFAULT 0`).run();
   }
+  if (!hasColumn("oil_logs", "part_id")) {
+    db.prepare(`ALTER TABLE oil_logs ADD COLUMN part_id INTEGER`).run();
+  }
   if (!hasColumn("stock_movements", "unit_cost_usd")) {
     db.prepare(`ALTER TABLE stock_movements ADD COLUMN unit_cost_usd REAL`).run();
   }
@@ -1754,28 +1757,26 @@ export default async function stockRoutes(app) {
       if (asset) {
         const cost_center_code = resolveLogCostCenterCode(db, asset.id, body.cost_center_code);
         const oilUnitCost = Number(part.unit_cost || 0) > 0 ? Number(part.unit_cost) : null;
-        const lg = hasColumn("oil_logs", "unit_cost")
-          ? db.prepare(`
-              INSERT INTO oil_logs (asset_id, log_date, oil_type, quantity, cost_center_code, unit_cost)
-              VALUES (?, ?, ?, ?, ?, ?)
-            `).run(
-              asset.id,
-              log_date,
-              normalizeOilTypeInput(oil_type, part.part_code || null),
-              quantity,
-              cost_center_code,
-              oilUnitCost,
-            )
-          : db.prepare(`
-              INSERT INTO oil_logs (asset_id, log_date, oil_type, quantity, cost_center_code)
-              VALUES (?, ?, ?, ?, ?)
-            `).run(
-              asset.id,
-              log_date,
-              normalizeOilTypeInput(oil_type, part.part_code || null),
-              quantity,
-              cost_center_code,
-            );
+        const oilLogColumns = ["asset_id", "log_date", "oil_type", "quantity", "cost_center_code"];
+        const oilLogValues = [
+          asset.id,
+          log_date,
+          normalizeOilTypeInput(oil_type, part.part_code || null),
+          quantity,
+          cost_center_code,
+        ];
+        if (hasColumn("oil_logs", "unit_cost")) {
+          oilLogColumns.push("unit_cost");
+          oilLogValues.push(oilUnitCost);
+        }
+        if (hasColumn("oil_logs", "part_id")) {
+          oilLogColumns.push("part_id");
+          oilLogValues.push(part.id);
+        }
+        const lg = db.prepare(`
+          INSERT INTO oil_logs (${oilLogColumns.join(", ")})
+          VALUES (${oilLogColumns.map(() => "?").join(", ")})
+        `).run(...oilLogValues);
         lube_log_id = Number(lg.lastInsertRowid);
       }
 
