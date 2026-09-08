@@ -10911,6 +10911,42 @@ export default async function maintenanceRoutes(app) {
     };
   }
 
+  function resolveMechanicLaborSmr(work_date, asset_code, site_code) {
+    if (!isDate(work_date) || !asset_code) return null;
+    try {
+      const asset = db.prepare(`
+        SELECT id
+        FROM assets
+        WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?))
+        LIMIT 1
+      `).get(asset_code);
+      if (!asset?.id) return null;
+      const daily = db.prepare(`
+        SELECT closing_hours, opening_hours
+        FROM daily_hours
+        WHERE asset_id = ?
+          AND work_date = ?
+          AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+        ORDER BY id DESC
+        LIMIT 1
+      `).get(asset.id, work_date, String(site_code || "main").trim().toLowerCase() || "main");
+      const closing = Number(daily?.closing_hours);
+      if (Number.isFinite(closing) && closing >= 0) return Number(closing.toFixed(1));
+      const opening = Number(daily?.opening_hours);
+      return Number.isFinite(opening) && opening >= 0 ? Number(opening.toFixed(1)) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function enrichMechanicLaborSmr(row, site_code) {
+    if (row?.smr != null && Number.isFinite(Number(row.smr))) return row;
+    return {
+      ...row,
+      smr: resolveMechanicLaborSmr(row?.work_date, row?.asset_code, site_code),
+    };
+  }
+
   // GET /api/maintenance/mechanic-labor?date=YYYY-MM-DD
   app.get("/mechanic-labor", async (req, reply) => {
     try {
@@ -10929,7 +10965,9 @@ export default async function maintenanceRoutes(app) {
         FROM mechanic_labor_entries
         WHERE work_date = ? AND LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
         ORDER BY id ASC
-      `).all(date, site_code).map((r) => enrichMechanicLaborRow(r, defaultRate));
+      `).all(date, site_code)
+        .map((r) => enrichMechanicLaborSmr(r, site_code))
+        .map((r) => enrichMechanicLaborRow(r, defaultRate));
 
       const totals = rows.reduce(
         (acc, r) => {
@@ -10992,6 +11030,7 @@ export default async function maintenanceRoutes(app) {
       const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
       const userName = String(req.headers?.["x-user-name"] || "").trim() || "system";
       const parsed = mechanicLaborEntryBody(req.body || {});
+      if (parsed.smr == null) parsed.smr = resolveMechanicLaborSmr(parsed.work_date, parsed.asset_code, site_code);
       if (!isDate(parsed.work_date)) {
         return reply.code(400).send({ ok: false, error: "work_date (YYYY-MM-DD) required" });
       }
@@ -11074,6 +11113,7 @@ export default async function maintenanceRoutes(app) {
       const errors = [];
       rawEntries.forEach((item, idx) => {
         const parsed = mechanicLaborEntryBody({ ...item, work_date });
+        if (parsed.smr == null) parsed.smr = resolveMechanicLaborSmr(work_date, parsed.asset_code, site_code);
         const line = idx + 1;
         if (!parsed.technician_name) errors.push(`Row ${line}: technician_name required`);
         if (!parsed.asset_code) errors.push(`Row ${line}: asset_code required`);
@@ -11184,6 +11224,7 @@ export default async function maintenanceRoutes(app) {
       if (!existing) return reply.code(404).send({ ok: false, error: "Entry not found" });
 
       const parsed = mechanicLaborEntryBody(req.body || {});
+      if (parsed.smr == null) parsed.smr = resolveMechanicLaborSmr(parsed.work_date, parsed.asset_code, site_code);
       if (!isDate(parsed.work_date)) {
         return reply.code(400).send({ ok: false, error: "work_date (YYYY-MM-DD) required" });
       }
@@ -11297,7 +11338,9 @@ export default async function maintenanceRoutes(app) {
         ORDER BY work_date ASC, id ASC
       `).all(start, end, site_code);
 
-      const rows = rawRows.map((r) => enrichMechanicLaborRow(r, defaultRate));
+      const rows = rawRows
+        .map((r) => enrichMechanicLaborSmr(r, site_code))
+        .map((r) => enrichMechanicLaborRow(r, defaultRate));
 
       const wb = new ExcelJS.Workbook();
       wb.creator = "IRONLOG";
