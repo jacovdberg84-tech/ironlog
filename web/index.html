@@ -734,6 +734,12 @@
             <details class="borris-context"><summary>Add workshop context</summary><label for="ironmindContext">Site conditions or details to include</label><textarea id="ironmindContext" class="ironmind-context" rows="2" placeholder="Machine details, recent work, weather or operating conditions"></textarea></details>
           </div>
         </div>
+        <details class="borris-extra"><summary>Check an approved OEM source</summary>
+          <p>Compare a public OEM page or PDF with your indexed manuals. Your question and internal records stay inside Ironlog; only the supplied URL is requested from the OEM.</p>
+          <p class="muted">Bell: bellequipment.com · Caterpillar: caterpillar.com / cat.com · Atlas Copco: atlascopco.com · Mercedes-Benz: mercedes-benz-trucks.com (including each www host).</p>
+          <form id="borrisOemForm" class="stack-12"><label>OEM document link <input type="url" name="url" required maxlength="2000" class="w-full" placeholder="https://www.bellequipment.com/..."></label><label>What should Borris compare? <textarea name="question" required minlength="3" maxlength="1500" class="w-full" rows="2" placeholder="Include the model and component or fault code"></textarea></label><button class="btn btn-primary" type="submit">Check source and compare</button></form>
+          <div id="borrisOemResult" class="stack-12" aria-live="polite"></div>
+        </details>
         <details class="borris-extra"><summary>Maintenance insights</summary><div class="stack-12"><p id="ironmindMeta" class="muted"></p><button id="ironmindRefreshBtn" class="btn" type="button">Refresh insights</button><label><input id="ironmindDetailMode" type="checkbox"> More detail</label><div id="ironmindSummary" class="output ironmind-body"></div><details><summary>Previous briefings</summary><label><input id="ironmindShowMissingDays" type="checkbox"> Include missing days</label><button id="ironmindReloadHistory" class="btn" type="button">Reload history</button><div id="ironmindHistoryList" class="list"></div></details></div></details>
         <details class="borris-extra"><summary>Service tools and settings</summary><div class="asset-cards-grid">        <!-- Hour Thresholds Card -->
         <div class="dash-card collapsible" data-collapsed="false">
@@ -7467,6 +7473,6 @@
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=2"></script>
-  <script src="./app.js?v=85"></script>
+  <script src="./app.js?v=86"></script>
 </body>
 </html>

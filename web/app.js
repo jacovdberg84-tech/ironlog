@@ -21555,3 +21555,24 @@ function initWorkshopUploads() {
   });
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',initWorkshopUploads); else initWorkshopUploads();
+
+function initBorrisOem() {
+  qs('borrisOemForm')?.addEventListener('submit',async event=>{
+    event.preventDefault();const form=event.currentTarget,button=form.querySelector('button'),out=qs('borrisOemResult');
+    button.disabled=true;out.textContent='Retrieving the approved source and checking indexed manuals...';
+    try {
+      const data=await fetchJson(API+'/api/oem/check',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify(Object.fromEntries(new FormData(form)))});
+      out.replaceChildren();
+      const source=document.createElement('a');source.textContent=data.source.manufacturer+' — '+data.source.title;source.href=data.source.url;source.target='_blank';source.rel='noopener noreferrer';out.appendChild(source);
+      const meta=document.createElement('p');meta.textContent='Retrieved '+data.source.retrieved_at+' · Revision: '+data.source.revision+'. '+data.source.scope;out.appendChild(meta);
+      const comparison=document.createElement('p');comparison.style.whiteSpace='pre-wrap';comparison.textContent=data.comparison;out.appendChild(comparison);
+      for(const [label,rows] of [['External source',data.external],['Internal manuals',data.internal]]) {
+        const heading=document.createElement('h4');heading.textContent=label;out.appendChild(heading);
+        if(!rows.length){const empty=document.createElement('p');empty.textContent='No matching passages found. Agreement or conflict cannot be established.';out.appendChild(empty);}
+        for(const row of rows){const p=document.createElement('p');p.style.whiteSpace='pre-wrap';p.textContent='['+row.citation+'] '+(row.title||data.source.title)+(row.page?' — PDF page '+row.page:' — web page')+(row.revision?' · revision '+row.revision:'')+'\n'+row.excerpt;out.appendChild(p);}
+      }
+      const note=document.createElement('p');note.textContent=data.notice;out.appendChild(note);
+    } catch(err){out.textContent=err.message;}finally{button.disabled=false;}
+  });
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initBorrisOem);else initBorrisOem();

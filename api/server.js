@@ -1,3 +1,4 @@
+import oemRoutes from './routes/oem.routes.js';
 import workshopRoutes from './routes/workshop.routes.js';
 // IRONLOG/api/server.js
 import Fastify from "fastify";
@@ -97,6 +98,7 @@ app.register(operationsRoutes, { prefix: "/api/operations" });
 app.register(dispatchRoutes, { prefix: "/api/dispatch" });
 app.register(qualityRoutes, { prefix: "/api/quality" });
 app.register(syncRoutes, { prefix: "/api/sync" });
+app.register(oemRoutes, { prefix: '/api/oem' });
 app.register(workshopRoutes, { prefix: '/api/workshop' });
 app.register(docsRoutes, { prefix: "/api/docs" });
 app.register(ironmindRoutes, { prefix: "/api/ironmind" });
