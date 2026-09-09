@@ -1,3 +1,4 @@
+import { isManualQuestion, assetCandidates } from '../utils/questionIntent.js';
 import { answerWorkshop } from '../utils/workshopKnowledge.js';
 import fs from "node:fs";
 import path from "node:path";
@@ -105,10 +106,11 @@ export default async function ironmindRoutes(app) {
     return { start: fallbackDate, end: fallbackDate };
   }
   function parseAssetCode(question) {
-    const q = String(question || "").toUpperCase();
-    const m = q.match(/\b[A-Z0-9]{2,}[A-Z][0-9A-Z-]*\b/g) || [];
-    const deny = new Set(["PLEASE", "DOWNTIME", "SELECTED", "TIME", "FROM", "TO", "AND", "THE", "FOR", "FUEL", "USAGE", "RECURRING", "FAILURES", "PM", "OVERDUE", "RISK"]);
-    return (m.find((x) => !deny.has(x)) || "").trim();
+    const find=db.prepare('SELECT asset_code FROM assets WHERE UPPER(asset_code)=? LIMIT 1');
+    for (const token of assetCandidates(question)) {
+      const row=find.get(token);if(row)return row.asset_code;
+    }
+    return '';
   }
   function hasColumn(table, col) {
     const rows = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -1391,7 +1393,7 @@ export default async function ironmindRoutes(app) {
       const body = req.body || {};
       const question = String(body.question || "").trim();
       if (!question) return reply.code(400).send({ ok: false, error: "question is required" });
-      if (body.workshop_document_id || /\b(manual|bulletin|fault code|torque|specification)\b/i.test(question)) {
+      if (body.workshop_document_id || isManualQuestion(question)) {
         return reply.send(await answerWorkshop(db, question, String(body.workshop_document_id || '')));
       }
       const fallbackDate = isDate(body.date) ? String(body.date) : todayYmd();
