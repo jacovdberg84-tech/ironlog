@@ -511,7 +511,7 @@ function reliabilityMetricsForRange(start, end, opts = {}) {
   };
 }
 
-function kpiDaily(date, scheduled, dailyHoursDate = date) {
+function kpiDaily(date, scheduled, dailyHoursDate = date, opts = {}) {
   const usedRow = db.prepare(`
     SELECT COUNT(DISTINCT dh.asset_id) AS used_assets
     FROM daily_hours dh
@@ -560,7 +560,6 @@ function kpiDaily(date, scheduled, dailyHoursDate = date) {
     ? `(${endAtPredicate} OR ${openStatePredicate})`
     : `${openStatePredicate}`;
   const dtLogParams = [date, date];
-  if (hasBreakdownEndAt) dtLogParams.push(date);
   const dtLogsRow = db.prepare(`
     SELECT IFNULL(SUM(l.hours_down), 0) AS downtime_hours
     FROM breakdown_downtime_logs l
@@ -568,16 +567,8 @@ function kpiDaily(date, scheduled, dailyHoursDate = date) {
     JOIN assets a ON a.id = b.asset_id
     WHERE l.log_date = ?
       AND DATE(COALESCE(b.breakdown_date, l.log_date)) <= ?
-      AND ${activeBreakdownPredicate}
       AND UPPER(TRIM(COALESCE(b.description, ''))) NOT LIKE 'MANAGER INSPECTION ALERT%'
       ${andAssetFleetHoursOnly("a")}
-      AND NOT EXISTS (
-        SELECT 1
-        FROM work_orders wbx
-        WHERE wbx.source = 'breakdown'
-          AND COALESCE(wbx.reference_id, -1) = b.id
-          AND REPLACE(TRIM(LOWER(COALESCE(wbx.status, ''))), ' ', '_') IN ('completed', 'approved', 'closed')
-      )
   `).get(...dtLogParams);
   let downtime_hours = Number(dtLogsRow?.downtime_hours || 0);
   const openNoLogParams = [Number(scheduled || 0), date, dailyHoursDate];
@@ -621,6 +612,11 @@ function kpiDaily(date, scheduled, dailyHoursDate = date) {
     ) x
   `).get(...openNoLogParams);
   downtime_hours += Number(openNoLogRow?.assumed_down_hours || 0);
+  // A completed repair can be recorded after the operating day. The Daily PDF
+  // passes the repair time that belongs to this day when no explicit downtime
+  // log was captured, so it contributes to availability without rewriting the
+  // original incident record.
+  downtime_hours += Math.max(0, safeNum(opts.additionalDowntimeHours, 0));
   // A down asset still belongs in planned hours even when no Daily Log row was entered.
   available_hours += Number(openNoLogRow?.missing_planned_hours || 0);
 
@@ -10343,7 +10339,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    const reportRevision = "daily-pdf-partial-breakdown-r2026-09-04";
+    const reportRevision = "daily-pdf-completed-repair-downtime-r2026-09-09";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -10592,12 +10588,12 @@ export default async function reportsRoutes(app) {
     // per-asset availability downtime all use the previous calendar day.
     // Availability must use the same operations day as the downtime, fuel and
     // pre-start sections. Using the report issue date here could falsely show 100%.
-    const kpi = kpiDaily(opsDay, scheduled, date);
-    const dailyPlannedMaintenance = listPlannedMaintenanceForDate(db, opsDay).slice(0, 40);
+    const scheduledFallback = Math.max(0, Number(scheduled || 0));
     const dailyDowntimeLogs = hasTable("breakdown_downtime_logs")
       ? db.prepare(`
           SELECT
             l.id,
+            b.asset_id,
             a.asset_code,
             a.asset_name,
             b.description,
@@ -10627,6 +10623,94 @@ export default async function reportsRoutes(app) {
           .filter((r) => Number(r.hours_down || 0) > 0 || Number(r.effective_active || 0) === 1)
           .slice(0, 60)
       : [];
+
+    // A breakdown may begin and be repaired during an operations day, while the
+    // technician completes/closes its work order the following morning. When
+    // no explicit downtime log exists for that incident/day, carry the recorded
+    // repair hours back to the breakdown day. Explicit daily logs remain the
+    // source of truth and are never replaced.
+    const hasBreakdownRepairLabor = hasTable("breakdown_repair_labor");
+    const repairHoursExpr = hasBreakdownRepairLabor
+      ? "COALESCE(NULLIF(brl.labor_hours, 0), w.labor_hours, 0)"
+      : "COALESCE(w.labor_hours, 0)";
+    const completedBreakdownRepairCandidates = db.prepare(`
+      SELECT
+        b.id AS breakdown_id,
+        b.asset_id,
+        a.asset_code,
+        a.asset_name,
+        b.description,
+        b.component,
+        MAX(${repairHoursExpr}) AS repair_hours
+      FROM breakdowns b
+      JOIN assets a ON a.id = b.asset_id
+      JOIN work_orders w
+        ON LOWER(TRIM(COALESCE(w.source, ''))) = 'breakdown'
+        AND COALESCE(w.reference_id, -1) = b.id
+      ${hasBreakdownRepairLabor ? "LEFT JOIN breakdown_repair_labor brl ON brl.breakdown_id = b.id" : ""}
+      WHERE ${breakdownDateExpr} = ?
+        AND REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_')
+          IN ('completed', 'approved', 'closed')
+        AND COALESCE(${repairHoursExpr}, 0) > 0
+        AND NOT EXISTS (
+          SELECT 1
+          FROM breakdown_downtime_logs l
+          WHERE l.breakdown_id = b.id
+            AND l.log_date = ?
+            AND COALESCE(l.hours_down, 0) > 0
+        )
+      GROUP BY b.id, b.asset_id, a.asset_code, a.asset_name, b.description, b.component
+      ORDER BY b.id ASC
+    `).all(opsDay, opsDay);
+
+    const scheduledByAssetId = new Map(
+      hours.map((r) => {
+        const rowScheduled = Number(r.scheduled_hours || 0);
+        return [
+          Number(r.asset_id || 0),
+          rowScheduled > 0 ? rowScheduled : scheduledFallback,
+        ];
+      }),
+    );
+    const loggedDowntimeByAssetId = new Map();
+    for (const row of dailyDowntimeLogs) {
+      const assetId = Number(row.asset_id || 0);
+      if (!assetId) continue;
+      loggedDowntimeByAssetId.set(
+        assetId,
+        Math.max(0, Number(loggedDowntimeByAssetId.get(assetId) || 0))
+          + Math.max(0, Number(row.hours_down || 0)),
+      );
+    }
+    const repairDowntimeAllocatedByAssetId = new Map();
+    const completedBreakdownRepairDowntime = completedBreakdownRepairCandidates
+      .map((row) => {
+        const assetId = Number(row.asset_id || 0);
+        const dayCap = Math.max(0, Number(scheduledByAssetId.get(assetId) || scheduledFallback));
+        const alreadyLogged = Math.max(0, Number(loggedDowntimeByAssetId.get(assetId) || 0));
+        const alreadyAllocated = Math.max(0, Number(repairDowntimeAllocatedByAssetId.get(assetId) || 0));
+        const repairHours = Math.max(0, Number(row.repair_hours || 0));
+        // A shift is 06:00-17:00 (11 hours) unless its scheduled-hours value says
+        // otherwise. Never let combined repair downtime exceed that daily cap.
+        const hoursDown = Math.min(repairHours, Math.max(0, dayCap - alreadyLogged - alreadyAllocated));
+        if (hoursDown > 0) {
+          repairDowntimeAllocatedByAssetId.set(assetId, alreadyAllocated + hoursDown);
+        }
+        return {
+          ...row,
+          repair_hours: repairHours,
+          hours_down: Number(hoursDown.toFixed(2)),
+        };
+      })
+      .filter((row) => row.hours_down > 0);
+    const completedRepairDowntimeHours = completedBreakdownRepairDowntime.reduce(
+      (sum, row) => sum + Number(row.hours_down || 0),
+      0,
+    );
+    const kpi = kpiDaily(opsDay, scheduled, date, {
+      additionalDowntimeHours: completedRepairDowntimeHours,
+    });
+    const dailyPlannedMaintenance = listPlannedMaintenanceForDate(db, opsDay).slice(0, 40);
     const offsiteSiteRaw = String(req.query?.site_code || getSiteCode(req) || "main").trim().toLowerCase() || "main";
     const offsiteSiteAliases =
       offsiteSiteRaw === "main" || offsiteSiteRaw === "default"
@@ -10665,7 +10749,6 @@ export default async function reportsRoutes(app) {
       : [];
 
     // Per-asset downtime for availability (same day as short breakdowns / fuel).
-    const scheduledFallback = Math.max(0, Number(scheduled || 0));
     const downtimeByAssetId = new Map();
     const imputedActiveDownAssetIds = new Set();
     try {
@@ -10678,6 +10761,14 @@ export default async function reportsRoutes(app) {
       `).all(opsDay);
       for (const r of downRows) {
         downtimeByAssetId.set(Number(r.asset_id), Math.max(0, Number(r.hours_down || 0)));
+      }
+      for (const r of completedBreakdownRepairDowntime) {
+        const assetId = Number(r.asset_id || 0);
+        if (!assetId) continue;
+        downtimeByAssetId.set(
+          assetId,
+          Math.max(0, Number(downtimeByAssetId.get(assetId) || 0)) + Math.max(0, Number(r.hours_down || 0)),
+        );
       }
 
       // A machine that remained on an active breakdown for the operations day is
@@ -10975,6 +11066,19 @@ export default async function reportsRoutes(app) {
             detail: compactCell(String(r.notes || r.description || "").replace(/^Auto from Daily Input \(DOWN\)\s*[—-]?\s*/i, ""), 220),
           };
         });
+        for (const r of completedBreakdownRepairDowntime) {
+          dailyDowntimeRows.push({
+            asset: r.asset_code,
+            equipment: compactCell(r.asset_name ?? "", 48),
+            type: "Breakdown",
+            hrs: fmtNum(r.hours_down || 0, 1),
+            area: compactCell(r.component ?? "", 42) || "—",
+            detail: compactCell(
+              `${String(r.description || "Breakdown repair").trim()} · ${fmtNum(r.repair_hours || 0, 1)} completed repair hr`,
+              220,
+            ),
+          });
+        }
         for (const r of dailyPlannedMaintenance) {
           if (loggedMaintenanceAssets.has(String(r.asset_code || ""))) continue;
           dailyDowntimeRows.push({
