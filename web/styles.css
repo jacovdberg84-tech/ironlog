@@ -5656,6 +5656,72 @@ body.sidebar-collapsed .main-content {
   color: #6b7280;
 }
 
+.daily-progress-panel,
+.daily-offsite-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+
+.daily-offsite-panel {
+  border-color: #fed7aa;
+  background: #fffaf5;
+}
+
+.daily-progress-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.daily-progress-heading strong {
+  color: #1e3a5f;
+  font-size: 13px;
+}
+
+.daily-progress-heading span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.daily-progress-panel textarea.daily-input {
+  min-height: 58px;
+  resize: vertical;
+  font: inherit;
+  font-weight: 500;
+}
+
+.daily-offsite-toggle-field {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.daily-offsite-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #9a3412;
+  cursor: pointer;
+}
+
+.daily-offsite-toggle input {
+  accent-color: #ea580c;
+}
+
+@media (max-width: 620px) {
+  .daily-progress-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+}
+
 /* Work Orders — focused workshop queue */
 .wo-page-subtitle { margin: 4px 0 0; }
 .wo-overview-card {

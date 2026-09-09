@@ -63,6 +63,9 @@ export default async function breakdownRoutes(app) {
   tryAddColumn(`ALTER TABLE breakdowns ADD COLUMN parts_status TEXT`);
   tryAddColumn(`ALTER TABLE breakdowns ADD COLUMN parts_received_date TEXT`);
   tryAddColumn(`ALTER TABLE breakdowns ADD COLUMN ets_repair_date TEXT`);
+  tryAddColumn(`ALTER TABLE work_orders ADD COLUMN repair_progress TEXT`);
+  tryAddColumn(`ALTER TABLE work_orders ADD COLUMN repair_progress_at TEXT`);
+  tryAddColumn(`ALTER TABLE work_orders ADD COLUMN due_date TEXT`);
 
   /* =====================================================
      PREPARED STATEMENTS
@@ -124,7 +127,10 @@ export default async function breakdownRoutes(app) {
       b.parts_received_date,
       b.ets_repair_date,
       b.primary_work_order_id,
-      wo.status AS primary_work_order_status
+      wo.status AS primary_work_order_status,
+      wo.repair_progress AS repair_progress,
+      wo.repair_progress_at AS repair_progress_at,
+      wo.due_date AS repair_due_date
     FROM breakdowns b
     JOIN assets a ON a.id = b.asset_id
     LEFT JOIN work_orders wo ON wo.id = b.primary_work_order_id
@@ -147,6 +153,9 @@ export default async function breakdownRoutes(app) {
       b.ets_repair_date,
       b.primary_work_order_id,
       wo.status AS primary_work_order_status,
+      wo.repair_progress AS repair_progress,
+      wo.repair_progress_at AS repair_progress_at,
+      wo.due_date AS repair_due_date,
       COALESCE((
         SELECT SUM(l.hours_down)
         FROM breakdown_downtime_logs l
@@ -239,6 +248,16 @@ export default async function breakdownRoutes(app) {
       parts_received_date = COALESCE(?, parts_received_date),
       ets_repair_date = COALESCE(?, ets_repair_date)
     WHERE id = ?
+  `);
+
+  const updateBreakdownDailyHeader = db.prepare(`
+    UPDATE breakdowns
+    SET
+      description = COALESCE(?, description),
+      component = COALESCE(?, component),
+      critical = COALESCE(?, critical)
+    WHERE id = ?
+      AND status = 'OPEN'
   `);
 
   const closeWorkOrderQuick = db.prepare(`
@@ -509,6 +528,81 @@ export default async function breakdownRoutes(app) {
   });
 
   // ---------------------------
+  // Daily Log progress helper
+  // POST /api/breakdowns/:id/daily-progress
+  // Body: { repair_progress?, scheduled_repair_date? }
+  // Keeps the Daily Log as the one place to update an open incident and its WO.
+  // ---------------------------
+  app.post("/:id/daily-progress", async (req, reply) => {
+    const breakdownId = Number(req.params.id);
+    if (!Number.isInteger(breakdownId) || breakdownId <= 0) {
+      return reply.code(400).send({ error: "Invalid breakdown id" });
+    }
+
+    const breakdown = db.prepare(`
+      SELECT id, primary_work_order_id
+      FROM breakdowns
+      WHERE id = ?
+    `).get(breakdownId);
+    if (!breakdown) return reply.code(404).send({ error: "Breakdown not found" });
+
+    const hasProgress = Object.prototype.hasOwnProperty.call(req.body || {}, "repair_progress");
+    const repairProgress = hasProgress
+      ? String(req.body?.repair_progress || "").trim() || null
+      : undefined;
+    const hasScheduledRepairDate = Object.prototype.hasOwnProperty.call(req.body || {}, "scheduled_repair_date");
+    const scheduledRepairDate = String(req.body?.scheduled_repair_date || "").trim();
+    if (scheduledRepairDate && !isDate(scheduledRepairDate)) {
+      return reply.code(400).send({ error: "scheduled_repair_date must be YYYY-MM-DD" });
+    }
+
+    const workOrder = Number(breakdown.primary_work_order_id || 0)
+      ? db.prepare(`SELECT id FROM work_orders WHERE id = ?`).get(Number(breakdown.primary_work_order_id))
+      : db.prepare(`
+          SELECT id
+          FROM work_orders
+          WHERE source = 'breakdown' AND reference_id = ?
+          ORDER BY id DESC
+          LIMIT 1
+        `).get(breakdownId);
+
+    if (!workOrder) {
+      return reply.code(409).send({ error: "No linked work order found for this breakdown" });
+    }
+
+    db.prepare(`
+      UPDATE work_orders
+      SET
+        repair_progress = CASE WHEN ? THEN ? ELSE repair_progress END,
+        repair_progress_at = CASE WHEN ? THEN datetime('now') ELSE repair_progress_at END,
+        due_date = CASE WHEN ? THEN ? ELSE due_date END
+      WHERE id = ?
+    `).run(
+      hasProgress ? 1 : 0,
+      repairProgress,
+      hasProgress ? 1 : 0,
+      hasScheduledRepairDate ? 1 : 0,
+      scheduledRepairDate || null,
+      Number(workOrder.id),
+    );
+
+    if (hasScheduledRepairDate) {
+      db.prepare(`
+        UPDATE breakdowns
+        SET ets_repair_date = ?
+        WHERE id = ?
+      `).run(scheduledRepairDate || null, breakdownId);
+    }
+
+    const updated = db.prepare(`
+      SELECT id, repair_progress, repair_progress_at, due_date
+      FROM work_orders
+      WHERE id = ?
+    `).get(Number(workOrder.id));
+    return reply.send({ ok: true, breakdown_id: breakdownId, work_order: updated });
+  });
+
+  // ---------------------------
   // Ensure open breakdown exists (Daily Input helper)
   // POST /api/breakdowns/ensure-open
   // { asset_code, breakdown_date, description?, component?, critical?, get_used?, get_hours_fitted?, get_hours_changed? }
@@ -548,6 +642,12 @@ export default async function breakdownRoutes(app) {
           Number(existing.id)
         );
       }
+      updateBreakdownDailyHeader.run(
+        description || null,
+        component,
+        critical,
+        Number(existing.id),
+      );
       updateBreakdownRepairTracking.run(
         repairPack.parts_ordered_date,
         repairPack.parts_status,

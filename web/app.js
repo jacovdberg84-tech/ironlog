@@ -15253,10 +15253,13 @@ function validateDailyRows() {
         r.error = "DOWN HOURS TOO HIGH — MUST BE <= SCHEDULED HOURS.";
         continue;
       }
-      if (r.opening_hours != null && (r.closing_hours == null || r.closing_hours === "")) {
-        r.closing_hours = r.opening_hours;
-        r.hours_run = 0;
+      if (r.opening_hours != null && r.closing_hours != null && r.closing_hours < r.opening_hours) {
+        r.error = "HOURMETER MISMATCH — CLOSING LOWER THAN OPENING.";
+        continue;
       }
+      // A machine can work part of the shift before it goes down. Keep those
+      // meter inputs editable and only mark it as production when it ran.
+      r.is_used = Number(r.hours_run || 0) > 0;
       continue;
     }
 
@@ -15302,7 +15305,7 @@ function validateDailyRows() {
 
 function calcDailyPreviewKpis() {
   const used = dailyRows.filter(
-    (r) => r.is_used && !r.is_master_standby && String(r.input_unit || "hours").toLowerCase() !== "km"
+    (r) => (r.is_used || r.is_down) && !r.is_master_standby && String(r.input_unit || "hours").toLowerCase() !== "km"
   );
   const usedCount = used.length;
 
@@ -15425,51 +15428,98 @@ function renderDailyPrestartSection() {
 
 /* -------- DOWN helper -------- */
 
-async function logDownRowToBreakdowns(date, r) {
-  try {
-    const captureDay = new Date(`${date}T12:00:00`);
-    captureDay.setDate(captureDay.getDate() - 1);
-    const operationsDate = captureDay.toISOString().slice(0, 10);
-    const downDesc = r.down_reason ? `DOWN — ${r.down_reason}` : "DOWN";
-    const b = await fetchJson(`${API}/api/breakdowns/ensure-open`, {
-      method: "POST",
+function dailyOperationsDate(captureDate) {
+  return prevDateStr(String(captureDate || todayLocalYmd()).slice(0, 10));
+}
+
+async function saveDailyOffsiteProgress(captureDate, r, breakdownId) {
+  if (!r.offsite_enabled) return null;
+
+  const sentDate = String(r.offsite_sent_date || "").trim() || dailyOperationsDate(captureDate);
+  const payload = {
+    asset_code: r.asset_code,
+    breakdown_id: Number(breakdownId || r.breakdown_id || 0) || null,
+    repair_status: String(r.offsite_status || "sent_offsite").trim() || "sent_offsite",
+    sent_date: sentDate,
+    expected_return_date: String(r.offsite_expected_return_date || r.ets_repair_date || "").trim() || null,
+    actual_return_date: String(r.offsite_actual_return_date || "").trim() || null,
+    vendor: String(r.offsite_vendor || "").trim() || null,
+    current_location: String(r.offsite_location || "").trim() || null,
+    repair_reason: String(r.down_reason || "").trim() || null,
+    notes: String(r.offsite_progress || r.repair_progress || r.breakdown_comment || "").trim() || null,
+  };
+
+  if (Number(r.offsite_repair_id || 0) > 0) {
+    await fetchJson(`${API}/api/breakdown-ops/offsite-repairs/${Number(r.offsite_repair_id)}`, {
+      method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        asset_code: r.asset_code,
-        breakdown_date: operationsDate,
-        start_date: String(r.breakdown_start_date || "").trim() || operationsDate,
-        description: downDesc,
-        component: String(r.breakdown_component || "").trim() || null,
-        critical: Boolean(r.breakdown_critical),
-        parts_ordered_date: String(r.parts_ordered_date || "").trim() || null,
-        parts_status: String(r.parts_status || "").trim() || null,
-        parts_received_date: String(r.parts_received_date || "").trim() || null,
-        ets_repair_date: String(r.ets_repair_date || "").trim() || null,
-      }),
+      body: JSON.stringify(payload),
     });
-
-    const breakdownId = b.breakdown_id || b.breakdownId || b.id;
-    if (!breakdownId) return;
-
-    const notes = r.down_reason
-      ? `Auto from Daily Input (DOWN) — ${r.down_reason}`
-      : "Auto from Daily Input (DOWN)";
-
-    const downHoursRaw = r.down_hours != null ? Number(r.down_hours) : Number(r.scheduled_hours || 0);
-    const downHours = Number.isFinite(downHoursRaw) ? Math.max(0, downHoursRaw) : 0;
-
-    await fetchJson(`${API}/api/breakdowns/${breakdownId}/downtime`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        log_date: operationsDate,
-        hours_down: downHours,
-        notes,
-      }),
-    });
-  } catch {
-    // swallow
+    return Number(r.offsite_repair_id);
   }
+
+  const created = await fetchJson(`${API}/api/breakdown-ops/offsite-repairs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const id = Number(created?.id || 0) || null;
+  if (id) r.offsite_repair_id = id;
+  return id;
+}
+
+async function logDownRowToBreakdowns(date, r) {
+  const operationsDate = dailyOperationsDate(date);
+  const downDesc = r.down_reason ? `DOWN — ${r.down_reason}` : "DOWN";
+  const b = await fetchJson(`${API}/api/breakdowns/ensure-open`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      asset_code: r.asset_code,
+      breakdown_date: operationsDate,
+      start_date: String(r.breakdown_start_date || "").trim() || operationsDate,
+      description: downDesc,
+      component: String(r.breakdown_component || "").trim() || null,
+      critical: Boolean(r.breakdown_critical),
+      parts_ordered_date: String(r.parts_ordered_date || "").trim() || null,
+      parts_status: String(r.parts_status || "").trim() || null,
+      parts_received_date: String(r.parts_received_date || "").trim() || null,
+      ets_repair_date: String(r.ets_repair_date || "").trim() || null,
+    }),
+  });
+
+  const breakdownId = Number(b.breakdown_id || b.breakdownId || b.id || 0);
+  if (!breakdownId) throw new Error(`${r.asset_code}: breakdown was not created`);
+
+  const notes = r.down_reason
+    ? `Auto from Daily Input (DOWN) — ${r.down_reason}`
+    : "Auto from Daily Input (DOWN)";
+  const downHoursRaw = r.down_hours != null ? Number(r.down_hours) : Number(r.scheduled_hours || 0);
+  const downHours = Number.isFinite(downHoursRaw) ? Math.max(0, downHoursRaw) : 0;
+
+  await fetchJson(`${API}/api/breakdowns/${breakdownId}/downtime`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      log_date: operationsDate,
+      hours_down: downHours,
+      notes,
+    }),
+  });
+
+  await fetchJson(`${API}/api/breakdowns/${breakdownId}/daily-progress`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      repair_progress: String(r.repair_progress || "").trim(),
+      scheduled_repair_date: String(r.ets_repair_date || "").trim() || null,
+    }),
+  });
+
+  const offsiteRepairId = await saveDailyOffsiteProgress(date, r, breakdownId);
+  r.breakdown_id = breakdownId;
+  r.work_order_id = Number(b.primary_work_order_id || r.work_order_id || 0) || null;
+  return { breakdownId, offsiteRepairId };
 }
 
 function renderDailyTable() {
@@ -15530,7 +15580,7 @@ function renderDailyTable() {
         </div>
         <div class="daily-hour-field">
           <label>Closing</label>
-          <input type="number" step="0.1" value="${fmt(r.closing_hours)}" class="daily-input ${r.is_down || r.telematics_locked ? 'disabled readonly' : ''}" ${r.is_down || r.telematics_locked ? 'readonly' : ''} title="${r.telematics_locked ? 'Hourmeter from FSC telematics' : ''}" />
+          <input type="number" step="0.1" value="${fmt(r.closing_hours)}" class="daily-input ${r.telematics_locked ? 'disabled readonly' : ''}" ${r.telematics_locked ? 'readonly' : ''} title="${r.telematics_locked ? 'Hourmeter from FSC telematics' : 'Enter the actual closing meter even when this machine had downtime'}" />
         </div>
         <div class="daily-hour-field">
           <label>Run</label>
@@ -15563,11 +15613,11 @@ function renderDailyTable() {
     const unitSelect = document.createElement("div");
     unitSelect.className = "daily-unit-select";
     unitSelect.innerHTML = `
-      <select class="daily-select ${r.is_down && r.down_lock ? 'disabled' : ''}" ${r.is_down && r.down_lock ? 'disabled' : ''}>
+      <select class="daily-select">
         <option value="hours" ${String(r.input_unit || "hours").toLowerCase() === "hours" ? 'selected' : ''}>HRS</option>
         <option value="km" ${String(r.input_unit || "hours").toLowerCase() === "km" ? 'selected' : ''}>KM</option>
       </select>
-      <button class="daily-btn-icon reset-unit" title="Reset to suggested (${r.suggested_input_unit || 'hours'})" ${r.is_down && r.down_lock ? 'disabled' : ''}>↺</button>
+      <button class="daily-btn-icon reset-unit" title="Reset to suggested (${r.suggested_input_unit || 'hours'})">↺</button>
     `;
     controlsCol.appendChild(unitSelect);
 
@@ -15590,13 +15640,13 @@ function renderDailyTable() {
 
       downDetails.innerHTML = `
         <div class="daily-down-title">
-          <strong>Maintenance / breakdown details</strong>
-          <span>Saved directly to the breakdown and work-order records</span>
+          <strong>Daily incident update</strong>
+          <span>One place for downtime, repair progress, parts, dates, and off-site tracking</span>
         </div>
         <div class="down-details-grid">
           <div class="down-field">
             <label>Reason</label>
-            <select class="daily-select ${r.is_down && r.down_lock ? 'disabled' : ''}" ${r.is_down && r.down_lock ? 'disabled' : ''}>
+            <select class="daily-select">
               <option value="">Select reason...</option>
               <option value="Mechanical" ${r.down_reason === "Mechanical" ? 'selected' : ''}>Mechanical</option>
               <option value="Electrical" ${r.down_reason === "Electrical" ? 'selected' : ''}>Electrical</option>
@@ -15615,7 +15665,7 @@ function renderDailyTable() {
           </div>
           <div class="down-field">
             <label>Component / Area</label>
-            <input type="text" value="${r.breakdown_component || ''}" class="daily-input" placeholder="Engine, hydraulics, tyres..." data-down-field="component" />
+            <input type="text" value="${escapeHtml(String(r.breakdown_component || ""))}" class="daily-input" placeholder="Engine, hydraulics, tyres..." data-down-field="component" />
           </div>
           <div class="down-field">
             <label>Priority</label>
@@ -15649,16 +15699,79 @@ function renderDailyTable() {
             <input type="date" value="${String(r.parts_received_date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || ""}" class="daily-input" data-down-field="parts_received" />
           </div>
           <div class="down-field">
-            <label>ETS Repair</label>
+            <label>Target repair date</label>
             <input type="date" value="${String(r.ets_repair_date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || ""}" class="daily-input" data-down-field="ets_repair" />
           </div>
           <div class="down-field full">
-            <label>Breakdown details / action taken</label>
-            <input type="text" value="${r.breakdown_comment || ''}" class="daily-input" placeholder="Describe the fault, inspection, repair or action required..." data-down-field="comment" />
+            <label>Fault / action taken</label>
+            <input type="text" value="${escapeHtml(String(r.breakdown_comment || ""))}" class="daily-input" placeholder="Describe the fault, inspection, repair or action required..." data-down-field="comment" />
           </div>
         </div>
+        <div class="daily-progress-panel">
+          <div class="daily-progress-heading">
+            <strong>Repair progress and next plan</strong>
+            <span>${r.work_order_id ? `Linked WO #${r.work_order_id}` : "A linked work order will be created when you save"}</span>
+          </div>
+          <div class="down-details-grid">
+            <div class="down-field full">
+              <label>Progress / next action</label>
+              <textarea rows="2" class="daily-input" placeholder="What was completed today, what is waiting, and the next action..." data-down-field="repair_progress">${escapeHtml(String(r.repair_progress || ""))}</textarea>
+            </div>
+            <div class="down-field full daily-offsite-toggle-field">
+              <label class="daily-offsite-toggle">
+                <input type="checkbox" data-down-field="offsite_enabled" ${r.offsite_enabled ? "checked" : ""} />
+                <span>Asset is off site for repair</span>
+              </label>
+              <span class="muted small">Use this only when the machine or component has left site.</span>
+            </div>
+          </div>
+          ${r.offsite_enabled ? `
+            <div class="daily-offsite-panel">
+              <div class="daily-progress-heading">
+                <strong>Off-site repair tracking</strong>
+                <span>Saved to the linked off-site repair record</span>
+              </div>
+              <div class="down-details-grid">
+                <div class="down-field">
+                  <label>Repair stage</label>
+                  <select class="daily-select" data-down-field="offsite_status">
+                    <option value="sent_offsite" ${r.offsite_status === "sent_offsite" ? "selected" : ""}>Sent off site</option>
+                    <option value="diagnosis" ${r.offsite_status === "diagnosis" ? "selected" : ""}>Diagnosis</option>
+                    <option value="in_repair" ${r.offsite_status === "in_repair" ? "selected" : ""}>In repair</option>
+                    <option value="waiting_parts" ${r.offsite_status === "waiting_parts" ? "selected" : ""}>Waiting parts</option>
+                    <option value="ready_return" ${r.offsite_status === "ready_return" ? "selected" : ""}>Ready to return</option>
+                    <option value="returned" ${r.offsite_status === "returned" ? "selected" : ""}>Returned</option>
+                  </select>
+                </div>
+                <div class="down-field">
+                  <label>Sent date</label>
+                  <input type="date" value="${String(r.offsite_sent_date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || ""}" class="daily-input" data-down-field="offsite_sent" />
+                </div>
+                <div class="down-field">
+                  <label>Expected return</label>
+                  <input type="date" value="${String(r.offsite_expected_return_date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || ""}" class="daily-input" data-down-field="offsite_expected" />
+                </div>
+                <div class="down-field">
+                  <label>Supplier / repairer</label>
+                  <input type="text" value="${escapeHtml(String(r.offsite_vendor || ""))}" class="daily-input" placeholder="Workshop or supplier" data-down-field="offsite_vendor" />
+                </div>
+                <div class="down-field">
+                  <label>Current location</label>
+                  <input type="text" value="${escapeHtml(String(r.offsite_location || ""))}" class="daily-input" placeholder="Workshop, city, depot..." data-down-field="offsite_location" />
+                </div>
+                <div class="down-field">
+                  <label>Actual return</label>
+                  <input type="date" value="${String(r.offsite_actual_return_date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || ""}" class="daily-input" data-down-field="offsite_actual" />
+                </div>
+                <div class="down-field full">
+                  <label>Off-site progress / next action</label>
+                  <textarea rows="2" class="daily-input" placeholder="Supplier update, parts status, collection plan..." data-down-field="offsite_progress">${escapeHtml(String(r.offsite_progress || ""))}</textarea>
+                </div>
+              </div>
+            </div>` : ""}
+        </div>
         ${startYmd ? `<div class="down-meta">Date down: ${startYmd}${calcDaysDown != null ? ` | Total days down: ${calcDaysDown}` : ""}</div>` : ""}
-        ${r.is_down && r.down_lock ? `<div class="down-lock-notice">Locked until WO is repaired (${r.lock_wo_status || "-"})</div>` : ""}
+        ${r.is_down && r.down_lock ? `<div class="down-lock-notice">Linked WO is ${escapeHtml(String(r.lock_wo_status || "open").replace(/_/g, " "))}. Meter inputs and the planning section remain editable here.</div>` : ""}
       `;
       contentGrid.appendChild(downDetails);
     }
@@ -15675,7 +15788,7 @@ function renderDailyTable() {
     container.appendChild(card);
 
     // Add event listeners
-    const inputs = card.querySelectorAll("input, select");
+    const inputs = card.querySelectorAll("input, select, textarea");
 
     inputs.forEach(input => {
       input.addEventListener("change", () => {
@@ -15702,12 +15815,35 @@ function renderDailyTable() {
             r.parts_received_date = String(input.value || "").trim();
           } else if (downField === "ets_repair") {
             r.ets_repair_date = String(input.value || "").trim();
+          } else if (downField === "offsite_sent") {
+            r.offsite_sent_date = String(input.value || "").trim();
+          } else if (downField === "offsite_expected") {
+            r.offsite_expected_return_date = String(input.value || "").trim();
+          } else if (downField === "offsite_actual") {
+            r.offsite_actual_return_date = String(input.value || "").trim();
           }
         } else if (type === "text") {
           if (input.getAttribute("data-down-field") === "component") {
             r.breakdown_component = String(input.value || "").trim();
           } else if (input.getAttribute("data-down-field") === "comment" || input.previousElementSibling?.textContent === "Comment") {
             r.breakdown_comment = String(input.value || "").trim();
+          } else if (input.getAttribute("data-down-field") === "offsite_vendor") {
+            r.offsite_vendor = String(input.value || "").trim();
+          } else if (input.getAttribute("data-down-field") === "offsite_location") {
+            r.offsite_location = String(input.value || "").trim();
+          }
+        } else if (type === "checkbox") {
+          if (input.getAttribute("data-down-field") === "offsite_enabled") {
+            r.offsite_enabled = Boolean(input.checked);
+            if (r.offsite_enabled && !r.offsite_sent_date) {
+              r.offsite_sent_date = dailyOperationsDate(qs("date")?.value || todayLocalYmd());
+            }
+          }
+        } else if (input.tagName === "TEXTAREA") {
+          if (input.getAttribute("data-down-field") === "repair_progress") {
+            r.repair_progress = String(input.value || "").trim();
+          } else if (input.getAttribute("data-down-field") === "offsite_progress") {
+            r.offsite_progress = String(input.value || "").trim();
           }
         } else if (input.tagName === "SELECT") {
           if (input.hasAttribute("data-daily-status")) {
@@ -15715,10 +15851,8 @@ function renderDailyTable() {
             r.is_down = nextStatus === "maintenance";
             r.is_used = nextStatus !== "standby";
             if (r.is_down) {
-              if (r.opening_hours != null) r.closing_hours = r.opening_hours;
-              r.hours_run = 0;
               if (r.down_hours == null) r.down_hours = Number(r.scheduled_hours || 10);
-              if (!r.breakdown_start_date) r.breakdown_start_date = String(qs("date")?.value || todayLocalYmd());
+              if (!r.breakdown_start_date) r.breakdown_start_date = dailyOperationsDate(qs("date")?.value || todayLocalYmd());
             } else {
               r.down_reason = "";
               r.down_hours = null;
@@ -15730,12 +15864,23 @@ function renderDailyTable() {
               r.parts_status = "";
               r.parts_received_date = "";
               r.ets_repair_date = "";
+              r.repair_progress = "";
+              r.offsite_enabled = false;
+              r.offsite_status = "sent_offsite";
+              r.offsite_sent_date = "";
+              r.offsite_expected_return_date = "";
+              r.offsite_actual_return_date = "";
+              r.offsite_vendor = "";
+              r.offsite_location = "";
+              r.offsite_progress = "";
             }
           } else if (cls.includes("daily-select") && !cls.includes("disabled")) {
             if (input.getAttribute("data-down-field") === "parts_status") {
               r.parts_status = String(input.value || "").trim();
             } else if (input.getAttribute("data-down-field") === "critical") {
               r.breakdown_critical = input.value === "critical";
+            } else if (input.getAttribute("data-down-field") === "offsite_status") {
+              r.offsite_status = String(input.value || "sent_offsite").trim();
             } else if (input.closest(".down-field")) {
               r.down_reason = String(input.value || "");
             } else if (input.value === "hours" || input.value === "km") {
@@ -15810,6 +15955,26 @@ async function loadDailyInput() {
     }
   } catch {
     openBreakdownByAsset = new Map();
+  }
+
+  let openOffsiteByBreakdown = new Map();
+  let openOffsiteByAsset = new Map();
+  try {
+    const offsiteData = await fetchJson(`${API}/api/breakdown-ops/offsite-repairs?include_closed=0`);
+    const rows = Array.isArray(offsiteData?.rows) ? offsiteData.rows : [];
+    for (const repair of rows) {
+      const breakdownId = Number(repair.breakdown_id || 0);
+      const assetCode = String(repair.asset_code || "").trim();
+      if (breakdownId && !openOffsiteByBreakdown.has(breakdownId)) {
+        openOffsiteByBreakdown.set(breakdownId, repair);
+      }
+      if (assetCode && !openOffsiteByAsset.has(assetCode)) {
+        openOffsiteByAsset.set(assetCode, repair);
+      }
+    }
+  } catch {
+    openOffsiteByBreakdown = new Map();
+    openOffsiteByAsset = new Map();
   }
 
   try {
@@ -15887,6 +16052,19 @@ async function loadDailyInput() {
       parts_status: "",
       parts_received_date: "",
       ets_repair_date: "",
+      breakdown_id: null,
+      work_order_id: null,
+      repair_progress: "",
+      repair_due_date: "",
+      offsite_enabled: false,
+      offsite_repair_id: null,
+      offsite_status: "sent_offsite",
+      offsite_sent_date: "",
+      offsite_expected_return_date: "",
+      offsite_actual_return_date: "",
+      offsite_vendor: "",
+      offsite_location: "",
+      offsite_progress: "",
 
       error: null,
       warning: null,
@@ -15974,18 +16152,39 @@ async function loadDailyInput() {
       row.parts_status = String(bd.parts_status || "").trim();
       row.parts_received_date = String(bd.parts_received_date || "").trim();
       row.ets_repair_date = String(bd.ets_repair_date || "").trim();
+      row.breakdown_id = Number(bd.id || 0) || null;
+      row.work_order_id = Number(bd.primary_work_order_id || 0) || null;
+      row.repair_progress = String(bd.repair_progress || "").trim();
+      row.repair_due_date = String(bd.repair_due_date || "").trim();
+      if (!row.ets_repair_date && row.repair_due_date) {
+        row.ets_repair_date = row.repair_due_date;
+      }
       const downForDate = Number(bd.hours_down_for_date);
       row.down_hours = Number.isFinite(downForDate) && downForDate >= 0
         ? downForDate
         : Number(row.scheduled_hours || 0);
-      if (row.opening_hours != null) {
-        row.closing_hours = row.opening_hours;
-        row.hours_run = 0;
+    }
+
+    const offsite = row.breakdown_id
+      ? (openOffsiteByBreakdown.get(Number(row.breakdown_id)) || openOffsiteByAsset.get(row.asset_code))
+      : null;
+    if (offsite) {
+      row.offsite_enabled = true;
+      row.offsite_repair_id = Number(offsite.id || 0) || null;
+      row.offsite_status = String(offsite.repair_status || "sent_offsite").trim();
+      row.offsite_sent_date = String(offsite.sent_date || "").trim();
+      row.offsite_expected_return_date = String(offsite.expected_return_date || "").trim();
+      row.offsite_actual_return_date = String(offsite.actual_return_date || "").trim();
+      row.offsite_vendor = String(offsite.vendor || "").trim();
+      row.offsite_location = String(offsite.current_location || "").trim();
+      row.offsite_progress = String(offsite.notes || "").trim();
+      if (!row.ets_repair_date && row.offsite_expected_return_date) {
+        row.ets_repair_date = row.offsite_expected_return_date;
       }
     }
 
     if (row.is_down && !String(row.breakdown_start_date || "").trim()) {
-      row.breakdown_start_date = date;
+      row.breakdown_start_date = dailyOperationsDate(date);
     }
 
     if (dailyScheduledOverride != null && !row.is_master_standby && (row.is_used || row.is_down)) {
@@ -16112,15 +16311,10 @@ renderDailyTable(); // re-render so errorRow highlighting appears
 
   const results = [];
   for (const r of dailyRows) {
-    if (r.is_down && r.opening_hours != null) {
-      r.closing_hours = r.opening_hours;
-      r.hours_run = 0;
-    }
-
     const payload = {
       asset_code: r.asset_code,
       work_date: date,
-      is_used: r.is_used,
+      is_used: r.is_down ? Number(r.hours_run || 0) > 0 : r.is_used,
       input_unit: String(r.input_unit || "hours").toLowerCase(),
       scheduled_hours: r.scheduled_hours ?? 0,
       opening_hours: r.opening_hours,
@@ -16138,17 +16332,26 @@ renderDailyTable(); // re-render so errorRow highlighting appears
     }
   }
 
+  const incidentFailures = [];
   for (const r of dailyRows) {
     if (!r.is_down) continue;
-    await logDownRowToBreakdowns(date, r);
+    try {
+      await logDownRowToBreakdowns(date, r);
+    } catch (e) {
+      incidentFailures.push({ asset_code: r.asset_code, error: e.message || String(e) });
+    }
   }
 
   const failed = results.filter((x) => !x.ok);
   const queued = results.filter((x) => x.queued).length;
 
-  setText("dailyResult", JSON.stringify({ saved: results.length - failed.length, failed }, null, 2));
+  setText("dailyResult", JSON.stringify({
+    saved: results.length - failed.length,
+    failed,
+    incident_updates_failed: incidentFailures,
+  }, null, 2));
 
-  if (failed.length) setStatus(`Saved with issues: ${failed.length} failed.`);
+  if (failed.length || incidentFailures.length) setStatus(`Saved with issues: ${failed.length + incidentFailures.length} failed.`);
   else if (queued) setStatus(`Saved offline: ${queued} queued for sync ✅`);
   else setStatus("Saved successfully.");
 
