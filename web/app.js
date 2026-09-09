@@ -7329,15 +7329,14 @@ function renderIronmindAskHistory() {
   if (!out) return;
   const rows = Array.isArray(window.__ironmindAskHistory) ? window.__ironmindAskHistory : [];
   if (!rows.length) {
-    out.innerHTML = `<small class="muted">Ask a question for short operational answers.</small>`;
+    out.innerHTML = `<small class="muted">What are we working on today?</small>`;
     return;
   }
   out.innerHTML = rows.map((h) => `
-    <div style="margin-bottom:10px;">
-      <div><b>You:</b> ${escapeHtml(String(h.question || ""))}</div>
-      <div><b>Borris:</b> ${escapeHtml(String(h.answer || "")).replace(/\n/g, "<br>")}</div>
-    </div>
+    <div class="borris-message borris-message-user"><span class="borris-speaker">You</span><div>${escapeHtml(String(h.question || "")).replace(/\n/g, "<br>")}</div></div>
+    <div class="borris-message borris-message-assistant"><span class="borris-speaker">Borris</span><div>${escapeHtml(String(h.answer || "")).replace(/\n/g, "<br>")}</div></div>
   `).join("");
+  out.scrollTop = out.scrollHeight;
 }
 
 async function hydrateIronmindAskMemory() {

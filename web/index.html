@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=14" />
+  <link rel="stylesheet" href="./styles.css?v=borris-chat-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -723,105 +723,19 @@
 
     <!-- BORRIS -->
     <section class="panel" id="tab-ironmind">
-      <div class="asset-cards-grid">
-        <!-- Borris Header Card -->
-        <div class="dash-card full-width">
-          <div class="dash-card-header">
-            <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.5-.8 2.8-2 3.5V11h2a3 3 0 0 1 3 3v1H5v-1a3 3 0 0 1 3-3h2V9.5A4 4 0 0 1 12 2z"></path></svg>
-              </div>
-              <div>
-                <h3>Borris (Maintenance Intelligence)</h3>
-                <p class="muted small">Learning IRONLOG's code and operational context before predictive planning is enabled.</p>
-              </div>
-            </div>
-            <span class="dash-card-badge">Code Learning Mode</span>
+      <div class="borris-page">
+        <header class="borris-header"><div><p class="borris-eyebrow">YOUR WORKSHOP ASSISTANT</p><h2>Borris</h2><p>Talk through a fault, explore your manuals, or plan the week ahead.</p></div><button id="ironmindResetMemoryBtn" class="btn btn-secondary" type="button">Clear conversation</button></header>
+        <div class="borris-conversation">
+          <div id="ironmindAskResult" class="borris-messages" role="log" aria-label="Conversation with Borris" aria-live="polite"><p class="muted">What are we working on today?</p></div>
+          <div class="borris-composer">
+            <label for="ironmindAskInput">Message Borris</label>
+            <textarea id="ironmindAskInput" class="ironmind-context" rows="3" placeholder="Ask about a machine, a fault code or a maintenance task..."></textarea>
+            <div class="borris-composer-actions"><small class="muted">Ctrl + Enter to send</small><button id="ironmindWeeklyPlanBtn" class="btn" type="button">Plan next week</button><button id="ironmindAskBtn" class="btn btn-primary" type="button">Send message</button></div>
+            <details class="borris-context"><summary>Add workshop context</summary><label for="ironmindContext">Site conditions or details to include</label><textarea id="ironmindContext" class="ironmind-context" rows="2" placeholder="Machine details, recent work, weather or operating conditions"></textarea></details>
           </div>
         </div>
-
-        <!-- Daily Insight Card -->
-        <div class="dash-card collapsible full-width" data-collapsed="false">
-          <div class="dash-card-header">
-            <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              </div>
-              <div>
-                <h3>BORRIS Daily Insight</h3>
-                <p class="muted small" id="ironmindMeta">No report loaded yet.</p>
-              </div>
-            </div>
-            <div class="dash-card-actions">
-              <span class="dash-card-badge" id="ironmindHealth">OpenAI: checking...</span>
-              <button class="report-card-toggle" aria-label="Toggle">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
-              </button>
-            </div>
-          </div>
-          <div class="report-card-body">
-            <div class="form-row">
-              <div class="form-field form-field-action">
-                <button id="ironmindRefreshBtn" class="btn btn-primary">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-                  Refresh Insight
-                </button>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-field form-field-full">
-                <label>Extra Context</label>
-                <textarea id="ironmindContext" class="ironmind-context" rows="3" placeholder="Optional context for Refresh Insight and Ask Borris (weather, incidents, priorities, constraints)..."></textarea>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-field">
-                <label class="checkbox-label">
-                  <input id="ironmindDetailMode" type="checkbox" />
-                  <span>More detailed insight</span>
-                </label>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-field form-field-full">
-                <label>Ask Borris</label>
-                <textarea id="ironmindAskInput" class="ironmind-context" rows="2" placeholder="Ask Borris anything about maintenance, risk, downtime, PM overdue, fuel trends... (Ctrl+Enter to send)"></textarea>
-              </div>
-            </div>
-            <div class="action-buttons">
-              <button id="ironmindWeeklyPlanBtn" class="btn" type="button">Plan next week</button>
-              <button id="ironmindAskBtn" class="btn btn-primary">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-                Ask
-              </button>
-              <button id="ironmindResetMemoryBtn" class="btn btn-secondary">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
-                Reset Memory
-              </button>
-            </div>
-            <div class="output ironmind-body" id="ironmindAskResult">
-              <small class="muted">Ask a question for short operational answers.</small>
-            </div>
-            <div class="output ironmind-body" id="ironmindSummary">
-              <small class="muted">Loading BORRIS insight...</small>
-            </div>
-            <details class="ironmind-history-pane" style="margin-top: 16px;">
-              <summary><b>BORRIS history (last 7 days)</b></summary>
-              <div class="row stack-6 ironmind-history-controls" style="margin-top: 10px;">
-                <label class="checkbox-label">
-                  <input id="ironmindShowMissingDays" type="checkbox" />
-                  <span>Include missing days</span>
-                </label>
-                <button id="ironmindReloadHistory" class="btn btn-secondary btn-sm">Reload history</button>
-              </div>
-              <div class="list" id="ironmindHistoryList">
-                <small class="muted">No history loaded yet.</small>
-              </div>
-            </details>
-          </div>
-        </div>
-
-        <!-- Hour Thresholds Card -->
+        <details class="borris-extra"><summary>Maintenance insights</summary><div class="stack-12"><p id="ironmindMeta" class="muted"></p><button id="ironmindRefreshBtn" class="btn" type="button">Refresh insights</button><label><input id="ironmindDetailMode" type="checkbox"> More detail</label><div id="ironmindSummary" class="output ironmind-body"></div><details><summary>Previous briefings</summary><label><input id="ironmindShowMissingDays" type="checkbox"> Include missing days</label><button id="ironmindReloadHistory" class="btn" type="button">Reload history</button><div id="ironmindHistoryList" class="list"></div></details></div></details>
+        <details class="borris-extra"><summary>Service tools and settings</summary><div class="asset-cards-grid">        <!-- Hour Thresholds Card -->
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
@@ -936,159 +850,9 @@
           </div>
         </div>
 
-        <div class="dash-card collapsible full-width" data-collapsed="false">
-          <div class="dash-card-header">
-            <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #ecfeff; color: #0e7490;">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18"></path><path d="M7 3v4"></path><path d="M17 3v4"></path><rect x="3" y="5" width="18" height="16" rx="2"></rect></svg>
-              </div>
-              <div>
-                <h3>Purchase Orders</h3>
-                <p class="muted small">Create, approve, and monitor PO lifecycle</p>
-              </div>
-            </div>
-            <button class="report-card-toggle" aria-label="Toggle">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
-            </button>
-          </div>
-          <div class="report-card-body">
-            <div class="form-row">
-              <div class="form-field">
-                <label>PO Status</label>
-                <select id="prPoStatusFilter" class="w-full">
-                  <option value="">All</option>
-                  <option value="draft">draft</option>
-                  <option value="approved">approved</option>
-                  <option value="sent">sent</option>
-                  <option value="partially_received">partially_received</option>
-                  <option value="received">received</option>
-                </select>
-              </div>
-              <div class="form-field form-field-action">
-                <button id="prLoadPoList" class="btn btn-primary">Load PO List</button>
-              </div>
-            </div>
-            <div class="list" id="prPoList" style="margin-top:12px;"></div>
-          </div>
-        </div>
-
-        <div class="dash-card collapsible full-width" data-collapsed="false">
-          <div class="dash-card-header">
-            <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eef2ff; color: #4338ca;">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-              </div>
-              <div>
-                <h3>PO Receipts + Invoices</h3>
-                <p class="muted small">Post GRNs, capture invoices, and run 3-way match</p>
-              </div>
-            </div>
-            <button class="report-card-toggle" aria-label="Toggle">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
-            </button>
-          </div>
-          <div class="report-card-body">
-            <div class="form-row">
-              <div class="form-field">
-                <label>PO ID</label>
-                <input id="prActivePoId" type="number" min="1" step="1" class="w-full" placeholder="PO ID" />
-              </div>
-              <div class="form-field">
-                <label>Location Code</label>
-                <input id="prReceiveLocationCode" class="w-full" value="MAIN" />
-              </div>
-              <div class="form-field">
-                <label>Receipt Lines JSON</label>
-                <input id="prReceiveLinesJson" class="w-full" placeholder='[{"po_line_id":1,"quantity_received":1}]' />
-              </div>
-              <div class="form-field form-field-action">
-                <button id="prPostReceiptBtn" class="btn btn-primary">Post Receipt</button>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-field">
-                <label>Invoice Number</label>
-                <input id="prInvoiceNumber" class="w-full" placeholder="INV-001" />
-              </div>
-              <div class="form-field">
-                <label>Invoice Lines JSON</label>
-                <input id="prInvoiceLinesJson" class="w-full" placeholder='[{"po_line_id":1,"quantity_invoiced":1,"unit_price":0}]' />
-              </div>
-              <div class="form-field form-field-action">
-                <button id="prCaptureInvoiceBtn" class="btn btn-primary">Capture Invoice</button>
-              </div>
-              <div class="form-field form-field-action">
-                <button id="prRunMatchBtn" class="btn btn-secondary">Run 3-Way Match</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="dash-card collapsible full-width" data-collapsed="false">
-          <div class="dash-card-header">
-            <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fff7ed; color: #c2410c;">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-              </div>
-              <div>
-                <h3>Exceptions + Journal Export</h3>
-                <p class="muted small">Resolve matching issues and build GL-ready journal files</p>
-              </div>
-            </div>
-            <button class="report-card-toggle" aria-label="Toggle">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
-            </button>
-          </div>
-          <div class="report-card-body">
-            <div class="form-row">
-              <div class="form-field">
-                <label>Exception Status</label>
-                <select id="prExceptionStatus" class="w-full">
-                  <option value="open">open</option>
-                  <option value="resolved">resolved</option>
-                </select>
-              </div>
-              <div class="form-field form-field-action">
-                <button id="prLoadExceptionsBtn" class="btn btn-primary">Load Exceptions</button>
-              </div>
-            </div>
-            <div class="list" id="prExceptionsList" style="margin-top:12px;"></div>
-            <div class="form-row" style="margin-top:12px;">
-              <div class="form-field">
-                <label>Journal Start</label>
-                <input id="prJournalStart" type="date" class="w-full" />
-              </div>
-              <div class="form-field">
-                <label>Journal End</label>
-                <input id="prJournalEnd" type="date" class="w-full" />
-              </div>
-              <div class="form-field">
-                <label>Batch ID (optional)</label>
-                <input id="prJournalBatchId" class="w-full" placeholder="JRN-..." />
-              </div>
-              <div class="form-field">
-                <label>Cost Center Default</label>
-                <input id="prJournalCc" class="w-full" placeholder="Optional" />
-              </div>
-              <div class="form-field form-field-action">
-                <button id="prBuildJournalBtn" class="btn btn-primary">Build Journals</button>
-              </div>
-              <div class="form-field form-field-action">
-                <button id="prExportJournalCsvBtn" class="btn btn-secondary">Export CSV</button>
-              </div>
-              <div class="form-field form-field-action">
-                <button id="prExportJournalXlsxBtn" class="btn btn-secondary">Export XLSX</button>
-              </div>
-            </div>
-            <div class="kpi-pills">
-              <span class="kpi-pill"><strong>Last Batch:</strong> <span id="prJournalLastBatch">-</span></span>
-            </div>
-          </div>
-        </div>
+</div><p id="ironmindHealth" class="muted"></p></details>
       </div>
-    </section>
-
-    <!-- LUBE -->
+    </section>    <!-- LUBE -->
     <section class="panel" id="tab-lube">
       <!-- Lube Header -->
       <div class="section-header">
@@ -7703,6 +7467,6 @@
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=2"></script>
-  <script src="./app.js?v=84"></script>
+  <script src="./app.js?v=85"></script>
 </body>
 </html>

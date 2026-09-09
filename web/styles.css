@@ -7980,3 +7980,27 @@ body.uc-qr-locked #ucAsset {
   border-color: var(--line);
   color: var(--ink);
 }
+
+/* Conversation-first Borris workspace */
+#tab-ironmind .borris-page {max-width:1000px;margin:0 auto;display:grid;gap:18px;}
+.borris-header {display:flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 2px;}
+.borris-header h2 {font-size:32px;letter-spacing:-.7px;margin:3px 0 8px;}
+.borris-header p {margin:0;line-height:1.6;}
+.borris-eyebrow {font-size:11px;font-weight:700;letter-spacing:1.5px;color:#64748b;}
+.borris-conversation {border:1px solid var(--border,#dce3eb);border-radius:20px;background:var(--card,#fff);overflow:hidden;box-shadow:0 8px 28px #0f172a08;}
+.borris-messages {min-height:300px;max-height:58vh;overflow-y:auto;padding:28px;display:flex;flex-direction:column;gap:18px;line-height:1.75;overflow-wrap:anywhere;}
+.borris-message {padding:16px 20px;border-radius:16px;max-width:90%;}
+.borris-message-user {align-self:flex-end;background:#eaf1ff;color:#1e3a5f;}
+.borris-message-assistant {align-self:flex-start;background:var(--bg,#f6f8fa);}
+.borris-speaker {display:block;font-size:11px;font-weight:750;letter-spacing:.7px;text-transform:uppercase;margin-bottom:5px;opacity:.65;}
+.borris-composer {border-top:1px solid var(--border,#dce3eb);padding:20px;display:grid;gap:10px;}
+.borris-composer>label {font-weight:650;font-size:13px;}
+#tab-ironmind #ironmindAskInput {width:100%;box-sizing:border-box;resize:vertical;min-height:90px;border-radius:12px;padding:14px;font:inherit;}
+.borris-composer-actions {display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;}
+.borris-composer-actions small {margin-right:auto;}
+.borris-extra,.borris-context {border:1px solid var(--border,#dce3eb);border-radius:12px;padding:14px 18px;background:var(--card,#fff);}
+.borris-context {border:0;padding:4px 0;font-size:13px;}
+.borris-extra>summary,.borris-context>summary {cursor:pointer;font-weight:600;}
+.borris-extra[open]>summary,.borris-context[open]>summary {margin-bottom:18px;}
+.borris-context textarea {width:100%;box-sizing:border-box;margin-top:8px;}
+@media(max-width:640px){.borris-header{align-items:flex-start;flex-direction:column;gap:12px}.borris-messages{padding:14px;min-height:250px}.borris-message{max-width:100%;padding:12px}.borris-composer{padding:14px}.borris-composer-actions small{width:100%}}
