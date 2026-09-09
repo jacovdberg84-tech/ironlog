@@ -21517,7 +21517,15 @@ async function loadWorkshopDocuments() {
         } catch(err) { qs('workshopUploadStatus').textContent=err.message; }
         finally { button.disabled=false; }
       });
-      card.append(title,details,button); out.appendChild(card);
+      const indexStatus=document.createElement('p');indexStatus.textContent='Borris index: '+doc.index.status+(doc.index.pages?' · '+doc.index.pages+' pages':'')+(doc.index.message?' — '+doc.index.message:'');
+      const indexButton=document.createElement('button');indexButton.type='button';indexButton.textContent='Index for Borris';
+      indexButton.disabled=['queued','indexing'].includes(doc.index.status);
+      indexButton.addEventListener('click',async()=>{
+        indexButton.disabled=true;
+        try {await fetchJson(API+'/api/workshop/documents/'+encodeURIComponent(doc.id)+'/index',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:'{}'});await loadWorkshopDocuments();}
+        catch(err){qs('workshopUploadStatus').textContent=err.message;indexButton.disabled=false;}
+      });
+      card.append(title,details,indexStatus,indexButton,button); out.appendChild(card);
     }
     if (data.documents.length === data.limit) {
       const note=document.createElement('p'); note.textContent='Showing the first ' + data.limit + ' documents. Narrow your search to find older records.'; out.appendChild(note);
@@ -21525,6 +21533,12 @@ async function loadWorkshopDocuments() {
   } catch(err) { out.textContent='Could not load documents: ' + err.message; }
 }
 function initWorkshopUploads() {
+  qs('workshopAskForm')?.addEventListener('submit',async event=>{
+    event.preventDefault();const form=event.currentTarget,button=form.querySelector('button'),out=qs('workshopAnswer');
+    button.disabled=true;out.textContent='Searching indexed manuals...';
+    try {const result=await fetchJson(API+'/api/workshop/ask',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify({question:new FormData(form).get('question')})});out.textContent=result.short_answer;}
+    catch(err){out.textContent='Could not answer: '+err.message;}finally{button.disabled=false;}
+  });
   qs('workshopSearchForm')?.addEventListener('submit', event => {event.preventDefault(); loadWorkshopDocuments();});
   qs('workshopUploadForm')?.addEventListener('submit', async event => {
     event.preventDefault(); const form=event.currentTarget, button=form.querySelector('button[type="submit"]'), status=qs('workshopUploadStatus');
@@ -21534,7 +21548,7 @@ function initWorkshopUploads() {
     try {
       const response=await fetch(API + '/api/workshop/documents', {method:'POST',headers:authHeaders(),body});
       const result=await response.json();if (!response.ok) throw new Error(result.error || 'Upload failed');
-      form.reset();status.textContent='Document stored in Ironlog. It is not yet indexed for Borris.';await loadWorkshopDocuments();
+      form.reset();status.textContent='Document stored. Select Index for Borris to make its text searchable.';await loadWorkshopDocuments();
     } catch(err) {status.textContent='Upload failed: ' + err.message;}
     finally {button.disabled=false;}
   });

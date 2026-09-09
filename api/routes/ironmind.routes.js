@@ -1,3 +1,4 @@
+import { answerWorkshop } from '../utils/workshopKnowledge.js';
 import fs from "node:fs";
 import path from "node:path";
 import { generateIronmindReport, getIronmindHistory, getLatestIronmindReport, getIronmindSettings, setIronmindSettings } from "../utils/ironmind.js";
@@ -1390,6 +1391,9 @@ export default async function ironmindRoutes(app) {
       const body = req.body || {};
       const question = String(body.question || "").trim();
       if (!question) return reply.code(400).send({ ok: false, error: "question is required" });
+      if (body.workshop_document_id || /\b(manual|bulletin|fault code|torque|specification)\b/i.test(question)) {
+        return reply.send(await answerWorkshop(db, question, String(body.workshop_document_id || '')));
+      }
       const fallbackDate = isDate(body.date) ? String(body.date) : todayYmd();
       const parsed = parseQuestionDates(question, fallbackDate);
       const start = isDate(body.start) ? String(body.start) : parsed.start;

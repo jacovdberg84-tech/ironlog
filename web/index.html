@@ -1914,7 +1914,7 @@
     <section class="panel" id="tab-workshop">
       <div class="card stack-12">
         <h3>Upload workshop documents</h3>
-        <p>Keep your manuals, OEM bulletins and documented fixes in Ironlog. PDF files up to 100 MB each. Uploading stores the original document; Borris content indexing is not yet enabled.</p>
+        <p>Keep your manuals, OEM bulletins and documented fixes in Ironlog. PDF files up to 100 MB each. After uploading, select Index for Borris. Scanned pages use local OCR where available.</p>
         <form id="workshopUploadForm" class="stack-12">
           <div class="row">
             <label>Title <input name="title" maxlength="200" required placeholder="e.g. B30E steering cylinder bulletin"></label>
@@ -1928,6 +1928,10 @@
           <button type="submit" class="btn btn-primary">Upload to Ironlog</button>
         </form>
         <p id="workshopUploadStatus" role="status" aria-live="polite"></p>
+        <h3>Ask the workshop manuals</h3>
+        <form id="workshopAskForm" class="row"><label>Question <input name="question" required maxlength="2000" placeholder="e.g. B30D water pump fault code"></label><button type="submit">Ask Borris with sources</button></form>
+        <p class="muted">Searches indexed documents. Check model, revision and applicability in the cited original pages.</p>
+        <pre id="workshopAnswer" class="output" style="white-space:pre-wrap" aria-live="polite"></pre>
         <h3>Stored documents</h3>
         <form id="workshopSearchForm" class="row"><label>Search <input id="workshopSearch" placeholder="Title, manufacturer, model or revision"></label><button type="submit">Search / refresh</button></form>
         <div id="workshopDocumentList" class="stack-12" aria-live="polite"></div>
@@ -7699,6 +7703,6 @@
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=2"></script>
-  <script src="./app.js?v=82"></script>
+  <script src="./app.js?v=83"></script>
 </body>
 </html>

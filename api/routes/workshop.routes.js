@@ -1,3 +1,4 @@
+import { createWorkshopIndexer, answerWorkshop } from '../utils/workshopKnowledge.js';
 import multipart from '@fastify/multipart';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -20,13 +21,26 @@ export default async function workshopRoutes(app, options = {}) {
     filename TEXT NOT NULL, size_bytes INTEGER NOT NULL, uploaded_by TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
+  const indexer = createWorkshopIndexer(db, root, path);
   const types = new Set(['Parts Manual','Workshop Manual','Service Manual','OEM Bulletin','Technical Document','Workshop Fix']);
   app.get('/documents', async req => {
     const q = String(req.query?.q || '').trim().slice(0,200);
     const rows = db.prepare(`SELECT * FROM workshop_documents WHERE
       instr(lower(title || ' ' || manufacturer || ' ' || model || ' ' || doc_type || ' ' || revision || ' ' || applicability), lower(?)) > 0
       ORDER BY created_at DESC, id DESC LIMIT 500`).all(q);
-    return {ok:true, documents:rows, limit:500};
+    return {ok:true, documents:rows.map(r=>({...r,index:db.prepare('SELECT * FROM workshop_index_jobs WHERE document_id=?').get(r.id)||{status:'not_indexed'}})), limit:500};
+  });
+  app.post('/documents/:id/index', async (req,reply) => {
+    const roles=(String(req.headers['x-user-roles']||'')+','+String(req.headers['x-user-role']||'')).split(',').map(s=>s.trim());
+    if (!roles.some(r=>['admin','supervisor','workshop_admin','plant_manager'].includes(r)) && (isAuthRequired() || roles.some(Boolean))) return reply.code(403).send({error:'Workshop administrator or supervisor required.'});
+    const id=String(req.params.id);
+    if(!/^[a-f0-9-]{36}$/.test(id) || !db.prepare('SELECT id FROM workshop_documents WHERE id=?').get(id))return reply.code(404).send({error:'Document not found'});
+    indexer.enqueue(id);return reply.code(202).send({ok:true});
+  });
+  app.post('/ask', async (req,reply) => {
+    const question=String(req.body?.question||'').trim();
+    if(!question || question.length>2000)return reply.code(400).send({error:'Enter a question up to 2000 characters.'});
+    return answerWorkshop(db,question,String(req.body?.document_id||''));
   });
   app.post('/documents', async (req, reply) => {
     const roles = (String(req.headers['x-user-roles'] || '') + ',' + String(req.headers['x-user-role'] || '')).split(',').map(s=>s.trim());
