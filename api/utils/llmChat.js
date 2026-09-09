@@ -110,6 +110,7 @@ export async function openAiCompatibleChatCompletion(body) {
     : null;
 
   let res;
+  let data;
   try {
     res = await fetch(url, {
       method: "POST",
@@ -117,6 +118,7 @@ export async function openAiCompatibleChatCompletion(body) {
       body: JSON.stringify(payload),
       signal: controller?.signal,
     });
+    data = await res.json();
   } catch (e) {
     if ((e?.name === "AbortError" || e?.code === "ABORT_ERR") && timeoutMs > 0) {
       lastLlmChatError = `timeout after ${timeoutMs}ms`;
@@ -129,7 +131,7 @@ export async function openAiCompatibleChatCompletion(body) {
     if (timer) clearTimeout(timer);
   }
 
-  const data = await res.json().catch(() => ({}));
+
   const safeUrl = url.replace(/^(https?:\/\/[^/]+).*/, "$1/…/chat/completions");
 
   if (!res.ok) {
@@ -161,3 +163,5 @@ export function chatEndpointSummaryForLogs() {
   const url = resolveOpenAiCompatibleChatUrl();
   return url.replace(/^(https?:\/\/[^/]+).*/, "$1/…");
 }
+
+

@@ -850,7 +850,9 @@ async function fetchJson(url, opts) {
         updateAuthChrome();
       }
     }
-    throw new Error(data.error || data.message || text || `Request failed (${res.status})`);
+    if ([502,503,504,524].includes(res.status)) throw new Error('Ironlog took too long to respond or is temporarily unavailable. Please retry shortly.');
+    const message = typeof data.error === 'string' ? data.error : typeof data.message === 'string' ? data.message : '';
+    throw new Error(message || `Request failed (${res.status}). Please retry or contact your administrator.`);
   }
   return data;
 }
