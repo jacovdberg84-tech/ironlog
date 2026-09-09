@@ -194,8 +194,10 @@ function daysDownForBreakdown(bd, reportDate) {
 
   const spanDays = spanEnd >= startDate ? inclusiveDaysBetween(startDate, spanEnd) : 0;
   if (logged > 0) {
-    // If daily logs are sparse/missing on some days, do not under-report days down.
-    return Math.max(logged, calculated, spanDays);
+    // A Daily Log downtime entry is the operational source of truth. Do not
+    // turn a one-hour incident into several full days merely because its WO
+    // remains open for follow-up work.
+    return logged;
   }
 
   return Math.max(calculated, spanDays, 1);
@@ -598,8 +600,7 @@ function kpiDaily(date, scheduled, dailyHoursDate = date, opts = {}) {
         AND NOT EXISTS (
           SELECT 1 FROM breakdown_downtime_logs l
           WHERE l.breakdown_id = b.id
-            AND l.log_date = ?
-            AND COALESCE(l.hours_down, 0) > 0
+            AND l.log_date <= ?
         )
         AND NOT EXISTS (
           SELECT 1 FROM work_orders wbx
@@ -7452,6 +7453,7 @@ export default async function reportsRoutes(app) {
           FROM breakdown_downtime_logs l
           WHERE l.breakdown_id = b.id
             AND l.log_date <= ?
+            AND COALESCE(l.hours_down, 0) > 0
         ), 0) AS logged_days
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
@@ -10339,7 +10341,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    const reportRevision = "daily-pdf-completed-repair-downtime-r2026-09-09";
+    const reportRevision = "daily-pdf-explicit-downtime-r2026-09-09";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -10427,6 +10429,7 @@ export default async function reportsRoutes(app) {
           FROM breakdown_downtime_logs l
           WHERE l.breakdown_id = b.id
             AND l.log_date <= ?
+            AND COALESCE(l.hours_down, 0) > 0
         ), 0) AS logged_days
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
@@ -10452,8 +10455,7 @@ export default async function reportsRoutes(app) {
         ...r,
         critical: Boolean(r.critical),
         days_down: daysDown,
-        // Align displayed downtime with selected daily scheduled hours.
-        downtime_hours: Number(daysDown) * Number(scheduled || 0),
+        downtime_hours: Number(r.downtime_hours || 0),
       };
     }).sort((a, b) => {
       const bDate = String(b.breakdown_date || b.start_at || "");
@@ -10771,8 +10773,10 @@ export default async function reportsRoutes(app) {
         );
       }
 
-      // A machine that remained on an active breakdown for the operations day is
-      // unavailable for that day even when its automatically-created log is still 0.
+      // Only infer a full shift for a brand-new open incident with no Daily Log
+      // downtime entry at all. Once an operator has recorded actual downtime,
+      // those hours are authoritative; an open WO alone must not create another
+      // full-shift loss on later reports.
       const activeDownAssets = db.prepare(`
         SELECT DISTINCT b.asset_id
         FROM breakdowns b
@@ -10787,7 +10791,13 @@ export default async function reportsRoutes(app) {
               AND REPLACE(TRIM(LOWER(COALESCE(wa.status, ''))), ' ', '_')
                 IN ('completed', 'approved', 'closed')
           )
-      `).all(...(hasBreakdownEndAt ? [opsDay, opsDay] : [opsDay]));
+          AND NOT EXISTS (
+            SELECT 1
+            FROM breakdown_downtime_logs l
+            WHERE l.breakdown_id = b.id
+              AND l.log_date <= ?
+          )
+      `).all(...(hasBreakdownEndAt ? [opsDay, opsDay, opsDay] : [opsDay, opsDay]));
       for (const r of activeDownAssets) {
         const assetId = Number(r.asset_id || 0);
         if (assetId > 0 && Number(downtimeByAssetId.get(assetId) || 0) <= 0) {
@@ -11048,22 +11058,19 @@ export default async function reportsRoutes(app) {
           })
         );
 
-        const maintenanceWords = /planned maintenance|service|maintenance/i;
-        const loggedMaintenanceAssets = new Set();
+        // Every Daily Log incident is a breakdown, even if its reason says
+        // maintenance or service. Planned services without downtime remain
+        // listed separately below as Maintenance.
+        const loggedDowntimeAssets = new Set();
         const dailyDowntimeRows = dailyDowntimeLogs.map((r) => {
-          const detail = [r.description, r.notes, r.component].filter(Boolean).join(" | ");
-          const isMaintenance = maintenanceWords.test(detail);
-          if (isMaintenance) loggedMaintenanceAssets.add(String(r.asset_code || ""));
+          loggedDowntimeAssets.add(String(r.asset_code || ""));
           return {
             asset: r.asset_code,
             equipment: compactCell(r.asset_name ?? "", 48),
-            type: isMaintenance ? "Maintenance" : "Breakdown",
-            hrs: fmtNum(
-              Number(r.hours_down || 0) > 0 ? r.hours_down : scheduledFallback,
-              1,
-            ),
+            type: "Breakdown",
+            hrs: fmtNum(Math.max(0, Number(r.hours_down || 0)), 1),
             area: compactCell(r.component ?? "", 42) || "—",
-            detail: compactCell(String(r.notes || r.description || "").replace(/^Auto from Daily Input \(DOWN\)\s*[—-]?\s*/i, ""), 220),
+            detail: compactCell(String(r.notes || r.description || "").replace(/^(?:Auto from Daily Input \(DOWN\)|Daily Log breakdown)\s*[—-]?\s*/i, ""), 220),
           };
         });
         for (const r of completedBreakdownRepairDowntime) {
@@ -11080,7 +11087,7 @@ export default async function reportsRoutes(app) {
           });
         }
         for (const r of dailyPlannedMaintenance) {
-          if (loggedMaintenanceAssets.has(String(r.asset_code || ""))) continue;
+          if (loggedDowntimeAssets.has(String(r.asset_code || ""))) continue;
           dailyDowntimeRows.push({
             asset: r.asset_code,
             equipment: compactCell(r.asset_name ?? "", 48),

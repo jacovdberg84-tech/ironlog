@@ -4666,12 +4666,14 @@ export default async function maintenanceRoutes(app) {
               AND a.archived = 0
           `).all();
 
-      const hasOpenServiceWO = db.prepare(`
-        SELECT 1
+      const findOpenServiceWO = db.prepare(`
+        SELECT id, status
         FROM work_orders
         WHERE source = 'service'
           AND reference_id = ?
-          AND status != 'closed'
+          AND REPLACE(TRIM(LOWER(COALESCE(status, ''))), ' ', '_')
+            NOT IN ('closed', 'completed', 'approved', 'cancelled')
+        ORDER BY id DESC
         LIMIT 1
       `);
 
@@ -4695,6 +4697,7 @@ export default async function maintenanceRoutes(app) {
 
       const tx = db.transaction(() => {
         const created = [];
+        const skipped = [];
 
         for (const p of nextServices) {
           const current = Number(p.current_hours || 0);
@@ -4704,7 +4707,18 @@ export default async function maintenanceRoutes(app) {
           const isRequestedPlan = requestedPlanIds.includes(Number(p.plan_id || 0));
           const shouldCreate = requestedPlanIds.length ? isRequestedPlan : isOverdue;
           if (!shouldCreate) continue;
-          if (hasOpenServiceWO.get(p.plan_id)) continue;
+          const existing = findOpenServiceWO.get(p.plan_id);
+          if (existing) {
+            skipped.push({
+              plan_id: Number(p.plan_id),
+              asset_id: Number(p.asset_id),
+              asset_code: p.asset_code,
+              reason: "open_work_order_exists",
+              work_order_id: Number(existing.id),
+              work_order_status: String(existing.status || "open"),
+            });
+            continue;
+          }
 
           const wo = insertWO.run(p.asset_id, p.plan_id);
           created.push({
@@ -4717,17 +4731,19 @@ export default async function maintenanceRoutes(app) {
           });
         }
 
-        return created;
+        return { created, skipped };
       });
 
-      const created = tx();
+      const result = tx();
+      const created = result.created;
 
       return reply.send({
         ok: true,
         near_due_hours: nearDueHours,
         requested_plan_count: requestedPlanIds.length,
         created_count: created.length,
-        created
+        created,
+        skipped: result.skipped,
       });
     } catch (err) {
       req.log.error(err);

@@ -2837,7 +2837,11 @@ async function generateWO() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to generate work orders");
     const mode = selectedPlans.length ? "selected plans" : "overdue plans";
-    alert(`Created ${Number(data.created_count || 0)} work orders (${mode})`);
+    const skipped = Array.isArray(data.skipped) ? data.skipped : [];
+    const skippedMsg = skipped.length
+      ? `\n\nAlready open: ${skipped.map((r) => `${r.asset_code || "asset"} — WO #${r.work_order_id}`).join(", ")}`
+      : "";
+    alert(`Created ${Number(data.created_count || 0)} work orders (${mode})${skippedMsg}`);
     selectedDuePlanIds.clear();
     await loadPlans();
     await loadDue();

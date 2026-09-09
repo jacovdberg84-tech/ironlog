@@ -5657,7 +5657,8 @@ body.sidebar-collapsed .main-content {
 }
 
 .daily-progress-panel,
-.daily-offsite-panel {
+.daily-offsite-panel,
+.daily-short-breakdown-panel {
   margin-top: 14px;
   padding: 14px;
   border: 1px solid #dbeafe;
@@ -5668,6 +5669,11 @@ body.sidebar-collapsed .main-content {
 .daily-offsite-panel {
   border-color: #fed7aa;
   background: #fffaf5;
+}
+
+.daily-short-breakdown-panel {
+  border-color: #bbf7d0;
+  background: #f7fdf9;
 }
 
 .daily-progress-heading {
