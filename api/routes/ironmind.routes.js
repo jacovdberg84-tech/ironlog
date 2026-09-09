@@ -1,3 +1,4 @@
+import { isStockQuestion, stockLookup } from '../utils/stockKnowledge.js';
 import { isManualQuestion, assetCandidates } from '../utils/questionIntent.js';
 import { answerWorkshop } from '../utils/workshopKnowledge.js';
 import fs from "node:fs";
@@ -1394,7 +1395,16 @@ export default async function ironmindRoutes(app) {
       const question = String(body.question || "").trim();
       if (!question) return reply.code(400).send({ ok: false, error: "question is required" });
       if (body.workshop_document_id || isManualQuestion(question)) {
-        return reply.send(await answerWorkshop(db, question, String(body.workshop_document_id || '')));
+        const manual=await answerWorkshop(db, question, String(body.workshop_document_id || ''));
+        if (/\b(parts?|seals?|bearings?|filters?)\b/i.test(question) || isStockQuestion(question)) {
+          const stock=stockLookup(db,question,manual.sources);
+          return reply.send({...manual,stock:stock.matches,short_answer:manual.short_answer+'\n\n'+stock.short_answer});
+        }
+        return reply.send(manual);
+      }
+      if (isStockQuestion(question)) {
+        const stock=stockLookup(db,question);
+        return reply.send({ok:true,short_answer:stock.short_answer,stock:stock.matches});
       }
       const fallbackDate = isDate(body.date) ? String(body.date) : todayYmd();
       const parsed = parseQuestionDates(question, fallbackDate);
