@@ -30,3 +30,12 @@ test('stock questions route explicitly without intercepting generic maintenance 
  assert.equal(isStockQuestion('What is the unit price of HS-12345?'),true);
  assert.equal(isStockQuestion('Show downtime for A301AM'),false);
 });
+
+test('store terminology routes to inventory and is removed from description matching',()=>{
+ const db=fixture();try {
+  for(const q of ['Find hub seals in stores','Show store items hub seals','Check spares hub seals']) {
+   assert.equal(isStockQuestion(q),true,q);
+   assert.equal(stockLookup(db,q).matches.length,2,q);
+  }
+ }finally{db.close();}
+});

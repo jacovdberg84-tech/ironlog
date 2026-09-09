@@ -1,7 +1,7 @@
 export function isStockQuestion(question) {
- return /\b(stock|on hand|in store|bin|inventory|do we have|how many|unit price|unit cost|stock code)\b/i.test(String(question));
+ return /\b(stocks?|stores?|store items?|on hand|bins?|inventory|do we have|how many|unit price|unit cost|stock code|spares?|parts? availability)\b/i.test(String(question));
 }
-const stop=new Set('can could should there any us manual catalogue catalog look up i we you me my our it them these those this that the a an and or for with from to in of do does is are have has how many much where what which please need will would like find check show tell available availability stock store stores hand inventory bin price cost unit part parts number numbers location file bell caterpillar atlas copco mercedes benz machine model'.split(' '));
+const stop=new Set('can could should there any us manual catalogue catalog look up i we you me my our it them these those this that the a an and or for with from to in of do does is are have has how many much where what which please need will would like find check show tell item items spare spares available availability stock store stores hand inventory bin price cost unit part parts number numbers location file bell caterpillar atlas copco mercedes benz machine model'.split(' '));
 const tokens=text=>[...new Set(String(text).toUpperCase().match(/[A-Z0-9][A-Z0-9._/-]{1,49}/g)||[])];
 export function stockLookup(db,question,sources=[]) {
  if(!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='parts'").get())return {matches:[],short_answer:'Stock lookup is unavailable: the parts catalogue is missing.'};
@@ -40,4 +40,5 @@ export function stockLookup(db,question,sources=[]) {
  if(truncated)lines.push('More matches exist. Narrow the question with an exact stock code.');
  return {matches:rows,truncated,short_answer:lines.join('\n\n')};
 }
+
 
