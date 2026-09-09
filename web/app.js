@@ -10697,7 +10697,7 @@ function switchTab(key) {
     loadAssetsFleet().catch(() => {});
   }
   if (k === "workshop") {
-    openWorkshopLibraryOnTabActivate();
+    loadWorkshopDocuments().catch(() => {});
   }
   if (k === "vehicle") {
     loadChecklistHub().catch(() => {});
@@ -21490,3 +21490,53 @@ document.addEventListener("DOMContentLoaded", () => {
   try { bindEnterpriseHandlers(); } catch (e) { console.error("enterprise bind failed", e); }
   try { if (typeof window.bindStoreQrAdmin === "function") window.bindStoreQrAdmin(); } catch (e) { console.error("store QR bind failed", e); }
 });
+
+// Internal workshop reference library. Download through authenticated fetch.
+async function loadWorkshopDocuments() {
+  const out = qs('workshopDocumentList');
+  if (!out) return;
+  out.textContent = 'Loading documents...';
+  try {
+    const data = await fetchJson(API + '/api/workshop/documents?q=' + encodeURIComponent(qs('workshopSearch')?.value || ''));
+    out.replaceChildren();
+    if (!data.documents.length) out.textContent = 'No matching documents. Upload your first manual above.';
+    for (const doc of data.documents) {
+      const card = document.createElement('div'); card.className = 'card';
+      const title = document.createElement('strong'); title.textContent = doc.title;
+      const details = document.createElement('p');
+      details.textContent = [doc.doc_type,doc.manufacturer,doc.model,doc.revision && 'Revision ' + doc.revision,doc.applicability,(doc.size_bytes / 1048576).toFixed(1) + ' MB'].filter(Boolean).join(' · ');
+      const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Download PDF';
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          const response = await fetch(API + '/api/workshop/documents/' + encodeURIComponent(doc.id) + '/file', {headers: authHeaders()});
+          if (!response.ok) throw new Error('Download failed. Check your login and retry.');
+          const url = URL.createObjectURL(await response.blob());
+          const link = document.createElement('a'); link.href=url; link.download=doc.filename; document.body.appendChild(link); link.click(); link.remove();
+          setTimeout(()=>URL.revokeObjectURL(url),60000);
+        } catch(err) { qs('workshopUploadStatus').textContent=err.message; }
+        finally { button.disabled=false; }
+      });
+      card.append(title,details,button); out.appendChild(card);
+    }
+    if (data.documents.length === data.limit) {
+      const note=document.createElement('p'); note.textContent='Showing the first ' + data.limit + ' documents. Narrow your search to find older records.'; out.appendChild(note);
+    }
+  } catch(err) { out.textContent='Could not load documents: ' + err.message; }
+}
+function initWorkshopUploads() {
+  qs('workshopSearchForm')?.addEventListener('submit', event => {event.preventDefault(); loadWorkshopDocuments();});
+  qs('workshopUploadForm')?.addEventListener('submit', async event => {
+    event.preventDefault(); const form=event.currentTarget, button=form.querySelector('button[type="submit"]'), status=qs('workshopUploadStatus');
+    const body=new FormData(form); const file=body.get('file');
+    if (!file || file.size > 100*1024*1024 || !file.name.toLowerCase().endsWith('.pdf')) {status.textContent='Choose a PDF up to 100 MB.';return;}
+    button.disabled=true;status.textContent='Uploading document...';
+    try {
+      const response=await fetch(API + '/api/workshop/documents', {method:'POST',headers:authHeaders(),body});
+      const result=await response.json();if (!response.ok) throw new Error(result.error || 'Upload failed');
+      form.reset();status.textContent='Document stored in Ironlog. It is not yet indexed for Borris.';await loadWorkshopDocuments();
+    } catch(err) {status.textContent='Upload failed: ' + err.message;}
+    finally {button.disabled=false;}
+  });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',initWorkshopUploads); else initWorkshopUploads();

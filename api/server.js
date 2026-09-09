@@ -1,3 +1,4 @@
+import workshopRoutes from './routes/workshop.routes.js';
 // IRONLOG/api/server.js
 import Fastify from "fastify";
 import cors from "@fastify/cors";
@@ -96,6 +97,7 @@ app.register(operationsRoutes, { prefix: "/api/operations" });
 app.register(dispatchRoutes, { prefix: "/api/dispatch" });
 app.register(qualityRoutes, { prefix: "/api/quality" });
 app.register(syncRoutes, { prefix: "/api/sync" });
+app.register(workshopRoutes, { prefix: '/api/workshop' });
 app.register(docsRoutes, { prefix: "/api/docs" });
 app.register(ironmindRoutes, { prefix: "/api/ironmind" });
 app.register(inspectproRoutes, { prefix: "/api/integrations/inspectpro" });

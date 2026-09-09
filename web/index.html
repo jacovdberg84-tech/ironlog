@@ -1912,6 +1912,26 @@
 
     <!-- WORKSHOP LIBRARY -->
     <section class="panel" id="tab-workshop">
+      <div class="card stack-12">
+        <h3>Upload workshop documents</h3>
+        <p>Keep your manuals, OEM bulletins and documented fixes in Ironlog. PDF files up to 100 MB each. Uploading stores the original document; Borris content indexing is not yet enabled.</p>
+        <form id="workshopUploadForm" class="stack-12">
+          <div class="row">
+            <label>Title <input name="title" maxlength="200" required placeholder="e.g. B30E steering cylinder bulletin"></label>
+            <label>Document type <select name="doc_type"><option>Parts Manual</option><option>Workshop Manual</option><option>Service Manual</option><option>OEM Bulletin</option><option>Technical Document</option><option>Workshop Fix</option></select></label>
+            <label>Manufacturer <input name="manufacturer" maxlength="500" placeholder="e.g. Bell"></label>
+            <label>Model / engine <input name="model" maxlength="500" placeholder="e.g. B30E / OM926"></label>
+            <label>Revision / edition <input name="revision" maxlength="500"></label>
+            <label>Serial range / applicability <input name="applicability" maxlength="500"></label>
+          </div>
+          <label>PDF document <input name="file" type="file" accept=".pdf,application/pdf" required></label>
+          <button type="submit" class="btn btn-primary">Upload to Ironlog</button>
+        </form>
+        <p id="workshopUploadStatus" role="status" aria-live="polite"></p>
+        <h3>Stored documents</h3>
+        <form id="workshopSearchForm" class="row"><label>Search <input id="workshopSearch" placeholder="Title, manufacturer, model or revision"></label><button type="submit">Search / refresh</button></form>
+        <div id="workshopDocumentList" class="stack-12" aria-live="polite"></div>
+      </div>
       <div class="asset-cards-grid">
         <div class="dash-card full-width">
           <div class="dash-card-header">
@@ -1921,14 +1941,14 @@
               </div>
               <div>
                 <h3>Workshop Library</h3>
-                <p class="muted small">Opens automatically in a new browser tab when you select this section.</p>
+                <p class="muted small">Your previous external library remains available here. New uploads above are stored in Ironlog.</p>
               </div>
             </div>
           </div>
           <div class="report-card-body">
-            <p class="muted small" id="workshopLibraryStatus">Opening Workshop Library…</p>
+            <p class="muted small" id="workshopLibraryStatus">External library (optional)</p>
             <div class="action-buttons" style="margin-top: 12px;">
-              <button type="button" class="btn btn-primary" data-workshop-open="site">Open Library again</button>
+              <button type="button" class="btn btn-primary" data-workshop-open="site">Open external library</button>
             </div>
           </div>
         </div>
@@ -7679,6 +7699,6 @@
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=2"></script>
-  <script src="./app.js?v=79"></script>
+  <script src="./app.js?v=82"></script>
 </body>
 </html>
