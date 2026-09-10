@@ -17437,6 +17437,43 @@ async function loadAssetDetailHeader(asset_code) {
   }
 }
 
+function loadAssetDetailsForm(assetCode) {
+  const code = String(assetCode || "").trim();
+  const asset = assetsFleetCache.find((card) => String(card.asset_code || "") === code);
+  if (qs("assetDetailsName")) qs("assetDetailsName").value = asset?.asset_name || "";
+  if (qs("assetDetailsCategory")) qs("assetDetailsCategory").value = asset?.category || "";
+  if (qs("assetDetailsStatus")) {
+    qs("assetDetailsStatus").textContent = asset
+      ? `Editing ${code}. Leave the class blank only when the asset does not need one.`
+      : "Select a fleet card above to edit its details.";
+  }
+}
+
+async function saveAssetDetails() {
+  const code = getSelectedAssetCode();
+  const description = String(qs("assetDetailsName")?.value || "").trim();
+  const category = String(qs("assetDetailsCategory")?.value || "").trim();
+  const status = qs("assetDetailsStatus");
+  if (!code) return alert("Select a fleet card first.");
+  if (!description) return alert("Enter an equipment description.");
+
+  if (status) status.textContent = `Saving details for ${code}…`;
+  try {
+    await fetchJson(`${API}/api/assets/${encodeURIComponent(code)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ asset_name: description, category: category || null }),
+    });
+    await loadAssetsFleet();
+    await selectAssetCard(code, { loadHistory: false, scroll: false });
+    if (status) status.textContent = `Equipment details saved for ${code}.`;
+    setStatus(`Equipment details saved for ${code}.`);
+  } catch (e) {
+    if (status) status.textContent = String(e.message || e);
+    setStatus("Equipment details save failed.");
+  }
+}
+
 async function selectAssetCard(asset_code, opts = {}) {
   const code = String(asset_code || "").trim();
   if (!code) return;
@@ -17458,6 +17495,7 @@ async function selectAssetCard(asset_code, opts = {}) {
     syncPlantHireAssetLabel(code);
   }
   ensureAssetHistoryDateRange();
+  loadAssetDetailsForm(code);
   await loadAssetDetailHeader(code);
   if (opts.loadHistory !== false) {
     await loadAssetHistory().catch((e) => setStatus("History error: " + (e.message || e)));
@@ -19174,6 +19212,9 @@ async function init() {
 
   qs("btnUnarchiveAsset")?.addEventListener("click", () =>
     unarchiveSelectedAsset().catch((e) => setStatus("Unarchive error: " + e.message))
+  );
+  qs("saveAssetDetails")?.addEventListener("click", () =>
+    saveAssetDetails().catch((e) => setStatus("Equipment details error: " + e.message))
   );
   qs("saveContractorAsset")?.addEventListener("click", () =>
     saveContractorAsset().catch((e) => setStatus("Contractor asset save error: " + e.message))

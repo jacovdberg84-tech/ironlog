@@ -1499,6 +1499,24 @@
           </div>
           <div class="report-card-body">
             <div id="assetDetailHeader" class="asset-detail-header"></div>
+            <div class="info-note" style="margin: 14px 0 10px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              <span>Edit the equipment description and class shown on fleet cards, Daily Log, reports, and QR forms.</span>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Equipment description</label>
+                <input id="assetDetailsName" class="w-full" placeholder="e.g. CAT 140K Motor Grader" />
+              </div>
+              <div class="form-field">
+                <label>Equipment class / type</label>
+                <input id="assetDetailsCategory" class="w-full" placeholder="e.g. Grader" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="saveAssetDetails" type="button" class="btn btn-secondary">Save equipment details</button>
+              </div>
+            </div>
+            <p class="muted small" id="assetDetailsStatus">Select a fleet card above to edit its details.</p>
             <div class="form-row">
               <div class="form-field">
                 <label>Start Date</label>

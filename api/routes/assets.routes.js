@@ -32,10 +32,34 @@ function isLdvPrestartQrAsset(assetCode) {
   return /^V(0[1-9]|1[0-5])AM$/i.test(String(assetCode || "").trim());
 }
 
+// These records were imported with the ownership label in the equipment-class
+// field. Keep the correction deliberately narrow so a later user edit is never
+// overwritten on a subsequent API restart.
+const LEGACY_ASSET_CATEGORY_CORRECTIONS = [
+  { assetCode: "G02AM", category: "Grader" },
+  { assetCode: "W200AM", category: "Water Truck" },
+  { assetCode: "W201AM", category: "Water Truck" },
+  { assetCode: "E503AM", category: "50T Excavator" },
+  { assetCode: "E504AM", category: "50T Excavator" },
+];
+
+function applyLegacyAssetCategoryCorrections() {
+  const updateCategory = db.prepare(`
+    UPDATE assets
+    SET category = ?
+    WHERE UPPER(asset_code) = ?
+      AND LOWER(TRIM(COALESCE(category, ''))) = 'internal (amlph)'
+  `);
+  for (const correction of LEGACY_ASSET_CATEGORY_CORRECTIONS) {
+    updateCategory.run(correction.category, correction.assetCode);
+  }
+}
+
 export default async function assetRoutes(app) {
   ensureMasterDataSchema();
   ensureCostAllocationSchema(db);
   ensurePlantHireSchema(db);
+  applyLegacyAssetCategoryCorrections();
   db.prepare(`
     CREATE TABLE IF NOT EXISTS asset_qr_profiles (
       asset_id INTEGER PRIMARY KEY,
