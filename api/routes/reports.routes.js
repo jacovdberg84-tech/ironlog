@@ -7448,7 +7448,7 @@ export default async function reportsRoutes(app) {
     const assetHasArchived = hasColumn("assets", "archived");
     const assetHasSiteCode = hasColumn("assets", "site_code");
     const assetWhere = [];
-    const assetParams = [weekEnding, weekEnding];
+    const assetParams = [weekEnding, weekEnding, weekEnding, weekEnding];
     if (assetHasArchived) assetWhere.push("COALESCE(a.archived, 0) = 0");
     if (assetHasSiteCode && siteCode) {
       assetWhere.push("LOWER(COALESCE(NULLIF(a.site_code, ''), 'main')) = ?");
@@ -7477,7 +7477,23 @@ export default async function reportsRoutes(app) {
             AND dh.opening_hours IS NOT NULL
           ORDER BY dh.work_date DESC, dh.id DESC
           LIMIT 1
-        )) AS meter_hours
+        )) AS meter_hours,
+        COALESCE((
+          SELECT dh.is_used
+          FROM daily_hours dh
+          WHERE dh.asset_id = a.id
+            AND dh.work_date <= ?
+          ORDER BY dh.work_date DESC, dh.id DESC
+          LIMIT 1
+        ), 0) AS latest_is_used,
+        COALESCE((
+          SELECT dh.hours_run
+          FROM daily_hours dh
+          WHERE dh.asset_id = a.id
+            AND dh.work_date <= ?
+          ORDER BY dh.work_date DESC, dh.id DESC
+          LIMIT 1
+        ), 0) AS latest_hours_run
       FROM assets a
       ${assetWhere.length ? `WHERE ${assetWhere.join(" AND ")}` : ""}
       ORDER BY a.asset_code COLLATE NOCASE ASC
@@ -7527,6 +7543,9 @@ export default async function reportsRoutes(app) {
       assetCode: asset.asset_code,
       meterHours: asset.meter_hours,
       active: asset.active,
+      // A unit that logged production on the latest day is operational, even if an
+      // older breakdown record remains open while its paperwork is being closed out.
+      isOperational: Number(asset.latest_is_used) === 1 || Number(asset.latest_hours_run) > 0,
       breakdown: breakdownAtWeekEnd.get(asset.id, weekEnding, weekEnding) || null,
       offsite: offsiteAtWeekEnd.get(asset.id, weekEnding, weekEnding) || null,
     }));

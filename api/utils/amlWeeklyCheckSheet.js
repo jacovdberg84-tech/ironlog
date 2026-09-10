@@ -194,8 +194,11 @@ export async function buildAmlWeeklyCheckSheet(templateBuffer, { weekEnding, rec
       continue;
     }
 
-    const breakdown = record.breakdown || null;
     const offsite = record.offsite || null;
+    // The AML status must describe the unit's actual operating state at week end.
+    // An open breakdown can remain in Ironlog while its work order is being closed,
+    // so do not classify a machine as down when its latest Daily Log says it worked.
+    const breakdown = record.isOperational && !offsite ? null : record.breakdown || null;
     sheetXml = replaceTemplateCell(sheetXml, `D${row}`, "YES");
     if (Number.isFinite(Number(record.meterHours)) && Number(record.meterHours) > 0) {
       sheetXml = replaceTemplateCell(sheetXml, `J${row}`, Number(record.meterHours), "number");

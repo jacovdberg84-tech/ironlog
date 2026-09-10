@@ -67,6 +67,13 @@ test("AML weekly check sheet keeps protected template features while filling per
       assetCode: secondAssetCode,
       meterHours: 12345.6,
       active: 1,
+      isOperational: true,
+      breakdown: {
+        critical: 1,
+        component: "Engine",
+        description: "Legacy work order still awaiting close-out",
+        ets_repair_date: "2026-09-14",
+      },
     }],
   });
 
@@ -79,6 +86,8 @@ test("AML weekly check sheet keeps protected template features while filling per
   assert.equal(cellValue(outputSheet, "R14", []), "ENGINE");
   assert.equal(cellValue(outputSheet, "S14", []), "Cylinder head repair");
   assert.equal(cellValue(outputSheet, "O15", []), "On Hire Working");
+  assert.equal(cellValue(outputSheet, "R15", []), "");
+  assert.equal(cellValue(outputSheet, "S15", []), "");
   assert.match(cell(outputSheet, "J15"), /<v>12345\.6<\/v>/);
   assert.match(outputSheet, /<sheetProtection\b/i);
   assert.ok(outputZip.file("xl/externalLinks/externalLink1.xml"), "external link should remain in the template copy");
