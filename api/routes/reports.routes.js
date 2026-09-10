@@ -161,6 +161,18 @@ export function dailyPdfDowntimeHours({ hasDailyEntry, isUsed, recordedHours, to
   return Boolean(hasDailyEntry) && Number(isUsed || 0) === 1 ? recorded : total;
 }
 
+export function dailyPdfRepairFallbackHours({ dayCap, loggedHours, allocatedHours, repairHours }) {
+  const cap = Math.max(0, Number(dayCap || 0));
+  const logged = Math.max(0, Number(loggedHours || 0));
+  const allocated = Math.max(0, Number(allocatedHours || 0));
+  const repair = Math.max(0, Number(repairHours || 0));
+  // Technician repair time is a fallback for a day with no Daily Log
+  // downtime. Once a clerk has entered actual downtime, do not add a second
+  // estimate from a work order for the same asset/day.
+  if (logged > 0) return 0;
+  return Math.min(repair, Math.max(0, cap - allocated));
+}
+
 function workOrderTerminalStatus(status) {
   const s = String(status || "").toLowerCase();
   return ["completed", "approved", "closed"].includes(s);
@@ -10726,9 +10738,15 @@ export default async function reportsRoutes(app) {
         const alreadyLogged = Math.max(0, Number(loggedDowntimeByAssetId.get(assetId) || 0));
         const alreadyAllocated = Math.max(0, Number(repairDowntimeAllocatedByAssetId.get(assetId) || 0));
         const repairHours = Math.max(0, Number(row.repair_hours || 0));
-        // A shift is 06:00-17:00 (11 hours) unless its scheduled-hours value says
-        // otherwise. Never let combined repair downtime exceed that daily cap.
-        const hoursDown = Math.min(repairHours, Math.max(0, dayCap - alreadyLogged - alreadyAllocated));
+        // A shift is 06:00-17:00 (11 hours) unless its scheduled-hours value
+        // says otherwise. Work-order repair time only fills a blank Daily Log;
+        // it must never inflate an asset's explicit recorded downtime.
+        const hoursDown = dailyPdfRepairFallbackHours({
+          dayCap,
+          loggedHours: alreadyLogged,
+          allocatedHours: alreadyAllocated,
+          repairHours,
+        });
         if (hoursDown > 0) {
           repairDowntimeAllocatedByAssetId.set(assetId, alreadyAllocated + hoursDown);
         }

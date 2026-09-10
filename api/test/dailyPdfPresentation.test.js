@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   dailyPdfDowntimeHours,
+  dailyPdfRepairFallbackHours,
   serviceLabelFromDailyDowntime,
 } from "../routes/reports.routes.js";
 
@@ -23,6 +24,17 @@ test("Daily PDF retains the full-shift fallback only without production", () => 
     recordedHours: 0,
     totalHours: 11,
   }), 11);
+});
+
+test("Daily PDF does not stack work-order repair estimates onto logged downtime", () => {
+  // A300AM: the clerk entered 1 hour. A later work-order close must not add
+  // its repair estimate and turn the row into an 11-hour loss.
+  assert.equal(dailyPdfRepairFallbackHours({
+    dayCap: 11,
+    loggedHours: 1,
+    allocatedHours: 0,
+    repairHours: 10,
+  }), 0);
 });
 
 test("numeric service intervals are presented as maintenance", () => {
