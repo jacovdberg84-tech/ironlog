@@ -131,6 +131,36 @@ function compactCell(v, max = 140) {
   return s.length > max ? `${s.slice(0, Math.max(1, max - 1))}...` : s;
 }
 
+/**
+ * Daily Log breakdown entries also record planned services. Detect an actual
+ * service interval from the entered component/work text so the Daily PDF can
+ * distinguish a maintenance stop from an unplanned breakdown.
+ */
+export function serviceLabelFromDailyDowntime(...values) {
+  const text = values
+    .map((value) => String(value ?? ""))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "";
+
+  const hourMatch = text.match(/\b(\d{2,5})\s*(?:h|hr|hrs|hour|hours)\s*(?:service|svc)\b/i);
+  if (hourMatch) return `${Number(hourMatch[1])} hour service`;
+
+  const kmMatch = text.match(/\b(\d{3,6})\s*(?:km|kilomet(?:er|re)s?)\s*(?:service|svc)\b/i);
+  if (kmMatch) return `${Number(kmMatch[1])} km service`;
+
+  return "";
+}
+
+export function dailyPdfDowntimeHours({ hasDailyEntry, isUsed, recordedHours, totalHours }) {
+  const recorded = Math.max(0, Number(recordedHours || 0));
+  const total = Math.max(0, Number(totalHours || 0));
+  // A saved Production row is authoritative: only a logged repair loss can
+  // reduce its availability, never the open-incident full-shift fallback.
+  return Boolean(hasDailyEntry) && Number(isUsed || 0) === 1 ? recorded : total;
+}
+
 function workOrderTerminalStatus(status) {
   const s = String(status || "").toLowerCase();
   return ["completed", "approved", "closed"].includes(s);
@@ -10345,7 +10375,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    const reportRevision = "daily-pdf-explicit-downtime-r2026-09-09";
+    const reportRevision = "daily-pdf-production-and-service-r2026-09-10";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -10756,7 +10786,9 @@ export default async function reportsRoutes(app) {
 
     // Per-asset downtime for availability (same day as short breakdowns / fuel).
     const downtimeByAssetId = new Map();
-    const imputedActiveDownAssetIds = new Set();
+    // Keep actual recorded loss separate from the full-shift fallback for an
+    // open incident. A saved Production row must only use actual loss.
+    const recordedDowntimeByAssetId = new Map();
     try {
       const downRows = db.prepare(`
         SELECT b.asset_id, COALESCE(SUM(l.hours_down), 0) AS hours_down
@@ -10766,15 +10798,19 @@ export default async function reportsRoutes(app) {
         GROUP BY b.asset_id
       `).all(opsDay);
       for (const r of downRows) {
-        downtimeByAssetId.set(Number(r.asset_id), Math.max(0, Number(r.hours_down || 0)));
+        const assetId = Number(r.asset_id || 0);
+        const hoursDown = Math.max(0, Number(r.hours_down || 0));
+        downtimeByAssetId.set(assetId, hoursDown);
+        recordedDowntimeByAssetId.set(assetId, hoursDown);
       }
       for (const r of completedBreakdownRepairDowntime) {
         const assetId = Number(r.asset_id || 0);
         if (!assetId) continue;
-        downtimeByAssetId.set(
-          assetId,
-          Math.max(0, Number(downtimeByAssetId.get(assetId) || 0)) + Math.max(0, Number(r.hours_down || 0)),
-        );
+        const repairHours = Math.max(0, Number(r.hours_down || 0));
+        const totalDown = Math.max(0, Number(downtimeByAssetId.get(assetId) || 0)) + repairHours;
+        const recordedDown = Math.max(0, Number(recordedDowntimeByAssetId.get(assetId) || 0)) + repairHours;
+        downtimeByAssetId.set(assetId, totalDown);
+        recordedDowntimeByAssetId.set(assetId, recordedDown);
       }
 
       // Only infer a full shift for a brand-new open incident with neither a
@@ -10814,7 +10850,6 @@ export default async function reportsRoutes(app) {
         const assetId = Number(r.asset_id || 0);
         if (assetId > 0 && Number(downtimeByAssetId.get(assetId) || 0) <= 0) {
           downtimeByAssetId.set(assetId, scheduledFallback);
-          imputedActiveDownAssetIds.add(assetId);
         }
       }
     } catch { /* table may be missing */ }
@@ -10847,12 +10882,15 @@ export default async function reportsRoutes(app) {
       );
       const run = Math.max(0, Number(r.hours_run || 0));
       const runEff = sched > 0 ? Math.min(run, sched) : run;
-      // Recorded production proves the asset was not unavailable for the full shift.
-      // Keep explicit downtime, but discard a full-day value that was only imputed
-      // from an active incident with a zero-hour placeholder.
-      const downRaw = imputedActiveDownAssetIds.has(assetId) && run > 0
-        ? 0
-        : Math.max(0, Number(downtimeByAssetId.get(assetId) || 0));
+      // A Production entry is the operator's statement that the asset was
+      // available. Never mix the open-incident full-shift assumption into that
+      // row: retain only an entered downtime log or recorded repair hours.
+      const downRaw = dailyPdfDowntimeHours({
+        hasDailyEntry: r.has_daily_entry,
+        isUsed: r.is_used,
+        recordedHours: recordedDowntimeByAssetId.get(assetId),
+        totalHours: downtimeByAssetId.get(assetId),
+      });
       const down = sched > 0 ? Math.min(downRaw, sched) : downRaw;
       const prestartDone = prestartAssetIds.has(assetId);
       const inspection = prestartDone && sched > down
@@ -11070,19 +11108,27 @@ export default async function reportsRoutes(app) {
           })
         );
 
-        // Every Daily Log incident is a breakdown, even if its reason says
-        // maintenance or service. Planned services without downtime remain
-        // listed separately below as Maintenance.
+        // A Daily Log incident can be either an unplanned breakdown or a
+        // planned service. Numeric service intervals identify the latter even
+        // when the entry originated from the quick breakdown workflow.
         const loggedDowntimeAssets = new Set();
         const dailyDowntimeRows = dailyDowntimeLogs.map((r) => {
           loggedDowntimeAssets.add(String(r.asset_code || ""));
+          const serviceLabel = serviceLabelFromDailyDowntime(r.component, r.notes, r.description);
+          const isMaintenance = Boolean(serviceLabel);
           return {
             asset: r.asset_code,
             equipment: compactCell(r.asset_name ?? "", 48),
-            type: "Breakdown",
+            type: isMaintenance ? "Maintenance" : "Breakdown",
             hrs: fmtNum(Math.max(0, Number(r.hours_down || 0)), 1),
-            area: compactCell(r.component ?? "", 42) || "—",
-            detail: compactCell(String(r.notes || r.description || "").replace(/^(?:Auto from Daily Input \(DOWN\)|Daily Log breakdown)\s*[—-]?\s*/i, ""), 220),
+            area: isMaintenance
+              ? serviceLabel
+              : (compactCell(r.component ?? "", 42) || "—"),
+            // For a service, the interval is the useful operations summary;
+            // do not expose the quick-entry's internal "Short breakdown" text.
+            detail: isMaintenance
+              ? serviceLabel
+              : compactCell(String(r.notes || r.description || "").replace(/^(?:Auto from Daily Input \(DOWN\)|Daily Log breakdown)\s*[—-]?\s*/i, ""), 220),
           };
         });
         for (const r of completedBreakdownRepairDowntime) {
