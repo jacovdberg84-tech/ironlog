@@ -7448,7 +7448,7 @@ export default async function reportsRoutes(app) {
     const assetHasArchived = hasColumn("assets", "archived");
     const assetHasSiteCode = hasColumn("assets", "site_code");
     const assetWhere = [];
-    const assetParams = [weekEnding, weekEnding, weekEnding];
+    const assetParams = [weekEnding, weekEnding];
     if (assetHasArchived) assetWhere.push("COALESCE(a.archived, 0) = 0");
     if (assetHasSiteCode && siteCode) {
       assetWhere.push("LOWER(COALESCE(NULLIF(a.site_code, ''), 'main')) = ?");
@@ -7476,14 +7476,6 @@ export default async function reportsRoutes(app) {
             AND dh.work_date <= ?
             AND dh.opening_hours IS NOT NULL
           ORDER BY dh.work_date DESC, dh.id DESC
-          LIMIT 1
-        ), (
-          SELECT dh.closing_hours
-          FROM daily_hours dh
-          WHERE dh.asset_id = a.id
-            AND dh.work_date > ?
-            AND dh.closing_hours IS NOT NULL
-          ORDER BY dh.work_date ASC, dh.id ASC
           LIMIT 1
         )) AS meter_hours
       FROM assets a
