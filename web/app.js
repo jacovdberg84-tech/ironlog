@@ -11402,6 +11402,34 @@ function getLast7Range(endDate) {
   return { start: fmt(start), end: fmt(end) };
 }
 
+function defaultAmlWeeklyEndDate(date = new Date()) {
+  const result = new Date(date);
+  const daysSinceFriday = (result.getDay() + 2) % 7;
+  result.setDate(result.getDate() - daysSinceFriday);
+  return result.toISOString().slice(0, 10);
+}
+
+async function downloadAmlWeeklyCheckSheet() {
+  const weekEnding = String(qs("amlWeeklyEnd")?.value || "").trim();
+  const status = qs("amlWeeklyExportStatus");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekEnding)) {
+    alert("Select the AML week-ending date first.");
+    return;
+  }
+  if (status) status.textContent = "Preparing the protected AML weekly template…";
+  setStatus("Preparing AML Weekly Check Sheet…");
+  const downloaded = await downloadAuthedFile(
+    `${API}/api/reports/aml-weekly-check-sheet.xlsx?week_ending=${encodeURIComponent(weekEnding)}`,
+    `AML_Weekly_Check_Sheet_${weekEnding}.xlsx`,
+  );
+  if (status) {
+    status.textContent = downloaded
+      ? "Downloaded. Review the completed fields, then submit the sheet as normal."
+      : "The AML weekly sheet could not be downloaded. Please retry or contact your administrator.";
+  }
+  if (downloaded) setStatus("AML Weekly Check Sheet downloaded.");
+}
+
 function getLastNDaysRange(endDate, days) {
   const end = new Date(`${endDate}T00:00:00`);
   const span = Math.max(1, Number(days || 30));
@@ -18571,6 +18599,13 @@ async function init() {
 
   qs("openDaily")?.addEventListener("click", openDailyPdf);
   qs("openWeekly")?.addEventListener("click", openWeeklyPdf);
+  qs("downloadAmlWeeklyCheckSheet")?.addEventListener("click", () => {
+    downloadAmlWeeklyCheckSheet().catch((e) => {
+      const status = qs("amlWeeklyExportStatus");
+      if (status) status.textContent = `Export failed: ${e.message || e}`;
+      setStatus("AML Weekly Check Sheet export error: " + (e.message || e));
+    });
+  });
   qs("openLubePdf")?.addEventListener("click", openLubePdf);
   qs("openLubePdfFromLube")?.addEventListener("click", openLubePdf);
   qs("downloadLubeUsageXlsx")?.addEventListener("click", downloadLubeUsageXlsx);
@@ -19204,6 +19239,8 @@ async function init() {
   if (qTo && !qTo.value) qTo.value = new Date().toISOString().slice(0, 10);
   const costMonth = qs("costMonth");
   if (costMonth && !costMonth.value) costMonth.value = new Date().toISOString().slice(0, 7);
+  const amlWeeklyEnd = qs("amlWeeklyEnd");
+  if (amlWeeklyEnd && !amlWeeklyEnd.value) amlWeeklyEnd.value = defaultAmlWeeklyEndDate();
   loadStoreAllocations().catch(() => {});
   loadStockOnHandPage().catch(() => {});
   loadInventoryControl().catch(() => {});

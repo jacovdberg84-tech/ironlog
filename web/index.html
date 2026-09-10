@@ -6531,6 +6531,35 @@
           </div>
         </div>
 
+        <!-- AML Weekly Check Sheet -->
+        <div class="report-card collapsible" data-report-category="operations management" data-collapsed="false">
+          <div class="report-card-header">
+            <div class="report-card-title">
+              <div class="report-card-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line></svg>
+              </div>
+              <div>
+                <h3>AML Weekly Check Sheet</h3>
+                <p class="muted small">Prefill the protected AML V27 template from live Ironlog data</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="report-form">
+              <label class="chk">Week ending
+                <input id="amlWeeklyEnd" type="date" />
+              </label>
+            </div>
+            <div class="report-actions">
+              <button id="downloadAmlWeeklyCheckSheet" class="btn btn-primary">Download prefilled AML sheet</button>
+            </div>
+            <p id="amlWeeklyExportStatus" class="muted small" style="margin:10px 0 0;">The original layout, protection and formulas remain unchanged. Review the completed fields before submission.</p>
+          </div>
+        </div>
+
         <!-- Stock Reports -->
         <div class="report-card collapsible" data-report-category="stock" data-collapsed="false">
           <div class="report-card-header">

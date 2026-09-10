@@ -2,6 +2,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 import multipart from "@fastify/multipart";
 import sharp from "sharp";
 import ExcelJS from "exceljs";
@@ -54,6 +55,17 @@ import { resolveStorageAbs as resolveStorageAbsUtil, getDataRoot, normalizeStora
 import { getPdfReportBranding, savePdfReportBranding, resolvePdfCompanyLogoAbs, setPdfCompanyLogoPath, clearPdfCompanyLogo, getPdfBrandingLogoDir } from "../utils/reportSettings.js";
 import { listDailyPrestarts, prestartDeductionForProductionFleet, PRESTART_DEDUCTION_HOURS } from "../utils/prestartDaily.js";
 import { listPlannedMaintenanceForDate, shiftDateYmd } from "../utils/shortBreakdowns.js";
+import {
+  buildAmlWeeklyCheckSheet,
+} from "../utils/amlWeeklyCheckSheet.js";
+
+const __dirnameReports = path.dirname(fileURLToPath(import.meta.url));
+const AML_WEEKLY_TEMPLATE_PATH = path.join(
+  __dirnameReports,
+  "..",
+  "templates",
+  "AML Weekly Check Sheet V27.xlsx"
+);
 
 let maintenanceMasterSchedulerStarted = false;
 let reportSubscriptionsSchedulerStarted = false;
@@ -7427,6 +7439,137 @@ export default async function reportsRoutes(app) {
         `${download ? "attachment" : "inline"}; filename="AML_Legal_Compliance_${todayYmd()}.pdf"`
       )
       .send(pdf);
+  });
+
+  // =========================
+  // AML WEEKLY CHECK SHEET (creator-protected template)
+  // =========================
+  function buildAmlWeeklyExportRecords(weekEnding, siteCode) {
+    const assetHasArchived = hasColumn("assets", "archived");
+    const assetHasSiteCode = hasColumn("assets", "site_code");
+    const assetWhere = [];
+    const assetParams = [weekEnding, weekEnding, weekEnding];
+    if (assetHasArchived) assetWhere.push("COALESCE(a.archived, 0) = 0");
+    if (assetHasSiteCode && siteCode) {
+      assetWhere.push("LOWER(COALESCE(NULLIF(a.site_code, ''), 'main')) = ?");
+      assetParams.push(siteCode);
+    }
+
+    const assets = db.prepare(`
+      SELECT
+        a.id,
+        a.asset_code,
+        a.asset_name,
+        COALESCE(a.active, 1) AS active,
+        COALESCE((
+          SELECT dh.closing_hours
+          FROM daily_hours dh
+          WHERE dh.asset_id = a.id
+            AND dh.work_date <= ?
+            AND dh.closing_hours IS NOT NULL
+          ORDER BY dh.work_date DESC, dh.id DESC
+          LIMIT 1
+        ), (
+          SELECT dh.opening_hours
+          FROM daily_hours dh
+          WHERE dh.asset_id = a.id
+            AND dh.work_date <= ?
+            AND dh.opening_hours IS NOT NULL
+          ORDER BY dh.work_date DESC, dh.id DESC
+          LIMIT 1
+        ), (
+          SELECT dh.closing_hours
+          FROM daily_hours dh
+          WHERE dh.asset_id = a.id
+            AND dh.work_date > ?
+            AND dh.closing_hours IS NOT NULL
+          ORDER BY dh.work_date ASC, dh.id ASC
+          LIMIT 1
+        )) AS meter_hours
+      FROM assets a
+      ${assetWhere.length ? `WHERE ${assetWhere.join(" AND ")}` : ""}
+      ORDER BY a.asset_code COLLATE NOCASE ASC
+    `).all(...assetParams);
+
+    const breakdownAtWeekEnd = db.prepare(`
+      SELECT
+        b.id,
+        b.description,
+        b.component,
+        b.critical,
+        b.ets_repair_date,
+        w.id AS work_order_id,
+        w.status AS work_order_status,
+        w.repair_progress
+      FROM breakdowns b
+      LEFT JOIN work_orders w ON w.id = b.primary_work_order_id
+      WHERE b.asset_id = ?
+        AND DATE(COALESCE(NULLIF(b.start_at, ''), b.breakdown_date)) <= ?
+        AND (
+          LOWER(COALESCE(b.status, 'open')) NOT IN ('closed', 'completed')
+          OR DATE(COALESCE(b.end_at, w.closed_at, b.breakdown_date)) > ?
+        )
+      ORDER BY COALESCE(b.critical, 0) DESC,
+        DATE(COALESCE(NULLIF(b.start_at, ''), b.breakdown_date)) DESC,
+        b.id DESC
+      LIMIT 1
+    `);
+    const offsiteAtWeekEnd = db.prepare(`
+      SELECT
+        r.id,
+        r.sent_date,
+        r.expected_return_date,
+        r.actual_return_date,
+        r.vendor,
+        r.notes,
+        r.repair_status
+      FROM breakdown_offsite_repairs r
+      WHERE r.asset_id = ?
+        AND DATE(r.sent_date) <= ?
+        AND (r.actual_return_date IS NULL OR DATE(r.actual_return_date) > ?)
+      ORDER BY DATE(r.sent_date) DESC, r.id DESC
+      LIMIT 1
+    `);
+
+    return assets.map((asset) => ({
+      assetCode: asset.asset_code,
+      meterHours: asset.meter_hours,
+      active: asset.active,
+      breakdown: breakdownAtWeekEnd.get(asset.id, weekEnding, weekEnding) || null,
+      offsite: offsiteAtWeekEnd.get(asset.id, weekEnding, weekEnding) || null,
+    }));
+  }
+
+  // GET /api/reports/aml-weekly-check-sheet.xlsx?week_ending=YYYY-MM-DD
+  app.get("/aml-weekly-check-sheet.xlsx", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    const weekEnding = String(req.query?.week_ending || req.query?.end || "").trim();
+    if (!isDate(weekEnding)) {
+      return reply.code(400).send({ ok: false, error: "week_ending (YYYY-MM-DD) required" });
+    }
+    if (!fs.existsSync(AML_WEEKLY_TEMPLATE_PATH)) {
+      req.log.error({ template: AML_WEEKLY_TEMPLATE_PATH }, "AML weekly template is missing");
+      return reply.code(503).send({ ok: false, error: "AML weekly template is not installed" });
+    }
+
+    const siteCode = String(req.headers["x-site-code"] || req.query?.site_code || "main")
+      .trim()
+      .toLowerCase();
+    const templateBuffer = fs.readFileSync(AML_WEEKLY_TEMPLATE_PATH);
+    const records = buildAmlWeeklyExportRecords(weekEnding, siteCode);
+    const workbook = await buildAmlWeeklyCheckSheet(templateBuffer, { weekEnding, records });
+    const unmatched = workbook.unmatchedAssetCodes.slice(0, 20);
+    if (unmatched.length) {
+      req.log.warn({ unmatched, siteCode, weekEnding }, "AML weekly export skipped assets not present in the template");
+    }
+
+    return reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header("Content-Disposition", `attachment; filename="AML_Weekly_Check_Sheet_${weekEnding}.xlsx"`)
+      .header("X-Ironlog-AML-Filled-Rows", String(workbook.filledRows))
+      .header("X-Ironlog-AML-Unmatched-Assets", unmatched.join(","))
+      .send(workbook.buffer);
   });
 
   // =========================
