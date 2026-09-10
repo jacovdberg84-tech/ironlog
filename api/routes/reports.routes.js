@@ -578,7 +578,11 @@ function kpiDaily(date, scheduled, dailyHoursDate = date, opts = {}) {
   openNoLogParams.push(date, date);
   const openNoLogRow = db.prepare(`
     SELECT
-      IFNULL(SUM(CASE WHEN x.run_hours <= 0 AND x.timed_first_day = 0 THEN x.scheduled ELSE 0 END), 0) AS assumed_down_hours,
+      -- A saved Daily Log production entry is the operator's statement that
+      -- the asset was available. Do not turn it into a full-shift loss just
+      -- because an earlier repair WO remains open or the meter was entered
+      -- late. Explicit downtime logs remain the source of actual loss.
+      IFNULL(SUM(CASE WHEN x.has_daily_row = 0 AND x.timed_first_day = 0 THEN x.scheduled ELSE 0 END), 0) AS assumed_down_hours,
       IFNULL(SUM(CASE WHEN x.has_daily_row = 0 THEN x.scheduled ELSE 0 END), 0) AS missing_planned_hours
     FROM (
       SELECT
@@ -10773,10 +10777,9 @@ export default async function reportsRoutes(app) {
         );
       }
 
-      // Only infer a full shift for a brand-new open incident with no Daily Log
-      // downtime entry at all. Once an operator has recorded actual downtime,
-      // those hours are authoritative; an open WO alone must not create another
-      // full-shift loss on later reports.
+      // Only infer a full shift for a brand-new open incident with neither a
+      // Daily Log production entry nor an explicit downtime log. A production
+      // entry wins over an open WO; actual loss must be entered as downtime.
       const activeDownAssets = db.prepare(`
         SELECT DISTINCT b.asset_id
         FROM breakdowns b
@@ -10797,7 +10800,16 @@ export default async function reportsRoutes(app) {
             WHERE l.breakdown_id = b.id
               AND l.log_date <= ?
           )
-      `).all(...(hasBreakdownEndAt ? [opsDay, opsDay, opsDay] : [opsDay, opsDay]));
+          AND NOT EXISTS (
+            SELECT 1
+            FROM daily_hours dh
+            WHERE dh.asset_id = b.asset_id
+              AND dh.work_date IN (?, ?)
+              AND COALESCE(dh.is_used, 0) = 1
+          )
+      `).all(...(hasBreakdownEndAt
+        ? [opsDay, opsDay, opsDay, date, opsDay]
+        : [opsDay, opsDay, date, opsDay]));
       for (const r of activeDownAssets) {
         const assetId = Number(r.asset_id || 0);
         if (assetId > 0 && Number(downtimeByAssetId.get(assetId) || 0) <= 0) {
