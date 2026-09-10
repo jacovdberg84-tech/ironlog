@@ -94,6 +94,52 @@ test("AML weekly check sheet keeps protected template features while filling per
   assert.ok(outputZip.file("xl/pivotCache/pivotCacheDefinition1.xml"), "pivot cache should remain in the template copy");
 });
 
+test("AML template includes the new grader and water-truck rows with working lookup data", async () => {
+  const template = await fs.readFile(templatePath);
+  const inputZip = await JSZip.loadAsync(template);
+  const inputSheet = await inputZip.file(AML_WEEKLY_SHEET_PATH).async("string");
+  const blueprintSheet = await inputZip.file("xl/worksheets/sheet5.xml").async("string");
+  const strings = sharedStrings(await inputZip.file("xl/sharedStrings.xml").async("string"));
+  const expectedRows = [
+    { row: 94, code: "G02AM", category: "GRADER", description: "CAT 140K MOTOR GRADER" },
+    { row: 95, code: "W200AM", category: "WATER TRUCK", description: "BELL B25D 23000L WATER TRUCK" },
+    { row: 96, code: "W201AM", category: "WATER TRUCK", description: "BELL B25D 23000L WATER TRUCK" },
+  ];
+
+  for (const entry of expectedRows) {
+    assert.equal(cellValue(inputSheet, `C${entry.row}`, strings), entry.code);
+    const sourceRow = Array.from({ length: 1502 }, (_, index) => index + 1).find(
+      (row) => cellValue(blueprintSheet, `A${row}`, strings) === entry.code
+    );
+    assert.ok(sourceRow, `EAM BLUE PRINT needs ${entry.code}`);
+    assert.equal(cellValue(blueprintSheet, `C${sourceRow}`, strings), entry.category);
+    assert.equal(cellValue(blueprintSheet, `D${sourceRow}`, strings), entry.description);
+  }
+
+  const result = await buildAmlWeeklyCheckSheet(template, {
+    weekEnding: "2026-09-11",
+    records: expectedRows.map((entry, index) => ({
+      assetCode: entry.code,
+      meterHours: 7000 + index,
+      active: 1,
+      isOperational: true,
+    })),
+  });
+  assert.equal(result.filledRows, expectedRows.length);
+  assert.deepEqual(result.unmatchedAssetCodes, []);
+
+  const outputZip = await JSZip.loadAsync(result.buffer);
+  const outputSheet = await outputZip.file(AML_WEEKLY_SHEET_PATH).async("string");
+  for (const entry of expectedRows) {
+    assert.equal(cellValue(outputSheet, `D${entry.row}`, []), "YES");
+    assert.equal(cellValue(outputSheet, `O${entry.row}`, []), "On Hire Working");
+  }
+  assert.match(outputSheet, /<sheetProtection\b/i);
+  assert.ok(outputZip.file("xl/externalLinks/externalLink1.xml"));
+  assert.ok(outputZip.file("xl/pivotCache/pivotCacheDefinition1.xml"));
+  assert.match(blueprintSheet, /<dimension ref="A1:DS1502"\/>/i);
+});
+
 test("AML status and category mapping match the protected template choices", () => {
   assert.equal(amlWorkingStatus({}), "On Hire Working");
   assert.equal(amlWorkingStatus({ offsite: { id: 1 } }), "Off Hire Available at site ");
