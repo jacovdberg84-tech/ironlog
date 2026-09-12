@@ -78,6 +78,12 @@ function todayYmd() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// The Daily PDF is issued the following morning, while all operational data
+// belongs to the completed shift on the preceding calendar day.
+export function dailyPdfOperationsDate(reportIssueDate) {
+  return shiftDateYmd(reportIssueDate, -1);
+}
+
 function yn(v) {
   return v ? "YES" : "NO";
 }
@@ -10551,7 +10557,7 @@ export default async function reportsRoutes(app) {
     const scheduled = Number(req.query?.scheduled ?? 10);
     if (!isDate(date)) return reply.code(400).send({ error: "date (YYYY-MM-DD) required" });
     // The report is issued today for the previous completed operations day.
-    const opsDay = shiftDateYmd(date, -1);
+    const opsDay = dailyPdfOperationsDate(date);
 
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
 
@@ -11090,12 +11096,12 @@ export default async function reportsRoutes(app) {
     if (hasTable("cartrack_events")) {
       try {
         const events = listCartrackEventsFromDb({
-          startDate: date,
-          endDate: date,
+          startDate: opsDay,
+          endDate: opsDay,
           minSpeedKmh: speedAlertKmh,
           limit: 500,
         });
-        cartrackSpeeding = summarizeSpeedingEvents(date, events, speedAlertKmh);
+        cartrackSpeeding = summarizeSpeedingEvents(opsDay, events, speedAlertKmh);
       } catch {
         cartrackSpeeding = null;
       }
@@ -11378,7 +11384,7 @@ export default async function reportsRoutes(app) {
           sectionTitle(doc, `Fleet Tracking - speeding above ${speedAlertKmh} km/h`);
           if (!cartrackSpeeding.total_speeding_events) {
             doc.fontSize(10).fillColor("#64748b");
-            doc.text(`No speeding events above ${speedAlertKmh} km/h recorded for ${date}.`);
+            doc.text(`No speeding events above ${speedAlertKmh} km/h recorded for ${opsDay}.`);
             doc.moveDown(0.5);
           } else {
             doc.fontSize(10).fillColor("#334155");

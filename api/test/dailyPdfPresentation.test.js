@@ -3,8 +3,14 @@ import assert from "node:assert/strict";
 import {
   dailyPdfDowntimeHours,
   dailyPdfRepairFallbackHours,
+  dailyPdfOperationsDate,
   serviceLabelFromDailyDowntime,
 } from "../routes/reports.routes.js";
+
+test("Daily PDF speeding uses the same completed operations day", () => {
+  assert.equal(dailyPdfOperationsDate("2026-09-12"), "2026-09-11");
+  assert.equal(dailyPdfOperationsDate("2027-01-01"), "2026-12-31");
+});
 
 test("Daily PDF keeps actual downtime when production was recorded", () => {
   // A300AM: a 10.6-hour Production row must not inherit an 11-hour fallback
