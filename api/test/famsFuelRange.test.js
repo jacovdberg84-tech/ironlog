@@ -37,7 +37,7 @@ test("FAMS catch-up range rejects unsafe calendar ranges", () => {
   );
 });
 
-test("FAMS cleanup removes only an exact legacy copy and keeps its tagged source row", async (t) => {
+test("FAMS cleanup matches a unique source/day/litres pair even when the legacy meter differs", async (t) => {
   const dbPath = path.join(os.tmpdir(), `ironlog-fams-duplicate-${process.pid}-${Date.now()}.db`);
   process.env.DB_PATH = dbPath;
   const { db } = await import("../db/client.js");
@@ -69,9 +69,10 @@ test("FAMS cleanup removes only an exact legacy copy and keeps its tagged source
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   insert.run(1, "2026-08-12", 120, "Main Store | Sergio | Driver A", "hours", 20258.2, null);
-  insert.run(1, "2026-08-12", 120, "Main Store | Sergio | Driver A", "hours", 20258.2, 7001);
-  // This has the same asset/day/litres but a different meter and must survive.
-  insert.run(1, "2026-08-12", 120, "Main Store | Sergio | Driver A", "hours", 20259.2, null);
+  // FAMS API records the transaction run; legacy CSVs recorded the absolute SMR.
+  insert.run(1, "2026-08-12", 120, "Main Store | Sergio | Driver A", "hours", 12.5, 7001);
+  // This has the same asset/day/litres but a different source and must survive.
+  insert.run(1, "2026-08-12", 120, "Manual fuel entry", "hours", 20259.2, null);
 
   const preview = previewFamsLegacyDuplicates({ startDate: "2026-08-01", endDate: "2026-08-31" });
   assert.equal(preview.found, 1);

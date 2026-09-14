@@ -195,16 +195,23 @@ function famsIdExists(famsId) {
 
 /**
  * Earlier FAMS CSV uploads did not retain the source transaction ID. Link a
- * legacy row only when its asset, day, litres, source and meter all match one
+ * legacy row only when its asset, day, litres and normalized source map to one
  * FAMS transaction exactly; otherwise leave it alone rather than guessing.
  */
+function normalizedFamsSource(value) {
+  return String(value || "")
+    .split("|")
+    .map((part) => part.trim())
+    .filter((part) => part && !/^(none|n\/?a|not available|-)$/i.test(part))
+    .join(" | ")
+    .toLowerCase();
+}
+
 function linkExactLegacyFamsFuelRow({
   assetId,
   logDate,
   liters,
   source,
-  meterUnit,
-  meterValue,
   famsId,
   famsTrId,
   famsEquipmentId,
@@ -214,21 +221,19 @@ function linkExactLegacyFamsFuelRow({
   fuelPrice,
   costCentre,
 }) {
-  if (!Number.isFinite(meterValue) || !String(source || "").trim()) return false;
+  const sourceKey = normalizedFamsSource(source);
+  if (!sourceKey) return false;
   const candidates = db.prepare(`
-    SELECT id
+    SELECT id, source
     FROM fuel_logs
     WHERE asset_id = ?
       AND log_date = ?
       AND fams_id IS NULL
       AND ABS(COALESCE(liters, 0) - ?) < 0.000001
-      AND TRIM(COALESCE(source, '')) = TRIM(?)
-      AND LOWER(TRIM(COALESCE(meter_unit, ''))) = LOWER(TRIM(COALESCE(?, '')))
-      AND meter_run_value IS NOT NULL
-      AND ABS(meter_run_value - ?) < 0.000001
     ORDER BY id ASC
-    LIMIT 2
-  `).all(assetId, logDate, liters, source, meterUnit, meterValue);
+    LIMIT 10
+  `).all(assetId, logDate, liters)
+    .filter((candidate) => normalizedFamsSource(candidate.source) === sourceKey);
   if (candidates.length !== 1) return false;
 
   const updated = db.prepare(`
@@ -260,74 +265,66 @@ function linkExactLegacyFamsFuelRow({
 
 function confirmedFamsLegacyDuplicateRows({ startDate, endDate, limit = 10000 } = {}) {
   const maxRows = Math.max(1, Math.min(10000, Number(limit) || 10000));
-  return db.prepare(`
-    WITH matches AS (
-      SELECT
-        f.id AS fams_log_id,
-        l.id AS legacy_log_id,
-        f.asset_id,
-        f.log_date,
-        f.liters,
-        f.source,
-        f.meter_unit,
-        f.meter_run_value,
-        f.fams_id
-      FROM fuel_logs f
-      JOIN fuel_logs l
-        ON l.asset_id = f.asset_id
-        AND l.log_date = f.log_date
-        AND l.fams_id IS NULL
-        AND ABS(COALESCE(l.liters, 0) - COALESCE(f.liters, 0)) < 0.000001
-        AND TRIM(COALESCE(l.source, '')) <> ''
-        AND TRIM(COALESCE(l.source, '')) = TRIM(COALESCE(f.source, ''))
-        AND LOWER(TRIM(COALESCE(l.meter_unit, ''))) = LOWER(TRIM(COALESCE(f.meter_unit, '')))
-        AND l.meter_run_value IS NOT NULL
-        AND f.meter_run_value IS NOT NULL
-        AND ABS(l.meter_run_value - f.meter_run_value) < 0.000001
-      WHERE f.fams_id IS NOT NULL
-        AND f.log_date >= ?
-        AND f.log_date <= ?
-    ),
-    unique_legacy AS (
-      SELECT legacy_log_id
-      FROM matches
-      GROUP BY legacy_log_id
-      HAVING COUNT(*) = 1
-    ),
-    unique_fams AS (
-      SELECT fams_log_id
-      FROM matches
-      GROUP BY fams_log_id
-      HAVING COUNT(*) = 1
-    )
+  const rows = db.prepare(`
     SELECT
-      m.fams_log_id,
-      m.legacy_log_id,
-      m.log_date,
-      m.liters,
-      m.source,
-      m.meter_unit,
-      m.meter_run_value,
-      m.fams_id,
+      f.id,
+      f.asset_id,
+      f.log_date,
+      f.liters,
+      f.source,
+      f.meter_unit,
+      f.meter_run_value,
+      f.fams_id,
       a.asset_code,
       a.asset_name
-    FROM matches m
-    JOIN unique_legacy ul ON ul.legacy_log_id = m.legacy_log_id
-    JOIN unique_fams uf ON uf.fams_log_id = m.fams_log_id
-    JOIN assets a ON a.id = m.asset_id
-    ORDER BY m.log_date ASC, a.asset_code ASC, m.legacy_log_id ASC
-    LIMIT ?
-  `).all(startDate, endDate, maxRows);
+    FROM fuel_logs f
+    JOIN assets a ON a.id = f.asset_id
+    WHERE f.log_date >= ?
+      AND f.log_date <= ?
+      AND COALESCE(f.liters, 0) > 0
+    ORDER BY f.log_date ASC, a.asset_code ASC, f.id ASC
+  `).all(startDate, endDate);
+  const groups = new Map();
+  for (const row of rows) {
+    const sourceKey = normalizedFamsSource(row.source);
+    if (!sourceKey) continue;
+    const litresKey = Number(row.liters || 0).toFixed(4);
+    const key = `${row.asset_id}|${row.log_date}|${litresKey}|${sourceKey}`;
+    const group = groups.get(key) || { fams: [], legacy: [] };
+    if (row.fams_id != null) group.fams.push(row);
+    else group.legacy.push(row);
+    groups.set(key, group);
+  }
+  const confirmed = [];
+  for (const group of groups.values()) {
+    if (group.fams.length !== 1 || group.legacy.length !== 1) continue;
+    const fams = group.fams[0];
+    const legacy = group.legacy[0];
+    confirmed.push({
+      fams_log_id: fams.id,
+      legacy_log_id: legacy.id,
+      log_date: fams.log_date,
+      liters: fams.liters,
+      source: fams.source,
+      meter_unit: fams.meter_unit,
+      meter_run_value: fams.meter_run_value,
+      legacy_meter_run_value: legacy.meter_run_value,
+      fams_id: fams.fams_id,
+      asset_code: fams.asset_code,
+      asset_name: fams.asset_name,
+    });
+  }
+  return confirmed.slice(0, maxRows);
 }
 
-/** Preview only exact, unambiguous FAMS-versus-legacy duplicate pairs. */
+/** Preview only unique, unambiguous FAMS-versus-legacy duplicate pairs. */
 export function previewFamsLegacyDuplicates({ startDate, endDate, limit = 100 } = {}) {
   ensureFamsFuelSchema();
   const rows = confirmedFamsLegacyDuplicateRows({ startDate, endDate, limit });
   return { found: rows.length, rows };
 }
 
-/** Keep the FAMS-tagged row and remove its exact legacy duplicate. */
+/** Keep the FAMS-tagged row and remove its confirmed legacy duplicate. */
 export function removeFamsLegacyDuplicates({ startDate, endDate } = {}) {
   ensureFamsFuelSchema();
   const rows = confirmedFamsLegacyDuplicateRows({ startDate, endDate, limit: 10000 });
@@ -465,8 +462,6 @@ function insertMatchedFuelRow(row, asset) {
     logDate,
     liters,
     source,
-    meterUnit,
-    meterValue: totalReading,
     famsId,
     famsTrId,
     famsEquipmentId,
