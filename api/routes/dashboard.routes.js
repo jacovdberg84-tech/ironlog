@@ -20,6 +20,7 @@ import {
   listFamsUnmatched,
   syncFamsFuel,
 } from "../utils/famsFuel.js";
+import { famsSelectedDateRange } from "../utils/famsFuelRange.js";
 
 function todayYYYYMMDD() {
   return new Date().toISOString().slice(0, 10);
@@ -2392,7 +2393,20 @@ export default async function dashboardRoutes(app) {
     if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
     try {
       const force = Boolean(req.body?.force);
-      const result = await syncFamsFuel({ log: req.log || console, force });
+      const startDate = String(req.body?.start_date || "").trim();
+      const endDate = String(req.body?.end_date || "").trim();
+      let range = null;
+      if (startDate || endDate) {
+        if (!startDate || !endDate) {
+          return reply.code(400).send({ ok: false, error: "Select both a From date and a To date" });
+        }
+        try {
+          range = famsSelectedDateRange({ startDate, endDate });
+        } catch (err) {
+          return reply.code(400).send({ ok: false, error: err?.message || String(err) });
+        }
+      }
+      const result = await syncFamsFuel({ log: req.log || console, force, range });
       if (!result?.ok && result?.error) {
         return reply.code(502).send(result);
       }

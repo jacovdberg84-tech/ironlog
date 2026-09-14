@@ -400,7 +400,7 @@ function insertUnmatchedFuelRow(row) {
  * Reusable FAMS sync: current month → today.
  * Safe to call from scheduler or manual button.
  */
-export async function syncFamsFuel({ log = console, force = false } = {}) {
+export async function syncFamsFuel({ log = console, force = false, range = null } = {}) {
   ensureFamsFuelSchema();
   const cfg = getFamsConfig();
   if (!cfg.enabled && !force) {
@@ -426,11 +426,11 @@ export async function syncFamsFuel({ log = console, force = false } = {}) {
     persistSyncState({ last_attempt_at: attemptAt, last_error: null });
     log.info?.("[FAMS] Sync started");
 
-    const range = famsCurrentMonthRange();
+    const syncRange = range || famsCurrentMonthRange();
     try {
       const rows = await fetchFamsReportingLogbook({
-        startSlash: range.startSlash,
-        endSlash: range.endSlash,
+        startSlash: syncRange.startSlash,
+        endSlash: syncRange.endSlash,
         log,
       });
 
@@ -471,7 +471,7 @@ export async function syncFamsFuel({ log = console, force = false } = {}) {
       const successAt = new Date().toISOString();
       const result = {
         ok: true,
-        range: { start: range.startYmd, end: range.endYmd },
+        range: { start: syncRange.startYmd, end: syncRange.endYmd },
         received: rows.length,
         imported,
         skipped,
@@ -493,8 +493,8 @@ export async function syncFamsFuel({ log = console, force = false } = {}) {
         last_imported: imported,
         last_skipped: skipped,
         last_unmatched: unmatched,
-        last_range_start: range.startYmd,
-        last_range_end: range.endYmd,
+        last_range_start: syncRange.startYmd,
+        last_range_end: syncRange.endYmd,
       });
       log.info?.(`[FAMS] ${imported} new transactions imported`);
       log.info?.(`[FAMS] ${skipped} existing transactions skipped`);
@@ -512,11 +512,11 @@ export async function syncFamsFuel({ log = console, force = false } = {}) {
       persistSyncState({
         last_attempt_at: attemptAt,
         last_error: msg,
-        last_range_start: range.startYmd,
-        last_range_end: range.endYmd,
+        last_range_start: syncRange.startYmd,
+        last_range_end: syncRange.endYmd,
       });
       log.warn?.(`[FAMS] Sync failed: ${msg}`);
-      return { ok: false, error: msg, range: { start: range.startYmd, end: range.endYmd } };
+      return { ok: false, error: msg, range: { start: syncRange.startYmd, end: syncRange.endYmd } };
     } finally {
       syncInFlight = null;
     }

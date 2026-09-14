@@ -10718,6 +10718,7 @@ function switchTab(key) {
     loadPartsTrackingTab().catch(() => {});
   }
   if (k === "fuel") {
+    initFamsFuelCatchupDates();
     loadFamsFuelStatus().catch(() => {});
   }
   if (k === "lube") {
@@ -11004,15 +11005,39 @@ async function loadFamsFuelStatus() {
   }
 }
 
-async function syncFamsFuelNow() {
+function initFamsFuelCatchupDates() {
+  const today = todayLocalYmd();
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const from = qs("fuelFamsSyncFromDate");
+  const to = qs("fuelFamsSyncToDate");
+  if (from && !from.value) from.value = monthStart;
+  if (to && !to.value) to.value = today;
+}
+
+function selectedFamsFuelSyncRange() {
+  const startDate = String(qs("fuelFamsSyncFromDate")?.value || "").trim();
+  const endDate = String(qs("fuelFamsSyncToDate")?.value || "").trim();
+  if (!startDate || !endDate) {
+    alert("Select both a Catch-up From Date and Catch-up To Date.");
+    return null;
+  }
+  if (startDate > endDate) {
+    alert("Catch-up From Date cannot be after Catch-up To Date.");
+    return null;
+  }
+  return { startDate, endDate };
+}
+
+async function syncFamsFuelNow({ startDate = "", endDate = "" } = {}) {
   const resultEl = qs("fuelFamsResult");
-  setStatus("Syncing FAMS fuel…");
+  const selectedRange = startDate && endDate ? ` for ${startDate} to ${endDate}` : "";
+  setStatus(`Syncing FAMS fuel${selectedRange}…`);
   if (resultEl) resultEl.textContent = "Syncing…";
   try {
     const res = await fetchJson(`${API}/api/dashboard/fuel/fams/sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ force: true }),
+      body: JSON.stringify({ force: true, start_date: startDate || undefined, end_date: endDate || undefined }),
     });
     if (resultEl) resultEl.textContent = JSON.stringify(res, null, 2);
     if (res?.status) renderFamsFuelStatus(res.status);
@@ -11400,6 +11425,12 @@ function getLast7Range(endDate) {
   start.setDate(start.getDate() - 6);
   const fmt = (d) => d.toISOString().slice(0, 10);
   return { start: fmt(start), end: fmt(end) };
+}
+
+async function syncFamsFuelSelectedDates() {
+  const range = selectedFamsFuelSyncRange();
+  if (!range) return;
+  return syncFamsFuelNow(range);
 }
 
 function defaultAmlWeeklyEndDate(date = new Date()) {
@@ -18618,6 +18649,9 @@ async function init() {
   );
   qs("fuelFamsSyncNowBtn")?.addEventListener("click", () =>
     syncFamsFuelNow().catch((e) => setStatus("FAMS sync error: " + e.message))
+  );
+  qs("fuelFamsSyncSelectedBtn")?.addEventListener("click", () =>
+    syncFamsFuelSelectedDates().catch((e) => setStatus("FAMS selected-date sync error: " + e.message))
   );
   qs("fuelFamsRefreshStatusBtn")?.addEventListener("click", () =>
     loadFamsFuelStatus().catch((e) => setStatus("FAMS status error: " + e.message))

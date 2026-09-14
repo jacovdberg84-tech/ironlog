@@ -2901,6 +2901,21 @@
                 Refresh status
               </button>
             </div>
+            <div class="form-row" style="margin-top:4px;">
+              <div class="form-field">
+                <label>Catch-up From Date</label>
+                <input id="fuelFamsSyncFromDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Catch-up To Date</label>
+                <input id="fuelFamsSyncToDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <label>&nbsp;</label>
+                <button id="fuelFamsSyncSelectedBtn" class="btn btn-secondary" type="button">Sync Selected Dates</button>
+              </div>
+            </div>
+            <p class="muted mini" style="margin:0 0 14px;">Use this to catch up a missed period such as August. Select up to one year; existing FAMS transactions are skipped automatically.</p>
             <hr class="hr-soft" style="margin:12px 0;" />
             <p class="muted small" style="margin-top:0;">CSV fallback (emergency / manual)</p>
             <div class="form-row">
