@@ -2915,7 +2915,12 @@
                 <button id="fuelFamsSyncSelectedBtn" class="btn btn-secondary" type="button">Sync Selected Dates</button>
               </div>
             </div>
-            <p class="muted mini" style="margin:0 0 14px;">Use this to catch up a missed period such as August. Select up to one year; existing FAMS transactions are skipped automatically.</p>
+            <p class="muted mini" style="margin:0 0 8px;">Use this to catch up a missed period such as August. Select up to one year; existing FAMS transactions are skipped automatically.</p>
+            <div class="action-buttons" style="margin-bottom:14px;">
+              <button id="fuelFamsDuplicatesPreviewBtn" class="btn btn-secondary" type="button">Preview Confirmed Duplicates</button>
+              <button id="fuelFamsDuplicatesRemoveBtn" class="btn btn-danger" type="button">Remove Confirmed Duplicates</button>
+            </div>
+            <p class="muted mini" style="margin:0 0 14px;">Cleanup only removes an older row when asset, date, litres, source and meter reading exactly match one FAMS-tagged transaction.</p>
             <hr class="hr-soft" style="margin:12px 0;" />
             <p class="muted small" style="margin-top:0;">CSV fallback (emergency / manual)</p>
             <div class="form-row">

@@ -193,6 +193,153 @@ function famsIdExists(famsId) {
   return Boolean(inUnmatched);
 }
 
+/**
+ * Earlier FAMS CSV uploads did not retain the source transaction ID. Link a
+ * legacy row only when its asset, day, litres, source and meter all match one
+ * FAMS transaction exactly; otherwise leave it alone rather than guessing.
+ */
+function linkExactLegacyFamsFuelRow({
+  assetId,
+  logDate,
+  liters,
+  source,
+  meterUnit,
+  meterValue,
+  famsId,
+  famsTrId,
+  famsEquipmentId,
+  famsRegistration,
+  opening,
+  closing,
+  fuelPrice,
+  costCentre,
+}) {
+  if (!Number.isFinite(meterValue) || !String(source || "").trim()) return false;
+  const candidates = db.prepare(`
+    SELECT id
+    FROM fuel_logs
+    WHERE asset_id = ?
+      AND log_date = ?
+      AND fams_id IS NULL
+      AND ABS(COALESCE(liters, 0) - ?) < 0.000001
+      AND TRIM(COALESCE(source, '')) = TRIM(?)
+      AND LOWER(TRIM(COALESCE(meter_unit, ''))) = LOWER(TRIM(COALESCE(?, '')))
+      AND meter_run_value IS NOT NULL
+      AND ABS(meter_run_value - ?) < 0.000001
+    ORDER BY id ASC
+    LIMIT 2
+  `).all(assetId, logDate, liters, source, meterUnit, meterValue);
+  if (candidates.length !== 1) return false;
+
+  const updated = db.prepare(`
+    UPDATE fuel_logs
+    SET
+      fams_id = ?,
+      fams_tr_id = ?,
+      fams_equipment_id = ?,
+      fams_registration = ?,
+      open_meter_value = COALESCE(?, open_meter_value),
+      close_meter_value = COALESCE(?, close_meter_value),
+      unit_cost_per_liter = COALESCE(?, unit_cost_per_liter),
+      cost_center_code = COALESCE(?, cost_center_code)
+    WHERE id = ?
+      AND fams_id IS NULL
+  `).run(
+    famsId,
+    famsTrId,
+    famsEquipmentId,
+    famsRegistration,
+    opening,
+    closing,
+    fuelPrice,
+    costCentre,
+    candidates[0].id,
+  );
+  return Number(updated.changes || 0) === 1;
+}
+
+function confirmedFamsLegacyDuplicateRows({ startDate, endDate, limit = 10000 } = {}) {
+  const maxRows = Math.max(1, Math.min(10000, Number(limit) || 10000));
+  return db.prepare(`
+    WITH matches AS (
+      SELECT
+        f.id AS fams_log_id,
+        l.id AS legacy_log_id,
+        f.asset_id,
+        f.log_date,
+        f.liters,
+        f.source,
+        f.meter_unit,
+        f.meter_run_value,
+        f.fams_id
+      FROM fuel_logs f
+      JOIN fuel_logs l
+        ON l.asset_id = f.asset_id
+        AND l.log_date = f.log_date
+        AND l.fams_id IS NULL
+        AND ABS(COALESCE(l.liters, 0) - COALESCE(f.liters, 0)) < 0.000001
+        AND TRIM(COALESCE(l.source, '')) <> ''
+        AND TRIM(COALESCE(l.source, '')) = TRIM(COALESCE(f.source, ''))
+        AND LOWER(TRIM(COALESCE(l.meter_unit, ''))) = LOWER(TRIM(COALESCE(f.meter_unit, '')))
+        AND l.meter_run_value IS NOT NULL
+        AND f.meter_run_value IS NOT NULL
+        AND ABS(l.meter_run_value - f.meter_run_value) < 0.000001
+      WHERE f.fams_id IS NOT NULL
+        AND f.log_date >= ?
+        AND f.log_date <= ?
+    ),
+    unique_legacy AS (
+      SELECT legacy_log_id
+      FROM matches
+      GROUP BY legacy_log_id
+      HAVING COUNT(*) = 1
+    ),
+    unique_fams AS (
+      SELECT fams_log_id
+      FROM matches
+      GROUP BY fams_log_id
+      HAVING COUNT(*) = 1
+    )
+    SELECT
+      m.fams_log_id,
+      m.legacy_log_id,
+      m.log_date,
+      m.liters,
+      m.source,
+      m.meter_unit,
+      m.meter_run_value,
+      m.fams_id,
+      a.asset_code,
+      a.asset_name
+    FROM matches m
+    JOIN unique_legacy ul ON ul.legacy_log_id = m.legacy_log_id
+    JOIN unique_fams uf ON uf.fams_log_id = m.fams_log_id
+    JOIN assets a ON a.id = m.asset_id
+    ORDER BY m.log_date ASC, a.asset_code ASC, m.legacy_log_id ASC
+    LIMIT ?
+  `).all(startDate, endDate, maxRows);
+}
+
+/** Preview only exact, unambiguous FAMS-versus-legacy duplicate pairs. */
+export function previewFamsLegacyDuplicates({ startDate, endDate, limit = 100 } = {}) {
+  ensureFamsFuelSchema();
+  const rows = confirmedFamsLegacyDuplicateRows({ startDate, endDate, limit });
+  return { found: rows.length, rows };
+}
+
+/** Keep the FAMS-tagged row and remove its exact legacy duplicate. */
+export function removeFamsLegacyDuplicates({ startDate, endDate } = {}) {
+  ensureFamsFuelSchema();
+  const rows = confirmedFamsLegacyDuplicateRows({ startDate, endDate, limit: 10000 });
+  const remove = db.prepare(`DELETE FROM fuel_logs WHERE id = ? AND fams_id IS NULL`);
+  const tx = db.transaction((matches) => {
+    let removed = 0;
+    for (const match of matches) removed += Number(remove.run(match.legacy_log_id).changes || 0);
+    return removed;
+  });
+  return { found: rows.length, removed: tx(rows), rows: rows.slice(0, 100) };
+}
+
 function persistSyncState(patch) {
   ensureFamsFuelSchema();
   const cur = db.prepare(`SELECT * FROM fams_sync_state WHERE id = 1`).get() || {};
@@ -310,6 +457,27 @@ function insertMatchedFuelRow(row, asset) {
   const source =
     [store, operator, driver].filter(Boolean).join(" | ") || "FAMS";
   const costCentre = String(row.Costcentre || row.CostcentreDesc || "").trim() || null;
+  const famsTrId = String(row.TrId || "").trim() || null;
+  const famsEquipmentId = row.Equipment_ID != null ? Number(row.Equipment_ID) : null;
+
+  if (linkExactLegacyFamsFuelRow({
+    assetId: asset.id,
+    logDate,
+    liters,
+    source,
+    meterUnit,
+    meterValue: totalReading,
+    famsId,
+    famsTrId,
+    famsEquipmentId,
+    famsRegistration: registration || null,
+    opening,
+    closing,
+    fuelPrice: fuelPrice != null && fuelPrice > 0 ? fuelPrice : null,
+    costCentre,
+  })) {
+    return "linked_legacy";
+  }
 
   // Store FAMS meter fields on fuel_logs for consumption analysis only.
   // Never writes daily_hours / asset master hours.
@@ -336,11 +504,11 @@ function insertMatchedFuelRow(row, asset) {
     fuelPrice != null && fuelPrice > 0 ? fuelPrice : null,
     costCentre,
     famsId,
-    String(row.TrId || "").trim() || null,
-    row.Equipment_ID != null ? Number(row.Equipment_ID) : null,
+    famsTrId,
+    famsEquipmentId,
     registration || null
   );
-  return true;
+  return "inserted";
 }
 
 function insertUnmatchedFuelRow(row) {
@@ -438,6 +606,7 @@ export async function syncFamsFuel({ log = console, force = false, range = null 
       let skipped = 0;
       let unmatched = 0;
       let invalid = 0;
+      let linkedLegacy = 0;
 
       const tx = db.transaction((records) => {
         for (const row of records) {
@@ -458,8 +627,11 @@ export async function syncFamsFuel({ log = console, force = false, range = null 
           }
           const asset = findAssetByRegistration(registration);
           if (asset) {
-            if (insertMatchedFuelRow(row, asset)) imported += 1;
-            else invalid += 1;
+            const insertResult = insertMatchedFuelRow(row, asset);
+            if (insertResult) {
+              if (insertResult === "linked_legacy") linkedLegacy += 1;
+              else imported += 1;
+            } else invalid += 1;
           } else {
             if (insertUnmatchedFuelRow(row)) unmatched += 1;
             else invalid += 1;
@@ -474,6 +646,7 @@ export async function syncFamsFuel({ log = console, force = false, range = null 
         range: { start: syncRange.startYmd, end: syncRange.endYmd },
         received: rows.length,
         imported,
+        linked_legacy: linkedLegacy,
         skipped,
         unmatched,
         invalid,

@@ -18,6 +18,8 @@ import {
   ensureFamsFuelSchema,
   getFamsSyncStatus,
   listFamsUnmatched,
+  previewFamsLegacyDuplicates,
+  removeFamsLegacyDuplicates,
   syncFamsFuel,
 } from "../utils/famsFuel.js";
 import { famsSelectedDateRange } from "../utils/famsFuelRange.js";
@@ -2414,6 +2416,36 @@ export default async function dashboardRoutes(app) {
     } catch (err) {
       // Never crash the API on FAMS failure
       return reply.code(500).send({ ok: false, error: err?.message || String(err) });
+    }
+  });
+
+  // POST /api/dashboard/fuel/fams/duplicates/preview — read-only exact legacy/FAMS duplicate check
+  app.post("/fuel/fams/duplicates/preview", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
+    const startDate = String(req.body?.start_date || "").trim();
+    const endDate = String(req.body?.end_date || "").trim();
+    try {
+      const range = famsSelectedDateRange({ startDate, endDate });
+      return reply.send({ ok: true, range: { start: range.startYmd, end: range.endYmd }, ...previewFamsLegacyDuplicates({
+        startDate: range.startYmd,
+        endDate: range.endYmd,
+      }) });
+    } catch (err) {
+      return reply.code(400).send({ ok: false, error: err?.message || String(err) });
+    }
+  });
+
+  // POST /api/dashboard/fuel/fams/duplicates/remove — only removes exact, unambiguous legacy duplicates
+  app.post("/fuel/fams/duplicates/remove", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
+    const startDate = String(req.body?.start_date || "").trim();
+    const endDate = String(req.body?.end_date || "").trim();
+    try {
+      const range = famsSelectedDateRange({ startDate, endDate });
+      const result = removeFamsLegacyDuplicates({ startDate: range.startYmd, endDate: range.endYmd });
+      return reply.send({ ok: true, range: { start: range.startYmd, end: range.endYmd }, ...result });
+    } catch (err) {
+      return reply.code(400).send({ ok: false, error: err?.message || String(err) });
     }
   });
 

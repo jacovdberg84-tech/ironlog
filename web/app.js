@@ -11043,8 +11043,9 @@ async function syncFamsFuelNow({ startDate = "", endDate = "" } = {}) {
     if (res?.status) renderFamsFuelStatus(res.status);
     else await loadFamsFuelStatus().catch(() => {});
     if (res?.ok) {
+      const linkedLegacy = Number(res.legacy_linked || 0);
       setStatus(
-        `FAMS sync done: ${Number(res.imported || 0)} imported, ${Number(res.skipped || 0)} skipped, ${Number(res.unmatched || 0)} unmatched.`
+        `FAMS sync done: ${Number(res.imported || 0)} imported, ${linkedLegacy} legacy row(s) linked, ${Number(res.skipped || 0)} skipped, ${Number(res.unmatched || 0)} unmatched.`
       );
       await loadDashboard().catch(() => {});
     } else {
@@ -11431,6 +11432,39 @@ async function syncFamsFuelSelectedDates() {
   const range = selectedFamsFuelSyncRange();
   if (!range) return;
   return syncFamsFuelNow(range);
+}
+
+async function previewFamsFuelDuplicates() {
+  const resultEl = qs("fuelFamsResult");
+  const range = selectedFamsFuelSyncRange();
+  if (!range) return;
+  setStatus(`Checking FAMS duplicates for ${range.startDate} to ${range.endDate}…`);
+  const res = await fetchJson(`${API}/api/dashboard/fuel/fams/duplicates/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ start_date: range.startDate, end_date: range.endDate }),
+  });
+  if (resultEl) resultEl.textContent = JSON.stringify(res, null, 2);
+  setStatus(`${Number(res.found || 0)} exact FAMS duplicate pair(s) found. Review the result, then remove confirmed duplicates if needed.`);
+}
+
+async function removeFamsFuelDuplicates() {
+  const resultEl = qs("fuelFamsResult");
+  const range = selectedFamsFuelSyncRange();
+  if (!range) return;
+  const approved = confirm(
+    `Remove only exact, confirmed FAMS duplicate pairs from ${range.startDate} to ${range.endDate}? The FAMS-tagged transaction will be kept.`,
+  );
+  if (!approved) return;
+  setStatus(`Removing confirmed FAMS duplicates for ${range.startDate} to ${range.endDate}…`);
+  const res = await fetchJson(`${API}/api/dashboard/fuel/fams/duplicates/remove`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ start_date: range.startDate, end_date: range.endDate }),
+  });
+  if (resultEl) resultEl.textContent = JSON.stringify(res, null, 2);
+  setStatus(`${Number(res.removed || 0)} confirmed FAMS duplicate row(s) removed.`);
+  await loadDashboard().catch(() => {});
 }
 
 function defaultAmlWeeklyEndDate(date = new Date()) {
@@ -18652,6 +18686,12 @@ async function init() {
   );
   qs("fuelFamsSyncSelectedBtn")?.addEventListener("click", () =>
     syncFamsFuelSelectedDates().catch((e) => setStatus("FAMS selected-date sync error: " + e.message))
+  );
+  qs("fuelFamsDuplicatesPreviewBtn")?.addEventListener("click", () =>
+    previewFamsFuelDuplicates().catch((e) => setStatus("FAMS duplicate preview error: " + e.message))
+  );
+  qs("fuelFamsDuplicatesRemoveBtn")?.addEventListener("click", () =>
+    removeFamsFuelDuplicates().catch((e) => setStatus("FAMS duplicate cleanup error: " + e.message))
   );
   qs("fuelFamsRefreshStatusBtn")?.addEventListener("click", () =>
     loadFamsFuelStatus().catch((e) => setStatus("FAMS status error: " + e.message))
