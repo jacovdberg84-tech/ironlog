@@ -6619,7 +6619,45 @@ async function loadAssetKpiWeekly() {
   }
 }
 
-function exportAssetKpiToExcel() {
+async function downloadAssetKpiExport(url, filename, label) {
+  const msg = document.getElementById("akpMsg");
+  if (msg) {
+    msg.className = "muted";
+    msg.textContent = `Preparing ${label}...`;
+  }
+  try {
+    const res = await fetch(url, { headers: authHeaders() });
+    if (!res.ok) {
+      let detail = await res.text().catch(() => "");
+      try {
+        const data = JSON.parse(detail);
+        detail = data.error || data.message || detail;
+      } catch {}
+      throw new Error(detail || `${label} request failed (${res.status})`);
+    }
+    const blobUrl = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = `${label} downloaded.`;
+    }
+  } catch (e) {
+    const detail = e?.message || String(e);
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = `${label} error: ${detail}`;
+    }
+    alert(`${label} error: ${detail}`);
+  }
+}
+
+async function exportAssetKpiToExcel() {
   if (!akpLastMeta) {
     alert("Load KPI data first before exporting.");
     return;
@@ -6632,10 +6670,14 @@ function exportAssetKpiToExcel() {
   const selectedCodes = akpSelectedAssetCodes();
   const codes = selectedCodes.length ? selectedCodes : (akpLastMeta.asset_codes || []);
   if (codes.length) q.set("asset_codes", codes.join(","));
-  window.open(`${API}/dashboard/asset-kpi.xlsx?${q.toString()}`, "_blank");
+  await downloadAssetKpiExport(
+    `${API}/dashboard/asset-kpi.xlsx?${q.toString()}`,
+    `IRONLOG_Asset_KPI_${akpLastMeta.start}_to_${akpLastMeta.end}.xlsx`,
+    "Asset KPI Excel export",
+  );
 }
 
-function exportAssetKpiDocx() {
+async function exportAssetKpiDocx() {
   if (!akpLastMeta) {
     alert("Load KPI data first before exporting.");
     return;
@@ -6656,7 +6698,11 @@ function exportAssetKpiDocx() {
   if (categoryFilter) q.set("category", categoryFilter);
   q.set("avail_target", availTarget);
   q.set("util_target", utilTarget);
-  window.open(`${API}/dashboard/asset-kpi.docx?${q.toString()}`, "_blank");
+  await downloadAssetKpiExport(
+    `${API}/dashboard/asset-kpi.docx?${q.toString()}`,
+    `IRONLOG_Asset_KPI_${akpLastMeta.start}_to_${akpLastMeta.end}.docx`,
+    "Asset KPI Word export",
+  );
 }
 
 async function exportExecutivePackFromAssetKpi() {
