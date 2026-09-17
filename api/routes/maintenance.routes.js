@@ -59,6 +59,10 @@ import {
   UNDERCARRIAGE_TRACK_SAG_POINTS,
   UNDERCARRIAGE_WEAR_BANDS,
 } from "../utils/undercarriageTemplate.js";
+import {
+  createManagementSummary,
+  styleManagementDetailSheet,
+} from "../utils/managementWorkbook.js";
 
 function isDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
@@ -11362,21 +11366,23 @@ export default async function maintenanceRoutes(app) {
       wb.creator = "IRONLOG";
       wb.created = new Date();
 
-      const wsSummary = wb.addWorksheet("Summary");
-      wsSummary.columns = [
-        { header: "Field", key: "field", width: 28 },
-        { header: "Value", key: "value", width: 24 },
-      ];
       const yearHours = rows.reduce((s, r) => s + Number(r.hours || 0), 0);
       const yearCost = rows.reduce((s, r) => s + Number(r.labor_cost || 0), 0);
-      wsSummary.addRows([
-        { field: "Year", value: year },
-        { field: "Site", value: site_code },
-        { field: "Default labor rate ($/hr)", value: defaultRate },
-        { field: "Total entries", value: rows.length },
-        { field: "Total hours", value: Number(yearHours.toFixed(2)) },
-        { field: "Total labor cost ($)", value: Number(yearCost.toFixed(2)) },
-      ]);
+      const technicianCount = new Set(rows.map((row) => String(row.technician_name || "").trim()).filter(Boolean)).size;
+      createManagementSummary(wb, {
+        title: "IRONLOG Mechanics Cost Report",
+        periodLabel: `Reporting year: ${year}`,
+        cards: [
+          { label: "LABOR HOURS", value: Number(yearHours.toFixed(2)), numFmt: "#,##0.00" },
+          { label: "LABOR COST", value: Number(yearCost.toFixed(2)), numFmt: "$#,##0.00" },
+          { label: "WORK ENTRIES", value: rows.length, numFmt: "#,##0" },
+          { label: "TECHNICIANS", value: technicianCount, numFmt: "#,##0" },
+        ],
+        scopeLines: [
+          `Site: ${site_code}. Default labor rate: $${Number(defaultRate || 0).toFixed(2)} per hour.`,
+          "Monthly sheets retain the full job-card, time, technician, and SMR history.",
+        ],
+      });
 
       const monthCols = [
         { header: "Date", key: "work_date", width: 14 },
@@ -11433,6 +11439,17 @@ export default async function maintenanceRoutes(app) {
           labor_rate_per_hour: "",
           labor_cost: Number(monthCost.toFixed(2)),
         });
+        styleManagementDetailSheet(ws, {
+          title: `Mechanics cost – ${sheetName} ${year}`,
+          subtitle: `Site: ${site_code} · Scheduled work window: 06:00 to 17:00`,
+          frozenColumns: 2,
+          numberFormats: {
+            hours: "#,##0.00",
+            smr: "#,##0.0",
+            labor_rate_per_hour: "$#,##0.00",
+            labor_cost: "$#,##0.00",
+          },
+        });
       }
 
       const byTech = new Map();
@@ -11468,6 +11485,12 @@ export default async function maintenanceRoutes(app) {
           }))
           .sort((a, b) => b.hours - a.hours),
       );
+      styleManagementDetailSheet(wsTech, {
+        title: "Mechanics cost by technician",
+        subtitle: `Reporting year: ${year} · Site: ${site_code}`,
+        frozenColumns: 1,
+        numberFormats: { entries: "#,##0", hours: "#,##0.00", labor_cost: "$#,##0.00" },
+      });
 
       const wsPlant = wb.addWorksheet("Plant Summary");
       wsPlant.columns = [
@@ -11485,6 +11508,12 @@ export default async function maintenanceRoutes(app) {
           }))
           .sort((a, b) => b.hours - a.hours),
       );
+      styleManagementDetailSheet(wsPlant, {
+        title: "Mechanics cost by equipment",
+        subtitle: `Reporting year: ${year} · Site: ${site_code}`,
+        frozenColumns: 1,
+        numberFormats: { entries: "#,##0", hours: "#,##0.00", labor_cost: "$#,##0.00" },
+      });
 
       const buffer = await wb.xlsx.writeBuffer();
       return reply

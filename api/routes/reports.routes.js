@@ -58,6 +58,10 @@ import { listPlannedMaintenanceForDate, shiftDateYmd } from "../utils/shortBreak
 import {
   buildAmlWeeklyCheckSheet,
 } from "../utils/amlWeeklyCheckSheet.js";
+import {
+  createManagementSummary,
+  styleManagementDetailSheet,
+} from "../utils/managementWorkbook.js";
 
 const __dirnameReports = path.dirname(fileURLToPath(import.meta.url));
 const AML_WEEKLY_TEMPLATE_PATH = path.join(
@@ -3682,6 +3686,24 @@ export default async function reportsRoutes(app) {
 
     const wb = new ExcelJS.Workbook();
     wb.creator = "IRONLOG";
+    wb.created = new Date();
+    const totalQty = usageRows.reduce((sum, row) => sum + Number(row.qty_total || 0), 0);
+    const totalCost = usageRows.reduce((sum, row) => sum + Number(row.total_lube_cost || 0), 0);
+    const assetCount = new Set(usageRows.map((row) => String(row.asset_code || "")).filter(Boolean)).size;
+    createManagementSummary(wb, {
+      title: "IRONLOG Lube Usage Report",
+      periodLabel: `Reporting period: ${start} to ${end}`,
+      cards: [
+        { label: "LUBE QUANTITY ISSUED", value: totalQty, numFmt: "#,##0.00" },
+        { label: "ESTIMATED LUBE COST", value: totalCost, numFmt: "#,##0.00" },
+        { label: "ASSETS SUPPLIED", value: assetCount, numFmt: "#,##0" },
+        { label: "LUBE SKUS ISSUED", value: usageRows.length, numFmt: "#,##0" },
+      ],
+      scopeLines: [
+        `Usage period: ${start} to ${end}. Store stock month: ${month}.`,
+        `Location: ${resolvedLocationCode || "all locations"}. The detail tabs retain each issue and the store balance evidence.`,
+      ],
+    });
     const wsUsage = wb.addWorksheet("Usage by asset", { views: [{ state: "frozen", ySplit: 1 }] });
     wsUsage.columns = [
       { header: "Asset code", key: "asset_code", width: 14 },
@@ -3705,7 +3727,12 @@ export default async function reportsRoutes(app) {
         entries: Number(r.entries || 0),
       });
     }
-    wsUsage.getRow(1).font = { bold: true };
+    styleManagementDetailSheet(wsUsage, {
+      title: "Lube usage by asset",
+      subtitle: `Reporting period: ${start} to ${end}`,
+      frozenColumns: 1,
+      numberFormats: { qty_total: "#,##0.00", total_lube_cost: "#,##0.00", entries: "#,##0" },
+    });
 
     const wsLines = wb.addWorksheet("Usage lines", { views: [{ state: "frozen", ySplit: 1 }] });
     wsLines.columns = [
@@ -3738,39 +3765,31 @@ export default async function reportsRoutes(app) {
         work_order_id: r.work_order_id || "",
       });
     }
-    wsLines.getRow(1).font = { bold: true };
+    styleManagementDetailSheet(wsLines, {
+      title: "Lube issue lines",
+      subtitle: `Reporting period: ${start} to ${end}`,
+      frozenColumns: 2,
+      numberFormats: { smr: "#,##0.0", quantity: "#,##0.00", unit_cost: "#,##0.00", line_cost: "#,##0.00" },
+    });
 
-    const wsStock = wb.addWorksheet("Month store stock", { views: [{ state: "frozen", ySplit: 6 }] });
-    wsStock.addRow(["Lube store — month opening / closing (from stock movements)"]);
-    wsStock.addRow(["Report usage period (oil logs)", `${start} to ${end}`]);
-    wsStock.addRow(["Stock month (balances)", month]);
-    wsStock.addRow(["Location filter", resolvedLocationCode || "(all locations)"]);
-    wsStock.addRow([
-      "Opening as-of (end prev. month)",
-      stockSnap.opening_as_of,
-      "Closing as-of (end month)",
-      stockSnap.closing_as_of,
-    ]);
-    wsStock.addRow([]);
-    const hdr = wsStock.addRow([
-      "Stock code",
-      "Description",
-      "Min stock",
-      "Opening qty",
-      "Closing qty",
-      "Net movement (month)",
-    ]);
-    hdr.font = { bold: true };
+    const wsStock = wb.addWorksheet("Store stock");
+    wsStock.columns = [
+      { header: "Stock code", key: "part_code", width: 16 },
+      { header: "Description", key: "part_name", width: 34 },
+      { header: "Min stock", key: "min_stock", width: 14 },
+      { header: "Opening qty", key: "opening_qty", width: 14 },
+      { header: "Closing qty", key: "closing_qty", width: 14 },
+      { header: "Net movement", key: "net_month_movement", width: 16 },
+    ];
     for (const r of stockSnap.rows) {
-      wsStock.addRow([
-        r.part_code,
-        r.part_name,
-        r.min_stock,
-        r.opening_qty,
-        r.closing_qty,
-        r.net_month_movement,
-      ]);
+      wsStock.addRow(r);
     }
+    styleManagementDetailSheet(wsStock, {
+      title: "Lube store stock movement",
+      subtitle: `Balance month: ${month} · Opening as of ${stockSnap.opening_as_of} · Closing as of ${stockSnap.closing_as_of}`,
+      frozenColumns: 1,
+      numberFormats: { min_stock: "#,##0.00", opening_qty: "#,##0.00", closing_qty: "#,##0.00", net_month_movement: "#,##0.00" },
+    });
 
     const safeStart = start.replace(/[^\d-]/g, "");
     const safeEnd = end.replace(/[^\d-]/g, "");
@@ -7243,27 +7262,20 @@ export default async function reportsRoutes(app) {
     const wb = new ExcelJS.Workbook();
     wb.creator = "IRONLOG";
     wb.created = new Date();
-
-    const wsSummary = wb.addWorksheet("Summary");
-    wsSummary.columns = [
-      { header: "Metric", key: "metric", width: 28 },
-      { header: "Value", key: "value", width: 36 },
-    ];
-    wsSummary.addRows([
-      { metric: "Site", value: site_code },
-      { metric: "Period from", value: start },
-      { metric: "Period to", value: end },
-      { metric: "Status filter", value: status ? partOrderStatusLabel(status) : "All active" },
-      { metric: "On order ($)", value: summary.on_order.value },
-      { metric: "On order (lines)", value: summary.on_order.count },
-      { metric: "In transit ($)", value: summary.in_transit.value },
-      { metric: "In transit (lines)", value: summary.in_transit.count },
-      { metric: "Arrived ($)", value: summary.arrived.value },
-      { metric: "Arrived (lines)", value: summary.arrived.count },
-      { metric: "Pending forecast ($)", value: summary.total_pending },
-      { metric: "Total period ($)", value: summary.total_forecast },
-    ]);
-    wsSummary.getRow(1).font = { bold: true };
+    createManagementSummary(wb, {
+      title: "IRONLOG Parts Purchases Report",
+      periodLabel: `Reporting period: ${start} to ${end}`,
+      cards: [
+        { label: "ON ORDER", value: summary.on_order.value, numFmt: "$#,##0.00" },
+        { label: "IN TRANSIT", value: summary.in_transit.value, numFmt: "$#,##0.00" },
+        { label: "ARRIVED", value: summary.arrived.value, numFmt: "$#,##0.00" },
+        { label: "TOTAL PERIOD", value: summary.total_forecast, numFmt: "$#,##0.00" },
+      ],
+      scopeLines: [
+        `Site: ${site_code}. Status filter: ${status ? partOrderStatusLabel(status) : "all active"}.`,
+        `${summary.on_order.count} on-order, ${summary.in_transit.count} in-transit, and ${summary.arrived.count} arrived line items in the selected period.`,
+      ],
+    });
 
     const ws = wb.addWorksheet("Purchases");
     ws.columns = [
@@ -7285,15 +7297,20 @@ export default async function reportsRoutes(app) {
       { header: "Notes", key: "notes", width: 30 },
       { header: "Created by", key: "created_by", width: 16 },
     ];
-    ws.getRow(1).font = { bold: true };
     for (const r of rows) {
       ws.addRow({
         ...r,
         status_label: partOrderStatusLabel(r.status),
       });
     }
-  ["qty", "unit_cost", "line_total"].forEach((key) => {
+    ["qty", "unit_cost", "line_total"].forEach((key) => {
       ws.getColumn(key).numFmt = "#,##0.00";
+    });
+    styleManagementDetailSheet(ws, {
+      title: "Parts purchase detail",
+      subtitle: `Reporting period: ${start} to ${end} · Site: ${site_code}`,
+      frozenColumns: 2,
+      numberFormats: { qty: "#,##0.00", unit_cost: "$#,##0.00", line_total: "$#,##0.00" },
     });
 
     const buffer = await wb.xlsx.writeBuffer();
