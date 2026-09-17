@@ -1412,30 +1412,9 @@ function buildMaintenanceInsightsExportQuery() {
   return { start, end, q };
 }
 
-async function downloadMaintenanceInsightsXlsxFile(url, filename) {
-  const res = await fetch(url, { headers: authHeaders() });
-  if (!res.ok) {
-    let msg = await res.text().catch(() => "");
-    try {
-      const j = JSON.parse(msg);
-      msg = j.error || j.message || msg;
-    } catch {}
-    throw new Error(msg || `Export failed (${res.status})`);
-  }
-  const blob = await res.blob();
-  const blobUrl = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = blobUrl;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(blobUrl);
-}
-
 async function openMaintenanceInsightsXlsx() {
   const { start, end, q } = buildMaintenanceInsightsExportQuery();
-  await downloadMaintenanceInsightsXlsxFile(
+  await downloadProtectedXlsxFile(
     `${API}/maintenance/insights.xlsx?${q.toString()}`,
     `IRONLOG_Maintenance_Insights_${start}_to_${end}.xlsx`,
   );
@@ -1443,7 +1422,7 @@ async function openMaintenanceInsightsXlsx() {
 
 async function downloadInsightsPartsDemandXlsx() {
   const { start, end, q } = buildMaintenanceInsightsExportQuery();
-  await downloadMaintenanceInsightsXlsxFile(
+  await downloadProtectedXlsxFile(
     `${API}/maintenance/insights/parts-demand.xlsx?${q.toString()}`,
     `IRONLOG_Parts_Demand_${start}_to_${end}.xlsx`,
   );
@@ -1451,7 +1430,7 @@ async function downloadInsightsPartsDemandXlsx() {
 
 async function downloadInsightsCostPerMachineXlsx() {
   const { start, end, q } = buildMaintenanceInsightsExportQuery();
-  await downloadMaintenanceInsightsXlsxFile(
+  await downloadProtectedXlsxFile(
     `${API}/maintenance/insights/cost-per-machine.xlsx?${q.toString()}`,
     `IRONLOG_Maintenance_Cost_Per_Machine_${start}_to_${end}.xlsx`,
   );
@@ -2633,6 +2612,42 @@ async function openUpcomingServicesPdf(download = false, includeAll = false) {
     setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
   } catch (err) {
     alert(`Could not open PDF: ${err.message || err}`);
+  }
+}
+
+async function downloadProtectedXlsxFile(url, filename) {
+  const res = await fetch(url, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) {
+    let message = await res.text().catch(() => "");
+    try {
+      const body = JSON.parse(message);
+      message = body.error || body.message || message;
+    } catch {}
+    throw new Error(res.status === 401
+      ? "Your session has expired. Please sign in again."
+      : message || `Export failed (${res.status})`);
+  }
+  const blob = await res.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+}
+
+async function downloadMaintenancePlansXlsx() {
+  const nearDueHours = getDueThresholdHours();
+  const dateTag = new Date().toISOString().slice(0, 10);
+  try {
+    await downloadProtectedXlsxFile(
+      `${API}/maintenance/plans.xlsx?near_due_hours=${encodeURIComponent(String(nearDueHours))}`,
+      `IRONLOG_Maintenance_Plans_${dateTag}.xlsx`,
+    );
+  } catch (err) {
+    alert(`Could not download maintenance plans: ${err.message || err}`);
   }
 }
 
@@ -8689,6 +8704,7 @@ document.addEventListener("DOMContentLoaded", () => {
     await Promise.all([loadPlans(), loadDue(), loadHistory()]);
   });
   document.getElementById("shareUpcomingServicesPdfBtn")?.addEventListener("click", () => openUpcomingServicesPdf(false, true));
+  document.getElementById("downloadMaintenancePlansXlsxBtn")?.addEventListener("click", () => downloadMaintenancePlansXlsx());
   document.getElementById("openUpcomingServicesPdfBtn")?.addEventListener("click", () => openUpcomingServicesPdf(false));
   document.getElementById("downloadUpcomingServicesPdfBtn")?.addEventListener("click", () => openUpcomingServicesPdf(true));
 

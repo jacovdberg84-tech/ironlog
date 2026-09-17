@@ -1878,30 +1878,46 @@ export default async function maintenanceRoutes(app) {
   const damageReportsDir = path.join(dataRoot, "uploads", "manager-damage-reports");
   fs.mkdirSync(damageReportsDir, { recursive: true });
 
-   // =====================================================
+  // =====================================================
   // MAINTENANCE PLANS - LIST
   // GET /api/maintenance/plans
   // =====================================================
+  function displayPlanServiceName(plan) {
+    const assetCode = String(plan?.asset_code || "").trim();
+    const meterUnit = meterUnitForAsset(assetCode);
+    const interval = planIntervalHours(plan);
+    const supplied = String(plan?.service_name || "").trim();
+    if (meterUnit === "km") return "10000 km service";
+    if (!supplied || /^\d+(?:\.0+)?$/.test(supplied)) {
+      return `${Number(interval || 0).toFixed(0)} hour service`;
+    }
+    return supplied;
+  }
+
+  function listMaintenancePlans(nearDueHours = 50) {
+    const rows = db.prepare(`
+      SELECT
+        mp.id,
+        mp.asset_id,
+        mp.service_name,
+        mp.interval_hours,
+        mp.last_service_hours,
+        mp.active,
+        a.asset_code,
+        a.asset_name,
+        a.category
+      FROM maintenance_plans mp
+      JOIN assets a ON a.id = mp.asset_id
+      WHERE a.archived = 0
+      ORDER BY a.asset_code ASC, mp.service_name ASC
+    `).all();
+
+    return enrichPlansWithNextService(rows, getAssetCurrentHours, nearDueHours);
+  }
+
   app.get("/plans", async (req, reply) => {
     try {
-      const rows = db.prepare(`
-        SELECT
-          mp.id,
-          mp.asset_id,
-          mp.service_name,
-          mp.interval_hours,
-          mp.last_service_hours,
-          mp.active,
-          a.asset_code,
-          a.asset_name,
-          a.category
-        FROM maintenance_plans mp
-        JOIN assets a ON a.id = mp.asset_id
-        WHERE a.archived = 0
-        ORDER BY a.asset_code ASC, mp.service_name ASC
-      `).all();
-
-      const plans = enrichPlansWithNextService(rows, getAssetCurrentHours, 50);
+      const plans = listMaintenancePlans();
 
       return reply.send({
         ok: true,
@@ -1913,6 +1929,142 @@ export default async function maintenanceRoutes(app) {
         ok: false,
         error: err.message
       });
+    }
+  });
+
+  // =====================================================
+  // MAINTENANCE PLANS - EXCEL EXPORT
+  // GET /api/maintenance/plans.xlsx?near_due_hours=50
+  // =====================================================
+  app.get("/plans.xlsx", async (req, reply) => {
+    try {
+      const requestedThreshold = Number(req.query?.near_due_hours || 50);
+      const nearDueHours = Number.isFinite(requestedThreshold)
+        ? Math.max(1, Math.min(100000, requestedThreshold))
+        : 50;
+      const plans = listMaintenancePlans(nearDueHours);
+      const planningQueue = buildDueListFromPlans(plans, getAssetCurrentHours, nearDueHours)
+        .sort((a, b) => {
+          const statusRank = { OVERDUE: 1, "ALMOST DUE": 2, OK: 3 };
+          const rank = (statusRank[String(a.status || "OK").toUpperCase()] || 4)
+            - (statusRank[String(b.status || "OK").toUpperCase()] || 4);
+          if (rank !== 0) return rank;
+          const remaining = Number(a.remaining_hours || 0) - Number(b.remaining_hours || 0);
+          if (remaining !== 0) return remaining;
+          return String(a.asset_code || "").localeCompare(String(b.asset_code || ""));
+        });
+      const overdueCount = planningQueue.filter((row) => String(row.status || "").toUpperCase() === "OVERDUE").length;
+      const dueSoonCount = planningQueue.filter((row) => String(row.status || "").toUpperCase() === "ALMOST DUE").length;
+      const activeAssetCount = new Set(planningQueue.map((row) => Number(row.asset_id || 0)).filter(Boolean)).size;
+      const dateTag = new Date().toISOString().slice(0, 10);
+
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "IRONLOG";
+      wb.created = new Date();
+      createManagementSummary(wb, {
+        title: "IRONLOG Maintenance Plans",
+        periodLabel: `Live planning view generated ${dateTag}`,
+        cards: [
+          { label: "ACTIVE ASSETS", value: activeAssetCount, numFmt: "#,##0" },
+          { label: "OVERDUE", value: overdueCount, numFmt: "#,##0", tone: "warning" },
+          { label: "DUE SOON", value: dueSoonCount, numFmt: "#,##0", tone: "attention" },
+          { label: "CONFIGURED SCHEDULES", value: plans.length, numFmt: "#,##0" },
+        ],
+        scopeLines: [
+          "Planning Queue shows one next service for every active asset. Service Schedules keeps every configured service interval.",
+          `Near-due threshold: ${nearDueHours} hours. LDV schedules use their 500 km early-warning threshold.`,
+        ],
+      });
+
+      const queueSheet = wb.addWorksheet("Planning Queue");
+      queueSheet.columns = [
+        { header: "Asset code", key: "asset_code", width: 14 },
+        { header: "Equipment", key: "asset_name", width: 30 },
+        { header: "Category", key: "category", width: 20 },
+        { header: "Current meter", key: "current_hours", width: 16 },
+        { header: "Unit", key: "meter_unit", width: 10 },
+        { header: "Last service", key: "last_service_hours", width: 16 },
+        { header: "Next service", key: "service_name", width: 22 },
+        { header: "Due meter", key: "next_due_hours", width: 16 },
+        { header: "Remaining", key: "remaining_hours", width: 14 },
+        { header: "Status", key: "status", width: 15 },
+      ];
+      queueSheet.addRows(planningQueue.map((row) => ({
+        asset_code: row.asset_code || "",
+        asset_name: row.asset_name || "",
+        category: row.category || "",
+        current_hours: Number(row.current_hours || 0),
+        meter_unit: row.meter_unit || meterUnitForAsset(row.asset_code),
+        last_service_hours: Number(row.last_service_hours || 0),
+        service_name: displayPlanServiceName(row),
+        next_due_hours: Number(row.next_due_hours || 0),
+        remaining_hours: Number(row.remaining_hours || 0),
+        status: row.status || "OK",
+      })));
+      styleManagementDetailSheet(queueSheet, {
+        title: "Maintenance planning queue",
+        subtitle: `Live meter readings · Near-due threshold: ${nearDueHours} hours`,
+        frozenColumns: 2,
+        numberFormats: {
+          current_hours: "#,##0.0",
+          last_service_hours: "#,##0.0",
+          next_due_hours: "#,##0.0",
+          remaining_hours: "#,##0.0",
+        },
+      });
+
+      const scheduleSheet = wb.addWorksheet("Service Schedules");
+      scheduleSheet.columns = [
+        { header: "Asset code", key: "asset_code", width: 14 },
+        { header: "Equipment", key: "asset_name", width: 30 },
+        { header: "Category", key: "category", width: 20 },
+        { header: "Service schedule", key: "service_name", width: 24 },
+        { header: "Interval", key: "interval_hours", width: 13 },
+        { header: "Unit", key: "meter_unit", width: 10 },
+        { header: "Active", key: "active", width: 11 },
+        { header: "Last service", key: "last_service_hours", width: 16 },
+        { header: "Current meter", key: "current_hours", width: 16 },
+        { header: "Next due", key: "next_due_hours", width: 16 },
+        { header: "Remaining", key: "remaining_hours", width: 14 },
+        { header: "Next for asset", key: "is_next_for_asset", width: 15 },
+        { header: "Status", key: "status", width: 15 },
+      ];
+      scheduleSheet.addRows(plans.map((row) => ({
+        asset_code: row.asset_code || "",
+        asset_name: row.asset_name || "",
+        category: row.category || "",
+        service_name: displayPlanServiceName(row),
+        interval_hours: Number(row.interval_hours || 0),
+        meter_unit: row.meter_unit || meterUnitForAsset(row.asset_code),
+        active: Number(row.active || 0) ? "Active" : "Inactive",
+        last_service_hours: Number(row.last_service_hours_snapped ?? row.last_service_hours ?? 0),
+        current_hours: Number(row.current_hours || 0),
+        next_due_hours: row.is_next_for_asset ? Number(row.next_due_hours || 0) : null,
+        remaining_hours: row.is_next_for_asset ? Number(row.remaining_hours || 0) : null,
+        is_next_for_asset: row.is_next_for_asset ? "Yes" : "",
+        status: row.is_next_for_asset ? (row.status || "OK") : "",
+      })));
+      styleManagementDetailSheet(scheduleSheet, {
+        title: "Configured maintenance schedules",
+        subtitle: "All service plans, including inactive schedules. Only the next due service is marked per active asset.",
+        frozenColumns: 2,
+        numberFormats: {
+          interval_hours: "#,##0.0",
+          last_service_hours: "#,##0.0",
+          current_hours: "#,##0.0",
+          next_due_hours: "#,##0.0",
+          remaining_hours: "#,##0.0",
+        },
+      });
+
+      const buffer = await wb.xlsx.writeBuffer();
+      return reply
+        .header("Content-Disposition", `attachment; filename=IRONLOG_Maintenance_Plans_${dateTag}.xlsx`)
+        .type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .send(buffer);
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || "Unable to export maintenance plans" });
     }
   });
   // =====================================================
