@@ -14,6 +14,8 @@ import { fuelBenchmarkAssetsInRangeSql, sqlFuelMetricModeExpr } from "../utils/f
 import { isOperationalHireAsset, sqlIncludeArchivedHireAssets } from "../utils/hiredEquipment.js";
 import { ensureCostAllocationSchema, resolveLogCostCenterCode } from "../utils/costAllocation.js";
 import { fetchLubeUsageLines } from "../utils/lubeUsageLines.js";
+import { createManagementSummary, styleManagementDetailSheet } from "../utils/managementWorkbook.js";
+import { buildShiftScenario } from "../utils/shiftScenario.js";
 import {
   ensureFamsFuelSchema,
   getFamsSyncStatus,
@@ -3090,6 +3092,366 @@ export default async function dashboardRoutes(app) {
         pct: deltaPct,
       },
     });
+  });
+
+  function scenarioHoursFromRequest(value, fallback) {
+    const parsed = Number(value ?? fallback);
+    return Number.isFinite(parsed) && parsed >= 0.25 && parsed <= 24 ? parsed : fallback;
+  }
+
+  function buildShiftScenarioData(start, end, baseHours, scenarioHours, assetCode, siteCode) {
+    const metricExpr = sqlFuelMetricModeExpr("a");
+    const assets = db.prepare(`
+      SELECT
+        a.id AS asset_id,
+        a.asset_code,
+        a.asset_name,
+        COALESCE(a.category, '') AS category,
+        ${metricExpr} AS metric_mode
+      FROM assets a
+      WHERE ${sqlIncludeArchivedHireAssets("a")}
+      ORDER BY a.asset_code ASC
+    `).all().filter((row) => !assetCode || String(row.asset_code || "").trim().toLowerCase() === assetCode.toLowerCase());
+
+    const byAsset = new Map(assets.map((asset) => [Number(asset.asset_id), {
+      ...asset,
+      active_days: 0,
+      run_hours: 0,
+      fuel_liters: 0,
+      fuel_cost: 0,
+      nonfuel_cost: 0,
+      lube_cost: 0,
+      parts_cost: 0,
+      labor_cost: 0,
+      mechanic_labor_cost: 0,
+      downtime_cost: 0,
+    }]));
+    if (!byAsset.size) {
+      return buildShiftScenario([], { baseHours, scenarioHours });
+    }
+
+    const settings = new Map(db.prepare(`
+      SELECT key, value
+      FROM cost_settings
+      WHERE key IN ('fuel_cost_per_liter_default', 'lube_cost_per_qty_default', 'labor_cost_per_hour_default', 'downtime_cost_per_hour_default')
+    `).all().map((row) => [String(row.key || ""), Number(row.value || 0)]));
+    const fuelDefault = Number.isFinite(settings.get("fuel_cost_per_liter_default")) ? settings.get("fuel_cost_per_liter_default") : 1.5;
+    const lubeDefault = Number.isFinite(settings.get("lube_cost_per_qty_default")) ? settings.get("lube_cost_per_qty_default") : 4.0;
+    const laborDefault = Number.isFinite(settings.get("labor_cost_per_hour_default")) ? settings.get("labor_cost_per_hour_default") : 35.0;
+    const downtimeDefault = Number.isFinite(settings.get("downtime_cost_per_hour_default")) ? settings.get("downtime_cost_per_hour_default") : 120.0;
+
+    const dailyParams = [start, end];
+    const dailySiteFilter = dailyHoursHasSite
+      ? "AND LOWER(TRIM(COALESCE(NULLIF(dh.site_code, ''), 'main'))) = ?"
+      : "";
+    if (dailyHoursHasSite) dailyParams.push(siteCode);
+    const dailyRows = db.prepare(`
+      SELECT
+        dh.asset_id,
+        COUNT(DISTINCT dh.work_date) AS active_days,
+        COALESCE(SUM(dh.hours_run), 0) AS run_hours
+      FROM daily_hours dh
+      WHERE dh.work_date BETWEEN ? AND ?
+        AND COALESCE(dh.is_used, 1) = 1
+        AND LOWER(COALESCE(NULLIF(TRIM(dh.input_unit), ''), 'hours')) <> 'km'
+        AND COALESCE(dh.hours_run, 0) > 0
+        ${dailySiteFilter}
+      GROUP BY dh.asset_id
+    `).all(...dailyParams);
+    for (const row of dailyRows) {
+      const target = byAsset.get(Number(row.asset_id));
+      if (!target) continue;
+      target.active_days = Number(row.active_days || 0);
+      target.run_hours = Number(row.run_hours || 0);
+    }
+
+    const fuelRows = db.prepare(`
+      SELECT
+        fl.asset_id,
+        COALESCE(SUM(fl.liters), 0) AS fuel_liters,
+        COALESCE(SUM(fl.liters * COALESCE(fl.unit_cost_per_liter, a.fuel_cost_per_liter, ?)), 0) AS fuel_cost,
+        COUNT(DISTINCT fl.log_date) AS fuel_days
+      FROM fuel_logs fl
+      JOIN assets a ON a.id = fl.asset_id
+      WHERE fl.log_date BETWEEN ? AND ?
+      GROUP BY fl.asset_id
+    `).all(fuelDefault, start, end);
+    const fuelDays = new Map();
+    for (const row of fuelRows) {
+      const target = byAsset.get(Number(row.asset_id));
+      if (!target) continue;
+      target.fuel_liters = Number(row.fuel_liters || 0);
+      target.fuel_cost = Number(row.fuel_cost || 0);
+      fuelDays.set(Number(row.asset_id), Number(row.fuel_days || 0));
+    }
+
+    const fuelLogsInRange = db.prepare(`
+      SELECT
+        id,
+        log_date,
+        COALESCE(LOWER(meter_unit), '') AS meter_unit,
+        COALESCE(meter_run_value, 0) AS meter_run_value,
+        COALESCE(hours_run, 0) AS hours_run,
+        open_meter_value,
+        close_meter_value
+      FROM fuel_logs
+      WHERE asset_id = ?
+        AND log_date BETWEEN ? AND ?
+      ORDER BY log_date ASC, id ASC
+    `);
+    const fuelLogBeforeRange = db.prepare(`
+      SELECT
+        id,
+        log_date,
+        COALESCE(LOWER(meter_unit), '') AS meter_unit,
+        COALESCE(meter_run_value, 0) AS meter_run_value,
+        COALESCE(hours_run, 0) AS hours_run,
+        open_meter_value,
+        close_meter_value
+      FROM fuel_logs
+      WHERE asset_id = ?
+        AND log_date < ?
+        AND (COALESCE(meter_run_value, 0) > 0 OR COALESCE(hours_run, 0) > 0)
+      ORDER BY log_date DESC, id DESC
+      LIMIT 1
+    `);
+    for (const asset of byAsset.values()) {
+      if (String(asset.metric_mode || "hours").toLowerCase() === "km") continue;
+      if (asset.run_hours <= 0 && asset.fuel_liters > 0) {
+        const run = getRunFromFuelRows(
+          fuelLogsInRange.all(asset.asset_id, start, end),
+          fuelLogBeforeRange.get(asset.asset_id, start),
+          "hours",
+        );
+        asset.run_hours = Number(run?.hours_run || 0);
+      }
+      if (asset.active_days <= 0 && asset.run_hours > 0) {
+        asset.active_days = Number(fuelDays.get(Number(asset.asset_id)) || 0);
+      }
+    }
+
+    const addCost = (rows, key) => {
+      for (const row of rows) {
+        const target = byAsset.get(Number(row.asset_id));
+        if (!target) continue;
+        target[key] += Number(row[key] || 0);
+      }
+    };
+    addCost(db.prepare(`
+      SELECT ol.asset_id, COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS lube_cost
+      FROM oil_logs ol
+      WHERE ol.log_date BETWEEN ? AND ?
+      GROUP BY ol.asset_id
+    `).all(lubeDefault, start, end), "lube_cost");
+
+    const stockColumns = db.prepare(`PRAGMA table_info(stock_movements)`).all();
+    const stockDateExpr = stockColumns.some((column) => String(column.name) === "created_at")
+      ? "DATE(sm.created_at)"
+      : "DATE(sm.movement_date)";
+    addCost(db.prepare(`
+      SELECT w.asset_id, COALESCE(SUM(ABS(sm.quantity) * COALESCE(p.unit_cost, 0)), 0) AS parts_cost
+      FROM stock_movements sm
+      JOIN parts p ON p.id = sm.part_id
+      JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
+      WHERE sm.movement_type = 'out'
+        AND ${stockDateExpr} BETWEEN ? AND ?
+      GROUP BY w.asset_id
+    `).all(start, end), "parts_cost");
+    addCost(db.prepare(`
+      SELECT w.asset_id, COALESCE(SUM(COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, ?)), 0) AS labor_cost
+      FROM work_orders w
+      WHERE DATE(COALESCE(w.completed_at, w.closed_at)) BETWEEN ? AND ?
+        AND LOWER(REPLACE(TRIM(COALESCE(w.status, '')), ' ', '_')) IN ('completed', 'approved', 'closed')
+      GROUP BY w.asset_id
+    `).all(laborDefault, start, end), "labor_cost");
+    const mechanicsTableExists = Boolean(db.prepare(`
+      SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'mechanic_labor_entries' LIMIT 1
+    `).get()?.ok);
+    if (mechanicsTableExists) {
+      const mechanicRows = db.prepare(`
+        SELECT
+          a.id AS asset_id,
+          COALESCE(SUM(
+            COALESCE(m.hours, 0) * COALESCE(NULLIF(m.labor_rate_per_hour, 0), ?)
+          ), 0) AS mechanic_labor_cost
+        FROM mechanic_labor_entries m
+        JOIN assets a ON UPPER(TRIM(a.asset_code)) = UPPER(TRIM(m.asset_code))
+        WHERE m.work_date BETWEEN ? AND ?
+          AND LOWER(TRIM(COALESCE(m.site_code, 'main'))) = ?
+        GROUP BY a.id
+      `).all(laborDefault, start, end, siteCode);
+      for (const row of mechanicRows) {
+        const target = byAsset.get(Number(row.asset_id));
+        if (!target) continue;
+        target.mechanic_labor_cost = Number(row.mechanic_labor_cost || 0);
+        // The time sheet is the actual labour record; use it in preference to
+        // a work-order estimate for the same asset and period.
+        if (target.mechanic_labor_cost > 0) target.labor_cost = target.mechanic_labor_cost;
+      }
+    }
+    addCost(db.prepare(`
+      SELECT b.asset_id, COALESCE(SUM(l.hours_down * COALESCE(a.downtime_cost_per_hour, ?)), 0) AS downtime_cost
+      FROM breakdown_downtime_logs l
+      JOIN breakdowns b ON b.id = l.breakdown_id
+      JOIN assets a ON a.id = b.asset_id
+      WHERE l.log_date BETWEEN ? AND ?
+      GROUP BY b.asset_id
+    `).all(downtimeDefault, start, end), "downtime_cost");
+
+    for (const asset of byAsset.values()) {
+      asset.nonfuel_cost = asset.lube_cost + asset.parts_cost + asset.labor_cost + asset.downtime_cost;
+    }
+    return buildShiftScenario(Array.from(byAsset.values()), { baseHours, scenarioHours });
+  }
+
+  function addShiftScenarioWorkbook(workbook, data, { start, end, assetCode } = {}) {
+    workbook.creator = "IRONLOG";
+    workbook.created = new Date();
+    const baseHours = Number(data.base_hours || 11);
+    const scenarioHours = Number(data.scenario_hours || 8);
+    const fleet = data.fleet || {};
+    const summary = createManagementSummary(workbook, {
+      title: "IRONLOG Shift Cost Scenario",
+      periodLabel: `${start} to ${end}${assetCode ? ` · ${assetCode}` : " · All equipment"}`,
+      cards: [
+        { label: `${baseHours} H FUEL`, value: Number(fleet.base_fuel_liters || 0), numFmt: '#,##0.0" L"' },
+        { label: `${scenarioHours} H FUEL`, value: Number(fleet.scenario_fuel_liters || 0), numFmt: '#,##0.0" L"' },
+        { label: "FUEL SAVING", value: Number(fleet.fuel_liters_saved || 0), tone: "attention", numFmt: '#,##0.0" L"' },
+        { label: `${baseHours} H COST / H`, value: Number(fleet.base_cost_per_operating_hour || 0), numFmt: '$#,##0.00' },
+        { label: `${scenarioHours} H COST / H`, value: Number(fleet.scenario_cost_per_operating_hour || 0), numFmt: '$#,##0.00' },
+        { label: "PERIOD FUEL COST SAVING", value: Number(fleet.fuel_cost_saved || 0), tone: "attention", numFmt: '$#,##0.00' },
+        { label: "RECORDED NON-FUEL COST", value: Number(fleet.nonfuel_cost || 0), numFmt: '$#,##0.00' },
+        { label: "EQUIPMENT ANALYSED", value: Number(data.rows?.length || 0), numFmt: '#,##0' },
+      ],
+      scopeLines: [
+        `The selected period contains ${Number(fleet.active_shifts || 0).toFixed(0)} active equipment shifts across ${Number(data.rows?.length || 0)} equipment units.`,
+        "Fuel scales with each machine's logged L/hr. Lube, parts, labour and downtime costs are held constant per active equipment shift.",
+        "This is a planning comparison, not a production forecast. Assets with incomplete fuel/hour data or kilometre-based utilisation are listed separately.",
+      ],
+    });
+    summary.ws.getColumn(1).width = 20;
+
+    const detail = workbook.addWorksheet("Equipment comparison");
+    detail.columns = [
+      { header: "Asset", key: "asset_code", width: 14 },
+      { header: "Equipment", key: "asset_name", width: 26 },
+      { header: "Category", key: "category", width: 18 },
+      { header: "Active shifts", key: "active_days", width: 13 },
+      { header: "Logged run h", key: "logged_run_hours", width: 14 },
+      { header: "Actual L/hr", key: "actual_liters_per_hour", width: 13 },
+      { header: "Non-fuel cost / shift", key: "nonfuel_cost_per_shift", width: 19 },
+      { header: `${baseHours}h fuel L / shift`, key: "base_fuel_liters_per_shift", width: 18 },
+      { header: `${scenarioHours}h fuel L / shift`, key: "scenario_fuel_liters_per_shift", width: 19 },
+      { header: "Fuel L saved / shift", key: "fuel_liters_saved_per_shift", width: 18 },
+      { header: `${baseHours}h total cost / shift`, key: "base_total_cost_per_shift", width: 21 },
+      { header: `${scenarioHours}h total cost / shift`, key: "scenario_total_cost_per_shift", width: 22 },
+      { header: `${baseHours}h cost / h`, key: "base_cost_per_operating_hour", width: 16 },
+      { header: `${scenarioHours}h cost / h`, key: "scenario_cost_per_operating_hour", width: 17 },
+      { header: "Cost / h change", key: "cost_per_operating_hour_change", width: 16 },
+      { header: "Period fuel saving L", key: "period_fuel_liters_saved", width: 19 },
+      { header: "Period cost saving", key: "period_cost_saved", width: 19 },
+    ];
+    for (const row of data.rows || []) detail.addRow(row);
+    detail.addRow({
+      asset_code: "TOTAL",
+      asset_name: `${Number(data.rows?.length || 0)} equipment units`,
+      active_days: Number(fleet.active_shifts || 0),
+      logged_run_hours: (data.rows || []).reduce((total, row) => total + Number(row.logged_run_hours || 0), 0),
+      actual_liters_per_hour: Number(fleet.base_operating_hours || 0) > 0 ? Number(fleet.base_fuel_liters || 0) / Number(fleet.base_operating_hours || 1) : 0,
+      nonfuel_cost_per_shift: Number(fleet.active_shifts || 0) > 0 ? Number(fleet.nonfuel_cost || 0) / Number(fleet.active_shifts || 1) : 0,
+      base_fuel_liters_per_shift: Number(fleet.active_shifts || 0) > 0 ? Number(fleet.base_fuel_liters || 0) / Number(fleet.active_shifts || 1) : 0,
+      scenario_fuel_liters_per_shift: Number(fleet.active_shifts || 0) > 0 ? Number(fleet.scenario_fuel_liters || 0) / Number(fleet.active_shifts || 1) : 0,
+      fuel_liters_saved_per_shift: Number(fleet.active_shifts || 0) > 0 ? Number(fleet.fuel_liters_saved || 0) / Number(fleet.active_shifts || 1) : 0,
+      base_total_cost_per_shift: Number(fleet.active_shifts || 0) > 0 ? Number(fleet.base_total_cost || 0) / Number(fleet.active_shifts || 1) : 0,
+      scenario_total_cost_per_shift: Number(fleet.active_shifts || 0) > 0 ? Number(fleet.scenario_total_cost || 0) / Number(fleet.active_shifts || 1) : 0,
+      base_cost_per_operating_hour: Number(fleet.base_cost_per_operating_hour || 0),
+      scenario_cost_per_operating_hour: Number(fleet.scenario_cost_per_operating_hour || 0),
+      cost_per_operating_hour_change: Number(fleet.cost_per_operating_hour_change || 0),
+      period_fuel_liters_saved: Number(fleet.fuel_liters_saved || 0),
+      period_cost_saved: Number(fleet.total_cost_saved || 0),
+    });
+    const styled = styleManagementDetailSheet(detail, {
+      title: "Equipment shift comparison",
+      subtitle: `Comparison of ${baseHours}-hour and ${scenarioHours}-hour shifts · ${start} to ${end}`,
+      frozenColumns: 2,
+      numberFormats: {
+        D: '#,##0', E: '#,##0.0', F: '#,##0.000', G: '$#,##0.00', H: '#,##0.0', I: '#,##0.0', J: '#,##0.0',
+        K: '$#,##0.00', L: '$#,##0.00', M: '$#,##0.00', N: '$#,##0.00', O: '$#,##0.00', P: '#,##0.0', Q: '$#,##0.00',
+      },
+    });
+    detail.autoFilter = { from: { row: styled.headerRow, column: 1 }, to: { row: styled.lastRow, column: detail.columnCount } };
+
+    const excluded = workbook.addWorksheet("Excluded equipment");
+    excluded.columns = [
+      { header: "Asset", key: "asset_code", width: 16 },
+      { header: "Equipment", key: "asset_name", width: 34 },
+      { header: "Reason excluded", key: "reason", width: 38 },
+    ];
+    if (data.excluded?.length) {
+      data.excluded.forEach((row) => excluded.addRow(row));
+    } else {
+      excluded.addRow({ asset_code: "—", asset_name: "", reason: "All selected assets had a valid hours and fuel basis." });
+    }
+    const excludedStyled = styleManagementDetailSheet(excluded, {
+      title: "Excluded equipment",
+      subtitle: "Assets excluded from the shift comparison to avoid assumptions based on incomplete or kilometre data.",
+      frozenColumns: 1,
+    });
+    excluded.autoFilter = { from: { row: excludedStyled.headerRow, column: 1 }, to: { row: excludedStyled.lastRow, column: excluded.columnCount } };
+  }
+
+  // GET /api/dashboard/shift-scenario?start=&end=&base_hours=11&scenario_hours=8&asset_code=
+  app.get("/shift-scenario", async (req, reply) => {
+    try {
+      const start = String(req.query?.start || "").trim();
+      const end = String(req.query?.end || "").trim();
+      const assetCode = String(req.query?.asset_code || "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end) {
+        return reply.code(400).send({ error: "Provide valid start/end dates" });
+      }
+      const baseHours = scenarioHoursFromRequest(req.query?.base_hours, 11);
+      const scenarioHours = scenarioHoursFromRequest(req.query?.scenario_hours, 8);
+      const data = buildShiftScenarioData(start, end, baseHours, scenarioHours, assetCode, siteCodeFromReq(req));
+      return reply.send({
+        ok: true,
+        start,
+        end,
+        asset_code: assetCode || null,
+        assumptions: {
+          fuel: "Fuel scales with logged L/hr.",
+          nonfuel: "Recorded lube, parts, labour and downtime cost is held constant per active equipment shift.",
+        },
+        ...data,
+      });
+    } catch (error) {
+      req.log.error(error);
+      return reply.code(500).send({ error: error.message || String(error) });
+    }
+  });
+
+  // GET /api/dashboard/shift-scenario.xlsx?start=&end=&base_hours=11&scenario_hours=8&asset_code=
+  app.get("/shift-scenario.xlsx", async (req, reply) => {
+    try {
+      const start = String(req.query?.start || "").trim();
+      const end = String(req.query?.end || "").trim();
+      const assetCode = String(req.query?.asset_code || "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end) {
+        return reply.code(400).send({ error: "Provide valid start/end dates" });
+      }
+      const baseHours = scenarioHoursFromRequest(req.query?.base_hours, 11);
+      const scenarioHours = scenarioHoursFromRequest(req.query?.scenario_hours, 8);
+      const data = buildShiftScenarioData(start, end, baseHours, scenarioHours, assetCode, siteCodeFromReq(req));
+      const workbook = new ExcelJS.Workbook();
+      addShiftScenarioWorkbook(workbook, data, { start, end, assetCode });
+      const buffer = await workbook.xlsx.writeBuffer();
+      return reply
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header("Content-Disposition", `attachment; filename="IRONLOG_Shift_Scenario_${start}_to_${end}.xlsx"`)
+        .send(buffer);
+    } catch (error) {
+      req.log.error(error);
+      return reply.code(500).send({ error: error.message || String(error) });
+    }
   });
 
   // GET /api/dashboard/fuel?start=YYYY-MM-DD&end=YYYY-MM-DD&tolerance=0.15

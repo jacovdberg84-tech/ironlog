@@ -3182,6 +3182,75 @@
           </div>
         </div>
 
+        <!-- Shift Cost Scenario Card -->
+        <div id="shiftScenarioCard" class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"></path><path d="m7 15 4-4 3 3 6-7"></path></svg>
+              </div>
+              <div>
+                <h3>Shift Cost Scenario</h3>
+                <p class="muted small">See the fuel and cost-per-hour effect of an 8-hour shift compared with the normal 11-hour shift.</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Normal shift hours</label>
+                <input id="shiftScenarioBaseHours" type="number" min="0.25" max="24" step="0.25" value="11" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Scenario shift hours</label>
+                <input id="shiftScenarioHours" type="number" min="0.25" max="24" step="0.25" value="8" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>Equipment ID (optional)</label>
+                <input id="shiftScenarioAsset" list="assetCodeOptions" class="w-full" placeholder="All equipment" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="loadShiftScenario" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                  Compare shifts
+                </button>
+                <button id="downloadShiftScenarioXlsx" class="btn btn-secondary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                  Download Excel
+                </button>
+              </div>
+            </div>
+            <p id="shiftScenarioPeriod" class="muted small" style="margin:0 0 10px;">Uses the date range selected in Fuel Benchmark above.</p>
+            <div id="shiftScenarioSummary" class="kpi-pills" style="margin-bottom:12px;">
+              <span class="muted">Choose a Fuel Benchmark date range, then compare the shifts.</span>
+            </div>
+            <div id="shiftScenarioAssumptions" class="muted small" style="margin:0 0 10px;">Fuel changes with logged L/hr. Recorded lube, parts, labour and downtime cost is held constant per active shift.</div>
+            <div style="overflow:auto; max-height:440px;">
+              <table style="width:100%; min-width:970px; border-collapse:collapse; font-size:13px;">
+                <thead>
+                  <tr style="background:#17365d; color:#fff; text-align:left;">
+                    <th style="padding:9px;">Asset</th>
+                    <th style="padding:9px;">Equipment</th>
+                    <th style="padding:9px;">Actual L/hr</th>
+                    <th id="shiftScenarioBaseFuelHead" style="padding:9px;">11h fuel</th>
+                    <th id="shiftScenarioScenarioFuelHead" style="padding:9px;">8h fuel</th>
+                    <th style="padding:9px;">Fuel saved</th>
+                    <th id="shiftScenarioBaseCostHead" style="padding:9px;">11h cost / h</th>
+                    <th id="shiftScenarioScenarioCostHead" style="padding:9px;">8h cost / h</th>
+                    <th style="padding:9px;">Cost / h change</th>
+                  </tr>
+                </thead>
+                <tbody id="shiftScenarioList">
+                  <tr><td colspan="9" class="muted" style="padding:12px;">No scenario loaded.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <!-- Fuel Snapshots Card -->
         <div id="fuelSnapshotsCard" class="dash-card collapsible collapsed full-width" data-collapsed="true">
           <div class="dash-card-header">

@@ -8620,6 +8620,107 @@ async function loadFuelBenchmark() {
   }
 }
 
+function shiftScenarioRequestParams() {
+  const start = String(qs("fuelStart")?.value || "").trim();
+  const end = String(qs("fuelEnd")?.value || "").trim();
+  const baseHours = Number(qs("shiftScenarioBaseHours")?.value || 11);
+  const scenarioHours = Number(qs("shiftScenarioHours")?.value || 8);
+  const assetCode = String(qs("shiftScenarioAsset")?.value || "").trim();
+  if (!start || !end) {
+    alert("Select the Fuel Benchmark start and end dates first.");
+    return null;
+  }
+  if (!Number.isFinite(baseHours) || baseHours < 0.25 || baseHours > 24 || !Number.isFinite(scenarioHours) || scenarioHours < 0.25 || scenarioHours > 24) {
+    alert("Shift hours must be between 0.25 and 24.");
+    return null;
+  }
+  const query = new URLSearchParams({
+    start,
+    end,
+    base_hours: String(baseHours),
+    scenario_hours: String(scenarioHours),
+  });
+  if (assetCode) query.set("asset_code", assetCode);
+  return { start, end, baseHours, scenarioHours, assetCode, query };
+}
+
+function shiftScenarioMoney(value) {
+  const amount = Number(value || 0);
+  return `$${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function renderShiftScenario(data) {
+  const baseHours = Number(data?.base_hours || 11);
+  const scenarioHours = Number(data?.scenario_hours || 8);
+  const fleet = data?.fleet || {};
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  const excluded = Array.isArray(data?.excluded) ? data.excluded : [];
+  const period = qs("shiftScenarioPeriod");
+  if (period) period.textContent = `Analysis period: ${data?.start || "-"} to ${data?.end || "-"}${data?.asset_code ? ` · ${data.asset_code}` : " · All eligible equipment"}.`;
+
+  setText("shiftScenarioBaseFuelHead", `${baseHours}h fuel`);
+  setText("shiftScenarioScenarioFuelHead", `${scenarioHours}h fuel`);
+  setText("shiftScenarioBaseCostHead", `${baseHours}h cost / h`);
+  setText("shiftScenarioScenarioCostHead", `${scenarioHours}h cost / h`);
+
+  const summary = qs("shiftScenarioSummary");
+  if (summary) {
+    const change = Number(fleet.cost_per_operating_hour_change || 0);
+    const costDirection = change > 0.004 ? "higher" : change < -0.004 ? "lower" : "unchanged";
+    summary.innerHTML = [
+      `<span class="kpi-pill"><strong>${baseHours}h fuel:</strong> ${Number(fleet.base_fuel_liters || 0).toFixed(1)} L</span>`,
+      `<span class="kpi-pill"><strong>${scenarioHours}h fuel:</strong> ${Number(fleet.scenario_fuel_liters || 0).toFixed(1)} L</span>`,
+      `<span class="kpi-pill kpi-pill-green"><strong>Fuel saving:</strong> ${Number(fleet.fuel_liters_saved || 0).toFixed(1)} L</span>`,
+      `<span class="kpi-pill"><strong>${baseHours}h cost / h:</strong> ${shiftScenarioMoney(fleet.base_cost_per_operating_hour)}</span>`,
+      `<span class="kpi-pill"><strong>${scenarioHours}h cost / h:</strong> ${shiftScenarioMoney(fleet.scenario_cost_per_operating_hour)}</span>`,
+      `<span class="kpi-pill ${change > 0.004 ? "kpi-pill-amber" : "kpi-pill-green"}"><strong>Cost / h:</strong> ${shiftScenarioMoney(Math.abs(change))} ${costDirection}</span>`,
+    ].join("");
+  }
+  const assumptions = qs("shiftScenarioAssumptions");
+  if (assumptions) {
+    assumptions.textContent = `Included ${rows.length} equipment unit${rows.length === 1 ? "" : "s"} across ${Number(fleet.active_shifts || 0).toFixed(0)} active shifts. Fuel follows logged L/hr; non-fuel recorded cost is held constant per active shift.${excluded.length ? ` ${excluded.length} asset${excluded.length === 1 ? "" : "s"} excluded because the logged basis is incomplete or kilometre-based.` : ""}`;
+  }
+
+  const list = qs("shiftScenarioList");
+  if (list) {
+    list.innerHTML = rows.map((row) => {
+      const change = Number(row.cost_per_operating_hour_change || 0);
+      const changeLabel = `${change > 0 ? "+" : ""}${shiftScenarioMoney(change)}`;
+      return `<tr style="border-bottom:1px solid #d9e2f3;">
+        <td style="padding:9px;"><strong>${escapeHtml(row.asset_code || "-")}</strong></td>
+        <td style="padding:9px;">${escapeHtml(row.asset_name || "-")}</td>
+        <td style="padding:9px;">${Number(row.actual_liters_per_hour || 0).toFixed(3)}</td>
+        <td style="padding:9px;">${Number(row.base_fuel_liters_per_shift || 0).toFixed(1)} L</td>
+        <td style="padding:9px;">${Number(row.scenario_fuel_liters_per_shift || 0).toFixed(1)} L</td>
+        <td style="padding:9px; color:#0f766e; font-weight:600;">${Number(row.fuel_liters_saved_per_shift || 0).toFixed(1)} L</td>
+        <td style="padding:9px;">${shiftScenarioMoney(row.base_cost_per_operating_hour)}</td>
+        <td style="padding:9px;">${shiftScenarioMoney(row.scenario_cost_per_operating_hour)}</td>
+        <td style="padding:9px; color:${change > 0.004 ? "#b45309" : "#0f766e"}; font-weight:600;">${changeLabel}</td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="9" class="muted" style="padding:12px;">No equipment had both operating-hours and fuel data for this period.</td></tr>`;
+  }
+}
+
+async function loadShiftScenario() {
+  const request = shiftScenarioRequestParams();
+  if (!request) return;
+  setStatus("Calculating shift scenario...");
+  const data = await fetchJson(`${API}/api/dashboard/shift-scenario?${request.query.toString()}`);
+  renderShiftScenario(data);
+  setStatus(data.rows?.length ? `Shift scenario ready (${data.rows.length} equipment units).` : "Shift scenario ready. Add logged hours and fuel to include equipment.");
+}
+
+async function downloadShiftScenarioXlsx() {
+  const request = shiftScenarioRequestParams();
+  if (!request) return;
+  setStatus("Preparing shift scenario Excel...");
+  const ok = await downloadAuthedFile(
+    `${API}/api/dashboard/shift-scenario.xlsx?${request.query.toString()}`,
+    `IRONLOG_Shift_Scenario_${request.start}_to_${request.end}.xlsx`,
+  );
+  if (ok) setStatus("Shift scenario Excel downloaded.");
+}
+
 function fuelJanToDateRange() {
   const now = new Date();
   const year = now.getFullYear();
@@ -18300,6 +18401,12 @@ async function init() {
   );
   qs("loadFuelBenchmark")?.addEventListener("click", () =>
     loadFuelBenchmark().catch((e) => setStatus("Fuel benchmark error: " + e.message))
+  );
+  qs("loadShiftScenario")?.addEventListener("click", () =>
+    loadShiftScenario().catch((e) => setStatus("Shift scenario error: " + e.message))
+  );
+  qs("downloadShiftScenarioXlsx")?.addEventListener("click", () =>
+    downloadShiftScenarioXlsx().catch((e) => setStatus("Shift scenario export error: " + e.message))
   );
   qs("fuelPresetQ1")?.addEventListener("click", () =>
     applyFuelPeriodPreset("q1").catch((e) => setStatus("Fuel benchmark error: " + e.message))
