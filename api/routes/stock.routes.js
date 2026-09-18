@@ -492,7 +492,12 @@ export default async function stockRoutes(app) {
         COALESCE(b.bin_code, 'UNSPECIFIED') AS bin_code,
         COALESCE(b.bin_name, 'Unspecified') AS bin_name,
         COALESCE(SUM(sm.quantity), 0) AS on_hand,
-        0 AS reserved
+        COALESCE((
+          SELECT SUM(sr.quantity_reserved - sr.quantity_issued)
+          FROM stock_reservations sr
+          WHERE sr.part_id = p.id
+            AND sr.status = 'active'
+        ), 0) AS reserved
       FROM parts p
       LEFT JOIN stock_movements sm ON sm.part_id = p.id
       LEFT JOIN stock_locations l ON l.id = sm.location_id

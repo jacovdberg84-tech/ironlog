@@ -4,9 +4,15 @@ import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { notifyWorkOrderAssigned } from "../utils/pushNotify.js";
 import { snapLastServiceHours } from "../utils/serviceSchedule.js";
+import {
+  applyIssuedQuantityToReservation,
+  ensureServiceTemplateSchema,
+  releaseWorkOrderReservations,
+} from "../utils/serviceTemplates.js";
 
 export default async function workOrderRoutes(app) {
   ensureAuditTable(db);
+  ensureServiceTemplateSchema(db);
   db.prepare(`
     CREATE TABLE IF NOT EXISTS work_order_qr_profiles (
       work_order_id INTEGER PRIMARY KEY,
@@ -1606,11 +1612,33 @@ export default async function workOrderRoutes(app) {
     `).all(`work_order:${id}`);
 
     const work_order = enrichWorkOrderCosts(wo, movements);
+    const planned_materials = db.prepare(`
+      SELECT
+        pm.*,
+        COALESCE((
+          SELECT ABS(SUM(sm.quantity))
+          FROM stock_movements sm
+          WHERE sm.reference = ?
+            AND sm.part_id = pm.part_id
+            AND sm.quantity < 0
+        ), 0) AS quantity_issued,
+        COALESCE((
+          SELECT sr.quantity_reserved - sr.quantity_issued
+          FROM stock_reservations sr
+          WHERE sr.work_order_id = pm.work_order_id
+            AND sr.part_id = pm.part_id
+            AND sr.status = 'active'
+        ), 0) AS quantity_reserved_remaining
+      FROM work_order_planned_materials pm
+      WHERE pm.work_order_id = ?
+      ORDER BY pm.id ASC
+    `).all(`work_order:${id}`, id);
 
     return {
       work_order,
       breakdown,
       parts_issued: movements,
+      planned_materials,
       default_labor_rate: readLaborRateDefault(),
     };
   });
@@ -1709,11 +1737,19 @@ export default async function workOrderRoutes(app) {
     `).get(part.id);
 
     const on_hand = Number(onHandRow.on_hand || 0);
-    if (on_hand < quantity) {
+    const otherReservations = Number(db.prepare(`
+      SELECT COALESCE(SUM(quantity_reserved - quantity_issued), 0) AS reserved
+      FROM stock_reservations
+      WHERE part_id = ? AND work_order_id <> ? AND status = 'active'
+    `).get(part.id, id)?.reserved || 0);
+    const available_to_issue = Math.max(0, on_hand - otherReservations);
+    if (available_to_issue < quantity) {
       return reply.code(409).send({
         error: "insufficient stock",
         part_code,
         on_hand,
+        reserved_for_other_work: otherReservations,
+        available_to_issue,
         requested: quantity
       });
     }
@@ -1723,6 +1759,7 @@ export default async function workOrderRoutes(app) {
       INSERT INTO stock_movements (part_id, quantity, movement_type, reference)
       VALUES (?, ?, 'out', ?)
     `).run(part.id, -Math.abs(Math.trunc(quantity)), `work_order:${id}`);
+    applyIssuedQuantityToReservation(db, id, part.id, quantity);
 
     writeAudit(db, req, {
       module: "workorders",
@@ -1960,6 +1997,7 @@ export default async function workOrderRoutes(app) {
         supervisor_name,
         id
       );
+      releaseWorkOrderReservations(db, id);
 
       if (String(wo.source || "").trim().toLowerCase() === "breakdown" && Number(wo.reference_id || 0) > 0) {
         closeLinkedBreakdownWhenWorkIsFinished.run(Number(wo.reference_id), id);
