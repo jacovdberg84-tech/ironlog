@@ -5115,11 +5115,12 @@ function refreshWeeklyForumInputsTable() {
             <td>${esc(plan ? wfPlanLabel(plan) : `Plan ${Number(r.plan_id || 0)}`)}</td>
             <td>${esc(render(oils))}</td>
             <td>${esc(render(parts))}</td>
+            <td style="text-align:right;">${fmtMoney(Number(r.all_in_total || 0))}</td>
             <td>${esc(r.notes || "")}</td>
           </tr>
         `;
       }).join("")
-    : `<tr><td colspan="4" class="muted">No manual inputs saved.</td></tr>`;
+    : `<tr><td colspan="5" class="muted">No manual inputs saved.</td></tr>`;
 }
 function refreshWeeklyForumPartsDatalist() {
   const html = wfPartsCache.map((p) => {
@@ -5642,12 +5643,16 @@ function hydrateWfDraftFromSaved(planId) {
   if (!row) {
     wfDraftItems = [];
     const laborEl = document.getElementById("wfInputLabor");
+    const allInEl = document.getElementById("wfInputAllInTotal");
     if (laborEl) laborEl.value = "0";
+    if (allInEl) allInEl.value = "0";
     refreshWfDraftEditor();
     return;
   }
   const laborEl = document.getElementById("wfInputLabor");
+  const allInEl = document.getElementById("wfInputAllInTotal");
   if (laborEl) laborEl.value = String(Number(row.labor_total || 0));
+  if (allInEl) allInEl.value = String(Number(row.all_in_total || 0));
   let items = [];
   try {
     const parsed = JSON.parse(String(row.items_json || "[]"));
@@ -8317,7 +8322,7 @@ async function loadWeeklyForumInputs() {
     const planNow = Number(document.getElementById("wfInputPlan")?.value || 0);
     if (planNow) hydrateWfDraftFromSaved(planNow);
   } catch (e) {
-    if (body) body.innerHTML = `<tr><td colspan="4" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+    if (body) body.innerHTML = `<tr><td colspan="5" class="message-error">${esc(e.message || String(e))}</td></tr>`;
   }
 }
 
@@ -8326,6 +8331,7 @@ async function saveWeeklyForumInput() {
   const plan_id = Number(document.getElementById("wfInputPlan")?.value || 0);
   const notes = String(document.getElementById("wfInputNotes")?.value || "").trim();
   const labor_total = Math.max(0, Number(document.getElementById("wfInputLabor")?.value || 0));
+  const all_in_total = Math.max(0, Number(document.getElementById("wfInputAllInTotal")?.value || 0));
   const items = wfDraftItems.map((x) => ({
     type: x.type === "oil" ? "oil" : "part",
     part_code: String(x.part_code || "").trim(),
@@ -8337,9 +8343,9 @@ async function saveWeeklyForumInput() {
     msg.textContent = "Select an upcoming service plan first.";
     return;
   }
-  if (!items.length && labor_total <= 0) {
+  if (!items.length && labor_total <= 0 && all_in_total <= 0) {
     msg.className = "message-error";
-    msg.textContent = "Enter at least one oil or part line, or a labor total.";
+    msg.textContent = "Enter store items, labor, or an all-in planned cost.";
     return;
   }
   msg.className = "muted";
@@ -8348,12 +8354,14 @@ async function saveWeeklyForumInput() {
     const res = await fetch(`${API}/maintenance/weekly-forum/forecast-inputs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan_id, items, labor_total, notes: notes || null }),
+      body: JSON.stringify({ plan_id, items, labor_total, all_in_total, notes: notes || null }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to save input");
     msg.className = "message-success";
-    msg.textContent = "Manual input saved. Forecast cost now uses stores pricing.";
+    msg.textContent = all_in_total > 0
+      ? "All-in planned cost saved. The presentation pack will use it as the service total."
+      : "Manual input saved. Forecast cost now uses stores pricing.";
     await loadWeeklyForumInputs();
     await loadWeeklyForumSummary();
   } catch (e) {

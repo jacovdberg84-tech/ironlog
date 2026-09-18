@@ -1031,7 +1031,8 @@ function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
   const forecastInputs = hasTable("weekly_forum_service_inputs")
     ? dbConn.prepare(`
         SELECT plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, items_json, notes,
-          COALESCE(labor_total, 0) AS labor_total
+          COALESCE(labor_total, 0) AS labor_total,
+          COALESCE(all_in_total, 0) AS all_in_total
         FROM weekly_forum_service_inputs
       `).all()
     : [];
@@ -1166,15 +1167,21 @@ function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
       const manualOilCost = pricedItems.filter((x) => x.type === "oil").reduce((s, x) => s + Number(x.line_cost || 0), 0);
       const manualPartsCost = pricedItems.filter((x) => x.type !== "oil").reduce((s, x) => s + Number(x.line_cost || 0), 0);
       const manualLaborTotal = Math.max(0, Number(manual?.labor_total || 0));
+      const manualAllInTotal = Math.max(0, Number(manual?.all_in_total || 0));
       const hasManualParts = pricedItems.length > 0;
       const hasManualLabor = manualLaborTotal > 0;
+      const hasManualAllIn = manualAllInTotal > 0;
       const hasManualOverride = hasManualParts || hasManualLabor;
-      const estKitCost = Number((hasManualParts ? (manualOilCost + manualPartsCost) : serviceKitCost).toFixed(2));
-      const estLaborCost = Number((hasManualLabor ? manualLaborTotal : avgLaborCost).toFixed(2));
-      const estTotalCost = Number((estKitCost + estLaborCost).toFixed(2));
-      const costSource = hasManualOverride
+      // A quoted all-in estimate deliberately replaces the detailed split. It avoids
+      // presenting an invented kit/labor breakdown when only a supplier budget is known.
+      const estKitCost = Number((hasManualAllIn ? 0 : (hasManualParts ? (manualOilCost + manualPartsCost) : serviceKitCost)).toFixed(2));
+      const estLaborCost = Number((hasManualAllIn ? 0 : (hasManualLabor ? manualLaborTotal : avgLaborCost)).toFixed(2));
+      const estTotalCost = Number((hasManualAllIn ? manualAllInTotal : (estKitCost + estLaborCost)).toFixed(2));
+      const costSource = hasManualAllIn
+        ? "manual_all_in_estimate"
+        : hasManualOverride
         ? (hasManualParts && hasManualLabor ? "manual_parts_and_labor" : hasManualParts ? "manual_store_pricing" : "manual_labor")
-        : (serviceEvents > 0 || laborEvents > 0 ? "historical_average" : "none");
+        : (estTotalCost > 0 && (serviceEvents > 0 || laborEvents > 0) ? "historical_average" : "none");
 
       return {
         plan_id: planId,
@@ -1186,7 +1193,8 @@ function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
         next_due_hours: Number(nextDue.toFixed(2)),
         remaining_hours: Number(remaining.toFixed(2)),
         status,
-        needs_manual_input: costSource === "none",
+        // A service without a defensible amount is not a zero-cost service.
+        needs_manual_input: estTotalCost <= 0,
         forecast: {
           service_events: serviceEvents,
           avg_oil_qty: Number(avgOilQty.toFixed(2)),
@@ -1202,6 +1210,7 @@ function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
             oil_cost_total: Number(manualOilCost.toFixed(2)),
             parts_cost_total: Number(manualPartsCost.toFixed(2)),
             labor_total: Number(manualLaborTotal.toFixed(2)),
+            all_in_total: Number(manualAllInTotal.toFixed(2)),
             items: pricedItems,
             notes: String(manual?.notes || ""),
           },
@@ -5974,6 +5983,8 @@ export default async function maintenanceRoutes(app) {
       parts_qty REAL NOT NULL DEFAULT 0,
       items_json TEXT NOT NULL DEFAULT '[]',
       notes TEXT,
+      labor_total REAL NOT NULL DEFAULT 0,
+      all_in_total REAL NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
@@ -5987,6 +5998,10 @@ export default async function maintenanceRoutes(app) {
     const wfInputHasLabor = wfInputCols.some((c) => String(c?.name || "") === "labor_total");
     if (!wfInputHasLabor) {
       db.prepare(`ALTER TABLE weekly_forum_service_inputs ADD COLUMN labor_total REAL NOT NULL DEFAULT 0`).run();
+    }
+    const wfInputHasAllInTotal = wfInputCols.some((c) => String(c?.name || "") === "all_in_total");
+    if (!wfInputHasAllInTotal) {
+      db.prepare(`ALTER TABLE weekly_forum_service_inputs ADD COLUMN all_in_total REAL NOT NULL DEFAULT 0`).run();
     }
   } catch {}
 
@@ -6077,7 +6092,8 @@ export default async function maintenanceRoutes(app) {
     try {
       const rows = db.prepare(`
         SELECT id, plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, items_json, notes,
-          COALESCE(labor_total, 0) AS labor_total, updated_at
+          COALESCE(labor_total, 0) AS labor_total,
+          COALESCE(all_in_total, 0) AS all_in_total, updated_at
         FROM weekly_forum_service_inputs
         ORDER BY plan_id ASC
       `).all();
@@ -6097,6 +6113,7 @@ export default async function maintenanceRoutes(app) {
       const parts_qty = Math.max(0, Number(req.body?.parts_qty || 0));
       const notes = String(req.body?.notes || "").trim() || null;
       const labor_total = Math.max(0, Number(req.body?.labor_total || 0));
+      const all_in_total = Math.max(0, Number(req.body?.all_in_total || 0));
       const normalizedItems = items
         .map((it) => ({
           type: String(it?.type || "part").toLowerCase() === "oil" ? "oil" : "part",
@@ -6106,10 +6123,13 @@ export default async function maintenanceRoutes(app) {
         .filter((it) => it.part_code && it.qty > 0);
       const items_json = JSON.stringify(normalizedItems);
       if (!plan_id) return reply.code(400).send({ ok: false, error: "plan_id is required" });
+      if (!normalizedItems.length && labor_total <= 0 && all_in_total <= 0) {
+        return reply.code(400).send({ ok: false, error: "Add store items, labor, or an all-in planned cost" });
+      }
       db.prepare(`
         INSERT INTO weekly_forum_service_inputs (
-          plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, items_json, notes, labor_total, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+          plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, items_json, notes, labor_total, all_in_total, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(plan_id) DO UPDATE SET
           oil_part_code = excluded.oil_part_code,
           oil_qty = excluded.oil_qty,
@@ -6118,8 +6138,9 @@ export default async function maintenanceRoutes(app) {
           items_json = excluded.items_json,
           notes = excluded.notes,
           labor_total = excluded.labor_total,
+          all_in_total = excluded.all_in_total,
           updated_at = datetime('now')
-      `).run(plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, items_json, notes, labor_total);
+      `).run(plan_id, oil_part_code, oil_qty, parts_part_code, parts_qty, items_json, notes, labor_total, all_in_total);
       return reply.send({ ok: true, plan_id });
     } catch (err) {
       req.log.error(err);

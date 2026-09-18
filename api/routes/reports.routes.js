@@ -9655,6 +9655,27 @@ export default async function reportsRoutes(app) {
     const upcomingKitTotal = upcomingCostRows.reduce((s, r) => s + Number(r?.forecast?.est_service_kit_cost || 0), 0);
     const upcomingLaborTotal = upcomingCostRows.reduce((s, r) => s + Number(r?.forecast?.est_labor_cost || 0), 0);
     const upcomingGrandTotal = upcomingCostRows.reduce((s, r) => s + Number(r?.forecast?.est_total_cost || 0), 0);
+    const upcomingUnpricedRows = upcomingCostRows.filter((r) => r?.needs_manual_input);
+    const isAllInUpcomingEstimate = (r) => String(r?.forecast?.cost_source || "") === "manual_all_in_estimate";
+    const upcomingAllInTotal = upcomingCostRows
+      .filter(isAllInUpcomingEstimate)
+      .reduce((sum, r) => sum + Number(r?.forecast?.est_total_cost || 0), 0);
+    const upcomingCostCell = (r, key) => {
+      if (r?.needs_manual_input) return "—";
+      if (isAllInUpcomingEstimate(r) && key !== "est_total_cost") return "—";
+      return Number(r?.forecast?.[key] || 0).toFixed(2);
+    };
+    const upcomingSourceLabel = (r) => {
+      if (r?.needs_manual_input) return "needs pricing";
+      switch (String(r?.forecast?.cost_source || "")) {
+        case "manual_all_in_estimate": return "all-in cost";
+        case "manual_parts_and_labor": return "manual detailed";
+        case "manual_store_pricing": return "stores pricing";
+        case "manual_labor": return "manual labor";
+        case "historical_average": return "history average";
+        default: return "-";
+      }
+    };
     const pptx = new PptxGenJS();
     pptx.layout = "LAYOUT_WIDE";
     pptx.author = "IRONLOG";
@@ -9917,17 +9938,17 @@ export default async function reportsRoutes(app) {
             compactCell(String(r.service_name || "-"), 18),
             Number(r.remaining_hours || 0).toFixed(1),
             String(r.status || "-"),
-            Number(r?.forecast?.est_service_kit_cost || 0).toFixed(2),
-            Number(r?.forecast?.est_labor_cost || 0).toFixed(2),
-            Number(r?.forecast?.est_total_cost || 0).toFixed(2),
-            compactCell(String(r?.forecast?.cost_source || "-").replace(/_/g, " "), 14),
+            upcomingCostCell(r, "est_service_kit_cost"),
+            upcomingCostCell(r, "est_labor_cost"),
+            upcomingCostCell(r, "est_total_cost"),
+            compactCell(upcomingSourceLabel(r), 14),
           ])
           : [["-", "No upcoming services in forecast window", "-", "-", "-", "-", "-", "-"]]),
       ],
       { x: 0.35, y: 0.95, w: 12.6, h: upcomingTableH, fontSize: 9.2, ...tableOptions }
     );
     s4b.addText(
-      `Totals: Kit $${fmtNum(upcomingKitTotal, 2)} | Labor $${fmtNum(upcomingLaborTotal, 2)} | Upcoming maintenance $${fmtNum(upcomingGrandTotal, 2)}`,
+      `Priced total: Kit $${fmtNum(upcomingKitTotal, 2)} | Labor $${fmtNum(upcomingLaborTotal, 2)}${upcomingAllInTotal ? ` | All-in $${fmtNum(upcomingAllInTotal, 2)}` : ""} | Upcoming maintenance $${fmtNum(upcomingGrandTotal, 2)}${upcomingUnpricedRows.length ? ` | ${upcomingUnpricedRows.length} awaiting pricing` : ""}`,
       { x: 0.45, y: Math.min(5.9, 0.95 + upcomingTableH + 0.2), w: 12.2, h: 0.35, fontFace: deckBodyFont, fontSize: 11, bold: true, color: deckText },
     );
     const s5 = pptx.addSlide();

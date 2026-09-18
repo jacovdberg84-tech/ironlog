@@ -1695,7 +1695,7 @@
       </small>
       <hr class="hr-soft" />
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <h3 style="margin:0;">Manual Upcoming Service Inputs (Store-Priced)</h3>
+        <h3 style="margin:0;">Upcoming Service Cost Inputs</h3>
       </div>
       <div class="row stack-10">
         <label>
@@ -1705,6 +1705,10 @@
         <label>
           Total labor ($)
           <input id="wfInputLabor" type="number" min="0" step="0.01" value="0" />
+        </label>
+        <label>
+          All-in planned cost ($)
+          <input id="wfInputAllInTotal" type="number" min="0" step="0.01" value="0" />
         </label>
       </div>
       <div class="row stack-10">
@@ -1725,7 +1729,7 @@
         </label>
         <button id="wfAddItemBtn" type="button">Add Item</button>
       </div>
-      <small class="muted">Tip: choose a stores item, add qty, click Add Item. Costs update instantly from stores pricing.</small>
+      <small class="muted">Tip: choose a stores item, add qty, click Add Item. Costs update instantly from stores pricing. If you have a supplier quote or budget only, enter it as the all-in planned cost; it will be used as the report total without inventing a parts/labor split.</small>
       <div style="overflow:auto; margin-top:10px;">
         <table class="gridTable" style="min-width:920px;">
           <thead>
@@ -1765,6 +1769,7 @@
               <th>Plan</th>
               <th>Oils</th>
               <th>Parts</th>
+              <th style="text-align:right;">All-in estimate $</th>
               <th>Notes</th>
             </tr>
           </thead>
