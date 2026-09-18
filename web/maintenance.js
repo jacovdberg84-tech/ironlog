@@ -1681,7 +1681,10 @@ function openMaintenanceInsightsPdf(download = false) {
   q.set("checklist_fail_threshold", String(t.checklist_fail_threshold));
   q.set("fuel_variance_threshold", String(t.fuel_variance_threshold));
   if (download) q.set("download", "1");
-  window.open(`${API}/maintenance/insights.pdf?${q.toString()}`, "_blank");
+  return openProtectedPdf(`${API}/maintenance/insights.pdf?${q.toString()}`, {
+    download,
+    filename: `IRONLOG_Maintenance_Insights_${start}_to_${end}.pdf`,
+  });
 }
 
 async function loadMaintenanceInsights() {
@@ -3449,7 +3452,10 @@ function openHistogramPdf(download = false) {
   q.set("include_all", "1");
   q.set("site_code", getSessionSite());
   if (download) q.set("download", "1");
-  window.open(`${API}/maintenance/histogram/events.pdf?${q.toString()}`, "_blank");
+  return openProtectedPdf(`${API}/maintenance/histogram/events.pdf?${q.toString()}`, {
+    download,
+    filename: "IRONLOG_Histogram_Events.pdf",
+  });
 }
 
 async function editHistogramEvent(id) {
@@ -5094,7 +5100,10 @@ function openDamageReportPdf(id, download = false) {
   const n = Number(id || 0);
   if (!n) return;
   const q = download ? "?download=1" : "";
-  window.open(`${API}/reports/damage-report/${n}.pdf${q}`, "_blank");
+  return openProtectedPdf(`${API}/reports/damage-report/${n}.pdf${q}`, {
+    download,
+    filename: `IRONLOG_Damage_Report_${n}.pdf`,
+  });
 }
 
 function openDamageReportsBulkPdf(download = false, withPhotos = false) {
@@ -5111,7 +5120,10 @@ function openDamageReportsBulkPdf(download = false, withPhotos = false) {
   if (assetId) q.set("asset_id", assetId);
   if (withPhotos) q.set("with_photos", "1");
   if (download) q.set("download", "1");
-  window.open(`${API}/reports/damage-reports.pdf?${q.toString()}`, "_blank");
+  return openProtectedPdf(`${API}/reports/damage-reports.pdf?${q.toString()}`, {
+    download,
+    filename: `IRONLOG_Damage_Reports_${start}_to_${end}.pdf`,
+  });
 }
 
 function downloadDamageReportsXlsx() {
@@ -5126,14 +5138,20 @@ function downloadDamageReportsXlsx() {
   q.set("start", start);
   q.set("end", end);
   if (assetId) q.set("asset_id", assetId);
-  window.open(`${API}/reports/damage-reports.xlsx?${q.toString()}`, "_blank");
+  return downloadProtectedXlsxFile(
+    `${API}/reports/damage-reports.xlsx?${q.toString()}`,
+    `IRONLOG_Damage_Reports_${start}_to_${end}.xlsx`,
+  ).catch((err) => alert(`Could not download damage report export: ${err.message || err}`));
 }
 
 function openManagerInspectionPdf(id, download = false) {
   const n = Number(id || 0);
   if (!n) return;
   const q = download ? "?download=1" : "";
-  window.open(`${API}/reports/manager-inspection/${n}.pdf${q}`, "_blank");
+  return openProtectedPdf(`${API}/reports/manager-inspection/${n}.pdf${q}`, {
+    download,
+    filename: `IRONLOG_Manager_Inspection_${n}.pdf`,
+  });
 }
 
 function openManagerInspectionsBulkPdf(download = false, withPhotos = false) {
@@ -5150,7 +5168,10 @@ function openManagerInspectionsBulkPdf(download = false, withPhotos = false) {
   if (assetId) q.set("asset_id", assetId);
   if (withPhotos) q.set("with_photos", "1");
   if (download) q.set("download", "1");
-  window.open(`${API}/reports/manager-inspections.pdf?${q.toString()}`, "_blank");
+  return openProtectedPdf(`${API}/reports/manager-inspections.pdf?${q.toString()}`, {
+    download,
+    filename: `IRONLOG_Manager_Inspections_${start}_to_${end}.pdf`,
+  });
 }
 
 function inspectionCard(r) {
@@ -6820,7 +6841,10 @@ function exportReliabilityToExcel() {
   q.set("end", relLastMeta.end);
   if (relLastMeta.category) q.set("category", relLastMeta.category);
   if (relLastMeta.asset_ids) q.set("asset_ids", relLastMeta.asset_ids);
-  window.open(`${API}/maintenance/reliability.xlsx?${q.toString()}`, "_blank");
+  return downloadProtectedXlsxFile(
+    `${API}/maintenance/reliability.xlsx?${q.toString()}`,
+    `IRONLOG_Reliability_${relLastMeta.start}_to_${relLastMeta.end}.xlsx`,
+  ).catch((err) => alert(`Could not download reliability export: ${err.message || err}`));
 }
 
 async function loadAssetKpiWeekly() {
@@ -8805,7 +8829,10 @@ async function saveRsgProfile() {
 }
 
 function downloadRsgCsvTemplate() {
-  window.open(`${API}/ironmind/rsg/profiles/template.csv`, "_blank");
+  return downloadProtectedXlsxFile(
+    `${API}/ironmind/rsg/profiles/template.csv`,
+    "IRONLOG_RSG_Profiles_Template.csv",
+  ).catch((err) => alert(`Could not download RSG template: ${err.message || err}`));
 }
 
 async function importRsgProfilesCsv() {

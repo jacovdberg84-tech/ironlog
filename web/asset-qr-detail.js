@@ -1,5 +1,31 @@
 (function () {
   function qs(id) { return document.getElementById(id); }
+  function authHeaders() {
+    const token = String(localStorage.getItem("ironlog_auth_token") || sessionStorage.getItem("ironlog_auth_token") || "").trim();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  async function openProtectedPdf(url) {
+    const preview = window.open("", "_blank", "noopener,noreferrer");
+    if (!preview) {
+      alert("Allow pop-ups for IRONLOG, then try opening the PDF again.");
+      return false;
+    }
+    preview.opener = null;
+    try {
+      const res = await fetch(url, { headers: authHeaders(), cache: "no-store" });
+      const blob = await res.blob();
+      if (!res.ok) throw new Error(res.status === 401 ? "Your session has expired. Please sign in again." : `PDF request failed (${res.status})`);
+      const blobUrl = URL.createObjectURL(blob);
+      preview.location.replace(blobUrl);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+      return true;
+    } catch (error) {
+      if (!preview.closed) preview.close();
+      alert(`Could not open PDF: ${error.message || error}`);
+      return false;
+    }
+  }
   function esc(v) {
     return String(v == null ? "" : v)
       .replaceAll("&", "&amp;")
@@ -74,7 +100,7 @@
         <div class="meta">Inspector: ${esc(r.inspector_name || "-")} | Hours: ${r.machine_hours != null ? esc(Number(r.machine_hours).toFixed(1)) : "-"}</div>
         <div class="small" style="margin-top:4px;">${esc(inspectionLineFromChecklist(r.checklist))}</div>
         ${notes ? `<div class="small" style="margin-top:4px;">Notes: ${esc(notes)}</div>` : ""}
-        ${Number(r.id || 0) > 0 ? `<div class="row" style="margin-top:6px;"><a class="btn" href="${esc(pdfUrl)}" target="_blank" rel="noopener">Open PDF</a></div>` : ""}
+        ${Number(r.id || 0) > 0 ? `<div class="row" style="margin-top:6px;"><button type="button" class="btn" data-asset-qr-pdf="${esc(pdfUrl)}">Open PDF</button></div>` : ""}
         ${renderThumbs(photoPaths)}
       </div>
     `;
@@ -116,7 +142,7 @@
           <span class="pill">${esc(d.source || "-")}</span>
         </div>
         <div class="small" style="margin-top:4px;">Opened: ${esc(String(d.opened_at || "-"))} | Closed: ${esc(String(d.closed_at || "-"))}</div>
-        ${woId > 0 ? `<div class="row" style="margin-top:6px;"><a class="btn" href="/api/reports/workorder/${woId}.pdf" target="_blank" rel="noopener">Open PDF</a></div>` : ""}
+        ${woId > 0 ? `<div class="row" style="margin-top:6px;"><button type="button" class="btn" data-asset-qr-pdf="/api/reports/workorder/${woId}.pdf">Open PDF</button></div>` : ""}
         ${renderThumbs(photoPaths)}
       </div>
     `;
@@ -193,6 +219,11 @@
 
     qs("totalCount").textContent = String(total);
     listEl.innerHTML = html || `<div class="empty">No ${esc(view)} data found for this asset yet.</div>`;
+    listEl.onclick = (event) => {
+      const button = event.target?.closest?.("button[data-asset-qr-pdf]");
+      const url = String(button?.getAttribute("data-asset-qr-pdf") || "").trim();
+      if (url) void openProtectedPdf(url);
+    };
     qs("sub").textContent = `${assetCode} loaded`;
 
     const u = new URL(window.location.href);

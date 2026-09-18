@@ -65,6 +65,28 @@
     return h;
   }
 
+  async function openProtectedPdf(url) {
+    const preview = window.open("", "_blank", "noopener,noreferrer");
+    if (!preview) {
+      alert("Allow pop-ups for IRONLOG, then try opening the PDF again.");
+      return false;
+    }
+    preview.opener = null;
+    try {
+      const res = await fetch(url, { headers: authHeaders(), cache: "no-store" });
+      const blob = await res.blob();
+      if (!res.ok) throw new Error(res.status === 401 ? "Your session has expired. Please sign in again." : `PDF request failed (${res.status})`);
+      const blobUrl = URL.createObjectURL(blob);
+      preview.location.replace(blobUrl);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+      return true;
+    } catch (error) {
+      if (!preview.closed) preview.close();
+      alert(`Could not open undercarriage inspection PDF: ${error.message || error}`);
+      return false;
+    }
+  }
+
   function ucInputId(key, field) {
     return `uc_${key}_${field}`;
   }
@@ -514,7 +536,7 @@
             Worst wear <b>${worst}</b>${summary.worst_component ? ` (${esc(summary.worst_component)})` : ""}
           </div>
           <div class="row stack-10" style="margin-top:8px; flex-wrap:wrap;">
-            <a class="btn" href="${esc(pdf)}" target="_blank" rel="noopener">PDF</a>
+            <button type="button" class="btn" data-uc-pdf="${esc(pdf)}">PDF</button>
             <button type="button" class="btn" data-uc-xlsx="${Number(r.id)}">XLSX</button>
           </div>
         </div>
@@ -588,7 +610,7 @@
           ? `Saved. Highest wear ${Number(worst).toFixed(1)}% on ${data.summary?.worst_component || "component"}.`
           : "Undercarriage inspection saved to machine history.";
       }
-      if (data.pdf_url) window.open(data.pdf_url, "_blank");
+      if (data.pdf_url) await openProtectedPdf(data.pdf_url);
       loadSavedList();
       loadWearProfileForAsset(asset_id);
     } catch (e) {
@@ -819,9 +841,15 @@
     document.getElementById("ucLoadSavedBtn")?.addEventListener("click", () => loadSavedList());
     document.getElementById("ucReportXlsxBtn")?.addEventListener("click", () => exportXlsx(0).catch((e) => alert(e.message)));
     document.getElementById("ucSavedList")?.addEventListener("click", (evt) => {
-      const btn = evt.target?.closest?.("button[data-uc-xlsx]");
-      if (!btn) return;
-      exportXlsx(Number(btn.getAttribute("data-uc-xlsx") || 0)).catch((e) => alert(e.message));
+      const target = evt.target?.closest?.("button");
+      if (!target) return;
+      const pdfUrl = String(target.getAttribute("data-uc-pdf") || "").trim();
+      if (pdfUrl) {
+        void openProtectedPdf(pdfUrl);
+        return;
+      }
+      const id = Number(target.getAttribute("data-uc-xlsx") || 0);
+      if (id) exportXlsx(id).catch((e) => alert(e.message));
     });
     document.getElementById("ucQrPreviewBtn")?.addEventListener("click", () => previewUndercarriageQr().catch((e) => alert(e.message)));
     document.getElementById("ucQrDownloadBtn")?.addEventListener("click", () => downloadUndercarriageQrPng().catch((e) => alert(e.message)));

@@ -934,6 +934,15 @@ async function downloadAuthedFile(url, fallbackName = "ironlog-report") {
   }
 }
 
+/** Opens or downloads a protected report without losing the active IRONLOG session. */
+function openAuthedReport(url, { download = false, filename = "ironlog-report.pdf" } = {}) {
+  if (download) return downloadAuthedFile(url, filename);
+  return openAuthedPdf(url).catch((err) => {
+    alert(`Could not open report: ${err.message || err}`);
+    return false;
+  });
+}
+
 function getRoleAllowedTabs(role) {
   const r = String(role || "").toLowerCase();
   if (r === "plant_clerk") return ["dash", "daily", "assets", "fuel", "lube", "vehicle", "reports", "docs", "tasks"];
@@ -4076,7 +4085,10 @@ function clOpenCheckPdf(checkId, download = false) {
   const id = Number(checkId || 0);
   if (!id) return alert("No check selected.");
   const q = download ? "?download=1" : "";
-  window.open(`${API}/api/reports/vehicle-ldv-check/${id}.pdf${q}`, "_blank");
+  return openAuthedReport(`${API}/api/reports/vehicle-ldv-check/${id}.pdf${q}`, {
+    download,
+    filename: `IRONLOG_Vehicle_Check_${id}.pdf`,
+  });
 }
 
 async function clOpenRangePdf(download = false) {
@@ -4087,7 +4099,10 @@ async function clOpenRangePdf(download = false) {
   const q = new URLSearchParams({ start, end, with_photos: "1" });
   if (assetId > 0) q.set("asset_id", String(assetId));
   if (download) q.set("download", "1");
-  window.open(`${API}/api/reports/vehicle-ldv-checks.pdf?${q.toString()}`, "_blank");
+  return openAuthedReport(`${API}/api/reports/vehicle-ldv-checks.pdf?${q.toString()}`, {
+    download,
+    filename: `IRONLOG_Vehicle_Checks_${start}_to_${end}.pdf`,
+  });
 }
 
 function renderClHistory(rows) {
@@ -4209,7 +4224,9 @@ function initChecklistTab() {
   qs("clPdfBtn")?.addEventListener("click", () => {
     const id = Number(qs("clPdfBtn")?.dataset.checkId || clCurrentCheckId || 0);
     if (!id) return alert("Submit the checklist first.");
-    window.open(`${API}/api/reports/vehicle-ldv-check/${id}.pdf`, "_blank");
+    void openAuthedReport(`${API}/api/reports/vehicle-ldv-check/${id}.pdf`, {
+      filename: `IRONLOG_Vehicle_Check_${id}.pdf`,
+    });
   });
   qs("clHistLoad")?.addEventListener("click", () => loadClHistory().catch((e) => setStatus(String(e.message || e))));
   qs("clHistOpenRangePdf")?.addEventListener("click", () => clOpenRangePdf(false));
@@ -4503,7 +4520,10 @@ async function vcLoadChecksList() {
 function vcOpenPdf(download = false) {
   if (!vcActiveCheckId) return alert("Load or create a check first.");
   const q = download ? "?download=1" : "";
-  window.open(`${API}/api/reports/vehicle-ldv-check/${vcActiveCheckId}.pdf${q}`, "_blank");
+  return openAuthedReport(`${API}/api/reports/vehicle-ldv-check/${vcActiveCheckId}.pdf${q}`, {
+    download,
+    filename: `IRONLOG_Vehicle_Check_${vcActiveCheckId}.pdf`,
+  });
 }
 
 function vcOpenBulkPdf(download = false) {
@@ -4518,7 +4538,10 @@ function vcOpenBulkPdf(download = false) {
   });
   if (assetId > 0) q.set("asset_id", String(assetId));
   if (download) q.set("download", "1");
-  window.open(`${API}/api/reports/vehicle-ldv-checks.pdf?${q.toString()}`, "_blank");
+  return openAuthedReport(`${API}/api/reports/vehicle-ldv-checks.pdf?${q.toString()}`, {
+    download,
+    filename: `IRONLOG_Vehicle_Checks_${start}_to_${end}.pdf`,
+  });
 }
 
 function initVehicleCheckTab() {
@@ -7421,12 +7444,8 @@ async function previewIronmindRsgPdf() {
   setStatus("Opening RSG PDF preview...");
   try {
     const url = `${API}/api/ironmind/rsg/preview.pdf?asset_code=${encodeURIComponent(assetCode)}&service_hours=${encodeURIComponent(hours)}`;
-    const win = window.open(url, "_blank", "noopener");
-    if (!win) {
-      // Popup blocked fallback
-      window.location.href = url;
-    }
-    setStatus("RSG PDF preview opened.");
+    const opened = await openAuthedReport(url, { filename: `IRONLOG_RSG_${assetCode}_${hours}h.pdf` });
+    if (opened !== false) setStatus("RSG PDF preview opened.");
   } catch (e) {
     if (out) out.textContent = String(e.message || e);
     setStatus("RSG PDF preview failed.");
@@ -7445,14 +7464,8 @@ async function downloadIronmindRsgPdf() {
   setStatus("Preparing RSG PDF download...");
   try {
     const url = `${API}/api/ironmind/rsg/preview.pdf?asset_code=${encodeURIComponent(assetCode)}&service_hours=${encodeURIComponent(hours)}&download=1`;
-    const a = document.createElement("a");
-    a.href = url;
-    a.target = "_blank";
-    a.rel = "noopener";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setStatus("RSG PDF download started.");
+    const downloaded = await downloadAuthedFile(url, `IRONLOG_RSG_${assetCode}_${hours}h.pdf`);
+    if (downloaded) setStatus("RSG PDF download started.");
   } catch (e) {
     if (out) out.textContent = String(e.message || e);
     setStatus("RSG PDF download failed.");
@@ -8844,7 +8857,7 @@ function openFuelBenchmarkPdf(download = false) {
   const url =
     `${API}/api/reports/fuel-benchmark.pdf?start=${encodeURIComponent(start)}` +
     `&end=${encodeURIComponent(end)}&tolerance=${encodeURIComponent(tolerance)}&mode=${encodeURIComponent(modeFilter)}&asset_code=${encodeURIComponent(assetCode)}${mode}`;
-  window.open(url, "_blank");
+  return openAuthedReport(url, { download, filename: `IRONLOG_Fuel_Benchmark_${start}_to_${end}.pdf` });
 }
 
 function openFuelBenchmarkXlsx() {
@@ -8858,7 +8871,7 @@ function openFuelBenchmarkXlsx() {
   const url =
     `${API}/api/reports/fuel-benchmark.xlsx?start=${encodeURIComponent(start)}` +
     `&end=${encodeURIComponent(end)}&tolerance=${encodeURIComponent(tolerance)}&mode=${encodeURIComponent(modeFilter)}&asset_code=${encodeURIComponent(assetCode)}`;
-  window.open(url, "_blank");
+  return downloadAuthedFile(url, `IRONLOG_Fuel_Benchmark_${start}_to_${end}.xlsx`);
 }
 
 function openFuelReconciliationPdf(download = false) {
@@ -8875,7 +8888,7 @@ function openFuelReconciliationPdf(download = false) {
     `&end=${encodeURIComponent(end)}&tolerance=${encodeURIComponent(tolerance)}` +
     `&mode=${encodeURIComponent(modeFilter)}&asset_code=${encodeURIComponent(assetCode)}` +
     `&fuel_price=${encodeURIComponent(fuelPrice)}${mode}`;
-  window.open(url, "_blank");
+  return openAuthedReport(url, { download, filename: `IRONLOG_Fuel_Reconciliation_${start}_to_${end}.pdf` });
 }
 
 function openFuelReconciliationXlsx() {
@@ -8891,7 +8904,7 @@ function openFuelReconciliationXlsx() {
     `&end=${encodeURIComponent(end)}&tolerance=${encodeURIComponent(tolerance)}` +
     `&mode=${encodeURIComponent(modeFilter)}&asset_code=${encodeURIComponent(assetCode)}` +
     `&fuel_price=${encodeURIComponent(fuelPrice)}`;
-  window.open(url, "_blank");
+  return downloadAuthedFile(url, `IRONLOG_Fuel_Reconciliation_${start}_to_${end}.xlsx`);
 }
 
 async function downloadExecutivePackExcel() {
@@ -8937,7 +8950,7 @@ function openFuelMachineHistoryPdf(assetCode, download = false) {
   const url =
     `${API}/api/reports/fuel-machine-history.pdf?asset_code=${encodeURIComponent(code)}` +
     `&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&tolerance=${encodeURIComponent(tolerance)}${mode}`;
-  window.open(url, "_blank");
+  return openAuthedReport(url, { download, filename: `IRONLOG_Fuel_History_${code}_${start}_to_${end}.pdf` });
 }
 
 function fuelPeriodRange(anchorDate, period) {
@@ -9546,13 +9559,17 @@ function openStockMovementsReportPdf() {
   q.set("date_from", date_from);
   q.set("date_to", date_to);
   if (part_code) q.set("part_code", part_code);
-  window.open(`${API}/api/reports/stock-movements.pdf?${q.toString()}`, "_blank");
+  return openAuthedReport(`${API}/api/reports/stock-movements.pdf?${q.toString()}`, {
+    filename: `IRONLOG_Stock_Movements_${date_from}_to_${date_to}.pdf`,
+  });
 }
 
 function openStockOnHandPdf() {
   const filter = (qs("spFilter")?.value || "").trim();
   const q = filter ? `?part_code=${encodeURIComponent(filter)}` : "";
-  window.open(`${API}/api/reports/stock-monitor.pdf${q}`, "_blank");
+  return openAuthedReport(`${API}/api/reports/stock-monitor.pdf${q}`, {
+    filename: "IRONLOG_Stock_On_Hand.pdf",
+  });
 }
 
 let storesPartOrdersCache = [];
@@ -10592,7 +10609,10 @@ function openLegalCompliancePdf(download = false) {
   if (dep) q.set("department", dep);
   if (status) q.set("status", status);
   if (download) q.set("download", "1");
-  window.open(`${API}/api/reports/legal-compliance.pdf?${q.toString()}`, "_blank");
+  return openAuthedReport(`${API}/api/reports/legal-compliance.pdf?${q.toString()}`, {
+    download,
+    filename: "IRONLOG_Legal_Compliance.pdf",
+  });
 }
 
 async function setLegalStatus(id, status) {
@@ -10736,7 +10756,7 @@ async function uploadLegalDoc() {
 function downloadLegalDoc(id) {
   const docId = Number(id || 0);
   if (!docId) return;
-  window.open(`${API}/api/legal/${docId}/download`, "_blank");
+  return downloadAuthedFile(`${API}/api/legal/${docId}/download`, `IRONLOG_Legal_Document_${docId}`);
 }
 
 async function archiveLegalDoc(id, active) {
@@ -11609,16 +11629,19 @@ function openDailyXlsx() {
   const date = qs("date")?.value || new Date().toISOString().slice(0, 10);
   const scheduled = qs("scheduled")?.value || 10;
   const ts = Date.now();
-  window.open(`${API}/api/reports/daily.xlsx?date=${date}&scheduled=${scheduled}&_ts=${ts}`, "_blank");
+  return downloadAuthedFile(
+    `${API}/api/reports/daily.xlsx?date=${date}&scheduled=${scheduled}&_ts=${ts}`,
+    `IRONLOG_Daily_${date}.xlsx`,
+  );
 }
 
 /** GM weekly pack: Maintenance & Engineering KPIs (same date field as daily / weekly PDF). */
 function openGmWeeklyXlsx() {
   const end = qs("date")?.value || new Date().toISOString().slice(0, 10);
   const scheduled = qs("scheduled")?.value || 10;
-  window.open(
+  return downloadAuthedFile(
     `${API}/api/reports/gm-weekly.xlsx?end=${encodeURIComponent(end)}&forecast_days=30&scheduled=${scheduled}`,
-    "_blank",
+    `IRONLOG_GM_Weekly_${end}.xlsx`,
   );
 }
 
@@ -11997,7 +12020,10 @@ function openOperationsPdf(download = false) {
     return;
   }
   const q = `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}${download ? "&download=1" : ""}`;
-  window.open(`${API}/api/reports/operations.pdf?${q}`, "_blank");
+  return openAuthedReport(`${API}/api/reports/operations.pdf?${q}`, {
+    download,
+    filename: `IRONLOG_Operations_${start}_to_${end}.pdf`,
+  });
 }
 
 function downloadOperationsXlsx() {
@@ -12008,7 +12034,7 @@ function downloadOperationsXlsx() {
     return;
   }
   const q = `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
-  window.open(`${API}/api/reports/operations.xlsx?${q}`, "_blank");
+  return downloadAuthedFile(`${API}/api/reports/operations.xlsx?${q}`, `IRONLOG_Operations_${start}_to_${end}.xlsx`);
 }
 
 /* =========================
@@ -12377,7 +12403,9 @@ async function saveBoSlipReport() {
     setStatus("Slip saved.");
     clearBoSlipPhotosUi();
     if (res.id) {
-      window.open(`${API}/api/breakdown-ops/slips/${res.id}/pdf`, "_blank");
+      await openAuthedReport(`${API}/api/breakdown-ops/slips/${res.id}/pdf`, {
+        filename: `IRONLOG_Operational_Slip_${res.id}.pdf`,
+      });
     }
     await loadBoSlipSavedList();
   } catch (e) {
@@ -12428,7 +12456,9 @@ function renderBoSlipSavedRow(r) {
 function openBoSlipPdf(id) {
   const n = Number(id || 0);
   if (!n) return;
-  window.open(`${API}/api/breakdown-ops/slips/${n}/pdf`, "_blank");
+  return openAuthedReport(`${API}/api/breakdown-ops/slips/${n}/pdf`, {
+    filename: `IRONLOG_Operational_Slip_${n}.pdf`,
+  });
 }
 
 async function ensureOpenBreakdownOps() {
@@ -14489,13 +14519,19 @@ function currentProcurementJournalBatch() {
 function exportProcurementJournalsCsv() {
   const batch = currentProcurementJournalBatch();
   if (!batch) throw new Error("Build journals first or enter batch ID.");
-  window.open(`${API}/api/procurement/journals/export.csv?batch_id=${encodeURIComponent(batch)}`, "_blank");
+  return downloadAuthedFile(
+    `${API}/api/procurement/journals/export.csv?batch_id=${encodeURIComponent(batch)}`,
+    `IRONLOG_Procurement_Journals_${batch}.csv`,
+  );
 }
 
 function exportProcurementJournalsXlsx() {
   const batch = currentProcurementJournalBatch();
   if (!batch) throw new Error("Build journals first or enter batch ID.");
-  window.open(`${API}/api/procurement/journals/export.xlsx?batch_id=${encodeURIComponent(batch)}`, "_blank");
+  return downloadAuthedFile(
+    `${API}/api/procurement/journals/export.xlsx?batch_id=${encodeURIComponent(batch)}`,
+    `IRONLOG_Procurement_Journals_${batch}.xlsx`,
+  );
 }
 
 function getSiteOpsFrom() {
@@ -17344,9 +17380,9 @@ function renderAssetFleetGrid(cards) {
 
 function downloadAssetsCostCentersXlsx() {
   const includeArchived = qs("showArchived")?.checked ? 1 : 0;
-  window.open(
+  void downloadAuthedFile(
     `${API}/api/assets/cost-centers.xlsx?include_archived=${includeArchived}&_ts=${Date.now()}`,
-    "_blank",
+    "IRONLOG_Asset_Cost_Centers.xlsx",
   );
   setStatus("Asset cost center register export started.");
 }
@@ -17885,7 +17921,7 @@ async function loadAssetHistory() {
             ev.details?.worst_component ? ` (${ev.details.worst_component})` : ""
           }</small>${
             ev.details?.pdf_url
-              ? `<br><small><a href="${ev.details.pdf_url}" target="_blank" rel="noopener">Open PDF</a></small>`
+              ? `<br><small><button type="button" class="link-button" data-open-authed-pdf="${escapeHtml(ev.details.pdf_url)}">Open PDF</button></small>`
               : ""
           }${ev.details?.notes ? `<br><small>${ev.details.notes}</small>` : ""}`
         : ev.type === "ops_slip"
@@ -20139,7 +20175,7 @@ async function openDocDraftPdf(download = false) {
       return;
     }
     const url = `${API}/api/docs/drafts/${id}.pdf${download ? "?download=1" : ""}`;
-    window.open(url, "_blank");
+    await openAuthedReport(url, { download, filename: `IRONLOG_Document_Draft_${id}.pdf` });
   } catch (e) {
     setStatus("Open PDF failed: " + (e.message || e));
   }
@@ -20152,7 +20188,7 @@ function openDocRegisterPdf(download = false) {
   if (currentOnly) params.set("current_only", "1");
   const q = params.toString();
   const url = `${API}/api/docs/register.pdf${q ? `?${q}` : ""}`;
-  window.open(url, "_blank");
+  return openAuthedReport(url, { download, filename: "IRONLOG_Document_Register.pdf" });
 }
 
 async function openDocDraftWord(download = false) {
@@ -20168,7 +20204,7 @@ async function openDocDraftWord(download = false) {
       return;
     }
     const url = `${API}/api/docs/drafts/${id}.docx${download ? "?download=1" : ""}`;
-    window.open(url, "_blank");
+    await downloadAuthedFile(url, `IRONLOG_Document_Draft_${id}.docx`);
   } catch (e) {
     setStatus("Open Word failed: " + (e.message || e));
   }
@@ -20181,7 +20217,7 @@ function openDocRegisterWord(download = false) {
   if (currentOnly) params.set("current_only", "1");
   const q = params.toString();
   const url = `${API}/api/docs/register.docx${q ? `?${q}` : ""}`;
-  window.open(url, "_blank");
+  return downloadAuthedFile(url, "IRONLOG_Document_Register.docx");
 }
 
 async function decideDocDraft(approved) {
@@ -21157,7 +21193,7 @@ function financeExportSiteAllocation() {
   const site = String(qs("finSiteFilter")?.value || "").trim();
   const q = new URLSearchParams({ period });
   if (site) q.set("site_code", site);
-  window.open(`${API}/api/finance/site-allocation/export.xlsx?${q.toString()}`, "_blank");
+  return downloadAuthedFile(`${API}/api/finance/site-allocation/export.xlsx?${q.toString()}`, `IRONLOG_Site_Allocation_${period}.xlsx`);
 }
 
 async function financeBuildSummarizedRun() {
@@ -21300,12 +21336,12 @@ async function loadFinanceRunDetail() {
 function financeExportRunCsv() {
   const id = Number(qs("finActiveRunId")?.value || 0);
   if (!id) { alert("Enter a run ID first."); return; }
-  window.open(`${API}/api/procurement/journals/runs/${id}/export.csv`, "_blank");
+  return downloadAuthedFile(`${API}/api/procurement/journals/runs/${id}/export.csv`, `IRONLOG_Journal_Run_${id}.csv`);
 }
 function financeExportRunXlsx() {
   const id = Number(qs("finActiveRunId")?.value || 0);
   if (!id) { alert("Enter a run ID first."); return; }
-  window.open(`${API}/api/procurement/journals/runs/${id}/export.xlsx`, "_blank");
+  return downloadAuthedFile(`${API}/api/procurement/journals/runs/${id}/export.xlsx`, `IRONLOG_Journal_Run_${id}.xlsx`);
 }
 
 async function financeMarkExported() {
@@ -21640,12 +21676,12 @@ async function loadFinanceSsot() {
 function financeExportSsotCsv() {
   const period = String(qs("finSsotPeriod")?.value || "").trim();
   if (!/^\d{4}-\d{2}$/.test(period)) { alert("Enter period as YYYY-MM"); return; }
-  window.open(`${API}/api/finance/reports/ssot/export.csv?period=${encodeURIComponent(period)}`, "_blank");
+  return downloadAuthedFile(`${API}/api/finance/reports/ssot/export.csv?period=${encodeURIComponent(period)}`, `IRONLOG_SSOT_${period}.csv`);
 }
 function financeExportSsotXlsx() {
   const period = String(qs("finSsotPeriod")?.value || "").trim();
   if (!/^\d{4}-\d{2}$/.test(period)) { alert("Enter period as YYYY-MM"); return; }
-  window.open(`${API}/api/finance/reports/ssot/export.xlsx?period=${encodeURIComponent(period)}`, "_blank");
+  return downloadAuthedFile(`${API}/api/finance/reports/ssot/export.xlsx?period=${encodeURIComponent(period)}`, `IRONLOG_SSOT_${period}.xlsx`);
 }
 
 async function loadFinanceKpiDefs() {
@@ -22037,7 +22073,7 @@ async function execLoadBoard() {
 function execExportBoardXlsx() {
   const period = String(qs("execPeriod")?.value || "").trim();
   if (!/^\d{4}-\d{2}$/.test(period)) { alert("period YYYY-MM required"); return; }
-  window.open(`${API}/api/executive/board-pack/export.xlsx?period=${encodeURIComponent(period)}`, "_blank");
+  return downloadAuthedFile(`${API}/api/executive/board-pack/export.xlsx?period=${encodeURIComponent(period)}`, `IRONLOG_Board_Pack_${period}.xlsx`);
 }
 
 function bindEnterpriseHandlers() {
@@ -22074,6 +22110,13 @@ function bindEnterpriseHandlers() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  document.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest("[data-open-authed-pdf]") : null;
+    const url = String(button?.getAttribute("data-open-authed-pdf") || "").trim();
+    if (!url) return;
+    event.preventDefault();
+    void openAuthedReport(url, { filename: "IRONLOG_Report.pdf" });
+  });
   initDarkMode();
   init().catch((e) => console.error(e));
   try {

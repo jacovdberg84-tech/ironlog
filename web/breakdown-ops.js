@@ -67,6 +67,37 @@ async function fetchJson(url, opts = {}) {
   return data;
 }
 
+async function openProtectedPdf(url) {
+  const preview = window.open("", "_blank", "noopener,noreferrer");
+  if (!preview) {
+    alert("Allow pop-ups for IRONLOG, then try opening the PDF again.");
+    return false;
+  }
+  preview.opener = null;
+  try {
+    const res = await fetch(url, { headers: authHeaders(), cache: "no-store" });
+    const blob = await res.blob();
+    if (!res.ok) {
+      let message = await blob.text().catch(() => "");
+      try {
+        const data = JSON.parse(message);
+        message = data.error || data.message || message;
+      } catch {}
+      throw new Error(res.status === 401
+        ? "Your session has expired. Please sign in again."
+        : message || `PDF request failed (${res.status})`);
+    }
+    const blobUrl = URL.createObjectURL(blob);
+    preview.location.replace(blobUrl);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+    return true;
+  } catch (error) {
+    if (!preview.closed) preview.close();
+    alert(`Could not open operational slip PDF: ${error.message || error}`);
+    return false;
+  }
+}
+
 function escapeHtml(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
@@ -710,7 +741,7 @@ async function saveBoSlipReport() {
     setText("boSlipResult", JSON.stringify(res, null, 2));
     setStatus("Slip saved.");
     clearBoSlipPhotosUi();
-    if (res.id) window.open(`${API}/breakdown-ops/slips/${res.id}/pdf`, "_blank");
+    if (res.id) await openBoSlipPdf(res.id);
     await loadBoSlipSavedList();
   } catch (e) {
     setText("boSlipResult", String(e.message || e));
@@ -757,10 +788,10 @@ function renderBoSlipSavedRow(r) {
   return el;
 }
 
-function openBoSlipPdf(id) {
+async function openBoSlipPdf(id) {
   const n = Number(id || 0);
   if (!n) return;
-  window.open(`${API}/breakdown-ops/slips/${n}/pdf`, "_blank");
+  return openProtectedPdf(`${API}/breakdown-ops/slips/${n}/pdf`);
 }
 
 async function ensureOpenBreakdownOps() {
