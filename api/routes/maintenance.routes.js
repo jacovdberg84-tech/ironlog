@@ -1019,8 +1019,26 @@ function getPartPricingForForecast(dbConn, partCodeIn, ctx) {
   };
 }
 
+/**
+ * Cost history must survive a maintenance-plan replacement.  Work orders retain
+ * the plan ID that existed when the service was closed, whereas the current
+ * schedule may have a new ID for the same asset and service interval.  Prefer
+ * the number named in the service label (old imports occasionally saved a
+ * 1000-hour service with a 500-hour interval), then fall back to the interval.
+ */
+export function serviceCostHistoryKey(plan) {
+  const serviceName = String(plan?.service_name || plan?.serviceName || "").trim();
+  const namedInterval = serviceName.match(/(\d+(?:\.\d+)?)\s*(?:h(?:r|our)?s?|km)?/i);
+  if (namedInterval) {
+    const n = Number(namedInterval[1]);
+    if (Number.isFinite(n) && n > 0) return `interval:${n}`;
+  }
+  const interval = Number(plan?.next_service_interval || plan?.interval_hours || plan?.intervalHours || 0);
+  return Number.isFinite(interval) && interval > 0 ? `interval:${interval}` : "";
+}
+
 /** Upcoming service kit + labor cost per maintenance plan (historical averages or saved manual inputs). */
-function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
+export function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
   const nearDueHours = Math.max(1, Number(opts.nearDueHours || 50));
   const maxRemainingHours = opts.maxRemainingHours != null
     ? Math.max(0, Number(opts.maxRemainingHours))
@@ -1038,8 +1056,27 @@ function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
     : [];
   const inputByPlan = new Map((forecastInputs || []).map((r) => [Number(r.plan_id || 0), r]));
 
+  // Historical service work orders point at the plan that was active when the
+  // work was completed. Build a same-asset / same-service index so a recreated
+  // plan continues to use the actual cost history instead of appearing free.
+  const historicalPlans = hasTable("maintenance_plans")
+    ? dbConn.prepare(`SELECT id, asset_id, service_name, interval_hours FROM maintenance_plans`).all()
+    : [];
+  const historicalPlanIdsByService = new Map();
+  for (const plan of historicalPlans) {
+    const assetId = Number(plan.asset_id || 0);
+    const key = serviceCostHistoryKey(plan);
+    if (!assetId || !key) continue;
+    const indexKey = `${assetId}:${key}`;
+    if (!historicalPlanIdsByService.has(indexKey)) historicalPlanIdsByService.set(indexKey, []);
+    historicalPlanIdsByService.get(indexKey).push(Number(plan.id || 0));
+  }
+
   const getAssetHoursSafe = (assetId) => {
     try {
+      if (typeof opts.getAssetHours === "function") {
+        return Number(opts.getAssetHours(Number(assetId || 0)) || 0);
+      }
       return Number(getAssetCurrentHoursInfo(Number(assetId || 0)).hours || 0);
     } catch {
       return 0;
@@ -1054,6 +1091,15 @@ function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
       const nextDue = Number(p.last_service_hours || 0) + Number(p.interval_hours || 0);
       const remaining = nextDue - current;
       const status = classifyDueStatus(remaining, nearDueHours);
+      const historyKey = serviceCostHistoryKey(p);
+      const historyPlanIds = Array.from(new Set([
+        planId,
+        ...(historicalPlanIdsByService.get(`${assetId}:${historyKey}`) || []),
+      ].filter((id) => Number(id) > 0)));
+      // A malformed legacy plan must return an unpriced row rather than break
+      // the complete forecast query with an empty IN clause.
+      const historyPlanBinds = historyPlanIds.length ? historyPlanIds : [-1];
+      const historyPlanMarks = historyPlanBinds.map(() => "?").join(",");
 
       const hist =
         hasTable("work_orders") && hasTable("stock_movements")
@@ -1073,9 +1119,9 @@ function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
                 LEFT JOIN stock_movements sm ON sm.reference = ('work_order:' || w.id)
                 LEFT JOIN parts p ON p.id = sm.part_id
                 WHERE LOWER(COALESCE(w.source, '')) = 'service'
-                  AND COALESCE(w.reference_id, 0) = ?
+                  AND COALESCE(w.reference_id, 0) IN (${historyPlanMarks})
                   AND LOWER(COALESCE(w.status, '')) IN (${closedStatuses})
-              `).get(planId)
+              `).get(...historyPlanBinds)
             : dbConn.prepare(`
                 SELECT
                   COUNT(DISTINCT w.id) AS service_events,
@@ -1088,9 +1134,9 @@ function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
                 FROM work_orders w
                 LEFT JOIN stock_movements sm ON sm.reference = ('work_order:' || w.id)
                 WHERE LOWER(COALESCE(w.source, '')) = 'service'
-                  AND COALESCE(w.reference_id, 0) = ?
+                  AND COALESCE(w.reference_id, 0) IN (${historyPlanMarks})
                   AND LOWER(COALESCE(w.status, '')) IN (${closedStatuses})
-              `).get(planId)
+              `).get(...historyPlanBinds)
           : null;
 
       const serviceEvents = Number(hist?.service_events || 0);
@@ -1109,11 +1155,11 @@ function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
                 SELECT DATE(${woCloseExpr})
                 FROM work_orders w
                 WHERE LOWER(COALESCE(w.source, '')) = 'service'
-                  AND COALESCE(w.reference_id, 0) = ?
+                  AND COALESCE(w.reference_id, 0) IN (${historyPlanMarks})
                   AND ${woCloseExpr} IS NOT NULL
                   AND LOWER(COALESCE(w.status, '')) IN (${closedStatuses})
               )
-          `).get(lubeCostDefault, assetId, planId)
+          `).get(lubeCostDefault, assetId, ...historyPlanBinds)
         : null;
       const oilQtyLogs = Number(oilAvg?.oil_qty_total || 0);
       const oilCostLogsPlan = Number(oilAvg?.oil_cost_total || 0);
@@ -1129,9 +1175,9 @@ function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
               COALESCE(SUM(COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, 0)), 0) AS labor_cost_total
             FROM work_orders w
             WHERE LOWER(COALESCE(w.source, '')) = 'service'
-              AND COALESCE(w.reference_id, 0) = ?
+              AND COALESCE(w.reference_id, 0) IN (${historyPlanMarks})
               AND LOWER(COALESCE(w.status, '')) IN (${closedStatuses})
-          `).get(planId)
+          `).get(...historyPlanBinds)
         : null;
       const laborEvents = Number(laborHist?.service_events || 0);
       const avgLaborCost = laborEvents > 0 ? Number(laborHist.labor_cost_total || 0) / laborEvents : 0;
@@ -1181,7 +1227,9 @@ function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
         ? "manual_all_in_estimate"
         : hasManualOverride
         ? (hasManualParts && hasManualLabor ? "manual_parts_and_labor" : hasManualParts ? "manual_store_pricing" : "manual_labor")
-        : (estTotalCost > 0 && (serviceEvents > 0 || laborEvents > 0) ? "historical_average" : "none");
+        : (estTotalCost > 0 && (serviceEvents > 0 || laborEvents > 0)
+          ? (historyPlanIds.length > 1 ? "historical_asset_service_average" : "historical_average")
+          : "none");
 
       return {
         plan_id: planId,

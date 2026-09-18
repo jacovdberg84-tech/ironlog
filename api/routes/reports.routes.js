@@ -82,6 +82,19 @@ function todayYmd() {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** Build the authenticated context for a report's internal API request. */
+export function maintenanceDeckInsightsHeaders(siteCode, requestHeaders = {}) {
+  const headers = {
+    "x-user-name": "system",
+    "x-user-role": "admin",
+    "x-user-roles": "admin",
+    "x-site-code": siteCode || "main",
+  };
+  const authorization = String(requestHeaders?.authorization || requestHeaders?.Authorization || "").trim();
+  if (authorization) headers.authorization = authorization;
+  return headers;
+}
+
 // The Daily PDF is issued the following morning, while all operational data
 // belongs to the completed shift on the preceding calendar day.
 export function dailyPdfOperationsDate(reportIssueDate) {
@@ -8986,7 +8999,7 @@ export default async function reportsRoutes(app) {
     return { start: fmt(monday), end: fmt(sunday) };
   }
 
-  async function buildMaintenanceExecutiveDeck({ period, label, site_code }) {
+  async function buildMaintenanceExecutiveDeck({ period, label, site_code, requestHeaders = {} }) {
     const defaults = costDefaults();
     const laborRate = Number(defaults.labor_cost_per_hour_default || 35);
     const lubeDefault = Number(defaults.lube_cost_per_qty_default || 4);
@@ -8994,15 +9007,14 @@ export default async function reportsRoutes(app) {
     const akpBarOpts = { catAxisLabelRotate: -45, showLegend: true, legendPos: "b", chartColors: akpChartColors };
     const akpLineOpts = { catAxisLabelRotate: -45, showLegend: true, legendPos: "b", valAxisMinVal: 0, valAxisMaxVal: 100, chartColors: ["2563EB", "16A34A"] };
 
+    // The live API requires a bearer session.  Internal inject requests do not
+    // inherit it automatically, which previously made this deck silently use
+    // an empty forecast even though the signed-in Weekly Forum showed costs.
+    const insightsHeaders = maintenanceDeckInsightsHeaders(site_code, requestHeaders);
     const insightsInjected = await app.inject({
       method: "GET",
       url: `/api/maintenance/insights?start=${encodeURIComponent(period.start)}&end=${encodeURIComponent(period.end)}&near_due_hours=50&predictive_horizon_hours=100`,
-      headers: {
-        "x-user-name": "system",
-        "x-user-role": "admin",
-        "x-user-roles": "admin",
-        "x-site-code": site_code || "main",
-      },
+      headers: insightsHeaders,
     });
     let maintenanceInsights = {};
     if (insightsInjected.statusCode < 400) {
@@ -9673,6 +9685,7 @@ export default async function reportsRoutes(app) {
         case "manual_store_pricing": return "stores pricing";
         case "manual_labor": return "manual labor";
         case "historical_average": return "history average";
+        case "historical_asset_service_average": return "asset service history";
         default: return "-";
       }
     };
@@ -10097,7 +10110,12 @@ export default async function reportsRoutes(app) {
       }
       label = `${period.start}_to_${period.end}`;
     }
-    const deck = await buildMaintenanceExecutiveDeck({ period, label, site_code });
+    const deck = await buildMaintenanceExecutiveDeck({
+      period,
+      label,
+      site_code,
+      requestHeaders: opts.requestHeaders || {},
+    });
     const root = path.join(dataRoot, "reports-cache", "maintenance-master");
     fs.mkdirSync(root, { recursive: true });
     const fileName = `maintenance_master_${t}_${site_code}_${label}.pptx`;
@@ -10147,6 +10165,7 @@ export default async function reportsRoutes(app) {
         month: String(body.month || "").trim(),
         start: String(body.start || "").trim(),
         end: String(body.end || "").trim(),
+        requestHeaders: req.headers,
       });
       return reply.send({ ok: true, ...out });
     } catch (err) {
@@ -10175,7 +10194,12 @@ export default async function reportsRoutes(app) {
 
     if (hasExplicitPeriod || !row?.file_path || !fs.existsSync(row.file_path)) {
       try {
-        const generated = await generateMaintenanceMaster(report_type, site_code, { month, start, end });
+        const generated = await generateMaintenanceMaster(report_type, site_code, {
+          month,
+          start,
+          end,
+          requestHeaders: req.headers,
+        });
         row = {
           report_type,
           label: generated.label,
@@ -10200,7 +10224,12 @@ export default async function reportsRoutes(app) {
     const { period, label } = resolved;
     const siteCodeFromQuery = String(req.query?.site_code || "").trim().toLowerCase();
     const site_code = siteCodeFromQuery || getSiteCode(req);
-    const buffer = await buildMaintenanceExecutiveDeck({ period, label, site_code });
+    const buffer = await buildMaintenanceExecutiveDeck({
+      period,
+      label,
+      site_code,
+      requestHeaders: req.headers,
+    });
     reply
       .header("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation")
       .header("Content-Disposition", `attachment; filename="IRONLOG_Maintenance_Executive_${label}.pptx"`)

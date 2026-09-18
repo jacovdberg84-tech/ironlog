@@ -4,6 +4,7 @@ import {
   dailyPdfDowntimeHours,
   dailyPdfRepairFallbackHours,
   dailyPdfOperationsDate,
+  maintenanceDeckInsightsHeaders,
   serviceLabelFromDailyDowntime,
 } from "../routes/reports.routes.js";
 
@@ -50,5 +51,18 @@ test("numeric service intervals are presented as maintenance", () => {
       "Short breakdown — BREAKDOWN — Service — 500 hour service completed",
     ),
     "500 hour service",
+  );
+});
+
+test("maintenance presentation forwards the signed-in session to its forecast request", () => {
+  assert.deepEqual(
+    maintenanceDeckInsightsHeaders("main", { authorization: "Bearer active-session" }),
+    {
+      "x-user-name": "system",
+      "x-user-role": "admin",
+      "x-user-roles": "admin",
+      "x-site-code": "main",
+      authorization: "Bearer active-session",
+    },
   );
 });
