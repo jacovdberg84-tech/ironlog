@@ -870,7 +870,11 @@ async function loadAuthConfig() {
 }
 
 /** Opens a PDF (or other binary) in a new tab using the same auth headers as API calls. */
-async function openAuthedPdf(url) {
+async function openAuthedPdf(url, fallbackName = "ironlog-report.pdf") {
+  // Open the tab while handling the user's click. Some embedded browsers block tabs
+  // created after fetch completes, but still allow this initial blank tab.
+  const preview = window.open("", "_blank");
+  if (preview) preview.opener = null;
   const res = await fetch(url, { headers: authHeaders() });
   const blob = await res.blob();
   if (!res.ok) {
@@ -889,9 +893,26 @@ async function openAuthedPdf(url) {
     } catch {}
     throw new Error(msg || `Request failed (${res.status})`);
   }
-  const u = URL.createObjectURL(blob);
-  window.open(u, "_blank", "noopener,noreferrer");
-  setTimeout(() => URL.revokeObjectURL(u), 120000);
+  const blobUrl = URL.createObjectURL(blob);
+  if (preview && !preview.closed) {
+    preview.location.replace(blobUrl);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+    return true;
+  }
+  // Embedded browsers do not always permit popup control. Open the authenticated
+  // blob in the current tab rather than leaving the user with an empty new tab.
+  if (typeof window.location?.assign === "function") {
+    window.location.assign(blobUrl);
+  } else {
+    const anchor = document.createElement("a");
+    anchor.href = blobUrl;
+    anchor.download = fallbackName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+  return false;
 }
 
 /** Downloads a protected report/export using the current IRONLOG login token. */
@@ -937,7 +958,7 @@ async function downloadAuthedFile(url, fallbackName = "ironlog-report") {
 /** Opens or downloads a protected report without losing the active IRONLOG session. */
 function openAuthedReport(url, { download = false, filename = "ironlog-report.pdf" } = {}) {
   if (download) return downloadAuthedFile(url, filename);
-  return openAuthedPdf(url).catch((err) => {
+  return openAuthedPdf(url, filename).catch((err) => {
     alert(`Could not open report: ${err.message || err}`);
     return false;
   });

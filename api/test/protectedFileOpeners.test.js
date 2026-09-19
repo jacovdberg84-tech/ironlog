@@ -40,6 +40,27 @@ test('operational slip PDF is fetched with the active admin session', async () =
   assert.deepEqual(calls.alerts, []);
 });
 
+test('a blocked popup falls back to the current tab instead of displaying a popup warning', async () => {
+  const source = readWeb('breakdown-ops.js');
+  const start = source.indexOf('async function openProtectedPdf(');
+  const end = source.indexOf('async function ensureOpenBreakdownOps(');
+  const calls = { currentTab: '', alerts: [] };
+  const context = vm.createContext({
+    API: '/api',
+    authHeaders: () => ({ Authorization: 'Bearer admin-session' }),
+    fetch: async () => ({ ok: true, status: 200, blob: async () => ({ type: 'application/pdf' }) }),
+    window: { open: () => null, location: { assign: (url) => { calls.currentTab = url; } } },
+    URL: { createObjectURL: () => 'blob:operational-slip', revokeObjectURL() {} },
+    setTimeout() {},
+    alert: (message) => calls.alerts.push(message),
+  });
+  vm.runInContext(source.slice(start, end), context);
+
+  await context.openBoSlipPdf(74);
+  assert.equal(calls.currentTab, 'blob:operational-slip');
+  assert.deepEqual(calls.alerts, []);
+});
+
 test('admin report buttons no longer navigate directly to protected API files', () => {
   const app = readWeb('app.js');
   const maintenance = readWeb('maintenance.js');
@@ -48,6 +69,8 @@ test('admin report buttons no longer navigate directly to protected API files', 
   assert.match(app, /function openAuthedReport\(/);
   assert.match(app, /openAuthedReport\(`\$\{API\}\/api\/breakdown-ops\/slips\/\$\{n\}\/pdf`/);
   assert.match(maintenance, /function openProtectedPdf\(/);
+  assert.match(maintenance, /window\.location\?\.assign/);
+  assert.doesNotMatch(maintenance, /Allow pop-ups for IRONLOG/);
   assert.match(breakdownOps, /async function openProtectedPdf\(/);
 
   for (const source of [app, maintenance, breakdownOps]) {

@@ -2636,10 +2636,6 @@ function maintenancePlanGroupBucket(group) {
 
 async function openProtectedPdf(url, { download = false, filename = "IRONLOG-report.pdf" } = {}) {
   const preview = download ? null : window.open("", "_blank");
-  if (!download && !preview) {
-    alert("Allow pop-ups for IRONLOG, then try opening the PDF again.");
-    return;
-  }
   if (preview) preview.opener = null;
   try {
     const res = await fetch(url, { headers: authHeaders(), cache: "no-store" });
@@ -2662,8 +2658,19 @@ async function openProtectedPdf(url, { download = false, filename = "IRONLOG-rep
         document.body.appendChild(link);
         link.click();
         link.remove();
-      } else if (!preview.closed) {
+      } else if (preview && !preview.closed) {
         preview.location.replace(blobUrl);
+      } else if (typeof window.location?.assign === "function") {
+        // Embedded browsers may block controlled popups. Keep the PDF accessible
+        // by opening the authenticated blob in the current tab instead.
+        window.location.assign(blobUrl);
+      } else {
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
       }
     } finally {
       setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);

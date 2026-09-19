@@ -66,22 +66,29 @@
   }
 
   async function openProtectedPdf(url) {
-    const preview = window.open("", "_blank", "noopener,noreferrer");
-    if (!preview) {
-      alert("Allow pop-ups for IRONLOG, then try opening the PDF again.");
-      return false;
-    }
-    preview.opener = null;
+    const preview = window.open("", "_blank");
+    if (preview) preview.opener = null;
     try {
       const res = await fetch(url, { headers: authHeaders(), cache: "no-store" });
       const blob = await res.blob();
       if (!res.ok) throw new Error(res.status === 401 ? "Your session has expired. Please sign in again." : `PDF request failed (${res.status})`);
       const blobUrl = URL.createObjectURL(blob);
-      preview.location.replace(blobUrl);
+      if (preview && !preview.closed) {
+        preview.location.replace(blobUrl);
+      } else if (typeof window.location?.assign === "function") {
+        window.location.assign(blobUrl);
+      } else {
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = "IRONLOG_Undercarriage_Inspection.pdf";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
       setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
       return true;
     } catch (error) {
-      if (!preview.closed) preview.close();
+      if (preview && !preview.closed) preview.close();
       alert(`Could not open undercarriage inspection PDF: ${error.message || error}`);
       return false;
     }
