@@ -4,9 +4,14 @@
  * MTBF = operating hours ÷ failure count
  * LTTR = downtime hours ÷ failure count
  *
- * Failures = distinct incidents with machine downtime > 0 in the selected window
- * (daily breakdown_downtime_logs first, else breakdown header when reported in-window,
- * else clipped wall-clock hours on linked breakdown work orders).
+ * Failures = distinct incidents with machine downtime recorded in the selected window.
+ *
+ * Daily downtime logs are authoritative because their log date is the actual date
+ * lost. Older records without daily logs may use their breakdown-header total,
+ * but only where the breakdown itself was reported in the selected window. A
+ * linked work order remains audit information only: its elapsed calendar time
+ * must never turn a historic, planned, or later-entered record into downtime for
+ * the selected period.
  */
 
 function parseTsMs(raw, fallbackMs) {
@@ -133,13 +138,6 @@ export function buildReliabilityIncidentsForAssets(db, ctx) {
     } else if (inReportWindow && header_dt > 0) {
       downtime_hours = header_dt;
       downtime_source = "breakdown_header";
-    } else if (wo) {
-      const woClosed = wo.completed_at || wo.closed_at || null;
-      const woH = woWallClockHoursInRange(wo.opened_at, woClosed, start, end);
-      if (woH > 0) {
-        downtime_hours = woH;
-        downtime_source = "work_order";
-      }
     }
 
     if (downtime_hours <= 0) continue;

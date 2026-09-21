@@ -6653,6 +6653,53 @@ function relSelectedAssetIds() {
     .filter((n) => n > 0);
 }
 
+function matchReliabilityAssetKpiScope() {
+  const msg = document.getElementById("relMsg");
+  const sel = document.getElementById("relAssetSelect");
+  const start = String(document.getElementById("relStart")?.value || "").trim();
+  const end = String(document.getElementById("relEnd")?.value || "").trim();
+  if (!sel || !start || !end) return;
+
+  if (!akpLastMeta || !akpLastResponse || akpLastMeta.start !== start || akpLastMeta.end !== end) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = "Load Asset KPI for this same date range first, then match its equipment scope.";
+    }
+    return;
+  }
+
+  const selectedKpiCodes = akpSelectedAssetCodes();
+  const sourceAssets = selectedKpiCodes.length
+    ? selectedKpiCodes
+    : (Array.isArray(akpLastResponse.by_asset) ? akpLastResponse.by_asset.map((a) => a.asset_code) : []);
+  const wanted = new Set(sourceAssets.map((code) => String(code || "").trim().toUpperCase()).filter(Boolean));
+  if (!wanted.size) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = "The Asset KPI report has no equipment in this date range to match.";
+    }
+    return;
+  }
+
+  const codeById = new Map(relAssetCatalog.map((asset) => [
+    Number(asset.id || asset.asset_id || 0),
+    String(asset.asset_code || "").trim().toUpperCase(),
+  ]));
+  let matched = 0;
+  Array.from(sel.options).forEach((option) => {
+    const match = wanted.has(codeById.get(Number(option.value || 0)) || "");
+    option.selected = match;
+    if (match) matched += 1;
+  });
+  relLastMeta = null;
+  if (msg) {
+    msg.className = matched === wanted.size ? "message-success" : "message-error";
+    msg.textContent = matched === wanted.size
+      ? `Matched ${matched} Asset KPI equipment item(s). Load MTBF / LTTR to apply the shared scope.`
+      : `Matched ${matched} of ${wanted.size} Asset KPI equipment item(s). Clear the Reliability category filter and try again.`;
+  }
+}
+
 function relRefreshCategoryOptions(assets, keepValue = "") {
   const catSel = document.getElementById("relCategoryFilter");
   if (!catSel) return;
@@ -9421,6 +9468,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!sel) return;
     Array.from(sel.options).forEach((o) => { o.selected = true; });
   });
+  document.getElementById("relMatchAssetKpiScopeBtn")?.addEventListener("click", () => matchReliabilityAssetKpiScope());
   document.getElementById("relClearSelBtn")?.addEventListener("click", () => {
     const sel = document.getElementById("relAssetSelect");
     if (!sel) return;

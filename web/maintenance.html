@@ -1857,8 +1857,10 @@
         <p class="muted" style="margin:0 0 12px 0;">
           <strong>MTBF</strong> (mean time between failures) = operating hours ÷ failure count.
           <strong>LTTR</strong> (lost time to repair) = downtime hours ÷ failure count.
-          Failures are breakdown incidents with machine downtime in the selected period (daily downtime logs, breakdown total when reported in range, or linked breakdown work order hours).
-          Operating hours come from daily input run hours. Expand the incident table below to reconcile against work orders.
+          Failures are breakdown incidents with recorded downtime in the selected period: daily downtime logs first,
+          then the breakdown total for older records reported in that period. A work order is shown for audit only;
+          its elapsed time is not treated as downtime. Operating hours come from daily input run hours.
+          To compare directly with Asset KPI, load it for the same dates, then use <em>Match Asset KPI scope</em> below.
         </p>
         <div class="row stack-10">
           <label>
@@ -1882,6 +1884,7 @@
             <select id="relAssetSelect" multiple size="8" style="width:100%; min-height:160px;"></select>
           </label>
           <div class="stack-10">
+            <button id="relMatchAssetKpiScopeBtn" type="button">Match Asset KPI scope</button>
             <button id="relSelectAllBtn" type="button">Select all listed</button>
             <button id="relClearSelBtn" type="button">Clear selection</button>
           </div>
@@ -1910,7 +1913,7 @@
           </table>
         </div>
         <h4 style="margin:20px 0 8px;">Incidents in period (audit)</h4>
-        <p class="muted" style="margin:0 0 8px;">Each row is one failure counted above. Downtime source shows whether hours came from daily logs, the breakdown record, or the linked work order.</p>
+        <p class="muted" style="margin:0 0 8px;">Each row is one failure counted above. Downtime source shows whether hours came from daily logs or the breakdown record; the linked work order is included for audit only.</p>
         <div style="overflow:auto;">
           <table class="gridTable" style="min-width:960px;">
             <thead>

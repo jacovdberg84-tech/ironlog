@@ -3496,9 +3496,9 @@ export default async function maintenanceRoutes(app) {
       formulas: {
         mtbf: "operating_hours / failure_count",
         lttr: "downtime_hours / failure_count",
-        failures: "distinct breakdown incidents with downtime > 0 in period (daily logs, else header when reported in period, else linked breakdown WO wall-clock)",
+        failures: "distinct breakdown incidents with recorded downtime in period (daily logs, else breakdown header when reported in period)",
         operating_hours: "sum of daily_hours.hours_run (is_used=1) in period",
-        downtime_hours: "per-incident downtime in period (same sources as failures)",
+        downtime_hours: "per-incident recorded downtime in period (same sources as failures; work-order elapsed time is audit-only)",
       },
       summary: {
         failure_count,
