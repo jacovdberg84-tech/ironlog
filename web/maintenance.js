@@ -6638,6 +6638,7 @@ function renderAssetKpiTables(data) {
 
 let relAssetCatalog = [];
 let relLastMeta = null;
+let relKpiScheduledHours = 10;
 
 function relFmtHours(v) {
   if (v == null || v === "") return "-";
@@ -6692,6 +6693,7 @@ function matchReliabilityAssetKpiScope() {
     if (match) matched += 1;
   });
   relLastMeta = null;
+  relKpiScheduledHours = Math.max(0.5, Number(akpLastMeta.sched || 10) || 10);
   if (msg) {
     msg.className = matched === wanted.size ? "message-success" : "message-error";
     msg.textContent = matched === wanted.size
@@ -6761,6 +6763,11 @@ function renderReliabilityReport(data) {
   const body = document.getElementById("relAssetBody");
   const incBody = document.getElementById("relIncidentBody");
   const s = data?.summary || {};
+  const recordedDowntime = Number(s.recorded_downtime_hours || 0);
+  const totalDowntime = Number(s.downtime_hours || 0);
+  const downtimeMeta = totalDowntime > recordedDowntime + 0.01
+    ? `Asset KPI daily basis · ${relFmtHours(recordedDowntime)} h directly recorded`
+    : "Same daily basis as Asset KPI";
   if (summaryEl) {
     summaryEl.innerHTML = `
       <div class="kpi-card kpi-util">
@@ -6773,10 +6780,10 @@ function renderReliabilityReport(data) {
         <div class="kpi-big-value">${relFmtHours(s.operating_hours)}</div>
         <div class="kpi-meta">Daily input run hours</div>
       </div>
-      <div class="kpi-card kpi-alerts">
+        <div class="kpi-card kpi-alerts">
         <div class="kpi-card-header"><div class="kpi-icon">D</div><div class="kpi-title">Downtime hours</div></div>
         <div class="kpi-big-value">${relFmtHours(s.downtime_hours)}</div>
-        <div class="kpi-meta">Logged breakdown downtime</div>
+        <div class="kpi-meta">${downtimeMeta}</div>
       </div>
       <div class="kpi-card kpi-avail">
         <div class="kpi-card-header"><div class="kpi-icon">M</div><div class="kpi-title">MTBF</div></div>
@@ -6858,13 +6865,14 @@ async function loadReliabilityMetrics() {
   const q = new URLSearchParams();
   q.set("start", start);
   q.set("end", end);
+  q.set("scheduled", String(relKpiScheduledHours));
   if (category) q.set("category", category);
   if (assetIds.length) q.set("asset_ids", assetIds.join(","));
   try {
     const res = await fetch(`${API}/maintenance/reliability?${q.toString()}`, { headers: authHeaders() });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to load reliability metrics");
-    relLastMeta = { start, end, category, asset_ids: assetIds.join(",") };
+    relLastMeta = { start, end, category, asset_ids: assetIds.join(","), scheduled: relKpiScheduledHours };
     renderReliabilityReport(data);
     if (msg) {
       msg.className = "message-success";
@@ -6893,6 +6901,7 @@ function exportReliabilityToExcel() {
   const q = new URLSearchParams();
   q.set("start", relLastMeta.start);
   q.set("end", relLastMeta.end);
+  q.set("scheduled", String(relLastMeta.scheduled || 10));
   if (relLastMeta.category) q.set("category", relLastMeta.category);
   if (relLastMeta.asset_ids) q.set("asset_ids", relLastMeta.asset_ids);
   return downloadProtectedXlsxFile(

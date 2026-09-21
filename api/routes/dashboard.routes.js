@@ -16,6 +16,7 @@ import { ensureCostAllocationSchema, resolveLogCostCenterCode } from "../utils/c
 import { fetchLubeUsageLines } from "../utils/lubeUsageLines.js";
 import { createManagementSummary, styleManagementDetailSheet } from "../utils/managementWorkbook.js";
 import { buildShiftScenario } from "../utils/shiftScenario.js";
+import { registerAssetKpiRangeBuilder } from "../utils/assetKpiRangeProvider.js";
 import {
   ensureFamsFuelSchema,
   getFamsSyncStatus,
@@ -932,6 +933,11 @@ export default async function dashboardRoutes(app) {
       daily_series,
     };
   }
+
+  // Maintenance reliability uses this exact daily calculation for its selected
+  // equipment, so the downtime and operating-hour bases cannot diverge from
+  // the Asset KPI report.
+  registerAssetKpiRangeBuilder(buildAssetKpiRange);
 
   // GET /api/dashboard/asset-kpi/weekly?start=YYYY-MM-DD&end=YYYY-MM-DD&scheduled=10
   // Rolls up dashboard KPI rules (availability / utilization) across a date range per asset and by equipment category.

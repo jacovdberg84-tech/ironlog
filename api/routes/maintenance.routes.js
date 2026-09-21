@@ -23,6 +23,7 @@ import {
   computeMtbfLttr,
   round2,
 } from "../utils/reliabilityMetrics.js";
+import { getAssetKpiRangeBuilder } from "../utils/assetKpiRangeProvider.js";
 import { normalizeUploadedPhoto } from "../utils/imagePdf.js";
 import {
   generateMechanicsTimesheet,
@@ -3378,6 +3379,8 @@ export default async function maintenanceRoutes(app) {
 
   function buildMaintenanceReliabilityReport(start, end, opts = {}) {
     const categoryFilter = String(opts.category || "").trim();
+    const scheduledFallback = Math.max(0.5, Number(opts.scheduled ?? 10) || 10);
+    const siteCode = String(opts.site_code || "main").trim().toLowerCase() || "main";
     let assetIds = Array.isArray(opts.asset_ids) ? opts.asset_ids.map((x) => Number(x)).filter((n) => n > 0) : [];
 
     let assetRows = [];
@@ -3446,12 +3449,35 @@ export default async function maintenanceRoutes(app) {
       hasColumn,
     });
 
+    // Use the same daily KPI engine as Asset KPI for production hours and
+    // downtime. This includes explicit downtime, historical header fallback,
+    // and only the same open-breakdown imputation used for availability.
+    // If the dashboard provider is unavailable during an isolated route test,
+    // retain the recorded-downtime calculation as a safe fallback.
+    const buildAssetKpiRange = getAssetKpiRangeBuilder();
+    const kpiRange = buildAssetKpiRange
+      ? buildAssetKpiRange(
+        start,
+        end,
+        scheduledFallback,
+        siteCode,
+        assetRows.map((a) => String(a.asset_code || "").trim()).filter(Boolean),
+      )
+      : null;
+    const kpiByAsset = new Map(
+      (Array.isArray(kpiRange?.by_asset) ? kpiRange.by_asset : [])
+        .map((row) => [Number(row.asset_id || 0), row])
+        .filter(([assetId]) => assetId > 0)
+    );
+
     const by_asset = assetRows.map((a) => {
       const aid = Number(a.asset_id || 0);
-      const operating_hours = Number(runByAsset.get(aid) || 0);
+      const kpi = kpiByAsset.get(aid) || null;
+      const operating_hours = kpi ? Number(kpi.run_hours || 0) : Number(runByAsset.get(aid) || 0);
       const rel = reliabilityByAsset.get(aid) || { failure_count: 0, downtime_hours: 0 };
       const failure_count = Number(rel.failure_count || 0);
-      const downtime_hours = Number(rel.downtime_hours || 0);
+      const recorded_downtime_hours = Number(rel.downtime_hours || 0);
+      const downtime_hours = kpi ? Number(kpi.downtime_hours || 0) : recorded_downtime_hours;
       const { mtbf_hours, lttr_hours } = computeMtbfLttr(operating_hours, failure_count, downtime_hours);
       return {
         asset_id: aid,
@@ -3461,6 +3487,7 @@ export default async function maintenanceRoutes(app) {
         failure_count,
         operating_hours: round2(operating_hours),
         downtime_hours: round2(downtime_hours),
+        recorded_downtime_hours: round2(recorded_downtime_hours),
         mtbf_hours,
         lttr_hours,
       };
@@ -3473,6 +3500,7 @@ export default async function maintenanceRoutes(app) {
     const failure_count = by_asset.reduce((s, r) => s + Number(r.failure_count || 0), 0);
     const operating_hours = by_asset.reduce((s, r) => s + Number(r.operating_hours || 0), 0);
     const downtime_hours = by_asset.reduce((s, r) => s + Number(r.downtime_hours || 0), 0);
+    const recorded_downtime_hours = by_asset.reduce((s, r) => s + Number(r.recorded_downtime_hours || 0), 0);
     const { mtbf_hours, lttr_hours } = computeMtbfLttr(operating_hours, failure_count, downtime_hours);
 
     const incidentsWithAsset = incidents.map((inc) => {
@@ -3493,17 +3521,20 @@ export default async function maintenanceRoutes(app) {
       end,
       category: categoryFilter || null,
       asset_filter_count: assetIds.length,
+      scheduled_fallback: scheduledFallback,
+      downtime_basis: kpiRange ? "asset_kpi_daily" : "recorded_breakdown_downtime",
       formulas: {
         mtbf: "operating_hours / failure_count",
         lttr: "downtime_hours / failure_count",
         failures: "distinct breakdown incidents with recorded downtime in period (daily logs, else breakdown header when reported in period)",
-        operating_hours: "sum of daily_hours.hours_run (is_used=1) in period",
-        downtime_hours: "per-incident recorded downtime in period (same sources as failures; work-order elapsed time is audit-only)",
+        operating_hours: "Asset KPI daily run hours for the selected equipment",
+        downtime_hours: "Asset KPI daily downtime for the selected equipment (logged/header downtime plus the same open-breakdown imputation used by availability)",
       },
       summary: {
         failure_count,
         operating_hours: round2(operating_hours),
         downtime_hours: round2(downtime_hours),
+        recorded_downtime_hours: round2(recorded_downtime_hours),
         mtbf_hours,
         lttr_hours,
       },
@@ -3528,7 +3559,9 @@ export default async function maintenanceRoutes(app) {
       }
       const asset_ids = parseReliabilityAssetIds(req.query?.asset_ids);
       const category = String(req.query?.category || "").trim();
-      const data = buildMaintenanceReliabilityReport(startDate, endDate, { asset_ids, category });
+      const scheduled = Math.max(0.5, Number(req.query?.scheduled ?? 10) || 10);
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const data = buildMaintenanceReliabilityReport(startDate, endDate, { asset_ids, category, scheduled, site_code });
       return reply.send({ ok: true, ...data });
     } catch (err) {
       req.log.error(err);
@@ -3549,7 +3582,9 @@ export default async function maintenanceRoutes(app) {
       }
       const asset_ids = parseReliabilityAssetIds(req.query?.asset_ids);
       const category = String(req.query?.category || "").trim();
-      const data = buildMaintenanceReliabilityReport(startDate, endDate, { asset_ids, category });
+      const scheduled = Math.max(0.5, Number(req.query?.scheduled ?? 10) || 10);
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const data = buildMaintenanceReliabilityReport(startDate, endDate, { asset_ids, category, scheduled, site_code });
 
       const wb = new ExcelJS.Workbook();
       wb.creator = "IRONLOG";
@@ -3560,11 +3595,14 @@ export default async function maintenanceRoutes(app) {
       summary.addRow(["Period", `${startDate} to ${endDate}`]);
       summary.addRow(["Category filter", category || "All"]);
       summary.addRow(["Assets in scope", data.asset_filter_count]);
+      summary.addRow(["Asset KPI scheduled fallback", data.scheduled_fallback]);
+      summary.addRow(["Downtime basis", data.downtime_basis === "asset_kpi_daily" ? "Asset KPI daily downtime" : "Recorded breakdown downtime"]);
       summary.addRow([]);
       summary.addRow(["Metric", "Value"]);
       summary.addRow(["Failures", data.summary.failure_count]);
       summary.addRow(["Operating hours", data.summary.operating_hours]);
       summary.addRow(["Downtime hours", data.summary.downtime_hours]);
+      summary.addRow(["Recorded incident downtime (audit)", data.summary.recorded_downtime_hours]);
       summary.addRow(["MTBF (hours)", data.summary.mtbf_hours ?? ""]);
       summary.addRow(["LTTR (hours)", data.summary.lttr_hours ?? ""]);
 
@@ -3576,6 +3614,7 @@ export default async function maintenanceRoutes(app) {
         { header: "Failures", key: "failure_count", width: 12 },
         { header: "Operating h", key: "operating_hours", width: 14 },
         { header: "Downtime h", key: "downtime_hours", width: 14 },
+        { header: "Recorded incident h", key: "recorded_downtime_hours", width: 18 },
         { header: "MTBF h", key: "mtbf_hours", width: 12 },
         { header: "LTTR h", key: "lttr_hours", width: 12 },
       ];
