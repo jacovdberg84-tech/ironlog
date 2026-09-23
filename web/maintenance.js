@@ -6910,6 +6910,23 @@ function exportReliabilityToExcel() {
   ).catch((err) => alert(`Could not download reliability export: ${err.message || err}`));
 }
 
+function exportReliabilityExecutiveToExcel() {
+  if (!relLastMeta) {
+    alert("Load MTBF / LTTR data first.");
+    return;
+  }
+  const q = new URLSearchParams();
+  q.set("start", relLastMeta.start);
+  q.set("end", relLastMeta.end);
+  q.set("scheduled", String(relLastMeta.scheduled || 10));
+  if (relLastMeta.category) q.set("category", relLastMeta.category);
+  if (relLastMeta.asset_ids) q.set("asset_ids", relLastMeta.asset_ids);
+  return downloadProtectedXlsxFile(
+    `${API}/maintenance/reliability-executive.xlsx?${q.toString()}`,
+    `IRONLOG_MTBF_LTTR_Executive_${relLastMeta.start}_to_${relLastMeta.end}.xlsx`,
+  ).catch((err) => alert(`Could not download executive reliability export: ${err.message || err}`));
+}
+
 async function loadAssetKpiWeekly() {
   const msg = document.getElementById("akpMsg");
   const catBody = document.getElementById("akpCategoryBody");
@@ -9469,6 +9486,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("loadAssetKpiBtn")?.addEventListener("click", () => loadAssetKpiWeekly());
   document.getElementById("loadReliabilityBtn")?.addEventListener("click", () => loadReliabilityMetrics());
   document.getElementById("exportReliabilityBtn")?.addEventListener("click", () => exportReliabilityToExcel());
+  document.getElementById("exportReliabilityExecutiveBtn")?.addEventListener("click", () => exportReliabilityExecutiveToExcel());
   document.getElementById("relCategoryFilter")?.addEventListener("change", () => {
     relRenderAssetOptions(relAssetCatalog);
   });

@@ -64,6 +64,7 @@ import {
   createManagementSummary,
   styleManagementDetailSheet,
 } from "../utils/managementWorkbook.js";
+import { buildReliabilityExecutiveWorkbook } from "../utils/reliabilityExecutiveWorkbook.js";
 import {
   SERVICE_TEMPLATE_ITEM_TYPES,
   buildServiceEstimatePreview,
@@ -3640,6 +3641,33 @@ export default async function maintenanceRoutes(app) {
       reply
         .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         .header("Content-Disposition", `attachment; filename="IRONLOG_MTBF_LTTR_${startDate}_to_${endDate}.xlsx"`)
+        .send(Buffer.from(buf));
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.get("/reliability-executive.xlsx", async (req, reply) => {
+    try {
+      const endDate = String(req.query?.end || "").trim() || new Date().toISOString().slice(0, 10);
+      const startDate = String(req.query?.start || "").trim() || (() => {
+        const d = new Date(`${endDate}T00:00:00`);
+        d.setDate(d.getDate() - 29);
+        return d.toISOString().slice(0, 10);
+      })();
+      if (!isDate(startDate) || !isDate(endDate) || startDate > endDate) {
+        return reply.code(400).send({ ok: false, error: "Provide valid start/end dates" });
+      }
+      const asset_ids = parseReliabilityAssetIds(req.query?.asset_ids);
+      const category = String(req.query?.category || "").trim();
+      const scheduled = Math.max(0.5, Number(req.query?.scheduled ?? 10) || 10);
+      const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
+      const data = buildMaintenanceReliabilityReport(startDate, endDate, { asset_ids, category, scheduled, site_code });
+      const buf = await buildReliabilityExecutiveWorkbook(data, { startDate, endDate, category });
+      reply
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header("Content-Disposition", `attachment; filename="IRONLOG_MTBF_LTTR_Executive_${startDate}_to_${endDate}.xlsx"`)
         .send(Buffer.from(buf));
     } catch (err) {
       req.log.error(err);
