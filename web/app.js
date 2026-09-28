@@ -9593,6 +9593,40 @@ function openStockOnHandPdf() {
   });
 }
 
+function ensureGmStockReportDate() {
+  const input = qs("gmStockReportDate");
+  if (input && !input.value) input.value = todayLocalYmd();
+}
+
+function updateGmStockReportHelp() {
+  const period = String(qs("gmStockReportPeriod")?.value || "monthly").trim().toLowerCase();
+  const label = qs("gmStockReportDateLabel");
+  const help = qs("gmStockReportHelp");
+  if (period === "weekly") {
+    if (label) label.textContent = "Week ending";
+    if (help) help.textContent = "Weekly uses the seven days ending on the selected date.";
+    return;
+  }
+  if (label) label.textContent = "Month containing";
+  if (help) help.textContent = "Monthly uses the full calendar month containing the selected date.";
+}
+
+async function downloadGmStockReportXlsx() {
+  ensureGmStockReportDate();
+  const period = String(qs("gmStockReportPeriod")?.value || "monthly").trim().toLowerCase() === "weekly"
+    ? "weekly"
+    : "monthly";
+  const reportDate = String(qs("gmStockReportDate")?.value || "").trim();
+  if (!reportDate) return alert("Choose a report date.");
+  const query = new URLSearchParams({ period, report_date: reportDate });
+  setStatus("Preparing GM stock Excel...");
+  const ok = await downloadAuthedFile(
+    `${API}/api/stock/gm-stock-report.xlsx?${query.toString()}`,
+    `IRONLOG_${period === "weekly" ? "Weekly" : "Monthly"}_Stock_Report_${reportDate}.xlsx`,
+  );
+  if (ok) setStatus("GM stock Excel downloaded.");
+}
+
 let storesPartOrdersCache = [];
 
 function ensureStoresPartOrderDates() {
@@ -18600,6 +18634,10 @@ async function init() {
   qs("spLoad")?.addEventListener("click", () =>
     loadStockOnHandPage().catch((e) => setStatus("Stock on hand error: " + e.message))
   );
+  ensureGmStockReportDate();
+  updateGmStockReportHelp();
+  qs("gmStockReportPeriod")?.addEventListener("change", updateGmStockReportHelp);
+  qs("downloadGmStockReportXlsx")?.addEventListener("click", () => downloadGmStockReportXlsx());
   qs("spSort")?.addEventListener("change", () => refreshStockInventoryDisplay());
   qs("spOnlyLow")?.addEventListener("change", () => refreshStockInventoryDisplay());
   qs("spList")?.addEventListener("click", (evt) => {

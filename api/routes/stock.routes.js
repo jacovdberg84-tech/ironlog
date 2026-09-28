@@ -9,6 +9,10 @@ import {
 } from "../utils/masterdataGovernance.js";
 import { fetchLubeMonthStockSnapshot } from "../utils/lubeMonthStock.js";
 import { ensureCostAllocationSchema, resolveLogCostCenterCode } from "../utils/costAllocation.js";
+import {
+  buildWorkshopInventoryReportWorkbook,
+  resolveWorkshopInventoryReportPeriod,
+} from "../utils/workshopInventoryReport.js";
 
 export default async function stockRoutes(app) {
   ensureAuditTable(db);
@@ -18,6 +22,10 @@ export default async function stockRoutes(app) {
   function hasColumn(table, col) {
     const rows = db.prepare(`PRAGMA table_info(${table})`).all();
     return rows.some((r) => String(r.name) === col);
+  }
+
+  function hasTable(table) {
+    return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
   }
 
   function getRole(req) {
@@ -351,6 +359,160 @@ export default async function stockRoutes(app) {
       stock_value: Number((Number(r.on_hand || 0) * Number(r.unit_cost || 0)).toFixed(2)),
       below_min: Number(r.on_hand) < Number(r.min_stock)
     }));
+  });
+
+  // GM-ready weekly/monthly inventory register. It uses the same stock movement
+  // ledger as Stores, with period opening and closing balances for every item.
+  app.get("/gm-stock-report.xlsx", async (req, reply) => {
+    try {
+      const period = resolveWorkshopInventoryReportPeriod(req.query?.period, req.query?.report_date);
+      const dateColumn = hasColumn("stock_movements", "created_at") ? "sm.created_at" : "sm.movement_date";
+      const dateExpr = `DATE(${dateColumn})`;
+      const hasMovementCost = hasColumn("stock_movements", "unit_cost_usd");
+      const hasLocation = hasColumn("stock_movements", "location_id");
+      const hasBin = hasColumn("stock_movements", "bin_id");
+      const hasSupplierMaster = hasTable("mdm_suppliers");
+      const supplierJoin = hasSupplierMaster
+        ? "LEFT JOIN mdm_suppliers sup ON sup.site_code = ? AND sup.supplier_code = p.default_supplier_code"
+        : "";
+      const itemRows = db.prepare(`
+        WITH movement_summary AS (
+          SELECT
+            sm.part_id,
+            COALESCE(SUM(CASE WHEN ${dateExpr} < DATE(?) THEN sm.quantity ELSE 0 END), 0) AS opening_qty,
+            COALESCE(SUM(CASE
+              WHEN ${dateExpr} BETWEEN DATE(?) AND DATE(?)
+                AND sm.quantity > 0
+                AND LOWER(COALESCE(sm.movement_type, '')) NOT LIKE '%return%'
+                AND LOWER(COALESCE(sm.movement_type, '')) NOT LIKE '%adjust%'
+                AND LOWER(COALESCE(sm.movement_type, '')) NOT LIKE '%transfer%'
+              THEN sm.quantity ELSE 0 END), 0) AS receipts_qty,
+            COALESCE(SUM(CASE
+              WHEN ${dateExpr} BETWEEN DATE(?) AND DATE(?)
+                AND sm.quantity < 0
+                AND LOWER(COALESCE(sm.movement_type, '')) NOT LIKE '%adjust%'
+                AND LOWER(COALESCE(sm.movement_type, '')) NOT LIKE '%transfer%'
+              THEN ABS(sm.quantity) ELSE 0 END), 0) AS issues_qty,
+            COALESCE(SUM(CASE
+              WHEN ${dateExpr} BETWEEN DATE(?) AND DATE(?)
+                AND sm.quantity > 0
+                AND LOWER(COALESCE(sm.movement_type, '')) LIKE '%return%'
+              THEN sm.quantity ELSE 0 END), 0) AS returns_qty,
+            COALESCE(SUM(CASE
+              WHEN ${dateExpr} BETWEEN DATE(?) AND DATE(?)
+                AND sm.quantity > 0
+                AND LOWER(COALESCE(sm.movement_type, '')) LIKE '%transfer%'
+              THEN sm.quantity ELSE 0 END), 0) AS transfers_in_qty,
+            COALESCE(SUM(CASE
+              WHEN ${dateExpr} BETWEEN DATE(?) AND DATE(?)
+                AND sm.quantity < 0
+                AND LOWER(COALESCE(sm.movement_type, '')) LIKE '%transfer%'
+              THEN ABS(sm.quantity) ELSE 0 END), 0) AS transfers_out_qty,
+            COALESCE(SUM(CASE
+              WHEN ${dateExpr} BETWEEN DATE(?) AND DATE(?)
+                AND LOWER(COALESCE(sm.movement_type, '')) LIKE '%adjust%'
+              THEN sm.quantity ELSE 0 END), 0) AS adjustments_qty,
+            COALESCE(SUM(CASE WHEN ${dateExpr} <= DATE(?) THEN sm.quantity ELSE 0 END), 0) AS closing_qty,
+            MAX(CASE WHEN ${dateExpr} <= DATE(?) THEN ${dateColumn} END) AS last_movement_at,
+            GROUP_CONCAT(DISTINCT ${hasLocation ? "COALESCE(loc.location_code, 'UNSPECIFIED')" : "'UNSPECIFIED'"}) AS location
+          FROM stock_movements sm
+          ${hasLocation ? "LEFT JOIN stock_locations loc ON loc.id = sm.location_id" : ""}
+          GROUP BY sm.part_id
+        ), minmax AS (
+          SELECT
+            part_id,
+            MAX(min_qty) AS min_qty,
+            MAX(max_qty) AS max_qty,
+            MAX(COALESCE(reorder_qty, 0)) AS reorder_point
+          FROM stock_min_max
+          GROUP BY part_id
+        )
+        SELECT
+          p.part_code,
+          p.part_name,
+          p.critical,
+          COALESCE(NULLIF(TRIM(p.department_code), ''), '') AS category,
+          COALESCE(NULLIF(TRIM(${hasSupplierMaster ? "sup.name" : "p.default_supplier_code"}), ''), '') AS supplier,
+          COALESCE(mm.min_qty, p.min_stock, 0) AS min_qty,
+          COALESCE(mm.max_qty, 0) AS max_qty,
+          COALESCE(NULLIF(mm.reorder_point, 0), COALESCE(mm.min_qty, p.min_stock, 0)) AS reorder_point,
+          COALESCE(ms.opening_qty, 0) AS opening_qty,
+          COALESCE(ms.receipts_qty, 0) AS receipts_qty,
+          COALESCE(ms.issues_qty, 0) AS issues_qty,
+          COALESCE(ms.returns_qty, 0) AS returns_qty,
+          COALESCE(ms.transfers_in_qty, 0) AS transfers_in_qty,
+          COALESCE(ms.transfers_out_qty, 0) AS transfers_out_qty,
+          COALESCE(ms.adjustments_qty, 0) AS adjustments_qty,
+          COALESCE(ms.closing_qty, 0) AS closing_qty,
+          COALESCE(p.unit_cost, 0) AS unit_cost,
+          COALESCE(ms.last_movement_at, '') AS last_movement_at,
+          COALESCE(ms.location, 'Unspecified') AS location,
+          CASE WHEN (
+            LOWER(COALESCE(p.part_code, '')) LIKE '%oil%'
+            OR LOWER(COALESCE(p.part_name, '')) LIKE '%oil%'
+            OR LOWER(COALESCE(p.part_code, '')) LIKE '%lube%'
+            OR LOWER(COALESCE(p.part_name, '')) LIKE '%lube%'
+            OR LOWER(COALESCE(p.part_code, '')) LIKE '%grease%'
+            OR LOWER(COALESCE(p.part_name, '')) LIKE '%grease%'
+          ) THEN 1 ELSE 0 END AS is_lube
+        FROM parts p
+        LEFT JOIN movement_summary ms ON ms.part_id = p.id
+        LEFT JOIN minmax mm ON mm.part_id = p.id
+        ${supplierJoin}
+        ORDER BY p.critical DESC, p.part_code ASC
+      `).all(
+        period.start_date, // opening balance
+        period.start_date, period.end_date, // receipts
+        period.start_date, period.end_date, // issues
+        period.start_date, period.end_date, // returns
+        period.start_date, period.end_date, // transfers in
+        period.start_date, period.end_date, // transfers out
+        period.start_date, period.end_date, // adjustments
+        period.end_date, // closing balance
+        period.end_date, // last movement date
+        ...(hasSupplierMaster ? [getSiteCode(req)] : []),
+      ).map((row) => ({
+        ...row,
+        critical: Boolean(row.critical),
+        is_lube: Boolean(row.is_lube),
+      }));
+
+      const movementRows = db.prepare(`
+        SELECT
+          ${dateColumn} AS movement_at,
+          sm.movement_type,
+          sm.quantity,
+          sm.reference,
+          p.part_code,
+          p.part_name,
+          ${hasLocation ? "COALESCE(loc.location_code, 'Unspecified')" : "'Unspecified'"} AS location_code,
+          ${hasBin ? "COALESCE(bin.bin_code, '')" : "''"} AS bin_code,
+          COALESCE(NULLIF(${hasMovementCost ? "sm.unit_cost_usd" : "0"}, 0), p.unit_cost, 0) AS unit_cost
+        FROM stock_movements sm
+        JOIN parts p ON p.id = sm.part_id
+        ${hasLocation ? "LEFT JOIN stock_locations loc ON loc.id = sm.location_id" : ""}
+        ${hasBin ? "LEFT JOIN stock_bins bin ON bin.id = sm.bin_id" : ""}
+        WHERE ${dateExpr} BETWEEN DATE(?) AND DATE(?)
+        ORDER BY ${dateColumn} DESC, sm.id DESC
+        LIMIT 10000
+      `).all(period.start_date, period.end_date).map((row) => ({
+        ...row,
+        transaction_type: String(row.movement_type || "").replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Movement",
+      }));
+
+      const buffer = await buildWorkshopInventoryReportWorkbook(
+        { items: itemRows, movements: movementRows },
+        { reportType: period.report_type, startDate: period.start_date, endDate: period.end_date },
+      );
+      const label = period.report_type === "weekly" ? "Weekly" : "Monthly";
+      return reply
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header("Content-Disposition", `attachment; filename="IRONLOG_${label}_Stock_Report_${period.start_date}_to_${period.end_date}.xlsx"`)
+        .send(Buffer.from(buffer));
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(400).send({ ok: false, error: err.message || String(err) });
+    }
   });
 
   // Stock locations

@@ -1828,6 +1828,46 @@
           </div>
         </div>
 
+        <!-- GM stock report -->
+        <div class="dash-card collapsible full-width" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"></path><path d="M7 16V9"></path><path d="M12 16V5"></path><path d="M17 16v-4"></path></svg>
+              </div>
+              <div>
+                <h3>GM stock report</h3>
+                <p class="muted small">Weekly or monthly Excel register populated from live Stores items, movements, closing balances, and replenishment flags.</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field">
+                <label>Report type</label>
+                <select id="gmStockReportPeriod" class="w-full">
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly" selected>Monthly</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label id="gmStockReportDateLabel">Month containing</label>
+                <input id="gmStockReportDate" type="date" class="w-full" />
+              </div>
+              <div class="form-field form-field-action">
+                <button id="downloadGmStockReportXlsx" type="button" class="btn btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                  Download GM Excel
+                </button>
+              </div>
+            </div>
+            <p id="gmStockReportHelp" class="muted small" style="margin: 8px 0 0;">Monthly uses the full calendar month containing the selected date.</p>
+          </div>
+        </div>
+
         <!-- Store QR — field terminal -->
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
