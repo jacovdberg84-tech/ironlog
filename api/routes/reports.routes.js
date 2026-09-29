@@ -27,8 +27,10 @@ import registerOperationsExportsRoutes from "./reports/operations-exports.routes
 import registerPresentationsRoutes from "./reports/presentations.routes.js";
 import registerPeriodReportsRoutes from "./reports/period-reports.routes.js";
 import { serviceCostSourceLabel } from "../utils/serviceCostSource.js";
+import { DONE_WORK_ORDER_STATUSES, isWorkOrderDone, breakdownNextStep, downtimeCell, draftWeeklyFindings, workOrderBlockerCell, workOrderOwnerCell, workOrderProgressCell } from "../utils/weeklyForumFindings.js";
 
 const __dirnameReports = path.dirname(fileURLToPath(import.meta.url));
+const doneStatusSql = DONE_WORK_ORDER_STATUSES.map((s) => `'${s}'`).join(", ");
 const AML_WEEKLY_TEMPLATE_PATH = path.join(
   __dirnameReports,
   "..",
@@ -3948,7 +3950,7 @@ export default async function reportsRoutes(app) {
         JOIN breakdowns b ON b.id = w.reference_id
         WHERE LOWER(COALESCE(w.source, '')) = 'breakdown'
           AND COALESCE(b.critical, 0) = 1
-          AND LOWER(COALESCE(w.status, 'open')) NOT IN ('closed', 'completed', 'done')
+          AND LOWER(COALESCE(w.status, 'open')) NOT IN (${doneStatusSql})
       `).get();
       const scheduled = Number(hours?.scheduled_hours || 0);
       const run = Math.max(0, Math.min(Number(hours?.run_hours || 0), scheduled));
@@ -4061,8 +4063,9 @@ export default async function reportsRoutes(app) {
     const breakdownRows = hasDowntimeLogs
       ? db.prepare(`
           SELECT b.id, a.asset_code, a.asset_name, b.status, b.component, b.description,
-            b.parts_status, b.ets_repair_date,
+            b.parts_status, b.ets_repair_date, b.end_at,
             MIN(l.log_date) AS start_date, MAX(l.log_date) AS end_date,
+            COUNT(DISTINCT l.log_date) AS day_count,
             COALESCE(SUM(l.hours_down), 0) AS downtime_hours
           FROM breakdown_downtime_logs l
           JOIN breakdowns b ON b.id = l.breakdown_id
@@ -4076,24 +4079,41 @@ export default async function reportsRoutes(app) {
     const workOrderEndExpr = hasColumn("work_orders", "completed_at")
       ? "COALESCE(w.completed_at, w.closed_at, w.opened_at)"
       : "COALESCE(w.closed_at, w.opened_at)";
+    const woCol = (col) => (hasColumn("work_orders", col) ? `w.${col}` : `NULL`);
+    const hasPartsRequests = hasTable("maintenance_parts_requests");
     const workOrderRows = db.prepare(`
-      SELECT w.id, w.source, w.status, w.opened_at, w.closed_at,
+      SELECT w.id, w.source, w.reference_id, w.status, w.opened_at, w.closed_at,
+        ${woCol("completed_at")} AS completed_at,
+        ${woCol("assigned_artisan_name")} AS assigned_artisan_name,
+        ${woCol("due_date")} AS due_date,
+        ${woCol("repair_progress")} AS repair_progress,
         a.asset_code, a.asset_name,
         b.description AS breakdown_description, b.component AS breakdown_component,
         b.parts_status, b.ets_repair_date,
-        mp.service_name
+        mp.service_name,
+        ${hasPartsRequests ? `(
+          SELECT COUNT(*) FROM maintenance_parts_requests pr
+          WHERE pr.work_order_id = w.id
+            AND LOWER(COALESCE(pr.status, 'requested')) NOT IN ('received', 'issued', 'closed', 'cancelled', 'rejected')
+        )` : "0"} AS open_parts_requests,
+        ${hasPartsRequests ? `(
+          SELECT COALESCE(pr.part_name, pr.part_code) FROM maintenance_parts_requests pr
+          WHERE pr.work_order_id = w.id
+            AND LOWER(COALESCE(pr.status, 'requested')) NOT IN ('received', 'issued', 'closed', 'cancelled', 'rejected')
+          ORDER BY pr.id LIMIT 1
+        )` : "NULL"} AS first_waiting_part
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
       LEFT JOIN breakdowns b ON LOWER(COALESCE(w.source, '')) = 'breakdown' AND b.id = w.reference_id
       LEFT JOIN maintenance_plans mp ON LOWER(COALESCE(w.source, '')) = 'service' AND mp.id = w.reference_id
       WHERE DATE(w.opened_at) <= ?
         AND (
-          LOWER(COALESCE(w.status, 'open')) NOT IN ('closed', 'completed', 'done')
+          LOWER(COALESCE(w.status, 'open')) NOT IN (${doneStatusSql})
           OR DATE(${workOrderEndExpr}) BETWEEN ? AND ?
         )
         AND LOWER(COALESCE(w.source, '')) IN ('breakdown', 'service')
       ORDER BY
-        CASE WHEN LOWER(COALESCE(w.status, 'open')) IN ('closed', 'completed', 'done') THEN 1 ELSE 0 END,
+        CASE WHEN LOWER(COALESCE(w.status, 'open')) IN (${doneStatusSql}) THEN 1 ELSE 0 END,
         DATE(w.opened_at) DESC, w.id DESC
       LIMIT 12
     `).all(period.end, period.start, period.end);
@@ -4112,7 +4132,7 @@ export default async function reportsRoutes(app) {
         : 0;
       const internalLabor = hasColumn("work_orders", "labor_hours") && hasColumn("work_orders", "labor_rate_per_hour")
         ? Number(db.prepare(`
-            SELECT COALESCE(SUM(COALESCE(w.labor_hours, 0) * COALESCE(NULLIF(w.labor_rate_per_hour, 0), ?)), 0) AS value
+            SELECT COALESCE(SUM(${hasColumn("work_orders", "planned_labor_hours") ? "COALESCE(NULLIF(w.labor_hours, 0), w.planned_labor_hours, 0)" : "COALESCE(w.labor_hours, 0)"} * COALESCE(NULLIF(w.labor_rate_per_hour, 0), ?)), 0) AS value
             FROM work_orders w
             WHERE DATE(${workOrderEndExpr}) BETWEEN ? AND ?
           `).get(laborRate, range.start, range.end)?.value || 0)
@@ -4231,9 +4251,11 @@ export default async function reportsRoutes(app) {
     addKpiTile(s2, 9.78, "Open critical WOs", String(selectedKpis.criticalOpen), "Current open backlog");
     s2.addText("What changed this week", { x: 0.42, y: 3.55, w: 5.2, h: 0.25, fontFace: headingFont, fontSize: 14, bold: true, color: navy });
     const reviewByArea = new Map(reviewNotes.map((row) => [String(row.area || ""), row]));
+    const drafted = draftWeeklyFindings({ selectedKpis, previousKpis, breakdownRows, workOrderRows, selectedCosts, previousCosts, money });
     const reviewRows = ["Downtime", "Repairs", "Costs"].map((area) => {
       const row = reviewByArea.get(area);
-      return [area, row ? compact(row.weekly_finding, 70) : "Not recorded — add a weekly review input.", row ? `${compact(row.action_owner, 42)}${row.due_date ? ` • ${row.due_date}` : ""}` : "Action / owner required"];
+      if (row) return [area, compact(row.weekly_finding, 70), `${compact(row.action_owner, 42)}${row.due_date ? ` • ${row.due_date}` : ""}`];
+      return [area, compact(`${drafted[area].finding} (IronLog draft)`, 110), compact(drafted[area].action, 42)];
     });
     s2.addTable([tableHeader("Area", "Weekly finding", "Action / owner"), ...reviewRows], { x: 0.42, y: 3.92, w: 12.0, h: 2.12, fontSize: 9.2, rowH: 0.48, ...tableOptions });
 
@@ -4277,10 +4299,10 @@ export default async function reportsRoutes(app) {
     const downRows = breakdownRows.length ? breakdownRows.map((r) => [
       `${r.asset_code} • ${compact(r.asset_name, 18)}`,
       r.start_date === r.end_date ? String(r.start_date || "—") : `${r.start_date || "—"} → ${r.end_date || "—"}`,
-      `${num(r.downtime_hours)} h`,
+      downtimeCell(r),
       compact([r.component, r.description].filter(Boolean).join(" • "), 38) || "—",
       String(r.status || "OPEN").toUpperCase(),
-      compact([r.parts_status, r.ets_repair_date ? `Return ${r.ets_repair_date}` : ""].filter(Boolean).join(" • "), 34) || "Update return target",
+      compact(breakdownNextStep(r), 34),
     ]) : [["—", "—", "0 h", "No mechanical downtime recorded", "—", "—"]];
     s6.addTable([tableHeader("Asset", "Date / window", "Hours down", "Fault / component", "Status", "Return / next step"), ...downRows], { x: 0.38, y: 2.05, w: 12.45, h: 4.15, fontSize: 8.5, rowH: 0.42, ...tableOptions });
     s6.addText("For each event: downtime start/end, component, cause, work order and return target. Week boundary hours stay inside the selected period.", { x: 0.5, y: 6.45, w: 12.0, h: 0.16, fontFace: bodyFont, fontSize: 8.5, color: muted, align: "center" });
@@ -4289,17 +4311,15 @@ export default async function reportsRoutes(app) {
     addChrome(s7, "Mechanical work and repair status", "Open repair work is carried forward; completed work appears when it closed in the selected week.", 7);
     const workRows = workOrderRows.length ? workOrderRows.map((r) => {
       const description = String(r.source || "").toLowerCase() === "service" ? r.service_name : r.breakdown_description;
-      const blocker = String(r.source || "").toLowerCase() === "breakdown" ? r.parts_status : "";
-      const target = String(r.source || "").toLowerCase() === "breakdown" ? r.ets_repair_date : r.closed_at;
       return [
         `WO-${r.id} • ${r.asset_code}`,
         compact(description || `${r.source || "Work order"} activity`, 42),
-        String(r.status || "open").replace(/_/g, " "),
-        compact(blocker || "No recorded parts blocker", 28),
-        target ? `Target ${String(target).slice(0, 10)}` : "Owner / due to be set",
+        compact(workOrderProgressCell(r), 30),
+        compact(workOrderBlockerCell(r), 28),
+        compact(workOrderOwnerCell(r), 32),
       ];
     }) : [["—", "No breakdown or service work orders in scope", "—", "—", "—"]];
-    s7.addTable([tableHeader("Work order / asset", "Mechanical work", "Progress", "Blocker / parts", "Return / due"), ...workRows], { x: 0.38, y: 2.05, w: 12.45, h: 3.35, fontSize: 8.5, rowH: 0.4, ...tableOptions });
+    s7.addTable([tableHeader("Work order / asset", "Mechanical work", "Progress", "Blocker / parts", "Owner / due"), ...workRows], { x: 0.38, y: 2.05, w: 12.45, h: 3.35, fontSize: 8.5, rowH: 0.4, ...tableOptions });
     const offsiteRows = breakdownRows.filter((r) => /off.?site|external|supplier|contractor/i.test(`${r.parts_status || ""} ${r.description || ""}`)).slice(0, 2);
     s7.addText("Offsite repair watch", { x: 0.48, y: 5.76, w: 3.3, h: 0.2, fontFace: headingFont, fontSize: 12, bold: true, color: navy });
     s7.addText(offsiteRows.length ? offsiteRows.map((r) => `${r.asset_code} • ${compact(r.description, 72)}${r.ets_repair_date ? ` • Return ${r.ets_repair_date}` : ""}`).join("\n") : "No offsite repair records are currently flagged. Use the parts / return target on a breakdown to bring it into this watch.", { x: 0.48, y: 6.05, w: 11.75, h: 0.45, fontFace: bodyFont, fontSize: 9.5, color: muted, breakLine: false });
@@ -4308,7 +4328,7 @@ export default async function reportsRoutes(app) {
     addChrome(s8, "Maintenance cost against previous week", "Same cost basis for both weeks. Change = selected week − previous week.", 8);
     const costs = [
       ["Parts issued", selectedCosts.partsIssued, previousCosts.partsIssued, "Store issues in selected period"],
-      ["Internal labour", selectedCosts.internalLabor, previousCosts.internalLabor, `Work order labour × default rate (${money(laborRate)}/h)`],
+      ["Internal labour", selectedCosts.internalLabor, previousCosts.internalLabor, `Labour hours on work orders (planned hours where none booked) × ${money(laborRate)}/h`],
       ["External repairs", selectedCosts.externalRepairs, previousCosts.externalRepairs, "Recorded external repair costs"],
       ["Total maintenance", selectedCosts.total, previousCosts.total, "Parts issued + internal labour"],
     ];
@@ -4324,9 +4344,14 @@ export default async function reportsRoutes(app) {
     const s9 = pptx.addSlide();
     addChrome(s9, "Next week maintenance plan and decisions", "Open repairs, near-due services and unresolved Weekly Forum actions.", 9);
     const plannedRows = [
-      ...breakdownRows.filter((r) => String(r.status || "").toLowerCase() !== "closed").slice(0, 3).map((r, index) => [
-        String(index + 1), `${r.asset_code} • return to service`, r.ets_repair_date || "Set return target", compact(r.parts_status || r.description || "Repair plan required", 34), "Update repair owner / target",
-      ]),
+      ...breakdownRows.filter((r) => String(r.status || "").toLowerCase() !== "closed").slice(0, 3).map((r, index) => {
+        const wo = workOrderRows.find((w) => String(w.source || "").toLowerCase() === "breakdown" && Number(w.reference_id) === Number(r.id));
+        return [
+          String(index + 1), `${r.asset_code} • return to service`, r.ets_repair_date || "Set return target",
+          compact(r.parts_status ? `Parts: ${r.parts_status}` : (r.description || "Repair plan required"), 34),
+          wo ? compact(workOrderOwnerCell({ ...wo, ets_repair_date: r.ets_repair_date }), 34) : "Open a work order and assign an artisan",
+        ];
+      }),
       ...upcomingServices.slice(0, 3).map((r, index) => [
         String(index + 1 + breakdownRows.filter((x) => String(x.status || "").toLowerCase() !== "closed").slice(0, 3).length),
         `${r.asset_code || "—"} • ${compact(r.service_name || "Scheduled service", 28)}`,
@@ -4336,7 +4361,10 @@ export default async function reportsRoutes(app) {
         compact(Number(r?.forecast?.est_total_cost) > 0
           ? `$${Math.round(Number(r.forecast.est_total_cost)).toLocaleString("en-US")} • ${serviceCostSourceLabel(r)}`
           : serviceCostSourceLabel(r), 34),
-        "Confirm owner / outage window",
+        (() => {
+          const wo = workOrderRows.find((w) => String(w.source || "").toLowerCase() === "service" && Number(w.reference_id) === Number(r.plan_id) && !isWorkOrderDone(w.status));
+          return wo ? compact(workOrderOwnerCell(wo), 34) : "Raise work order; confirm outage window";
+        })(),
       ]),
     ].slice(0, 5);
     const nextRows = plannedRows.length ? plannedRows : [["1", "No open repairs or near-due services", "—", "—", "—"]];
