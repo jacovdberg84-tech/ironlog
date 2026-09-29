@@ -1280,9 +1280,104 @@ async function savePtOffsiteRow(id) {
   await loadPtOffsiteRepairs();
 }
 
+const WAITING_STATUS_LABELS = { requested: "Not ordered yet", ordered: "Ordered" };
+
+function waitingPartRowHtml(r) {
+  const wo = Number(r.work_order_id || 0);
+  const machine = `${escapeHtml(r.asset_code || "No machine")}${r.asset_name ? ` <span class="muted">${escapeHtml(r.asset_name)}</span>` : ""}`;
+  const since = String(r.since || "").slice(0, 10);
+  const badges = [
+    r.machine_down ? `<span class="mywork-pill mywork-pill-danger">Machine down</span>` : "",
+    r.urgency && r.urgency !== "normal" ? `<span class="mywork-pill mywork-pill-warn">${escapeHtml(r.urgency)}</span>` : "",
+    r.in_stock ? `<span class="mywork-pill mywork-pill-success">In stock (${Number(r.on_hand)})</span>` : "",
+  ].join("");
+  let what;
+  let actions = "";
+  if (r.kind === "request") {
+    what = `<strong>${escapeHtml(r.part_name || r.part_code)}</strong>${r.part_code && r.part_code !== r.part_name ? ` <span class="muted">${escapeHtml(r.part_code)}</span>` : ""} × ${Number(r.qty || 0)}`;
+    if (r.in_stock && wo) actions += `<button type="button" class="btn-primary" data-waiting-open-wo="${wo}">Issue on WO #${wo}</button>`;
+    if (r.status === "requested") actions += `<button type="button" data-waiting-status="ordered" data-waiting-id="${Number(r.id)}">Mark ordered</button>`;
+    if (r.status === "ordered") actions += `<button type="button" data-waiting-status="received" data-waiting-id="${Number(r.id)}">Mark received</button>`;
+    if (!r.in_stock && wo) actions += `<button type="button" data-waiting-open-wo="${wo}">Work order</button>`;
+  } else {
+    what = `<strong>Part not listed yet</strong> <span class="muted">— parts ${escapeHtml(String(r.status || "").toLowerCase())}</span>`;
+    if (wo) actions += `<button type="button" data-waiting-open-wo="${wo}">Work order</button>`;
+  }
+  const detail = [
+    wo ? `WO #${wo}` : "",
+    r.kind === "request" ? (WAITING_STATUS_LABELS[r.status] || r.status) : "",
+    r.requested_by ? `asked by ${r.requested_by}` : "",
+    since ? `since ${since}` : "",
+    r.notes || "",
+  ].filter(Boolean).join(" · ");
+  return `<article class="stores-waiting-row${r.machine_down ? " is-down" : ""}">
+    <div class="stores-waiting-main">
+      <div class="stores-waiting-machine">${machine}</div>
+      <div>${what}</div>
+      <div class="muted small">${escapeHtml(detail)}</div>
+    </div>
+    <div class="stores-waiting-badges">${badges}</div>
+    <div class="stores-waiting-actions">${actions}</div>
+  </article>`;
+}
+
+async function loadWorkshopWaitingParts() {
+  const listEl = qs("ptWaitingList");
+  if (!listEl) return;
+  try {
+    const data = await fetchJson(`${API}/api/my-work/waiting-parts`);
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    const s = data.summary || {};
+    const sum = qs("ptWaitingSummary");
+    if (sum) {
+      sum.innerHTML = rows.length
+        ? [
+            `<span><strong>${rows.length}</strong> waiting</span>`,
+            s.machines_down ? `<span class="is-danger"><strong>${s.machines_down}</strong> machine${s.machines_down === 1 ? "" : "s"} down</span>` : "",
+            s.in_stock ? `<span class="is-success"><strong>${s.in_stock}</strong> can be issued from stock now</span>` : "",
+            s.not_ordered ? `<span class="is-warn"><strong>${s.not_ordered}</strong> to order</span>` : "",
+          ].join("")
+        : "";
+    }
+    listEl.innerHTML = rows.length ? rows.map(waitingPartRowHtml).join("") : `<p class="muted">Nothing outstanding — the workshop is not waiting on any parts.</p>`;
+  } catch (e) {
+    listEl.innerHTML = `<p class="message-error">${escapeHtml(e.message || String(e))}</p>`;
+  }
+}
+
+async function setWaitingPartStatus(id, status) {
+  const note = status === "ordered" ? String(window.prompt("PO number or supplier (optional):", "") || "").trim() : "";
+  await fetchJson(`${API}/api/maintenance/parts-requests/${Number(id)}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status, status_notes: note }),
+  });
+  setStatus(status === "received" ? "Part marked received. Issue it on the work order." : "Part marked ordered.");
+  await loadWorkshopWaitingParts();
+}
+
+function wireWorkshopWaitingParts() {
+  qs("ptWaitingRefresh")?.addEventListener("click", () => loadWorkshopWaitingParts().catch(() => {}));
+  qs("ptWaitingList")?.addEventListener("click", (e) => {
+    const open = e.target.closest("[data-waiting-open-wo]");
+    if (open) {
+      location.href = `workorders.html?wo=${encodeURIComponent(open.dataset.waitingOpenWo)}`;
+      return;
+    }
+    const st = e.target.closest("[data-waiting-status]");
+    if (st) {
+      st.disabled = true;
+      setWaitingPartStatus(st.dataset.waitingId, st.dataset.waitingStatus).catch((err) => {
+        st.disabled = false;
+        alert(err.message || String(err));
+      });
+    }
+  });
+}
+
 async function loadPartsTrackingTab() {
   ensurePartsTrackingDates();
   await Promise.all([
+    loadWorkshopWaitingParts(),
     loadPtPartsOrders().catch((e) => setStatus("Parts tracking error: " + (e.message || e))),
     loadPtOffsiteRepairs().catch((e) => setStatus("Off-site tracking error: " + (e.message || e))),
   ]);
@@ -1290,6 +1385,7 @@ async function loadPartsTrackingTab() {
 
 /** Start-up: Stock monitor, stock reports and stores part order controls. Called once from init() in init.js. */
 function wireStockControls() {
+  wireWorkshopWaitingParts();
   qs("loadStockMonitor")?.addEventListener("click", () =>
     loadStockMonitor().catch((e) => setStatus("Stock monitor error: " + e.message))
   );

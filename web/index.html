@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=stockcat-1" />
+  <link rel="stylesheet" href="./styles.css?v=parts-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -2593,6 +2593,17 @@
     <!-- PARTS TRACKING -->
     <section class="panel" id="tab-parts-tracking">
       <div class="asset-cards-grid">
+        <div class="dash-card full-width stores-waiting-card">
+          <div class="stores-waiting-head">
+            <div>
+              <h3>Workshop waiting on parts</h3>
+              <p class="muted small">Parts the workshop asked for on a work order, and machines down waiting on parts. Machines that are down come first.</p>
+            </div>
+            <button type="button" id="ptWaitingRefresh">Refresh</button>
+          </div>
+          <div id="ptWaitingSummary" class="stores-waiting-summary"></div>
+          <div id="ptWaitingList" class="stores-waiting-list"><div class="skeleton-block"></div></div>
+        </div>
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
@@ -7715,7 +7726,7 @@
   <script src="./app/dashboard.js?v=89"></script>
   <script src="./app/borris.js?v=89"></script>
   <script src="./app/fuel-lube.js?v=89"></script>
-  <script src="./app/stock.js?v=90"></script>
+  <script src="./app/stock.js?v=91"></script>
   <script src="./app/compliance.js?v=89"></script>
   <script src="./app/tabs.js?v=89"></script>
   <script src="./app/uploads.js?v=89"></script>
@@ -7732,6 +7743,6 @@
   <script src="./app/finance.js?v=89"></script>
   <script src="./app/enterprise.js?v=89"></script>
   <script src="./app/workshop-docs.js?v=89"></script>
-  <script src="./my-work.js?v=2"></script>
+  <script src="./my-work.js?v=3"></script>
 </body>
 </html>

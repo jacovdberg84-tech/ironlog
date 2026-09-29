@@ -2,6 +2,7 @@
 import { db } from "../db/client.js";
 import { getRoles, getSiteCode, getUser } from "../utils/request.js";
 import { buildMyWork } from "../utils/myWork.js";
+import { summarizeWaiting, workshopWaitingOnParts } from "../utils/partsWaiting.js";
 
 function localToday() {
   return new Intl.DateTimeFormat("en-CA", {
@@ -24,6 +25,17 @@ export default async function myWorkRoutes(app) {
           today: localToday(),
         }),
       };
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  // Everything the workshop is waiting on from stores (full list for the stores queue).
+  app.get("/waiting-parts", async (req, reply) => {
+    try {
+      const rows = workshopWaitingOnParts(db, { site: getSiteCode(req) });
+      return { ok: true, summary: summarizeWaiting(rows), rows };
     } catch (err) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message });
