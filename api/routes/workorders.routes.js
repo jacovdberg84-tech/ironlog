@@ -10,6 +10,7 @@ import {
   releaseWorkOrderReservations,
 } from "../utils/serviceTemplates.js";
 import { ensureStockCategorySchema, normalizeStockCategory, stockCategorySql } from "../utils/stockCategory.js";
+import { holdsAnyRole } from "../utils/request.js";
 
 export default async function workOrderRoutes(app) {
   ensureStockCategorySchema(db);
@@ -118,7 +119,7 @@ export default async function workOrderRoutes(app) {
 
   function requireRoles(req, reply, roles) {
     const role = getRole(req);
-    if (!roles.includes(role)) {
+    if (!holdsAnyRole(req, roles)) {
       reply.code(403).send({ error: `role '${role || "unknown"}' not allowed` });
       return false;
     }

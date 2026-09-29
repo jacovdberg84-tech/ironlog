@@ -47,3 +47,13 @@ export function requireAnyRole(req, reply, allowed, opts) {
   }
   return true;
 }
+
+/**
+ * True when any of the caller's roles is allowed. Requests that carry no role
+ * headers fall back to the primary role default, as before.
+ */
+export function holdsAnyRole(req, allowed) {
+  const roles = getRoles(req);
+  if (!roles.length) roles.push(getRole(req));
+  return roles.some((r) => allowed.includes(r));
+}

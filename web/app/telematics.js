@@ -308,6 +308,7 @@ async function loadCartrackFleet() {
     });
     loadCartrackSpeedingEvents(todayLocalYmd(), { useCache: true }).catch(() => {});
   } catch (e) {
+    if (hideWhenForbidden(e, host)) return;
     host.innerHTML = `<div class="cartrack-empty muted small">Cartrack: ${escapeHtml(e.message || String(e))}</div>`;
   }
 }
@@ -488,6 +489,7 @@ async function loadCartrackAdminSettings() {
       s.configured ? true : null
     );
   } catch (e) {
+    if (hideWhenForbidden(e, "adminCartrackCard")) return;
     setCartrackAdminResult(String(e.message || e), false);
   }
 }
@@ -652,6 +654,7 @@ async function loadGpsVehicleLinksAdmin() {
       true
     );
   } catch (e) {
+    if (hideWhenForbidden(e, "adminGpsVehicleLinksCard")) return;
     setGpsVehicleLinksResult(String(e.message || e), false);
   }
 }
@@ -743,6 +746,7 @@ async function loadUnitechAdminSettings() {
       s.configured ? true : null
     );
   } catch (e) {
+    if (hideWhenForbidden(e, "adminUnitechCard")) return;
     setUnitechAdminResult(String(e.message || e), false);
   }
 }

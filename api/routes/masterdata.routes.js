@@ -8,11 +8,11 @@ import {
   normalizeMdmCode,
   setMdmPoliciesForSite,
 } from "../utils/masterdataGovernance.js";
-import { getRole, getUser, getSiteCode } from "../utils/request.js";
+import { getRole, getUser, getSiteCode, holdsAnyRole } from "../utils/request.js";
 
 function requireRoles(req, reply, roles) {
   const role = getRole(req);
-  if (!roles.includes(role)) {
+  if (!holdsAnyRole(req, roles)) {
     reply.code(403).send({ error: `role '${role || "unknown"}' not allowed` });
     return false;
   }
@@ -23,6 +23,8 @@ function requireRoles(req, reply, roles) {
 const MDM_WRITE_ROLES = ["admin", "supervisor"];
 const MDM_READ_ROLES = [
   "admin",
+  "workshop_admin",
+  "plant_clerk",
   "supervisor",
   "plant_manager",
   "site_manager",

@@ -1,6 +1,6 @@
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
-import { isDate, getRole, getSiteCode } from "../utils/request.js";
+import { isDate, getRole, getSiteCode, holdsAnyRole } from "../utils/request.js";
 
 function isShift(v) {
   const s = String(v || "").trim().toLowerCase();
@@ -15,7 +15,7 @@ function toNumberOrNull(v) {
 
 function requireRoles(req, reply, roles) {
   const role = getRole(req);
-  if (!roles.includes(role)) {
+  if (!holdsAnyRole(req, roles)) {
     reply.code(403).send({ error: `forbidden: role '${role}' cannot perform this action` });
     return false;
   }

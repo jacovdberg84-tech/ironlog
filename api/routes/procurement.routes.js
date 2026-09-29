@@ -1,6 +1,6 @@
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
-import { getRole, getUser, getSiteCode } from "../utils/request.js";
+import { getRole, getUser, getSiteCode, holdsAnyRole } from "../utils/request.js";
 
 function getDepartment(req) {
   return String(req.headers["x-user-department"] || "").trim().toLowerCase() || null;
@@ -24,7 +24,7 @@ function isManagerScopeRole(req) {
 
 function requireRoles(req, reply, roles) {
   const role = getRole(req);
-  if (!roles.includes(role)) {
+  if (!holdsAnyRole(req, roles)) {
     reply.code(403).send({ error: `role '${role || "unknown"}' not allowed` });
     return false;
   }

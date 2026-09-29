@@ -614,6 +614,7 @@ async function loadTelematicsAdminDevices() {
     }).join("");
     setStatus(`Telematics units loaded (${rows.length}).`);
   } catch (e) {
+    if (hideWhenForbidden(e, "adminTelematicsCard")) return;
     host.innerHTML = `<div class="muted small">Load failed: ${escapeHtml(e.message || String(e))}</div>`;
     setStatus("Telematics load failed.");
   }

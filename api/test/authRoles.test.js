@@ -30,3 +30,11 @@ test("primary role keeps admins first and maps the newer role names", () => {
   assert.equal(primaryRouteRole(["plant_clerk", "operator"]), "operator");
   assert.equal(primaryRouteRole(["plant_manager"]), "plant_manager");
 });
+
+test("role checks accept any role the user holds", async () => {
+  const { holdsAnyRole } = await import("../utils/request.js");
+  const req = (role, roles) => ({ headers: { ...(role ? { "x-user-role": role } : {}), ...(roles ? { "x-user-roles": roles } : {}) } });
+  assert.equal(holdsAnyRole(req("plant_manager", "plant_manager,storeman,stores"), ["admin", "supervisor", "stores"]), true);
+  assert.equal(holdsAnyRole(req("plant_manager", "plant_manager"), ["admin", "supervisor", "stores"]), false);
+  assert.equal(holdsAnyRole(req(null, null), ["admin"]), true, "no role headers keeps the old admin default");
+});

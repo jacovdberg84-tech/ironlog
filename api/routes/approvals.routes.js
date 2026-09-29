@@ -1,7 +1,7 @@
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { applyMasterDataApproval } from "../utils/masterdataGovernance.js";
-import { getRole, getUser } from "../utils/request.js";
+import { getRole, getUser, holdsAnyRole } from "../utils/request.js";
 
 function hasColumn(table, col) {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -16,7 +16,7 @@ function ensureColumn(table, colName, colDef) {
 
 function requireRoles(req, reply, roles) {
   const role = getRole(req);
-  if (!roles.includes(role)) {
+  if (!holdsAnyRole(req, roles)) {
     reply.code(403).send({ error: `role '${role || "unknown"}' not allowed` });
     return false;
   }
