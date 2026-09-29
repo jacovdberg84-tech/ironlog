@@ -163,66 +163,80 @@
       margin-top: 6px;
     }
   </style>
+  <link rel="stylesheet" href="/web/prestart-form.css?v=1" />
 </head>
 <body>
   <div class="wrap">
-    <div class="card">
-      <h1>LDV Pre-Start Checklist</h1>
-      <div id="sub" class="muted">Loading...</div>
-      <div id="offlineState" class="muted" style="margin-top:6px;"></div>
-      <div class="actions">
-        <a class="btn" id="openQrBtn" href="#">Asset QR</a>
-        <button id="refreshBtn" type="button">Refresh</button>
+    <div class="card pc-hero">
+      <div>
+        <h1 id="assetCode">Loading…</h1>
+        <div class="pc-asset-name" id="assetName"></div>
+        <div class="pc-title">Vehicle pre-start</div>
       </div>
+      <div class="pc-date">Date<br /><strong id="checkDate">-</strong></div>
     </div>
 
-    <div class="card">
-      <div class="grid">
-        <div class="kv"><div class="k">Vehicle</div><div class="v" id="assetCode">-</div></div>
-        <div class="kv"><div class="k">Name</div><div class="v" id="assetName">-</div></div>
-        <div class="kv"><div class="k">Date</div><div class="v" id="checkDate">-</div></div>
-        <div class="kv"><div class="k">Previous KM</div><div class="v" id="prevKm">-</div></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="row">
-        <label for="odometerKm">Current Odometer (KM) *</label>
-        <input id="odometerKm" type="number" step="0.1" min="0" placeholder="Enter current KM from dashboard" />
-      </div>
-      <div class="row">
-        <label for="inspectorName">Inspector / Driver</label>
-        <input id="inspectorName" type="text" placeholder="Your name" />
-      </div>
-      <div class="row">
-        <label>Pre-Start Checks (all required)</label>
-        <div class="check"><input id="chkBrakes" type="checkbox" /> <label for="chkBrakes">Brakes OK</label></div>
-        <div class="check"><input id="chkLights" type="checkbox" /> <label for="chkLights">Lights OK</label></div>
-        <div class="check"><input id="chkTyres" type="checkbox" /> <label for="chkTyres">Tyres OK</label></div>
-        <div class="check"><input id="chkOilCoolant" type="checkbox" /> <label for="chkOilCoolant">Oil/Coolant OK</label></div>
-        <div class="check"><input id="chkLeaks" type="checkbox" /> <label for="chkLeaks">No leaks or visible damage</label></div>
-        <div class="check"><input id="chkSafety" type="checkbox" /> <label for="chkSafety">Safety items in place</label></div>
-      </div>
-      <div class="row">
-        <label for="notes">Notes</label>
-        <textarea id="notes" placeholder="Any remarks before start"></textarea>
-      </div>
-      <div class="actions">
-        <button class="primary" id="saveBtn" type="button">Submit Pre-Start</button>
-        <a class="btn" id="openPdfBtn" href="#" style="display:none;">Open Check PDF</a>
-      </div>
-      <div class="row">
-        <label for="photoInput">Photo (optional)</label>
-        <input id="photoInput" type="file" accept="image/*" capture="environment" />
-        <div class="actions" style="margin-top:8px;">
-          <button id="uploadPhotoBtn" type="button">Upload Photo</button>
+    <div id="formArea">
+      <div class="card">
+        <div class="pc-fields">
+          <div>
+            <label for="inspectorName">Your name</label>
+            <input id="inspectorName" type="text" autocomplete="name" placeholder="Driver name" />
+          </div>
+          <div>
+            <label for="odometerKm">Odometer (km) *</label>
+            <input id="odometerKm" type="number" inputmode="decimal" step="0.1" min="0" placeholder="From the dashboard" />
+            <div class="tiny">Last reading: <span id="prevKm">-</span></div>
+          </div>
         </div>
-        <div class="tiny">Tip: submit pre-start first, then upload photo.</div>
       </div>
-      <div id="syncState" class="sync"></div>
+
+      <div class="card">
+        <div id="sub" class="muted" style="margin-bottom:10px;">Loading…</div>
+        <div id="checklistRoot"></div>
+      </div>
+
+      <div class="card">
+        <details class="pc-more">
+          <summary>Add a note or photo (optional)</summary>
+          <div class="row">
+            <label for="notes">Note</label>
+            <textarea id="notes" placeholder="Anything the workshop should know"></textarea>
+          </div>
+          <div class="row">
+            <label for="photoInput">Photo</label>
+            <input id="photoInput" type="file" accept="image/*" capture="environment" />
+            <div class="tiny">The photo is attached when you submit.</div>
+          </div>
+        </details>
+      </div>
+
       <div id="msg"></div>
+
+      <div class="pc-footer">
+        <div class="pc-progress" id="pcProgress">0 of 0 checked</div>
+        <button class="primary" id="saveBtn" type="button">Submit pre-start</button>
+      </div>
+    </div>
+
+    <div id="doneArea" class="card pc-done" hidden>
+      <div class="pc-done-mark" id="doneMark">✓</div>
+      <h2 id="doneTitle">Pre-start done</h2>
+      <p id="doneText" class="muted"></p>
+      <div id="syncState" class="sync"></div>
+      <div class="pc-links">
+        <a id="openPdfBtn" href="#" hidden>Open check PDF</a>
+        <button type="button" id="editAgainBtn">Change answers</button>
+      </div>
+    </div>
+
+    <div class="pc-links">
+      <span id="offlineState" class="muted"></span>
+      <a id="openQrBtn" href="#">Vehicle details</a>
+      <button id="refreshBtn" type="button">Reload</button>
     </div>
   </div>
-  <script src="/web/ldv-prestart.js?v=3"></script>
+  <script src="/web/prestart-form.js?v=1"></script>
+  <script src="/web/ldv-prestart.js?v=4"></script>
 </body>
 </html>

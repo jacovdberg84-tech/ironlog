@@ -169,64 +169,78 @@
       margin-top: 6px;
     }
   </style>
+  <link rel="stylesheet" href="/web/prestart-form.css?v=1" />
 </head>
 <body>
   <div class="wrap">
-    <div class="card">
-      <h1 id="pageTitle">Machine pre-start</h1>
-      <div id="sub" class="muted">Loading...</div>
-      <div id="offlineState" class="muted" style="margin-top:6px;"></div>
-      <div class="actions">
-        <a class="btn" id="openQrBtn" href="#">Asset QR summary</a>
-        <button id="refreshBtn" type="button">Refresh</button>
+    <div class="card pc-hero">
+      <div>
+        <h1 id="assetCode">Loading…</h1>
+        <div class="pc-asset-name" id="assetName"></div>
+        <div class="pc-title" id="pageTitle">Machine pre-start</div>
       </div>
+      <label class="pc-date">Date<br /><input id="checkDateInput" type="date" /></label>
     </div>
 
-    <div class="card">
-      <div class="grid">
-        <div class="kv"><div class="k">Asset</div><div class="v" id="assetCode">-</div></div>
-        <div class="kv"><div class="k">Name</div><div class="v" id="assetName">-</div></div>
-        <div class="kv"><div class="k">Category</div><div class="v" id="assetCategory">-</div></div>
-        <div class="kv"><div class="k">Profile</div><div class="v" id="profileLabel">-</div></div>
+    <div id="formArea">
+      <div class="card">
+        <div class="pc-fields">
+          <div>
+            <label for="inspectorName">Your name</label>
+            <input id="inspectorName" type="text" autocomplete="name" placeholder="Operator name" />
+          </div>
+          <div>
+            <label for="smuHours">Hour meter (optional)</label>
+            <input id="smuHours" type="number" inputmode="decimal" step="0.1" min="0" placeholder="e.g. 4521.5" />
+          </div>
+        </div>
       </div>
-      <div class="row" style="margin-top:12px;">
-        <label for="checkDateInput">Check date</label>
-        <input id="checkDateInput" type="date" />
-      </div>
-    </div>
 
-    <div class="card">
-      <div class="row">
-        <label for="smuHours">SMU / meter reading (hours, optional)</label>
-        <input id="smuHours" type="number" step="0.1" min="0" placeholder="e.g. 4521.5" />
-      </div>
-      <div class="row">
-        <label for="inspectorName">Operator / inspector</label>
-        <input id="inspectorName" type="text" placeholder="Your name" />
-      </div>
-      <div class="row">
-        <label>Pre-start checks (all required)</label>
+      <div class="card">
+        <div id="sub" class="muted" style="margin-bottom:10px;">Loading checklist…</div>
         <div id="checklistRoot"></div>
       </div>
-      <div class="row">
-        <label for="notes">Notes</label>
-        <textarea id="notes" placeholder="Any remarks before start"></textarea>
+
+      <div class="card">
+        <details class="pc-more">
+          <summary>Add a note or photo (optional)</summary>
+          <div class="row">
+            <label for="notes">Note</label>
+            <textarea id="notes" placeholder="Anything the workshop should know"></textarea>
+          </div>
+          <div class="row">
+            <label for="photoInput">Photo</label>
+            <input id="photoInput" type="file" accept="image/*" capture="environment" />
+            <div class="tiny">The photo is attached when you submit.</div>
+          </div>
+        </details>
       </div>
-      <div class="actions">
-        <button class="primary" id="saveBtn" type="button">Submit pre-start</button>
-        <a class="btn" id="openPdfBtn" href="#" style="display:none;">Open check PDF</a>
-      </div>
-      <div class="row">
-        <label for="photoInput">Photo (optional)</label>
-        <input id="photoInput" type="file" accept="image/*" capture="environment" />
-        <div class="actions" style="margin-top:8px;">
-          <button id="uploadPhotoBtn" type="button">Upload photo</button>
-        </div>
-        <div class="tiny">Submit the checklist first, then you can attach a photo to this check.</div>
-      </div>
+
       <div id="msg"></div>
+
+      <div class="pc-footer">
+        <div class="pc-progress" id="pcProgress">0 of 0 checked</div>
+        <button class="primary" id="saveBtn" type="button">Submit pre-start</button>
+      </div>
+    </div>
+
+    <div id="doneArea" class="card pc-done" hidden>
+      <div class="pc-done-mark" id="doneMark">✓</div>
+      <h2 id="doneTitle">Pre-start done</h2>
+      <p id="doneText" class="muted"></p>
+      <div class="pc-links">
+        <a id="openPdfBtn" href="#" hidden>Open check PDF</a>
+        <button type="button" id="editAgainBtn">Change answers</button>
+      </div>
+    </div>
+
+    <div class="pc-links">
+      <span id="offlineState" class="muted"></span>
+      <a id="openQrBtn" href="#">Machine details</a>
+      <button id="refreshBtn" type="button">Reload</button>
     </div>
   </div>
-  <script src="/web/machine-prestart.js?v=2"></script>
+  <script src="/web/prestart-form.js?v=1"></script>
+  <script src="/web/machine-prestart.js?v=3"></script>
 </body>
 </html>

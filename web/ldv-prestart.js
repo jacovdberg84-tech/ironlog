@@ -73,27 +73,53 @@
   function todayYmd() {
     return new Date().toISOString().slice(0, 10);
   }
-  function readChecklist() {
-    return {
-      brakes_ok: Boolean(qs("chkBrakes")?.checked),
-      lights_ok: Boolean(qs("chkLights")?.checked),
-      tyres_ok: Boolean(qs("chkTyres")?.checked),
-      oil_coolant_ok: Boolean(qs("chkOilCoolant")?.checked),
-      leaks_damage_ok: Boolean(qs("chkLeaks")?.checked),
-      safety_items_ok: Boolean(qs("chkSafety")?.checked),
-    };
+  const PC = window.IronlogPrestart;
+  const LDV_CHECKS = [{
+    title: "",
+    items: [
+      { key: "brakes_ok", label: "Brakes" },
+      { key: "lights_ok", label: "Lights and indicators" },
+      { key: "tyres_ok", label: "Tyres (pressure and damage)" },
+      { key: "oil_coolant_ok", label: "Oil and coolant levels" },
+      { key: "leaks_damage_ok", label: "No leaks or body damage" },
+      { key: "safety_items_ok", label: "Safety items (triangle, extinguisher, first aid)" },
+    ],
+  }];
+
+  function updateProgress(p) {
+    const el = qs("pcProgress");
+    if (!el) return;
+    el.innerHTML = `<strong>${p.answered} of ${p.total}</strong> checked${p.faults ? ` · <span class="pc-fault-count">${p.faults} fault${p.faults === 1 ? "" : "s"}</span>` : ""}`;
+    const btn = qs("saveBtn");
+    if (btn) btn.textContent = p.faults ? "Submit and report faults" : "Submit pre-start";
+    if (p.answered === p.total && qs("msg")?.classList.contains("err")) msg("");
   }
+
   function applyChecklist(checklist) {
-    const byKey = {};
-    for (const item of Array.isArray(checklist) ? checklist : []) {
-      byKey[String(item?.key || "")] = Boolean(item?.ok);
+    PC.apply(qs("checklistRoot"), checklist);
+  }
+
+  function showDone(kind, title, text) {
+    const done = qs("doneArea");
+    const form = qs("formArea");
+    if (!done || !form) return;
+    done.className = `card pc-done is-${kind}`;
+    txt("doneMark", kind === "fault" ? "!" : "✓");
+    txt("doneTitle", title);
+    txt("doneText", text);
+    const pdf = qs("openPdfBtn");
+    if (pdf) {
+      pdf.hidden = !(currentCheckId > 0);
+      pdf.href = currentCheckId > 0 ? `/api/reports/vehicle-ldv-check/${encodeURIComponent(String(currentCheckId))}.pdf` : "#";
     }
-    if (qs("chkBrakes")) qs("chkBrakes").checked = byKey.brakes_ok === true;
-    if (qs("chkLights")) qs("chkLights").checked = byKey.lights_ok === true;
-    if (qs("chkTyres")) qs("chkTyres").checked = byKey.tyres_ok === true;
-    if (qs("chkOilCoolant")) qs("chkOilCoolant").checked = byKey.oil_coolant_ok === true;
-    if (qs("chkLeaks")) qs("chkLeaks").checked = byKey.leaks_damage_ok === true;
-    if (qs("chkSafety")) qs("chkSafety").checked = byKey.safety_items_ok === true;
+    form.hidden = true;
+    done.hidden = false;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function showForm() {
+    if (qs("doneArea")) qs("doneArea").hidden = true;
+    if (qs("formArea")) qs("formArea").hidden = false;
   }
 
   let currentAssetCode = "";
@@ -169,9 +195,13 @@
     const asset = data?.asset || {};
     previousKm = data?.previous_odometer_km == null ? null : Number(data.previous_odometer_km);
 
-    txt("sub", "Complete pre-start before operating vehicle.");
+    txt("sub", "Tap OK or Fault for every check.");
     txt("assetCode", String(asset.asset_code || currentAssetCode));
-    txt("assetName", String(asset.asset_name || "-"));
+    txt("assetName", String(asset.asset_name || ""));
+    document.title = `${String(asset.asset_code || currentAssetCode)} pre-start`;
+    PC.render(qs("checklistRoot"), LDV_CHECKS, updateProgress);
+    applyChecklist([]);
+    showForm();
     txt("checkDate", String(data?.check_date || currentDate));
     txt("prevKm", previousKm == null ? "-" : `${previousKm.toFixed(1)} km`);
 
@@ -180,21 +210,14 @@
       currentCheckId = Number(existing.id || 0);
       if (qs("odometerKm") && existing.odometer_km != null) qs("odometerKm").value = String(existing.odometer_km);
       if (qs("inspectorName")) qs("inspectorName").value = String(existing.inspector_name || "");
-      if (qs("notes")) qs("notes").value = String(existing.notes || "");
+      const saved = PC.splitSavedNotes(existing.notes);
+      if (qs("notes")) qs("notes").value = saved.notes;
       applyChecklist(existing.checklist);
-      msg("Pre-start already captured for today. You can update and resubmit if needed.", "ok");
+      PC.applyFaultComments(qs("checklistRoot"), saved.comments);
+      msg("You already submitted this pre-start today. Change any answer and submit again if needed.", "ok");
+    } else {
+      PC.rememberOperator(qs("inspectorName"));
     }
-    const openPdfBtn = qs("openPdfBtn");
-    if (openPdfBtn) {
-      if (currentCheckId > 0) {
-        openPdfBtn.style.display = "inline-block";
-        openPdfBtn.href = `/api/reports/vehicle-ldv-check/${encodeURIComponent(String(currentCheckId))}.pdf`;
-      } else {
-        openPdfBtn.style.display = "none";
-        openPdfBtn.href = "#";
-      }
-    }
-
     const openQrBtn = qs("openQrBtn");
     if (openQrBtn) openQrBtn.href = `./asset-qr.html?asset_code=${encodeURIComponent(currentAssetCode)}`;
     refreshOfflineBanner();
@@ -244,43 +267,67 @@
       if (!ok) return;
     }
 
-    const checklist = readChecklist();
-    const allChecked = Object.values(checklist).every(Boolean);
-    if (!allChecked) throw new Error("Complete all pre-start checks before submitting.");
+    const root = qs("checklistRoot");
+    const answers = PC.read(root);
+    root?.querySelectorAll(".pc-item.is-missing").forEach((el) => el.classList.remove("is-missing"));
+    if (answers.unanswered.length) {
+      root.querySelectorAll(".pc-item:not([data-state=ok]):not([data-state=fault])").forEach((el) => el.classList.add("is-missing"));
+      PC.firstUnanswered(root)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      throw new Error(`Tap OK or Fault for ${answers.unanswered.length} more check${answers.unanswered.length === 1 ? "" : "s"}.`);
+    }
+    const inspector_name = String(qs("inspectorName")?.value || "").trim();
+    if (!inspector_name) {
+      qs("inspectorName")?.focus();
+      throw new Error("Enter your name.");
+    }
 
     const body = {
       asset_code: currentAssetCode,
       check_date: currentDate,
       odometer_km: odometer,
-      inspector_name: String(qs("inspectorName")?.value || "").trim(),
+      inspector_name,
       notes: String(qs("notes")?.value || "").trim(),
-      checklist,
+      checklist: answers.checklist,
+      faults: answers.faults,
     };
+    const faultCount = Object.keys(answers.faults).length;
+    try { localStorage.setItem("ironlog_prestart_operator", inspector_name); } catch {}
     if (!navigator.onLine) {
-      const queued = upsertOfflineQueue(body);
+      upsertOfflineQueue(body);
       refreshOfflineBanner();
       showSyncState(null);
-      msg(`Offline: pre-start saved on device. Queue size ${queued}. It will sync automatically.`, "warn");
+      showDone(faultCount ? "fault" : "ok", "Saved on this phone", `No signal: the pre-start will send automatically when you are back online.${faultCount ? " You marked faults — tell your foreman before you drive." : ""}`);
       return;
     }
 
-    const data = await fetchJson("/api/maintenance/vehicle-ldv-checks/prestart", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const savedKm = data?.odometer_km == null ? odometer : Number(data.odometer_km);
-    currentCheckId = Number(data?.id || 0);
-    previousKm = Number.isFinite(savedKm) ? savedKm : previousKm;
-    txt("prevKm", previousKm == null ? "-" : `${previousKm.toFixed(1)} km`);
-    const openPdfBtn = qs("openPdfBtn");
-    if (openPdfBtn && currentCheckId > 0) {
-      openPdfBtn.style.display = "inline-block";
-      openPdfBtn.href = `/api/reports/vehicle-ldv-check/${encodeURIComponent(String(currentCheckId))}.pdf`;
+    const btn = qs("saveBtn");
+    if (btn) btn.disabled = true;
+    try {
+      const data = await fetchJson("/api/maintenance/vehicle-ldv-checks/prestart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const savedKm = data?.odometer_km == null ? odometer : Number(data.odometer_km);
+      currentCheckId = Number(data?.id || 0);
+      previousKm = Number.isFinite(savedKm) ? savedKm : previousKm;
+      txt("prevKm", previousKm == null ? "-" : `${previousKm.toFixed(1)} km`);
+      let photoNote = "";
+      if (qs("photoInput")?.files?.[0]) {
+        try {
+          await uploadPhoto();
+          photoNote = " Photo attached.";
+        } catch (e) {
+          photoNote = ` Photo not attached: ${e.message || e}`;
+        }
+      }
+      if (Number(data?.faults || 0) > 0) showDone("fault", "Faults reported", `${data.message}${photoNote}`);
+      else showDone(data?.km_review_needed ? "fault" : "ok", data?.km_review_needed ? "Saved — check the km" : "Pre-start done", `${data?.message || "Pre-start saved."}${photoNote}`);
+      showSyncState(data?.daily_input_sync || null);
+      await syncOfflineQueue();
+    } finally {
+      if (btn) btn.disabled = false;
     }
-    showSyncState(data?.daily_input_sync || null);
-    msg(data?.message || "Pre-start submitted successfully. KM saved to IRONLOG.", data?.km_review_needed ? "err" : "ok");
-    await syncOfflineQueue();
   }
 
   async function uploadPhoto() {
@@ -303,7 +350,6 @@
       data = {};
     }
     if (!res.ok) throw new Error(data?.error || t || `Upload failed (${res.status})`);
-    msg("Photo uploaded to this pre-start check.", "ok");
   }
 
   qs("refreshBtn")?.addEventListener("click", () => {
@@ -312,9 +358,7 @@
   qs("saveBtn")?.addEventListener("click", () => {
     submitPrestart().catch((e) => msg(String(e.message || e), "err"));
   });
-  qs("uploadPhotoBtn")?.addEventListener("click", () => {
-    uploadPhoto().catch((e) => msg(String(e.message || e), "err"));
-  });
+  qs("editAgainBtn")?.addEventListener("click", showForm);
   window.addEventListener("online", () => {
     refreshOfflineBanner();
     syncOfflineQueue().catch(() => {});

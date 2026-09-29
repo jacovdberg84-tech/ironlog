@@ -6,6 +6,7 @@ import path from "node:path";
 import { checklistToJsonObject, getMachinePrestartTemplate, listMachinePrestartProfiles, machinePrestartCheckMode, normalizeMachinePrestartChecklist, resolveMachinePrestartProfile } from "../../utils/machinePrestartTemplates.js";
 import { db } from "../../db/client.js";
 import { isDate } from "../../utils/request.js";
+import { faultMessage, notesWithFaults, prestartFaultList, syncPrestartFaultWorkOrder, unansweredChecks } from "../../utils/prestartFaults.js";
 import { listDailyPrestarts, prestartDeductionForProductionFleet } from "../../utils/prestartDaily.js";
 import { normalizeUploadedPhoto } from "../../utils/imagePdf.js";
 
@@ -367,13 +368,14 @@ export default function registerPrestartChecksRoutes(app, ctx) {
         isLdvOdometerOutlier(odometer_km, previousOdometer);
 
       const checklist = normalizeLdvPrestartChecklist(checklistObj);
-      const failed = checklist.filter((c) => !c.ok);
-      if (failed.length) {
+      const unanswered = unansweredChecks(checklist, checklistObj);
+      if (unanswered.length) {
         return reply.code(400).send({
           ok: false,
-          error: `Complete all pre-start checks before starting (${failed.map((c) => c.label).join(", ")}).`,
+          error: `Mark every check OK or Fault before submitting (${unanswered.join(", ")}).`,
         });
       }
+      const faults = prestartFaultList(checklist, req.body?.faults);
 
       const checklistJson = JSON.stringify(
         checklist.reduce((acc, c) => {
@@ -382,7 +384,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
         }, {})
       );
       const reviewNote = kmReviewNeeded ? "KM flagged for supervisor review" : null;
-      const mergedNotes = [notes, reviewNote].filter(Boolean).join(" | ") || null;
+      const mergedNotes = [notesWithFaults(notes, faults), reviewNote].filter(Boolean).join(" | ") || null;
 
       let checkId = 0;
       if (existing?.id) {
@@ -424,18 +426,24 @@ export default function registerPrestartChecksRoutes(app, ctx) {
         { unusual_km: kmReviewNeeded }
       );
 
+      const faultWo = syncPrestartFaultWorkOrder(db, {
+        assetId: Number(asset.id), checkId, siteCode: site_code, checkDate: check_date, operator: inspector_name, faults,
+      });
+
       return reply.send({
         ok: true,
         id: checkId,
+        faults: faults.length,
+        fault_work_order_id: faultWo && !faultWo.closed ? faultWo.work_order_id : null,
         asset_code: String(asset.asset_code || ""),
         check_date,
         odometer_km: Number(odometer_km.toFixed(1)),
         previous_odometer_km: previousOdometer == null ? null : Number(previousOdometer.toFixed(1)),
         km_review_needed: kmReviewNeeded,
         daily_input_sync: dailySync || { synced: false },
-        message: kmReviewNeeded
+        message: faultMessage(faults, faultWo) || (kmReviewNeeded
           ? "Pre-start saved. KM looks unusual — daily input not updated until a supervisor reviews."
-          : "Pre-start captured. KM reading saved to IRONLOG.",
+          : "Pre-start captured. KM reading saved to IRONLOG."),
       });
     } catch (err) {
       req.log.error(err);
@@ -752,13 +760,15 @@ export default function registerPrestartChecksRoutes(app, ctx) {
       }
 
       const checklist = normalizeMachinePrestartChecklist(profileId, checklistObj);
-      const failed = checklist.filter((c) => !c.ok);
-      if (failed.length) {
+      const unanswered = unansweredChecks(checklist, checklistObj);
+      if (unanswered.length) {
         return reply.code(400).send({
           ok: false,
-          error: `Complete all checks before submitting (${failed.map((c) => c.label).join(", ")}).`,
+          error: `Mark every check OK or Fault before submitting (${unanswered.join(", ")}).`,
         });
       }
+      const faults = prestartFaultList(checklist, req.body?.faults);
+      const savedNotes = notesWithFaults(notes, faults);
 
       const checklistJson = JSON.stringify(checklistToJsonObject(checklist));
 
@@ -778,7 +788,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
             check_mode = ?,
             updated_at = datetime('now')
           WHERE id = ?
-        `).run(inspector_name, notes, checklistJson, smu_hours, mode, checkId);
+        `).run(inspector_name, savedNotes, checklistJson, smu_hours, mode, checkId);
       } else {
         const ins = db.prepare(`
           INSERT INTO vehicle_ldv_checks (
@@ -793,7 +803,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
           check_date,
           String(asset.asset_code || ""),
           inspector_name,
-          notes,
+          savedNotes,
           mode,
           checklistJson,
           smu_hours
@@ -815,16 +825,22 @@ export default function registerPrestartChecksRoutes(app, ctx) {
         );
       }
 
+      const faultWo = syncPrestartFaultWorkOrder(db, {
+        assetId: Number(asset.id), checkId, siteCode: site_code, checkDate: check_date, operator: inspector_name, faults,
+      });
+
       return reply.send({
         ok: true,
         id: checkId,
+        faults: faults.length,
+        fault_work_order_id: faultWo && !faultWo.closed ? faultWo.work_order_id : null,
         asset_code: String(asset.asset_code || ""),
         check_date,
         profile_id: profileId,
         check_mode: mode,
         smu_hours,
         daily_input_sync: dailySync,
-        message: "Machine pre-start saved to IRONLOG.",
+        message: faultMessage(faults, faultWo) || "Machine pre-start saved to IRONLOG.",
       });
     } catch (err) {
       req.log.error(err);
