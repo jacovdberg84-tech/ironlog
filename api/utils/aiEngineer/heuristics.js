@@ -16,6 +16,7 @@ export function chooseTargetFiles(title, text) {
   }
   if (/work.?order|breakdown/.test(hay)) {
     files.add("api/routes/workorders.routes.js");
+    files.add("api/routes/workorders/board.routes.js");
     files.add("api/routes/breakdowns.routes.js");
   }
   if (/api|endpoint|route/.test(hay)) {

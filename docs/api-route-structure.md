@@ -1,11 +1,14 @@
 # API route structure
 
-`api/routes/reports.routes.js`, `maintenance.routes.js`, `dashboard.routes.js` and `stock.routes.js` used to hold every route in one giant function (about 13,800, 12,700, 4,200 and 2,900 lines). The routes now live in feature files in a folder of the same name:
+`api/routes/reports.routes.js`, `maintenance.routes.js`, `dashboard.routes.js`, `stock.routes.js`, `procurement.routes.js`, `workorders.routes.js` and `assets.routes.js` used to hold every route in one giant function (about 13,800, 12,700, 4,200, 2,900, 2,300, 2,100 and 1,900 lines). The routes now live in feature files in a folder of the same name:
 
 - `api/routes/reports/*.routes.js`
 - `api/routes/maintenance/*.routes.js`
 - `api/routes/dashboard/*.routes.js`
 - `api/routes/stock/*.routes.js`
+- `api/routes/procurement/*.routes.js`
+- `api/routes/workorders/*.routes.js`
+- `api/routes/assets/*.routes.js`
 
 ## How it fits together
 
@@ -62,3 +65,22 @@ A helper only one feature file uses can simply live in that file.
 - `lube.routes.js`: Lube stock on hand, month stock, minimums, receipts and issues
 - `movements.routes.js`: Stock movements, store allocations
 - `part-orders.routes.js`: Stores part orders and store QR profile
+
+### `api/routes/procurement/`
+
+- `journals.routes.js`: Procurement journals: build, summarise, export, post and reverse
+- `purchase-orders.routes.js`: Purchase orders, receipts, invoices, three-way match and exceptions
+- `requisitions.routes.js`: Requisitions: lines, attachments, approvals and receiving requests
+- `suppliers.routes.js`: Suppliers and supplier catalogue
+
+### `api/routes/workorders/`
+
+- `board.routes.js`: Work order list and detail, repair requests, status, progress, costs and QR profiles
+- `closeout.routes.js`: Parts issue, close requests, reopening, deletion requests and closing
+- `scheduling.routes.js`: Technicians, scheduling board, rules, assignment and escalations
+
+### `api/routes/assets/`
+
+- `history.routes.js`: Asset hours and history
+- `qr-profiles.routes.js`: Asset, undercarriage and tyre QR profiles
+- `register.routes.js`: Asset register, fleet summary, hire register, cost centre export, create, archive and edit
