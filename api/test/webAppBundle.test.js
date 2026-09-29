@@ -2,19 +2,26 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { webAppFiles, readWebAppSource } from "./webAppSource.js";
+import { pageScriptFiles, readPageSource } from "./webAppSource.js";
 
-test("index.html loads every web/app file exactly once", () => {
-  const listed = webAppFiles();
-  const onDisk = fs.readdirSync(new URL("../../web/app/", import.meta.url)).filter((f) => f.endsWith(".js")).map((f) => `app/${f}`);
-  assert.equal(new Set(listed).size, listed.length, "a file is listed twice");
-  assert.deepEqual([...listed].sort(), onDisk.sort());
-  assert.equal(listed[0], "app/core.js", "core.js defines shared helpers and must load first");
-});
+const pages = [
+  { page: "index.html", dir: "app", first: "app/core.js" },
+  { page: "maintenance.html", dir: "maintenance", first: "maintenance/core.js" },
+];
 
-test("each web/app file parses as a classic script", () => {
-  for (const f of webAppFiles()) {
-    assert.doesNotThrow(() => new vm.Script(fs.readFileSync(new URL(`../../web/${f}`, import.meta.url), "utf8"), { filename: f }), f);
-  }
-  assert.doesNotThrow(() => new vm.Script(readWebAppSource()));
-});
+for (const { page, dir, first } of pages) {
+  test(`${page} loads every web/${dir} file exactly once`, () => {
+    const listed = pageScriptFiles(page, dir);
+    const onDisk = fs.readdirSync(new URL(`../../web/${dir}/`, import.meta.url)).filter((f) => f.endsWith(".js")).map((f) => `${dir}/${f}`);
+    assert.equal(new Set(listed).size, listed.length, "a file is listed twice");
+    assert.deepEqual([...listed].sort(), onDisk.sort());
+    assert.equal(listed[0], first, "core.js defines shared helpers and must load first");
+  });
+
+  test(`each web/${dir} file parses as a classic script`, () => {
+    for (const f of pageScriptFiles(page, dir)) {
+      assert.doesNotThrow(() => new vm.Script(fs.readFileSync(new URL(`../../web/${f}`, import.meta.url), "utf8"), { filename: f }), f);
+    }
+    assert.doesNotThrow(() => new vm.Script(readPageSource(page, dir)));
+  });
+}

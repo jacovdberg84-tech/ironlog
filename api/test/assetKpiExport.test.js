@@ -2,8 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import { readMaintenanceSource } from "./webAppSource.js";
 
-const source = readFileSync(new URL("../../web/maintenance.js", import.meta.url), "utf8");
+const source = readMaintenanceSource();
 const functions = source.slice(
   source.indexOf("async function downloadAssetKpiExport("),
   source.indexOf("async function exportExecutivePackFromAssetKpi(")

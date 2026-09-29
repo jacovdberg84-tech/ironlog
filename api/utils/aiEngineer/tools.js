@@ -203,7 +203,7 @@ export function createToolRegistry({ repoRoot, worktreePath = null }) {
           parameters: {
             type: "object",
             properties: {
-              path: { type: "string", description: "Relative path e.g. web/maintenance.js" },
+              path: { type: "string", description: "Relative path e.g. web/maintenance/plans.js" },
             },
             required: ["path"],
           },
