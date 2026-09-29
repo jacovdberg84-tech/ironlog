@@ -199,6 +199,7 @@ function refreshTopViewData(view) {
       break;
     case "wf":
       loadWeeklyForumSummary().catch(() => {});
+      loadWeeklyForumReviews().catch(() => {});
       loadWeeklyForumActions().catch(() => {});
       loadWeeklyForumInputs().catch(() => {});
       break;
@@ -5335,6 +5336,11 @@ function wfApplyMonthPreset(which) {
   const end = new Date(y, m + 1, 0);
   sEl.value = start.toISOString().slice(0, 10);
   eEl.value = end.toISOString().slice(0, 10);
+  const mpStart = document.getElementById("mpWeekStart");
+  const mpEnd = document.getElementById("mpWeekEnd");
+  if (mpStart) mpStart.value = sEl.value;
+  if (mpEnd) mpEnd.value = eEl.value;
+  loadWeeklyForumReviews().catch(() => {});
 }
 
 let wfUpcomingCache = [];
@@ -7298,6 +7304,103 @@ async function saveWeeklyForumAction() {
   }
 }
 
+function weeklyForumReviewRange() {
+  return {
+    start: String(document.getElementById("wfStart")?.value || "").trim(),
+    end: String(document.getElementById("wfEnd")?.value || "").trim(),
+  };
+}
+
+async function loadWeeklyForumReviews() {
+  const body = document.getElementById("wfReviewBody");
+  if (!body) return;
+  const { start, end } = weeklyForumReviewRange();
+  if (!start || !end) {
+    body.innerHTML = `<tr><td colspan="5" class="muted">Select a start and end date first.</td></tr>`;
+    return;
+  }
+  body.innerHTML = `<tr><td colspan="5" class="muted">Loading...</td></tr>`;
+  const q = new URLSearchParams({ start, end });
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-forum/review-notes?${q.toString()}`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load weekly review notes");
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    body.innerHTML = rows.length
+      ? rows.map((r) => `
+        <tr>
+          <td>${esc(r.area || "-")}</td>
+          <td>${esc(r.weekly_finding || "-")}</td>
+          <td>${esc(r.action_owner || "-")}</td>
+          <td>${esc(r.due_date || "-")}</td>
+          <td><button type="button" class="btn btn-secondary" data-wf-review-delete="${Number(r.id || 0)}">Remove</button></td>
+        </tr>
+      `).join("")
+      : `<tr><td colspan="5" class="muted">No weekly review inputs saved for this period yet.</td></tr>`;
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="5" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+  }
+}
+
+async function saveWeeklyForumReview() {
+  const msg = document.getElementById("wfReviewMsg");
+  if (!msg) return;
+  const { start, end } = weeklyForumReviewRange();
+  const area = String(document.getElementById("wfReviewArea")?.value || "").trim();
+  const weekly_finding = String(document.getElementById("wfReviewFinding")?.value || "").trim();
+  const action_owner = String(document.getElementById("wfReviewActionOwner")?.value || "").trim();
+  const due_date = String(document.getElementById("wfReviewDue")?.value || "").trim();
+  if (!start || !end || !area || !weekly_finding || !action_owner) {
+    msg.className = "message-error";
+    msg.textContent = "Start date, end date, area, weekly finding, and action / owner are required.";
+    return;
+  }
+  msg.className = "muted";
+  msg.textContent = "Saving weekly review...";
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-forum/review-notes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ start, end, area, weekly_finding, action_owner, due_date: due_date || null }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save weekly review");
+    msg.className = "message-success";
+    msg.textContent = "Weekly review saved. It will appear in the next Weekly Forum presentation.";
+    document.getElementById("wfReviewFinding").value = "";
+    document.getElementById("wfReviewActionOwner").value = "";
+    document.getElementById("wfReviewDue").value = "";
+    await loadWeeklyForumReviews();
+  } catch (e) {
+    msg.className = "message-error";
+    msg.textContent = e.message || String(e);
+  }
+}
+
+async function deleteWeeklyForumReview(id) {
+  const n = Number(id || 0);
+  if (!n) return;
+  const msg = document.getElementById("wfReviewMsg");
+  try {
+    const res = await fetch(`${API}/maintenance/weekly-forum/review-notes/${n}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to remove weekly review");
+    if (msg) {
+      msg.className = "message-success";
+      msg.textContent = "Weekly review removed.";
+    }
+    await loadWeeklyForumReviews();
+  } catch (e) {
+    if (msg) {
+      msg.className = "message-error";
+      msg.textContent = e.message || String(e);
+    }
+  }
+}
+
 async function updateWeeklyForumActionStatus(id, status) {
   const n = Number(id || 0);
   if (!n) return;
@@ -9196,7 +9299,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const d = new Date();
     const day = d.getDay();
     const mondayOffset = day === 0 ? -6 : 1 - day;
-    d.setDate(d.getDate() + mondayOffset + 4);
+    d.setDate(d.getDate() + mondayOffset + 6);
     wfEnd.value = d.toISOString().slice(0, 10);
   }
   const akpStart = document.getElementById("akpStart");
@@ -9261,6 +9364,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const w = mpWeekRangeLabel();
     mpWeekEnd.value = w.end;
   }
+  if (mpWeekStart && wfStart?.value) mpWeekStart.value = wfStart.value;
+  if (mpWeekEnd && wfEnd?.value) mpWeekEnd.value = wfEnd.value;
   if (mpMonth && !mpMonth.value) mpMonth.value = mpMonthLabel();
   if (kpiPackMonth && !kpiPackMonth.value) kpiPackMonth.value = mpMonthLabel();
   if (kpiPackSiteCodes && !kpiPackSiteCodes.value) kpiPackSiteCodes.value = "main";
@@ -9434,6 +9539,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadArtisanInspections().catch(() => {});
   loadDamageReports().catch(() => {});
   loadWeeklyForumSummary().catch(() => {});
+  loadWeeklyForumReviews().catch(() => {});
   loadWeeklyForumActions().catch(() => {});
   loadWeeklyForumParts().catch(() => {});
   loadWeeklyForumInputs().catch(() => {});
@@ -9539,7 +9645,31 @@ document.addEventListener("DOMContentLoaded", () => {
     if (sel) Array.from(sel.options).forEach((o) => { o.selected = false; });
     loadAssetKpiWeekly();
   });
-  document.getElementById("loadWeeklyForumBtn")?.addEventListener("click", loadWeeklyForumSummary);
+  document.getElementById("loadWeeklyForumBtn")?.addEventListener("click", () => {
+    loadWeeklyForumSummary();
+    loadWeeklyForumReviews();
+    loadWeeklyForumActions();
+  });
+  document.getElementById("wfStart")?.addEventListener("change", (evt) => {
+    const target = document.getElementById("mpWeekStart");
+    if (target) target.value = String(evt.target?.value || "");
+    loadWeeklyForumReviews();
+  });
+  document.getElementById("wfEnd")?.addEventListener("change", (evt) => {
+    const target = document.getElementById("mpWeekEnd");
+    if (target) target.value = String(evt.target?.value || "");
+    loadWeeklyForumReviews();
+  });
+  document.getElementById("mpWeekStart")?.addEventListener("change", (evt) => {
+    const target = document.getElementById("wfStart");
+    if (target) target.value = String(evt.target?.value || "");
+    loadWeeklyForumReviews();
+  });
+  document.getElementById("mpWeekEnd")?.addEventListener("change", (evt) => {
+    const target = document.getElementById("wfEnd");
+    if (target) target.value = String(evt.target?.value || "");
+    loadWeeklyForumReviews();
+  });
   document.getElementById("wfPresetThisMonth")?.addEventListener("click", () => wfApplyMonthPreset("this"));
   document.getElementById("wfPresetLastMonth")?.addEventListener("click", () => wfApplyMonthPreset("last"));
   document.getElementById("saveRsgProfileBtn")?.addEventListener("click", saveRsgProfile);
@@ -9592,6 +9722,12 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("importRsgCsvBtn")?.addEventListener("click", importRsgProfilesCsv);
   document.getElementById("saveWfActionBtn")?.addEventListener("click", saveWeeklyForumAction);
   document.getElementById("loadWfActionsBtn")?.addEventListener("click", loadWeeklyForumActions);
+  document.getElementById("saveWfReviewBtn")?.addEventListener("click", saveWeeklyForumReview);
+  document.getElementById("loadWfReviewsBtn")?.addEventListener("click", loadWeeklyForumReviews);
+  document.getElementById("wfReviewBody")?.addEventListener("click", (evt) => {
+    const btn = evt.target?.closest?.("button[data-wf-review-delete]");
+    if (btn) deleteWeeklyForumReview(btn.getAttribute("data-wf-review-delete"));
+  });
   document.getElementById("saveWfInputBtn")?.addEventListener("click", saveWeeklyForumInput);
   document.getElementById("loadWfInputsBtn")?.addEventListener("click", loadWeeklyForumInputs);
   document.getElementById("wfAddItemBtn")?.addEventListener("click", addWfDraftItem);

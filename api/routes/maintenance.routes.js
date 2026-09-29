@@ -6608,6 +6608,20 @@ export default async function maintenanceRoutes(app) {
     )
   `).run();
   db.prepare(`
+    CREATE TABLE IF NOT EXISTS weekly_forum_review_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      area TEXT NOT NULL,
+      weekly_finding TEXT NOT NULL,
+      action_owner TEXT NOT NULL,
+      due_date TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(period_start, period_end, area)
+    )
+  `).run();
+  db.prepare(`
     CREATE TABLE IF NOT EXISTS weekly_forum_service_inputs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       plan_id INTEGER NOT NULL UNIQUE,
@@ -6638,6 +6652,91 @@ export default async function maintenanceRoutes(app) {
       db.prepare(`ALTER TABLE weekly_forum_service_inputs ADD COLUMN all_in_total REAL NOT NULL DEFAULT 0`).run();
     }
   } catch {}
+
+  app.get("/weekly-forum/review-notes", async (req, reply) => {
+    try {
+      const start = String(req.query?.start || "").trim();
+      const end = String(req.query?.end || "").trim();
+      if (!isDate(start) || !isDate(end)) {
+        return reply.code(400).send({ ok: false, error: "start and end must be YYYY-MM-DD" });
+      }
+      const rows = db.prepare(`
+        SELECT id, period_start, period_end, area, weekly_finding, action_owner, due_date, created_at, updated_at
+        FROM weekly_forum_review_notes
+        WHERE period_start = ? AND period_end = ?
+        ORDER BY CASE area
+          WHEN 'Downtime' THEN 0
+          WHEN 'Repairs' THEN 1
+          WHEN 'Costs' THEN 2
+          ELSE 3
+        END ASC, id ASC
+      `).all(start, end);
+      return reply.send({ ok: true, rows });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.post("/weekly-forum/review-notes", async (req, reply) => {
+    try {
+      const start = String(req.body?.start || "").trim();
+      const end = String(req.body?.end || "").trim();
+      const area = String(req.body?.area || "").trim();
+      const weekly_finding = String(req.body?.weekly_finding || "").trim();
+      const action_owner = String(req.body?.action_owner || "").trim();
+      const due_date = String(req.body?.due_date || "").trim() || null;
+      const allowedAreas = ["Downtime", "Repairs", "Costs", "Other"];
+      if (!isDate(start) || !isDate(end) || start > end) {
+        return reply.code(400).send({ ok: false, error: "start and end must be valid dates, with start before end" });
+      }
+      if (!allowedAreas.includes(area)) {
+        return reply.code(400).send({ ok: false, error: "area must be Downtime, Repairs, Costs, or Other" });
+      }
+      if (!weekly_finding || !action_owner) {
+        return reply.code(400).send({ ok: false, error: "weekly finding and action / owner are required" });
+      }
+      if (due_date && !isDate(due_date)) {
+        return reply.code(400).send({ ok: false, error: "due_date must be YYYY-MM-DD" });
+      }
+      const existing = db.prepare(`
+        SELECT id FROM weekly_forum_review_notes
+        WHERE period_start = ? AND period_end = ? AND area = ?
+      `).get(start, end, area);
+      db.prepare(`
+        INSERT INTO weekly_forum_review_notes (
+          period_start, period_end, area, weekly_finding, action_owner, due_date, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(period_start, period_end, area) DO UPDATE SET
+          weekly_finding = excluded.weekly_finding,
+          action_owner = excluded.action_owner,
+          due_date = excluded.due_date,
+          updated_at = datetime('now')
+      `).run(start, end, area, weekly_finding, action_owner, due_date);
+      const row = db.prepare(`
+        SELECT id, period_start, period_end, area, weekly_finding, action_owner, due_date, created_at, updated_at
+        FROM weekly_forum_review_notes
+        WHERE period_start = ? AND period_end = ? AND area = ?
+      `).get(start, end, area);
+      return reply.send({ ok: true, id: Number(row?.id || existing?.id || 0), row });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  app.delete("/weekly-forum/review-notes/:id", async (req, reply) => {
+    try {
+      const id = Number(req.params?.id || 0);
+      if (!id) return reply.code(400).send({ ok: false, error: "invalid id" });
+      const result = db.prepare(`DELETE FROM weekly_forum_review_notes WHERE id = ?`).run(id);
+      if (!result.changes) return reply.code(404).send({ ok: false, error: "weekly review note not found" });
+      return reply.send({ ok: true, id });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
 
   app.get("/weekly-forum/actions", async (req, reply) => {
     try {
