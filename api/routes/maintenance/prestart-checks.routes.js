@@ -6,11 +6,23 @@ import path from "node:path";
 import { checklistToJsonObject, getMachinePrestartTemplate, listMachinePrestartProfiles, machinePrestartCheckMode, normalizeMachinePrestartChecklist, resolveMachinePrestartProfile } from "../../utils/machinePrestartTemplates.js";
 import { db } from "../../db/client.js";
 import { isDate } from "../../utils/request.js";
-import { faultMessage, notesWithFaults, prestartFaultList, syncPrestartFaultWorkOrder, unansweredChecks } from "../../utils/prestartFaults.js";
+import { withPortuguese } from "../../utils/prestartPortuguese.js";
+import { addEnglishToFaultComments, faultMessage, notesWithFaults, prestartFaultList, syncPrestartFaultWorkOrder, unansweredChecks } from "../../utils/prestartFaults.js";
+import { aiChatText, isAiConfigured } from "../../utils/ironmind.js";
+import { translateText } from "../../utils/translate.js";
 import { listDailyPrestarts, prestartDeductionForProductionFleet } from "../../utils/prestartDaily.js";
 import { normalizeUploadedPhoto } from "../../utils/imagePdf.js";
 
 export default function registerPrestartChecksRoutes(app, ctx) {
+  // Portuguese fault comments get an English copy on the work order, after the
+  // operator's submit has already been answered.
+  function translateFaultCommentsLater(req, faultWo, faults) {
+    if (!faultWo?.work_order_id || faultWo.closed) return;
+    if (String(req.body?.lang || "").toLowerCase() !== "pt" || !isAiConfigured()) return;
+    addEnglishToFaultComments(db, faultWo.work_order_id, faults, (text) => translateText(text, { to: "en", chat: aiChatText }))
+      .catch((err) => req.log.warn({ err }, "fault comment translation failed"));
+  }
+
   const {
     applyLdvKmToAllChecksForDate,
     checklistRowStatus,
@@ -429,6 +441,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
       const faultWo = syncPrestartFaultWorkOrder(db, {
         assetId: Number(asset.id), checkId, siteCode: site_code, checkDate: check_date, operator: inspector_name, faults,
       });
+      translateFaultCommentsLater(req, faultWo, faults);
 
       return reply.send({
         ok: true,
@@ -692,7 +705,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
         ok: true,
         profile_id: profileId,
         check_mode: mode,
-        template,
+        template: withPortuguese(template),
         asset: {
           id: Number(asset.id),
           asset_code: String(asset.asset_code || ""),
@@ -828,6 +841,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
       const faultWo = syncPrestartFaultWorkOrder(db, {
         assetId: Number(asset.id), checkId, siteCode: site_code, checkDate: check_date, operator: inspector_name, faults,
       });
+      translateFaultCommentsLater(req, faultWo, faults);
 
       return reply.send({
         ok: true,

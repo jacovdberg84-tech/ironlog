@@ -97,3 +97,27 @@ export function faultMessage(faults, wo) {
     + `${wo?.work_order_id ? `The workshop has work order #${wo.work_order_id}. ` : ""}`
     + "Tell your foreman before you operate.";
 }
+
+/**
+ * Adds an English version after each Portuguese fault comment on the repair
+ * work order ("- Brakes: pedal mole (EN: soft pedal)"). translate(text) resolves
+ * to English or null. Runs after the operator's submit has been answered.
+ */
+export async function addEnglishToFaultComments(db, workOrderId, faults, translate) {
+  const withComments = faults.filter((f) => f.comment);
+  if (!workOrderId || !withComments.length) return false;
+  const row = db.prepare(`SELECT job_description FROM work_orders WHERE id = ?`).get(Number(workOrderId));
+  if (!row) return false;
+  let desc = String(row.job_description || "");
+  let changed = false;
+  for (const f of withComments) {
+    const line = `- ${f.label}: ${f.comment}`;
+    if (!desc.includes(line) || desc.includes(`${line} (EN:`)) continue;
+    const en = String((await translate(f.comment)) || "").trim();
+    if (!en || en.toLowerCase() === f.comment.toLowerCase()) continue;
+    desc = desc.replace(line, `${line} (EN: ${en})`);
+    changed = true;
+  }
+  if (changed) db.prepare(`UPDATE work_orders SET job_description = ? WHERE id = ?`).run(desc, Number(workOrderId));
+  return changed;
+}

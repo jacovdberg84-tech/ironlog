@@ -106,10 +106,10 @@
     if (!el) return;
     const queued = getOfflineQueue().length;
     if (navigator.onLine) {
-      el.textContent = queued ? `Online. ${queued} machine pre-start submission(s) waiting to sync.` : "Online.";
+      el.textContent = queued ? `${PC.t("online")} ${PC.t("queued", { n: queued })}` : PC.t("online");
       return;
     }
-    el.textContent = queued ? `Offline mode. ${queued} submission(s) queued.` : "Offline mode.";
+    el.textContent = queued ? `${PC.t("offline")} ${PC.t("queued", { n: queued })}` : PC.t("offline");
   }
 
   const PC = window.IronlogPrestart;
@@ -117,14 +117,27 @@
   function updateProgress(p) {
     const el = qs("pcProgress");
     if (!el) return;
-    el.innerHTML = `<strong>${p.answered} of ${p.total}</strong> checked${p.faults ? ` · <span class="pc-fault-count">${p.faults} fault${p.faults === 1 ? "" : "s"}</span>` : ""}`;
+    el.innerHTML = `<strong>${PC.t("progress", { a: p.answered, t: p.total })}</strong>${p.faults ? ` · <span class="pc-fault-count">${PC.t("faultCount", { n: p.faults })}</span>` : ""}`;
     const btn = qs("saveBtn");
-    if (btn) btn.textContent = p.faults ? "Submit and report faults" : "Submit pre-start";
+    if (btn) btn.textContent = p.faults ? PC.t("submitFaults") : PC.t("submit");
     if (p.answered === p.total && qs("msg")?.classList.contains("err")) msg("");
   }
 
+  let currentTemplate = null;
+
   function renderChecklist(template) {
-    PC.render(qs("checklistRoot"), (template?.sections || []).map((sec) => ({ title: sec.title, items: sec.items || [] })), updateProgress);
+    currentTemplate = template || currentTemplate;
+    if (!currentTemplate) return;
+    const pt = PC.lang() === "pt";
+    txt("pageTitle", String((pt && currentTemplate.title_pt) || currentTemplate.title || PC.t("machinePrestart")));
+    txt("sub", PC.t("tapEvery"));
+    // Tippers log km, other machines hours; both go in the same reading field.
+    const meterLabel = qs("meterLabel");
+    if (meterLabel) meterLabel.dataset.i18n = currentTemplate.meter === "km" ? "odometerOpt" : "hourMeter";
+    PC.translatePage();
+    PC.render(qs("checklistRoot"), currentTemplate.sections || [], updateProgress);
+    updateProgress(PC.progress(qs("checklistRoot")));
+    refreshOfflineBanner();
   }
 
   function applyChecklist(checklist) {
@@ -163,11 +176,12 @@
     currentAssetCode = getAssetCodeFromUrl();
     if (!currentAssetCode) {
       txt("sub", "Missing asset_code in URL.");
+      txt("assetCode", "-");
       return;
     }
     currentDate = qs("checkDateInput")?.value || currentDate || getCheckDateFromUrlOrToday();
     syncDateInput();
-    txt("sub", `Loading ${currentAssetCode}...`);
+    txt("sub", PC.t("loading"));
     msg("");
     const q = new URLSearchParams();
     q.set("asset_code", currentAssetCode);
@@ -178,6 +192,11 @@
       writeContextCache(currentAssetCode, data);
     } catch (err) {
       const cached = readContextCache(currentAssetCode);
+      if (!cached?.data && /no machine pre-start template/i.test(String(err.message || ""))) {
+        txt("sub", "");
+        txt("assetCode", currentAssetCode);
+        throw new Error(PC.t("noTemplate"));
+      }
       if (!cached?.data) throw err;
       data = cached.data;
       msg(`Offline: showing cached machine pre-start context from ${String(cached.cached_at || "earlier")}.`, "warn");
@@ -186,8 +205,6 @@
     const template = data?.template || null;
     if (!template) throw new Error("No template returned from server.");
 
-    txt("sub", "Tap OK or Fault for every check.");
-    txt("pageTitle", String(template.title || "Machine pre-start"));
     txt("assetCode", String(asset.asset_code || currentAssetCode));
     txt("assetName", String(asset.asset_name || ""));
     document.title = `${String(asset.asset_code || currentAssetCode)} pre-start`;
@@ -205,7 +222,7 @@
       if (qs("notes")) qs("notes").value = saved.notes;
       applyChecklist(existing.checklist);
       PC.applyFaultComments(qs("checklistRoot"), saved.comments);
-      msg("You already submitted this pre-start today. Change any answer and submit again if needed.", "ok");
+      msg(PC.t("already"), "ok");
     } else {
       if (qs("smuHours")) qs("smuHours").value = "";
       if (qs("notes")) qs("notes").value = "";
@@ -254,19 +271,19 @@
     if (answers.unanswered.length) {
       root.querySelectorAll(".pc-item:not([data-state=ok]):not([data-state=fault])").forEach((el) => el.classList.add("is-missing"));
       PC.firstUnanswered(root)?.scrollIntoView({ behavior: "smooth", block: "center" });
-      throw new Error(`Tap OK or Fault for ${answers.unanswered.length} more check${answers.unanswered.length === 1 ? "" : "s"}.`);
+      throw new Error(PC.t("moreChecks", { n: answers.unanswered.length }));
     }
     const inspector_name = String(qs("inspectorName")?.value || "").trim();
     if (!inspector_name) {
       qs("inspectorName")?.focus();
-      throw new Error("Enter your name.");
+      throw new Error(PC.t("enterName"));
     }
 
     const smuRaw = String(qs("smuHours")?.value || "").trim();
     let smu_hours = null;
     if (smuRaw) {
       const smu = Number(smuRaw);
-      if (!Number.isFinite(smu) || smu < 0) throw new Error("Hour meter must be a number.");
+      if (!Number.isFinite(smu) || smu < 0) throw new Error(PC.t("badNumber"));
       smu_hours = smu;
     }
 
@@ -278,13 +295,14 @@
       notes: String(qs("notes")?.value || "").trim(),
       checklist: answers.checklist,
       faults: answers.faults,
+      lang: PC.lang(),
     };
     const faultCount = Object.keys(answers.faults).length;
     try { localStorage.setItem("ironlog_prestart_operator", inspector_name); } catch {}
     if (!navigator.onLine) {
       upsertOfflineQueue(body);
       refreshOfflineBanner();
-      showDone(faultCount ? "fault" : "ok", "Saved on this phone", `No signal: the pre-start will send automatically when you are back online.${faultCount ? " You marked faults — tell your foreman before you operate." : ""}`);
+      showDone(faultCount ? "fault" : "ok", PC.t("savedPhone"), `${PC.t("savedPhoneText")}${faultCount ? PC.t("offlineFault") : ""}`);
       return;
     }
 
@@ -301,15 +319,17 @@
       if (qs("photoInput")?.files?.[0]) {
         try {
           await uploadPhoto();
-          photoNote = " Photo attached.";
+          photoNote = PC.t("photoAttached");
         } catch (e) {
-          photoNote = ` Photo not attached: ${e.message || e}`;
+          photoNote = `${PC.t("photoNot")}${e.message || e}`;
         }
       }
       if (Number(data?.faults || 0) > 0) {
-        showDone("fault", "Faults reported", `${data.message}${photoNote}`);
+        const list = Object.keys(answers.faults).map((k) => root.querySelector(`.pc-item[data-key="${CSS.escape(k)}"] .pc-label`)?.firstChild?.textContent || k).join(", ");
+        const wo = data.fault_work_order_id ? PC.t("woRef", { id: data.fault_work_order_id }) : "";
+        showDone("fault", PC.t("faultsTitle"), `${PC.t("faultsText", { n: data.faults, wo, list })}${photoNote}`);
       } else {
-        showDone("ok", "Pre-start done", `${currentAssetCode} is checked for ${currentDate}. Safe working!${photoNote}`);
+        showDone("ok", PC.t("doneTitle"), `${PC.t("doneText", { asset: currentAssetCode, date: currentDate })}${photoNote}`);
       }
       await syncOfflineQueue();
     } finally {
@@ -357,6 +377,7 @@
   });
   window.addEventListener("offline", refreshOfflineBanner);
 
+  PC.bindLanguageToggle(() => renderChecklist());
   loadContext().catch((e) => msg(String(e.message || e), "err"));
   refreshOfflineBanner();
   syncOfflineQueue().catch(() => {});
