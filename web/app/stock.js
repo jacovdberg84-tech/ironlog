@@ -75,9 +75,19 @@ loadStockMonitor = async function() {
 
 let stockPageData = { rows: [], recent: [], summary: null };
 
+const STOCK_CATEGORY_OPTIONS = [
+  ["part", "Parts"],
+  ["component", "Components"],
+  ["get", "G.E.T"],
+  ["tyre", "Tyres"],
+  ["oil", "Oils & lubricants"],
+];
+
 function filterStockDisplayRows(rows) {
   const q = (qs("spFilter")?.value || "").trim().toLowerCase();
-  const arr = Array.isArray(rows) ? rows : [];
+  const category = (qs("spCategory")?.value || "").trim();
+  let arr = Array.isArray(rows) ? rows : [];
+  if (category) arr = arr.filter((r) => String(r.stock_category || "part") === category);
   if (!q) return arr;
   return arr.filter(
     (r) =>
@@ -115,9 +125,16 @@ function renderStockInventoryTable(rows) {
           ? `<span class="stores-inv-status stores-inv-status--watch">Critical</span>`
           : `<span class="stores-inv-status stores-inv-status--ok">OK</span>`;
       const shortage = Math.max(0, min - onHand);
+      const category = String(r.stock_category || "part");
+      const categoryControl = canEditStockCategory()
+        ? `<label class="stores-stock-category"><span class="sr-only">Category for ${escapeHtml(r.part_code || "")}</span>
+            <select data-stock-category-select title="${r.stock_category_source === "manual" ? "Set by stores" : "Set automatically — change if wrong"}">
+              ${STOCK_CATEGORY_OPTIONS.map(([key, label]) => `<option value="${key}"${key === category ? " selected" : ""}>${label}</option>`).join("")}
+            </select></label>`
+        : `<span class="stores-stock-category">${escapeHtml(r.stock_category_label || "Parts")}</span>`;
       return `<article class="${cardCls}" data-stock-code="${spoAttrVal(r.part_code || "")}" data-stock-name="${spoAttrVal(r.part_name || "")}">
         <header>
-          <div><span class="stores-inv-code">${escapeHtml(r.part_code || "")}</span><div class="stores-stock-name">${escapeHtml(r.part_name || "—")}</div></div>
+          <div><span class="stores-inv-code">${escapeHtml(r.part_code || "")}</span><div class="stores-stock-name">${escapeHtml(r.part_name || "—")}</div>${categoryControl}</div>
           ${status}
         </header>
         <div class="stores-stock-metrics">
@@ -142,6 +159,37 @@ function renderStockInventoryTable(rows) {
     <div class="stores-stock-grid">${cards}</div>
     <div class="stores-inventory-foot muted small">${rows.length} item${rows.length === 1 ? "" : "s"} shown</div>
   `;
+}
+
+function canEditStockCategory() {
+  return getSessionRoles().some((r) => ["admin", "supervisor", "stores", "storeman", "workshop_admin"].includes(r));
+}
+
+async function saveStockCategory(select) {
+  const card = select.closest("[data-stock-code]");
+  const code = String(card?.dataset?.stockCode || "").trim();
+  if (!code) return;
+  select.disabled = true;
+  try {
+    const res = await fetchJson(`${API}/api/stock/part-category`, {
+      method: "POST",
+      body: JSON.stringify({ part_code: code, category: select.value }),
+    });
+    const row = stockPageData.rows.find((r) => r.part_code === code);
+    if (row) {
+      row.stock_category = res.stock_category;
+      row.stock_category_label = res.stock_category_label;
+      row.stock_category_source = res.stock_category_source;
+    }
+    setStatus(`${code} is now in ${res.stock_category_label}.`);
+    if (qs("spCategory")?.value) refreshStockInventoryDisplay();
+  } catch (e) {
+    setStatus(`Could not change the category for ${code}: ${e.message || e}`);
+    const row = stockPageData.rows.find((r) => r.part_code === code);
+    if (row) select.value = row.stock_category || "part";
+  } finally {
+    select.disabled = false;
+  }
 }
 
 function openStockAction(card, action) {
@@ -295,11 +343,12 @@ function exportStockOnHandCsv() {
   const rows = onlyLow ? baseRows.filter((r) => Boolean(r.below_min)) : baseRows;
   if (!rows.length) return alert("Load stock data first.");
 
-  const header = "part_code,part_name,on_hand,min_stock,unit_cost,stock_value,critical,below_min";
+  const header = "part_code,part_name,category,on_hand,min_stock,unit_cost,stock_value,critical,below_min";
   const lines = rows.map((r) =>
     [
       r.part_code || "",
       `"${String(r.part_name || "").replace(/"/g, '""')}"`,
+      `"${String(r.stock_category_label || "Parts").replace(/"/g, '""')}"`,
       Number(r.on_hand || 0),
       Number(r.min_stock || 0),
       Number(r.unit_cost || 0),
@@ -1253,6 +1302,11 @@ function wireStockControls() {
   qs("downloadGmStockReportXlsx")?.addEventListener("click", () => downloadGmStockReportXlsx());
   qs("spSort")?.addEventListener("change", () => refreshStockInventoryDisplay());
   qs("spOnlyLow")?.addEventListener("change", () => refreshStockInventoryDisplay());
+  qs("spCategory")?.addEventListener("change", () => refreshStockInventoryDisplay());
+  qs("spList")?.addEventListener("change", (evt) => {
+    const select = evt.target?.closest?.("select[data-stock-category-select]");
+    if (select) saveStockCategory(select);
+  });
   qs("spList")?.addEventListener("click", (evt) => {
     const btn = evt.target?.closest?.("button[data-stock-action]");
     if (!btn) return;

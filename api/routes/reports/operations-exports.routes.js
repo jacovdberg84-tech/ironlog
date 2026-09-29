@@ -7,6 +7,7 @@ import { buildAmlWeeklyCheckSheet } from "../../utils/amlWeeklyCheckSheet.js";
 import { buildPdfBuffer, kvGrid, sectionTitle, table, tryDrawLogo } from "../../utils/pdfGenerator.js";
 import { db } from "../../db/client.js";
 import { isDate } from "../../utils/request.js";
+import { oilPartSql } from "../../utils/stockCategory.js";
 
 export default function registerOperationsExportsRoutes(app, ctx) {
   const {
@@ -902,12 +903,7 @@ export default function registerOperationsExportsRoutes(app, ctx) {
       JOIN parts p ON p.id = sm.part_id
       WHERE sm.reference = ('work_order:' || w.id)
         AND sm.movement_type = 'out'
-        AND (
-          LOWER(COALESCE(p.consumable_kind, '')) IN ('oil', 'lube', 'lubricant', 'hydraulic', 'hydraulic_oil', 'coolant', 'grease')
-          OR LOWER(COALESCE(p.part_name, '')) LIKE '%oil%'
-          OR LOWER(COALESCE(p.part_name, '')) LIKE '%lube%'
-          OR LOWER(COALESCE(p.part_name, '')) LIKE '%hydraulic%'
-        )
+        AND ${oilPartSql("p")}
     )`;
 
     const woLines = db.prepare(`

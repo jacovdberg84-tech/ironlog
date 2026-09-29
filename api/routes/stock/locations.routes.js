@@ -2,6 +2,7 @@
 // Registered by routes/stock.routes.js; shared helpers arrive through ctx.
 import { db } from "../../db/client.js";
 import { writeAudit } from "../../utils/audit.js";
+import { STOCK_CATEGORIES, STOCK_CATEGORY_KEYS, classifyStockItem, ensureStockCategorySchema, normalizeStockCategory, stockCategoryLabel } from "../../utils/stockCategory.js";
 
 export default function registerLocationsRoutes(app, ctx) {
   const { getBinByCodeAtLocation, getLocationByCode, getOnHand, getPartByCode, requireRoles } = ctx;
@@ -342,6 +343,36 @@ export default function registerLocationsRoutes(app, ctx) {
   // Set minimum stock for a specific part
   // POST /api/stock/part-minimum
   // Body: { part_code, min_stock }
+  // GET /api/stock/categories — the stock categories stores can assign.
+  app.get("/categories", async () => ({ ok: true, categories: STOCK_CATEGORIES }));
+
+  // POST /api/stock/part-category { part_code, category } — set an item's stock category by hand.
+  // category "auto" hands the item back to the automatic rules.
+  app.post("/part-category", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
+    const part_code = String(req.body?.part_code || "").trim();
+    const raw = String(req.body?.category || "").trim().toLowerCase();
+    if (!part_code) return reply.code(400).send({ error: "part_code is required" });
+    const category = raw === "auto" ? "auto" : normalizeStockCategory(raw);
+    if (!category) {
+      return reply.code(400).send({ error: `category must be one of: ${STOCK_CATEGORY_KEYS.join(", ")} or auto` });
+    }
+    ensureStockCategorySchema(db);
+    const part = db.prepare(`SELECT id, part_code, part_name, stock_category, stock_category_source FROM parts WHERE part_code = ?`).get(part_code);
+    if (!part) return reply.code(404).send({ error: `part_code not found: ${part_code}` });
+    const next = category === "auto" ? classifyStockItem(part) : category;
+    const source = category === "auto" ? "auto" : "manual";
+    db.prepare(`UPDATE parts SET stock_category = ?, stock_category_source = ? WHERE id = ?`).run(next, source, part.id);
+    writeAudit(db, req, {
+      module: "stock",
+      action: "set_part_category",
+      entity_type: "part",
+      entity_id: part_code,
+      payload: { before: part.stock_category || null, after: next, source },
+    });
+    return reply.send({ ok: true, part_code, stock_category: next, stock_category_label: stockCategoryLabel(next), stock_category_source: source });
+  });
+
   app.post("/part-minimum", async (req, reply) => {
     if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
     const part_code = String(req.body?.part_code || "").trim();

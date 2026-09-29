@@ -3,6 +3,7 @@ import multipart from "@fastify/multipart";
 import { parse } from "csv-parse/sync";
 import { db } from "../db/client.js";
 import { sqlFuelMetricModeExpr } from "../utils/fuelMetricMode.js";
+import { ensureStockCategorySchema, normalizeStockCategory } from "../utils/stockCategory.js";
 import {
   parseCsvToObjects,
   requireHeaders,
@@ -868,6 +869,8 @@ export default async function uploadRoutes(app) {
         min_stock = excluded.min_stock,
         unit_cost = excluded.unit_cost
     `);
+    ensureStockCategorySchema(db);
+    const setManualCategory = db.prepare(`UPDATE parts SET stock_category = ?, stock_category_source = 'manual' WHERE part_code = ?`);
 
     const tx = db.transaction(() => {
       for (const r of rows) {
@@ -879,10 +882,14 @@ export default async function uploadRoutes(app) {
 
         if (!code || !name) continue;
         upsert.run(code, name, critical, min, unitCost);
+        const category = normalizeStockCategory(r.category ?? r.stock_category);
+        if (category) setManualCategory.run(category, code);
       }
     });
 
     tx();
+    // Items without a hand-picked category (new, or renamed by this import) get the automatic one.
+    ensureStockCategorySchema(db, { refresh: true });
 
     return reply.send({ ok: true, imported: rows.length });
   });

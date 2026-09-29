@@ -42,6 +42,7 @@ import registerInspectionsRoutes from "./maintenance/inspections.routes.js";
 import registerPrestartChecksRoutes from "./maintenance/prestart-checks.routes.js";
 import registerPartsRequestsRoutes from "./maintenance/parts-requests.routes.js";
 import registerMechanicLaborRoutes from "./maintenance/mechanic-labor.routes.js";
+import { ensureStockCategorySchema, oilPartSql as oilCategorySql } from "../utils/stockCategory.js";
 
 function isMonth(s) {
   return /^\d{4}-\d{2}$/.test(String(s || "").trim());
@@ -851,25 +852,10 @@ function sqlStockMovementOutbound(alias = "sm") {
   return `(LOWER(COALESCE(${s}.movement_type, '')) = 'out' OR COALESCE(${s}.quantity, 0) < 0)`;
 }
 
-/**
- * SQL boolean expression (SQLite): parts row is bucketed as oil/lubricant, not hard parts.
- * Uses parts.consumable_kind when set; otherwise part name/code heuristics.
- */
+/** SQL boolean expression (SQLite): parts row is an oil / lubricant store item, not a hard part. */
 function sqlOilPartPredicate(alias = "p") {
-  const p = alias;
-  return `(
-  LOWER(TRIM(COALESCE(${p}.consumable_kind, ''))) IN ('oil', 'lube', 'lubricant', 'hydraulic', 'hydraulic_oil', 'coolant', 'grease', 'hyd fluid', 'hydraulic fluid')
-  OR (
-    TRIM(COALESCE(${p}.consumable_kind, '')) = ''
-    AND (
-      INSTR(LOWER(' ' || REPLACE(REPLACE(COALESCE(${p}.part_name, ''), '-', ' '), '_', ' ') || ' '), ' oil ') > 0
-      OR INSTR(LOWER(' ' || REPLACE(REPLACE(COALESCE(${p}.part_name, ''), '-', ' '), '_', ' ') || ' '), ' lube ') > 0
-      OR LOWER(TRIM(COALESCE(${p}.part_name, ''))) LIKE 'lubricant%'
-      OR LOWER(TRIM(COALESCE(${p}.part_code, ''))) LIKE 'oil%'
-      OR LOWER(TRIM(COALESCE(${p}.part_code, ''))) LIKE 'lube%'
-    )
-  )
-)`;
+  ensureStockCategorySchema(db);
+  return oilCategorySql(alias);
 }
 
 /**

@@ -2,6 +2,7 @@
 // Registered by routes/stock.routes.js; shared helpers arrive through ctx.
 import { buildWorkshopInventoryReportWorkbook, resolveWorkshopInventoryReportPeriod } from "../../utils/workshopInventoryReport.js";
 import { db } from "../../db/client.js";
+import { oilPartSql, stockCategoryLabel, stockCategorySql } from "../../utils/stockCategory.js";
 
 export default function registerInventoryRoutes(app, ctx) {
   const { getFxRate, getOnHand, getPartByCode, getSiteCode, hasColumn, hasTable, requireRoles } = ctx;
@@ -19,7 +20,9 @@ export default function registerInventoryRoutes(app, ctx) {
         p.part_name,
         p.critical,
         p.min_stock,
-        p.unit_cost
+        p.unit_cost,
+        ${stockCategorySql("p")} AS stock_category,
+        COALESCE(p.stock_category_source, 'auto') AS stock_category_source
         ${govSql},
         IFNULL(SUM(sm.quantity), 0) AS on_hand
       FROM parts p
@@ -31,6 +34,7 @@ export default function registerInventoryRoutes(app, ctx) {
     return rows.map(r => ({
       ...r,
       critical: Boolean(r.critical),
+      stock_category_label: stockCategoryLabel(r.stock_category),
       on_hand: Number(r.on_hand),
       unit_cost: Number(r.unit_cost || 0),
       stock_value: Number((Number(r.on_hand || 0) * Number(r.unit_cost || 0)).toFixed(2)),
@@ -108,7 +112,7 @@ export default function registerInventoryRoutes(app, ctx) {
           p.part_code,
           p.part_name,
           p.critical,
-          COALESCE(NULLIF(TRIM(p.department_code), ''), '') AS category,
+          ${stockCategorySql("p")} AS stock_category,
           COALESCE(NULLIF(TRIM(${hasSupplierMaster ? "sup.name" : "p.default_supplier_code"}), ''), '') AS supplier,
           COALESCE(mm.min_qty, p.min_stock, 0) AS min_qty,
           COALESCE(mm.max_qty, 0) AS max_qty,
@@ -124,14 +128,7 @@ export default function registerInventoryRoutes(app, ctx) {
           COALESCE(p.unit_cost, 0) AS unit_cost,
           COALESCE(ms.last_movement_at, '') AS last_movement_at,
           COALESCE(ms.location, 'Unspecified') AS location,
-          CASE WHEN (
-            LOWER(COALESCE(p.part_code, '')) LIKE '%oil%'
-            OR LOWER(COALESCE(p.part_name, '')) LIKE '%oil%'
-            OR LOWER(COALESCE(p.part_code, '')) LIKE '%lube%'
-            OR LOWER(COALESCE(p.part_name, '')) LIKE '%lube%'
-            OR LOWER(COALESCE(p.part_code, '')) LIKE '%grease%'
-            OR LOWER(COALESCE(p.part_name, '')) LIKE '%grease%'
-          ) THEN 1 ELSE 0 END AS is_lube
+          CASE WHEN ${oilPartSql("p")} THEN 1 ELSE 0 END AS is_lube
         FROM parts p
         LEFT JOIN movement_summary ms ON ms.part_id = p.id
         LEFT JOIN minmax mm ON mm.part_id = p.id
@@ -212,6 +209,8 @@ export default function registerInventoryRoutes(app, ctx) {
         p.critical,
         p.min_stock,
         p.unit_cost,
+        ${stockCategorySql("p")} AS stock_category,
+        COALESCE(p.stock_category_source, 'auto') AS stock_category_source,
         IFNULL(SUM(sm.quantity), 0) AS on_hand
       FROM parts p
       LEFT JOIN stock_movements sm ON sm.part_id = p.id
@@ -222,6 +221,7 @@ export default function registerInventoryRoutes(app, ctx) {
     `).all(...params).map((r) => ({
       ...r,
       critical: Boolean(r.critical),
+      stock_category_label: stockCategoryLabel(r.stock_category),
       on_hand: Number(r.on_hand || 0),
       unit_cost: Number(r.unit_cost || 0),
       stock_value: Number((Number(r.on_hand || 0) * Number(r.unit_cost || 0)).toFixed(2)),
@@ -288,14 +288,7 @@ export default function registerInventoryRoutes(app, ctx) {
         IFNULL(SUM(sm.quantity), 0) AS on_hand
       FROM parts p
       LEFT JOIN stock_movements sm ON sm.part_id = p.id
-      WHERE (
-        LOWER(IFNULL(p.part_code, '')) LIKE '%oil%' OR
-        LOWER(IFNULL(p.part_name, '')) LIKE '%oil%' OR
-        LOWER(IFNULL(p.part_code, '')) LIKE '%lube%' OR
-        LOWER(IFNULL(p.part_name, '')) LIKE '%lube%' OR
-        LOWER(IFNULL(p.part_code, '')) LIKE '%grease%' OR
-        LOWER(IFNULL(p.part_name, '')) LIKE '%grease%'
-      )
+      WHERE ${oilPartSql("p")}
       GROUP BY p.id
       HAVING on_hand < IFNULL(p.min_stock, 0)
       ORDER BY (IFNULL(p.min_stock, 0) - on_hand) DESC, p.part_code ASC

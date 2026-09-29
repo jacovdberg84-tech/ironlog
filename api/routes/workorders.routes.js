@@ -9,8 +9,10 @@ import {
   ensureServiceTemplateSchema,
   releaseWorkOrderReservations,
 } from "../utils/serviceTemplates.js";
+import { ensureStockCategorySchema, normalizeStockCategory, stockCategorySql } from "../utils/stockCategory.js";
 
 export default async function workOrderRoutes(app) {
+  ensureStockCategorySchema(db);
   ensureAuditTable(db);
   ensureServiceTemplateSchema(db);
   db.prepare(`
@@ -208,17 +210,14 @@ export default async function workOrderRoutes(app) {
     }
   }
 
-  function isOilPartRow(partName, partCode, consumableKind) {
-    const kind = String(consumableKind || "").trim().toLowerCase();
-    if (["oil", "lube", "lubricant", "hydraulic", "hydraulic_oil", "coolant", "grease"].includes(kind)) return true;
-    const txt = `${String(partName || "")} ${String(partCode || "")}`.toLowerCase();
-    return /\boil\b|\blube\b|\bgrease\b|\bhydraulic\b/.test(txt);
+  function isOilPartRow(stockCategory) {
+    return normalizeStockCategory(stockCategory) === "oil";
   }
 
   function sumIssuedOilCost(movements) {
     return (Array.isArray(movements) ? movements : []).reduce((sum, m) => {
       if (String(m.movement_type || "").toLowerCase() !== "out") return sum;
-      if (!isOilPartRow(m.part_name, m.part_code, m.consumable_kind)) return sum;
+      if (!isOilPartRow(m.stock_category)) return sum;
       const qty = Math.abs(Number(m.quantity || 0));
       const unit = Number(m.unit_cost || 0);
       return sum + (qty * (Number.isFinite(unit) ? unit : 0));
@@ -1604,6 +1603,7 @@ export default async function workOrderRoutes(app) {
         p.part_code,
         p.part_name,
         p.consumable_kind,
+        ${stockCategorySql("p")} AS stock_category,
         p.unit_cost
       FROM stock_movements sm
       JOIN parts p ON p.id = sm.part_id

@@ -11,7 +11,7 @@ const sampleData = {
     {
       part_code: "KIT-500",
       part_name: "500 hour service kit",
-      category: "Service kits",
+      stock_category: "part",
       supplier: "AML Spares",
       location: "Main stores",
       critical: true,
@@ -33,7 +33,7 @@ const sampleData = {
     {
       part_code: "BOLT-M16",
       part_name: "M16 flange bolt",
-      category: "Workshop spares",
+      stock_category: "part",
       supplier: "",
       location: "Main stores",
       critical: false,
@@ -55,7 +55,7 @@ const sampleData = {
     {
       part_code: "OIL-10W40",
       part_name: "10W40 engine oil",
-      category: "Lubricants",
+      stock_category: "oil",
       supplier: "Oil supplier",
       location: "Lube store",
       critical: false,
@@ -115,16 +115,44 @@ test("workshop inventory report creates a GM summary and live stock register tab
 
   assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), [
     "GM Summary",
-    "Workshop Spares",
+    "Parts",
+    "Components",
+    "G.E.T",
+    "Tyres",
     "Oils & Lubricants",
     "Stock Movements",
     "Critical Spares",
   ]);
   assert.equal(workbook.getWorksheet("GM Summary").getCell("A1").value, "IRONLOG Workshop Inventory Report");
-  assert.equal(workbook.getWorksheet("Workshop Spares").getCell("A4").value, "Stock Code");
-  assert.equal(workbook.getWorksheet("Workshop Spares").getCell("A5").value, "KIT-500");
+  assert.equal(workbook.getWorksheet("Parts").getCell("A4").value, "Stock Code");
+  assert.equal(workbook.getWorksheet("Parts").getCell("A5").value, "KIT-500");
   assert.equal(workbook.getWorksheet("Oils & Lubricants").getCell("A5").value, "OIL-10W40");
   assert.equal(workbook.getWorksheet("Stock Movements").getCell("A5").value, "2026-09-27");
   assert.equal(workbook.getWorksheet("Critical Spares").getCell("A5").value, "KIT-500");
-  assert.equal(workbook.getWorksheet("Workshop Spares").getCell("U5").value, "URGENT - STOCK OUT");
+  assert.equal(workbook.getWorksheet("Parts").getCell("U5").value, "URGENT - STOCK OUT");
+});
+
+test("each stock category gets its own register and the summary totals by category", async () => {
+  const data = {
+    items: [
+      ...sampleData.items,
+      { ...sampleData.items[1], part_code: "TIP-J300", part_name: "Tip Cat J300", stock_category: "get", is_lube: false },
+      { ...sampleData.items[1], part_code: "TYRE-2325", part_name: "23.5R25 tyre", stock_category: "tyre", is_lube: false },
+      { ...sampleData.items[1], part_code: "ENG-3306", part_name: "Cat 3306B engine", stock_category: "component", is_lube: false },
+    ],
+    movements: [],
+  };
+  const buffer = await buildWorkshopInventoryReportWorkbook(data, { reportType: "monthly", startDate: "2026-09-01", endDate: "2026-09-30" });
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  assert.equal(workbook.getWorksheet("G.E.T").getCell("A5").value, "TIP-J300");
+  assert.equal(workbook.getWorksheet("Tyres").getCell("A5").value, "TYRE-2325");
+  assert.equal(workbook.getWorksheet("Components").getCell("A5").value, "ENG-3306");
+  assert.equal(workbook.getWorksheet("Components").getCell("C5").value, "Components");
+  assert.equal(workbook.getWorksheet("Parts").getCell("A7").value, null, "only the two parts are on the Parts sheet");
+  const summary = workbook.getWorksheet("GM Summary");
+  const labels = [];
+  summary.eachRow((row) => labels.push(row.getCell(1).value));
+  assert.ok(labels.includes("Stock by category"));
+  for (const name of ["Parts", "Components", "G.E.T", "Tyres", "Oils & Lubricants", "Total"]) assert.ok(labels.includes(name), name);
 });

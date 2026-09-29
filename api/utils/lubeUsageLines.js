@@ -1,4 +1,5 @@
 // Line-level lube / oil usage (oil logs + stores issues to equipment / work orders).
+import { ensureStockCategorySchema, oilPartSql } from "./stockCategory.js";
 
 function hasColumn(db, table, col) {
   try {
@@ -18,29 +19,10 @@ function hasTable(db, table) {
   }
 }
 
-function lubePartNameCodeSql(alias = "p") {
-  const p = alias;
-  return `
-    LOWER(COALESCE(${p}.part_name, '')) LIKE '%oil%'
-    OR LOWER(COALESCE(${p}.part_name, '')) LIKE '%lube%'
-    OR LOWER(COALESCE(${p}.part_name, '')) LIKE '%grease%'
-    OR LOWER(COALESCE(${p}.part_name, '')) LIKE '%hydraulic%'
-    OR LOWER(COALESCE(${p}.part_code, '')) LIKE '%oil%'
-    OR LOWER(COALESCE(${p}.part_code, '')) LIKE '%lube%'
-  `;
-}
-
-/** SQL fragment: part row is oil / lube / grease (alias e.g. p). */
+/** SQL fragment: part row is an oil / lubricant store item (alias e.g. p). */
 export function lubePartWhereSql(db, alias = "p") {
-  const p = alias;
-  const nameCode = lubePartNameCodeSql(p);
-  if (hasColumn(db, "parts", "consumable_kind")) {
-    return `(
-      LOWER(COALESCE(${p}.consumable_kind, '')) IN ('oil', 'lube', 'lubricant', 'hydraulic', 'hydraulic_oil', 'coolant', 'grease')
-      OR ${nameCode}
-    )`;
-  }
-  return `(${nameCode})`;
+  ensureStockCategorySchema(db);
+  return oilPartSql(alias);
 }
 
 const ROLE_OIL_TYPES = new Set(["admin", "supervisor", "manager", "stores", "artisan", "operator"]);

@@ -48,7 +48,7 @@ test("GM stock route creates a live workbook with period balances from the Store
 
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(reply.rawPayload);
-  const register = workbook.getWorksheet("Workshop Spares");
+  const register = workbook.getWorksheet("Parts");
   assert.equal(register.getCell("A5").value, "KIT-500");
   assert.equal(register.getCell("J5").value, 10);
   assert.equal(register.getCell("K5").value, 5);
