@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { readWebAppSource } from './webAppSource.js';
 
 const root = new URL('../..', import.meta.url);
 const readWeb = (name) => readFileSync(new URL(`web/${name}`, root), 'utf8');
@@ -62,7 +63,7 @@ test('a blocked popup falls back to the current tab instead of displaying a popu
 });
 
 test('admin report buttons no longer navigate directly to protected API files', () => {
-  const app = readWeb('app.js');
+  const app = readWebAppSource();
   const maintenance = readWeb('maintenance.js');
   const breakdownOps = readWeb('breakdown-ops.js');
 
