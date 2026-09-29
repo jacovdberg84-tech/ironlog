@@ -56,7 +56,7 @@ test("GM stock controls describe the weekly seven-day report", () => {
 
 test("Stores page exposes the GM stock report download control", () => {
   const indexSource = readFileSync(new URL("../../web/index.html", import.meta.url), "utf8");
-  const routeSource = readFileSync(new URL("../routes/stock.routes.js", import.meta.url), "utf8");
+  const routeSource = readFileSync(new URL("../routes/stock/inventory.routes.js", import.meta.url), "utf8");
   assert.match(indexSource, /id="downloadGmStockReportXlsx"/);
   assert.match(routeSource, /app\.get\("\/gm-stock-report\.xlsx"/);
 });
