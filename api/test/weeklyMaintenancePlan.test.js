@@ -47,7 +47,7 @@ test('weekly planner UI uses authenticated fetch helper and restores button on f
 });
 import { buildDueListFromPlans } from '../utils/serviceSchedule.js';
 test('weekly route selects the next rotating service and returns a draft without writes',async()=>{
- const routeSource=fs.readFileSync(new URL('../routes/maintenance.routes.js',import.meta.url),'utf8');
+ const routeSource=fs.readFileSync(new URL('../routes/maintenance/weekly.routes.js',import.meta.url),'utf8');
  const route=routeSource.slice(routeSource.indexOf("  app.get('/weekly-plan'"),routeSource.indexOf('  app.get("/weekly-forum/summary"'));
  let handler, reads=0;
  // The 250h service was completed at 250h, so the next scheduled milestone
