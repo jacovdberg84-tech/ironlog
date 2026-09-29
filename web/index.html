@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=borris-chat-1" />
+  <link rel="stylesheet" href="./styles.css?v=mywork-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -168,137 +168,17 @@
           <span id="sidebarRoleName">Admin</span>
         </div>
       </div>
-      <div class="nav-section">
-        <div class="nav-section-title">Daily Work</div>
-        <a href="#" class="nav-item" data-tab="dash">
+      <div class="nav-section" data-nav-section="home">
+        <div class="nav-section-title">Home</div>
+        <a href="#" class="nav-item" data-tab="mywork" title="What needs your attention today">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
+          <span>My Work</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="dash" title="Fleet availability, utilisation and alerts at a glance">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
           <span>Dashboard</span>
         </a>
-        <a href="#" class="nav-item" data-tab="daily">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
-          <span>Daily Log</span>
-        </a>
-        <a href="maintenance.html" class="nav-item" data-nav="maintenance">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
-          <span>Maintenance</span>
-        </a>
-        <a href="breakdown-ops.html" class="nav-item" data-nav="maintenance">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-          <span>Breakdown Ops</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="operations">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 20h20"></path><path d="M5 20V10l7-7 7 7v10"></path><path d="M9 20v-6h6v6"></path></svg>
-          <span>Site Operations</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="dispatch">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
-          <span>Dispatch</span>
-        </a>
-      </div>
-
-      <div class="nav-section">
-        <div class="nav-section-title">Fleet & Workshop</div>
-        <a href="#" class="nav-item" data-tab="assets">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
-          <span>Assets</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="telematics">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"></path><circle cx="12" cy="14" r="2"></circle><path d="M12 12v-2"></path></svg>
-          <span>Telematics</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="cartrack">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-          <span>Fleet Track</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="workshop">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
-          <span>Workshop Help</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="fuel">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 22h18"></path><path d="M5 22V9a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v13"></path><path d="M11 9V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v3"></path><path d="M17 13h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2"></path></svg>
-          <span>Fuel Log</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="lube">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 2v8L8 12l-2-2V2"></path><path d="M14 2v8l2 2 2-2V2"></path><rect x="7" y="12" width="10" height="10"></rect></svg>
-          <span>Lubricants</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="vehicle">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-          <span>Inspections</span>
-        </a>
-      </div>
-
-      <div class="nav-section">
-        <div class="nav-section-title">Stores & Parts</div>
-        <a href="#" class="nav-item" data-tab="stock">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-          <span>Stock Control</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="parts-tracking">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 9.4l-9-5.19"></path><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-          <span>Parts Orders</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="procurement">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
-          <span>Supply Flow</span>
-        </a>
-      </div>
-
-      <div class="nav-section">
-        <div class="nav-section-title">Compliance & Quality</div>
-        <a href="#" class="nav-item" data-tab="legal">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-          <span>Legal Docs</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="approvals">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-          <span>Approvals</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="quality">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-          <span>Data Quality</span>
-        </a>
-      </div>
-
-      <div class="nav-section">
-        <div class="nav-section-title">Assistance</div>
-        <a href="#" class="nav-item" data-tab="ironmind">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.5-.8 2.8-2 3.5V11h2a3 3 0 0 1 3 3v1H5v-1a3 3 0 0 1 3-3h2V9.5A4 4 0 0 1 12 2z"></path><path d="M9 14l2 2 4-4"></path></svg>
-          <span>Ask Borris</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="docs">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-          <span>AI Documents</span>
-        </a>
-      </div>
-
-      <div class="nav-section">
-        <div class="nav-section-title">Reports & Administration</div>
-        <a href="#" class="nav-item" data-tab="reports">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
-          <span>Reports & Exports</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="finance">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
-          <span>Finance</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="enterprise">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></svg>
-          <span>Enterprise</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="exec">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 12 9 6 13 10 21 3"></polyline><polyline points="16 3 21 3 21 8"></polyline></svg>
-          <span>Exec Command</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="uploads">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-          <span>CSV Uploads</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="audit">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-          <span>Audit Trail</span>
-        </a>
-        <a href="#" class="nav-item" data-tab="tasks" id="navTasks">
+        <a href="#" class="nav-item" data-tab="tasks" id="navTasks" title="Your to-do list and team tasks">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
           <span>Tasks</span>
         </a>
@@ -329,7 +209,139 @@
           <div class="task-subheader">Saved Views</div>
           <div id="taskCustomViewSidebarLinks"></div>
         </div>
-        <a href="#" class="nav-item" data-tab="admin" id="navAdmin">
+      </div>
+
+      <div class="nav-section" data-nav-section="workshop">
+        <div class="nav-section-title">Workshop</div>
+        <a href="maintenance.html" class="nav-item" data-nav="maintenance" title="Services due, service history and workshop planning">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+          <span>Maintenance</span>
+        </a>
+        <a href="breakdown-ops.html" class="nav-item" data-nav="maintenance" title="Log and follow up machine breakdowns">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          <span>Breakdowns</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="vehicle" title="Pre-start and equipment checklists">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+          <span>Inspections</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="workshop" title="Manuals, parts books and workshop documents">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+          <span>Workshop Library</span>
+        </a>
+      </div>
+
+      <div class="nav-section" data-nav-section="fleet">
+        <div class="nav-section-title">Fleet</div>
+        <a href="#" class="nav-item" data-tab="assets" title="Machine and vehicle register">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
+          <span>Assets</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="daily" title="Capture daily hours and downtime">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+          <span>Daily Log</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="fuel" title="Fuel issues and consumption">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 22h18"></path><path d="M5 22V9a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v13"></path><path d="M11 9V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v3"></path><path d="M17 13h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2"></path></svg>
+          <span>Fuel</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="lube" title="Oil and lubricant usage">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 2v8L8 12l-2-2V2"></path><path d="M14 2v8l2 2 2-2V2"></path><rect x="7" y="12" width="10" height="10"></rect></svg>
+          <span>Lubricants</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="telematics" title="Telematics units and fault codes">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"></path><circle cx="12" cy="14" r="2"></circle><path d="M12 12v-2"></path></svg>
+          <span>Telematics</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="cartrack" title="Live vehicle positions">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+          <span>Fleet Track</span>
+        </a>
+      </div>
+
+      <div class="nav-section" data-nav-section="stores">
+        <div class="nav-section-title">Stores</div>
+        <a href="#" class="nav-item" data-tab="stock" title="Stock on hand, receiving and issuing parts">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+          <span>Stock Control</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="parts-tracking" title="Parts on order and off-site repairs">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 9.4l-9-5.19"></path><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+          <span>Parts Orders</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="procurement" title="Requisitions, approvals and supplier orders">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+          <span>Purchasing</span>
+        </a>
+      </div>
+
+      <div class="nav-section" data-nav-section="site">
+        <div class="nav-section-title">Site & Compliance</div>
+        <a href="#" class="nav-item" data-tab="operations" title="Daily site production and operations log">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 20h20"></path><path d="M5 20V10l7-7 7 7v10"></path><path d="M9 20v-6h6v6"></path></svg>
+          <span>Site Operations</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="dispatch" title="Machine and vehicle dispatch">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+          <span>Dispatch</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="legal" title="Licences, certificates and expiry dates">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          <span>Legal Docs</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="approvals" title="Items waiting for your approval">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+          <span>Approvals</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="quality" title="Find missing or inconsistent data">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+          <span>Data Quality</span>
+        </a>
+      </div>
+
+      <div class="nav-section" data-nav-section="reports">
+        <div class="nav-section-title">Reports</div>
+        <a href="#" class="nav-item" data-tab="reports" title="PDF and Excel reports">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+          <span>Reports & Exports</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="finance" title="Costs, budgets and month-end">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+          <span>Finance</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="exec" title="Executive command centre and board pack">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 12 9 6 13 10 21 3"></polyline><polyline points="16 3 21 3 21 8"></polyline></svg>
+          <span>Executive Overview</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="enterprise" title="Companies, sites, currencies and integrations">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></svg>
+          <span>Enterprise</span>
+        </a>
+      </div>
+
+      <div class="nav-section" data-nav-section="help">
+        <div class="nav-section-title">Help</div>
+        <a href="#" class="nav-item" data-tab="ironmind" title="Ask the AI assistant about your fleet">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.5-.8 2.8-2 3.5V11h2a3 3 0 0 1 3 3v1H5v-1a3 3 0 0 1 3-3h2V9.5A4 4 0 0 1 12 2z"></path><path d="M9 14l2 2 4-4"></path></svg>
+          <span>Ask Borris</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="docs" title="Draft documents with AI">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          <span>AI Documents</span>
+        </a>
+      </div>
+
+      <div class="nav-section" data-nav-section="admin">
+        <div class="nav-section-title">Admin</div>
+        <a href="#" class="nav-item" data-tab="uploads" title="Bulk import data from CSV files">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+          <span>CSV Uploads</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="audit" title="Who changed what, and when">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          <span>Audit Trail</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="admin" id="navAdmin" title="Manage users, roles and permissions">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
           <span>Users & Access</span>
         </a>
@@ -341,29 +353,50 @@
   <div class="main-content" id="mainContent">
     <div class="mobile-nav" id="mobileNav">
       <select id="tabSelect">
-        <option value="dash">Dashboard</option>
-        <option value="daily">Daily Log</option>
-        <option value="assets">Assets</option>
-        <option value="telematics">Telematics</option>
-        <option value="cartrack">Fleet Track</option>
-        <option value="workshop">Workshop Library</option>
-        <option value="fuel">Fuel</option>
-        <option value="lube">Lube</option>
-        <option value="stock">Stores</option>
-        <option value="parts-tracking">Parts Tracking</option>
-        <option value="legal">Legal Docs</option>
-        <option value="uploads">CSV Uploads</option>
-        <option value="reports">Reports</option>
-        <option value="approvals">Approvals</option>
-        <option value="procurement">Supply Flow</option>
-        <option value="operations">Site Operations</option>
-        <option value="dispatch">Dispatch</option>
-        <option value="quality">Data Quality</option>
-        <option value="audit">Audit Trail</option>
-        <option value="vehicle">Checklists</option>
-        <option value="admin">User admin</option>
-        <option value="ironmind">Borris AI</option>
-        <option value="docs">AI Documents</option>
+        <optgroup label="Home">
+          <option value="mywork">My Work</option>
+          <option value="dash">Dashboard</option>
+          <option value="tasks">Tasks</option>
+        </optgroup>
+        <optgroup label="Workshop">
+          <option value="vehicle">Inspections</option>
+          <option value="workshop">Workshop Library</option>
+        </optgroup>
+        <optgroup label="Fleet">
+          <option value="assets">Assets</option>
+          <option value="daily">Daily Log</option>
+          <option value="fuel">Fuel</option>
+          <option value="lube">Lubricants</option>
+          <option value="telematics">Telematics</option>
+          <option value="cartrack">Fleet Track</option>
+        </optgroup>
+        <optgroup label="Stores">
+          <option value="stock">Stock Control</option>
+          <option value="parts-tracking">Parts Orders</option>
+          <option value="procurement">Purchasing</option>
+        </optgroup>
+        <optgroup label="Site & Compliance">
+          <option value="operations">Site Operations</option>
+          <option value="dispatch">Dispatch</option>
+          <option value="legal">Legal Docs</option>
+          <option value="approvals">Approvals</option>
+          <option value="quality">Data Quality</option>
+        </optgroup>
+        <optgroup label="Reports">
+          <option value="reports">Reports & Exports</option>
+          <option value="finance">Finance</option>
+          <option value="exec">Executive Overview</option>
+          <option value="enterprise">Enterprise</option>
+        </optgroup>
+        <optgroup label="Help">
+          <option value="ironmind">Ask Borris</option>
+          <option value="docs">AI Documents</option>
+        </optgroup>
+        <optgroup label="Admin">
+          <option value="uploads">CSV Uploads</option>
+          <option value="audit">Audit Trail</option>
+          <option value="admin">Users & Access</option>
+        </optgroup>
       </select>
     </div>
 
@@ -374,8 +407,21 @@
     </div>
     <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 
+    <!-- MY WORK -->
+    <section class="panel show" id="tab-mywork">
+      <div class="mywork-head">
+        <div>
+          <span class="eyebrow">My Work</span>
+          <h2 id="myWorkGreeting">What needs your attention</h2>
+          <p class="muted" id="myWorkSubtitle">Loading…</p>
+        </div>
+        <button type="button" class="btn-secondary" id="myWorkRefresh">Refresh</button>
+      </div>
+      <div class="mywork-grid" id="myWorkGrid" aria-live="polite"></div>
+    </section>
+
     <!-- DASHBOARD -->
-    <section class="panel show" id="tab-dash">
+    <section class="panel" id="tab-dash">
 
       <div class="dashboard-action-hub">
         <div class="dashboard-action-intro">
@@ -7649,6 +7695,7 @@
   <datalist id="teamMemberList"></datalist>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=2"></script>
-  <script src="./app.js?v=86"></script>
+  <script src="./app.js?v=87"></script>
+  <script src="./my-work.js?v=1"></script>
 </body>
 </html>

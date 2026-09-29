@@ -1,6 +1,7 @@
 // IRONLOG/api/routes/alerts.routes.js
 import { db } from "../db/client.js";
 import { isDate } from "../utils/request.js";
+import { queryLowStock } from "../utils/myWork.js";
 
 export default async function alertsRoutes(app) {
   // GET /api/alerts?asof=2026-02-27
@@ -11,20 +12,7 @@ export default async function alertsRoutes(app) {
       return reply.code(400).send({ error: "asof must be YYYY-MM-DD" });
     }
 
-    const lowStock = db.prepare(`
-      SELECT
-        p.part_code,
-        p.part_name,
-        p.critical,
-        p.min_stock,
-        IFNULL(SUM(sm.quantity),0) AS on_hand
-      FROM parts p
-      LEFT JOIN stock_movements sm ON sm.part_id = p.id
-      GROUP BY p.id
-      HAVING on_hand < p.min_stock
-      ORDER BY p.critical DESC, on_hand ASC
-      LIMIT 100
-    `).all().map(r => ({ ...r, critical: Boolean(r.critical), on_hand: Number(r.on_hand) }));
+    const lowStock = queryLowStock(db, 100);
 
     const criticalOnOrder = db.prepare(`
       SELECT
