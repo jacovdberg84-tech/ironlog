@@ -77,21 +77,21 @@
   const LDV_CHECKS = [{
     title: "",
     items: [
-      { key: "brakes_ok", label: "Brakes" },
-      { key: "lights_ok", label: "Lights and indicators" },
-      { key: "tyres_ok", label: "Tyres (pressure and damage)" },
-      { key: "oil_coolant_ok", label: "Oil and coolant levels" },
-      { key: "leaks_damage_ok", label: "No leaks or body damage" },
-      { key: "safety_items_ok", label: "Safety items (triangle, extinguisher, first aid)" },
+      { key: "brakes_ok", label: "Brakes", label_pt: "Travões" },
+      { key: "lights_ok", label: "Lights and indicators", label_pt: "Luzes e piscas" },
+      { key: "tyres_ok", label: "Tyres (pressure and damage)", label_pt: "Pneus (pressão e danos)" },
+      { key: "oil_coolant_ok", label: "Oil and coolant levels", label_pt: "Níveis de óleo e líquido de arrefecimento" },
+      { key: "leaks_damage_ok", label: "No leaks or body damage", label_pt: "Sem fugas ou danos na carroçaria" },
+      { key: "safety_items_ok", label: "Safety items (triangle, extinguisher, first aid)", label_pt: "Equipamento de segurança (triângulo, extintor, primeiros socorros)" },
     ],
   }];
 
   function updateProgress(p) {
     const el = qs("pcProgress");
     if (!el) return;
-    el.innerHTML = `<strong>${p.answered} of ${p.total}</strong> checked${p.faults ? ` · <span class="pc-fault-count">${p.faults} fault${p.faults === 1 ? "" : "s"}</span>` : ""}`;
+    el.innerHTML = `<strong>${PC.t("progress", { a: p.answered, t: p.total })}</strong>${p.faults ? ` · <span class="pc-fault-count">${PC.t("faultCount", { n: p.faults })}</span>` : ""}`;
     const btn = qs("saveBtn");
-    if (btn) btn.textContent = p.faults ? "Submit and report faults" : "Submit pre-start";
+    if (btn) btn.textContent = p.faults ? PC.t("submitFaults") : PC.t("submit");
     if (p.answered === p.total && qs("msg")?.classList.contains("err")) msg("");
   }
 
@@ -164,10 +164,10 @@
     if (!el) return;
     const queued = getOfflineQueue().length;
     if (navigator.onLine) {
-      el.textContent = queued ? `Online. ${queued} pre-start submission(s) waiting to sync.` : "Online.";
+      el.textContent = queued ? `${PC.t("online")} ${PC.t("queued", { n: queued })}` : PC.t("online");
       return;
     }
-    el.textContent = queued ? `Offline mode. ${queued} submission(s) queued.` : "Offline mode.";
+    el.textContent = queued ? `${PC.t("offline")} ${PC.t("queued", { n: queued })}` : PC.t("offline");
   }
 
   async function loadContext() {
@@ -176,7 +176,7 @@
       txt("sub", "Missing asset_code in URL.");
       return;
     }
-    txt("sub", `Loading ${currentAssetCode}...`);
+    txt("sub", PC.t("loading"));
     msg("");
     showSyncState(null);
     const q = new URLSearchParams();
@@ -195,7 +195,7 @@
     const asset = data?.asset || {};
     previousKm = data?.previous_odometer_km == null ? null : Number(data.previous_odometer_km);
 
-    txt("sub", "Tap OK or Fault for every check.");
+    txt("sub", PC.t("tapEvery"));
     txt("assetCode", String(asset.asset_code || currentAssetCode));
     txt("assetName", String(asset.asset_name || ""));
     document.title = `${String(asset.asset_code || currentAssetCode)} pre-start`;
@@ -214,7 +214,7 @@
       if (qs("notes")) qs("notes").value = saved.notes;
       applyChecklist(existing.checklist);
       PC.applyFaultComments(qs("checklistRoot"), saved.comments);
-      msg("You already submitted this pre-start today. Change any answer and submit again if needed.", "ok");
+      msg(PC.t("already"), "ok");
     } else {
       PC.rememberOperator(qs("inspectorName"));
     }
@@ -252,9 +252,9 @@
   async function submitPrestart() {
     msg("");
     const odometerRaw = String(qs("odometerKm")?.value || "").trim();
-    if (!odometerRaw) throw new Error("Enter current odometer KM.");
+    if (!odometerRaw) throw new Error(PC.t("enterKm"));
     const odometer = Number(odometerRaw);
-    if (!Number.isFinite(odometer) || odometer < 0) throw new Error("Odometer must be a valid number >= 0.");
+    if (!Number.isFinite(odometer) || odometer < 0) throw new Error(PC.t("badNumber"));
     if (previousKm != null && odometer < previousKm) {
       const ok = window.confirm(
         `KM ${odometer.toFixed(1)} is less than previous (${previousKm.toFixed(1)}). Submit pre-start anyway?`
@@ -273,12 +273,12 @@
     if (answers.unanswered.length) {
       root.querySelectorAll(".pc-item:not([data-state=ok]):not([data-state=fault])").forEach((el) => el.classList.add("is-missing"));
       PC.firstUnanswered(root)?.scrollIntoView({ behavior: "smooth", block: "center" });
-      throw new Error(`Tap OK or Fault for ${answers.unanswered.length} more check${answers.unanswered.length === 1 ? "" : "s"}.`);
+      throw new Error(PC.t("moreChecks", { n: answers.unanswered.length }));
     }
     const inspector_name = String(qs("inspectorName")?.value || "").trim();
     if (!inspector_name) {
       qs("inspectorName")?.focus();
-      throw new Error("Enter your name.");
+      throw new Error(PC.t("enterName"));
     }
 
     const body = {
@@ -289,6 +289,7 @@
       notes: String(qs("notes")?.value || "").trim(),
       checklist: answers.checklist,
       faults: answers.faults,
+      lang: PC.lang(),
     };
     const faultCount = Object.keys(answers.faults).length;
     try { localStorage.setItem("ironlog_prestart_operator", inspector_name); } catch {}
@@ -296,7 +297,7 @@
       upsertOfflineQueue(body);
       refreshOfflineBanner();
       showSyncState(null);
-      showDone(faultCount ? "fault" : "ok", "Saved on this phone", `No signal: the pre-start will send automatically when you are back online.${faultCount ? " You marked faults — tell your foreman before you drive." : ""}`);
+      showDone(faultCount ? "fault" : "ok", PC.t("savedPhone"), `${PC.t("savedPhoneText")}${faultCount ? PC.t("offlineFault") : ""}`);
       return;
     }
 
@@ -316,13 +317,20 @@
       if (qs("photoInput")?.files?.[0]) {
         try {
           await uploadPhoto();
-          photoNote = " Photo attached.";
+          photoNote = PC.t("photoAttached");
         } catch (e) {
-          photoNote = ` Photo not attached: ${e.message || e}`;
+          photoNote = `${PC.t("photoNot")}${e.message || e}`;
         }
       }
-      if (Number(data?.faults || 0) > 0) showDone("fault", "Faults reported", `${data.message}${photoNote}`);
-      else showDone(data?.km_review_needed ? "fault" : "ok", data?.km_review_needed ? "Saved — check the km" : "Pre-start done", `${data?.message || "Pre-start saved."}${photoNote}`);
+      if (Number(data?.faults || 0) > 0) {
+        const list = Object.keys(answers.faults).map((k) => root.querySelector(`.pc-item[data-key="${CSS.escape(k)}"] .pc-label`)?.firstChild?.textContent || k).join(", ");
+        const wo = data.fault_work_order_id ? PC.t("woRef", { id: data.fault_work_order_id }) : "";
+        showDone("fault", PC.t("faultsTitle"), `${PC.t("faultsText", { n: data.faults, wo, list })}${data?.km_review_needed ? ` ${PC.t("kmText")}` : ""}${photoNote}`);
+      } else if (data?.km_review_needed) {
+        showDone("fault", PC.t("kmTitle"), `${PC.t("kmText")}${photoNote}`);
+      } else {
+        showDone("ok", PC.t("doneTitle"), `${PC.t("doneText", { asset: currentAssetCode, date: currentDate })}${photoNote}`);
+      }
       showSyncState(data?.daily_input_sync || null);
       await syncOfflineQueue();
     } finally {
@@ -365,6 +373,11 @@
   });
   window.addEventListener("offline", refreshOfflineBanner);
 
+  PC.bindLanguageToggle(() => {
+    PC.render(qs("checklistRoot"), LDV_CHECKS, updateProgress);
+    refreshOfflineBanner();
+    if (qs("sub") && qs("checklistRoot")?.querySelector(".pc-item")) txt("sub", PC.t("tapEvery"));
+  });
   loadContext().catch((e) => msg(String(e.message || e), "err"));
   refreshOfflineBanner();
   syncOfflineQueue().catch(() => {});

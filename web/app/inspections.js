@@ -119,13 +119,17 @@ function setClPtHelp(on) {
   localStorage.setItem(CL_PT_HELP_KEY, on ? "1" : "0");
 }
 
+// Accents and case are ignored when matching Portuguese ("travoes" finds "Travões").
+function clFold(text) {
+  return String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
 function clBuildPtGlossaryReverse() {
   if (clPtGlossaryReverse) return clPtGlossaryReverse;
   clPtGlossaryReverse = {};
   for (const [en, pt] of Object.entries(CL_PT_GLOSSARY)) {
-    if (pt && !clPtGlossaryReverse[pt.toLowerCase()]) {
-      clPtGlossaryReverse[pt.toLowerCase()] = en;
-    }
+    const key = clFold(pt);
+    if (pt && !clPtGlossaryReverse[key]) clPtGlossaryReverse[key] = en;
   }
   return clPtGlossaryReverse;
 }
@@ -148,15 +152,16 @@ function clPtToEn(text) {
   const src = String(text || "").trim();
   if (!src) return "";
   const reverse = clBuildPtGlossaryReverse();
-  if (reverse[src.toLowerCase()]) return reverse[src.toLowerCase()];
-  let out = src;
+  if (reverse[clFold(src)]) return reverse[clFold(src)];
+  // Replace phrase by phrase on the accent-folded text.
+  let out = clFold(src);
   const phrases = Object.entries(reverse).sort((a, b) => b[0].length - a[0].length);
   for (const [pt, en] of phrases) {
     if (pt.length < 4) continue;
-    const re = new RegExp(pt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    const re = new RegExp(pt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
     out = out.replace(re, en);
   }
-  return out;
+  return out === clFold(src) ? src : out;
 }
 
 function clTranslateFreeText(text, direction = "pt-en") {
@@ -165,16 +170,17 @@ function clTranslateFreeText(text, direction = "pt-en") {
   return direction === "en-pt" ? clEnToPt(raw) : clPtToEn(raw);
 }
 
-function clLabelHtml(englishLabel) {
+function clLabelHtml(englishLabel, portugueseLabel = "") {
   const en = String(englishLabel || "");
   if (!isClPtHelpOn()) return escapeHtml(en);
-  const pt = clEnToPt(en);
+  // The server sends label_pt for machine checklists; the glossary covers the rest.
+  const pt = String(portugueseLabel || "") || clEnToPt(en);
   if (!pt || pt.toLowerCase() === en.toLowerCase()) return escapeHtml(en);
   return `${escapeHtml(en)}<small class="cl-label-pt">${escapeHtml(pt)}</small>`;
 }
 
-function clSectionTitleHtml(title) {
-  return clLabelHtml(title);
+function clSectionTitleHtml(title, titlePt = "") {
+  return clLabelHtml(title, titlePt);
 }
 
 async function refreshClChecklistLabels() {
@@ -182,18 +188,33 @@ async function refreshClChecklistLabels() {
   await selectChecklistAsset(clSelectedAssetCode).catch(() => {});
 }
 
-function runClPtTranslate() {
+async function runClPtTranslate() {
   const out = qs("clPtTranslateOut");
   const input = String(qs("clPtTranslateIn")?.value || "").trim();
   const dir = String(qs("clPtTranslateDir")?.value || "pt-en");
+  if (!out) return;
   if (!input) {
-    if (out) out.textContent = "Enter text to translate.";
+    out.textContent = "Enter text to translate.";
     return;
   }
+  out.textContent = "Translating…";
+  // Full sentences go through the server's AI translation; the checklist
+  // glossary is the fallback when AI is not set up or unreachable.
+  try {
+    const data = await fetchJson(`${API}/api/translate`, {
+      method: "POST",
+      body: JSON.stringify({ text: input, to: dir === "en-pt" ? "pt" : "en" }),
+    });
+    if (data?.ok && data.text) {
+      out.textContent = data.text;
+      return;
+    }
+  } catch {}
   const translated = clTranslateFreeText(input, dir);
-  if (out) {
-    out.textContent = translated || "(No translation found — try shorter phrases or checklist terms.)";
-  }
+  const unchanged = !translated || clFold(translated) === clFold(input);
+  out.textContent = unchanged
+    ? "No translation found. Only checklist words are known offline — ask your admin to set up AI translation for full sentences."
+    : `${translated}\n(Word list only — check the meaning.)`;
 }
 
 function clCheckDate() {
@@ -514,7 +535,7 @@ function renderClMachineChecklist(template, checklist) {
     wrap.className = "cl-sec";
     const title = document.createElement("div");
     title.className = "cl-sec-title";
-    title.innerHTML = clSectionTitleHtml(String(sec.title || ""));
+    title.innerHTML = clSectionTitleHtml(String(sec.title || ""), sec.title_pt);
     wrap.appendChild(title);
     for (const it of sec.items || []) {
       const key = String(it.key || "").trim();
@@ -522,7 +543,7 @@ function renderClMachineChecklist(template, checklist) {
       const id = clSafeDomId(key);
       const row = document.createElement("div");
       row.className = "cl-check-row";
-      row.innerHTML = `<input type="checkbox" id="${id}" data-key="${escapeHtml(key)}" ${byKey[key] ? "checked" : ""} /><label for="${id}">${clLabelHtml(it.label || key)}</label>`;
+      row.innerHTML = `<input type="checkbox" id="${id}" data-key="${escapeHtml(key)}" ${byKey[key] ? "checked" : ""} /><label for="${id}">${clLabelHtml(it.label || key, it.label_pt)}</label>`;
       wrap.appendChild(row);
     }
     root.appendChild(wrap);
@@ -651,6 +672,9 @@ async function submitChecklistForm() {
   const checklist = readClChecklistObject();
   const inspector_name = String(qs("clInspector")?.value || "").trim();
   const notes = String(qs("clNotes")?.value || "").trim();
+  // An unticked check is saved as a fault and opens a repair work order.
+  const unticked = Object.values(checklist).filter((v) => !v).length;
+  if (unticked && !confirm(`${unticked} check${unticked === 1 ? " is" : "s are"} not ticked. ${unticked === 1 ? "It" : "They"} will be saved as fault${unticked === 1 ? "" : "s"} and sent to the workshop as a repair work order. Continue?`)) return;
 
   if (clSelectedKind === "ldv") {
     const odoRaw = String(qs("clOdometer")?.value || "").trim();
@@ -993,9 +1017,9 @@ function initChecklistTab() {
   if (ins && !ins.value) ins.value = getSessionUser();
 
   qs("clRefreshHub")?.addEventListener("click", () => loadChecklistHub().catch((e) => setStatus(String(e.message || e))));
-  qs("clPtTranslateBtn")?.addEventListener("click", runClPtTranslate);
+  qs("clPtTranslateBtn")?.addEventListener("click", () => runClPtTranslate().catch(() => {}));
   qs("clPtTranslateIn")?.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") runClPtTranslate();
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") runClPtTranslate().catch(() => {});
   });
   qs("clCheckDate")?.addEventListener("change", () => {
     clSelectedAssetCode = "";
