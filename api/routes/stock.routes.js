@@ -9,9 +9,11 @@ import registerCycleCountsRoutes from "./stock/cycle-counts.routes.js";
 import registerLubeRoutes from "./stock/lube.routes.js";
 import registerMovementsRoutes from "./stock/movements.routes.js";
 import registerPartOrdersRoutes from "./stock/part-orders.routes.js";
+import { autoCategorizePart, ensureStockCategorySchema } from "../utils/stockCategory.js";
 
 export default async function stockRoutes(app) {
   ensureAuditTable(db);
+  ensureStockCategorySchema(db);
   ensureMasterDataSchema();
   ensureCostAllocationSchema(db);
 
@@ -411,7 +413,7 @@ export default async function stockRoutes(app) {
       const part_name = String(orderRow?.part_name || part_code).trim() || part_code;
       const uc = Math.max(0, Number(orderRow?.unit_cost || 0));
       try {
-        insertPart.run(part_code, part_name, uc, null, null, null);
+        autoCategorizePart(db, insertPart.run(part_code, part_name, uc, null, null, null).lastInsertRowid);
       } catch {
         // race — re-read
       }

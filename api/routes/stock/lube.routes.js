@@ -4,6 +4,7 @@ import { db } from "../../db/client.js";
 import { fetchLubeMonthStockSnapshot } from "../../utils/lubeMonthStock.js";
 import { resolveLogCostCenterCode } from "../../utils/costAllocation.js";
 import { writeAudit } from "../../utils/audit.js";
+import { oilPartSql } from "../../utils/stockCategory.js";
 
 export default function registerLubeRoutes(app, ctx) {
   const {
@@ -26,16 +27,7 @@ export default function registerLubeRoutes(app, ctx) {
     if (location_code && !location) {
       return reply.code(404).send({ error: `location_code not found: ${location_code}` });
     }
-    const where = [
-      "(" +
-        "LOWER(IFNULL(p.part_code, '')) LIKE '%oil%' OR " +
-        "LOWER(IFNULL(p.part_name, '')) LIKE '%oil%' OR " +
-        "LOWER(IFNULL(p.part_code, '')) LIKE '%lube%' OR " +
-        "LOWER(IFNULL(p.part_name, '')) LIKE '%lube%' OR " +
-        "LOWER(IFNULL(p.part_code, '')) LIKE '%grease%' OR " +
-        "LOWER(IFNULL(p.part_name, '')) LIKE '%grease%'" +
-      ")",
-    ];
+    const where = [oilPartSql("p")];
     const params = [];
 
     if (q) {
@@ -120,16 +112,8 @@ export default function registerLubeRoutes(app, ctx) {
 
     const lubeParts = db.prepare(`
       SELECT id, part_code, part_name, min_stock
-      FROM parts
-      WHERE (
-        LOWER(IFNULL(part_code, '')) LIKE '%oil%' OR
-        LOWER(IFNULL(part_name, '')) LIKE '%oil%' OR
-        LOWER(IFNULL(part_code, '')) LIKE '%lube%' OR
-        LOWER(IFNULL(part_name, '')) LIKE '%lube%' OR
-        LOWER(IFNULL(part_code, '')) LIKE '%grease%' OR
-        LOWER(IFNULL(part_name, '')) LIKE '%grease%'
-      )
-      AND LOWER(IFNULL(part_name, '')) NOT LIKE '%filter%'
+      FROM parts p
+      WHERE ${oilPartSql("p")}
       ORDER BY part_code ASC
       LIMIT 500
     `).all();

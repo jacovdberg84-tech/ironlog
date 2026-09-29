@@ -8135,3 +8135,11 @@ body.uc-qr-locked #ucAsset {
   .mywork-head { flex-direction: column; align-items: stretch; }
   .mywork-grid { grid-template-columns: 1fr; }
 }
+
+/* Stock category on stock cards */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.stores-stock-category { display: inline-block; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.stores-stock-category select {
+  padding: 3px 6px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--text); font-size: 12px;
+}

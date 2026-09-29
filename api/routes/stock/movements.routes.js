@@ -3,6 +3,7 @@
 import { db } from "../../db/client.js";
 import { normalizeMdmCode, validateAgainstMdmPolicy, validatePartGovernanceOptional } from "../../utils/masterdataGovernance.js";
 import { writeAudit } from "../../utils/audit.js";
+import { autoCategorizePart } from "../../utils/stockCategory.js";
 
 export default function registerMovementsRoutes(app, ctx) {
   const {
@@ -94,7 +95,7 @@ export default function registerMovementsRoutes(app, ctx) {
         if (!pv.ok) return reply.code(400).send({ error: pv.error });
         try {
           const uc = unit_cost_usd != null ? Number(unit_cost_usd.toFixed(6)) : 0;
-          insertPart.run(part_code, part_name, uc, department_code, default_supplier_code, data_owner_username);
+          autoCategorizePart(db, insertPart.run(part_code, part_name, uc, department_code, default_supplier_code, data_owner_username).lastInsertRowid);
         } catch (e) {
           // In case of race, re-read
         }

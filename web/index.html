@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=mywork-1" />
+  <link rel="stylesheet" href="./styles.css?v=stockcat-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -245,9 +245,9 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 22h18"></path><path d="M5 22V9a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v13"></path><path d="M11 9V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v3"></path><path d="M17 13h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2"></path></svg>
           <span>Fuel</span>
         </a>
-        <a href="#" class="nav-item" data-tab="lube" title="Oil and lubricant usage">
+        <a href="#" class="nav-item" data-tab="lube" title="Oils issued to machines, and oil stock">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 2v8L8 12l-2-2V2"></path><path d="M14 2v8l2 2 2-2V2"></path><rect x="7" y="12" width="10" height="10"></rect></svg>
-          <span>Lubricants</span>
+          <span>Oils</span>
         </a>
         <a href="#" class="nav-item" data-tab="telematics" title="Telematics units and fault codes">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"></path><circle cx="12" cy="14" r="2"></circle><path d="M12 12v-2"></path></svg>
@@ -366,7 +366,7 @@
           <option value="assets">Assets</option>
           <option value="daily">Daily Log</option>
           <option value="fuel">Fuel</option>
-          <option value="lube">Lubricants</option>
+          <option value="lube">Oils</option>
           <option value="telematics">Telematics</option>
           <option value="cartrack">Fleet Track</option>
         </optgroup>
@@ -1978,6 +1978,17 @@
               <div class="form-field">
                 <label>Filter</label>
                 <input id="spFilter" class="w-full" placeholder="Search part code or description..." />
+              </div>
+              <div class="form-field">
+                <label for="spCategory">Category</label>
+                <select id="spCategory" class="w-full">
+                  <option value="">All categories</option>
+                  <option value="part">Parts</option>
+                  <option value="component">Components</option>
+                  <option value="get">G.E.T</option>
+                  <option value="tyre">Tyres</option>
+                  <option value="oil">Oils &amp; lubricants</option>
+                </select>
               </div>
               <div class="form-field">
                 <label>Sort By</label>
@@ -7704,7 +7715,7 @@
   <script src="./app/dashboard.js?v=89"></script>
   <script src="./app/borris.js?v=89"></script>
   <script src="./app/fuel-lube.js?v=89"></script>
-  <script src="./app/stock.js?v=89"></script>
+  <script src="./app/stock.js?v=90"></script>
   <script src="./app/compliance.js?v=89"></script>
   <script src="./app/tabs.js?v=89"></script>
   <script src="./app/uploads.js?v=89"></script>

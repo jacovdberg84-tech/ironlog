@@ -102,6 +102,15 @@ function expandRouteRoles(roles, url = "") {
   return [...out];
 }
 
+// Many routes check only x-user-role against the older role names (supervisor,
+// operator, stores). Prefer those over the newer names they stand in for, so a
+// storeman passes "stores" checks just like a workshop admin passes
+// "supervisor" ones. x-user-roles still carries every role.
+const NEWER_ROLE_NAMES = new Set(["workshop_admin", "plant_clerk", "storeman"]);
+export function primaryRouteRole(routeRoles) {
+  return routeRoles.find((role) => !NEWER_ROLE_NAMES.has(role)) || routeRoles[0];
+}
+
 function applyLegacyRouteRoles(req) {
   const roles = [
     ...String(req.headers["x-user-roles"] || "").split(","),
@@ -111,7 +120,7 @@ function applyLegacyRouteRoles(req) {
     .filter((role) => VALID_ROLES.includes(role));
   if (!roles.length) return;
   const routeRoles = expandRouteRoles([...new Set(roles)], req.url.split("?")[0]);
-  req.headers["x-user-role"] = routeRoles.find((role) => role !== "workshop_admin" && role !== "plant_clerk") || routeRoles[0];
+  req.headers["x-user-role"] = primaryRouteRole(routeRoles);
   req.headers["x-user-roles"] = routeRoles.join(",");
 }
 
@@ -175,7 +184,7 @@ export async function ironlogAuthHook(req, reply) {
       }
       const routeRoles = expandRouteRoles(roles, url);
       req.headers["x-user-name"] = row.username;
-      req.headers["x-user-role"] = routeRoles.find((r) => r !== "workshop_admin" && r !== "plant_clerk") || roles[0];
+      req.headers["x-user-role"] = primaryRouteRole(routeRoles) || roles[0];
       req.headers["x-user-roles"] = routeRoles.join(",");
       req.headers["x-user-department"] = String(row.department || "").trim().toLowerCase();
       const perms = getPermissionsForRoles(roles);

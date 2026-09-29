@@ -1,3 +1,4 @@
+import { ensureStockCategorySchema, oilPartSql } from "./stockCategory.js";
 /**
  * Lube-store month opening/closing balances from stock_movements (cumulative qty).
  * Opening = on-hand at end of previous calendar month; closing = end of selected month.
@@ -9,17 +10,11 @@ function stockMovementDateExpr(db) {
   return hasCreatedAt ? "DATE(sm.created_at)" : "DATE(sm.movement_date)";
 }
 
-const LUBE_PART_FILTER = `(
-  LOWER(IFNULL(p.part_code, '')) LIKE '%oil%' OR
-  LOWER(IFNULL(p.part_name, '')) LIKE '%oil%' OR
-  LOWER(IFNULL(p.part_code, '')) LIKE '%lube%' OR
-  LOWER(IFNULL(p.part_name, '')) LIKE '%lube%' OR
-  LOWER(IFNULL(p.part_code, '')) LIKE '%grease%' OR
-  LOWER(IFNULL(p.part_name, '')) LIKE '%grease%'
-)`;
+const LUBE_PART_FILTER = oilPartSql("p");
 
 /** @param {*} db SQLite database (better-sqlite3) */
 export function fetchLubeMonthStockSnapshot(db, opts) {
+  ensureStockCategorySchema(db);
   const month = String(opts?.month || "").trim();
   if (!/^\d{4}-\d{2}$/.test(month)) {
     throw new Error("month must be YYYY-MM");
