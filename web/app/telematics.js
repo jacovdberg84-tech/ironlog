@@ -1272,3 +1272,100 @@ function initCartrackSpeedFloat() {
     refreshCartrackSpeedFloat({ refresh: true }).catch(() => {});
   }, CARTRACK_SPEED_FLOAT_POLL_MS);
 }
+
+/** Start-up: Telematics, Cartrack and GPS link controls. Called once from init() in init.js. */
+function wireTelematicsControls() {
+  initCartrackAdminPanel().catch(() => {});
+  initCartrackTrackingTab();
+
+  qs("cartrackSaveSettingsBtn")?.addEventListener("click", () =>
+    saveCartrackAdminSettings().catch((e) => setCartrackAdminResult(String(e.message || e), false))
+  );
+  qs("cartrackTestBtn")?.addEventListener("click", () => testCartrackConnection().catch(() => {}));
+  qs("cartrackRunMorningBtn")?.addEventListener("click", () => runCartrackMorningNow().catch(() => {}));
+  qs("unitechSaveSettingsBtn")?.addEventListener("click", () =>
+    saveUnitechAdminSettings().catch((e) => setUnitechAdminResult(String(e.message || e), false))
+  );
+  qs("unitechTestBtn")?.addEventListener("click", () => testUnitechConnection().catch(() => {}));
+  qs("gpsLinkSaveBtn")?.addEventListener("click", () => saveGpsVehicleLink().catch(() => {}));
+  qs("gpsLinkRefreshBtn")?.addEventListener("click", () => loadGpsVehicleLinksAdmin().catch(() => {}));
+  qs("gpsLinkApplyBtn")?.addEventListener("click", () => applyGpsVehicleLinks().catch(() => {}));
+  qs("gpsVehicleLinksList")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-gps-link-delete]");
+    if (!btn) return;
+    deleteGpsVehicleLink(btn.getAttribute("data-gps-link-delete")).catch(() => {});
+  });
+  qs("gpsVehicleLinkSuggestions")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-gps-link-prefill]");
+    if (!btn) return;
+    prefillGpsVehicleLinkForm(btn.getAttribute("data-gps-link-prefill"), btn.getAttribute("data-gps-link-source"));
+  });
+  qs("cartrackSyncBtn")?.addEventListener("click", () => syncCartrackNow().catch((e) => setStatus(String(e.message || e))));
+  qs("cartrackDashShowAll")?.addEventListener("change", () => {
+    renderCartrackFleetTable(
+      cartrackDashboardFleetCache.fleet,
+      cartrackDashboardFleetCache.speedingToday,
+      { showAll: Boolean(qs("cartrackDashShowAll")?.checked) }
+    );
+  });
+  qs("cartrackMorningPdfBtn")?.addEventListener("click", () =>
+    openCartrackMorningPdf().catch((e) => setStatus(String(e.message || e)))
+  );
+  qs("cartrackMorningEmailBtn")?.addEventListener("click", () =>
+    emailCartrackMorningReport().catch((e) => setStatus(String(e.message || e)))
+  );
+  qs("cartrackTrackMorningPdfBtn")?.addEventListener("click", () =>
+    openCartrackMorningPdf().catch((e) => setStatus(String(e.message || e)))
+  );
+  const onCartrackSpeedReportDateChange = (e) => {
+    const d = syncCartrackSpeedReportDateInputs(e.target?.value);
+    loadCartrackSpeedingEvents(d, { useCache: d === todayLocalYmd() }).catch(() => {});
+    loadCartrackSpeedingEvents(d, {
+      hostId: "cartrackTrackSpeedingEventsHost",
+      countId: "cartrackTrackSpeedingEventsCount",
+      panelId: "cartrackTrackSpeedingEventsPanel",
+      useCache: d === todayLocalYmd(),
+    }).catch(() => {});
+  };
+  qs("cartrackSpeedReportDate")?.addEventListener("change", onCartrackSpeedReportDateChange);
+  qs("cartrackTrackSpeedReportDate")?.addEventListener("change", onCartrackSpeedReportDateChange);
+  qs("cartrackKpiSpeeding")?.closest(".kpi-pill")?.addEventListener("click", () => {
+    openCartrackSpeedingEventsPanel();
+    loadCartrackSpeedingEvents(todayLocalYmd(), { useCache: true }).catch(() => {});
+  });
+  initCartrackSpeedReportDates();
+
+  qs("telemSaveDeviceBtn")?.addEventListener("click", () =>
+    saveTelematicsDevice().catch((e) => setTelemAdminResult(String(e.message || e)))
+  );
+  qs("telemRefreshDevicesBtn")?.addEventListener("click", () =>
+    loadTelematicsAdminDevices().catch((e) => setTelemAdminResult(String(e.message || e)))
+  );
+  qs("telemShowInactive")?.addEventListener("change", () =>
+    loadTelematicsAdminDevices().catch(() => {})
+  );
+  qs("telematicsRefreshBtn")?.addEventListener("click", () =>
+    loadTelematicsTab().catch((e) => setStatus("Telematics refresh error: " + (e.message || e)))
+  );
+  qs("telemDevicesList")?.addEventListener("click", (e) => {
+    const editBtn = e.target.closest("button[data-telem-edit]");
+    if (editBtn) {
+      fillTelematicsDeviceForm({
+        assetCode: editBtn.getAttribute("data-telem-asset"),
+        deviceSerial: "",
+        unitModel: editBtn.getAttribute("data-telem-model") || "FSC650",
+        externalId: "",
+        replaceFaulty: true,
+      });
+      setTelemAdminResult(`Enter new serial for ${editBtn.getAttribute("data-telem-asset")} (was ${editBtn.getAttribute("data-telem-serial")}).`);
+      return;
+    }
+    const deactBtn = e.target.closest("button[data-telem-deactivate]");
+    if (deactBtn) {
+      deactivateTelematicsDeviceAdmin(
+        deactBtn.getAttribute("data-telem-deactivate"),
+        deactBtn.getAttribute("data-telem-asset-label")
+      ).catch((err) => setTelemAdminResult(String(err.message || err)));
+    }
+  });
+}

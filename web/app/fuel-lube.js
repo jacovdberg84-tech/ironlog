@@ -1557,3 +1557,213 @@ async function deleteFuelLogEntry(logId) {
   if (!ok) return;
   await fetchJson(`${API}/api/dashboard/fuel/log/${id}`, { method: "DELETE" });
 }
+
+/** Start-up: Lube usage controls. Called once from init() in init.js. */
+function wireLubeControls() {
+  qs("loadLube")?.addEventListener("click", () =>
+    loadLubeUsage().catch((e) => setStatus("Lube error: " + e.message))
+  );
+  qs("lubeFilterAsset")?.addEventListener("input", () => {
+    if (lubeUsageCache) renderLubeUsageTable(lubeUsageCache);
+  });
+  qs("lubeFilterOilType")?.addEventListener("input", () => {
+    if (lubeUsageCache) renderLubeUsageTable(lubeUsageCache);
+  });
+  qs("lubeHidePartLike")?.addEventListener("change", () => {
+    if (lubeUsageCache) renderLubeUsageTable(lubeUsageCache);
+  });
+  qs("loadLubeAnalytics")?.addEventListener("click", () =>
+    loadLubeAnalytics().catch((e) => setStatus("Lube analytics error: " + e.message))
+  );
+}
+
+/** Start-up: Lube mappings and fuel log entry controls. Called once from init() in init.js. */
+function wireFuelLogControls() {
+  qs("loadLubeMaps")?.addEventListener("click", () =>
+    loadLubeMappings().catch((e) => setStatus("Lube mapping load error: " + e.message))
+  );
+  qs("saveLubeMap")?.addEventListener("click", () =>
+    saveLubeMapping().catch((e) => setStatus("Lube mapping save error: " + e.message))
+  );
+  qs("saveFuelLog")?.addEventListener("click", () =>
+    saveFuelLog().catch((e) => setStatus("Fuel log error: " + e.message))
+  );
+  qs("fuelMassImportBtn")?.addEventListener("click", () =>
+    importFuelMassPaste().catch((e) => setStatus("Fuel mass import error: " + e.message))
+  );
+  qs("fuelAsset")?.addEventListener("change", () => {
+    applyAssetCostCenterToInputs(qs("fuelAsset")?.value);
+    syncFuelUnitFromAsset(qs("fuelAsset")?.value, "input").catch(() => {});
+  });
+  qs("mlAsset")?.addEventListener("change", () => {
+    applyAssetCostCenterToInputs(qs("mlAsset")?.value);
+  });
+  qs("fuelMeterUnit")?.addEventListener("change", () => {
+    const mode = String(qs("fuelMeterUnit")?.value || "hours").toLowerCase() === "km" ? "km" : "hours";
+    const meterInput = qs("fuelHoursRun");
+    if (meterInput) meterInput.placeholder = mode === "km" ? "Distance since fill (km)" : "Hours since fill";
+  });
+  qs("loadFuelBaseline")?.addEventListener("click", () =>
+    loadFuelBaseline().catch((e) => setStatus("Fuel baseline error: " + e.message))
+  );
+  qs("fuelBaseAsset")?.addEventListener("change", () => {
+    syncFuelUnitFromAsset(qs("fuelBaseAsset")?.value, "both").catch(() => {});
+  });
+  qs("saveFuelBaseline")?.addEventListener("click", () =>
+    saveFuelBaseline().catch((e) => setStatus("Fuel baseline error: " + e.message))
+  );
+}
+
+/** Start-up: Cost settings, fuel benchmark, reconciliation and shift scenario controls. Called once from init() in init.js. */
+function wireFuelReportControls() {
+  qs("loadCostSettings")?.addEventListener("click", () =>
+    loadCostSettings().catch((e) => setStatus("Cost settings error: " + e.message))
+  );
+  qs("saveCostSettings")?.addEventListener("click", () =>
+    saveCostSettings().catch((e) => setStatus("Cost settings error: " + e.message))
+  );
+  qs("saveCostAssetRates")?.addEventListener("click", () =>
+    saveCostAssetRates().catch((e) => setStatus("Cost asset rates error: " + e.message))
+  );
+  qs("saveCostPartRate")?.addEventListener("click", () =>
+    saveCostPartRate().catch((e) => setStatus("Cost part rate error: " + e.message))
+  );
+  qs("loadFuelBenchmark")?.addEventListener("click", () =>
+    loadFuelBenchmark().catch((e) => setStatus("Fuel benchmark error: " + e.message))
+  );
+  qs("loadShiftScenario")?.addEventListener("click", () =>
+    loadShiftScenario().catch((e) => setStatus("Shift scenario error: " + e.message))
+  );
+  qs("downloadShiftScenarioXlsx")?.addEventListener("click", () =>
+    downloadShiftScenarioXlsx().catch((e) => setStatus("Shift scenario export error: " + e.message))
+  );
+  qs("fuelPresetQ1")?.addEventListener("click", () =>
+    applyFuelPeriodPreset("q1").catch((e) => setStatus("Fuel benchmark error: " + e.message))
+  );
+  qs("fuelPresetQ2")?.addEventListener("click", () =>
+    applyFuelPeriodPreset("q2").catch((e) => setStatus("Fuel benchmark error: " + e.message))
+  );
+  qs("fuelPresetQ3")?.addEventListener("click", () =>
+    applyFuelPeriodPreset("q3").catch((e) => setStatus("Fuel benchmark error: " + e.message))
+  );
+  qs("fuelPresetYtd")?.addEventListener("click", () =>
+    applyFuelPeriodPreset("ytd").catch((e) => setStatus("Fuel benchmark error: " + e.message))
+  );
+  qs("fuelPresetMtd")?.addEventListener("click", () =>
+    applyFuelPeriodPreset("mtd").catch((e) => setStatus("Fuel benchmark error: " + e.message))
+  );
+  qs("fuelDupOnly")?.addEventListener("change", () =>
+    loadFuelBenchmark().catch((e) => setStatus("Fuel benchmark error: " + e.message))
+  );
+  qs("fuelEquipSelectAll")?.addEventListener("click", () => {
+    const host = qs("fuelEquipFilterList");
+    host?.querySelectorAll('input[type="checkbox"][data-fuel-equip]')?.forEach((b) => { b.checked = true; });
+    renderFuelEquipmentChart(window.__fuelBenchmarkChartRows || []);
+  });
+  qs("fuelEquipClear")?.addEventListener("click", () => {
+    const host = qs("fuelEquipFilterList");
+    host?.querySelectorAll('input[type="checkbox"][data-fuel-equip]')?.forEach((b) => { b.checked = false; });
+    renderFuelEquipmentChart(window.__fuelBenchmarkChartRows || []);
+  });
+  qs("fuelEquipTypeFilter")?.addEventListener("change", (evt) => {
+    const type = String(evt.target?.value || "").trim();
+    if (!type) return;
+    const host = qs("fuelEquipFilterList");
+    if (!host) return;
+    // Uncheck all, then check only the matching type
+    host.querySelectorAll('input[type="checkbox"][data-fuel-equip]').forEach((b) => { b.checked = false; });
+    host.querySelectorAll(`label[data-fuel-type="${CSS.escape(type)}"] input[type="checkbox"]`).forEach((b) => { b.checked = true; });
+    // Reset the select so it can be used again next time
+    evt.target.value = "";
+    renderFuelEquipmentChart(window.__fuelBenchmarkChartRows || []);
+  });
+  qs("fuelEquipViewMode")?.addEventListener("change", () => {
+    renderFuelEquipmentChart(window.__fuelBenchmarkChartRows || []);
+  });
+  qs("fuelEquipFilterList")?.addEventListener("change", (evt) => {
+    const t = evt.target;
+    if (!(t instanceof HTMLInputElement) || t.type !== "checkbox") return;
+    if (!t.hasAttribute("data-fuel-equip")) return;
+    renderFuelEquipmentChart(window.__fuelBenchmarkChartRows || []);
+  });
+  qs("loadFuelSnapshots")?.addEventListener("click", () =>
+    loadFuelSnapshots().catch((e) => setStatus("Fuel snapshots error: " + e.message))
+  );
+  qs("fuelBenchmarkList")?.addEventListener("click", (evt) => {
+    const pdfBtn = evt.target?.closest?.("button[data-fuel-machine-pdf]");
+    if (pdfBtn) {
+      const code = String(pdfBtn.getAttribute("data-fuel-machine-pdf") || "").trim();
+      if (!code) return;
+      openFuelMachineHistoryPdf(code, false);
+      return;
+    }
+
+    const saveBtn = evt.target?.closest?.("button[data-fuel-save]");
+    if (saveBtn) {
+      const rowEl = saveBtn.closest(".item");
+      const mountEl = rowEl?.querySelector?.(".fuel-inline-history");
+      const code = String(mountEl?.getAttribute?.("data-code") || "");
+      saveFuelMachineHoursInline(saveBtn)
+        .then(() => Promise.all([
+          loadFuelBenchmark().catch(() => {}),
+          code && mountEl ? loadFuelMachineDailyInline(code, mountEl).catch(() => {}) : Promise.resolve(),
+        ]))
+        .then(() => setStatus("Machine hours updated."))
+        .catch((e) => setStatus("Machine hours update failed: " + (e.message || e)));
+      return;
+    }
+
+    const delBtn = evt.target?.closest?.("button[data-fuel-delete]");
+    if (delBtn) {
+      const logId = Number(delBtn.getAttribute("data-fuel-delete") || 0);
+      const rowEl = delBtn.closest(".item");
+      const mountEl = rowEl?.querySelector?.(".fuel-inline-history");
+      const code = String(mountEl?.getAttribute?.("data-code") || "");
+      deleteFuelLogEntry(logId)
+        .then(() => Promise.all([
+          loadFuelBenchmark().catch(() => {}),
+          code && mountEl ? loadFuelMachineDailyInline(code, mountEl).catch(() => {}) : Promise.resolve(),
+        ]))
+        .then(() => setStatus("Fuel input deleted."))
+        .catch((e) => setStatus("Delete fuel input failed: " + (e.message || e)));
+      return;
+    }
+
+    const btn = evt.target?.closest?.("button[data-fuel-machine]");
+    if (!btn) return;
+    const code = String(btn.getAttribute("data-fuel-machine") || "").trim();
+    if (!code) return;
+    const rowEl = btn.closest(".item");
+    const mountEl = rowEl?.querySelector?.(".fuel-inline-history");
+    if (!mountEl) return;
+    const opened = mountEl.getAttribute("data-opened") === "1";
+    const openedCode = String(mountEl.getAttribute("data-code") || "");
+    if (opened && openedCode === code) {
+      mountEl.innerHTML = "";
+      mountEl.setAttribute("data-opened", "0");
+      mountEl.setAttribute("data-code", "");
+      return;
+    }
+    mountEl.setAttribute("data-opened", "1");
+    mountEl.setAttribute("data-code", code);
+    loadFuelMachineDailyInline(code, mountEl).catch((e) => {
+      mountEl.innerHTML = `<small>Machine history error: ${String(e.message || e)}</small>`;
+      setStatus("Machine fuel consumption error: " + (e.message || e));
+    });
+  });
+  qs("openFuelBenchmarkPdf")?.addEventListener("click", () => openFuelBenchmarkPdf(false));
+  qs("downloadFuelBenchmarkPdf")?.addEventListener("click", () => openFuelBenchmarkPdf(true));
+  qs("downloadFuelBenchmarkXlsx")?.addEventListener("click", () => openFuelBenchmarkXlsx());
+  qs("openFuelReconPdf")?.addEventListener("click", () => openFuelReconciliationPdf(false));
+  qs("downloadFuelReconPdf")?.addEventListener("click", () => openFuelReconciliationPdf(true));
+  qs("downloadFuelReconXlsx")?.addEventListener("click", () => openFuelReconciliationXlsx());
+  qs("runFuelReconYtd")?.addEventListener("click", () =>
+    runFuelReconciliation(true).catch((e) => setStatus("Fuel reconciliation error: " + e.message))
+  );
+  qs("runFuelReconRange")?.addEventListener("click", () =>
+    runFuelReconciliation(false).catch((e) => setStatus("Fuel reconciliation error: " + e.message))
+  );
+  qs("downloadExecutivePackXlsx")?.addEventListener("click", () => {
+    downloadExecutivePackExcel().catch((e) => setStatus("Executive pack error: " + e.message));
+  });
+}

@@ -575,3 +575,16 @@ async function loadDashboard() {
 
   setStatus("Dashboard ready.");
 }
+
+/** Start-up: Dashboard refresh and KPI controls. Called once from init() in init.js. */
+function wireDashboardControls() {
+  qs("refresh")?.addEventListener("click", () =>
+    loadDashboard().catch((e) => setStatus("Dashboard error: " + e.message))
+  );
+  qs("kpiDebugToggle")?.addEventListener("change", () =>
+    loadDashboard().catch((e) => setStatus("Dashboard error: " + e.message))
+  );
+  qs("loadReliability")?.addEventListener("click", () =>
+    loadDashboard().catch((e) => setStatus("Dashboard error: " + e.message))
+  );
+}

@@ -500,3 +500,42 @@ function downloadOperationsXlsx() {
 /* =========================
    ACTIONS
 ========================= */
+
+/** Start-up: Report download buttons. Called once from init() in init.js. */
+function wireReportControls() {
+  qs("openDaily")?.addEventListener("click", openDailyPdf);
+  qs("openWeekly")?.addEventListener("click", openWeeklyPdf);
+  qs("downloadAmlWeeklyCheckSheet")?.addEventListener("click", () => {
+    downloadAmlWeeklyCheckSheet().catch((e) => {
+      const status = qs("amlWeeklyExportStatus");
+      if (status) status.textContent = `Export failed: ${e.message || e}`;
+      setStatus("AML Weekly Check Sheet export error: " + (e.message || e));
+    });
+  });
+  qs("openLubePdf")?.addEventListener("click", openLubePdf);
+  qs("openLubePdfFromLube")?.addEventListener("click", openLubePdf);
+  qs("downloadLubeUsageXlsx")?.addEventListener("click", downloadLubeUsageXlsx);
+  qs("loadLubeMonthStock")?.addEventListener("click", () =>
+    loadLubeMonthStock().catch((e) => setStatus("Lube month stock error: " + e.message))
+  );
+  qs("openStockMonitorPdf")?.addEventListener("click", openStockMonitorPdf);
+  qs("downloadStockMonitorPdf")?.addEventListener("click", downloadStockMonitorPdf);
+  qs("openOperationsPdf")?.addEventListener("click", () => openOperationsPdf(false));
+  qs("downloadOperationsPdf")?.addEventListener("click", () => openOperationsPdf(true));
+  qs("downloadOperationsXlsx")?.addEventListener("click", downloadOperationsXlsx);
+  qs("openDailyXlsx")?.addEventListener("click", openDailyXlsx);
+  qs("openGmWeeklyXlsx")?.addEventListener("click", openGmWeeklyXlsx);
+  qs("downloadCostMonthlyXlsx")?.addEventListener("click", downloadCostMonthlyXlsx);
+  qs("openMonthlyFleetCostPdf")?.addEventListener("click", openMonthlyFleetCostPdf);
+  qs("downloadMonthlyFleetCostPdf")?.addEventListener("click", downloadMonthlyFleetCostPdf);
+  qs("downloadMtdOpeningHoursXlsx")?.addEventListener("click", downloadMtdOpeningHoursXlsx);
+  qs("downloadMaintenanceCostByEquipmentXlsx")?.addEventListener("click", downloadMaintenanceCostByEquipmentXlsx);
+  qs("openMaintenanceCostByEquipmentPdf")?.addEventListener("click", () => openMaintenanceCostByEquipmentPdf(false));
+  qs("downloadMaintenanceCostByEquipmentPdf")?.addEventListener("click", () => openMaintenanceCostByEquipmentPdf(true));
+  qs("downloadMaintenanceExecutivePptx")?.addEventListener("click", downloadMaintenanceExecutivePptx);
+  qs("downloadGMUpcomingCostsPptx")?.addEventListener("click", downloadGMUpcomingCostsPptx);
+  qs("downloadGMBudgetMeetingDocx")?.addEventListener("click", downloadGMBudgetMeetingDocx);
+  qs("saveRainDayBtn")?.addEventListener("click", () => saveRainDay().catch((e) => setStatus("Rain day save error: " + e.message)));
+  qs("removeRainDayBtn")?.addEventListener("click", () => removeRainDay().catch((e) => setStatus("Rain day remove error: " + e.message)));
+  qs("loadRainDaysBtn")?.addEventListener("click", () => loadRainDays().catch((e) => setStatus("Rain day load error: " + e.message)));
+}

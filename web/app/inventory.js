@@ -1124,3 +1124,178 @@ async function saveLubeMapping() {
   ]);
   setStatus("Lube mapping saved.");
 }
+
+/** Start-up: Part issue, store allocation, manual stock, bins and cycle count controls. Called once from init() in init.js. */
+function wireInventoryControls() {
+  qs("issuePart")?.addEventListener("click", () =>
+    issuePart().catch((e) => setStatus("Issue error: " + e.message))
+  );
+  qs("allocateStore")?.addEventListener("click", () =>
+    allocateStore().catch((e) => setStatus("Stores allocation error: " + e.message))
+  );
+  qs("refreshAllocations")?.addEventListener("click", () =>
+    loadStoreAllocations().catch((e) => setStatus("Allocation list error: " + e.message))
+  );
+  qs("saveManualStock")?.addEventListener("click", () =>
+    saveManualStock().catch((e) => setStatus("Manual stock error: " + e.message))
+  );
+  qs("msPart")?.addEventListener("input", updateManualStockPartDesc);
+  qs("msPart")?.addEventListener("change", updateManualStockPartDesc);
+  qs("msType")?.addEventListener("change", () => {
+    updateManualStockCostRowVisibility();
+  });
+  qs("msType")?.addEventListener("input", () => {
+    updateManualStockCostRowVisibility();
+  });
+  qs("mlPart")?.addEventListener("input", updateManualLubePartDesc);
+  qs("mlPart")?.addEventListener("change", updateManualLubePartDesc);
+  // Lube minimums moved to separate card
+  qs("lubeMinPart")?.addEventListener("input", updateLubeMinPartDesc);
+  qs("lubeMinPart")?.addEventListener("change", updateLubeMinPartDesc);
+  qs("lubeMinSetOne")?.addEventListener("click", () =>
+    setSingleLubeMinimum().catch((e) => setStatus("Lube min error: " + e.message))
+  );
+  qs("lubeMinRefresh")?.addEventListener("click", () =>
+    loadLubeReorderAlerts().catch((e) => setStatus("Lube alerts error: " + e.message))
+  );
+  qs("receiveLube")?.addEventListener("click", () =>
+    receiveLubeStock().catch((e) => setStatus("Receive lube error: " + e.message))
+  );
+  qs("lrPart")?.addEventListener("input", updateReceiveLubePartDesc);
+  qs("lrPart")?.addEventListener("change", updateReceiveLubePartDesc);
+  qs("icLoad")?.addEventListener("click", () =>
+    loadInventoryControl().catch((e) => setStatus("Inventory control error: " + e.message))
+  );
+  qs("icSaveMin")?.addEventListener("click", () =>
+    saveInventoryPartMinimum().catch((e) => setStatus("Part minimum error: " + e.message))
+  );
+  qs("icSubmitCount")?.addEventListener("click", () =>
+    submitInventoryCycleCount().catch((e) => setStatus("Cycle count error: " + e.message))
+  );
+  qs("icPartCode")?.addEventListener("change", () =>
+    loadInventoryControl().catch((e) => setStatus("Inventory control error: " + e.message))
+  );
+  qs("saveManualLube")?.addEventListener("click", () =>
+    saveManualLube().catch((e) => setStatus("Manual lube error: " + e.message))
+  );
+  ["msLocation", "saLocation", "mlLocation"].forEach((id) => {
+    qs(id)?.addEventListener("change", () => {
+      const v = String(qs(id)?.value || "").trim().toUpperCase();
+      if (!v) return;
+      setRoleDefaultLocation(getSessionRole(), v);
+      applyDefaultLocationsToInputs();
+      if (id === "saLocation") {
+        const binInput = qs("saBin");
+        if (binInput) binInput.value = "";
+        loadBinCodeOptionsForLocation(v, "saBinCodeOptions").catch(() => {});
+      }
+      if (id === "msLocation") {
+        const binInput = qs("msBin");
+        if (binInput) binInput.value = "";
+        loadBinCodeOptionsForLocation(v, "msBinCodeOptions").catch(() => {});
+      }
+    });
+  });
+  qs("locLoad")?.addEventListener("click", () =>
+    loadLocations().catch((e) => setStatus("Locations error: " + e.message))
+  );
+  qs("locShowInactive")?.addEventListener("change", () =>
+    loadLocations().catch((e) => setStatus("Locations error: " + e.message))
+  );
+  qs("locSave")?.addEventListener("click", () =>
+    saveLocation().catch((e) => setStatus("Location save error: " + e.message))
+  );
+  qs("sbSaveBinBtn")?.addEventListener("click", () =>
+    saveStockBin().catch((e) => setStatus("Bin save error: " + e.message))
+  );
+  qs("sbLoadBinsBtn")?.addEventListener("click", () =>
+    loadStockBins().catch((e) => setStatus("Bins load error: " + e.message))
+  );
+  qs("sbSaveMinMaxBtn")?.addEventListener("click", () =>
+    saveStockMinMax().catch((e) => setStatus("Min-max save error: " + e.message))
+  );
+  qs("sbLoadDepthBtn")?.addEventListener("click", () =>
+    loadStockDepth().catch((e) => setStatus("Depth load error: " + e.message))
+  );
+  qs("sbLoadReplenishmentBtn")?.addEventListener("click", () =>
+    loadReplenishmentSuggestions().catch((e) => setStatus("Replenishment load error: " + e.message))
+  );
+  qs("sbExportReplenishmentCsvBtn")?.addEventListener("click", () => {
+    try {
+      exportReplenishmentSuggestionsCsv();
+      setStatus("Replenishment CSV exported.");
+    } catch (e) {
+      setStatus("Replenishment export error: " + (e.message || e));
+    }
+  });
+  qs("sbCreateCycleSessionBtn")?.addEventListener("click", () =>
+    createCycleSession().catch((e) => setStatus("Cycle session create error: " + e.message))
+  );
+  qs("sbLoadCycleSessionsBtn")?.addEventListener("click", () =>
+    loadCycleSessions().catch((e) => setStatus("Cycle sessions load error: " + e.message))
+  );
+  qs("loadLubeStock")?.addEventListener("click", () =>
+    loadLubeStockOnHand().catch((e) => setStatus("Lube stock error: " + e.message))
+  );
+  qs("mlPart")?.addEventListener("change", () =>
+    loadLubeStockOnHand().catch((e) => setStatus("Lube stock error: " + e.message))
+  );
+  qs("mlPart")?.addEventListener("input", () =>
+    loadLubeStockOnHand().catch((e) => setStatus("Lube stock error: " + e.message))
+  );
+  qs("mlType")?.addEventListener("change", () =>
+    loadLubeStockOnHand().catch((e) => setStatus("Lube stock error: " + e.message))
+  );
+  qs("mlType")?.addEventListener("input", () =>
+    loadLubeStockOnHand().catch((e) => setStatus("Lube stock error: " + e.message))
+  );
+  qs("mlQty")?.addEventListener("input", updateLubeQtyWarning);
+  qs("setLubeMin210")?.addEventListener("click", () =>
+    setLubeMinimumStock().catch((e) => setStatus("Lube minimum error: " + e.message))
+  );
+}
+
+/** Start-up: Lube analytics list actions. Called once from init() in init.js. */
+function wireLubeAnalyticsList() {
+  const lubeAnalyticsList = qs("lubeAnalyticsList");
+  if (lubeAnalyticsList) {
+    lubeAnalyticsList.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const btn = target.closest("[data-map-oil-key]");
+      if (!(btn instanceof HTMLElement)) return;
+      const oilKey = String(btn.getAttribute("data-map-oil-key") || "").trim();
+      const partCode = String(btn.getAttribute("data-map-part-code") || "").trim();
+      const oilEl = qs("lubeMapOilKey");
+      const partEl = qs("lubeMapPartCode");
+      if (oilEl) oilEl.value = oilKey;
+      if (partEl) partEl.value = partCode;
+      setStatus("Mapping fields pre-filled from selected lube row.");
+    });
+  }
+}
+
+/** Start-up: Cycle count session list actions. Called once from init() in init.js. */
+function wireCycleCountList() {
+  const sbCycleSessionsList = qs("sbCycleSessionsList");
+  if (sbCycleSessionsList) {
+    sbCycleSessionsList.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const submitId = target.getAttribute("data-sb-cs-submit");
+      const approveId = target.getAttribute("data-sb-cs-approve");
+      const countOneId = target.getAttribute("data-sb-cs-countone");
+      if (submitId) {
+        submitCycleSession(submitId).catch((e) => setStatus(`Cycle submit error: ${e.message || e}`));
+        return;
+      }
+      if (approveId) {
+        approveCycleSession(approveId).catch((e) => setStatus(`Cycle approve error: ${e.message || e}`));
+        return;
+      }
+      if (countOneId) {
+        addOnePartCountToSession(countOneId).catch((e) => setStatus(`Cycle line upsert error: ${e.message || e}`));
+      }
+    });
+  }
+}

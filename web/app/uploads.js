@@ -514,3 +514,40 @@ async function uploadDailyMatrixCsv(file) {
 /* =========================
    REPORTS
 ========================= */
+
+/** Start-up: CSV upload and FAMS fuel import controls. Called once from init() in init.js. */
+function wireUploadControls() {
+  qs("doUpload")?.addEventListener("click", () =>
+    doUpload().catch((e) => setStatus("Upload error: " + e.message))
+  );
+  qs("fuelFamsUploadBtn")?.addEventListener("click", () =>
+    importFamsFuelFile().catch((e) => setStatus("FAMS import error: " + e.message))
+  );
+  qs("fuelFamsSyncNowBtn")?.addEventListener("click", () =>
+    syncFamsFuelNow().catch((e) => setStatus("FAMS sync error: " + e.message))
+  );
+  qs("fuelFamsSyncSelectedBtn")?.addEventListener("click", () =>
+    syncFamsFuelSelectedDates().catch((e) => setStatus("FAMS selected-date sync error: " + e.message))
+  );
+  qs("fuelFamsDuplicatesPreviewBtn")?.addEventListener("click", () =>
+    previewFamsFuelDuplicates().catch((e) => setStatus("FAMS duplicate preview error: " + e.message))
+  );
+  qs("fuelFamsDuplicatesRemoveBtn")?.addEventListener("click", () =>
+    removeFamsFuelDuplicates().catch((e) => setStatus("FAMS duplicate cleanup error: " + e.message))
+  );
+  qs("fuelFamsRefreshStatusBtn")?.addEventListener("click", () =>
+    loadFamsFuelStatus().catch((e) => setStatus("FAMS status error: " + e.message))
+  );
+  qs("fuelRepairMeterChainBtn")?.addEventListener("click", () =>
+    repairFuelMeterChain().catch((e) => setStatus("Meter chain repair error: " + e.message))
+  );
+  qs("fuelClearFromDateBtn")?.addEventListener("click", () =>
+    clearFuelFromDate().catch((e) => setStatus("Fuel clear error: " + e.message))
+  );
+  qs("fuelClearPreviewBtn")?.addEventListener("click", () =>
+    runFuelClearPreview().catch((e) => setStatus("Fuel clear preview error: " + e.message))
+  );
+  qs("downloadFuelTemplate")?.addEventListener("click", downloadFuelCsvTemplate);
+  qs("downloadStoreTemplate")?.addEventListener("click", downloadStoresCsvTemplate);
+  qs("downloadFuelBaselineTemplate")?.addEventListener("click", downloadFuelBaselineCsvTemplate);
+}

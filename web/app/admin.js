@@ -1403,3 +1403,182 @@ async function executeBackupRestoreNow() {
   if (out) out.textContent = JSON.stringify(data, null, 2);
   setStatus("Restore execute requested. Reconnect after restart.");
 }
+
+/** Start-up: User admin, SMTP, push, PDF settings and backup controls. Called once from init() in init.js. */
+function wireAdminControls() {
+  qs("loadAdminUsersBtn")?.addEventListener("click", () =>
+    loadAdminUsers().catch((e) => setStatus("Admin users error: " + e.message))
+  );
+  qs("mdmLoadBtn")?.addEventListener("click", () =>
+    loadMasterDataGovernance().catch((e) => setStatus("Master data error: " + e.message))
+  );
+  qs("mdmDeptSaveBtn")?.addEventListener("click", () =>
+    saveMdmDepartment().catch((e) => setStatus("Department error: " + e.message))
+  );
+  qs("mdmCcSaveBtn")?.addEventListener("click", () =>
+    saveMdmCostCenter().catch((e) => setStatus("Cost center error: " + e.message))
+  );
+  qs("mdmSupSaveBtn")?.addEventListener("click", () =>
+    saveMdmSupplier().catch((e) => setStatus("Supplier error: " + e.message))
+  );
+  qs("mdmPolicySaveBtn")?.addEventListener("click", () =>
+    saveMdmPolicies().catch((e) => setStatus("Policy error: " + e.message))
+  );
+  qs("adminArtisanPresetBtn")?.addEventListener("click", applyAdminArtisanPreset);
+  qs("saveAdminUserBtn")?.addEventListener("click", () =>
+    saveAdminUser().catch((e) => setStatus("Save user error: " + e.message))
+  );
+  qs("chPwdSubmit")?.addEventListener("click", () =>
+    submitChangePassword().catch((e) => setStatus("Password error: " + e.message))
+  );
+  qs("loadSmtpSettingsBtn")?.addEventListener("click", () =>
+    loadSmtpSettings().catch((e) => setStatus("SMTP load error: " + e.message))
+  );
+  qs("saveSmtpSettingsBtn")?.addEventListener("click", () =>
+    saveSmtpSettings().catch((e) => setStatus("SMTP save error: " + e.message))
+  );
+  qs("testSmtpSettingsBtn")?.addEventListener("click", () =>
+    testSmtpSettings().catch((e) => setStatus("SMTP test error: " + e.message))
+  );
+  qs("loadPushNotifyBtn")?.addEventListener("click", () =>
+    loadPushNotificationSettings().catch((e) => setStatus("Push load error: " + e.message))
+  );
+  qs("sendPushNotifyTestBtn")?.addEventListener("click", () =>
+    sendPushNotificationTest().catch((e) => setStatus("Push test error: " + e.message))
+  );
+  qs("sendPushNotifyBtn")?.addEventListener("click", () =>
+    sendPushNotificationManual().catch((e) => setStatus("Push send error: " + e.message))
+  );
+  qs("loadPdfReportSettingsBtn")?.addEventListener("click", () =>
+    loadPdfReportSettings().catch((e) => setStatus("PDF site load error: " + e.message))
+  );
+  qs("savePdfReportSettingsBtn")?.addEventListener("click", () =>
+    savePdfReportSettings().catch((e) => setStatus("PDF site save error: " + e.message))
+  );
+  qs("uploadPdfReportLogoBtn")?.addEventListener("click", () =>
+    uploadPdfReportLogo().catch((e) => setStatus("PDF logo upload error: " + e.message))
+  );
+  qs("removePdfReportLogoBtn")?.addEventListener("click", () =>
+    removePdfReportLogo().catch((e) => setStatus("PDF logo remove error: " + e.message))
+  );
+  qs("pdfReportSiteCode")?.addEventListener("change", () => onPdfReportSiteCodeChange());
+  qs("pdfReportCompanyCode")?.addEventListener("change", () => onPdfReportCompanyCodeChange());
+  qs("sendSubscriptionNowBtn")?.addEventListener("click", () =>
+    sendSubscriptionNowFromAdmin().catch((e) => setStatus("Subscription send error: " + e.message))
+  );
+  qs("refreshBackupsBtn")?.addEventListener("click", () =>
+    loadBackupFiles().catch((e) => setStatus("Backups load error: " + e.message))
+  );
+  qs("createBackupNowBtn")?.addEventListener("click", () =>
+    createBackupNow().catch((e) => setStatus("Backup create error: " + e.message))
+  );
+  qs("previewBackupRestoreBtn")?.addEventListener("click", () =>
+    previewBackupRestore().catch((e) => setStatus("Backup preview error: " + e.message))
+  );
+  qs("stageBackupRestoreBtn")?.addEventListener("click", () =>
+    stageBackupRestore().catch((e) => setStatus("Restore stage error: " + e.message))
+  );
+  qs("executeBackupRestoreBtn")?.addEventListener("click", () =>
+    executeBackupRestoreNow().catch((e) => setStatus("Restore execute error: " + e.message))
+  );
+}
+
+/** Start-up: Safety checklist templates, QR labels and safety PDFs. Called once from init() in init.js. */
+function wireSafetyAdminControls() {
+  qs("safetyTplLoadBtn")?.addEventListener("click", () =>
+    loadSafetyTemplateEditor().catch((e) => setStatus("Safety template error: " + e.message))
+  );
+  qs("safetyTplSelect")?.addEventListener("change", () =>
+    loadSafetyTemplateEditor().catch(() => {})
+  );
+  qs("safetyCategoryAddBtn")?.addEventListener("click", () =>
+    addSafetyCategory().catch((e) => setStatus("Add category error: " + e.message))
+  );
+  qs("safetyCategoriesList")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-safety-edit-category]");
+    if (!btn) return;
+    const key = String(btn.getAttribute("data-safety-edit-category") || "").trim();
+    if (qs("safetyTplSelect")) qs("safetyTplSelect").value = key;
+    loadSafetyTemplateEditor().catch(() => {});
+  });
+  qs("safetyTplSaveBtn")?.addEventListener("click", () =>
+    saveSafetyTemplateEditor().catch((e) => setStatus("Safety template save error: " + e.message))
+  );
+  qs("safetyTplAddRowBtn")?.addEventListener("click", () => {
+    safetyTplItems.push({ key: `item_${safetyTplItems.length + 1}`, label: "New checklist item" });
+    renderSafetyTemplateEditor(safetyTplItems);
+  });
+  qs("safetyTplItems")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-safety-tpl-remove]");
+    if (!btn) return;
+    const idx = Number(btn.getAttribute("data-safety-tpl-remove"));
+    safetyTplItems.splice(idx, 1);
+    renderSafetyTemplateEditor(safetyTplItems);
+  });
+  qs("safetyItemAddBtn")?.addEventListener("click", () =>
+    addSafetyEquipmentItem().catch((e) => setStatus("Add safety item error: " + e.message))
+  );
+  qs("safetyItemsList")?.addEventListener("click", (e) => {
+    const qrBtn = e.target.closest("button[data-safety-use-qr]");
+    if (qrBtn) {
+      const code = String(qrBtn.getAttribute("data-safety-use-qr") || "");
+      if (qs("safetyQrItemCode")) qs("safetyQrItemCode").value = code;
+      generateSafetyQr().catch((err) => setStatus("QR error: " + err.message));
+      return;
+    }
+    const inspBtn = e.target.closest("button[data-safety-open-insp]");
+    if (inspBtn) {
+      const code = String(inspBtn.getAttribute("data-safety-open-insp") || "");
+      if (code) window.open(`./safety-inspection.html?item_code=${encodeURIComponent(code)}`, "_blank");
+      return;
+    }
+    const pdfBtn = e.target.closest("button[data-safety-item-pdf]");
+    if (pdfBtn) {
+      openSafetyItemInspectionPdf(pdfBtn.getAttribute("data-safety-item-pdf"))
+        .catch((err) => setStatus("Safety PDF error: " + err.message));
+      return;
+    }
+    const rmBtn = e.target.closest("button[data-safety-remove-item]");
+    if (rmBtn) {
+      removeSafetyEquipmentItem(Number(rmBtn.getAttribute("data-safety-remove-item") || 0))
+        .catch((err) => setStatus("Remove error: " + err.message));
+    }
+  });
+  qs("safetyItemsList")?.addEventListener("change", (e) => {
+    const chk = e.target.closest("input[data-safety-report-select]");
+    if (!chk) return;
+    const code = String(chk.getAttribute("data-safety-report-select") || "").trim().toUpperCase();
+    if (!code) return;
+    if (chk.checked) safetyReportSelectedCodes.add(code);
+    else safetyReportSelectedCodes.delete(code);
+  });
+  qs("safetyQrGenerate")?.addEventListener("click", () =>
+    generateSafetyQr().catch((e) => setStatus("Safety QR error: " + e.message))
+  );
+  qs("safetyQrPrint")?.addEventListener("click", printSafetyQr);
+  qs("safetyQrPrintSheet")?.addEventListener("click", () =>
+    printAllSafetyQrSheet().catch((e) => setStatus("Safety QR sheet error: " + e.message))
+  );
+  qs("safetyQrPreset")?.addEventListener("change", applySafetyQrSheetPreset);
+  ["safetyQrCols", "safetyQrSizeMm", "safetyQrCellMm", "safetyQrGapMm"].forEach((id) => {
+    qs(id)?.addEventListener("input", () => {
+      const preset = qs("safetyQrPreset");
+      if (preset && preset.value !== "custom") preset.value = "custom";
+    });
+  });
+  qs("safetyPdfRegisterBtn")?.addEventListener("click", () =>
+    openSafetyRegisterPdf(false).catch((e) => setStatus("Safety PDF error: " + e.message))
+  );
+  qs("safetyPdfBlankBtn")?.addEventListener("click", () =>
+    openSafetyRegisterPdf(true).catch((e) => setStatus("Safety PDF error: " + e.message))
+  );
+  qs("safetyInspectionReportAllBtn")?.addEventListener("click", () =>
+    openSafetyInspectionReportPdf(false).catch((e) => setStatus("Safety report error: " + e.message))
+  );
+  qs("safetyInspectionReportSelectedBtn")?.addEventListener("click", () =>
+    openSafetyInspectionReportPdf(true).catch((e) => setStatus("Safety report error: " + e.message))
+  );
+  initSafetyAdminPanel().catch(() => {});
+  initOfflineQueueAdminPanel();
+  initTelematicsAdminPanel().catch(() => {});
+}

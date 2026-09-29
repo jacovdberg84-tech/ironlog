@@ -1867,3 +1867,11 @@ async function logoutAuth() {
   applyRoleVisibility();
   await tryInitialSession();
 }
+
+/** Start-up: Login form controls. Called once from init() in init.js. */
+function wireLoginControls() {
+  qs("loginSubmit")?.addEventListener("click", () => submitLoginForm());
+  qs("loginPassword")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submitLoginForm();
+  });
+}

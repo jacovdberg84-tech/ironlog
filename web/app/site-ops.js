@@ -863,3 +863,151 @@ async function loadDispatchTrips() {
 /* =========================
    DAILY INPUT (GRID)
 ========================= */
+
+/** Start-up: Site operations, dispatch and data quality controls. Called once from init() in init.js. */
+function wireSiteOpsControls() {
+  qs("createDispatchTrip")?.addEventListener("click", () =>
+    createDispatchTrip().catch((e) => setStatus("Dispatch create error: " + e.message))
+  );
+  qs("saveDispatchPod")?.addEventListener("click", () =>
+    saveDispatchPod().catch((e) => setStatus("Dispatch POD error: " + e.message))
+  );
+  qs("createDispatchException")?.addEventListener("click", () =>
+    createDispatchException().catch((e) => setStatus("Dispatch exception error: " + e.message))
+  );
+  qs("loadDispatchExceptions")?.addEventListener("click", () =>
+    loadDispatchExceptions().catch((e) => setStatus("Dispatch exceptions load error: " + e.message))
+  );
+  qs("loadDispatchTrips")?.addEventListener("click", () =>
+    loadDispatchTrips().catch((e) => setStatus("Dispatch load error: " + e.message))
+  );
+  qs("dpStatusFilter")?.addEventListener("change", () =>
+    loadDispatchTrips().catch((e) => setStatus("Dispatch load error: " + e.message))
+  );
+  qs("dpVarTolerance")?.addEventListener("change", () =>
+    loadDispatchTrips().catch((e) => setStatus("Dispatch load error: " + e.message))
+  );
+  qs("dpOnlyBreaches")?.addEventListener("change", () =>
+    loadDispatchTrips().catch((e) => setStatus("Dispatch load error: " + e.message))
+  );
+  qs("dpExStatusFilter")?.addEventListener("change", () =>
+    loadDispatchExceptions().catch((e) => setStatus("Dispatch exceptions load error: " + e.message))
+  );
+  qs("dpExOnlyOpen")?.addEventListener("change", () =>
+    loadDispatchExceptions().catch((e) => setStatus("Dispatch exceptions load error: " + e.message))
+  );
+  qs("loadQualityCenter")?.addEventListener("click", () =>
+    loadQualityCenter().catch((e) => setStatus("Quality center load error: " + e.message))
+  );
+  qs("qSeverityFilter")?.addEventListener("change", () =>
+    loadQualityCenter().catch((e) => setStatus("Quality center load error: " + e.message))
+  );
+  qs("qTypeFilter")?.addEventListener("change", () =>
+    loadQualityCenter().catch((e) => setStatus("Quality center load error: " + e.message))
+  );
+  qs("saveOperationEntry")?.addEventListener("click", () =>
+    saveOperationEntry().catch((e) => setStatus("Operations save error: " + e.message))
+  );
+  qs("saveSiteDailyEntry")?.addEventListener("click", () =>
+    saveSiteDailyEntry().catch((e) => setStatus("Site daily save error: " + e.message))
+  );
+  qs("loadSiteDailyEntries")?.addEventListener("click", () =>
+    loadSiteDailyEntries().catch((e) => setStatus("Site daily load error: " + e.message))
+  );
+  qs("saveSiteEquipmentUsage")?.addEventListener("click", () =>
+    saveSiteEquipmentUsage().catch((e) => setStatus("Site equipment link error: " + e.message))
+  );
+  qs("loadSiteEquipmentUsage")?.addEventListener("click", () =>
+    loadSiteEquipmentUsage().catch((e) => setStatus("Site equipment load error: " + e.message))
+  );
+  qs("saveSiteTarget")?.addEventListener("click", () =>
+    saveSiteTarget().catch((e) => setStatus("Site target save error: " + e.message))
+  );
+  qs("loadSiteTargets")?.addEventListener("click", () =>
+    loadSiteTargets().catch((e) => setStatus("Site target load error: " + e.message))
+  );
+  qs("saveSiteDelay")?.addEventListener("click", () =>
+    saveSiteDelay().catch((e) => setStatus("Site delay save error: " + e.message))
+  );
+  qs("loadSiteDelays")?.addEventListener("click", () =>
+    loadSiteDelays().catch((e) => setStatus("Site delay load error: " + e.message))
+  );
+  qs("saveSiteZone")?.addEventListener("click", () =>
+    saveSiteZone().catch((e) => setStatus("Site zone save error: " + e.message))
+  );
+  qs("loadSiteZones")?.addEventListener("click", () =>
+    loadSiteZones().catch((e) => setStatus("Site zone load error: " + e.message))
+  );
+  qs("loadSiteDashboard")?.addEventListener("click", () =>
+    loadSiteDashboard().catch((e) => setStatus("Site dashboard load error: " + e.message))
+  );
+  qs("saveOperationsClosingDraft")?.addEventListener("click", () =>
+    saveOperationsClosing(false).catch((e) => setStatus("Operations closing error: " + e.message))
+  );
+  qs("closeOperationsDay")?.addEventListener("click", () =>
+    saveOperationsClosing(true).catch((e) => setStatus("Operations close day error: " + e.message))
+  );
+  qs("reopenOperationsDay")?.addEventListener("click", () =>
+    reopenOperationsDay().catch((e) => setStatus("Operations reopen day error: " + e.message))
+  );
+  qs("opDate")?.addEventListener("change", () =>
+    loadOperationsClosingForDate((qs("opDate")?.value || "").trim()).catch((e) => setStatus("Operations closing load error: " + e.message))
+  );
+  qs("loadOperations")?.addEventListener("click", () =>
+    loadOperations().catch((e) => setStatus("Operations load error: " + e.message))
+  );
+  qs("opClientMetric")?.addEventListener("change", () =>
+    loadOperations().catch((e) => setStatus("Operations load error: " + e.message))
+  );
+  qs("opClientTopN")?.addEventListener("change", () =>
+    loadOperations().catch((e) => setStatus("Operations load error: " + e.message))
+  );
+}
+
+/** Start-up: Dispatch and data quality list actions. Called once from init() in init.js. */
+function wireSiteOpsLists() {
+  const dispatchList = qs("dispatchList");
+  if (dispatchList) {
+    dispatchList.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const id = target.getAttribute("data-dp-status-id");
+      const next = target.getAttribute("data-dp-next");
+      if (!id || !next) return;
+      updateDispatchTripStatus(id, next).catch((e) => setStatus(`Dispatch status update failed: ${e.message || e}`));
+    });
+  }
+  const dispatchExceptionsList = qs("dispatchExceptionsList");
+  if (dispatchExceptionsList) {
+    dispatchExceptionsList.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const id = target.getAttribute("data-dp-ex-id");
+      const next = target.getAttribute("data-dp-ex-next");
+      if (!id || !next) return;
+      resolveDispatchException(id, next).catch((e) => setStatus(`Dispatch exception update failed: ${e.message || e}`));
+    });
+  }
+  const qualityList = qs("qualityList");
+  if (qualityList) {
+    qualityList.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const resolveBtn = target.closest("[data-q-resolve]");
+      if (resolveBtn instanceof HTMLElement) {
+        const mode = resolveBtn.getAttribute("data-q-resolve");
+        const entity = resolveBtn.getAttribute("data-q-entity");
+        const date = resolveBtn.getAttribute("data-q-date");
+        resolveQualityIssueNow(mode, entity, date).catch((e) => setStatus(`Quality resolve failed: ${e.message || e}`));
+        return;
+      }
+      const btn = target.closest("[data-q-fix]");
+      if (!(btn instanceof HTMLElement)) return;
+      const type = btn.getAttribute("data-q-type");
+      const asset = btn.getAttribute("data-q-asset");
+      const entity = btn.getAttribute("data-q-entity");
+      const date = btn.getAttribute("data-q-date");
+      openQualityFix(type, asset, entity, date);
+    });
+  }
+}

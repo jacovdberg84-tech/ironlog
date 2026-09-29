@@ -705,3 +705,263 @@ function exportProcurementJournalsXlsx() {
     `IRONLOG_Procurement_Journals_${batch}.xlsx`,
   );
 }
+
+/** Start-up: Requisition, purchase order and journal controls. Called once from init() in init.js. */
+function wireProcurementControls() {
+  qs("createRequisition")?.addEventListener("click", () =>
+    createRequisition().catch((e) => setStatus("Requisition create error: " + e.message))
+  );
+  qs("prLoadPoList")?.addEventListener("click", () =>
+    loadPurchaseOrders().catch((e) => setStatus("PO load error: " + e.message))
+  );
+  qs("prPoStatusFilter")?.addEventListener("change", () =>
+    loadPurchaseOrders().catch((e) => setStatus("PO load error: " + e.message))
+  );
+  qs("prPostReceiptBtn")?.addEventListener("click", () =>
+    postPoReceipt().catch((e) => setStatus("PO receipt error: " + e.message))
+  );
+  qs("prCaptureInvoiceBtn")?.addEventListener("click", () =>
+    capturePoInvoice().catch((e) => setStatus("Invoice capture error: " + e.message))
+  );
+  qs("prRunMatchBtn")?.addEventListener("click", () =>
+    runPoThreeWayMatch().catch((e) => setStatus("3-way match error: " + e.message))
+  );
+  qs("prLoadExceptionsBtn")?.addEventListener("click", () =>
+    loadProcurementExceptions().catch((e) => setStatus("Exception load error: " + e.message))
+  );
+  qs("prExceptionStatus")?.addEventListener("change", () =>
+    loadProcurementExceptions().catch((e) => setStatus("Exception load error: " + e.message))
+  );
+  qs("prBuildJournalBtn")?.addEventListener("click", () =>
+    buildProcurementJournals().catch((e) => setStatus("Journal build error: " + e.message))
+  );
+  qs("prExportJournalCsvBtn")?.addEventListener("click", () => {
+    try {
+      exportProcurementJournalsCsv();
+    } catch (e) {
+      setStatus("Journal CSV export error: " + (e.message || e));
+    }
+  });
+  qs("prExportJournalXlsxBtn")?.addEventListener("click", () => {
+    try {
+      exportProcurementJournalsXlsx();
+    } catch (e) {
+      setStatus("Journal XLSX export error: " + (e.message || e));
+    }
+  });
+  qs("loadRequisitions")?.addEventListener("click", () =>
+    loadRequisitions().catch((e) => setStatus("Requisition load error: " + e.message))
+  );
+  qs("prStatusFilter")?.addEventListener("change", () => {
+    setProcurementKpiFilter("all");
+    loadRequisitions().catch((e) => setStatus("Requisition load error: " + e.message));
+  });
+  qs("prTierFilter")?.addEventListener("change", () => {
+    loadRequisitions().catch((e) => setStatus("Requisition load error: " + e.message));
+  });
+  qs("prKpiAll")?.addEventListener("click", () => {
+    setProcurementKpiFilter("all");
+    loadRequisitions().catch((e) => setStatus("Requisition load error: " + e.message));
+  });
+  qs("prKpiApprovedOpen")?.addEventListener("click", () => {
+    const statusEl = qs("prStatusFilter");
+    if (statusEl) statusEl.value = "";
+    setProcurementKpiFilter("approved_open");
+    loadRequisitions().catch((e) => setStatus("Requisition load error: " + e.message));
+  });
+  qs("prKpiInFlow")?.addEventListener("click", () => {
+    const statusEl = qs("prStatusFilter");
+    if (statusEl) statusEl.value = "";
+    setProcurementKpiFilter("in_flow");
+    loadRequisitions().catch((e) => setStatus("Requisition load error: " + e.message));
+  });
+  qs("prSaveChainConfig")?.addEventListener("click", () => {
+    try {
+      saveProcurementChainConfig();
+      updateProcurementChainPreview();
+    } catch (e) {
+      setStatus(`Save chain rules failed: ${e.message || e}`);
+    }
+  });
+  ["prValue", "prTier1Max", "prTier1Chain", "prTier2Max", "prTier2Chain", "prTier3Chain", "prApproverChain"].forEach((id) => {
+    qs(id)?.addEventListener("input", updateProcurementChainPreview);
+  });
+}
+
+/** Start-up: Requisition, purchase order and exception list actions. Called once from init() in init.js. */
+function wireProcurementLists() {
+  const procurementList = qs("procurementList");
+  if (procurementList) {
+    procurementList.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const advanceId = target.getAttribute("data-pr-advance-id");
+      const advanceStatus = target.getAttribute("data-pr-advance-status");
+      const submitId = target.getAttribute("data-pr-submit-id");
+      const finalizeId = target.getAttribute("data-pr-finalize-id");
+      const postId = target.getAttribute("data-pr-post-id");
+      const routeId = target.getAttribute("data-pr-route-id");
+      const approveId = target.getAttribute("data-pr-approve-id");
+      const receiveId = target.getAttribute("data-pr-receive-id");
+      const receiveHalfId = target.getAttribute("data-pr-receive-half-id");
+      const receiveFullId = target.getAttribute("data-pr-receive-full-id");
+      const createPoId = target.getAttribute("data-pr-create-po-id");
+      const outstanding = target.getAttribute("data-pr-outstanding");
+      const duplicateJson = target.getAttribute("data-pr-duplicate");
+      const openApprovalId = target.getAttribute("data-pr-open-approval-id");
+      if (advanceId && advanceStatus) {
+        advanceRequisitionStage(advanceId, advanceStatus).catch((e) => setStatus(`Advance failed: ${e.message || e}`));
+        return;
+      }
+      if (finalizeId) {
+        fetchJson(`${API}/api/procurement/requisitions/${finalizeId}/finalize`, { method: "POST", headers: { "Content-Type": "application/json" } })
+          .then((res) => {
+            setText("procurementResult", JSON.stringify(res, null, 2));
+            return loadRequisitions();
+          })
+          .catch((e) => setStatus(`Finalize failed: ${e.message || e}`));
+        return;
+      }
+      if (postId) {
+        fetchJson(`${API}/api/procurement/requisitions/${postId}/post`, { method: "POST", headers: { "Content-Type": "application/json" } })
+          .then((res) => {
+            setText("procurementResult", JSON.stringify(res, null, 2));
+            return loadRequisitions();
+          })
+          .catch((e) => setStatus(`Post failed: ${e.message || e}`));
+        return;
+      }
+      if (routeId) {
+        launchApprovalRouteForRequisition(routeId)
+          .then(() => loadRequisitions())
+          .catch((e) => setStatus(`Route failed: ${e.message || e}`));
+        return;
+      }
+      if (approveId) {
+        approveCurrentStepForRequisition(approveId)
+          .then(() => loadRequisitions())
+          .catch((e) => setStatus(`Approve failed: ${e.message || e}`));
+        return;
+      }
+      if (submitId) {
+        fetchJson(`${API}/api/procurement/requisitions/${submitId}/finalize`, { method: "POST", headers: { "Content-Type": "application/json" } })
+          .then(() => fetchJson(`${API}/api/procurement/requisitions/${submitId}/post`, { method: "POST", headers: { "Content-Type": "application/json" } }))
+          .then(() =>
+            fetchJson(`${API}/api/procurement/requisitions/${submitId}/approvers`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ approvers: [{ name: "approver1" }] }),
+            })
+          )
+          .then(() => fetchJson(`${API}/api/procurement/requisitions/${submitId}/send-approval`, { method: "POST", headers: { "Content-Type": "application/json" } }))
+          .then((res) => {
+            setText("procurementResult", JSON.stringify(res, null, 2));
+            return loadRequisitions();
+          })
+          .catch((e) => setStatus(`Quick send failed: ${e.message || e}`));
+        return;
+      }
+      if (receiveId) {
+        requestRequisitionReceive(receiveId);
+        return;
+      }
+      if (receiveHalfId) {
+        requestRequisitionReceiveHalf(receiveHalfId, Number(outstanding || 0));
+        return;
+      }
+      if (receiveFullId) {
+        requestRequisitionReceiveFull(receiveFullId, Number(outstanding || 0));
+        return;
+      }
+      if (createPoId) {
+        createPoFromRequisition(createPoId).catch((e) => setStatus(`Create PO failed: ${e.message || e}`));
+        return;
+      }
+      if (duplicateJson) {
+        duplicateRequisitionFromRow(duplicateJson);
+        return;
+      }
+      if (openApprovalId) {
+        const statusEl = qs("approvalStatus");
+        const moduleEl = qs("approvalModule");
+        const actionEl = qs("approvalAction");
+        if (statusEl) statusEl.value = "";
+        if (moduleEl) moduleEl.value = "procurement";
+        if (actionEl) actionEl.value = "";
+        switchTab("approvals");
+        loadApprovalRequests().catch(() => {});
+        setStatus(`Showing approvals. Latest request id: #${openApprovalId}`);
+      }
+    });
+  }
+
+  const prPoList = qs("prPoList");
+  if (prPoList) {
+    prPoList.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const openId = target.getAttribute("data-pr-po-open");
+      const approveId = target.getAttribute("data-pr-po-approve");
+      const sendId = target.getAttribute("data-pr-po-send");
+      if (openId) {
+        openPurchaseOrder(openId).catch((e) => setStatus(`PO detail error: ${e.message || e}`));
+        return;
+      }
+      if (approveId) {
+        approvePurchaseOrder(approveId).catch((e) => setStatus(`PO approve error: ${e.message || e}`));
+        return;
+      }
+      if (sendId) {
+        sendPurchaseOrder(sendId).catch((e) => setStatus(`PO send error: ${e.message || e}`));
+      }
+    });
+  }
+
+  const prExList = qs("prExceptionsList");
+  if (prExList) {
+    prExList.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const resolveId = target.getAttribute("data-pr-ex-resolve");
+      if (resolveId) {
+        resolveProcurementException(resolveId).catch((e) => setStatus(`Exception resolve error: ${e.message || e}`));
+      }
+    });
+  }
+}
+
+/** Start-up: Supply flow board lane actions. Called once from init() in init.js. */
+function wireSupplyFlowLanes() {
+  ["sfPlan", "sfReview", "sfRoute", "sfApprove", "sfPoReady", "sfReceive"].forEach((laneId) => {
+    const lane = qs(laneId);
+    if (!lane) return;
+    lane.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const advanceId = target.getAttribute("data-pr-advance-id");
+      const advanceStatus = target.getAttribute("data-pr-advance-status");
+      if (!advanceId || !advanceStatus) return;
+      advanceRequisitionStage(advanceId, advanceStatus).catch((e) => setStatus(`Advance failed: ${e.message || e}`));
+    });
+  });
+}
+
+/** Start-up: Supply flow counter buttons. Called once from init() in init.js. */
+function wireSupplyFlowCounters() {
+  ["sfCountPlan", "sfCountReview", "sfCountRoute", "sfCountApprove", "sfCountPoReady", "sfCountReceive"].forEach((id) => {
+    const btn = qs(id);
+    if (!btn) return;
+    btn.addEventListener("click", () => {
+      const statusEl = qs("prStatusFilter");
+      if (id === "sfCountReceive") {
+        if (statusEl) statusEl.value = "";
+        setProcurementKpiFilter("receive_set");
+      } else {
+        const status = String(btn.getAttribute("data-sf-status") || "").trim();
+        if (statusEl) statusEl.value = status;
+        setProcurementKpiFilter("all");
+      }
+      loadRequisitions().catch((e) => setStatus("Requisition load error: " + e.message));
+    });
+  });
+}

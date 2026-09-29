@@ -785,3 +785,93 @@ async function unarchiveSelectedAsset() {
 /* =========================
    INIT
 ========================= */
+
+/** Start-up: Asset history, register, plant hire and allocation controls. Called once from init() in init.js. */
+function wireAssetControls() {
+  // Assets
+  qs("loadHistory")?.addEventListener("click", () =>
+    loadAssetHistory().catch((e) => setStatus("History error: " + e.message))
+  );
+  qs("downloadHistoryPdf")?.addEventListener("click", downloadAssetHistoryPdf);
+
+  qs("historyList")?.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-ops-slip-pdf]");
+    if (!btn) return;
+    e.preventDefault();
+    const id = btn.getAttribute("data-ops-slip-pdf");
+    if (!id) return;
+    try {
+      setStatus("Opening slip PDF...");
+      await openAuthedPdf(`${API}/api/breakdown-ops/slips/${encodeURIComponent(id)}/pdf`);
+      setStatus("PDF opened ✅");
+    } catch (err) {
+      setStatus("PDF error: " + (err.message || err));
+    }
+  });
+
+  qs("showArchived")?.addEventListener("change", () => {
+    loadAssetsFleet().catch(() => {});
+  });
+
+  qs("downloadAssetsCostCentersXlsx")?.addEventListener("click", () => downloadAssetsCostCentersXlsx());
+
+  qs("saveOperatingBudget")?.addEventListener("click", () =>
+    saveOperatingBudget().catch((e) => setStatus("Operating budget error: " + e.message))
+  );
+  qs("savePlantHireBudget")?.addEventListener("click", () =>
+    savePlantHireBudget().catch((e) => setStatus("Plant hire budget error: " + e.message))
+  );
+  qs("savePlantHireRates")?.addEventListener("click", () =>
+    savePlantHireRates().catch((e) => setStatus("Plant hire rates error: " + e.message))
+  );
+  qs("plantHireBudgetMonth")?.addEventListener("change", () => loadPlantHireBudgetStatus().catch(() => {}));
+  qs("plantHireAssetSelect")?.addEventListener("change", () => {
+    const code = String(qs("plantHireAssetSelect")?.value || "").trim();
+    const row = plantHireRegisterCache.find((r) => r.asset_code === code);
+    fillPlantHireRateFields(row || {});
+    syncPlantHireAssetLabel(code);
+  });
+
+  qs("assetsFleetFilter")?.addEventListener("input", () => {
+    renderAssetFleetGrid(assetsFleetCache);
+  });
+  qs("assetsFleetStatus")?.addEventListener("change", () => renderAssetFleetGrid(assetsFleetCache));
+  qs("assetFleetCard")?.addEventListener("click", (e) => {
+    const filterBtn = e.target.closest("button[data-fleet-status]");
+    if (!filterBtn) return;
+    if (qs("assetsFleetStatus")) qs("assetsFleetStatus").value = filterBtn.dataset.fleetStatus || "";
+    renderAssetFleetGrid(assetsFleetCache);
+  });
+
+  qs("assetFleetGrid")?.addEventListener("click", (e) => {
+    const card = e.target.closest(".asset-fleet-card");
+    if (!card) return;
+    const code = card.dataset.assetCode;
+    if (!code) return;
+    selectAssetCard(code, { loadHistory: true, scroll: true }).catch((err) =>
+      setStatus("Asset select error: " + (err.message || err))
+    );
+  });
+
+  qs("btnArchiveAsset")?.addEventListener("click", () =>
+    archiveSelectedAsset().catch((e) => setStatus("Archive error: " + e.message))
+  );
+
+  qs("btnUnarchiveAsset")?.addEventListener("click", () =>
+    unarchiveSelectedAsset().catch((e) => setStatus("Unarchive error: " + e.message))
+  );
+  qs("saveAssetDetails")?.addEventListener("click", () =>
+    saveAssetDetails().catch((e) => setStatus("Equipment details error: " + e.message))
+  );
+  qs("saveContractorAsset")?.addEventListener("click", () =>
+    saveContractorAsset().catch((e) => setStatus("Contractor asset save error: " + e.message))
+  );
+  qs("assetAllocSelect")?.addEventListener("change", () => loadAssetAllocationForm());
+  qs("saveAssetAllocationBtn")?.addEventListener("click", () =>
+    saveAssetAllocation().catch((e) => setStatus("Asset allocation error: " + e.message))
+  );
+  qs("refreshAssetAllocationBtn")?.addEventListener("click", () =>
+    populateAssetAllocSelect().catch((e) => setStatus("Asset allocation refresh error: " + e.message))
+  );
+  populateAssetAllocSelect().catch(() => {});
+}
