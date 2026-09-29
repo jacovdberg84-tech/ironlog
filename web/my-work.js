@@ -223,6 +223,7 @@ async function loadMyWork() {
     const due = dueRes && Array.isArray(dueRes.due) ? dueRes.due : null;
     const cards = myWorkCards(sections, due);
     grid.innerHTML = cards.map(renderMyWorkCard).join("");
+    loadCostingGapsCard(grid).catch(() => {});
     const open = cards.reduce((n, c) => n + (c.key === "services" || c.key === "partsorders" ? 0 : c.count), 0);
     if (subtitle) {
       const today = new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
@@ -258,4 +259,323 @@ async function loadMyWork() {
     openMyTasks(Number(task.dataset.myworkTask));
   });
   qs("myWorkRefresh")?.addEventListener("click", () => loadMyWork());
+})();
+
+/* ---------- Costing gaps + Borris costing assistant ---------- */
+
+const COSTING_GAP_ROLES = ["admin", "supervisor", "workshop_admin", "plant_manager", "site_manager"];
+let myWorkCostingGaps = [];
+let costingGapsExpanded = false;
+
+function costingGapOpenTarget(g) {
+  if (g.type === "service_no_labour" && g.work_order_id) return `workorders.html?wo=${g.work_order_id}`;
+  if (g.type === "part_zero_cost") return myWorkAllowed("stock") ? "stock" : "";
+  if (g.type === "labour_rate_missing") return myWorkAllowed("admin") ? "admin" : "";
+  if (g.type === "service_unpriced") return "maintenance.html";
+  return "";
+}
+
+function renderCostingGapsCard(gaps) {
+  const shown = costingGapsExpanded ? gaps : gaps.slice(0, 5);
+  const counts = [];
+  const n = (t) => gaps.filter((g) => g.type === t).length;
+  if (n("service_unpriced")) counts.push(`${n("service_unpriced")} service${n("service_unpriced") === 1 ? "" : "s"} unpriced`);
+  if (n("part_zero_cost")) counts.push(`${n("part_zero_cost")} part${n("part_zero_cost") === 1 ? "" : "s"} at $0`);
+  if (n("service_no_labour")) counts.push(`${n("service_no_labour")} job${n("service_no_labour") === 1 ? "" : "s"} without labour`);
+  const items = shown.map((g) => {
+    const target = costingGapOpenTarget(g);
+    return `<li class="costing-gap sev-${escapeHtml(g.severity)}">
+      <div class="mywork-item-main">
+        <strong>${escapeHtml(g.title)}</strong>
+        <span>${escapeHtml(g.detail)}</span>
+        <div class="costing-gap-actions">
+          ${g.borris ? `<button type="button" class="btn-primary" data-costing-assist="${escapeHtml(g.key)}">Work on it with Borris</button>` : ""}
+          ${target ? `<button type="button" data-mywork-go="${escapeHtml(target)}">Open</button>` : ""}
+          <button type="button" data-costing-dismiss="${escapeHtml(g.key)}">Not needed</button>
+        </div>
+      </div>
+    </li>`;
+  }).join("");
+  const more = gaps.length > 5
+    ? `<button type="button" class="mywork-more costing-more" data-costing-more="1">${costingGapsExpanded ? "Show fewer" : `Show all ${gaps.length}`}</button>`
+    : "";
+  return `
+    <article class="mywork-card mywork-card-wide ${gaps.length ? "tone-warn" : "is-clear"}" data-mywork-card="costing">
+      <header>
+        <h3>Costing gaps</h3>
+        <span class="mywork-count">${gaps.length ? gaps.length : "✓"}</span>
+      </header>
+      <p class="mywork-meta">${escapeHtml(counts.join(" · ") || "Every upcoming service and part in use has a price.")}</p>
+      ${gaps.length ? `<ul class="mywork-list costing-gap-list">${items}</ul>` : ""}
+      ${more}
+    </article>`;
+}
+
+async function loadCostingGapsCard(grid) {
+  const roles = getSessionRoles();
+  if (!roles.some((r) => COSTING_GAP_ROLES.includes(r)) || !myWorkAllowed("maintenance")) return;
+  try {
+    const data = await fetchJson(`${API}/api/maintenance/costing-gaps`);
+    myWorkCostingGaps = Array.isArray(data.gaps) ? data.gaps : [];
+  } catch {
+    return;
+  }
+  grid.querySelector('[data-mywork-card="costing"]')?.remove();
+  grid.insertAdjacentHTML("beforeend", renderCostingGapsCard(myWorkCostingGaps));
+}
+
+/* The Borris panel: evidence-based proposal the person can edit and apply. */
+function borrisPanel() {
+  let panel = qs("borrisCostingPanel");
+  if (panel) return panel;
+  document.body.insertAdjacentHTML("beforeend", `
+    <div id="borrisCostingBackdrop" class="bw-backdrop" hidden></div>
+    <section id="borrisCostingPanel" class="bw-panel" role="dialog" aria-modal="true" aria-labelledby="bwTitle" hidden>
+      <header class="bw-head">
+        <div><span class="bw-kicker">Borris · costing</span><h3 id="bwTitle">Costing gap</h3></div>
+        <button type="button" data-bw-close>Close</button>
+      </header>
+      <div id="bwBody" class="bw-body"></div>
+    </section>`);
+  panel = qs("borrisCostingPanel");
+  qs("borrisCostingBackdrop").addEventListener("click", closeBorrisPanel);
+  panel.addEventListener("click", onBorrisPanelClick);
+  panel.addEventListener("input", onBorrisPanelInput);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeBorrisPanel(); });
+  return panel;
+}
+
+function openBorrisPanel(title) {
+  const panel = borrisPanel();
+  qs("bwTitle").textContent = title;
+  panel.hidden = false;
+  qs("borrisCostingBackdrop").hidden = false;
+}
+
+function closeBorrisPanel() {
+  if (qs("borrisCostingPanel")) qs("borrisCostingPanel").hidden = true;
+  if (qs("borrisCostingBackdrop")) qs("borrisCostingBackdrop").hidden = true;
+}
+
+let borrisCurrent = null;
+
+function money(n) {
+  return `$${Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function renderServiceProposal(data) {
+  const p = data.proposal;
+  const plan = data.plan;
+  const unit = plan.meter_unit === "km" ? "km" : "h";
+  const modeNote = p.mode === "borris"
+    ? `<span class="bw-badge">Borris proposal</span>`
+    : `<span class="bw-badge is-history">From service history</span>${data.ai?.configured && data.ai.error ? ` <span class="bw-note">Borris could not answer (${escapeHtml(data.ai.error)}), so this uses the records only.</span>` : ""}`;
+  const rows = p.lines.map((l, i) => `
+    <tr>
+      <td><strong>${escapeHtml(l.part_code)}</strong><div class="bw-sub">${escapeHtml(l.part_name || "")}</div>${l.why ? `<div class="bw-why">${escapeHtml(l.why)}</div>` : ""}</td>
+      <td><input type="number" min="0" step="0.01" value="${l.qty}" data-bw-qty="${i}" aria-label="Quantity for ${escapeHtml(l.part_code)}" /></td>
+      <td class="${l.unit_cost > 0 ? "" : "bw-missing"}">${l.unit_cost > 0 ? money(l.unit_cost) : "No price"}</td>
+      <td data-bw-line="${i}">${money(l.line_cost)}</td>
+      <td><button type="button" class="bw-remove" data-bw-remove="${i}" aria-label="Remove ${escapeHtml(l.part_code)}">✕</button></td>
+    </tr>`).join("");
+  const src = p.sources;
+  return `
+    <p class="bw-lead">${escapeHtml(plan.asset_code)} ${escapeHtml(plan.asset_name || "")} · ${escapeHtml(plan.service_name || "")} (${Number(plan.interval_hours)} ${unit})</p>
+    <div class="bw-mode">${modeNote}</div>
+    ${p.summary ? `<p class="bw-summary">${escapeHtml(p.summary)}</p>` : ""}
+    ${p.borris_note ? `<p class="bw-note">Borris: ${escapeHtml(p.borris_note)}</p>` : ""}
+    ${p.lines.length ? `
+      <table class="bw-table">
+        <thead><tr><th>Part</th><th>Qty</th><th>Store price</th><th>Line</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>` : `<p class="bw-note">No parts proposed yet.</p>`}
+    ${p.unpriced_codes.length ? `<p class="bw-warn">No store price for ${escapeHtml(p.unpriced_codes.join(", "))} — those lines count as $0 until priced.</p>` : ""}
+    ${p.rejected_codes.length ? `<p class="bw-note">Left out (not in stores): ${escapeHtml(p.rejected_codes.join(", "))}.</p>` : ""}
+    <div class="bw-labour">
+      <label>Labour hours <input type="number" min="0" step="0.5" value="${p.labour.hours}" data-bw-hours="1" /></label>
+      <span>× ${money(p.labour.rate)}/h = <strong data-bw-labour-total>${money(p.labour.total)}</strong></span>
+    </div>
+    <p class="bw-total">Service estimate: <strong data-bw-total>${money(p.totals.total)}</strong></p>
+    ${p.questions.length ? `<div class="bw-questions"><strong>Borris needs to know:</strong><ul>${p.questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("")}</ul></div>` : ""}
+    <p class="bw-sources">Evidence: ${src.own_services} past service${src.own_services === 1 ? "" : "s"} on this machine${src.peer_assets.length ? `; ${src.peer_services} on ${escapeHtml(src.peer_assets.join(", "))}` : ""}${src.manual.length ? `; manual: ${escapeHtml(src.manual.join("; "))}` : "; no manual pages matched"}.</p>
+    <div class="bw-actions">
+      <button type="button" class="btn-primary" data-bw-apply="service">Apply to service cost</button>
+      <button type="button" data-costing-dismiss="${escapeHtml(data.key)}">Not needed</button>
+    </div>
+    <p class="bw-msg" data-bw-msg role="status"></p>
+    ${borrisFollowUpHtml()}`;
+}
+
+function renderPartProposal(data) {
+  const p = data.proposal;
+  const list = (rows, label) => rows.length
+    ? `<p class="bw-sub">${label}</p><ul class="bw-list">${rows.map((r) => `<li>${escapeHtml(r.part_code || r.source || "")} ${r.part_name ? `— ${escapeHtml(r.part_name)}` : ""} · ${money(r.unit_cost)}${r.date ? ` · ${escapeHtml(String(r.date).slice(0, 10))}` : ""}</li>`).join("")}</ul>`
+    : "";
+  return `
+    <p class="bw-lead">${escapeHtml(p.part_code)}</p>
+    <div class="bw-mode"><span class="bw-badge is-history">From purchase records</span></div>
+    <p class="bw-summary">${escapeHtml(p.summary)}</p>
+    ${list(p.purchases, "Purchase prices on record")}
+    ${list(p.similar, "Similar store items (a guide only)")}
+    <div class="bw-labour">
+      <label>Unit cost (USD) <input type="number" min="0" step="0.01" value="${p.unit_cost ?? ""}" data-bw-unit-cost="1" /></label>
+    </div>
+    <div class="bw-actions">
+      <button type="button" class="btn-primary" data-bw-apply="part">Save store price</button>
+      <button type="button" data-costing-dismiss="${escapeHtml(data.key)}">Not needed</button>
+    </div>
+    <p class="bw-msg" data-bw-msg role="status"></p>`;
+}
+
+function borrisFollowUpHtml() {
+  return `
+    <details class="bw-followup">
+      <summary>Ask Borris about this</summary>
+      <textarea data-bw-question rows="2" placeholder="e.g. Which fuel filter does the 950GC use at 500 h?"></textarea>
+      <button type="button" data-bw-ask="1">Ask</button>
+      <div class="bw-answer" data-bw-answer></div>
+    </details>`;
+}
+
+async function openCostingAssist(key) {
+  const gap = myWorkCostingGaps.find((g) => g.key === key);
+  openBorrisPanel(gap?.title || "Costing gap");
+  const body = qs("bwBody");
+  body.innerHTML = `<div class="bw-thinking">Borris is reading the service history, sister machines, store prices and manuals…</div>`;
+  try {
+    const data = await fetchJson(`${API}/api/maintenance/costing-gaps/assist`, { method: "POST", body: JSON.stringify({ key }) });
+    borrisCurrent = JSON.parse(JSON.stringify(data));
+    body.innerHTML = data.kind === "part" ? renderPartProposal(data) : renderServiceProposal(data);
+  } catch (err) {
+    body.innerHTML = `<p class="bw-warn">Could not get a proposal: ${escapeHtml(err.message || String(err))}</p>`;
+  }
+}
+
+function recalcServiceProposal() {
+  const p = borrisCurrent?.proposal;
+  if (!p) return;
+  const parts = p.lines.reduce((s, l) => s + l.line_cost, 0);
+  p.labour.total = Number((p.labour.hours * p.labour.rate).toFixed(2));
+  p.totals = { parts, labour: p.labour.total, total: Number((parts + p.labour.total).toFixed(2)) };
+  const panel = qs("borrisCostingPanel");
+  p.lines.forEach((l, i) => { const el = panel.querySelector(`[data-bw-line="${i}"]`); if (el) el.textContent = money(l.line_cost); });
+  const lt = panel.querySelector("[data-bw-labour-total]");
+  if (lt) lt.textContent = money(p.labour.total);
+  const tt = panel.querySelector("[data-bw-total]");
+  if (tt) tt.textContent = money(p.totals.total);
+}
+
+function onBorrisPanelInput(e) {
+  const p = borrisCurrent?.proposal;
+  if (!p) return;
+  const qtyIdx = e.target.dataset.bwQty;
+  if (qtyIdx != null) {
+    const l = p.lines[Number(qtyIdx)];
+    l.qty = Math.max(0, Number(e.target.value || 0));
+    l.line_cost = Number((l.qty * l.unit_cost).toFixed(2));
+    recalcServiceProposal();
+  }
+  if (e.target.dataset.bwHours) {
+    p.labour.hours = Math.max(0, Number(e.target.value || 0));
+    recalcServiceProposal();
+  }
+}
+
+function bwMsg(text, ok) {
+  const el = qs("borrisCostingPanel")?.querySelector("[data-bw-msg]");
+  if (!el) return;
+  el.textContent = text;
+  el.className = `bw-msg ${ok ? "is-ok" : "is-err"}`;
+}
+
+async function applyBorrisProposal(kind) {
+  const data = borrisCurrent;
+  if (!data) return;
+  const user = getSessionUser();
+  const today = new Date().toISOString().slice(0, 10);
+  if (kind === "service") {
+    const p = data.proposal;
+    const items = p.lines.filter((l) => l.qty > 0).map((l) => ({ type: l.type, part_code: l.part_code, qty: l.qty }));
+    if (!items.length && !(p.labour.total > 0)) return bwMsg("Add at least one part or labour hours first.", false);
+    await fetchJson(`${API}/api/maintenance/weekly-forum/forecast-inputs`, {
+      method: "POST",
+      body: JSON.stringify({
+        plan_id: data.plan.plan_id,
+        items,
+        labor_total: p.labour.total,
+        notes: `Borris ${p.mode === "borris" ? "proposal" : "history estimate"} approved by ${user || "user"} on ${today}. ${p.summary || ""}`.slice(0, 500),
+      }),
+    });
+    bwMsg(`Saved: ${data.plan.asset_code} ${data.plan.service_name} is now costed at ${money(p.totals.total)}.`, true);
+  } else {
+    const input = qs("borrisCostingPanel").querySelector("[data-bw-unit-cost]");
+    const unit_cost = Number(input?.value);
+    if (!(unit_cost > 0)) return bwMsg("Enter the unit cost from the invoice or quote.", false);
+    await fetchJson(`${API}/api/dashboard/cost/part-cost`, { method: "POST", body: JSON.stringify({ part_code: data.proposal.part_code, unit_cost }) });
+    bwMsg(`Saved: ${data.proposal.part_code} now costs ${money(unit_cost)}.`, true);
+  }
+  qs("borrisCostingPanel").querySelectorAll("[data-bw-apply]").forEach((b) => { b.disabled = true; });
+  loadMyWork();
+}
+
+async function askBorrisFollowUp() {
+  const panel = qs("borrisCostingPanel");
+  const q = String(panel.querySelector("[data-bw-question]")?.value || "").trim();
+  const out = panel.querySelector("[data-bw-answer]");
+  if (!q || !out) return;
+  out.textContent = "Borris is thinking…";
+  const d = borrisCurrent || {};
+  const context = d.kind === "service"
+    ? `Costing gap: ${d.plan?.asset_code} ${d.plan?.asset_name} ${d.plan?.service_name} (${d.plan?.interval_hours}). Current proposal: ${(d.proposal?.lines || []).map((l) => `${l.part_code} x${l.qty}`).join(", ") || "none"}; labour ${d.proposal?.labour?.hours} h.`
+    : `Costing gap: store part ${d.proposal?.part_code} has no price.`;
+  try {
+    const res = await fetchJson(`${API}/api/ironmind/ask`, { method: "POST", body: JSON.stringify({ question: q, asset_code: d.plan?.asset_code || "", context_notes: context }) });
+    out.textContent = res.short_answer || "No answer.";
+  } catch (err) {
+    out.textContent = `Borris could not answer: ${err.message || err}`;
+  }
+}
+
+async function dismissCostingGapUi(key) {
+  const reason = window.prompt("Why is this not needed? (optional — e.g. 'machine sold', 'priced by contractor')", "");
+  if (reason === null) return;
+  await fetchJson(`${API}/api/maintenance/costing-gaps/dismiss`, { method: "POST", body: JSON.stringify({ key, reason }) });
+  closeBorrisPanel();
+  loadMyWork();
+}
+
+function onBorrisPanelClick(e) {
+  if (e.target.closest("[data-bw-close]")) return closeBorrisPanel();
+  const rm = e.target.closest("[data-bw-remove]");
+  if (rm && borrisCurrent?.proposal) {
+    borrisCurrent.proposal.lines.splice(Number(rm.dataset.bwRemove), 1);
+    qs("bwBody").innerHTML = renderServiceProposal(borrisCurrent);
+    recalcServiceProposal();
+    return;
+  }
+  const apply = e.target.closest("[data-bw-apply]");
+  if (apply) {
+    apply.disabled = true;
+    applyBorrisProposal(apply.dataset.bwApply).catch((err) => { apply.disabled = false; bwMsg(err.message || String(err), false); });
+    return;
+  }
+  const dis = e.target.closest("[data-costing-dismiss]");
+  if (dis) return void dismissCostingGapUi(dis.dataset.costingDismiss).catch((err) => bwMsg(err.message || String(err), false));
+  if (e.target.closest("[data-bw-ask]")) askBorrisFollowUp();
+}
+
+(function initCostingGaps() {
+  const grid = qs("myWorkGrid");
+  if (!grid) return;
+  grid.addEventListener("click", (e) => {
+    const assist = e.target.closest("[data-costing-assist]");
+    if (assist) return void openCostingAssist(assist.dataset.costingAssist);
+    const dis = e.target.closest("[data-costing-dismiss]");
+    if (dis) return void dismissCostingGapUi(dis.dataset.costingDismiss).catch(() => {});
+    if (e.target.closest("[data-costing-more]")) {
+      costingGapsExpanded = !costingGapsExpanded;
+      grid.querySelector('[data-mywork-card="costing"]')?.remove();
+      grid.insertAdjacentHTML("beforeend", renderCostingGapsCard(myWorkCostingGaps));
+    }
+  });
 })();
