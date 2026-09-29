@@ -6,7 +6,7 @@ test("native Ollama URL and context default", () => {
   assert.equal(ollamaNativeChatUrl("http://127.0.0.1:11434/v1/chat/completions"), "http://127.0.0.1:11434/api/chat");
   const prev = process.env.BORRIS_NUM_CTX;
   delete process.env.BORRIS_NUM_CTX;
-  assert.equal(borrisNumCtx(), 8192);
+  assert.equal(borrisNumCtx(), 0, "off unless set: a bigger window reloads the model with more memory");
   process.env.BORRIS_NUM_CTX = "16384";
   assert.equal(borrisNumCtx(), 16384);
   if (prev === undefined) delete process.env.BORRIS_NUM_CTX; else process.env.BORRIS_NUM_CTX = prev;

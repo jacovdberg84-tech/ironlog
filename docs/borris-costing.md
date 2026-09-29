@@ -27,12 +27,18 @@ Plain database checks, no AI needed (`api/utils/costingGaps.js`):
 Nothing is written without that click.
 
 ## Ollama settings
-Borris runs on the server's Ollama. Planning questions and costing proposals use
-Ollama's `/api/chat` with a larger context window and JSON mode.
+Borris runs on the server's Ollama. Costing proposals and planning questions use
+Ollama's `/api/chat` in JSON mode.
 
-- `BORRIS_NUM_CTX` (default `8192`): tokens Borris can read at once. `16384` gives
-  more room for evidence but needs roughly 1–2 GB more RAM for a 7–8B model.
-  `0` keeps the model's own default.
-- `BORRIS_COSTING_TIMEOUT_MS` (default `120000`): how long a costing proposal may take.
+- `BORRIS_NUM_CTX` (default off): a larger context window for Borris, e.g. `8192`.
+  Ollama reloads the model with more memory when the window changes, so only set
+  it when the server has the RAM to spare (roughly +1–2 GB for a 7–8B model at
+  8192). On 2026-09-29 the default of 8192 exhausted the server and dropped the
+  Cloudflare tunnel, which is why it is now off.
+- `BORRIS_COSTING_TIMEOUT_MS` (default `45000`, capped at `80000`): how long a
+  costing proposal may take before IRONLOG falls back to the service-history
+  proposal. Cloudflare cuts requests at about 100 s.
+- One costing proposal runs at a time; a second request gets the history
+  proposal straight away.
 - A model that follows JSON instructions well (e.g. `qwen2.5:7b` or `llama3.1:8b`)
   gives better proposals than very small models.

@@ -23,6 +23,13 @@ import { writeAudit } from "../../utils/audit.js";
 const COSTING_ROLES = ["admin", "supervisor", "workshop_admin", "plant_manager", "site_manager"];
 // Services due within this many hours (or km) are checked for a price.
 const HORIZON = 250;
+let borrisBusy = false;
+
+/** BORRIS_COSTING_TIMEOUT_MS, default 45 s, never above 80 s (proxies cut at ~100 s). */
+export function costingTimeoutMs() {
+  const n = Number(process.env.BORRIS_COSTING_TIMEOUT_MS || 45000);
+  return Number.isFinite(n) && n > 0 ? Math.min(80000, n) : 45000;
+}
 
 function localToday() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
@@ -101,17 +108,26 @@ export default function registerCostingRoutes(app, ctx) {
 
       const ai = { configured: isAiConfigured(), ...aiProviderSummary(), used: false, error: null };
       let proposal = null;
-      if (ai.configured) {
-        const text = await aiChatText(serviceProposalMessages(evidence), {
-          temperature: 0,
-          max_tokens: 900,
-          num_ctx: borrisNumCtx(),
-          json: true,
-          timeout_ms: Number(process.env.BORRIS_COSTING_TIMEOUT_MS || 120000),
-        });
-        proposal = text == null ? null : proposalFromAi(db, evidence, text);
-        ai.used = Boolean(proposal);
-        if (!proposal) ai.error = text == null ? (getLastLlmChatError() || "no reply") : "reply was not usable JSON";
+      if (ai.configured && borrisBusy) {
+        ai.error = "Borris is busy with another proposal";
+      } else if (ai.configured) {
+        // One proposal at a time, and a hard time limit well under the ~100 s a
+        // proxy allows: a local model must never tie up the server.
+        borrisBusy = true;
+        try {
+          const text = await aiChatText(serviceProposalMessages(evidence), {
+            temperature: 0,
+            max_tokens: 700,
+            num_ctx: borrisNumCtx(),
+            json: true,
+            timeout_ms: costingTimeoutMs(),
+          });
+          proposal = text == null ? null : proposalFromAi(db, evidence, text);
+          ai.used = Boolean(proposal);
+          if (!proposal) ai.error = text == null ? (getLastLlmChatError() || "no reply") : "reply was not usable JSON";
+        } finally {
+          borrisBusy = false;
+        }
       }
       // Borris came back empty-handed (or is offline): fall back to history so
       // the person still gets a starting point, and say so.

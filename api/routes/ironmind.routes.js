@@ -642,8 +642,8 @@ export default async function ironmindRoutes(app) {
         model: cfg.model || "gpt-4o-mini",
         temperature: 0.2,
         max_tokens: planning ? Math.max(askMaxTokens, 700) : askMaxTokens,
-        timeout_ms: planning ? Math.max(askTimeoutMs, 90000) : askTimeoutMs,
-        ...(planning ? { num_ctx: borrisNumCtx() } : {}),
+        timeout_ms: Math.min(askTimeoutMs, 60000),
+        ...(planning && borrisNumCtx() ? { num_ctx: borrisNumCtx() } : {}),
         messages: [
           { role: "system", content: planning ? `${system} For planning and costing: use context.planning (upcoming services with cost and cost_source, costing gaps). Name the machines, amounts and gaps; say which gaps to fill first. Up to 8 bullets.` : system },
           ...hist,
