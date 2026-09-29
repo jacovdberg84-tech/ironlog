@@ -1,6 +1,7 @@
 // IRONLOG/api/routes/breakdowns.routes.js
 import { db } from "../db/client.js";
 import { notifyBreakdownCreated } from "../utils/pushNotify.js";
+import { closeWorkOrdersForClosedBreakdown } from "../utils/workOrderSync.js";
 
 /** Parse YYYY-MM-DDTHH:mm (no timezone) as local wall time. */
 function parseLocalDateTime(s) {
@@ -963,8 +964,11 @@ export default async function breakdownRoutes(app) {
       });
     }
 
-    closeBreakdown.run(id);
-    return reply.send({ ok: true, breakdown_id: id, status: "CLOSED" });
+    const closedWorkOrders = db.transaction(() => {
+      closeBreakdown.run(id);
+      return closeWorkOrdersForClosedBreakdown(db, id);
+    })();
+    return reply.send({ ok: true, breakdown_id: id, status: "CLOSED", closed_work_orders: closedWorkOrders });
   });
 
   app.post("/:id/reopen", async (req, reply) => {

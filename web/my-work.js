@@ -103,8 +103,9 @@ function myWorkCards(sections, due) {
       count: b.count,
       tone: "danger",
       empty: "No open breakdowns.",
+      meta: b.open_breakdown_records > b.count ? `${b.open_breakdown_records} open breakdown records` : "",
       items: b.items.map((x) => ({
-        primary: `${x.asset_code} — ${x.description || "Breakdown"}`,
+        primary: `${x.asset_code} — ${x.description || "Breakdown"}${x.open_breakdowns > 1 ? ` (+${x.open_breakdowns - 1} more)` : ""}`,
         secondary: [myWorkDate(x.breakdown_date) && `Since ${myWorkDate(x.breakdown_date)}`, x.parts_status && `Parts: ${x.parts_status}`].filter(Boolean).join(" · "),
         badge: x.critical ? myWorkPill("Critical", "danger") : "",
       })),
