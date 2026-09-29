@@ -10,8 +10,9 @@ function seed() {
     CREATE TABLE tasks (id INTEGER PRIMARY KEY, title TEXT, status TEXT, priority TEXT, project TEXT,
       assigned_to TEXT, due_date TEXT, site_code TEXT);
     CREATE TABLE breakdowns (id INTEGER PRIMARY KEY, asset_id INTEGER, breakdown_date TEXT, status TEXT,
-      description TEXT, critical INTEGER, parts_status TEXT, site_code TEXT);
-    CREATE TABLE work_orders (id INTEGER PRIMARY KEY, asset_id INTEGER, source TEXT, status TEXT, opened_at TEXT,
+      description TEXT, critical INTEGER, parts_status TEXT, site_code TEXT,
+      component TEXT, ets_repair_date TEXT, primary_work_order_id INTEGER);
+    CREATE TABLE work_orders (id INTEGER PRIMARY KEY, asset_id INTEGER, source TEXT, reference_id INTEGER, status TEXT, opened_at TEXT,
       closed_at TEXT, completed_at TEXT, assigned_artisan_name TEXT, priority TEXT, site_code TEXT);
     CREATE TABLE parts (id INTEGER PRIMARY KEY, part_code TEXT, part_name TEXT, min_stock REAL, critical INTEGER);
     CREATE TABLE stock_movements (id INTEGER PRIMARY KEY, part_id INTEGER, quantity REAL);
@@ -26,12 +27,12 @@ function seed() {
       (4, 'Finished', 'done', 'high', NULL, 'jaco', '2026-09-01', 'main'),
       (5, 'Someone else', 'open', 'high', NULL, 'pieter', '2026-09-01', 'main'),
       (6, 'Other site', 'open', 'high', NULL, 'jaco', '2026-09-01', 'north');
-    INSERT INTO breakdowns VALUES
+    INSERT INTO breakdowns (id, asset_id, breakdown_date, status, description, critical, parts_status, site_code) VALUES
       (1, 1, '2026-09-20', 'open', 'Hydraulic leak', 0, NULL, 'main'),
       (2, 2, '2026-09-25', 'OPEN', 'Engine', 1, 'ordered', NULL),
       (3, 2, '2026-09-10', 'closed', 'Old', 1, NULL, 'main'),
       (4, 1, '2026-09-10', 'open', 'North', 0, NULL, 'north');
-    INSERT INTO work_orders VALUES
+    INSERT INTO work_orders (id, asset_id, source, status, opened_at, closed_at, completed_at, assigned_artisan_name, priority, site_code) VALUES
       (1, 1, 'breakdown', 'open', '2026-09-20', NULL, NULL, NULL, NULL, 'main'),
       (2, 2, 'service', 'In Progress', '2026-09-21', NULL, NULL, 'Sipho', NULL, 'main'),
       (3, 2, 'service', 'closed', '2026-09-01', '2026-09-02', NULL, NULL, NULL, 'main'),
@@ -68,11 +69,14 @@ test("stores roles see low stock and outstanding part orders", () => {
   assert.equal(w.sections.open_breakdowns, undefined);
   assert.deepEqual(w.sections.low_stock.items.map((p) => p.part_code), ["BELT", "FLT"]);
   assert.deepEqual(w.sections.parts_on_order.items.map((p) => p.part_code), ["BELT"]);
+  // Breakdown 2 is waiting on ordered parts with no part listed yet.
+  assert.deepEqual(w.sections.waiting_parts.items.map((r) => `${r.kind}:${r.asset_code}`), ["breakdown:DT02"]);
+  assert.equal(w.sections.waiting_parts.machines_down, 1);
 });
 
 test("workshop admin covers both workshop and stores sections", () => {
   const w = buildMyWork(seed(), { ...ctx, roles: ["workshop_admin"] });
-  assert.deepEqual(Object.keys(w.sections).sort(), ["low_stock", "open_breakdowns", "open_work_orders", "parts_on_order", "tasks"]);
+  assert.deepEqual(Object.keys(w.sections).sort(), ["low_stock", "open_breakdowns", "open_work_orders", "parts_on_order", "tasks", "waiting_parts"]);
 });
 
 test("previews are capped at five while count stays complete", () => {

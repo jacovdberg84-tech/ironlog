@@ -125,6 +125,7 @@ function sourceLabel(source) {
   if (s === "breakdown") return "Breakdown";
   if (s === "inspection" || s === "manager_inspection") return "Inspection repair";
   if (s === "manual") return "Manual repair";
+  if (s === "prestart") return "Pre-start fault";
   return s || "Unknown";
 }
 
@@ -324,6 +325,10 @@ function woJobLine(wo) {
   const source = String(wo.source || "").toLowerCase();
   if (source === "breakdown") return [wo.breakdown_component, wo.breakdown_description].filter(Boolean).join(" — ") || "Breakdown repair";
   if (source === "service") return wo.service_name ? `${wo.service_name}${/^\d+$/.test(String(wo.service_name).trim()) ? " h service" : ""}` : "Scheduled service";
+  // Pre-start and repair jobs: the faults listed in the job description.
+  const lines = String(wo.job_description || "").split("\n").map((l) => l.replace(/^-\s*/, "").trim()).filter(Boolean);
+  if (source === "prestart" && lines.length > 1) return `Pre-start: ${lines.slice(1).join("; ")}`;
+  if (lines.length) return lines[lines.length - 1];
   return sourceLabel(wo.source);
 }
 
@@ -346,7 +351,9 @@ function workOrderBoardCard(wo) {
         <div><dt>Age</dt><dd>${woAgeLabel(woAgeHours(wo.opened_at))}</dd></div>
         ${due ? `<div><dt>Due</dt><dd class="${overdue ? "is-overdue" : ""}">${escapeHtml(due)}</dd></div>` : ""}
       </dl>
-      ${wo.parts_status && !["completed", "approved", "closed"].includes(woStageKey(wo.status)) ? `<p class="wo-flag">Parts: ${escapeHtml(wo.parts_status)}</p>` : ""}
+      ${Number(wo.open_parts_requests) > 0 && !["completed", "approved", "closed"].includes(woStageKey(wo.status))
+        ? `<p class="wo-flag">Waiting on stores: ${escapeHtml(wo.first_waiting_part || "parts")}${Number(wo.open_parts_requests) > 1 ? ` +${Number(wo.open_parts_requests) - 1} more` : ""}</p>`
+        : wo.parts_status && !["completed", "approved", "closed"].includes(woStageKey(wo.status)) ? `<p class="wo-flag">Parts: ${escapeHtml(wo.parts_status)}</p>` : ""}
       ${wo.repair_progress ? `<p class="wo-progress-line" title="${escapeHtml(wo.repair_progress)}">${escapeHtml(String(wo.repair_progress).slice(0, 90))}${String(wo.repair_progress).length > 90 ? "…" : ""}</p>` : ""}
       <div class="wo-board-actions">
         ${actions}
@@ -525,15 +532,94 @@ async function ensureStockCatalogLoaded() {
   return stockCatalogCache;
 }
 
-function canIssueParts(role) {
-  return ["admin", "supervisor", "stores"].includes(String(role || "").toLowerCase());
+const STORES_ISSUE_ROLES = ["admin", "supervisor", "stores", "storeman", "workshop_admin"];
+
+function sessionRoleList() {
+  const out = new Set([String(getSessionRole() || "").toLowerCase()]);
+  try {
+    const roles = JSON.parse(localStorage.getItem("ironlog_session_roles") || "[]");
+    if (Array.isArray(roles)) roles.forEach((r) => out.add(String(r).toLowerCase()));
+  } catch {}
+  return [...out].filter(Boolean);
+}
+
+// Any of the session's roles counts, so a storeman or plant admin can issue too.
+function canIssueParts() {
+  return sessionRoleList().some((r) => STORES_ISSUE_ROLES.includes(r));
+}
+
+const PART_REQUEST_STATUS_LABELS = { requested: "Waiting on stores", ordered: "Ordered", received: "Received", cancelled: "Cancelled" };
+
+function renderPartsRequests(wo, requests) {
+  const rows = Array.isArray(requests) ? requests : [];
+  const closed = String(wo?.status || "").toLowerCase() === "closed";
+  const list = rows.length
+    ? `<ul class="wo-parts-requests">${rows.map((r) => {
+        const st = String(r.status || "requested").toLowerCase();
+        return `<li class="is-${escapeHtml(st)}">
+          <div><strong>${escapeHtml(r.part_name || r.part_code || "Part")}</strong>${r.part_code && r.part_code !== r.part_name ? ` <span class="muted">${escapeHtml(r.part_code)}</span>` : ""} × ${Number(r.qty || 0)}
+            <div class="muted small">${escapeHtml([r.requested_by, String(r.created_at || "").slice(0, 10), r.notes, r.status_notes].filter(Boolean).join(" · "))}</div></div>
+          <span class="wo-parts-status">${escapeHtml(PART_REQUEST_STATUS_LABELS[st] || st)}${String(r.urgency || "normal") !== "normal" ? ` · ${escapeHtml(r.urgency)}` : ""}</span>
+        </li>`;
+      }).join("")}</ul>`
+    : `<div class="muted">No parts requested for this job.</div>`;
+  const form = closed ? "" : `
+    <form class="wo-part-request-form" data-wo-part-request="${Number(wo.id)}" data-asset-id="${Number(wo.asset_id || 0)}">
+      <label>Part number <input name="part_code" list="woPartCodeOptions" placeholder="If known" autocomplete="off" /></label>
+      <label>Description <input name="part_name" placeholder="e.g. Hydraulic pump seal kit" /></label>
+      <label>Qty <input name="qty" type="number" min="0.01" step="0.01" value="1" /></label>
+      <label>Urgency <select name="urgency"><option value="normal">Normal</option><option value="urgent">Urgent</option><option value="critical">Critical — machine down</option></select></label>
+      <label class="wo-part-request-notes">Notes <input name="notes" placeholder="Optional" /></label>
+      <button type="submit" class="btn-primary">Request from stores</button>
+      <p class="wo-part-request-msg" role="status"></p>
+    </form>`;
+  return list + form;
+}
+
+async function submitPartRequest(form) {
+  const woId = Number(form.getAttribute("data-wo-part-request") || 0);
+  const msg = form.querySelector(".wo-part-request-msg");
+  const fd = new FormData(form);
+  const payload = {
+    work_order_id: woId,
+    asset_id: Number(form.getAttribute("data-asset-id") || 0) || null,
+    part_code: String(fd.get("part_code") || "").trim(),
+    part_name: String(fd.get("part_name") || "").trim(),
+    qty: Number(fd.get("qty") || 1),
+    urgency: String(fd.get("urgency") || "normal"),
+    notes: String(fd.get("notes") || "").trim(),
+  };
+  if (!payload.part_code && !payload.part_name) {
+    if (msg) { msg.className = "wo-part-request-msg message-error"; msg.textContent = "Add a part number or a description."; }
+    return;
+  }
+  if (!Number.isFinite(payload.qty) || payload.qty <= 0) {
+    if (msg) { msg.className = "wo-part-request-msg message-error"; msg.textContent = "Quantity must be more than zero."; }
+    return;
+  }
+  const btn = form.querySelector("button[type=submit]");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(`${API}/maintenance/parts-requests`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Request failed");
+    await loadWorkOrderDetail(woId);
+    fetchWorkOrders();
+  } catch (err) {
+    if (msg) { msg.className = "wo-part-request-msg message-error"; msg.textContent = err.message || String(err); }
+    if (btn) btn.disabled = false;
+  }
 }
 
 function renderIssuePanel(wo) {
   const role = getSessionRole();
-  const canIssue = canIssueParts(role);
+  const canIssue = canIssueParts();
   if (!wo || !canIssue) {
-    return `<div class="muted">Issue from stores is available for Admin, Supervisor and Stores roles.</div>`;
+    return `<div class="muted">Stores issue parts to the job. Use “Parts needed” to ask stores for a part.</div>`;
   }
   return `
     <div class="card" style="margin-top:10px;">
@@ -604,6 +690,8 @@ function renderDetail(payload) {
   const workflowActions = workflowActionButtons(wo);
   const partsCount = nonLubeIssued.length;
   const lubeCount = lubeIssued.length;
+  const waitingCount = (Array.isArray(payload?.parts_requests) ? payload.parts_requests : [])
+    .filter((r) => ["requested", "ordered"].includes(String(r.status || "requested").toLowerCase())).length;
 
   return `
     <div class="wo-detail-head">
@@ -646,6 +734,10 @@ function renderDetail(payload) {
     </div>
 
     <div class="wo-detail-support">
+      <details${waitingCount ? " open" : ""}>
+        <summary>Parts needed <span class="wo-detail-count${waitingCount ? " is-waiting" : ""}">${waitingCount}</span></summary>
+        ${renderPartsRequests(wo, payload?.parts_requests)}
+      </details>
       <details open>
         <summary>Repair hours and costs</summary>
         ${renderRepairCostsPanel(wo) || `<div class="muted">No repair costs recorded.</div>`}
@@ -827,8 +919,9 @@ async function fetchWorkOrders() {
       ? renderWorkOrderBoard(filtered, { includeClosed: status !== "active" })
       : `<div class="wo-board-empty">No work orders found for current filters.</div>`;
 
-    const requested = getRequestedWorkOrderId();
+    const requested = requestedWoOpened ? null : getRequestedWorkOrderId();
     if (requested && filtered.some((r) => Number(r.id) === requested)) {
+      requestedWoOpened = true;
       loadWorkOrderDetail(requested).catch(() => {});
       setTimeout(() => scrollToWorkOrderCard(requested), 0);
     }
@@ -962,6 +1055,20 @@ async function submitCloseWorkOrder() {
   }
 }
 
+// Part numbers for the "Parts needed" form (every stores item, in stock or not).
+let partCodeOptionsLoaded = false;
+async function fillPartCodeOptions() {
+  const list = document.getElementById("woPartCodeOptions");
+  if (!list || partCodeOptionsLoaded) return;
+  const res = await fetch(`${API}/stock/onhand`, { headers: authHeaders() });
+  if (!res.ok) return;
+  const rows = await res.json();
+  list.innerHTML = (Array.isArray(rows) ? rows : [])
+    .map((r) => `<option value="${escapeHtml(r.part_code || "")}">${escapeHtml(`${r.part_name || ""} (on hand ${Number(r.on_hand || 0)})`)}</option>`)
+    .join("");
+  partCodeOptionsLoaded = true;
+}
+
 async function loadWorkOrderDetail(id) {
   const woId = Number(id || 0);
   const detailEl = document.getElementById("woDetail");
@@ -991,12 +1098,13 @@ async function loadWorkOrderDetail(id) {
         <button type="button" data-wo-qr-png="${woId}">QR PNG</button>
         <button type="button" data-wo-qr-link="${woId}">Copy link</button>`;
     }
+    fillPartCodeOptions().catch(() => {});
     const techSelect = document.getElementById("woRepairCostTechnician");
     if (techSelect) {
       await loadTechnicians();
       fillTechnicianSelect(techSelect, data.work_order?.assigned_artisan_name || "");
     }
-    if (canIssueParts(getSessionRole())) {
+    if (canIssueParts()) {
       const select = document.getElementById("woIssuePartCode");
       const searchInput = document.getElementById("woIssueSearch");
       if (select) {
@@ -1623,6 +1731,9 @@ async function downloadPlantLaborOilReport() {
   }
 }
 
+// A ?wo= link opens that job once, not on every refresh.
+let requestedWoOpened = false;
+
 function getRequestedWorkOrderId() {
   try {
     const q = new URLSearchParams(window.location.search);
@@ -1636,7 +1747,7 @@ function getRequestedWorkOrderId() {
 function scrollToWorkOrderCard(woId) {
   const id = Number(woId || 0);
   if (!id) return;
-  const card = document.querySelector(`.card[data-wo-id="${id}"]`);
+  const card = document.querySelector(`#woList [data-wo-id="${id}"]`);
   if (!card) return;
   card.classList.add("wo-highlight");
   card.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1855,6 +1966,12 @@ document.addEventListener("DOMContentLoaded", () => {
       if (closeId) openCloseModalForRow(closeId, closeSource);
       if (saveProgressId) saveRepairProgress(saveProgressId).catch(() => {});
       if (saveCostsId) saveRepairCosts(saveCostsId).catch(() => {});
+    });
+    detailEl.addEventListener("submit", (evt) => {
+      const form = evt.target instanceof HTMLElement ? evt.target.closest("[data-wo-part-request]") : null;
+      if (!form) return;
+      evt.preventDefault();
+      submitPartRequest(form).catch(() => {});
     });
     detailEl.addEventListener("input", (evt) => {
       const target = evt.target;

@@ -2,6 +2,8 @@
 // Overdue services come from /api/maintenance/due on the client so counts
 // match the Maintenance page. The low stock query is shared with /api/alerts.
 
+import { summarizeWaiting, workshopWaitingOnParts } from "./partsWaiting.js";
+
 export function queryLowStock(db, limit = 100) {
   return db.prepare(`
     SELECT
@@ -114,6 +116,8 @@ export function buildMyWork(db, { user, roles, site = "main", today }) {
     sections.open_work_orders = openWorkOrders(db, ctx);
   }
   if (has(STORES_ROLES)) {
+    const waiting = workshopWaitingOnParts(db, ctx);
+    sections.waiting_parts = { ...section(waiting), ...summarizeWaiting(waiting) };
     sections.low_stock = section(queryLowStock(db, 1000));
     sections.parts_on_order = partsOnOrder(db);
   }

@@ -110,7 +110,7 @@ export default async function breakdownRoutes(app) {
       b.ets_repair_date
     FROM breakdowns b
     WHERE b.asset_id = ?
-      AND b.status = 'OPEN'
+      AND UPPER(TRIM(b.status)) = 'OPEN'
     ORDER BY b.id DESC
     LIMIT 1
   `);
@@ -120,9 +120,12 @@ export default async function breakdownRoutes(app) {
       b.id,
       b.asset_id,
       a.asset_code,
+      a.asset_name,
       b.breakdown_date,
       b.start_at,
       b.description,
+      b.component,
+      b.critical,
       b.parts_ordered_date,
       b.parts_status,
       b.parts_received_date,
@@ -135,7 +138,7 @@ export default async function breakdownRoutes(app) {
     FROM breakdowns b
     JOIN assets a ON a.id = b.asset_id
     LEFT JOIN work_orders wo ON wo.id = b.primary_work_order_id
-    WHERE b.status = 'OPEN'
+    WHERE UPPER(TRIM(b.status)) = 'OPEN'
       AND (wo.status IS NULL OR wo.status NOT IN ('completed','approved','closed'))
     ORDER BY b.id DESC
     LIMIT 500
@@ -145,9 +148,12 @@ export default async function breakdownRoutes(app) {
       b.id,
       b.asset_id,
       a.asset_code,
+      a.asset_name,
       b.breakdown_date,
       b.start_at,
       b.description,
+      b.component,
+      b.critical,
       b.parts_ordered_date,
       b.parts_status,
       b.parts_received_date,
@@ -166,7 +172,7 @@ export default async function breakdownRoutes(app) {
     FROM breakdowns b
     JOIN assets a ON a.id = b.asset_id
     LEFT JOIN work_orders wo ON wo.id = b.primary_work_order_id
-    WHERE b.status = 'OPEN'
+    WHERE UPPER(TRIM(b.status)) = 'OPEN'
       AND (wo.status IS NULL OR wo.status NOT IN ('completed','approved','closed'))
     ORDER BY b.id DESC
     LIMIT 500
@@ -203,6 +209,13 @@ export default async function breakdownRoutes(app) {
     INSERT INTO work_orders (asset_id, source, reference_id, status)
     VALUES (?, 'breakdown', ?, 'open')
   `);
+  // The breakdown's expected return date is the repair work order's due date.
+  const setBreakdownWorkOrderDue = db.prepare(`
+    UPDATE work_orders
+    SET due_date = ?
+    WHERE source = 'breakdown' AND reference_id = ?
+      AND status NOT IN ('completed', 'approved', 'closed')
+  `);
 
   const linkPrimaryWO = db.prepare(`
     UPDATE breakdowns
@@ -215,7 +228,7 @@ export default async function breakdownRoutes(app) {
       breakdown_date = COALESCE(?, breakdown_date),
       start_at = COALESCE(?, start_at)
     WHERE id = ?
-      AND status = 'OPEN'
+      AND UPPER(TRIM(status)) = 'OPEN'
   `);
 
   const insertBreakdownShortClosed = db.prepare(`
@@ -258,7 +271,7 @@ export default async function breakdownRoutes(app) {
       component = COALESCE(?, component),
       critical = COALESCE(?, critical)
     WHERE id = ?
-      AND status = 'OPEN'
+      AND UPPER(TRIM(status)) = 'OPEN'
   `);
 
   const closeWorkOrderQuick = db.prepare(`
@@ -604,6 +617,52 @@ export default async function breakdownRoutes(app) {
   });
 
   // ---------------------------
+  // Update what failed and when the machine is expected back
+  // PATCH /api/breakdowns/:id/details
+  // Body (all optional): { component, description, critical, parts_status,
+  //   parts_ordered_date, parts_received_date, ets_repair_date }
+  // The expected return date also becomes the repair work order's due date.
+  // ---------------------------
+  app.patch("/:id/details", async (req, reply) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: "Invalid breakdown id" });
+    const current = db.prepare(`SELECT id, status FROM breakdowns WHERE id = ?`).get(id);
+    if (!current) return reply.code(404).send({ error: "Breakdown not found" });
+    if (String(current.status || "").trim().toUpperCase() === "CLOSED") {
+      return reply.code(409).send({ error: "Breakdown is closed" });
+    }
+    const body = req.body || {};
+    const has = (k) => Object.prototype.hasOwnProperty.call(body, k);
+    const sets = [];
+    const params = [];
+    for (const k of ["component", "description", "parts_status"]) {
+      if (!has(k)) continue;
+      const v = String(body[k] ?? "").trim();
+      if (k === "description" && !v) return reply.code(400).send({ error: "description cannot be empty" });
+      sets.push(`${k} = ?`);
+      params.push(v || null);
+    }
+    if (has("critical")) { sets.push("critical = ?"); params.push(body.critical ? 1 : 0); }
+    for (const k of ["parts_ordered_date", "parts_received_date", "ets_repair_date"]) {
+      if (!has(k)) continue;
+      const v = normalizeOptionalDate(body[k], k, reply);
+      if (v === undefined) return;
+      sets.push(`${k} = ?`);
+      params.push(v);
+    }
+    if (!sets.length) return reply.code(400).send({ error: "nothing to update" });
+    db.transaction(() => {
+      db.prepare(`UPDATE breakdowns SET ${sets.join(", ")} WHERE id = ?`).run(...params, id);
+      if (has("ets_repair_date")) setBreakdownWorkOrderDue.run(String(body.ets_repair_date || "").trim() || null, id);
+    })();
+    const b = db.prepare(`
+      SELECT id, component, description, critical, parts_status, parts_ordered_date, parts_received_date, ets_repair_date
+      FROM breakdowns WHERE id = ?
+    `).get(id);
+    return reply.send({ ok: true, breakdown: { ...b, critical: Boolean(b.critical) } });
+  });
+
+  // ---------------------------
   // Ensure open breakdown exists (Daily Input helper)
   // POST /api/breakdowns/ensure-open
   // { asset_code, breakdown_date, description?, component?, critical?, get_used?, get_hours_fitted?, get_hours_changed? }
@@ -769,6 +828,7 @@ export default async function breakdownRoutes(app) {
       const workOrderId = Number(wo.lastInsertRowid);
 
       linkPrimaryWO.run(workOrderId, breakdownId);
+      if (repairPack.ets_repair_date) setBreakdownWorkOrderDue.run(repairPack.ets_repair_date, breakdownId);
       if (initialDowntimeHours > 0) {
         upsertDowntimeLog.run(breakdownId, breakdown_date, initialDowntimeHours, "Manual breakdown capture");
       }

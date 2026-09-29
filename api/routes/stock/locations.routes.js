@@ -157,7 +157,7 @@ export default function registerLocationsRoutes(app, ctx) {
       LEFT JOIN stock_locations l ON l.id = sm.location_id
       LEFT JOIN stock_bins b ON b.id = sm.bin_id
       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-      GROUP BY p.id, location_id, sm.bin_id
+      GROUP BY p.id, COALESCE(sm.location_id, l.id), sm.bin_id
       ORDER BY p.part_code ASC, location_code ASC, bin_code ASC
       LIMIT 2000
     `).all(...params).map((r) => {

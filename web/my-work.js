@@ -146,6 +146,27 @@ function myWorkCards(sections, due) {
       action: myWorkAllowed("maintenance") ? { label: "Open work orders", target: "workorders.html" } : null,
     });
   }
+  const wp = sections.waiting_parts;
+  if (wp) {
+    const bits = [];
+    if (wp.machines_down) bits.push(`${wp.machines_down} machine${wp.machines_down === 1 ? "" : "s"} down`);
+    if (wp.in_stock) bits.push(`${wp.in_stock} can be issued from stock`);
+    if (wp.not_ordered) bits.push(`${wp.not_ordered} to order`);
+    cards.push({
+      key: "waitingparts",
+      title: "Workshop waiting on parts",
+      count: wp.count,
+      tone: wp.machines_down ? "danger" : "warn",
+      meta: bits.join(" · "),
+      empty: "The workshop is not waiting on any parts.",
+      items: wp.items.map((x) => ({
+        primary: `${x.asset_code || "No machine"} — ${x.kind === "request" ? `${x.part_name || x.part_code} × ${x.qty}` : "part not listed yet"}`,
+        secondary: [x.work_order_id ? `WO ${x.work_order_id}` : "", x.kind === "request" ? (x.status === "ordered" ? "Ordered" : "Not ordered yet") : `Parts ${String(x.status || "").toLowerCase()}`, myWorkDate(x.since) && `Since ${myWorkDate(x.since)}`].filter(Boolean).join(" · "),
+        badge: x.in_stock ? myWorkPill("In stock", "success") : x.machine_down ? myWorkPill("Machine down", "danger") : "",
+      })),
+      action: myWorkAllowed("parts-tracking") ? { label: "Open stores queue", target: "parts-tracking" } : null,
+    });
+  }
   const ls = sections.low_stock;
   if (ls) {
     cards.push({

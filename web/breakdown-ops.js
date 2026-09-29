@@ -116,44 +116,101 @@ function initSectionCollapseToggles() {
 let openBreakdownRows = [];
 let showAllOpenBreakdowns = false;
 
+const PARTS_STATUS_OPTIONS = ["", "Not ordered", "Ordered", "In transit", "Partial", "Received", "Waiting OEM"];
+
+function breakdownMissingInfo(r) {
+  const missing = [];
+  if (!String(r.component || "").trim()) missing.push("what failed");
+  if (!String(r.ets_repair_date || "").trim()) missing.push("return date");
+  return missing;
+}
+
+function incidentEditorHtml(r) {
+  const opts = PARTS_STATUS_OPTIONS.map((v) => `<option value="${escapeHtml(v)}"${String(r.parts_status || "") === v ? " selected" : ""}>${v ? escapeHtml(v) : "No parts / not known"}</option>`).join("");
+  return `<form class="bo-incident-editor" data-id="${Number(r.id)}" hidden>
+    <label>What failed <input name="component" list="bComponentOptions" value="${escapeHtml(r.component || "")}" autocomplete="off" /></label>
+    <label>Expected back in service <input name="ets_repair_date" type="date" value="${escapeHtml(String(r.ets_repair_date || "").slice(0, 10))}" /></label>
+    <label>Parts <select name="parts_status">${opts}</select></label>
+    <div class="bo-incident-editor-actions"><button type="submit" class="btn-primary">Save</button><button type="button" class="bo-edit-cancel">Cancel</button></div>
+  </form>`;
+}
+
 function renderBreakdownOpsOpen(rows) {
   const list = qs("boOpenList");
   if (!list) return;
   const search = String(qs("boOpenSearch")?.value || "").trim().toLowerCase();
-  const filtered = (Array.isArray(rows) ? rows : []).filter((r) => {
+  const onlyMissing = !!qs("boOpenMissing")?.checked;
+  const all = Array.isArray(rows) ? rows : [];
+  const filtered = all.filter((r) => {
+    if (onlyMissing && !breakdownMissingInfo(r).length) return false;
     if (!search) return true;
-    return `${r.id || ""} ${r.asset_code || ""} ${r.description || ""} ${r.primary_work_order_id || ""}`
+    return `${r.id || ""} ${r.asset_code || ""} ${r.asset_name || ""} ${r.component || ""} ${r.description || ""} ${r.primary_work_order_id || ""}`
       .toLowerCase()
       .includes(search);
   });
-  const visible = showAllOpenBreakdowns || search ? filtered : filtered.slice(0, 8);
-  setText("boOpenSummary", `${visible.length < filtered.length ? `Showing ${visible.length} of ` : ""}${filtered.length} active incident${filtered.length === 1 ? "" : "s"}${search ? ` matching “${search}”` : ""}.`);
+  const machines = new Set(all.map((r) => r.asset_id || r.asset_code)).size;
+  const missingCount = all.filter((r) => breakdownMissingInfo(r).length).length;
+  const visible = showAllOpenBreakdowns || search || onlyMissing ? filtered : filtered.slice(0, 12);
+  setText("boOpenSummary", `${machines} machine${machines === 1 ? "" : "s"} down (${all.length} incident${all.length === 1 ? "" : "s"})`
+    + `${missingCount ? ` · ${missingCount} missing what failed or a return date` : ""}`
+    + `${visible.length < filtered.length ? ` · showing ${visible.length} of ${filtered.length}` : ""}${search ? ` · matching “${search}”` : ""}.`);
   const moreBtn = qs("boOpenMore");
   if (moreBtn) {
-    moreBtn.style.display = filtered.length > 8 && !search ? "" : "none";
+    moreBtn.style.display = filtered.length > 12 && !search && !onlyMissing ? "" : "none";
     moreBtn.textContent = showAllOpenBreakdowns ? "Show fewer incidents" : `Show all ${filtered.length} incidents`;
   }
   list.innerHTML = "";
   if (!filtered.length) {
-    list.appendChild(item("<small>No active incidents match this view.</small>"));
+    list.appendChild(item(`<small>${onlyMissing ? "Every open incident has what failed and a return date." : "No active incidents match this view."}</small>`));
     return;
   }
+  const today = todayYmd();
   visible.forEach((r) => {
     const bid = Number(r.id || 0);
     const wo = r.primary_work_order_id != null ? Number(r.primary_work_order_id) : "";
     const fullDescription = String(r.description || "").trim();
-    const description = fullDescription.length > 180 ? `${fullDescription.slice(0, 180)}…` : fullDescription;
-    const code = escapeHtml(r.asset_code || "");
-    const woSt = escapeHtml(String(r.primary_work_order_status || ""));
+    const description = fullDescription.length > 160 ? `${fullDescription.slice(0, 160)}…` : fullDescription;
+    const eta = String(r.ets_repair_date || "").slice(0, 10);
+    const late = eta && eta < today;
+    const woSt = String(r.primary_work_order_status || "").replace(/_/g, " ");
     const row = item(
-      `<div class="bo-incident-head"><div><span class="wo-number">INCIDENT #${bid}</span><h3>${code || "Unknown asset"}</h3></div><span class="status-overdue">OPEN</span></div>` +
+      `<div class="bo-incident-head"><div><span class="wo-number">INCIDENT #${bid}</span><h3>${escapeHtml(r.asset_code || "Unknown asset")} <span class="bo-asset-name">${escapeHtml(r.asset_name || "")}</span></h3></div>${Number(r.critical) ? `<span class="status-overdue">CRITICAL</span>` : ""}</div>` +
+      `<p class="bo-incident-component${r.component ? "" : " is-missing"}">${escapeHtml(r.component || "What failed? Not recorded")}</p>` +
       `<p class="bo-incident-description" title="${escapeHtml(fullDescription)}">${escapeHtml(description || "No description recorded.")}</p>` +
-      `<div class="bo-incident-meta"><span><strong>Started</strong> ${escapeHtml(String(r.start_at || r.breakdown_date || "—"))}</span><span><strong>Work order</strong> ${wo ? `#${wo} · ${woSt.replace(/_/g, " ")}` : "Not linked"}</span></div>` +
-      `<div class="bo-incident-actions">${wo ? `<button type="button" class="bo-open-wo btn-primary" data-wo="${wo}">Open work order</button>` : ""}<button type="button" class="bo-close-bdn" data-id="${bid}">Close incident</button></div>`
+      `<dl class="bo-incident-facts">` +
+        `<div><dt>Down since</dt><dd>${escapeHtml(String(r.start_at || r.breakdown_date || "—").slice(0, 16))}</dd></div>` +
+        `<div><dt>Back in service</dt><dd class="${eta ? (late ? "is-overdue" : "") : "is-missing"}">${eta ? `${escapeHtml(eta)}${late ? " (late)" : ""}` : "No date set"}</dd></div>` +
+        `${r.parts_status ? `<div><dt>Parts</dt><dd>${escapeHtml(r.parts_status)}</dd></div>` : ""}` +
+        `<div><dt>Work order</dt><dd>${wo ? `#${wo} · ${escapeHtml(woSt || "open")}` : "Not linked"}</dd></div>` +
+      `</dl>` +
+      `<div class="bo-incident-actions"><button type="button" class="bo-edit-bdn${breakdownMissingInfo(r).length ? " btn-primary" : ""}" data-id="${bid}">Update</button>${wo ? `<button type="button" class="bo-open-wo" data-wo="${wo}">Work order</button>` : ""}<button type="button" class="bo-close-bdn" data-id="${bid}">Back in service</button></div>` +
+      incidentEditorHtml(r)
     );
     row.classList.add("bo-incident-card");
+    if (breakdownMissingInfo(r).length) row.classList.add("is-incomplete");
     list.appendChild(row);
   });
+}
+
+async function saveIncidentEditor(form) {
+  const id = Number(form.getAttribute("data-id") || 0);
+  if (!id) return;
+  const fd = new FormData(form);
+  const payload = {
+    component: String(fd.get("component") || "").trim(),
+    ets_repair_date: String(fd.get("ets_repair_date") || "").trim(),
+    parts_status: String(fd.get("parts_status") || "").trim(),
+  };
+  setStatus(`Saving incident #${id}...`);
+  await fetchJson(`${API}/breakdowns/${id}/details`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const row = openBreakdownRows.find((r) => Number(r.id) === id);
+  if (row) Object.assign(row, { ...payload, ets_repair_date: payload.ets_repair_date || null });
+  renderBreakdownOpsOpen(openBreakdownRows);
+  setStatus(`Incident #${id} updated.`);
 }
 
 async function loadCodePickers() {
@@ -798,7 +855,7 @@ async function pullBreakdownOpsLiveHours() {
 async function closeBreakdownFromOps(breakdownId) {
   const id = Number(breakdownId || 0);
   if (!id) return;
-  if (!confirm(`Close breakdown #${id}? Component work orders must be closed first.`)) return;
+  if (!confirm(`Machine back in service? This closes incident #${id} and its open repair work order.`)) return;
   setStatus("Closing breakdown...");
   try {
     await fetchJson(`${API}/breakdowns/${id}/close`, {
@@ -806,7 +863,7 @@ async function closeBreakdownFromOps(breakdownId) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
-    setStatus("Breakdown closed.");
+    setStatus(`Incident #${id} closed: machine back in service.`);
     refreshBreakdownOpsPanels();
   } catch (e) {
     alert(e.message || String(e));
@@ -816,23 +873,33 @@ async function closeBreakdownFromOps(breakdownId) {
 
 async function createBreakdown() {
   const date = (qs("bDate")?.value || "").trim() || todayYmd();
+  const etsUnknown = !!qs("bEtsUnknown")?.checked;
   const payload = {
     asset_code: (qs("bAsset")?.value || "").trim(),
     breakdown_date: date,
     time_down: qs("bTime")?.value ? `${date}T${qs("bTime").value}` : null,
+    component: (qs("bComponent")?.value || "").trim(),
     description: (qs("bDesc")?.value || "").trim(),
     downtime_hours: Number(qs("bDown")?.value || 0),
     critical: !!qs("bCrit")?.checked,
     parts_ordered_date: String(qs("bPartsOrderedDate")?.value || "").trim() || null,
     parts_status: String(qs("bPartsStatus")?.value || "").trim() || null,
     parts_received_date: String(qs("bPartsReceivedDate")?.value || "").trim() || null,
-    ets_repair_date: String(qs("bEtsRepairDate")?.value || "").trim() || null,
+    ets_repair_date: etsUnknown ? null : String(qs("bEtsRepairDate")?.value || "").trim() || null,
   };
-  if (!payload.asset_code || !payload.description) {
-    setText("breakdownResult", "Asset and problem description are required.");
+  const missing = [];
+  if (!payload.asset_code) missing.push("equipment");
+  if (!payload.component) missing.push("what failed");
+  if (!payload.description) missing.push("problem description");
+  if (!payload.ets_repair_date && !etsUnknown) missing.push("expected back in service (or tick “Not known yet”)");
+  if (payload.ets_repair_date && payload.ets_repair_date < date) missing.push("a return date on or after the date down");
+  if (missing.length) {
+    setText("breakdownResult", `Please add: ${missing.join(", ")}.`);
+    qs("breakdownResult")?.classList.add("is-error");
     return;
   }
-  setStatus("Creating breakdown...");
+  qs("breakdownResult")?.classList.remove("is-error");
+  setStatus("Reporting breakdown...");
   try {
     const res = await fetchJson(`${API}/breakdowns`, {
       method: "POST",
@@ -841,15 +908,18 @@ async function createBreakdown() {
     });
     const incidentId = Number(res?.breakdown_id || res?.id || 0);
     const workOrderId = Number(res?.primary_work_order_id || res?.work_order_id || 0);
-    setText("breakdownResult", `Incident${incidentId ? ` #${incidentId}` : ""} created${workOrderId ? ` with work order #${workOrderId}` : ""}.`);
-    ["bAsset", "bDesc", "bTime", "bPartsOrderedDate", "bPartsReceivedDate", "bEtsRepairDate"].forEach((id) => { if (qs(id)) qs(id).value = ""; });
+    setText("breakdownResult", `${payload.asset_code}: incident${incidentId ? ` #${incidentId}` : ""} reported${workOrderId ? `, work order #${workOrderId} is waiting for a technician` : ""}.`);
+    ["bAsset", "bComponent", "bDesc", "bTime", "bPartsOrderedDate", "bPartsReceivedDate", "bEtsRepairDate"].forEach((id) => { if (qs(id)) qs(id).value = ""; });
     if (qs("bDown")) qs("bDown").value = "0";
     if (qs("bPartsStatus")) qs("bPartsStatus").value = "";
     if (qs("bCrit")) qs("bCrit").checked = false;
-    setStatus("Breakdown and linked work order created.");
+    if (qs("bEtsUnknown")) qs("bEtsUnknown").checked = false;
+    if (qs("bEtsRepairDate")) qs("bEtsRepairDate").disabled = false;
+    setStatus("Breakdown reported.");
     refreshBreakdownOpsPanels();
   } catch (e) {
     setText("breakdownResult", String(e.message || e));
+    qs("breakdownResult")?.classList.add("is-error");
     setStatus("Breakdown failed.");
   }
 }
@@ -995,7 +1065,28 @@ function bindHandlers() {
       return;
     }
     const c = ev.target?.closest?.(".bo-close-bdn");
-    if (c) closeBreakdownFromOps(c.getAttribute("data-id")).catch(() => {});
+    if (c) { closeBreakdownFromOps(c.getAttribute("data-id")).catch(() => {}); return; }
+    const e = ev.target?.closest?.(".bo-edit-bdn");
+    if (e) {
+      const form = e.closest(".bo-incident-card")?.querySelector(".bo-incident-editor");
+      if (form) { form.hidden = !form.hidden; if (!form.hidden) form.querySelector("input")?.focus(); }
+      return;
+    }
+    const x = ev.target?.closest?.(".bo-edit-cancel");
+    if (x) { const form = x.closest(".bo-incident-editor"); if (form) form.hidden = true; }
+  });
+  qs("boOpenList")?.addEventListener("submit", (ev) => {
+    const form = ev.target?.closest?.(".bo-incident-editor");
+    if (!form) return;
+    ev.preventDefault();
+    saveIncidentEditor(form).catch((e) => { alert(e.message || String(e)); setStatus("Update failed."); });
+  });
+  qs("boOpenMissing")?.addEventListener("change", () => renderBreakdownOpsOpen(openBreakdownRows));
+  qs("bEtsUnknown")?.addEventListener("change", () => {
+    const el = qs("bEtsRepairDate");
+    if (!el) return;
+    el.disabled = !!qs("bEtsUnknown")?.checked;
+    if (el.disabled) el.value = "";
   });
   qs("boSlipType")?.addEventListener("change", updateBoSlipFormVisibility);
   qs("boSlipPhotosInput")?.addEventListener("change", (e) => onBoSlipPhotosInputChange(e).catch((err) => setStatus(String(err.message || err))));

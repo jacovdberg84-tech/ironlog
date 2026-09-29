@@ -112,57 +112,46 @@
     el.textContent = queued ? `Offline mode. ${queued} submission(s) queued.` : "Offline mode.";
   }
 
+  const PC = window.IronlogPrestart;
+
+  function updateProgress(p) {
+    const el = qs("pcProgress");
+    if (!el) return;
+    el.innerHTML = `<strong>${p.answered} of ${p.total}</strong> checked${p.faults ? ` · <span class="pc-fault-count">${p.faults} fault${p.faults === 1 ? "" : "s"}</span>` : ""}`;
+    const btn = qs("saveBtn");
+    if (btn) btn.textContent = p.faults ? "Submit and report faults" : "Submit pre-start";
+    if (p.answered === p.total && qs("msg")?.classList.contains("err")) msg("");
+  }
+
   function renderChecklist(template) {
-    const root = qs("checklistRoot");
-    if (!root) return;
-    root.innerHTML = "";
-    for (const sec of template?.sections || []) {
-      const wrap = document.createElement("div");
-      wrap.className = "section";
-      const h = document.createElement("h3");
-      h.className = "sec-title";
-      h.textContent = String(sec.title || "");
-      wrap.appendChild(h);
-      for (const it of sec.items || []) {
-        const key = String(it.key || "").trim();
-        if (!key) continue;
-        const id = safeDomId(key);
-        const row = document.createElement("div");
-        row.className = "check";
-        const input = document.createElement("input");
-        input.type = "checkbox";
-        input.id = id;
-        input.dataset.key = key;
-        const label = document.createElement("label");
-        label.htmlFor = id;
-        label.textContent = String(it.label || key);
-        row.appendChild(input);
-        row.appendChild(label);
-        wrap.appendChild(row);
-      }
-      root.appendChild(wrap);
-    }
+    PC.render(qs("checklistRoot"), (template?.sections || []).map((sec) => ({ title: sec.title, items: sec.items || [] })), updateProgress);
   }
 
   function applyChecklist(checklist) {
-    const byKey = {};
-    for (const item of Array.isArray(checklist) ? checklist : []) {
-      byKey[String(item?.key || "")] = Boolean(item?.ok);
-    }
-    qs("checklistRoot")?.querySelectorAll("input[type=checkbox][data-key]").forEach((el) => {
-      const k = String(el.dataset.key || "");
-      el.checked = byKey[k] === true;
-    });
+    PC.apply(qs("checklistRoot"), checklist);
   }
 
-  function readChecklistObject() {
-    const out = {};
-    qs("checklistRoot")?.querySelectorAll("input[type=checkbox][data-key]").forEach((el) => {
-      const k = String(el.dataset.key || "").trim();
-      if (!k) return;
-      out[k] = Boolean(el.checked);
-    });
-    return out;
+  function showDone(kind, title, text) {
+    const done = qs("doneArea");
+    const form = qs("formArea");
+    if (!done || !form) return;
+    done.className = `card pc-done is-${kind}`;
+    txt("doneMark", kind === "fault" ? "!" : "✓");
+    txt("doneTitle", title);
+    txt("doneText", text);
+    const pdf = qs("openPdfBtn");
+    if (pdf) {
+      pdf.hidden = !(currentCheckId > 0);
+      pdf.href = currentCheckId > 0 ? `/api/reports/vehicle-ldv-check/${encodeURIComponent(String(currentCheckId))}.pdf` : "#";
+    }
+    form.hidden = true;
+    done.hidden = false;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function showForm() {
+    if (qs("doneArea")) qs("doneArea").hidden = true;
+    if (qs("formArea")) qs("formArea").hidden = false;
   }
 
   function syncDateInput() {
@@ -197,12 +186,12 @@
     const template = data?.template || null;
     if (!template) throw new Error("No template returned from server.");
 
-    txt("sub", "Complete all sections before operating this machine.");
+    txt("sub", "Tap OK or Fault for every check.");
     txt("pageTitle", String(template.title || "Machine pre-start"));
     txt("assetCode", String(asset.asset_code || currentAssetCode));
-    txt("assetName", String(asset.asset_name || "-"));
-    txt("assetCategory", String(asset.category || "-"));
-    txt("profileLabel", String(data?.profile_id || "-"));
+    txt("assetName", String(asset.asset_name || ""));
+    document.title = `${String(asset.asset_code || currentAssetCode)} pre-start`;
+    showForm();
 
     renderChecklist(template);
 
@@ -212,26 +201,17 @@
       currentCheckId = Number(existing.id || 0);
       if (qs("smuHours") && existing.smu_hours != null) qs("smuHours").value = String(existing.smu_hours);
       if (qs("inspectorName")) qs("inspectorName").value = String(existing.inspector_name || "");
-      if (qs("notes")) qs("notes").value = String(existing.notes || "");
+      const saved = PC.splitSavedNotes(existing.notes);
+      if (qs("notes")) qs("notes").value = saved.notes;
       applyChecklist(existing.checklist);
-      msg("A pre-start for this date already exists. You can update and resubmit.", "ok");
+      PC.applyFaultComments(qs("checklistRoot"), saved.comments);
+      msg("You already submitted this pre-start today. Change any answer and submit again if needed.", "ok");
     } else {
       if (qs("smuHours")) qs("smuHours").value = "";
-      if (qs("inspectorName")) qs("inspectorName").value = "";
       if (qs("notes")) qs("notes").value = "";
       applyChecklist([]);
+      PC.rememberOperator(qs("inspectorName"));
       msg("");
-    }
-
-    const openPdfBtn = qs("openPdfBtn");
-    if (openPdfBtn) {
-      if (currentCheckId > 0) {
-        openPdfBtn.style.display = "inline-block";
-        openPdfBtn.href = `/api/reports/vehicle-ldv-check/${encodeURIComponent(String(currentCheckId))}.pdf`;
-      } else {
-        openPdfBtn.style.display = "none";
-        openPdfBtn.href = "#";
-      }
     }
 
     const openQrBtn = qs("openQrBtn");
@@ -267,15 +247,26 @@
 
   async function submitPrestart() {
     msg("");
-    const checklist = readChecklistObject();
-    const keys = Object.keys(checklist);
-    if (!keys.length) throw new Error("Checklist failed to render. Refresh the page.");
+    const root = qs("checklistRoot");
+    const answers = PC.read(root);
+    if (!root?.querySelector(".pc-item")) throw new Error("Checklist failed to load. Tap Reload.");
+    root.querySelectorAll(".pc-item.is-missing").forEach((el) => el.classList.remove("is-missing"));
+    if (answers.unanswered.length) {
+      root.querySelectorAll(".pc-item:not([data-state=ok]):not([data-state=fault])").forEach((el) => el.classList.add("is-missing"));
+      PC.firstUnanswered(root)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      throw new Error(`Tap OK or Fault for ${answers.unanswered.length} more check${answers.unanswered.length === 1 ? "" : "s"}.`);
+    }
+    const inspector_name = String(qs("inspectorName")?.value || "").trim();
+    if (!inspector_name) {
+      qs("inspectorName")?.focus();
+      throw new Error("Enter your name.");
+    }
 
     const smuRaw = String(qs("smuHours")?.value || "").trim();
     let smu_hours = null;
     if (smuRaw) {
       const smu = Number(smuRaw);
-      if (!Number.isFinite(smu) || smu < 0) throw new Error("SMU hours must be a valid number ≥ 0.");
+      if (!Number.isFinite(smu) || smu < 0) throw new Error("Hour meter must be a number.");
       smu_hours = smu;
     }
 
@@ -283,30 +274,47 @@
       asset_code: currentAssetCode,
       check_date: currentDate,
       smu_hours,
-      inspector_name: String(qs("inspectorName")?.value || "").trim(),
+      inspector_name,
       notes: String(qs("notes")?.value || "").trim(),
-      checklist,
+      checklist: answers.checklist,
+      faults: answers.faults,
     };
+    const faultCount = Object.keys(answers.faults).length;
+    try { localStorage.setItem("ironlog_prestart_operator", inspector_name); } catch {}
     if (!navigator.onLine) {
-      const queued = upsertOfflineQueue(body);
+      upsertOfflineQueue(body);
       refreshOfflineBanner();
-      msg(`Offline: machine pre-start saved on device. Queue size ${queued}. It will sync automatically.`, "warn");
+      showDone(faultCount ? "fault" : "ok", "Saved on this phone", `No signal: the pre-start will send automatically when you are back online.${faultCount ? " You marked faults — tell your foreman before you operate." : ""}`);
       return;
     }
 
-    const data = await fetchJson("/api/maintenance/machine-prestart", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    currentCheckId = Number(data?.id || 0);
-    const openPdfBtn = qs("openPdfBtn");
-    if (openPdfBtn && currentCheckId > 0) {
-      openPdfBtn.style.display = "inline-block";
-      openPdfBtn.href = `/api/reports/vehicle-ldv-check/${encodeURIComponent(String(currentCheckId))}.pdf`;
+    const btn = qs("saveBtn");
+    if (btn) btn.disabled = true;
+    try {
+      const data = await fetchJson("/api/maintenance/machine-prestart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      currentCheckId = Number(data?.id || 0);
+      let photoNote = "";
+      if (qs("photoInput")?.files?.[0]) {
+        try {
+          await uploadPhoto();
+          photoNote = " Photo attached.";
+        } catch (e) {
+          photoNote = ` Photo not attached: ${e.message || e}`;
+        }
+      }
+      if (Number(data?.faults || 0) > 0) {
+        showDone("fault", "Faults reported", `${data.message}${photoNote}`);
+      } else {
+        showDone("ok", "Pre-start done", `${currentAssetCode} is checked for ${currentDate}. Safe working!${photoNote}`);
+      }
+      await syncOfflineQueue();
+    } finally {
+      if (btn) btn.disabled = false;
     }
-    msg(String(data?.message || "Pre-start saved."), "ok");
-    await syncOfflineQueue();
   }
 
   async function uploadPhoto() {
@@ -329,7 +337,6 @@
       data = {};
     }
     if (!res.ok) throw new Error(data?.error || t || `Upload failed (${res.status})`);
-    msg("Photo uploaded to this check.", "ok");
   }
 
   qs("checkDateInput")?.addEventListener("change", () => {
@@ -343,9 +350,7 @@
   qs("saveBtn")?.addEventListener("click", () => {
     submitPrestart().catch((e) => msg(String(e.message || e), "err"));
   });
-  qs("uploadPhotoBtn")?.addEventListener("click", () => {
-    uploadPhoto().catch((e) => msg(String(e.message || e), "err"));
-  });
+  qs("editAgainBtn")?.addEventListener("click", showForm);
   window.addEventListener("online", () => {
     refreshOfflineBanner();
     syncOfflineQueue().catch(() => {});

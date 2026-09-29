@@ -7,6 +7,10 @@ import { writeAudit } from "../../utils/audit.js";
 import { closeBreakdownIfWorkFinished } from "../../utils/workOrderSync.js";
 
 export default function registerBoardRoutes(app, ctx) {
+  const partsRequestsTableExists = () => Boolean(
+    db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'maintenance_parts_requests'`).get()
+  );
+
   const {
     buildWorkOrderQrProfile,
     canRoleTransition,
@@ -62,6 +66,7 @@ export default function registerBoardRoutes(app, ctx) {
         w.closed_at,
         w.due_date,
         w.priority,
+        w.job_description,
         b.description AS breakdown_description,
         b.component AS breakdown_component,
         b.critical AS breakdown_critical,
@@ -102,6 +107,22 @@ export default function registerBoardRoutes(app, ctx) {
     sql += ` ORDER BY w.id DESC LIMIT ${limit}`;
 
     let rows = db.prepare(sql).all(...params);
+
+    // Parts the job is still waiting on (requested or ordered, not yet received).
+    if (rows.length && partsRequestsTableExists()) {
+      const waiting = db.prepare(`
+        SELECT work_order_id, COUNT(*) AS n, MIN(part_name) AS first_part
+        FROM maintenance_parts_requests
+        WHERE work_order_id IS NOT NULL
+          AND LOWER(COALESCE(status, 'requested')) IN ('requested', 'ordered')
+        GROUP BY work_order_id
+      `).all();
+      const byWo = new Map(waiting.map((w) => [Number(w.work_order_id), w]));
+      rows = rows.map((r) => {
+        const w = byWo.get(Number(r.id));
+        return w ? { ...r, open_parts_requests: Number(w.n), first_waiting_part: w.first_part } : r;
+      });
+    }
 
     const role = getRole(req);
     const userName = String(req.headers["x-user-name"] || "").trim().toLowerCase();
@@ -650,10 +671,20 @@ export default function registerBoardRoutes(app, ctx) {
       ORDER BY pm.id ASC
     `).all(`work_order:${id}`, id);
 
+    const parts_requests = partsRequestsTableExists()
+      ? db.prepare(`
+          SELECT id, part_code, part_name, qty, urgency, status, requested_by, notes, status_notes, created_at, updated_at
+          FROM maintenance_parts_requests
+          WHERE work_order_id = ?
+          ORDER BY CASE LOWER(COALESCE(status, 'requested')) WHEN 'requested' THEN 0 WHEN 'ordered' THEN 1 ELSE 2 END, id DESC
+        `).all(id)
+      : [];
+
     return {
       work_order,
       breakdown,
       parts_issued: movements,
+      parts_requests,
       planned_materials,
       default_labor_rate: readLaborRateDefault(),
     };
