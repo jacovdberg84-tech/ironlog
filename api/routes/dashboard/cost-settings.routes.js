@@ -21,7 +21,7 @@ export default function registerCostSettingsRoutes(app, ctx) {
   // POST /api/dashboard/cost/settings
   // Body: { fuel_cost_per_liter_default?, lube_cost_per_qty_default?, labor_cost_per_hour_default?, downtime_cost_per_hour_default? }
   app.post("/cost/settings", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
+    if (!requireRoles(req, reply, ["admin", "supervisor", "workshop_admin", "stores"])) return;
     const body = req.body || {};
     const allowed = [
       "fuel_cost_per_liter_default",
@@ -63,7 +63,7 @@ export default function registerCostSettingsRoutes(app, ctx) {
   // POST /api/dashboard/cost/asset-rates
   // Body: { asset_code, fuel_cost_per_liter?, downtime_cost_per_hour?, utilization_mode?, km_per_hour_factor? }
   app.post("/cost/asset-rates", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
+    if (!requireRoles(req, reply, ["admin", "supervisor", "workshop_admin", "stores"])) return;
     const body = req.body || {};
     const asset_code = String(body.asset_code || "").trim();
     if (!asset_code) return reply.code(400).send({ error: "asset_code is required" });
@@ -135,7 +135,7 @@ export default function registerCostSettingsRoutes(app, ctx) {
   // POST /api/dashboard/cost/part-cost
   // Body: { part_code, unit_cost }
   app.post("/cost/part-cost", async (req, reply) => {
-    if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
+    if (!requireRoles(req, reply, ["admin", "supervisor", "workshop_admin", "stores"])) return;
     const body = req.body || {};
     const part_code = String(body.part_code || "").trim();
     const unit_cost = Number(body.unit_cost);

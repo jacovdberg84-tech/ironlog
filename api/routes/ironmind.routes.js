@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { generateIronmindReport, getIronmindHistory, getLatestIronmindReport, getIronmindSettings, setIronmindSettings } from "../utils/ironmind.js";
 import {
+  borrisNumCtx,
   chatEndpointSummaryForLogs,
   getChatModel,
   getLastLlmChatError,
@@ -12,6 +13,7 @@ import {
   openAiCompatibleChatCompletion,
 } from "../utils/llmChat.js";
 import { db } from "../db/client.js";
+import { getPlanningSnapshot, isPlanningQuestion } from "../utils/costingGaps.js";
 import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
 
 function toBool(v) {
@@ -619,6 +621,9 @@ export default async function ironmindRoutes(app) {
         })
       : [];
     const notes = String(contextNotes || "").trim().slice(0, 1200);
+    // Planning and costing questions get the service forecast and costing gaps,
+    // a larger context window on Ollama and room for a fuller answer.
+    const planning = isPlanningQuestion(question) ? getPlanningSnapshot() : null;
     const context = {
       period: { start, end },
       fleet: {
@@ -630,15 +635,17 @@ export default async function ironmindRoutes(app) {
       asset_context: assetContext || null,
       latest_summary: summary || null,
       context_notes: notes || null,
+      ...(planning ? { planning } : {}),
     };
     try {
       const data = await openAiCompatibleChatCompletion({
         model: cfg.model || "gpt-4o-mini",
         temperature: 0.2,
-        max_tokens: askMaxTokens,
-        timeout_ms: askTimeoutMs,
+        max_tokens: planning ? Math.max(askMaxTokens, 700) : askMaxTokens,
+        timeout_ms: planning ? Math.max(askTimeoutMs, 90000) : askTimeoutMs,
+        ...(planning ? { num_ctx: borrisNumCtx() } : {}),
         messages: [
-          { role: "system", content: system },
+          { role: "system", content: planning ? `${system} For planning and costing: use context.planning (upcoming services with cost and cost_source, costing gaps). Name the machines, amounts and gaps; say which gaps to fill first. Up to 8 bullets.` : system },
           ...hist,
           { role: "user", content: `Context JSON:\n${JSON.stringify(context)}\n\nQuestion:\n${question}` },
         ],

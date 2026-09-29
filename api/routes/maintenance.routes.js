@@ -38,6 +38,7 @@ import registerServiceTemplatesRoutes from "./maintenance/service-templates.rout
 import registerPlansRoutes from "./maintenance/plans.routes.js";
 import registerInsightsRoutes from "./maintenance/insights.routes.js";
 import registerWeeklyRoutes from "./maintenance/weekly.routes.js";
+import registerCostingRoutes from "./maintenance/costing.routes.js";
 import registerInspectionsRoutes from "./maintenance/inspections.routes.js";
 import registerPrestartChecksRoutes from "./maintenance/prestart-checks.routes.js";
 import registerPartsRequestsRoutes from "./maintenance/parts-requests.routes.js";
@@ -5286,6 +5287,7 @@ export default async function maintenanceRoutes(app) {
   registerPlansRoutes(app, ctx);
   registerInsightsRoutes(app, ctx);
   registerWeeklyRoutes(app, ctx);
+  registerCostingRoutes(app, ctx);
   registerInspectionsRoutes(app, ctx);
   registerPrestartChecksRoutes(app, ctx);
   registerPartsRequestsRoutes(app, ctx);
