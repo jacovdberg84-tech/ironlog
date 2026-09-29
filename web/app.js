@@ -17,6 +17,8 @@ const LOC_DEFAULT_PREFIX = "ironlog_default_location_";
 const MAINT_CHILD_TABS = new Set(["Breakdowns", "ironmind"]);
 /** Production site nav — only tabs in active use (telematics pilot + go-live). */
 const PRODUCTION_SITE_TABS = [
+  "mywork",
+  "tasks",
   "dash",
   "daily",
   "maintenance",
@@ -1028,6 +1030,8 @@ function getEffectiveAllowedTabs() {
     list = list.filter((t) => production.has(t));
     // Borris stays reachable even for saved per-user tab lists created before it was restored.
     if (!list.includes("ironmind")) list = [...list, "ironmind"];
+    // Tasks back the My Work list; per-user section lists cannot assign it, so always allow it.
+    if (!list.includes("tasks")) list = [...list, "tasks"];
   } else {
     // Keep task workspace reachable even when older saved tab overrides exist.
     if (!list.includes("tasks")) list = [...list, "tasks"];
@@ -1045,7 +1049,38 @@ function getEffectiveAllowedTabs() {
   }
   // "admin" is not an assignable section in the multiselect; always allow the User admin tab for these roles
   if (roles.includes("admin") && !list.includes("admin")) list = [...list, "admin"];
+  // My Work is the home screen for every signed-in user; keep it first so it is the landing tab.
+  list = ["mywork", ...list.filter((t) => t !== "mywork")];
   return list;
+}
+
+/** Puts the sections a role uses most straight after Home. */
+const NAV_SECTION_PRIORITY = {
+  storeman: ["stores"],
+  stores: ["stores"],
+  procurement: ["stores"],
+  workshop_admin: ["workshop", "stores", "fleet"],
+  plant_manager: ["workshop", "fleet"],
+  site_manager: ["workshop", "fleet"],
+  plant_clerk: ["fleet"],
+};
+
+function orderNavSectionsForRoles(sidebar, roles) {
+  const sections = Array.from(sidebar.querySelectorAll(".nav-section[data-nav-section]"));
+  if (!sections.length) return;
+  const parent = sections[0].parentElement;
+  if (!sections[0].dataset.navDefaultIndex) sections.forEach((el, i) => { el.dataset.navDefaultIndex = String(i); });
+  const preferred = [];
+  (roles.includes("admin") ? [] : roles).forEach((r) => {
+    (NAV_SECTION_PRIORITY[r] || []).forEach((id) => { if (!preferred.includes(id)) preferred.push(id); });
+  });
+  const rank = (el) => {
+    const id = el.dataset.navSection;
+    if (id === "home") return -1;
+    const i = preferred.indexOf(id);
+    return i >= 0 ? i : 100 + Number(el.dataset.navDefaultIndex || 0);
+  };
+  sections.sort((a, b) => rank(a) - rank(b)).forEach((el) => parent.appendChild(el));
 }
 
 function applyRoleVisibility() {
@@ -1065,6 +1100,9 @@ function applyRoleVisibility() {
         return;
       }
       opt.hidden = !isAllowedDashboardTab(opt.value, allowed);
+    });
+    tabSelect.querySelectorAll("optgroup").forEach((group) => {
+      group.hidden = !Array.from(group.children).some((opt) => !opt.hidden);
     });
   }
   
@@ -1087,6 +1125,10 @@ function applyRoleVisibility() {
       item.style.display = isAllowedDashboardTab(tab, allowed) ? "" : "none";
     });
     
+    const taskWorkspaceHeader = sidebar.querySelector(".task-workspace-header");
+    if (taskWorkspaceHeader) taskWorkspaceHeader.style.display = allowed.has("tasks") ? "" : "none";
+    orderNavSectionsForRoles(sidebar, roles);
+
     // Hide nav sections that are empty
     sidebar.querySelectorAll(".nav-section").forEach((section) => {
       const visibleItems = section.querySelectorAll(".nav-item:not([style*='display: none'])");
@@ -1622,6 +1664,12 @@ function updateAuthChrome() {
   if (logoutBtn) logoutBtn.style.display = tok ? "" : "none";
 }
 
+/** Reloads the My Work home screen once the session is known (defined in my-work.js). */
+function refreshMyWorkIfVisible() {
+  if (!qs("tab-mywork")?.classList.contains("show")) return;
+  if (typeof loadMyWork === "function") loadMyWork().catch(() => {});
+}
+
 function applySessionFromMeUser(user) {
   if (!user) return;
   const u = String(user.username || DEFAULT_USER).trim() || DEFAULT_USER;
@@ -1795,6 +1843,7 @@ async function submitLoginForm() {
     updateAuthChrome();
     initSessionControls();
     applyRoleVisibility();
+    refreshMyWorkIfVisible();
     applyDefaultLocationsToInputs();
     setStatus(`Signed in as ${data.user?.username || u}`);
   } catch (e) {
@@ -10873,6 +10922,9 @@ function switchTab(key) {
   if (k === "assets") {
     loadAssetsFleet().catch(() => {});
   }
+  if (k === "mywork" && typeof loadMyWork === "function") {
+    loadMyWork().catch(() => {});
+  }
   if (k === "workshop") {
     loadWorkshopDocuments().catch(() => {});
   }
@@ -10921,6 +10973,7 @@ function getCurrentDashboardTabKey() {
 }
 
 const IRONLOG_HELP_OPENERS = {
+  mywork: "Need help with your My Work list?",
   dash: "Need help with the dashboard?",
   daily: "Need help with daily inputs?",
   assets: "Need help with assets?",
@@ -18069,6 +18122,7 @@ async function init() {
     resolveInitialTabFromUrl();
   }
   applyBareChildTabView();
+  refreshMyWorkIfVisible();
   applyI18n();
   applyGlobalPageTranslation();
 
@@ -20551,7 +20605,7 @@ function initTaskWorkspaceSidebar() {
     toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
   };
 
-  apply(localStorage.getItem(TASK_WORKSPACE_COLLAPSED_KEY) === "1");
+  apply(localStorage.getItem(TASK_WORKSPACE_COLLAPSED_KEY) !== "0");
   toggle.addEventListener("click", () => {
     const collapsed = links.style.display !== "none";
     apply(collapsed);
