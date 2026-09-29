@@ -32,7 +32,7 @@ import {
   UNDERCARRIAGE_TRACK_SAG_POINTS,
   UNDERCARRIAGE_WEAR_BANDS,
 } from "../utils/undercarriageTemplate.js";
-import { SERVICE_TEMPLATE_ITEM_TYPES, ensureServiceTemplateSchema } from "../utils/serviceTemplates.js";
+import { SERVICE_TEMPLATE_ITEM_TYPES, buildServiceEstimatePreview, ensureServiceTemplateSchema } from "../utils/serviceTemplates.js";
 import { isDate } from "../utils/request.js";
 import registerServiceTemplatesRoutes from "./maintenance/service-templates.routes.js";
 import registerPlansRoutes from "./maintenance/plans.routes.js";
@@ -1230,15 +1230,24 @@ export function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
       const hasManualLabor = manualLaborTotal > 0;
       const hasManualAllIn = manualAllInTotal > 0;
       const hasManualOverride = hasManualParts || hasManualLabor;
+      // A machine's service template prices the kit, oils and standard labour
+      // from current store costs. It fills whatever the manual inputs leave out.
+      const template = hasManualAllIn ? null : templateCostForPlan(dbConn, {
+        assetId, planId, assetCode: p.asset_code, intervalHours: p.interval_hours, meterReading: nextDue,
+      });
+      const useTemplateParts = !hasManualParts && template && template.materials > 0;
+      const useTemplateLabor = !hasManualLabor && template && template.labour > 0;
       // A quoted all-in estimate deliberately replaces the detailed split. It avoids
       // presenting an invented kit/labor breakdown when only a supplier budget is known.
-      const estKitCost = Number((hasManualAllIn ? 0 : (hasManualParts ? (manualOilCost + manualPartsCost) : serviceKitCost)).toFixed(2));
-      const estLaborCost = Number((hasManualAllIn ? 0 : (hasManualLabor ? manualLaborTotal : avgLaborCost)).toFixed(2));
+      const estKitCost = Number((hasManualAllIn ? 0 : (hasManualParts ? (manualOilCost + manualPartsCost) : useTemplateParts ? template.materials : serviceKitCost)).toFixed(2));
+      const estLaborCost = Number((hasManualAllIn ? 0 : (hasManualLabor ? manualLaborTotal : useTemplateLabor ? template.labour : avgLaborCost)).toFixed(2));
       const estTotalCost = Number((hasManualAllIn ? manualAllInTotal : (estKitCost + estLaborCost)).toFixed(2));
       const costSource = hasManualAllIn
         ? "manual_all_in_estimate"
         : hasManualOverride
         ? (hasManualParts && hasManualLabor ? "manual_parts_and_labor" : hasManualParts ? "manual_store_pricing" : "manual_labor")
+        : (useTemplateParts || useTemplateLabor)
+        ? "service_template"
         : (estTotalCost > 0 && (serviceEvents > 0 || laborEvents > 0)
           ? (historyPlanIds.length > 1 ? "historical_asset_service_average" : "historical_average")
           : "none");
@@ -1266,6 +1275,7 @@ export function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
           est_labor_cost: estLaborCost,
           est_total_cost: estTotalCost,
           cost_source: costSource,
+          template: template ? { id: template.id, name: template.name, pricing_complete: template.pricing_complete, labour_hours: template.labour_hours } : null,
           manual: {
             oil_cost_total: Number(manualOilCost.toFixed(2)),
             parts_cost_total: Number(manualPartsCost.toFixed(2)),
@@ -1279,6 +1289,28 @@ export function buildUpcomingServiceCostForecasts(dbConn, plans, opts = {}) {
     })
     .filter((r) => Number(r.remaining_hours || 0) <= maxRemainingHours)
     .sort((a, b) => Number(a.remaining_hours || 0) - Number(b.remaining_hours || 0));
+}
+
+/** Template-based cost for a plan: materials at store cost plus standard labour. Null when no template applies. */
+function templateCostForPlan(dbConn, { assetId, planId, assetCode, intervalHours, meterReading }) {
+  if (!dbHasTable(dbConn, "service_templates")) return null;
+  try {
+    const preview = buildServiceEstimatePreview(dbConn, {
+      assetId, planId, meterReading, intervalHours, meterUnit: meterUnitForAsset(assetCode),
+    });
+    const e = preview?.estimate;
+    if (!e) return null;
+    return {
+      id: e.service_template_id,
+      name: e.template_name,
+      materials: Number(e.estimated_parts_cost || 0) + Number(e.estimated_oil_cost || 0) + Number(e.estimated_consumables_cost || 0),
+      labour: Number(e.estimated_labour_cost || 0),
+      labour_hours: Number(e.labour_hours || 0),
+      pricing_complete: Boolean(e.pricing_complete),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function ensureBreakdownRepairLaborSchema(dbConn) {

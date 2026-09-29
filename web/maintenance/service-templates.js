@@ -213,12 +213,107 @@ async function runServicePlannerAction(button) {
   }
 }
 
+let templateProposalsCache = [];
+
+function proposalSourceLabel(p) {
+  if (p.source === "history") return `${p.history_services} past service${p.history_services === 1 ? "" : "s"}`;
+  const oils = p.oils_from ? `, oils as on ${p.oils_from}` : " — add oils";
+  if (p.source === "kit_code") return `Service kit by stock code${oils}`;
+  if (p.source === "kit_model") return `Model service kit${oils}`;
+  return "No history or kit found";
+}
+
+function renderTemplateProposals() {
+  const list = document.getElementById("templateProposalsList");
+  if (!list) return;
+  if (!templateProposalsCache.length) {
+    list.innerHTML = `<tr><td colspan="8" class="muted">No active maintenance plans found.</td></tr>`;
+    return;
+  }
+  list.innerHTML = templateProposalsCache.map((p) => {
+    const usable = p.items.length > 0;
+    const tick = usable && !(p.existing && p.existing.asset_specific);
+    const items = usable
+      ? p.items.map((it) => `${esc(it.part_code)} — ${esc(it.description)} × ${Number(it.quantity_required).toLocaleString()} ${esc(it.unit_of_measure)}`).join("<br>")
+      : `<span class="muted">Nothing to propose — create this one by hand.</span>`;
+    const missing = p.estimate.missing_prices.length ? `<br><span class="message-error mini">No store price: ${esc(p.estimate.missing_prices.join(", "))}</span>` : "";
+    const current = p.existing
+      ? (p.existing.ambiguous ? "Two templates tie — review" : `${esc(p.existing.name)}${p.existing.asset_specific ? "" : " <span class=\"muted mini\">(shared)</span>"}`)
+      : `<span class="muted">None</span>`;
+    return `<tr>
+      <td><input type="checkbox" data-proposal-key="${esc(p.key)}"${usable ? "" : " disabled"}${tick ? " checked" : ""} aria-label="Create template for ${esc(p.asset_code)} ${p.interval}" /></td>
+      <td><strong>${esc(p.asset_code)}</strong><br><span class="muted mini">${esc(p.asset_name || "")}</span></td>
+      <td>${Number(p.interval).toLocaleString()} ${p.meter_unit === "km" ? "km" : "h"}<br><span class="muted mini">${esc(p.service_name || "")}</span></td>
+      <td>${esc(proposalSourceLabel(p))}</td>
+      <td class="mini">${items}</td>
+      <td>${p.labour_hours} h × ${moneyLabel(p.labour_rate)}</td>
+      <td>${usable ? moneyLabel(p.estimate.total, !p.estimate.missing_prices.length) : "—"}${missing}</td>
+      <td>${current}</td>
+    </tr>`;
+  }).join("");
+  syncTemplateProposalButtons();
+}
+
+function syncTemplateProposalButtons() {
+  const ticked = document.querySelectorAll("#templateProposalsList input[data-proposal-key]:checked").length;
+  const btn = document.getElementById("createTemplateProposalsBtn");
+  if (btn) {
+    btn.disabled = ticked === 0;
+    btn.textContent = ticked ? `Create ${ticked} ticked template${ticked === 1 ? "" : "s"}` : "Create ticked templates";
+  }
+}
+
+async function buildTemplateProposals() {
+  const msg = document.getElementById("templateProposalsMessage");
+  if (msg) msg.textContent = "Building proposals from service history…";
+  try {
+    const res = await fetch(`${API}/maintenance/service-templates/suggestions`, { headers: authHeaders(), cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Unable to build proposals");
+    templateProposalsCache = Array.isArray(data.proposals) ? data.proposals : [];
+    const fromHistory = templateProposalsCache.filter((p) => p.source === "history").length;
+    const fromKit = templateProposalsCache.filter((p) => p.source === "kit_code" || p.source === "kit_model").length;
+    const none = templateProposalsCache.filter((p) => !p.items.length).length;
+    if (msg) msg.textContent = `${templateProposalsCache.length} machine services: ${fromHistory} from service history, ${fromKit} from a matching service kit, ${none} with nothing to propose. Machines that already have their own template are left unticked.`;
+    renderTemplateProposals();
+  } catch (error) {
+    if (msg) msg.textContent = error.message || String(error);
+  }
+}
+
+async function createTemplateProposals() {
+  const keys = Array.from(document.querySelectorAll("#templateProposalsList input[data-proposal-key]:checked")).map((el) => el.dataset.proposalKey);
+  if (!keys.length) return;
+  if (!confirm(`Create ${keys.length} service template${keys.length === 1 ? "" : "s"}? A machine's current template for the same interval is replaced (kept in history).`)) return;
+  const msg = document.getElementById("templateProposalsMessage");
+  try {
+    const res = await fetch(`${API}/maintenance/service-templates/suggestions/apply`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ keys }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Unable to create templates");
+    await Promise.all([loadServiceTemplates(), loadServicePlanner(), buildTemplateProposals()]);
+    if (msg) msg.textContent = `Created ${data.created.length} template${data.created.length === 1 ? "" : "s"}. Service costs now use them. ${msg.textContent}`;
+  } catch (error) {
+    if (msg) msg.textContent = error.message || String(error);
+  }
+}
+
 async function initServiceTemplateSection() {
   if (!serviceTemplateUiBound) {
     serviceTemplateUiBound = true;
     document.getElementById("refreshServicePlannerBtn")?.addEventListener("click", () => loadServicePlanner());
     document.getElementById("servicePlannerIncludeAll")?.addEventListener("change", () => loadServicePlanner());
     document.getElementById("saveServiceTemplateBtn")?.addEventListener("click", () => saveServiceTemplate());
+    document.getElementById("buildTemplateProposalsBtn")?.addEventListener("click", () => buildTemplateProposals());
+    document.getElementById("createTemplateProposalsBtn")?.addEventListener("click", () => createTemplateProposals());
+    document.getElementById("templateProposalsList")?.addEventListener("change", () => syncTemplateProposalButtons());
+    document.getElementById("templateProposalsAll")?.addEventListener("change", (event) => {
+      document.querySelectorAll("#templateProposalsList input[data-proposal-key]:not(:disabled)").forEach((el) => { el.checked = event.target.checked; });
+      syncTemplateProposalButtons();
+    });
     document.getElementById("saveServiceTemplateAssignmentBtn")?.addEventListener("click", () => saveServiceTemplateAssignment());
     document.getElementById("servicePlannerList")?.addEventListener("click", (event) => {
       const button = event.target instanceof HTMLElement ? event.target.closest("button[data-service-planner-action]") : null;

@@ -26,6 +26,7 @@ import registerStoresRoutes from "./reports/stores.routes.js";
 import registerOperationsExportsRoutes from "./reports/operations-exports.routes.js";
 import registerPresentationsRoutes from "./reports/presentations.routes.js";
 import registerPeriodReportsRoutes from "./reports/period-reports.routes.js";
+import { serviceCostSourceLabel } from "../utils/serviceCostSource.js";
 
 const __dirnameReports = path.dirname(fileURLToPath(import.meta.url));
 const AML_WEEKLY_TEMPLATE_PATH = path.join(
@@ -3481,18 +3482,7 @@ export default async function reportsRoutes(app) {
       if (isAllInUpcomingEstimate(r) && key !== "est_total_cost") return "—";
       return Number(r?.forecast?.[key] || 0).toFixed(2);
     };
-    const upcomingSourceLabel = (r) => {
-      if (r?.needs_manual_input) return "needs pricing";
-      switch (String(r?.forecast?.cost_source || "")) {
-        case "manual_all_in_estimate": return "all-in cost";
-        case "manual_parts_and_labor": return "manual detailed";
-        case "manual_store_pricing": return "stores pricing";
-        case "manual_labor": return "manual labor";
-        case "historical_average": return "history average";
-        case "historical_asset_service_average": return "asset service history";
-        default: return "-";
-      }
-    };
+    const upcomingSourceLabel = serviceCostSourceLabel;
     const pptx = new PptxGenJS();
     pptx.layout = "LAYOUT_WIDE";
     pptx.author = "IRONLOG";
@@ -4340,8 +4330,12 @@ export default async function reportsRoutes(app) {
       ...upcomingServices.slice(0, 3).map((r, index) => [
         String(index + 1 + breakdownRows.filter((x) => String(x.status || "").toLowerCase() !== "closed").slice(0, 3).length),
         `${r.asset_code || "—"} • ${compact(r.service_name || "Scheduled service", 28)}`,
-        Number.isFinite(Number(r.remaining_hours)) ? `${num(r.remaining_hours)} h remaining` : "Plan by availability",
-        compact(r?.forecast?.cost_source || "Kit / oils / labour", 34),
+        Number.isFinite(Number(r.remaining_hours))
+          ? (Number(r.remaining_hours) < 0 ? `${num(Math.abs(Number(r.remaining_hours)), 0).toLocaleString("en-US")} h overdue` : `${num(r.remaining_hours, 0).toLocaleString("en-US")} h remaining`)
+          : "Plan by availability",
+        compact(Number(r?.forecast?.est_total_cost) > 0
+          ? `$${Math.round(Number(r.forecast.est_total_cost)).toLocaleString("en-US")} • ${serviceCostSourceLabel(r)}`
+          : serviceCostSourceLabel(r), 34),
         "Confirm owner / outage window",
       ]),
     ].slice(0, 5);

@@ -5,6 +5,7 @@ import { buildPdfBuffer, sectionTitle, table } from "../../utils/pdfGenerator.js
 import { buildReliabilityExecutiveWorkbook } from "../../utils/reliabilityExecutiveWorkbook.js";
 import { db } from "../../db/client.js";
 import { isDate } from "../../utils/request.js";
+import { serviceCostSourceLabel } from "../../utils/serviceCostSource.js";
 
 export default function registerInsightsRoutes(app, ctx) {
   const {
@@ -1031,7 +1032,7 @@ export default function registerInsightsRoutes(app, ctx) {
           est_service_kit_cost: Number(r?.forecast?.est_service_kit_cost || 0),
           est_labor_cost: Number(r?.forecast?.est_labor_cost || 0),
           est_total_cost: Number(r?.forecast?.est_total_cost || 0),
-          cost_source: r?.forecast?.cost_source || "",
+          cost_source: serviceCostSourceLabel(r),
         })),
       );
 

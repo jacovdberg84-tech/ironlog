@@ -414,7 +414,7 @@ function renderMaintenanceInsights(data) {
         fmtMoney(r?.forecast?.est_service_kit_cost || 0),
         fmtMoney(r?.forecast?.est_labor_cost || 0),
         fmtMoney(r?.forecast?.est_total_cost || 0),
-        String(r?.forecast?.cost_source || "-").replace(/_/g, " "),
+        serviceCostSourceText(r),
       ])
     )}
     <h5 style="margin:14px 0 6px;">Parts demand (from prior service history)</h5>
@@ -842,3 +842,17 @@ async function loadGovernanceSignals() {
 let insightsForecastCache = [];
 let insightsDraftItems = [];
 let insightsInputsCache = [];
+
+/** Plain-language cost source (matches api/utils/serviceCostSource.js). */
+function serviceCostSourceText(r) {
+  if (r?.needs_manual_input) return "needs pricing";
+  return ({
+    service_template: "service template",
+    manual_all_in_estimate: "all-in quote",
+    manual_parts_and_labor: "manual parts and labour",
+    manual_store_pricing: "manual parts at store prices",
+    manual_labor: "manual labour",
+    historical_average: "past service average",
+    historical_asset_service_average: "past service average",
+  })[String(r?.forecast?.cost_source || "")] || "needs pricing";
+}
