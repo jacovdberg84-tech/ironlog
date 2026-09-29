@@ -9,14 +9,7 @@ import {
   enrichUnitechLiveRow,
   testUnitechConnection,
 } from "../utils/unitech.js";
-
-function getRoles(req) {
-  const many = String(req.headers["x-user-roles"] || "")
-    .split(",").map((x) => String(x || "").trim().toLowerCase()).filter(Boolean);
-  const one = String(req.headers["x-user-role"] || "")
-    .split(",").map((x) => String(x || "").trim().toLowerCase()).filter(Boolean);
-  return Array.from(new Set([...many, ...one]));
-}
+import { getRoles } from "../utils/request.js";
 
 function requireRoles(req, reply, allowed) {
   if (!getRoles(req).some((r) => allowed.includes(r))) {

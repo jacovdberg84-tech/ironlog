@@ -1,16 +1,10 @@
 import { db } from "../db/client.js";
-
-function isDate(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
-}
+import { isDate, getSiteCode } from "../utils/request.js";
 
 function toDateStart(daysBack = 30) {
   const d = new Date();
   d.setDate(d.getDate() - Math.max(0, Number(daysBack || 0)));
   return d.toISOString().slice(0, 10);
-}
-function getSiteCode(req) {
-  return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
 }
 
 export default async function qualityRoutes(app) {

@@ -71,10 +71,7 @@ import {
   ensureServiceTemplateSchema,
   resolveServiceTemplate,
 } from "../utils/serviceTemplates.js";
-
-function isDate(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
-}
+import { isDate } from "../utils/request.js";
 
 function isMonth(s) {
   return /^\d{4}-\d{2}$/.test(String(s || "").trim());

@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { runAgent } from "../utils/aiEngineer/orchestrator.js";
 import { chooseTargetFiles } from "../utils/aiEngineer/heuristics.js";
 import { buildProposalMarkdown } from "../utils/aiEngineer/agents/planner.js";
+import { getSiteCode, getRoles } from "../utils/request.js";
 
 const ALLOWED_ROLES = new Set([
   "admin",
@@ -20,24 +21,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const WORKTREE_BASE = path.join(REPO_ROOT, ".ai-engineer", "worktrees");
 
-function getSiteCode(req) {
-  return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
-}
-
 function getUserName(req) {
   return String(req.headers["x-user-name"] || req.headers["x-user"] || "system").trim() || "system";
-}
-
-function getRoles(req) {
-  const many = String(req.headers["x-user-roles"] || "")
-    .split(",")
-    .map((x) => String(x || "").trim().toLowerCase())
-    .filter(Boolean);
-  const one = String(req.headers["x-user-role"] || "")
-    .split(",")
-    .map((x) => String(x || "").trim().toLowerCase())
-    .filter(Boolean);
-  return Array.from(new Set([...many, ...one]));
 }
 
 function requireRole(req, reply) {

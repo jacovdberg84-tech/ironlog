@@ -8,18 +8,7 @@ import {
   normalizeMdmCode,
   setMdmPoliciesForSite,
 } from "../utils/masterdataGovernance.js";
-
-function getSiteCode(req) {
-  return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
-}
-
-function getUser(req) {
-  return String(req.headers["x-user-name"] || "session-user").trim() || "session-user";
-}
-
-function getRole(req) {
-  return String(req.headers["x-user-role"] || "admin").trim().toLowerCase();
-}
+import { getRole, getUser, getSiteCode } from "../utils/request.js";
 
 function requireRoles(req, reply, roles) {
   const role = getRole(req);

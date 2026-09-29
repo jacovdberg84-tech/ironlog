@@ -9,6 +9,7 @@ import {
   tryDrawLogo,
   ensurePageSpace,
 } from "../utils/pdfGenerator.js";
+import { isDate, getSiteCode } from "../utils/request.js";
 
 const SLIP_PICTURE_ALLOWED_MIME = new Set(["image/jpeg", "image/png"]);
 const SLIP_PICTURE_MAX_COUNT = 4;
@@ -62,17 +63,9 @@ function drawSlipPictures(doc, payload) {
   }
 }
 
-function isDate(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
-}
-
 function cleanDateOrNull(v) {
   const s = String(v || "").trim();
   return isDate(s) ? s : null;
-}
-
-function getSiteCode(req) {
-  return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
 }
 
 function getUser(req) {

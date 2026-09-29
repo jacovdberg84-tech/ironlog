@@ -1,16 +1,7 @@
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
+import { getRole, getUser, getSiteCode } from "../utils/request.js";
 
-function getRole(req) {
-  return String(req.headers["x-user-role"] || "admin").trim().toLowerCase();
-}
-
-function getUser(req) {
-  return String(req.headers["x-user-name"] || "session-user").trim() || "session-user";
-}
-function getSiteCode(req) {
-  return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
-}
 function getDepartment(req) {
   return String(req.headers["x-user-department"] || "").trim().toLowerCase() || null;
 }

@@ -1,6 +1,7 @@
 // IRONLOG/api/routes/sync.routes.js
 import { db } from "../db/client.js";
 import crypto from "node:crypto";
+import { getRole, getSiteCode } from "../utils/request.js";
 
 const SYNC_TABLES = new Set([
   "daily_hours",
@@ -15,14 +16,6 @@ const SYNC_TABLES = new Set([
   "vehicle_ldv_check_photos",
 ]);
 const SYNC_SCHEMA_VERSION = 1;
-
-function getRole(req) {
-  return String(req.headers["x-user-role"] || "admin").trim().toLowerCase();
-}
-
-function getSiteCode(req) {
-  return String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
-}
 
 function getPeerName(req) {
   return String(req.query?.peer || req.body?.peer || "").trim().toLowerCase();

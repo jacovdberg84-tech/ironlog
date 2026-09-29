@@ -41,3 +41,8 @@ IronLogMobile/
 IronLogCloud/
 
 **/workshop-files/
+
+# generated report cache and stray local databases
+api/reports-cache/
+api/db/ironlog.db*
+api/desktop/_installed_asar/

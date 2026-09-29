@@ -2,10 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { db } from "../db/client.js";
-
-function isDate(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
-}
+import { isDate } from "../utils/request.js";
 
 function hasColumn(table, col) {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all();

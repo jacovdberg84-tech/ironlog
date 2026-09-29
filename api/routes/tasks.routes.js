@@ -1,8 +1,5 @@
 import { db } from "../db/client.js";
-
-function getSiteCode(req) {
-  return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
-}
+import { getSiteCode } from "../utils/request.js";
 
 export default async function tasksRoutes(app) {
   // =========================

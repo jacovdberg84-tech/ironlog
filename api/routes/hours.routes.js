@@ -1,10 +1,7 @@
 // IRONLOG/api/routes/hours.routes.js
 import { db } from "../db/client.js";
 import { ensureTelematicsTables, isTelematicsMeterLocked, syncTelematicsDailyHours } from "../utils/telematics.js";
-
-function isDate(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
-}
+import { isDate } from "../utils/request.js";
 
 function prevDate(dateStr) {
   const d = new Date(dateStr + "T00:00:00");
