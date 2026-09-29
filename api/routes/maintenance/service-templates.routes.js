@@ -2,6 +2,7 @@
 // Registered by routes/maintenance.routes.js; shared helpers arrive through ctx.
 import { buildDueListFromPlans, meterUnitForAsset } from "../../utils/serviceSchedule.js";
 import { buildServiceEstimatePreview } from "../../utils/serviceTemplates.js";
+import { applyServiceTemplateProposals, buildServiceTemplateProposals } from "../../utils/serviceTemplateBuilder.js";
 import { db } from "../../db/client.js";
 import { writeAudit } from "../../utils/audit.js";
 
@@ -22,6 +23,26 @@ export default function registerServiceTemplatesRoutes(app, ctx) {
   app.get("/service-templates", async (req, reply) => {
     if (!requireMaintenancePermission(req, reply, "maintenance.templates.read")) return;
     return reply.send({ ok: true, templates: templateSummaryRows({ activeOnly: String(req.query?.active || "") === "1" }) });
+  });
+
+  // Proposed templates per machine and service interval, built from past
+  // service work orders (or a service kit matched by stock code). Read-only.
+  app.get("/service-templates/suggestions", async (req, reply) => {
+    if (!requireMaintenancePermission(req, reply, "maintenance.templates.manage")) return;
+    return reply.send({ ok: true, proposals: buildServiceTemplateProposals(db) });
+  });
+
+  // POST { keys: ["<asset_id>:<interval>", ...] } — create the chosen proposals.
+  app.post("/service-templates/suggestions/apply", async (req, reply) => {
+    if (!requireMaintenancePermission(req, reply, "maintenance.templates.manage")) return;
+    const keys = Array.isArray(req.body?.keys) ? req.body.keys.map(String) : [];
+    if (!keys.length) return reply.code(400).send({ ok: false, error: "Choose at least one template to create" });
+    const created = applyServiceTemplateProposals(db, buildServiceTemplateProposals(db), keys);
+    writeAudit(db, req, {
+      module: "maintenance", action: "service_template.build_from_history", entity_type: "service_template",
+      entity_id: created.map((c) => c.id).join(","), after: created,
+    });
+    return reply.code(201).send({ ok: true, created });
   });
 
   app.get("/service-templates/:id", async (req, reply) => {

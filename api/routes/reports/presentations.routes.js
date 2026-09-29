@@ -7,6 +7,7 @@ import { buildMechanicLaborDetail, buildMonthlyOperatingActuals } from "../../ut
 import { buildPlantHireLines, prevMonth as hirePrevMonth } from "../../utils/plantHire.js";
 import { db } from "../../db/client.js";
 import { getOperatingBudgetAmount } from "../../utils/monthlyBudget.js";
+import { serviceCostSourceLabel } from "../../utils/serviceCostSource.js";
 
 export default function registerPresentationsRoutes(app, ctx) {
   const {
@@ -304,7 +305,7 @@ export default function registerPresentationsRoutes(app, ctx) {
               fmtNum(Number(r?.forecast?.est_service_kit_cost || 0), 2),
               fmtNum(Number(r?.forecast?.est_labor_cost || 0), 2),
               fmtNum(Number(r?.forecast?.est_total_cost || 0), 2),
-              compactCell(String(r?.forecast?.cost_source || "-").replace(/_/g, " "), 16),
+              compactCell(serviceCostSourceLabel(r), 16),
             ])
           : [["-", "-", "-", "-", "-", "-", "-", "No upcoming maintenance rows"]]),
       ],
