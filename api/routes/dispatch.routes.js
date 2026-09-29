@@ -1,16 +1,10 @@
 import { db } from "../db/client.js";
-
-function isDate(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
-}
+import { isDate, getSiteCode } from "../utils/request.js";
 
 function toNum(v) {
   if (v == null || String(v).trim() === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
-}
-function getSiteCode(req) {
-  return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
 }
 
 const VALID_STATUSES = ["queued", "loading", "in_transit", "delivered", "returned"];

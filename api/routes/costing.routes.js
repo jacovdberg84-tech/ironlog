@@ -2,22 +2,7 @@
 // Costing feeds for Excel Power Query (Get Data from Web).
 
 import { db } from "../db/client.js";
-
-function isDate(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
-}
-
-function getRoles(req) {
-  const many = String(req.headers["x-user-roles"] || "")
-    .split(",")
-    .map((x) => String(x || "").trim().toLowerCase())
-    .filter(Boolean);
-  const one = String(req.headers["x-user-role"] || "")
-    .split(",")
-    .map((x) => String(x || "").trim().toLowerCase())
-    .filter(Boolean);
-  return Array.from(new Set([...many, ...one]));
-}
+import { isDate, getRoles } from "../utils/request.js";
 
 function requireRoles(req, reply, allowed) {
   const roles = getRoles(req);

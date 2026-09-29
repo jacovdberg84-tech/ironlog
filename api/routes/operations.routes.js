@@ -1,9 +1,6 @@
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
-
-function isDate(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
-}
+import { isDate, getRole, getSiteCode } from "../utils/request.js";
 
 function isShift(v) {
   const s = String(v || "").trim().toLowerCase();
@@ -14,13 +11,6 @@ function toNumberOrNull(v) {
   if (v == null || String(v).trim() === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
-}
-
-function getRole(req) {
-  return String(req.headers["x-user-role"] || "admin").trim().toLowerCase();
-}
-function getSiteCode(req) {
-  return String(req.headers["x-site-code"] || "main").trim().toLowerCase() || "main";
 }
 
 function requireRoles(req, reply, roles) {

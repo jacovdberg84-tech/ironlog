@@ -15,18 +15,7 @@ import {
   syncTelematicsDailyHours,
 } from "../utils/telematics.js";
 import { db } from "../db/client.js";
-
-function getRoles(req) {
-  const many = String(req.headers["x-user-roles"] || "")
-    .split(",").map((x) => String(x || "").trim().toLowerCase()).filter(Boolean);
-  const one = String(req.headers["x-user-role"] || "")
-    .split(",").map((x) => String(x || "").trim().toLowerCase()).filter(Boolean);
-  return Array.from(new Set([...many, ...one]));
-}
-
-function hasAnyRole(req, allowed) {
-  return getRoles(req).some((r) => allowed.includes(r));
-}
+import { isDate, getRoles, hasAnyRole } from "../utils/request.js";
 
 function requireRoles(req, reply, allowed) {
   if (!hasAnyRole(req, allowed)) {
@@ -34,10 +23,6 @@ function requireRoles(req, reply, allowed) {
     return false;
   }
   return true;
-}
-
-function isDate(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
 }
 
 function checkIngestAuth(req, reply) {

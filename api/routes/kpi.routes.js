@@ -1,10 +1,7 @@
 // IRONLOG/api/routes/kpi.routes.js
 import { db } from "../db/client.js";
 import { andDailyHoursFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
-
-function isDate(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
-}
+import { isDate } from "../utils/request.js";
 
 export default async function kpiRoutes(app) {
   // Daily KPI for a date

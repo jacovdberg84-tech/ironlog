@@ -31,19 +31,12 @@ import {
   listGpsFleetMappingSuggestions,
   applyGpsVehicleLinksToSnapshots,
 } from "../utils/gpsVehicleLinks.js";
+import { isDate, getRoles } from "../utils/request.js";
 
 function mergeGpsFleet({ cartrackRows, unitechRows, speedRegs }) {
   const cartrackFleet = cartrackRows.map((v) => enrichCartrackLiveRow(v, speedRegs));
   const unitechFleet = unitechRows.map((v) => enrichUnitechLiveRow(v, speedRegs));
   return [...cartrackFleet, ...unitechFleet];
-}
-
-function getRoles(req) {
-  const many = String(req.headers["x-user-roles"] || "")
-    .split(",").map((x) => String(x || "").trim().toLowerCase()).filter(Boolean);
-  const one = String(req.headers["x-user-role"] || "")
-    .split(",").map((x) => String(x || "").trim().toLowerCase()).filter(Boolean);
-  return Array.from(new Set([...many, ...one]));
 }
 
 function requireRoles(req, reply, allowed) {
@@ -52,10 +45,6 @@ function requireRoles(req, reply, allowed) {
     return false;
   }
   return true;
-}
-
-function isDate(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
 }
 
 async function emailMorningReport(summary, recipients) {

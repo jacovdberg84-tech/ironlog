@@ -4,30 +4,8 @@
 import { db } from "../db/client.js";
 import crypto from "node:crypto";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
+import { getRole, getUser, getRoles, hasAnyRole, requireAnyRole as requireRoles } from "../utils/request.js";
 
-function getRole(req) {
-  return String(req.headers["x-user-role"] || "admin").trim().toLowerCase();
-}
-function getUser(req) {
-  return String(req.headers["x-user-name"] || "session-user").trim() || "session-user";
-}
-function getRoles(req) {
-  const many = String(req.headers["x-user-roles"] || "")
-    .split(",").map((x) => String(x || "").trim().toLowerCase()).filter(Boolean);
-  const one = String(req.headers["x-user-role"] || "")
-    .split(",").map((x) => String(x || "").trim().toLowerCase()).filter(Boolean);
-  return Array.from(new Set([...many, ...one]));
-}
-function hasAnyRole(req, allowed) {
-  return getRoles(req).some((r) => allowed.includes(r));
-}
-function requireRoles(req, reply, allowed) {
-  if (!hasAnyRole(req, allowed)) {
-    reply.code(403).send({ error: `role '${getRole(req)}' not allowed` });
-    return false;
-  }
-  return true;
-}
 function monthStart(period) {
   const [y, m] = String(period).split("-");
   return `${y}-${String(m).padStart(2, "0")}-01`;

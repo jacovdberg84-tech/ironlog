@@ -4,16 +4,13 @@ import { buildPdfBuffer, sectionTitle, kvGrid, ensurePageSpace } from "../utils/
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
 import fs from "fs";
 import path from "path";
+import { getUser } from "../utils/request.js";
 
 const LANGS = new Set(["en", "af", "zu", "pt"]);
 const DOC_TYPES = new Set(["SOP", "Site Instruction", "Method Statement", "Checklist", "Risk Note"]);
 
 function nowIso() {
   return new Date().toISOString();
-}
-
-function getUser(req) {
-  return String(req.headers["x-user-name"] || "session-user").trim() || "session-user";
 }
 
 function hasColumn(tableName, columnName) {

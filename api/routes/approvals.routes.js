@@ -1,6 +1,7 @@
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { applyMasterDataApproval } from "../utils/masterdataGovernance.js";
+import { getRole, getUser } from "../utils/request.js";
 
 function hasColumn(table, col) {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -11,14 +12,6 @@ function ensureColumn(table, colName, colDef) {
   if (!hasColumn(table, colName)) {
     db.prepare(`ALTER TABLE ${table} ADD COLUMN ${colDef}`).run();
   }
-}
-
-function getRole(req) {
-  return String(req.headers["x-user-role"] || "admin").trim().toLowerCase();
-}
-
-function getUser(req) {
-  return String(req.headers["x-user-name"] || "session-user").trim() || "session-user";
 }
 
 function requireRoles(req, reply, roles) {

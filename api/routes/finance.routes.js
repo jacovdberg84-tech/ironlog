@@ -11,13 +11,8 @@ import {
 } from "../utils/plantHire.js";
 import { buildScheduledDowntimeCost } from "../utils/downtimeCosting.js";
 import { getMonthlyBudgetRow, getOperatingBudgetAmount, upsertMonthlyBudget } from "../utils/monthlyBudget.js";
+import { getRole, getUser } from "../utils/request.js";
 
-function getRole(req) {
-  return String(req.headers["x-user-role"] || "admin").trim().toLowerCase();
-}
-function getUser(req) {
-  return String(req.headers["x-user-name"] || "session-user").trim() || "session-user";
-}
 function getRoles(req) {
   const many = String(req.headers["x-user-roles"] || "")
     .split(",").map((x) => String(x || "").trim().toLowerCase()).filter(Boolean);
