@@ -556,6 +556,11 @@ async function callIronmindAi(structuredData, opts = {}) {
   return text == null ? null : parseJsonObject(text);
 }
 
+export function aiProviderSummary() {
+  const cfg = getAiConfig();
+  return { provider: cfg.provider || null, model: cfg.model || cfg.deployment || null };
+}
+
 export function isAiConfigured() {
   return Boolean(getAiConfig().provider);
 }
@@ -565,7 +570,7 @@ export function isAiConfigured() {
  * Azure OpenAI or Azure AI Foundry). Returns the reply text, or null when no
  * provider is set up or the call fails.
  */
-export async function aiChatText(messages, { temperature = 0.1, max_tokens = 700, timeout_ms } = {}, cfg = getAiConfig()) {
+export async function aiChatText(messages, { temperature = 0.1, max_tokens = 700, timeout_ms, num_ctx, json = false } = {}, cfg = getAiConfig()) {
   try {
     if (cfg.provider === "openai") {
       const data = await openAiCompatibleChatCompletion({
@@ -573,6 +578,8 @@ export async function aiChatText(messages, { temperature = 0.1, max_tokens = 700
         temperature,
         max_tokens,
         ...(timeout_ms ? { timeout_ms } : {}),
+        ...(num_ctx ? { num_ctx } : {}),
+        ...(json ? { json: true } : {}),
         messages,
       });
       return data?.choices?.[0]?.message?.content ?? null;
@@ -586,7 +593,7 @@ export async function aiChatText(messages, { temperature = 0.1, max_tokens = 700
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", "api-key": cfg.apiKey },
-        body: JSON.stringify({ temperature, max_tokens, messages }),
+        body: JSON.stringify({ temperature, max_tokens, messages, ...(json ? { response_format: { type: "json_object" } } : {}) }),
         signal,
       });
       const data = await res.json();
@@ -602,7 +609,7 @@ export async function aiChatText(messages, { temperature = 0.1, max_tokens = 700
           "api-key": cfg.apiKey,
           Authorization: `Bearer ${cfg.apiKey}`,
         },
-        body: JSON.stringify({ model: cfg.model, temperature, max_tokens, messages }),
+        body: JSON.stringify({ model: cfg.model, temperature, max_tokens, messages, ...(json ? { response_format: { type: "json_object" } } : {}) }),
         signal,
       });
       const data = await res.json();

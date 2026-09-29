@@ -83,6 +83,62 @@ function getRequestTimeoutMs(body) {
 /**
  * POST chat completions. Returns parsed JSON body or null on HTTP/error parse failure.
  */
+/** Ollama's own chat endpoint for an OpenAI-style chat URL on the same host. */
+export function ollamaNativeChatUrl(openAiUrl) {
+  const u = new URL(openAiUrl);
+  return `${u.origin}/api/chat`;
+}
+
+/** Context window for Borris on Ollama (tokens). BORRIS_NUM_CTX overrides; 0 keeps the model default. */
+export function borrisNumCtx() {
+  const n = Number(process.env.BORRIS_NUM_CTX ?? 8192);
+  return Number.isFinite(n) && n >= 0 ? Math.min(131072, Math.round(n)) : 8192;
+}
+
+/**
+ * Ollama's OpenAI-compatible endpoint ignores the context size, so callers that
+ * pass num_ctx (larger evidence) or json: true go to /api/chat instead. The reply
+ * is returned in the OpenAI shape so callers do not care which one answered.
+ */
+async function ollamaNativeChat(url, payload, timeoutMs) {
+  const options = { num_ctx: payload.num_ctx };
+  if (payload.temperature != null) options.temperature = payload.temperature;
+  if (payload.max_tokens != null) options.num_predict = payload.max_tokens;
+  const nativeBody = {
+    model: payload.model,
+    messages: payload.messages,
+    stream: false,
+    options,
+    ...(payload.json ? { format: "json" } : {}),
+  };
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const res = await fetch(ollamaNativeChatUrl(url), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(nativeBody),
+      signal: controller?.signal,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data) {
+      lastLlmChatError = `Ollama HTTP ${res.status}: ${data?.error || "no body"}`;
+      return null;
+    }
+    const content = data?.message?.content;
+    if (typeof content !== "string" || !content.trim()) {
+      lastLlmChatError = "Ollama returned no message content";
+      return null;
+    }
+    return { choices: [{ message: { role: "assistant", content } }], model: data.model };
+  } catch (e) {
+    lastLlmChatError = e?.name === "AbortError" ? `timeout after ${timeoutMs}ms` : `fetch: ${e?.message || e}`;
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function openAiCompatibleChatCompletion(body) {
   lastLlmChatError = "";
   const url = resolveOpenAiCompatibleChatUrl();
@@ -100,6 +156,17 @@ export async function openAiCompatibleChatCompletion(body) {
       : body;
   if (payload && typeof payload === "object" && Object.prototype.hasOwnProperty.call(payload, "timeout_ms")) {
     delete payload.timeout_ms;
+  }
+  if (toOllama && payload && (Number(payload.num_ctx) > 0 || payload.json)) {
+    if (!(Number(payload.num_ctx) > 0)) delete payload.num_ctx;
+    return ollamaNativeChat(url, payload, timeoutMs);
+  }
+  if (payload && typeof payload === "object") {
+    // Not Ollama: num_ctx does not exist and json maps to OpenAI's JSON mode.
+    const wantsJson = payload.json;
+    delete payload.num_ctx;
+    delete payload.json;
+    if (wantsJson) payload.response_format = { type: "json_object" };
   }
 
   const controller = timeoutMs > 0 ? new AbortController() : null;
