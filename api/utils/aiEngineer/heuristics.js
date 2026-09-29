@@ -3,7 +3,8 @@ export function chooseTargetFiles(title, text) {
   const files = new Set();
   if (/maint|service|mechanic|workshop|ai engineer|ai-engineer/.test(hay)) {
     files.add("web/maintenance.html");
-    files.add("web/maintenance.js");
+    files.add("web/maintenance/plans.js");
+    files.add("web/maintenance/core.js");
     files.add("api/routes/maintenance.routes.js");
     files.add("api/routes/aiEngineer.routes.js");
   }

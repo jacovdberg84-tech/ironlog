@@ -40,3 +40,28 @@ The main IronLog screen (`web/index.html`) used to load one 22,000-line `web/app
 | `finance.js` | Finance | 737 |
 | `enterprise.js` | Enterprise, integrations, governance, evidence packs, executive | 388 |
 | `workshop-docs.js` | Workshop library documents and uploads, Borris OEM | 87 |
+
+# Maintenance page structure
+
+`web/maintenance.html` used to load one 9,900-line `web/maintenance.js`. That code now lives in `web/maintenance/`, split by feature, and the same rules apply as for the main app. Pieces of one feature that were scattered through the old file, such as the weekly forum, are now together in one file. A load-order check confirmed this is safe: apart from the `fetch` wrapper in `core.js` and the page start-up in `init.js`, the files only define functions and settings.
+
+| File | What is in it | Lines |
+|---|---|---|
+| `core.js` | Config, sidebar and view switching, session labels, fetch wrapper, shared formatting helpers | 315 |
+| `service-templates.js` | Service templates and service planner | 229 |
+| `plans.js` | Maintenance plans, services due, service history and backfill | 1269 |
+| `insights.js` | Maintenance insights, forecasts and governance signals | 844 |
+| `report-builder.js` | Custom report builder and report subscriptions | 471 |
+| `views.js` | Maintenance hub modes and top-level views | 201 |
+| `histogram.js` | Maintenance histogram events | 189 |
+| `sync.js` | InspectPro sync administration | 222 |
+| `tyres.js` | Tyre inspections | 447 |
+| `weekly-inspections.js` | Weekly inspection calendar and roster | 680 |
+| `inspections.js` | Manager, damage and artisan inspections | 913 |
+| `weekly-forum.js` | Weekly maintenance forum: summary, drafts, actions, reviews and inputs | 612 |
+| `asset-kpi.js` | Asset KPI, reliability and executive exports | 1092 |
+| `parts-to-order.js` | Parts to order and RFQ | 394 |
+| `mechanics-cost.js` | Mechanics cost and timesheets | 696 |
+| `ai-engineer.js` | AI engineer requests | 248 |
+| `rsg-profiles.js` | RSG service kit profiles | 274 |
+| `init.js` | Dark mode and page start-up wiring | 886 |
