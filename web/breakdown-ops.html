@@ -5,7 +5,7 @@
   <title>IRONLOG Breakdowns</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./styles.css?v=16" />
+  <link rel="stylesheet" href="./styles.css?v=parts-1" />
 </head>
 <body class="page-shell">
   <div class="page-header">
@@ -24,16 +24,54 @@
 
   <section class="panel show page-section">
     <div class="card stack-12 bo-layout">
+      <div class="card bo-create-card">
+        <div class="section-head-row">
+          <h4>Report a breakdown</h4>
+          <button type="button" class="sectionToggleBtn" data-section-body="boCreateBody" data-storage-key="ironlog_section_bo_create">Hide</button>
+        </div>
+        <div id="boCreateBody" class="section-collapsible">
+        <p class="muted small">Creates the incident and its repair work order. Fields marked * are needed.</p>
+        <div class="bo-create-grid">
+          <label>Equipment * <input id="bAsset" list="assetCodeOptions" placeholder="Asset code" autocomplete="off" /></label>
+          <label>What failed * <input id="bComponent" list="bComponentOptions" placeholder="e.g. Engine, Hydraulics" autocomplete="off" /></label>
+          <label class="bo-description-field">Problem description * <input id="bDesc" placeholder="What happened? e.g. Hydraulic hose burst on boom" /></label>
+          <label>Date down <input id="bDate" type="date" /></label>
+          <label>Time down <input id="bTime" type="time" /></label>
+          <label>Expected back in service * <input id="bEtsRepairDate" type="date" /></label>
+          <label class="chk bo-unknown-return"><input id="bEtsUnknown" type="checkbox" /> Not known yet</label>
+          <label>Parts
+            <select id="bPartsStatus">
+              <option value="">No parts needed / not known</option><option value="Not ordered">Needed, not ordered</option><option value="Ordered">Ordered</option><option value="In transit">In transit</option><option value="Partial">Partly received</option><option value="Received">Received</option><option value="Waiting OEM">Waiting OEM</option>
+            </select>
+          </label>
+          <label class="chk bo-critical-field">
+            <input id="bCrit" type="checkbox" />
+            Critical safety or production impact
+          </label>
+          <button type="button" id="makeBreakdown" class="btn-primary">Report breakdown</button>
+        </div>
+        <details class="bo-create-advanced">
+          <summary>More: downtime hours and parts dates</summary>
+          <div class="row" style="flex-wrap:wrap; margin-top:10px;">
+            <label>Hours down on this date <input id="bDown" type="number" min="0" max="24" step="0.25" value="0" /></label>
+            <label>Date parts ordered <input id="bPartsOrderedDate" type="date" /></label>
+            <label>Parts received <input id="bPartsReceivedDate" type="date" /></label>
+          </div>
+        </details>
+        <p class="bo-form-result" id="breakdownResult" role="status"></p>
+        </div>
+      </div>
       <div class="card bo-open-card">
         <div class="section-head-row">
           <h4>Open incidents</h4>
           <button type="button" class="sectionToggleBtn" data-section-body="boOpenBody" data-storage-key="ironlog_section_bo_open">Hide</button>
         </div>
         <div id="boOpenBody" class="section-collapsible">
-          <p class="muted">The current downtime queue. Open the linked work order to manage the repair.</p>
+          <p class="muted">Machines that are down now. Keep “what failed” and the return date up to date: they feed My Work, the work order due date and the weekly forum.</p>
           <div class="bo-queue-tools">
             <input id="boOpenSearch" type="search" placeholder="Search asset, incident or description" />
             <label class="chk">Filter by start date <input id="boOpenDate" type="date" /></label>
+            <label class="chk"><input id="boOpenMissing" type="checkbox" /> Only missing info</label>
             <button type="button" id="boRefreshOpen">Refresh</button>
           </div>
           <div id="boOpenSummary" class="muted small"></div>
@@ -41,20 +79,59 @@
           <button type="button" id="boOpenMore" class="bo-open-more">Show all incidents</button>
         </div>
       </div>
-
-      <div class="card bo-recent-card">
+      <div class="card bo-short-card">
         <div class="section-head-row">
-          <h4>Recent breakdowns</h4>
-          <button type="button" class="sectionToggleBtn" data-section-body="boRecentBody" data-storage-key="ironlog_section_bo_recent" data-default-collapsed="1">Show</button>
+          <h4>Log a completed quick repair</h4>
+          <button type="button" class="sectionToggleBtn" data-section-body="boShortBody" data-storage-key="ironlog_section_bo_short" data-default-collapsed="1">Show</button>
         </div>
-        <div id="boRecentBody" class="section-collapsible">
-          <div class="row">
-            <button type="button" id="boRefreshRecent">Refresh</button>
-          </div>
-          <div class="list" id="boRecentList"></div>
+        <div id="boShortBody" class="section-collapsible">
+        <p class="muted">
+          One closed repair: downtime is written to breakdown logs. Parts issue to the linked work order; oils go to the oil log for the asset.
+        </p>
+      <div class="row">
+        <button type="button" id="boPullLiveHours">Pull live meter (uses asset + event date)</button>
+        <span class="muted" id="boLiveHoursHint"></span>
+      </div>
+      <div class="row">
+        <input id="sqAsset" list="assetCodeOptions" placeholder="Asset code" />
+        <input id="sqDesc" class="minw-260" placeholder="What was done (e.g. replaced hydraulic hose)" />
+      </div>
+      <div class="row">
+        <label>Event date <input id="sqDate" type="date" /></label>
+        <label>Time down <input id="sqTimeDown" type="datetime-local" /></label>
+        <label>Time up <input id="sqTimeUp" type="datetime-local" /></label>
+        <span class="muted">or</span>
+        <label>Hours down <input id="sqHours" class="w-90" type="number" step="0.25" min="0" max="24" placeholder="If no times" /></label>
+      </div>
+      <div class="row">
+        <input id="sqComponent" class="w-180" placeholder="Component (optional)" />
+        <label class="chk"><input id="sqCrit" type="checkbox" /> Critical</label>
+      </div>
+      <div id="sqPartsRows">
+        <div class="row sq-part-row">
+          <input class="sq-part-code w-180" list="partCodeOptions" placeholder="Part code" />
+          <input class="sq-part-qty w-70" type="number" min="1" step="1" placeholder="Qty" />
+          <button type="button" class="sq-part-remove" title="Remove part line">Remove</button>
+        </div>
+        <div class="row sq-part-row">
+          <input class="sq-part-code w-180" list="partCodeOptions" placeholder="Part code (optional)" />
+          <input class="sq-part-qty w-70" type="number" min="1" step="1" placeholder="Qty" />
+          <button type="button" class="sq-part-remove" title="Remove part line">Remove</button>
         </div>
       </div>
-
+      <div class="row">
+        <button type="button" id="sqAddPart">+ Add part</button>
+      </div>
+      <div class="row">
+        <input id="sqOilType" class="w-220" placeholder="Oil / lube product (optional)" />
+        <input id="sqOilQty" class="w-100" type="number" step="0.1" min="0" placeholder="Qty" />
+      </div>
+      <div class="row">
+        <button type="button" id="sqSubmit">Log short breakdown</button>
+      </div>
+      <pre class="output" id="shortBreakdownResult"></pre>
+      </div>
+      </div>
       <div class="card bo-offsite-card">
         <div class="section-head-row">
           <h4>Assets offsite for repairs</h4>
@@ -99,7 +176,6 @@
           <pre class="output" id="boOffsiteResult"></pre>
         </div>
       </div>
-
       <div class="card bo-slip-card">
         <div class="section-head-row">
           <h4>Operational slip reports (PDF)</h4>
@@ -209,104 +285,34 @@
         <pre class="output" id="boSlipResult"></pre>
         </div>
       </div>
-
-      <div class="card bo-create-card">
+      <div class="card bo-recent-card">
         <div class="section-head-row">
-          <h4>Report a breakdown</h4>
-          <button type="button" class="sectionToggleBtn" data-section-body="boCreateBody" data-storage-key="ironlog_section_bo_create">Hide</button>
+          <h4>Recent breakdowns</h4>
+          <button type="button" class="sectionToggleBtn" data-section-body="boRecentBody" data-storage-key="ironlog_section_bo_recent" data-default-collapsed="1">Show</button>
         </div>
-        <div id="boCreateBody" class="section-collapsible">
-        <p class="muted small">Creates one open incident and its linked primary work order.</p>
-        <div class="bo-create-grid">
-          <label>Equipment <input id="bAsset" list="assetCodeOptions" placeholder="Asset code" /></label>
-          <label>Date down <input id="bDate" type="date" /></label>
-          <label>Time down <input id="bTime" type="time" /></label>
-          <label>Hours down on this date <input id="bDown" type="number" min="0" max="24" step="0.25" value="0" /></label>
-          <label class="bo-description-field">Problem description <input id="bDesc" placeholder="What failed or stopped the machine?" /></label>
-          <label class="chk bo-critical-field">
-            <input id="bCrit" type="checkbox" />
-            Critical safety or production impact
-          </label>
-          <button type="button" id="makeBreakdown" class="btn-primary">Create incident &amp; work order</button>
-        </div>
-        <details class="bo-create-advanced">
-          <summary>Optional downtime and repair planning</summary>
-          <div class="row" style="flex-wrap:wrap; margin-top:10px;">
-            <label>Date parts ordered <input id="bPartsOrderedDate" type="date" /></label>
-            <label>Parts status
-              <select id="bPartsStatus" class="w-180">
-                <option value="">Not recorded</option><option value="Not ordered">Not ordered</option><option value="Ordered">Ordered</option><option value="In transit">In transit</option><option value="Partial">Partial</option><option value="Received">Received</option><option value="Waiting OEM">Waiting OEM</option>
-              </select>
-            </label>
-            <label>Parts received <input id="bPartsReceivedDate" type="date" /></label>
-            <label>Estimated repair <input id="bEtsRepairDate" type="date" /></label>
+        <div id="boRecentBody" class="section-collapsible">
+          <div class="row">
+            <button type="button" id="boRefreshRecent">Refresh</button>
           </div>
-        </details>
-        <pre class="output" id="breakdownResult"></pre>
+          <div class="list" id="boRecentList"></div>
         </div>
       </div>
 
-      <div class="card bo-short-card">
-        <div class="section-head-row">
-          <h4>Log a completed quick repair</h4>
-          <button type="button" class="sectionToggleBtn" data-section-body="boShortBody" data-storage-key="ironlog_section_bo_short" data-default-collapsed="1">Show</button>
-        </div>
-        <div id="boShortBody" class="section-collapsible">
-        <p class="muted">
-          One closed repair: downtime is written to breakdown logs. Parts issue to the linked work order; oils go to the oil log for the asset.
-        </p>
-      <div class="row">
-        <button type="button" id="boPullLiveHours">Pull live meter (uses asset + event date)</button>
-        <span class="muted" id="boLiveHoursHint"></span>
-      </div>
-      <div class="row">
-        <input id="sqAsset" list="assetCodeOptions" placeholder="Asset code" />
-        <input id="sqDesc" class="minw-260" placeholder="What was done (e.g. replaced hydraulic hose)" />
-      </div>
-      <div class="row">
-        <label>Event date <input id="sqDate" type="date" /></label>
-        <label>Time down <input id="sqTimeDown" type="datetime-local" /></label>
-        <label>Time up <input id="sqTimeUp" type="datetime-local" /></label>
-        <span class="muted">or</span>
-        <label>Hours down <input id="sqHours" class="w-90" type="number" step="0.25" min="0" max="24" placeholder="If no times" /></label>
-      </div>
-      <div class="row">
-        <input id="sqComponent" class="w-180" placeholder="Component (optional)" />
-        <label class="chk"><input id="sqCrit" type="checkbox" /> Critical</label>
-      </div>
-      <div id="sqPartsRows">
-        <div class="row sq-part-row">
-          <input class="sq-part-code w-180" list="partCodeOptions" placeholder="Part code" />
-          <input class="sq-part-qty w-70" type="number" min="1" step="1" placeholder="Qty" />
-          <button type="button" class="sq-part-remove" title="Remove part line">Remove</button>
-        </div>
-        <div class="row sq-part-row">
-          <input class="sq-part-code w-180" list="partCodeOptions" placeholder="Part code (optional)" />
-          <input class="sq-part-qty w-70" type="number" min="1" step="1" placeholder="Qty" />
-          <button type="button" class="sq-part-remove" title="Remove part line">Remove</button>
-        </div>
-      </div>
-      <div class="row">
-        <button type="button" id="sqAddPart">+ Add part</button>
-      </div>
-      <div class="row">
-        <input id="sqOilType" class="w-220" placeholder="Oil / lube product (optional)" />
-        <input id="sqOilQty" class="w-100" type="number" step="0.1" min="0" placeholder="Qty" />
-      </div>
-      <div class="row">
-        <button type="button" id="sqSubmit">Log short breakdown</button>
-      </div>
-      <pre class="output" id="shortBreakdownResult"></pre>
-      </div>
-      </div>
+
+
+
+
 
     </div>
   </section>
 
   <datalist id="assetCodeOptions"></datalist>
   <datalist id="partCodeOptions"></datalist>
+  <datalist id="bComponentOptions">
+    <option value="Engine"></option><option value="Cooling system"></option><option value="Fuel system"></option><option value="Transmission"></option><option value="Final drive / differential"></option><option value="Hydraulics"></option><option value="Electrical"></option><option value="Brakes"></option><option value="Steering"></option><option value="Suspension"></option><option value="Undercarriage"></option><option value="Tyres"></option><option value="G.E.T"></option><option value="Attachment / bucket"></option><option value="Body / cab"></option><option value="Air-con"></option><option value="Other"></option>
+  </datalist>
 
   <script src="./session.js?v=1"></script>
-  <script src="./breakdown-ops.js?v=8"></script>
+  <script src="./breakdown-ops.js?v=9"></script>
 </body>
 </html>
