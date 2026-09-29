@@ -166,6 +166,171 @@ function compactCell(v, max = 140) {
   return s.length > max ? `${s.slice(0, Math.max(1, max - 1))}...` : s;
 }
 
+function dailyPdfLongDate(ymd) {
+  const match = String(ymd || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return String(ymd || "");
+  const value = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (!Number.isFinite(value.getTime())) return String(ymd || "");
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(value);
+}
+
+function dailyPdfManagementSection(doc, label) {
+  ensurePageSpace(doc, 38);
+  const left = doc.page.margins.left;
+  const right = doc.page.width - doc.page.margins.right;
+  const y = doc.y;
+  doc.font("Helvetica-Bold").fontSize(12).fillColor("#143c50").text(String(label || ""), left, y, {
+    width: right - left,
+    lineBreak: false,
+  });
+  doc
+    .moveTo(left, y + 20)
+    .lineTo(right, y + 20)
+    .lineWidth(0.8)
+    .strokeColor("#0f7182")
+    .stroke();
+  doc.y = y + 28;
+}
+
+function drawDailyPdfMetricCards(doc, cards) {
+  const left = doc.page.margins.left;
+  const right = doc.page.width - doc.page.margins.right;
+  const gap = 11;
+  const cardHeight = 62;
+  const cardWidth = (right - left - gap * (cards.length - 1)) / cards.length;
+  ensurePageSpace(doc, cardHeight + 14);
+  const y = doc.y;
+
+  for (let index = 0; index < cards.length; index += 1) {
+    const card = cards[index];
+    const x = left + index * (cardWidth + gap);
+    doc.save();
+    doc.roundedRect(x, y, cardWidth, cardHeight, 5).fill("#e8f2f5");
+    doc.restore();
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(8)
+      .fillColor("#526a7c")
+      .text(String(card.label || "").toUpperCase(), x + 10, y + 10, {
+        width: cardWidth - 20,
+        lineBreak: false,
+      });
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(20)
+      .fillColor(card.alert ? "#b42318" : "#143c50")
+      .text(String(card.value || "-"), x + 10, y + 25, {
+        width: cardWidth - 20,
+        lineBreak: false,
+      });
+    if (card.detail) {
+      doc
+        .font("Helvetica")
+        .fontSize(7.5)
+        .fillColor("#526a7c")
+        .text(String(card.detail), x + 10, y + 49, {
+          width: cardWidth - 20,
+          lineBreak: false,
+        });
+    }
+  }
+  doc.y = y + cardHeight + 12;
+}
+
+function drawDailyPdfOperatingBasis(doc, values) {
+  const left = doc.page.margins.left;
+  const right = doc.page.width - doc.page.margins.right;
+  const gap = 11;
+  const rowHeight = 39;
+  const colWidth = (right - left - gap) / 2;
+  ensurePageSpace(doc, rowHeight * 2 + 16);
+  const startY = doc.y;
+
+  values.slice(0, 4).forEach((value, index) => {
+    const row = Math.floor(index / 2);
+    const col = index % 2;
+    const x = left + col * (colWidth + gap);
+    const y = startY + row * rowHeight;
+    doc
+      .font("Helvetica")
+      .fontSize(8.5)
+      .fillColor("#526a7c")
+      .text(String(value.label || ""), x, y, { width: colWidth * 0.52, lineBreak: false });
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(9.5)
+      .fillColor("#143c50")
+      .text(String(value.value || "-"), x + colWidth * 0.48, y, {
+        width: colWidth * 0.52,
+        align: "right",
+        lineBreak: false,
+      });
+    doc
+      .moveTo(x, y + 24)
+      .lineTo(x + colWidth, y + 24)
+      .lineWidth(0.45)
+      .strokeColor("#cbdde3")
+      .stroke();
+  });
+  doc.y = startY + rowHeight * 2 + 4;
+}
+
+function drawDailyPdfExceptions(doc, rows, emptyMessage = "Nothing requiring management action was recorded for the operating day.") {
+  const left = doc.page.margins.left;
+  const right = doc.page.width - doc.page.margins.right;
+  const width = right - left;
+  if (!rows.length) {
+    ensurePageSpace(doc, 42);
+    const y = doc.y;
+    doc.save();
+    doc.roundedRect(left, y, width, 36, 4).fill("#f2f6f7");
+    doc.restore();
+    doc.font("Helvetica").fontSize(9).fillColor("#526a7c").text(
+      String(emptyMessage),
+      left + 12,
+      y + 12,
+      { width: width - 24, lineBreak: false },
+    );
+    doc.y = y + 46;
+    return;
+  }
+
+  for (const row of rows) {
+    const detail = String(row.detail || "").trim();
+    const detailHeight = detail
+      ? doc.font("Helvetica").fontSize(8.5).heightOfString(detail, { width: width - 176 })
+      : 0;
+    const height = Math.max(42, Math.ceil(24 + detailHeight));
+    ensurePageSpace(doc, height + 8);
+    const y = doc.y;
+    const alert = row.alert === true;
+    doc.save();
+    doc.rect(left, y, 4, height).fill(alert ? "#b42318" : "#0f7182");
+    doc.restore();
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(9.5)
+      .fillColor("#143c50")
+      .text(String(row.title || ""), left + 13, y + 7, { width: width - 176, lineBreak: false });
+    if (detail) {
+      doc.font("Helvetica").fontSize(8.5).fillColor("#526a7c").text(detail, left + 13, y + 20, {
+        width: width - 176,
+      });
+    }
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(9)
+      .fillColor(alert ? "#b42318" : "#143c50")
+      .text(String(row.value || ""), left, y + 10, { width, align: "right", lineBreak: false });
+    doc.y = y + height + 6;
+  }
+}
+
 /**
  * Daily Log breakdown entries also record planned services. Detect an actual
  * service interval from the entered component/work text so the Daily PDF can
@@ -10614,7 +10779,7 @@ export default async function reportsRoutes(app) {
   // DAILY PDF
   // =========================
   app.get("/daily.pdf", async (req, reply) => {
-    const reportRevision = "daily-pdf-production-and-service-r2026-09-10";
+    const reportRevision = "daily-pdf-management-layout-r2026-09-29";
     reply.header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     reply.header("Pragma", "no-cache");
     reply.header("Expires", "0");
@@ -11174,8 +11339,369 @@ export default async function reportsRoutes(app) {
       }
     }
 
+    const offsiteStatusLabel = (status) => {
+      const key = String(status || "").trim().toLowerCase();
+      const labels = {
+        sent_offsite: "Sent offsite",
+        in_repair: "In repair",
+        waiting_parts: "Waiting parts",
+        ready_return: "Ready for return",
+        returned: "Returned",
+        diagnosis: "Diagnosis",
+      };
+      return labels[key] || key || "-";
+    };
+    const daysBetweenYmd = (from, to) => {
+      const start = String(from || "").trim();
+      const end = String(to || "").trim();
+      if (!start || !end) return null;
+      const startTime = Date.parse(`${start}T00:00:00Z`);
+      const endTime = Date.parse(`${end}T00:00:00Z`);
+      if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return null;
+      return Math.round((endTime - startTime) / 86400000);
+    };
+
+    const offsiteReportRows = offsiteRepairsPdf.map((row) => {
+      const sent = String(row.sent_date || "").trim();
+      const expected = String(row.expected_return_date || "").trim();
+      const actual = String(row.actual_return_date || "").trim();
+      const elapsed = daysBetweenYmd(sent, actual || date);
+      const dueDelta = daysBetweenYmd(date, expected);
+      const tracking = actual
+        ? `Returned ${actual}`
+        : !expected
+          ? "Return date required"
+          : dueDelta < 0
+            ? `OVERDUE ${Math.abs(dueDelta)} day(s)`
+            : dueDelta === 0
+              ? "Due today"
+              : `Due in ${dueDelta} day(s)`;
+      return {
+        asset: row.asset_code,
+        equipment: compactCell(row.asset_name ?? "", 48),
+        status: offsiteStatusLabel(row.repair_status),
+        owner: compactCell([row.responsible_person, row.vendor].filter(Boolean).join(" / "), 44) || "-",
+        sent: sent || "-",
+        expected: expected || "-",
+        elapsed: elapsed == null ? "-" : String(elapsed),
+        tracking,
+        approval: compactCell(String(row.approval_status || "not required").replaceAll("_", " "), 28),
+        notes: compactCell([row.repair_reason, row.notes].filter(Boolean).join(" / "), 120) || "-",
+      };
+    });
+
+    const breakdownReportRows = breakdownsPdf.map((row) => ({
+      asset: row.asset_code,
+      equipment: compactCell(row.asset_name ?? "", 40),
+      date_down: parseIsoDate(row.breakdown_date) || parseIsoDate(row.start_at) || "-",
+      days: fmtNum(row.days_down || 0, 0),
+      parts_ordered: row.parts_ordered_date || "-",
+      parts_status: compactCell(row.parts_status ?? "", 36) || "-",
+      received: row.parts_received_date || "-",
+      ets: row.ets_repair_date || "-",
+      desc: compactCell(row.description ?? "", 70) || "-",
+    }));
+
+    const loggedDowntimeAssets = new Set();
+    const dailyDowntimeRows = dailyDowntimeLogs.map((row) => {
+      loggedDowntimeAssets.add(String(row.asset_code || ""));
+      const serviceLabel = serviceLabelFromDailyDowntime(row.component, row.notes, row.description);
+      const isMaintenance = Boolean(serviceLabel);
+      return {
+        asset: row.asset_code,
+        equipment: compactCell(row.asset_name ?? "", 48),
+        type: isMaintenance ? "Maintenance" : "Breakdown",
+        hrs: fmtNum(Math.max(0, Number(row.hours_down || 0)), 1),
+        area: isMaintenance ? serviceLabel : (compactCell(row.component ?? "", 42) || "-"),
+        detail: isMaintenance
+          ? serviceLabel
+          : compactCell(String(row.notes || row.description || "").replace(/^(?:Auto from Daily Input \(DOWN\)|Daily Log breakdown)\s*[-]?\s*/i, ""), 220),
+      };
+    });
+    for (const row of completedBreakdownRepairDowntime) {
+      dailyDowntimeRows.push({
+        asset: row.asset_code,
+        equipment: compactCell(row.asset_name ?? "", 48),
+        type: "Breakdown",
+        hrs: fmtNum(row.hours_down || 0, 1),
+        area: compactCell(row.component ?? "", 42) || "-",
+        detail: compactCell(
+          `${String(row.description || "Breakdown repair").trim()} / ${fmtNum(row.repair_hours || 0, 1)} completed repair hr`,
+          220,
+        ),
+      });
+    }
+    for (const row of dailyPlannedMaintenance) {
+      if (loggedDowntimeAssets.has(String(row.asset_code || ""))) continue;
+      dailyDowntimeRows.push({
+        asset: row.asset_code,
+        equipment: compactCell(row.asset_name ?? "", 48),
+        type: "Maintenance",
+        hrs: "-",
+        area: compactCell(row.service_name ?? "", 42) || "Service",
+        detail: compactCell(row.description ?? "", 220),
+      });
+    }
+
+    const openWorkOrderRows = openWOsPdf.map((row) => ({
+      wo: String(row.id),
+      asset: row.asset_code,
+      equipment: compactCell(row.asset_name ?? "", 48),
+      source: ({
+        breakdown: "Breakdown",
+        service: "Maintenance",
+        manager_inspection: "Inspection",
+        inspection: "Inspection",
+      })[String(row.source || "").toLowerCase()] || compactCell(row.source ?? "", 20),
+      status: compactCell(String(row.status ?? "").replace(/_/g, " "), 16),
+      parts: compactCell(row.parts_status ?? "", 26) || "-",
+      tech: compactCell(row.assigned_artisan_name ?? "", 28),
+      progress: compactCell(row.repair_progress ?? "", 260) || "No progress update",
+    }));
+
+    const fleetReadingRows = hoursPdfEnriched.map((row) => {
+      const noEntry = !row.has_daily_entry;
+      const formatHours = (value) =>
+        value == null || value === "" || !Number.isFinite(Number(value)) ? "-" : fmtNum(value, 1);
+      const formatPercent = (value) =>
+        value == null || !Number.isFinite(Number(value)) ? "-" : `${fmtNum(value, 1)}%`;
+      const isDistanceAsset = /(?:\bldv\b|light vehicle|vehicle)/i.test(`${row.category || ""} ${row.asset_name || ""}`);
+      return {
+        asset: row.asset_code,
+        type: compactCell(row.category ?? "", 12),
+        equipment: compactCell(row.asset_name ?? "", 42),
+        open: noEntry ? "-" : formatHours(row.opening_hours),
+        close: noEntry ? "-" : formatHours(row.closing_hours),
+        run: `${fmtNum(row.hours_run, 1)}${isDistanceAsset ? " km" : " h"}`,
+        prestart: row.prestart_done ? "Done" : "-",
+        avail: formatPercent(row.availability_pct),
+        util: formatPercent(row.utilization_pct),
+        fuel: row.fuel_liters == null ? "-" : `${fmtNum(row.fuel_liters, 1)} L`,
+      };
+    });
+
+    const downtimeActionRows = dailyDowntimeRows
+      .filter((row) => row.type === "Breakdown" && Number(row.hrs || 0) > 0)
+      .sort((a, b) => Number(b.hrs || 0) - Number(a.hrs || 0))
+      .slice(0, 3)
+      .map((row) => ({
+        title: `${row.asset} | ${row.equipment}`,
+        detail: `${row.area}: ${row.detail || "Breakdown downtime recorded"}`,
+        value: `${row.hrs} h down`,
+        alert: true,
+      }));
+    const offsiteActionRows = offsiteReportRows.slice(0, 2).map((row) => ({
+      title: `${row.asset} | ${row.equipment}`,
+      detail: `Offsite repair - ${row.status}. ${row.notes}`,
+      value: row.elapsed === "-" ? row.tracking : `${row.elapsed} day(s) out`,
+      alert: /OVERDUE|required/i.test(row.tracking),
+    }));
+    const managementActionRows = [...downtimeActionRows, ...offsiteActionRows].slice(0, 5);
+    let dailyPdfSiteName = "Quionga, Mozambique";
+    try {
+      dailyPdfSiteName = String(getPdfReportBranding(db).site_name || dailyPdfSiteName).trim();
+    } catch {
+      // The report remains available when branding settings have not been initialized.
+    }
+
+    const dailyPdfPageLabels = ["MANAGEMENT OVERVIEW"];
     const pdf = await buildPdfBuffer(
       (doc) => {
+        {
+          const dailyPageLabels = dailyPdfPageLabels;
+          let activePageLabel = "MANAGEMENT OVERVIEW";
+          const managementTableStyle = {
+            compact: true,
+            headerColor: "#143c50",
+            headerLineColor: "#0f7182",
+            zebraColor: "#f2f6f7",
+            textColor: "#143c50",
+          };
+          doc.on("pageAdded", () => dailyPageLabels.push(activePageLabel));
+
+          dailyPdfManagementSection(doc, "Daily performance");
+          drawDailyPdfMetricCards(doc, [
+            {
+              label: "Availability",
+              value: kpi.availability == null ? "-" : `${fmtNum(kpi.availability, 1)}%`,
+              detail: "scheduled time available",
+              alert: kpi.availability != null && Number(kpi.availability) < 80,
+            },
+            {
+              label: "Utilization",
+              value: kpi.utilization == null ? "-" : `${fmtNum(kpi.utilization, 1)}%`,
+              detail: "run hours / schedule",
+            },
+            {
+              label: "Run hours",
+              value: `${fmtNum(kpi.run_hours, 1)} h`,
+              detail: `${fmtNum(kpi.used_assets, 0)} assets used`,
+            },
+            {
+              label: "Downtime",
+              value: `${fmtNum(kpi.downtime_hours, 1)} h`,
+              detail: "repair and maintenance loss",
+              alert: Number(kpi.downtime_hours || 0) > 0,
+            },
+          ]);
+
+          dailyPdfManagementSection(doc, "Operating basis");
+          drawDailyPdfOperatingBasis(doc, [
+            { label: "Operating day", value: dailyPdfLongDate(opsDay) },
+            { label: "Shift pattern", value: "06:00 - 17:00" },
+            { label: "Scheduled capacity", value: `${fmtNum(scheduled, 1)} h per asset` },
+            {
+              label: "Pre-start checks",
+              value: `${fmtNum(kpi.prestart_count, 0)} completed (${fmtNum(kpi.prestart_hours, 2)} h)`,
+            },
+          ]);
+
+          dailyPdfManagementSection(doc, "Exceptions and actions");
+          drawDailyPdfExceptions(doc, managementActionRows);
+
+          activePageLabel = "FLEET DETAIL";
+          doc.addPage();
+          dailyPdfManagementSection(doc, "Fleet readings");
+          doc.font("Helvetica").fontSize(8.5).fillColor("#526a7c").text(
+            `Production hours captured on ${date} apply to ${opsDay}. Fuel, availability and downtime are shown for ${opsDay}.`,
+          );
+          doc.moveDown(0.45);
+          if (fleetReadingRows.length) {
+            table(
+              doc,
+              [
+                { key: "asset", label: "Asset", width: 0.09 },
+                { key: "type", label: "Type", width: 0.09 },
+                { key: "equipment", label: "Equipment", width: 0.18 },
+                { key: "open", label: "Open", width: 0.08, align: "right" },
+                { key: "close", label: "Close", width: 0.08, align: "right" },
+                { key: "run", label: "Move", width: 0.09, align: "right" },
+                { key: "prestart", label: "Pre-start", width: 0.09, align: "center" },
+                { key: "avail", label: "Avail", width: 0.08, align: "right" },
+                { key: "util", label: "Util", width: 0.08, align: "right" },
+                { key: "fuel", label: "Fuel", width: 0.14, align: "right" },
+              ],
+              fleetReadingRows,
+              { ...managementTableStyle, fontSize: 7.5, headerFontSize: 7.5, rowPadY: 3, headerPadY: 4 },
+            );
+          } else {
+            drawDailyPdfExceptions(doc, [], "No fleet readings were captured for this operating day.");
+          }
+
+          activePageLabel = "MAINTENANCE & INCIDENTS";
+          doc.addPage();
+          dailyPdfManagementSection(doc, "Maintenance and incidents");
+
+          dailyPdfManagementSection(doc, "Offsite repair tracking");
+          if (offsiteReportRows.length) {
+            table(
+              doc,
+              [
+                { key: "asset", label: "Plant #", width: 0.07 },
+                { key: "equipment", label: "Equipment", width: 0.13 },
+                { key: "status", label: "Repair status", width: 0.10 },
+                { key: "owner", label: "Owner / repairer", width: 0.12 },
+                { key: "sent", label: "Sent", width: 0.07 },
+                { key: "expected", label: "Expected", width: 0.08 },
+                { key: "elapsed", label: "Days out", width: 0.06, align: "right" },
+                { key: "tracking", label: "Return tracking", width: 0.11 },
+                { key: "approval", label: "Approval", width: 0.10 },
+                { key: "notes", label: "Reason / next action", width: 0.16 },
+              ],
+              offsiteReportRows,
+              managementTableStyle,
+            );
+          } else {
+            drawDailyPdfExceptions(doc, [], "No assets are currently tracked as offsite for repair.");
+          }
+
+          dailyPdfManagementSection(doc, "Breakdown incidents");
+          if (breakdownReportRows.length) {
+            table(
+              doc,
+              [
+                { key: "asset", label: "Plant #", width: 0.09 },
+                { key: "equipment", label: "Equipment", width: 0.15 },
+                { key: "date_down", label: "Date down", width: 0.11 },
+                { key: "days", label: "Total days down", width: 0.10, align: "right" },
+                { key: "parts_ordered", label: "Parts ordered", width: 0.12 },
+                { key: "parts_status", label: "Parts status", width: 0.12 },
+                { key: "received", label: "Received", width: 0.11 },
+                { key: "ets", label: "ETS repair", width: 0.10 },
+                { key: "desc", label: "Fault / action", width: 0.10 },
+              ],
+              breakdownReportRows,
+              managementTableStyle,
+            );
+          } else {
+            drawDailyPdfExceptions(doc, [], "No active breakdown incidents were recorded.");
+          }
+
+          dailyPdfManagementSection(doc, `Daily downtime - ${opsDay}`);
+          if (dailyDowntimeRows.length) {
+            table(
+              doc,
+              [
+                { key: "asset", label: "Plant #", width: 0.10 },
+                { key: "equipment", label: "Equipment", width: 0.20 },
+                { key: "type", label: "Downtime type", width: 0.14 },
+                { key: "hrs", label: "Hours down", width: 0.11, align: "right" },
+                { key: "area", label: "Component / service", width: 0.17 },
+                { key: "detail", label: "Reason / work completed", width: 0.28 },
+              ],
+              dailyDowntimeRows,
+              managementTableStyle,
+            );
+          } else {
+            drawDailyPdfExceptions(doc, [], "No repair or maintenance downtime was recorded.");
+          }
+
+          dailyPdfManagementSection(doc, "Open work orders");
+          if (openWorkOrderRows.length) {
+            table(
+              doc,
+              [
+                { key: "wo", label: "WO#", width: 0.07, align: "right" },
+                { key: "asset", label: "Plant #", width: 0.09 },
+                { key: "equipment", label: "Equipment", width: 0.16 },
+                { key: "source", label: "Source", width: 0.10 },
+                { key: "status", label: "Status", width: 0.09 },
+                { key: "parts", label: "Parts status", width: 0.12 },
+                { key: "tech", label: "Technician", width: 0.11 },
+                { key: "progress", label: "Progress / next action", width: 0.26 },
+              ],
+              openWorkOrderRows,
+              managementTableStyle,
+            );
+          } else {
+            drawDailyPdfExceptions(doc, [], "No open work orders require action.");
+          }
+
+          if (cartrackSpeeding?.total_speeding_events) {
+            activePageLabel = "FLEET TRACKING";
+            doc.addPage();
+            dailyPdfManagementSection(doc, `Fleet tracking - speeding above ${speedAlertKmh} km/h`);
+            doc.font("Helvetica").fontSize(9).fillColor("#526a7c").text(
+              `${cartrackSpeeding.total_speeding_events} event(s) across ${cartrackSpeeding.vehicles_with_speeding} vehicle(s).`,
+            );
+            doc.moveDown(0.4);
+            const speedPdf = buildSpeedingReportPdfContent(cartrackSpeeding);
+            table(
+              doc,
+              speedPdf.columns,
+              speedPdf.rows.slice(0, 25).map((row) => ({
+                time: compactCell(row.time ?? "", 16),
+                vehicle: compactCell(String(row.vehicle ?? "").replace(/\n/g, " / "), 24),
+                speed: row.speed ?? "-",
+                limit: row.limit ?? "-",
+                type: compactCell(row.type ?? "", 80),
+              })),
+              managementTableStyle,
+            );
+          }
+        }
+        return;
+
         tryDrawLogo(doc, logoPath);
 
         sectionTitle(doc, "KPIs");
@@ -11356,9 +11882,9 @@ export default async function reportsRoutes(app) {
         // A Daily Log incident can be either an unplanned breakdown or a
         // planned service. Numeric service intervals identify the latter even
         // when the entry originated from the quick breakdown workflow.
-        const loggedDowntimeAssets = new Set();
-        const dailyDowntimeRows = dailyDowntimeLogs.map((r) => {
-          loggedDowntimeAssets.add(String(r.asset_code || ""));
+        const legacyLoggedDowntimeAssets = new Set();
+        const legacyDailyDowntimeRows = dailyDowntimeLogs.map((r) => {
+          legacyLoggedDowntimeAssets.add(String(r.asset_code || ""));
           const serviceLabel = serviceLabelFromDailyDowntime(r.component, r.notes, r.description);
           const isMaintenance = Boolean(serviceLabel);
           return {
@@ -11377,7 +11903,7 @@ export default async function reportsRoutes(app) {
           };
         });
         for (const r of completedBreakdownRepairDowntime) {
-          dailyDowntimeRows.push({
+          legacyDailyDowntimeRows.push({
             asset: r.asset_code,
             equipment: compactCell(r.asset_name ?? "", 48),
             type: "Breakdown",
@@ -11390,8 +11916,8 @@ export default async function reportsRoutes(app) {
           });
         }
         for (const r of dailyPlannedMaintenance) {
-          if (loggedDowntimeAssets.has(String(r.asset_code || ""))) continue;
-          dailyDowntimeRows.push({
+          if (legacyLoggedDowntimeAssets.has(String(r.asset_code || ""))) continue;
+          legacyDailyDowntimeRows.push({
             asset: r.asset_code,
             equipment: compactCell(r.asset_name ?? "", 48),
             type: "Maintenance",
@@ -11412,8 +11938,8 @@ export default async function reportsRoutes(app) {
             { key: "area", label: "Component / service", width: 0.17 },
             { key: "detail", label: "Reason / work completed", width: 0.28 },
           ],
-          dailyDowntimeRows.length
-            ? dailyDowntimeRows
+          legacyDailyDowntimeRows.length
+            ? legacyDailyDowntimeRows
             : [{ asset: "—", equipment: "No downtime recorded", type: "—", hrs: "0.0", area: "—", detail: "—" }],
         );
 
@@ -11477,8 +12003,11 @@ export default async function reportsRoutes(app) {
       },
       {
         title: "IRONLOG",
-        subtitle: "Daily Operations Report",
-        rightText: `Date: ${date}`,
+        managementTitle: "AML / DAILY OPERATIONS",
+        subtitle: `Operating date ${dailyPdfLongDate(opsDay)} | Issued ${dailyPdfLongDate(date)} | ${dailyPdfSiteName}`,
+        pageLabel: ({ pageIndex }) => dailyPdfPageLabels[pageIndex] || "OPERATIONS DETAIL",
+        sourceText: `Source: Ironlog | Operating day ${opsDay}`,
+        headerStyle: "management",
         showPageNumbers: true,
         layout: "landscape",
       }

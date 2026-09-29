@@ -13,6 +13,12 @@ const BRAND = {
   line: "#93c5fd",
   zebra: "#f8fafc",
 };
+const MANAGEMENT = {
+  header: "#143c50",
+  accent: "#0f7182",
+  text: "#143c50",
+  muted: "#526a7c",
+};
 
 function contentWidth(doc) {
   return doc.page.width - doc.page.margins.left - doc.page.margins.right;
@@ -74,11 +80,80 @@ function drawHeaderLogo(doc, logoPath, opts = {}) {
   }
 }
 
+function managementPageLabel(opts = {}) {
+  const label = typeof opts.pageLabel === "function"
+    ? opts.pageLabel({
+        pageIndex: Number(opts.pageIndex || 0),
+        pageCount: Number(opts.pageCount || 1),
+      })
+    : opts.pageLabel;
+  return String(label || opts.rightText || "OPERATIONS DETAIL").trim().toUpperCase();
+}
+
+/** Management-first header/footer used by the Daily Operations PDF. */
+function drawManagementHeaderFooter(doc, opts = {}) {
+  const savedY = doc.y;
+  const left = doc.page.margins.left;
+  const right = doc.page.width - doc.page.margins.right;
+  const width = right - left;
+  const pageNo = Number(opts.pageIndex || 0) + 1;
+  const pageCount = Math.max(1, Number(opts.pageCount || 1));
+  const title = String(opts.managementTitle || opts.title || "DAILY OPERATIONS").trim();
+  const subtitle = String(opts.subtitle || "").trim();
+  const sourceText = String(opts.sourceText || "Source: IRONLOG").trim();
+
+  doc.save();
+  doc.rect(0, 0, doc.page.width, 64).fill(MANAGEMENT.header);
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(9)
+    .fillColor("#ffffff")
+    .text(managementPageLabel(opts), left, 27, { width, align: "right", lineBreak: false });
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(15)
+    .fillColor("#ffffff")
+    .text(title, left, 19, { width: width * 0.66, lineBreak: false });
+  if (subtitle) {
+    doc
+      .font("Helvetica")
+      .fontSize(8.5)
+      .fillColor("#dbe9ee")
+      .text(subtitle, left, 43, { width: width * 0.72, lineBreak: false });
+  }
+
+  const footerY = doc.page.height - doc.page.margins.bottom - 16;
+  doc
+    .moveTo(left, footerY - 8)
+    .lineTo(right, footerY - 8)
+    .lineWidth(0.7)
+    .strokeOpacity(0.35)
+    .stroke(MANAGEMENT.accent);
+  doc
+    .fillOpacity(1)
+    .font("Helvetica")
+    .fontSize(7.5)
+    .fillColor(MANAGEMENT.muted)
+    .text(sourceText, left, footerY, { width: width * 0.76, lineBreak: false });
+  if (opts.showPageNumbers !== false) {
+    doc
+      .font("Helvetica-Bold")
+      .fillColor(MANAGEMENT.text)
+      .text(`${pageNo} / ${pageCount}`, left, footerY, { width, align: "right", lineBreak: false });
+  }
+  doc.restore();
+  doc.y = Math.max(savedY, doc.page.margins.top);
+}
+
 /**
  * Draws consistent header and footer on the current page.
  * Call this ONCE per page, typically from doc.on("pageAdded", ...) and at start.
  */
 export function drawHeaderFooter(doc, opts = {}) {
+  if (opts.headerStyle === "management") {
+    drawManagementHeaderFooter(doc, opts);
+    return;
+  }
   const {
     title = "",
     subtitle = "Report",
@@ -226,6 +301,10 @@ export function buildPdfBuffer(buildFn, opts = {}) {
       showPageNumbers: opts.showPageNumbers !== false,
       siteName,
       logoPath,
+      headerStyle: opts.headerStyle,
+      managementTitle: opts.managementTitle,
+      pageLabel: opts.pageLabel,
+      sourceText: opts.sourceText,
     };
 
     buildFn(doc);
@@ -235,7 +314,22 @@ export function buildPdfBuffer(buildFn, opts = {}) {
         const range = doc.bufferedPageRange(); // { start, count }
         for (let i = range.start; i < range.start + range.count; i++) {
           doc.switchToPage(i);
-          drawHeaderFooter(doc, headerOpts);
+          drawHeaderFooter(doc, {
+            ...headerOpts,
+            pageIndex: i - range.start,
+            pageCount: range.count,
+          });
+        }
+        // PDFKit's buffered first page can defer font resources until a later
+        // page has been visited. Redraw the management cover last so its title
+        // and issuing line are reliably visible in all PDF viewers.
+        if (opts.headerStyle === "management" && range.count > 0) {
+          doc.switchToPage(range.start);
+          drawHeaderFooter(doc, {
+            ...headerOpts,
+            pageIndex: 0,
+            pageCount: range.count,
+          });
         }
       } catch {
         // if bufferPages/switchToPage not supported, skip header/footer gracefully
@@ -369,6 +463,10 @@ export function table(doc, columns, rows, opts = {}) {
   const headerFontSize = opts.headerFontSize ?? (compactAuto ? 8 : 9);
   const rowPadY = opts.rowPadY ?? (compactAuto ? 3 : 4);
   const headerPadY = opts.headerPadY ?? (compactAuto ? 4 : 5);
+  const headerColor = opts.headerColor || BRAND.primary;
+  const zebraColor = opts.zebraColor || BRAND.zebra;
+  const textColor = opts.textColor || BRAND.text;
+  const headerLineColor = opts.headerLineColor || BRAND.line;
 
   const colAbs = resolveTableColumnWidths(columns, w);
 
@@ -386,7 +484,7 @@ export function table(doc, columns, rows, opts = {}) {
     doc
       .rect(left, y, w, headerH)
       .fillOpacity(1)
-      .fill(BRAND.primary);
+      .fill(headerColor);
     doc.restore();
 
     doc.font("Helvetica-Bold").fontSize(headerFontSize).fillColor("#ffffff");
@@ -403,10 +501,10 @@ export function table(doc, columns, rows, opts = {}) {
       .lineTo(right, y + headerH)
       .lineWidth(1)
       .strokeOpacity(1)
-      .stroke(BRAND.line);
+      .stroke(headerLineColor);
 
     doc.y = y + headerH + 2;
-    doc.font("Helvetica").fontSize(fontSize).fillColor(BRAND.text);
+    doc.font("Helvetica").fontSize(fontSize).fillColor(textColor);
   };
 
   drawHeader();
@@ -442,7 +540,7 @@ export function table(doc, columns, rows, opts = {}) {
       doc
         .rect(left, y, w, rowDrawH)
         .fillOpacity(1)
-        .fill(BRAND.zebra);
+        .fill(zebraColor);
       doc.restore();
     }
 
