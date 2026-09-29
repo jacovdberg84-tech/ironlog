@@ -35,6 +35,7 @@ import inspectproRoutes from "./routes/inspectpro.routes.js";
 import breakdownOpsRoutes from "./routes/breakdownOps.routes.js";
 import tasksRoutes from "./routes/tasks.routes.js";
 import myWorkRoutes from "./routes/myWork.routes.js";
+import translateRoutes from "./routes/translate.routes.js";
 import backupsRoutes from "./routes/backups.routes.js";
 import masterdataRoutes from "./routes/masterdata.routes.js";
 import telematicsRoutes from "./routes/telematics.routes.js";
@@ -108,6 +109,7 @@ app.register(inspectproRoutes, { prefix: "/api/integrations/inspectpro" });
   app.register(inspectproRoutes, { prefix: "/api/manager" });
   app.register(tasksRoutes, { prefix: "/api" });
   app.register(myWorkRoutes, { prefix: "/api/my-work" });
+  app.register(translateRoutes, { prefix: "/api/translate" });
 app.register(backupsRoutes, { prefix: "/api/admin/backups" });
   // Backward compatibility for stale cached frontend bundles still calling /tasks, /projects, /comments.
   app.register(tasksRoutes);

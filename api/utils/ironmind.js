@@ -542,44 +542,55 @@ async function callIronmindAi(structuredData, opts = {}) {
   const contextBlock = contextNotes ? `\n\nAdditional operator context:\n${contextNotes}` : "";
   const userPrompt = `Structured plant data for report date ${structuredData.report_date}:\n${JSON.stringify(structuredData, null, 2)}${contextBlock}`;
 
+  const text = await aiChatText(
+    [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    {
+      temperature: Number(process.env.IRONMIND_TEMPERATURE ?? 0.1),
+      max_tokens: Number(process.env.IRONMIND_MAX_TOKENS ?? 700),
+    },
+    cfg,
+  );
+  return text == null ? null : parseJsonObject(text);
+}
+
+export function isAiConfigured() {
+  return Boolean(getAiConfig().provider);
+}
+
+/**
+ * One chat call through whichever AI provider is configured (OpenAI-compatible,
+ * Azure OpenAI or Azure AI Foundry). Returns the reply text, or null when no
+ * provider is set up or the call fails.
+ */
+export async function aiChatText(messages, { temperature = 0.1, max_tokens = 700, timeout_ms } = {}, cfg = getAiConfig()) {
   try {
     if (cfg.provider === "openai") {
       const data = await openAiCompatibleChatCompletion({
         model: cfg.model,
-        temperature: Number(process.env.IRONMIND_TEMPERATURE ?? 0.1),
-        max_tokens: Number(process.env.IRONMIND_MAX_TOKENS ?? 700),
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
+        temperature,
+        max_tokens,
+        ...(timeout_ms ? { timeout_ms } : {}),
+        messages,
       });
-      if (!data) return null;
-      const text = data?.choices?.[0]?.message?.content;
-      return parseJsonObject(text);
+      return data?.choices?.[0]?.message?.content ?? null;
     }
 
+    const signal = timeout_ms ? AbortSignal.timeout(timeout_ms) : undefined;
     if (cfg.provider === "azure_openai") {
       const url = `${cfg.endpoint.replace(/\/$/, "")}/openai/deployments/${encodeURIComponent(
         cfg.deployment
       )}/chat/completions?api-version=${encodeURIComponent(cfg.apiVersion)}`;
       const res = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "api-key": cfg.apiKey,
-        },
-        body: JSON.stringify({
-          temperature: Number(process.env.IRONMIND_TEMPERATURE ?? 0.1),
-          max_tokens: Number(process.env.IRONMIND_MAX_TOKENS ?? 700),
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-        }),
+        headers: { "Content-Type": "application/json", "api-key": cfg.apiKey },
+        body: JSON.stringify({ temperature, max_tokens, messages }),
+        signal,
       });
       const data = await res.json();
-      const text = data?.choices?.[0]?.message?.content;
-      return parseJsonObject(text);
+      return data?.choices?.[0]?.message?.content ?? null;
     }
 
     if (cfg.provider === "foundry") {
@@ -591,25 +602,16 @@ async function callIronmindAi(structuredData, opts = {}) {
           "api-key": cfg.apiKey,
           Authorization: `Bearer ${cfg.apiKey}`,
         },
-        body: JSON.stringify({
-          model: cfg.model,
-          temperature: Number(process.env.IRONMIND_TEMPERATURE ?? 0.1),
-          max_tokens: Number(process.env.IRONMIND_MAX_TOKENS ?? 700),
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-        }),
+        body: JSON.stringify({ model: cfg.model, temperature, max_tokens, messages }),
+        signal,
       });
       const data = await res.json();
-      const text = data?.choices?.[0]?.message?.content || data?.output_text;
-      return parseJsonObject(text);
+      return data?.choices?.[0]?.message?.content || data?.output_text || null;
     }
   } catch (err) {
     console.error("[ironmind] ai call failed:", err?.message || err);
     return null;
   }
-
   return null;
 }
 
