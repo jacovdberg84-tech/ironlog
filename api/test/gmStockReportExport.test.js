@@ -2,8 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import { readWebAppSource } from "./webAppSource.js";
 
-const appSource = readFileSync(new URL("../../web/app.js", import.meta.url), "utf8");
+const appSource = readWebAppSource();
 const functions = appSource.slice(
   appSource.indexOf("function ensureGmStockReportDate()"),
   appSource.indexOf("\nlet storesPartOrdersCache")

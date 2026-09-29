@@ -12,7 +12,7 @@ Changed files:
 - api/routes/maintenance.routes.js
 - api/utils/weeklyMaintenancePlan.js
 - api/test/weeklyMaintenancePlan.test.js
-- web/app.js
+- web/app/borris.js (was web/app.js)
 - web/index.html
 
 Validation: `node --test api/test/*.test.js`, plus API syntax and git whitespace checks. Tests include service rotation, week/year boundaries, aggregate stock shortages, missing costs, invalid readings, classic browser script parsing, UI success/failure handling and endpoint wiring. No production database or live LLM was used in tests.

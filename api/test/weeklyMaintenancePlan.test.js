@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { buildWeeklyMaintenancePlan as build, weeklyWindow } from '../utils/weeklyMaintenancePlan.js';
+import { readWebAppSource } from './webAppSource.js';
 const row = (overrides={}) => ({plan_id:1,asset_code:'A',service_name:'250h',current_hours:200,remaining_hours:50,meter_unit:'hours',usage:{total_run:140,day_count:14,invalid_days:0},forecast:{est_service_kit_cost:30,est_labor_cost:20,cost_source:'manual_parts_and_labor',manual:{items:[{part_code:'FILTER',qty:2,unit_cost:15,on_hand:3}]}},...overrides});
 test('next week is Monday through Sunday including year rollover',()=>{
  assert.deepEqual(weeklyWindow('2026-09-07'),{as_of:'2026-09-07',start:'2026-09-14',end:'2026-09-20'});
@@ -32,10 +33,10 @@ test('calendar-day usage includes days with no runs rather than inflating use',(
  assert.equal(p.services.length,0);
 });
 test('browser code parses as the classic script actually used by index.html',()=>{
- new vm.Script(fs.readFileSync(new URL('../../web/app.js',import.meta.url),'utf8'));
+ new vm.Script(readWebAppSource());
 });
 test('weekly planner UI uses authenticated fetch helper and restores button on failure',async()=>{
- const source=fs.readFileSync(new URL('../../web/app.js',import.meta.url),'utf8');
+ const source=readWebAppSource();
  const helper=source.slice(source.indexOf('async function planIronmindWeek()'),source.indexOf('async function askIronmindQuestion()'));
  const button={},out={style:{}};
  const context=vm.createContext({qs:id=>id==='ironmindWeeklyPlanBtn'?button:out,API:'',setStatus:()=>{},fetchJson:async url=>{assert.equal(url,'/api/maintenance/weekly-plan');return {ok:true,short_answer:'<part> draft'};}});

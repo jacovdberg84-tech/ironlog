@@ -8,7 +8,8 @@ export function chooseTargetFiles(title, text) {
     files.add("api/routes/aiEngineer.routes.js");
   }
   if (/lube|oil|dashboard/.test(hay)) {
-    files.add("web/app.js");
+    files.add("web/app/dashboard.js");
+    files.add("web/app/fuel-lube.js");
     files.add("api/routes/dashboard.routes.js");
     files.add("api/routes/reports.routes.js");
   }
@@ -20,7 +21,7 @@ export function chooseTargetFiles(title, text) {
     files.add("api/server.js");
   }
   if (!files.size) {
-    files.add("web/app.js");
+    files.add("web/app/core.js");
     files.add("api/routes/maintenance.routes.js");
   }
   return [...files];

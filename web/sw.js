@@ -3,7 +3,6 @@ const CACHE_NAME = "ironlog-v1";
 const STATIC_ASSETS = [
   "/web/index.html",
   "/web/styles.css",
-  "/web/app.js",
   "/web/offline.html"
 ];
 
