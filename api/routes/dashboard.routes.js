@@ -15,6 +15,7 @@ import registerAssetKpiRoutes from "./dashboard/asset-kpi.routes.js";
 import registerLubeRoutes from "./dashboard/lube.routes.js";
 import registerCostSettingsRoutes from "./dashboard/cost-settings.routes.js";
 import registerFuelRoutes from "./dashboard/fuel.routes.js";
+import { holdsAnyRole } from "../utils/request.js";
 
 function todayYYYYMMDD() {
   return new Date().toISOString().slice(0, 10);
@@ -85,7 +86,7 @@ export default async function dashboardRoutes(app) {
 
   function requireRoles(req, reply, roles) {
     const role = getRole(req);
-    if (!roles.includes(role)) {
+    if (!holdsAnyRole(req, roles)) {
       reply.code(403).send({ error: `role '${role || "unknown"}' not allowed` });
       return false;
     }

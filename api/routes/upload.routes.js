@@ -12,6 +12,7 @@ import {
   asBool01,
   asDateYYYYMMDD
 } from "../utils/csvImporter.js";
+import { holdsAnyRole } from "../utils/request.js";
 
 export default async function uploadRoutes(app) {
   // enable file uploads
@@ -85,7 +86,7 @@ export default async function uploadRoutes(app) {
 
   function requireRoles(req, reply, roles) {
     const role = getRole(req);
-    if (!roles.includes(role)) {
+    if (!holdsAnyRole(req, roles)) {
       reply.code(403).send({ error: `role '${role || "unknown"}' not allowed` });
       return false;
     }

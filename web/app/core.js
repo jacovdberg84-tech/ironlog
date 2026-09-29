@@ -855,7 +855,9 @@ async function fetchJson(url, opts) {
     }
     if ([502,503,504,524].includes(res.status)) throw new Error('Ironlog took too long to respond or is temporarily unavailable. Please retry shortly.');
     const message = typeof data.error === 'string' ? data.error : typeof data.message === 'string' ? data.message : '';
-    throw new Error(message || `Request failed (${res.status}). Please retry or contact your administrator.`);
+    const err = new Error(message || `Request failed (${res.status}). Please retry or contact your administrator.`);
+    err.status = res.status;
+    throw err;
   }
   return data;
 }
@@ -1874,4 +1876,16 @@ function wireLoginControls() {
   qs("loginPassword")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") submitLoginForm();
   });
+}
+
+/**
+ * Background panels load for every user, but some need a manager's rights.
+ * When the server refuses (403), hide the panel quietly instead of showing an error.
+ */
+function hideWhenForbidden(err, elOrId) {
+  if (Number(err?.status) !== 403) return false;
+  const el = typeof elOrId === "string" ? qs(elOrId) : elOrId;
+  const panel = el?.closest?.(".dash-card, .card, .panel-card, section:not(.panel)") || el;
+  if (panel) panel.style.display = "none";
+  return true;
 }

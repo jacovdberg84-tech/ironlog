@@ -10,6 +10,7 @@ import registerLubeRoutes from "./stock/lube.routes.js";
 import registerMovementsRoutes from "./stock/movements.routes.js";
 import registerPartOrdersRoutes from "./stock/part-orders.routes.js";
 import { autoCategorizePart, ensureStockCategorySchema } from "../utils/stockCategory.js";
+import { holdsAnyRole } from "../utils/request.js";
 
 export default async function stockRoutes(app) {
   ensureAuditTable(db);
@@ -32,7 +33,7 @@ export default async function stockRoutes(app) {
 
   function requireRoles(req, reply, roles) {
     const role = getRole(req);
-    if (!roles.includes(role)) {
+    if (!holdsAnyRole(req, roles)) {
       reply.code(403).send({ error: `role '${role || "unknown"}' not allowed` });
       return false;
     }
