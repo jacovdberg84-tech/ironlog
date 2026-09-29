@@ -1801,3 +1801,71 @@ function exportShiftSelfCheckTxt() {
 /* =========================
    ASSETS TAB (History + Archive)
 ========================= */
+
+/** Start-up: Daily input grid, CSV and QR sheet controls. Called once from init() in init.js. */
+function wireDailyInputControls() {
+  // Daily
+  qs("loadDaily")?.addEventListener("click", () =>
+    loadDailyInput().catch((e) => setStatus("Daily load error: " + e.message))
+  );
+  qs("saveDaily")?.addEventListener("click", () =>
+    saveDailyInput().catch((e) => setStatus("Daily save error: " + e.message))
+  );
+  qs("scheduled")?.addEventListener("input", () => {
+    const raw = toNum(qs("scheduled")?.value);
+    if (raw == null || raw <= 0 || raw > 24) return;
+    applyDayScheduledHours(raw);
+    setStatus(`Production hours updated to ${raw} in Daily Log.`);
+  });
+  qs("scheduled")?.addEventListener("change", () => {
+    const scheduled = getDayScheduledHours();
+    if (qs("scheduled")) qs("scheduled").value = String(scheduled);
+    applyDayScheduledHours(scheduled);
+    loadDashboard()
+      .then(() => setStatus(`Production hours set to ${scheduled} for the selected day.`))
+      .catch((e) => setStatus("Scheduled hours update error: " + e.message));
+  });
+  qs("runShiftSelfCheck")?.addEventListener("click", () =>
+    runShiftSelfCheck().catch((e) => setStatus("Self-check error: " + e.message))
+  );
+  qs("exportShiftSelfCheck")?.addEventListener("click", exportShiftSelfCheckTxt);
+
+  qs("copyYesterday")?.addEventListener("click", () =>
+    copyYesterdayToToday().catch((e) => setStatus("Copy yesterday error: " + e.message))
+  );
+  qs("dailyHoursCsvBtn")?.addEventListener("click", () => qs("dailyHoursCsvFile")?.click());
+  qs("dailyHoursCsvTemplate")?.addEventListener("click", downloadDailyHoursCsvTemplate);
+  qs("dailyHoursCsvFile")?.addEventListener("change", (e) => {
+    const file = e.target?.files?.[0];
+    if (file) uploadDailyHoursCsv(file).finally(() => { e.target.value = ""; });
+  });
+  qs("dailyMatrixCsvBtn")?.addEventListener("click", () => qs("dailyMatrixCsvFile")?.click());
+  qs("dailyMatrixCsvTemplate")?.addEventListener("click", downloadDailyMatrixCsvTemplate);
+  qs("dailyMatrixCsvFile")?.addEventListener("change", (e) => {
+    const file = e.target?.files?.[0];
+    if (file) uploadDailyMatrixCsv(file).finally(() => { e.target.value = ""; });
+  });
+  qs("applyBulkSched")?.addEventListener("click", applyBulkScheduled);
+  qs("dailyDownOnly")?.addEventListener("change", () => {
+    dailyShowDownOnly = !!qs("dailyDownOnly")?.checked;
+    renderDailyTable();
+  });
+  qs("dailyQrGenerate")?.addEventListener("click", () =>
+    generateDailyAssetQr().catch((e) => setStatus("QR generate error: " + e.message))
+  );
+  qs("dailyQrPrint")?.addEventListener("click", printDailyAssetQr);
+  qs("dailyQrDownloadVisible")?.addEventListener("click", () =>
+    downloadAllVisibleDailyQrs().catch((e) => setStatus("Bulk QR download error: " + e.message))
+  );
+  qs("dailyQrPrintVisible")?.addEventListener("click", () =>
+    printVisibleDailyQrSheet().catch((e) => setStatus("QR sheet print error: " + e.message))
+  );
+  qs("qrPreset")?.addEventListener("change", applyQrSheetPreset);
+  ["qrCols", "qrSizeMm", "qrCellMm", "qrGapMm"].forEach((id) => {
+    qs(id)?.addEventListener("input", () => {
+      const preset = qs("qrPreset");
+      if (preset && preset.value !== "custom") preset.value = "custom";
+    });
+  });
+  applyQrSheetPreset();
+}

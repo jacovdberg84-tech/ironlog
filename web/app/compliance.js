@@ -479,3 +479,95 @@ async function archiveLegalDoc(id, active) {
 /* =========================
    TABS
 ========================= */
+
+/** Start-up: Audit trail controls. Called once from init() in init.js. */
+function wireAuditControls() {
+  qs("loadAudit")?.addEventListener("click", () =>
+    loadAuditLogs().catch((e) => setStatus("Audit error: " + e.message))
+  );
+}
+
+/** Start-up: Approval request controls. Called once from init() in init.js. */
+function wireApprovalControls() {
+  qs("loadApprovals")?.addEventListener("click", () =>
+    loadApprovalRequests().catch((e) => setStatus("Approvals error: " + e.message))
+  );
+  qs("approvalStatus")?.addEventListener("change", () =>
+    loadApprovalRequests().catch((e) => setStatus("Approvals error: " + e.message))
+  );
+  qs("legalUploadBtn")?.addEventListener("click", () =>
+    uploadLegalDoc().catch((e) => setStatus("Legal upload error: " + e.message))
+  );
+  qs("loadLegalBtn")?.addEventListener("click", () =>
+    loadLegalDocs().catch((e) => setStatus("Legal load error: " + e.message))
+  );
+  qs("loadLegalExpiryBtn")?.addEventListener("click", () =>
+    loadLegalExpiry().catch((e) => setStatus("Legal expiry error: " + e.message))
+  );
+  qs("openLegalCompliancePdf")?.addEventListener("click", () => openLegalCompliancePdf(false));
+  qs("downloadLegalCompliancePdf")?.addEventListener("click", () => openLegalCompliancePdf(true));
+}
+
+/** Start-up: Legal document and approval list actions. Called once from init() in init.js. */
+function wireComplianceLists() {
+  const legalList = qs("legalList");
+  if (legalList) {
+    legalList.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const dl = target.getAttribute("data-legal-download-id");
+      const ar = target.getAttribute("data-legal-archive-id");
+      const active = target.getAttribute("data-legal-active");
+      const stId = target.getAttribute("data-legal-status-id");
+      const st = target.getAttribute("data-legal-status");
+      const actionsId = target.getAttribute("data-legal-actions-id");
+      if (dl) {
+        downloadLegalDoc(dl);
+        return;
+      }
+      if (actionsId) {
+        showLegalActions(actionsId);
+        return;
+      }
+      if (stId && st) {
+        setLegalStatus(stId, st);
+        return;
+      }
+      if (ar && active != null) {
+        archiveLegalDoc(ar, Number(active) === 1);
+      }
+    });
+  }
+
+  const approvalList = qs("approvalList");
+  if (approvalList) {
+    approvalList.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const aId = target.getAttribute("data-approval-approve-id");
+      const rId = target.getAttribute("data-approval-reject-id");
+      if (aId) {
+        decideApprovalRequest(aId, "approve");
+        return;
+      }
+      if (rId) {
+        decideApprovalRequest(rId, "reject");
+      }
+    });
+  }
+
+  const approvalKpiStrip = qs("approvalKpiStrip");
+  if (approvalKpiStrip) {
+    approvalKpiStrip.addEventListener("click", (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement)) return;
+      const btn = target.closest("[data-approval-kpi-filter]");
+      if (!(btn instanceof HTMLElement)) return;
+      const filter = btn.getAttribute("data-approval-kpi-filter");
+      if (filter == null) return;
+      const statusEl = qs("approvalStatus");
+      if (statusEl) statusEl.value = filter;
+      loadApprovalRequests().catch((e) => setStatus("Approvals error: " + e.message));
+    });
+  }
+}

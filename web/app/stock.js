@@ -1238,3 +1238,157 @@ async function loadPartsTrackingTab() {
     loadPtOffsiteRepairs().catch((e) => setStatus("Off-site tracking error: " + (e.message || e))),
   ]);
 }
+
+/** Start-up: Stock monitor, stock reports and stores part order controls. Called once from init() in init.js. */
+function wireStockControls() {
+  qs("loadStockMonitor")?.addEventListener("click", () =>
+    loadStockMonitor().catch((e) => setStatus("Stock monitor error: " + e.message))
+  );
+  qs("spLoad")?.addEventListener("click", () =>
+    loadStockOnHandPage().catch((e) => setStatus("Stock on hand error: " + e.message))
+  );
+  ensureGmStockReportDate();
+  updateGmStockReportHelp();
+  qs("gmStockReportPeriod")?.addEventListener("change", updateGmStockReportHelp);
+  qs("downloadGmStockReportXlsx")?.addEventListener("click", () => downloadGmStockReportXlsx());
+  qs("spSort")?.addEventListener("change", () => refreshStockInventoryDisplay());
+  qs("spOnlyLow")?.addEventListener("change", () => refreshStockInventoryDisplay());
+  qs("spList")?.addEventListener("click", (evt) => {
+    const btn = evt.target?.closest?.("button[data-stock-action]");
+    if (!btn) return;
+    openStockAction(btn.closest("[data-stock-code]"), btn.getAttribute("data-stock-action"));
+  });
+  qs("spFilter")?.addEventListener("input", () => {
+    if (stockPageData.rows.length) refreshStockInventoryDisplay();
+  });
+  qs("spExportCsv")?.addEventListener("click", exportStockOnHandCsv);
+  qs("spOpenPdf")?.addEventListener("click", openStockOnHandPdf);
+  qs("smrLoad")?.addEventListener("click", () =>
+    loadStockMovementsReport().catch((e) => setStatus("Stock movements report error: " + e.message))
+  );
+  qs("smrExportCsv")?.addEventListener("click", exportStockMovementsReportCsv);
+  qs("smrOpenPdf")?.addEventListener("click", openStockMovementsReportPdf);
+  qs("spoLoad")?.addEventListener("click", () =>
+    loadStoresPartOrders().catch((e) => setStatus("Parts purchases error: " + e.message))
+  );
+  qs("spoSave")?.addEventListener("click", () =>
+    saveStoresPartOrder().catch((e) => {
+      const msg = qs("spoFormMsg");
+      if (msg) msg.textContent = e.message || String(e);
+    })
+  );
+  qs("spoClear")?.addEventListener("click", clearStoresPartOrderForm);
+  qs("spoFilterStatus")?.addEventListener("change", () => {
+    loadStoresPartOrders().catch(() => {});
+  });
+  qs("spoList")?.addEventListener("change", (evt) => {
+    const sel = evt.target?.closest?.("select[data-spo-status]");
+    if (!sel) return;
+    const id = Number(sel.getAttribute("data-spo-status") || 0);
+    const status = String(sel.value || "").trim();
+    if (!id) return;
+    updateStoresPartOrderStatus(id, status).catch((e) => alert(e.message || String(e)));
+  });
+  qs("spoList")?.addEventListener("click", (evt) => {
+    const saveBtn = evt.target?.closest?.("button[data-spo-save]");
+    if (saveBtn) {
+      saveStoresPartOrderRow(Number(saveBtn.getAttribute("data-spo-save") || 0)).catch((e) =>
+        alert(e.message || String(e))
+      );
+      return;
+    }
+    const recvBtn = evt.target?.closest?.("button[data-spo-receive]");
+    if (recvBtn) {
+      receiveStoresPartOrderToInventory(Number(recvBtn.getAttribute("data-spo-receive") || 0)).catch((e) =>
+        alert(e.message || String(e))
+      );
+      return;
+    }
+    const btn = evt.target?.closest?.("button[data-spo-del]");
+    if (!btn) return;
+    cancelStoresPartOrder(Number(btn.getAttribute("data-spo-del") || 0)).catch((e) => alert(e.message || String(e)));
+  });
+  qs("spoExportXlsx")?.addEventListener("click", () =>
+    exportStoresPartOrdersXlsx().catch((e) => setStatus("Parts purchases Excel error: " + e.message))
+  );
+  qs("spoOpenPdf")?.addEventListener("click", () => openStoresPartOrdersPdf(false));
+  qs("spoDownloadPdf")?.addEventListener("click", () => openStoresPartOrdersPdf(true));
+
+  qs("ptPartsLoad")?.addEventListener("click", () =>
+    loadPtPartsOrders().catch((e) => setStatus("Parts tracking error: " + e.message))
+  );
+  qs("ptPartsSave")?.addEventListener("click", () =>
+    savePtPartsOrder().catch((e) => {
+      const msg = qs("ptPartsMsg");
+      if (msg) msg.textContent = e.message || String(e);
+    })
+  );
+  qs("ptPartsClear")?.addEventListener("click", clearPtPartsForm);
+  qs("ptPartsStatus")?.addEventListener("change", () => loadPtPartsOrders().catch(() => {}));
+  qs("ptPartsSearch")?.addEventListener("input", () => renderPtPartsTable(ptPartsCache));
+  qs("ptPartsList")?.addEventListener("change", (evt) => {
+    const sel = evt.target?.closest?.("select[data-pt-status]");
+    if (!sel) return;
+    const id = Number(sel.getAttribute("data-pt-status") || 0);
+    if (!id) return;
+    const rowEl = qs("ptPartsList")?.querySelector(`[data-pt-row="${id}"]`);
+    const patch = readPtPartsRowPatch(rowEl) || {};
+    patch.status = String(sel.value || "").trim();
+    patchStoresPartOrder(id, patch)
+      .then(() => loadPtPartsOrders())
+      .catch((e) => alert(e.message || String(e)));
+  });
+  qs("ptPartsList")?.addEventListener("click", (evt) => {
+    const saveBtn = evt.target?.closest?.("button[data-pt-save]");
+    if (saveBtn) {
+      const id = Number(saveBtn.getAttribute("data-pt-save") || 0);
+      const rowEl = qs("ptPartsList")?.querySelector(`[data-pt-row="${id}"]`);
+      const patch = readPtPartsRowPatch(rowEl);
+      if (!patch) return;
+      patchStoresPartOrder(id, patch)
+        .then(() => {
+          setStatus("Part line saved.");
+          return loadPtPartsOrders();
+        })
+        .catch((e) => alert(e.message || String(e)));
+      return;
+    }
+    const recvBtn = evt.target?.closest?.("button[data-pt-receive]");
+    if (recvBtn) {
+      receiveStoresPartOrderToInventory(Number(recvBtn.getAttribute("data-pt-receive") || 0))
+        .then(() => loadPtPartsOrders())
+        .catch((e) => alert(e.message || String(e)));
+      return;
+    }
+    const delBtn = evt.target?.closest?.("button[data-pt-del]");
+    if (delBtn) {
+      cancelStoresPartOrder(Number(delBtn.getAttribute("data-pt-del") || 0))
+        .then(() => loadPtPartsOrders())
+        .catch((e) => alert(e.message || String(e)));
+    }
+  });
+  qs("ptOffLoad")?.addEventListener("click", () =>
+    loadPtOffsiteRepairs().catch((e) => setStatus("Off-site tracking error: " + e.message))
+  );
+  qs("ptOffSave")?.addEventListener("click", () =>
+    savePtOffsiteRepair().catch((e) => {
+      const msg = qs("ptOffMsg");
+      if (msg) msg.textContent = e.message || String(e);
+    })
+  );
+  qs("ptOffClear")?.addEventListener("click", clearPtOffForm);
+  qs("ptOffStatusFilter")?.addEventListener("change", () => renderPtOffsiteTable(ptOffsiteCache));
+  qs("ptOffIncludeReturned")?.addEventListener("change", () => loadPtOffsiteRepairs().catch(() => {}));
+  qs("ptOffList")?.addEventListener("click", (evt) => {
+    const historyBtn = evt.target?.closest?.("button[data-pt-off-history]");
+    if (historyBtn) {
+      togglePtOffsiteHistory(Number(historyBtn.getAttribute("data-pt-off-history") || 0));
+      return;
+    }
+    const btn = evt.target?.closest?.("button[data-pt-off-save]");
+    if (!btn) return;
+    savePtOffsiteRow(Number(btn.getAttribute("data-pt-off-save") || 0)).catch((e) =>
+      alert(e.message || String(e))
+    );
+  });
+}

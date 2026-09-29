@@ -664,3 +664,66 @@ async function submitShortBreakdown() {
     setStatus("Short breakdown failed.");
   }
 }
+
+/** Start-up: Breakdown ops, slip report and short breakdown controls. Called once from init() in init.js. */
+function wireBreakdownControls() {
+  qs("boRefreshOpen")?.addEventListener("click", () =>
+    loadBreakdownOpsOpen().catch((e) => setStatus("Open list error: " + e.message))
+  );
+  qs("boRefreshRecent")?.addEventListener("click", () =>
+    loadBreakdownOpsRecent().catch((e) => setStatus("Recent list error: " + e.message))
+  );
+  qs("boEnsureOpen")?.addEventListener("click", () =>
+    ensureOpenBreakdownOps().catch((e) => setStatus("Ensure open error: " + e.message))
+  );
+  qs("boRepairCreateWo")?.addEventListener("click", () =>
+    createRepairWorkOrderOps().catch((e) => setStatus("Repair WO error: " + e.message))
+  );
+  qs("boRepairOpenWo")?.addEventListener("click", () => {
+    if (lastBoRepairWoId) window.open(`/web/workorders.html?wo=${encodeURIComponent(String(lastBoRepairWoId))}`, "_blank");
+  });
+  qs("boPullLiveHours")?.addEventListener("click", () =>
+    pullBreakdownOpsLiveHours().catch((e) => setStatus("Live hours error: " + e.message))
+  );
+  qs("boOpenList")?.addEventListener("click", (ev) => {
+    const w = ev.target?.closest?.(".bo-copy-wo");
+    if (w) {
+      const wo = w.getAttribute("data-wo");
+      if (wo && qs("iWo")) qs("iWo").value = String(wo);
+      setStatus(`Copied WO #${wo} for parts issue.`);
+      return;
+    }
+    const c = ev.target?.closest?.(".bo-close-bdn");
+    if (c) closeBreakdownFromOps(c.getAttribute("data-id")).catch(() => {});
+  });
+
+  qs("boSlipType")?.addEventListener("change", updateBoSlipFormVisibility);
+  qs("boSlipPhotosInput")?.addEventListener("change", (e) =>
+    onBoSlipPhotosInputChange(e).catch((err) => setStatus(String(err.message || err)))
+  );
+  qs("boSlipPhotosClear")?.addEventListener("click", () => {
+    clearBoSlipPhotosUi();
+    setStatus("Slip pictures cleared.");
+  });
+  qs("boSlipPullAsset")?.addEventListener("click", () =>
+    pullBoSlipFromAsset().catch((e) => setStatus("Pull from asset error: " + (e.message || e)))
+  );
+  qs("boSlipSave")?.addEventListener("click", () =>
+    saveBoSlipReport().catch((e) => setStatus("Slip save error: " + e.message))
+  );
+  qs("boSlipLoadList")?.addEventListener("click", () =>
+    loadBoSlipSavedList().catch((e) => setStatus("Slip list error: " + e.message))
+  );
+  qs("boSlipSavedList")?.addEventListener("click", (ev) => {
+    const b = ev.target?.closest?.(".bo-slip-pdf");
+    if (b) openBoSlipPdf(b.getAttribute("data-id"));
+  });
+
+  qs("makeBreakdown")?.addEventListener("click", () =>
+    createBreakdown().catch((e) => setStatus("Breakdown error: " + e.message))
+  );
+  bindShortBreakdownPartsUi();
+  qs("sqSubmit")?.addEventListener("click", () =>
+    submitShortBreakdown().catch((e) => setStatus("Short breakdown error: " + e.message))
+  );
+}

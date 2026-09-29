@@ -629,3 +629,35 @@ async function postHoursWithOffline(payload) {
 /* =========================
    DASHBOARD / TELEMATICS
 ========================= */
+
+/** Start-up: Offline banner and queued-data sync. Called once from init() in init.js. */
+function wireOfflineSync() {
+  // Net banner
+  refreshNetBanner();
+  window.addEventListener("offline", () => {
+    refreshNetBanner();
+    renderOfflineQueueAdminPanel();
+  });
+
+  window.addEventListener("online", async () => {
+    refreshNetBanner();
+    renderOfflineQueueAdminPanel();
+    if (getTotalQueuedCount() === 0) return;
+    try {
+      await syncAllOfflineQueues();
+    } catch (e) {
+      setStatus("Sync error: " + (e.message || e));
+      refreshNetBanner();
+    }
+  });
+
+  qs("syncNow")?.addEventListener("click", async () => {
+    if (!navigator.onLine) return alert("Still offline.");
+    try {
+      await syncAllOfflineQueues();
+    } catch (e) {
+      setStatus("Sync error: " + (e.message || e));
+      refreshNetBanner();
+    }
+  });
+}

@@ -504,3 +504,103 @@ async function ironmindGoToAsset(assetCode) {
     await selectAssetCard(code, { loadHistory: true, scroll: true });
   }
 }
+
+/** Start-up: Borris insight, health, report and question controls (plus dashboard threshold save). Called once from init() in init.js. */
+function wireBorrisControls() {
+  qs("ironmindRefreshBtn")?.addEventListener("click", () =>
+    refreshIronmindInsight().catch((e) => setStatus("BORRIS refresh error: " + e.message))
+  );
+  setInterval(() => {
+    loadIronmindHealth().catch(() => {});
+  }, 30000);
+  qs("ironmindSaveSettingsBtn")?.addEventListener("click", () =>
+    saveIronmindSettings().catch((e) => setStatus("Borris settings error: " + (e.message || e)))
+  );
+  qs("ironmindWeeklyPlanBtn")?.addEventListener("click", planIronmindWeek);
+  qs("ironmindAskBtn")?.addEventListener("click", () =>
+    askIronmindQuestion().catch((e) => setStatus("BORRIS ask error: " + e.message))
+  );
+  qs("ironmindResetMemoryBtn")?.addEventListener("click", () =>
+    resetIronmindAskMemory().catch((e) => setStatus("BORRIS reset memory error: " + e.message))
+  );
+  qs("ironmindAskInput")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      askIronmindQuestion().catch((err) => setStatus("BORRIS ask error: " + err.message));
+    }
+  });
+  hydrateIronmindAskMemory().catch(() => {});
+  qs("saveThresholds")?.addEventListener("click", () => saveThresholdsFromUI());
+  qs("saveLdvThresholds")?.addEventListener("click", () => saveLdvPrestartThresholdsFromUI());
+  qs("ironmindSummary")?.addEventListener("click", (e) => {
+    const el = e.target instanceof HTMLElement ? e.target : null;
+    if (!el) return;
+    const drillKey = el.dataset.ironmindDrill;
+    const assetCode = el.dataset.ironmindAsset;
+    if (drillKey) ironmindDrillDown(drillKey);
+    if (assetCode) ironmindGoToAsset(assetCode).catch(() => {});
+  });
+  qs("ironmindHistoryList")?.addEventListener("click", (e) => {
+    const el = e.target instanceof HTMLElement ? e.target.closest("button[data-ironmind-history-id]") : null;
+    if (!el) return;
+    const rowEl = el.closest(".item");
+    if (!rowEl?.dataset?.ironmindRow) return;
+    try {
+      const row = JSON.parse(rowEl.dataset.ironmindRow);
+      renderIronmindReport(row);
+      setStatus(`Opened BORRIS report for ${row?.report_date || "-"}.`);
+    } catch (_) {
+      setStatus("Unable to open selected BORRIS report.");
+    }
+  });
+  qs("riskBoardList")?.addEventListener("click", (e) => {
+    const target = e.target instanceof HTMLElement ? e.target : null;
+    if (!target) return;
+    const openBtn = target.closest("button[data-ironmind-risk-asset]");
+    if (openBtn) {
+      const code = String(openBtn.getAttribute("data-ironmind-risk-asset") || "").trim();
+      if (!code) return;
+      ironmindGoToAsset(code).catch(() => {});
+      return;
+    }
+    const woBtn = target.closest("button[data-ironmind-risk-wo]");
+    if (woBtn) {
+      const code = String(woBtn.getAttribute("data-ironmind-risk-wo") || "").trim();
+      if (!code) return;
+      (async () => {
+        const downDesc = "BORRIS predicted risk work order";
+        const res = await fetchJson(`${API}/api/breakdowns/ensure-open`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            asset_code: code,
+            breakdown_date: date,
+            description: downDesc,
+            critical: false,
+          }),
+        });
+        const woId = Number(res?.primary_work_order_id || 0);
+        setStatus(woId > 0 ? `WO #${woId} ready for ${code}.` : `Work order ensured for ${code}.`);
+        await loadDashboard().catch(() => {});
+      })().catch((err) => setStatus("Create WO failed: " + (err.message || err)));
+    }
+  });
+  qs("ironmindShowMissingDays")?.addEventListener("change", () => {
+    loadIronmindHistory({ silent: true }).catch(() => {});
+  });
+  qs("ironmindReloadHistory")?.addEventListener("click", () => {
+    loadIronmindHistory().catch((e) => setStatus("BORRIS history error: " + e.message));
+  });
+  qs("ironmindRsgPlanBtn")?.addEventListener("click", () => {
+    generateIronmindRsgPlan(false).catch((e) => setStatus("RSG plan error: " + (e.message || e)));
+  });
+  qs("ironmindRsgPreviewPdfBtn")?.addEventListener("click", () => {
+    previewIronmindRsgPdf().catch((e) => setStatus("RSG preview error: " + (e.message || e)));
+  });
+  qs("ironmindRsgDownloadPdfBtn")?.addEventListener("click", () => {
+    downloadIronmindRsgPdf().catch((e) => setStatus("RSG download error: " + (e.message || e)));
+  });
+  qs("ironmindRsgCreateWoBtn")?.addEventListener("click", () => {
+    generateIronmindRsgPlan(true).catch((e) => setStatus("RSG create WO error: " + (e.message || e)));
+  });
+}

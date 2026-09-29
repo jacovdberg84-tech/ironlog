@@ -429,3 +429,85 @@ function initDarkMode() {
     }
   });
 }
+
+/** Start-up: AI document header, draft and Ask Jakes controls. Called once from init() in init.js. */
+function wireDocumentControls() {
+  qs("saveDocHeaderBtn")?.addEventListener("click", () =>
+    saveDocHeader().catch((e) => setStatus("Header save error: " + e.message))
+  );
+  qs("loadDocHeadersBtn")?.addEventListener("click", () =>
+    loadDocHeaders().catch((e) => setStatus("Header load error: " + e.message))
+  );
+  qs("generateDocDraftBtn")?.addEventListener("click", () =>
+    generateDocDraft().catch((e) => setStatus("Draft generate error: " + e.message))
+  );
+  qs("generateDocDraftFromRequestBtn")?.addEventListener("click", () =>
+    generateDocDraftFromRequest().catch((e) => setStatus("Draft request generate error: " + e.message))
+  );
+  qs("aiSmartRunBtn")?.addEventListener("click", () =>
+    runAiSmart().catch((e) => setStatus("Smart AI error: " + e.message))
+  );
+  qs("askJakesBtn")?.addEventListener("click", () =>
+    askJakes().catch((e) => setStatus("Ask Jakes error: " + e.message))
+  );
+  qs("askJakesPresetHydraulics")?.addEventListener("click", () =>
+    applyAskJakesPreset("hydraulics")
+  );
+  qs("askJakesPresetStarting")?.addEventListener("click", () =>
+    applyAskJakesPreset("starting")
+  );
+  qs("askJakesPresetOverheat")?.addEventListener("click", () =>
+    applyAskJakesPreset("overheat")
+  );
+  qs("askJakesUseAsNotesBtn")?.addEventListener("click", () =>
+    useAskJakesAnswerAsNotes()
+  );
+  qs("speakDocDraftBtn")?.addEventListener("click", () =>
+    speakDocDraft()
+  );
+  qs("stopSpeakDocDraftBtn")?.addEventListener("click", () =>
+    stopSpeakingDocDraft()
+  );
+  qs("docApproveYesBtn")?.addEventListener("click", () =>
+    decideDocDraft(true).catch((e) => setStatus("Draft decision error: " + e.message))
+  );
+  qs("docApproveNoBtn")?.addEventListener("click", () =>
+    decideDocDraft(false).catch((e) => setStatus("Draft decision error: " + e.message))
+  );
+  qs("openDocDraftPdfBtn")?.addEventListener("click", () =>
+    openDocDraftPdf(false)
+  );
+  qs("downloadDocDraftPdfBtn")?.addEventListener("click", () =>
+    openDocDraftPdf(true)
+  );
+  qs("openDocDraftWordBtn")?.addEventListener("click", () =>
+    openDocDraftWord(false)
+  );
+  qs("downloadDocDraftWordBtn")?.addEventListener("click", () =>
+    openDocDraftWord(true)
+  );
+  qs("openDocRegisterPdfBtn")?.addEventListener("click", () =>
+    openDocRegisterPdf(false)
+  );
+  qs("downloadDocRegisterPdfBtn")?.addEventListener("click", () =>
+    openDocRegisterPdf(true)
+  );
+  qs("openDocRegisterWordBtn")?.addEventListener("click", () =>
+    openDocRegisterWord(false)
+  );
+  qs("downloadDocRegisterWordBtn")?.addEventListener("click", () =>
+    openDocRegisterWord(true)
+  );
+  qs("loadDocDraftsBtn")?.addEventListener("click", () =>
+    loadDocDrafts().catch((e) => setStatus("Draft list error: " + e.message))
+  );
+  qs("docDraftsCurrentOnly")?.addEventListener("change", () =>
+    loadDocDrafts().catch((e) => setStatus("Draft list error: " + e.message))
+  );
+}
+
+/** Start-up: Initial AI document lists. Called once from init() in init.js. */
+function loadDocumentsOnStartup() {
+  loadDocHeaders().catch(() => {});
+  loadDocDrafts().catch(() => {});
+}
