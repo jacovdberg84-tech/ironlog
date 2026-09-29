@@ -145,6 +145,90 @@ const TEMPLATES = {
       },
     ],
   },
+  tipper_truck: {
+    id: "tipper_truck",
+    title: "Tipper truck pre-start",
+    meter: "km",
+    sections: [
+      {
+        id: "fluids",
+        title: "Fluid levels",
+        items: [
+          { key: "engine_oil_ok", label: "Engine oil OK" },
+          { key: "coolant_ok", label: "Coolant OK" },
+          { key: "hydraulic_oil_ok", label: "Tipper hydraulic oil OK" },
+          { key: "no_leaks_ok", label: "No fuel, oil, or air leaks" },
+        ],
+      },
+      {
+        id: "truck",
+        title: "Truck & tipper body",
+        items: [
+          { key: "tyre_condition_ok", label: "Tyres — pressure & damage OK" },
+          { key: "wheel_nuts_ok", label: "Wheel nuts tight (no missing nuts)" },
+          { key: "brakes_air_ok", label: "Brakes & air pressure OK" },
+          { key: "body_lifts_ok", label: "Tipper body, ram & tailgate OK" },
+          { key: "pto_controls_ok", label: "PTO & tipping controls OK" },
+        ],
+      },
+      {
+        id: "safety",
+        title: "Safety",
+        items: [
+          { key: "lights_beacon_ok", label: "Lights, indicators & beacon OK" },
+          { key: "mirrors_ok", label: "Mirrors clean & intact" },
+          { key: "seat_belt_ok", label: "Seat belt OK" },
+          { key: "horn_reversing_ok", label: "Horn & reversing alarm OK" },
+          { key: "fire_extinguisher_ok", label: "Fire extinguisher OK" },
+        ],
+      },
+    ],
+  },
+  water_truck: {
+    id: "water_truck",
+    title: "Water truck pre-start",
+    sections: [
+      {
+        id: "fluids",
+        title: "Fluid levels",
+        items: [
+          { key: "engine_oil_ok", label: "Engine oil OK" },
+          { key: "coolant_ok", label: "Coolant OK" },
+          { key: "hydraulic_oil_ok", label: "Hydraulic oil OK" },
+          { key: "transmission_oil_ok", label: "Transmission / axle oils OK" },
+        ],
+      },
+      {
+        id: "water",
+        title: "Water tank & sprays",
+        items: [
+          { key: "tank_mounts_ok", label: "Water tank & mountings OK (no leaks or cracks)" },
+          { key: "water_pump_ok", label: "Water pump & drive OK" },
+          { key: "spray_nozzles_ok", label: "Spray bars & nozzles OK (not blocked)" },
+          { key: "water_hoses_valves_ok", label: "Water hoses & valves OK" },
+        ],
+      },
+      {
+        id: "machine",
+        title: "Machine & tyres",
+        items: [
+          { key: "tyre_condition_ok", label: "Tyres — pressure & damage OK" },
+          { key: "steering_ok", label: "Steering & articulation OK" },
+          { key: "brakes_ok", label: "Brakes OK" },
+        ],
+      },
+      {
+        id: "safety",
+        title: "Safety",
+        items: [
+          { key: "lights_beacon_ok", label: "Lights & beacon OK" },
+          { key: "seat_belt_ok", label: "Seat belt OK" },
+          { key: "horn_reversing_ok", label: "Horn & reversing alarm OK" },
+          { key: "fire_extinguisher_ok", label: "Fire extinguisher OK" },
+        ],
+      },
+    ],
+  },
   fuel_truck: {
     id: "fuel_truck",
     title: "Fuel truck pre-start",
@@ -479,6 +563,9 @@ function resolveProfileByAssetCode(assetCode) {
   if (EXCAVATOR_ASSET_CODES.has(code) || /^E\d+AM$/.test(code)) return "excavator";
   if (WHEEL_LOADER_ASSET_CODES.has(code) || /^FL\d+AM$/.test(code)) return "wheel_loader";
   if (BACKHOE_LOADER_ASSET_CODES.has(code) || /^B0[1-9]AM$/.test(code)) return "backhoe_loader";
+  // Mercedes Axor tippers T01AM–T05AM and Bell B25D water tankers W200AM/W201AM.
+  if (/^T0[1-9]AM$/.test(code)) return "tipper_truck";
+  if (/^W2\d{2}AM$/.test(code)) return "water_truck";
   return null;
 }
 
@@ -499,6 +586,9 @@ export function resolveMachinePrestartProfile(category, assetName = "", assetCod
   if (/(dozer|bulldozer)/.test(hay)) return "dozer";
   if (/(wheel\s*loader|front\s*end\s*loader|\bloader\b)/.test(hay) && !/excavator/.test(hay)) return "wheel_loader";
   if (/(motor\s*grader|\bgrader\b)/.test(hay)) return "grader";
+  // Water tankers first: "water tanker ADT" and "water bowser" must not match haul or fuel trucks.
+  if (/(water\s*(truck|tanker|cart|bowser))/.test(hay)) return "water_truck";
+  if (/\btipper\b/.test(hay)) return "tipper_truck";
   if (/(haul\s*truck|rigid\s*dump|articulated\s*dump|\badt\b|dump\s*truck)/.test(hay)) return "haul_truck";
   if (/(mobile\s*crane|pick\s*and\s*carry|\bcrane\b)/.test(hay)) return "mobile_crane";
   if (/(fuel\s*truck|fuel\s*bowser|bowser|refuel|tanker)/.test(hay)) return "fuel_truck";
