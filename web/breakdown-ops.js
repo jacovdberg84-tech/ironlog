@@ -1,51 +1,7 @@
 const API = "/api";
-const ROLE_KEY = "ironlog_session_role";
-const ROLES_KEY = "ironlog_session_roles";
-const USER_KEY = "ironlog_session_user";
-const SITE_KEY = "ironlog_session_site";
-const TOKEN_KEY = "ironlog_auth_token";
+const { authHeaders, escapeHtml } = window.IronlogSession;
 
 const qs = (id) => document.getElementById(id) || null;
-
-function getSessionRole() {
-  return String(localStorage.getItem(ROLE_KEY) || "admin").trim().toLowerCase() || "admin";
-}
-
-function getSessionRoles() {
-  const raw = localStorage.getItem(ROLES_KEY);
-  if (raw) {
-    try {
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr) && arr.length) return arr.map((r) => String(r || "").trim().toLowerCase()).filter(Boolean);
-    } catch {}
-  }
-  return [getSessionRole()];
-}
-
-function getSessionUser() {
-  return String(localStorage.getItem(USER_KEY) || "admin").trim() || "admin";
-}
-
-function getSessionSite() {
-  return String(localStorage.getItem(SITE_KEY) || "main").trim().toLowerCase() || "main";
-}
-
-function getAuthToken() {
-  return String(localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY) || "").trim();
-}
-
-function authHeaders(extra = {}) {
-  const h = {
-    "x-user-name": getSessionUser(),
-    "x-user-role": getSessionRole(),
-    "x-user-roles": getSessionRoles().join(","),
-    "x-site-code": getSessionSite(),
-    ...extra,
-  };
-  const tok = getAuthToken();
-  if (tok) h.Authorization = `Bearer ${tok}`;
-  return h;
-}
 
 async function fetchJson(url, opts = {}) {
   const nextOpts = { ...opts };
@@ -103,14 +59,6 @@ async function openProtectedPdf(url) {
     alert(`Could not open operational slip PDF: ${error.message || error}`);
     return false;
   }
-}
-
-function escapeHtml(s) {
-  return String(s ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 function setStatus(msg) {

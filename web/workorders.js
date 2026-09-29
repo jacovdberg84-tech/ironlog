@@ -1,4 +1,5 @@
 const API = "/api";
+const { getSessionUser, getSessionRole, authHeaders, escapeHtml } = window.IronlogSession;
 let closingWorkOrderId = null;
 let closingWorkOrderSource = "";
 let assigningWorkOrderId = null;
@@ -8,27 +9,6 @@ let lastWorkOrderDetail = null;
 let stockCatalogCache = [];
 let technicianOptions = [];
 let lastCreatedRepairWoId = null;
-const ROLE_KEY = "ironlog_session_role";
-const USER_KEY = "ironlog_session_user";
-
-function getSessionRole() {
-  return String(localStorage.getItem(ROLE_KEY) || "admin").trim().toLowerCase() || "admin";
-}
-
-function getSessionUser() {
-  return String(localStorage.getItem(USER_KEY) || "admin").trim() || "admin";
-}
-
-function authHeaders(extra = {}) {
-  const h = {
-    ...extra,
-    "x-user-role": getSessionRole(),
-    "x-user-name": getSessionUser(),
-  };
-  const tok = String(localStorage.getItem("ironlog_auth_token") || sessionStorage.getItem("ironlog_auth_token") || "").trim();
-  if (tok) h.Authorization = `Bearer ${tok}`;
-  return h;
-}
 
 function canRoleTransition(role, currentStatus, nextStatus) {
   const r = String(role || "").toLowerCase();
@@ -169,14 +149,6 @@ function woPriority(status, openedAt) {
   if (s === "in_progress" && age > 48) return "P2";
   if ((s === "open" || s === "assigned") && age > 48) return "P2";
   return "P3";
-}
-
-function escapeHtml(s) {
-  return String(s || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 function canEditRepairProgress(wo) {
