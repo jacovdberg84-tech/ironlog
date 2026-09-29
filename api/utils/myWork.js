@@ -45,16 +45,28 @@ function myTasks(db, { user, site, today }) {
   return { ...section(rows), overdue, due_today: dueToday };
 }
 
+/** One row per machine that is down (a machine can have several open breakdowns). */
 function openBreakdowns(db, { site }) {
   const rows = db.prepare(`
-    SELECT b.id, a.asset_code, a.asset_name, b.breakdown_date, b.description, b.critical, b.parts_status
+    SELECT b.id, b.asset_id, a.asset_code, a.asset_name, b.breakdown_date, b.description, b.critical, b.parts_status
     FROM breakdowns b
     JOIN assets a ON a.id = b.asset_id
-    WHERE LOWER(TRIM(COALESCE(b.status, 'open'))) != 'closed'
+    WHERE UPPER(TRIM(COALESCE(b.status, 'OPEN'))) <> 'CLOSED'
       AND LOWER(TRIM(COALESCE(b.site_code, 'main'))) = ?
     ORDER BY b.critical DESC, b.breakdown_date ASC, b.id ASC
   `).all(site);
-  return section(rows.map((r) => ({ ...r, critical: Boolean(r.critical) })));
+  const byMachine = new Map();
+  for (const r of rows) {
+    const m = byMachine.get(r.asset_id);
+    if (m) {
+      m.open_breakdowns += 1;
+      m.critical = m.critical || Boolean(r.critical);
+    } else {
+      byMachine.set(r.asset_id, { ...r, critical: Boolean(r.critical), open_breakdowns: 1 });
+    }
+  }
+  const machines = [...byMachine.values()].sort((x, y) => Number(y.critical) - Number(x.critical) || String(x.breakdown_date).localeCompare(String(y.breakdown_date)));
+  return { ...section(machines), open_breakdown_records: rows.length };
 }
 
 function openWorkOrders(db, { site }) {

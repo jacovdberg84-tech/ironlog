@@ -10,9 +10,20 @@ let stockCatalogCache = [];
 let technicianOptions = [];
 let lastCreatedRepairWoId = null;
 
+const WORKSHOP_LEAD_ROLES = ["admin", "supervisor", "workshop_admin"];
+
+/** Admins, supervisors and plant admins assign, sign off and close work. */
+function sessionIsWorkshopLead() {
+  try {
+    const roles = JSON.parse(localStorage.getItem("ironlog_session_roles") || "[]");
+    if (Array.isArray(roles) && roles.some((r) => WORKSHOP_LEAD_ROLES.includes(String(r).toLowerCase()))) return true;
+  } catch {}
+  return WORKSHOP_LEAD_ROLES.includes(String(getSessionRole() || "").toLowerCase());
+}
+
 function canRoleTransition(role, currentStatus, nextStatus) {
   const r = String(role || "").toLowerCase();
-  if (r === "admin" || r === "supervisor") return true;
+  if (r === "admin" || r === "supervisor" || sessionIsWorkshopLead()) return true;
   if (r === "artisan") {
     const allowed = {
       assigned: ["in_progress"],
@@ -25,11 +36,11 @@ function canRoleTransition(role, currentStatus, nextStatus) {
 }
 
 function canRoleClose(role) {
-  return ["admin", "supervisor"].includes(String(role || "").toLowerCase());
+  return WORKSHOP_LEAD_ROLES.includes(String(role || "").toLowerCase()) || sessionIsWorkshopLead();
 }
 
 function isSupervisorRole(role) {
-  return ["admin", "supervisor"].includes(String(role || "").toLowerCase());
+  return WORKSHOP_LEAD_ROLES.includes(String(role || "").toLowerCase()) || sessionIsWorkshopLead();
 }
 
 function isArtisanRole(role) {
@@ -295,51 +306,84 @@ function workflowActionButtons(wo) {
   return buttons.join("");
 }
 
-function workOrderCard(wo) {
-  const ageHours = woAgeHours(wo.opened_at);
+const WO_STAGES = [
+  { key: "open", title: "Waiting for technician", hint: "Assign someone" },
+  { key: "assigned", title: "Assigned", hint: "Start the job" },
+  { key: "in_progress", title: "In progress", hint: "Mark complete when done" },
+  { key: "completed", title: "Waiting sign-off", hint: "Supervisor signs off" },
+  { key: "approved", title: "Signed off", hint: "Close to finish" },
+  { key: "closed", title: "Closed", hint: "" },
+];
+
+function woStageKey(status) {
+  const s = String(status || "open").trim().toLowerCase().replace(/\s+/g, "_");
+  return WO_STAGES.some((st) => st.key === s) ? s : "open";
+}
+
+function woJobLine(wo) {
+  const source = String(wo.source || "").toLowerCase();
+  if (source === "breakdown") return [wo.breakdown_component, wo.breakdown_description].filter(Boolean).join(" — ") || "Breakdown repair";
+  if (source === "service") return wo.service_name ? `${wo.service_name}${/^\d+$/.test(String(wo.service_name).trim()) ? " h service" : ""}` : "Scheduled service";
+  return sourceLabel(wo.source);
+}
+
+function workOrderBoardCard(wo) {
   const p = woPriority(wo.status, wo.opened_at);
-  const pClass = p === "P1" ? "pri-p1" : p === "P2" ? "pri-p2" : "pri-p3";
-  const equipmentType = String(wo.category || "").trim();
-  const technician = wo.assigned_artisan_name || wo.artisan_name || "Unassigned";
-  const workflowActions = workflowActionButtons(wo);
+  const technician = wo.assigned_artisan_name || wo.artisan_name || "";
+  const due = String(wo.due_date || wo.ets_repair_date || "").slice(0, 10);
+  const overdue = due && due < new Date().toISOString().slice(0, 10) && !["completed", "approved", "closed"].includes(woStageKey(wo.status));
+  const actions = workflowActionButtons(wo).replace(/ style="margin-top:8px;"/g, "");
   return `
-    <article class="card wo-queue-card" data-wo-id="${wo.id}">
-      <div class="wo-card-head">
-        <div>
-          <span class="wo-number">WO #${wo.id}</span>
-          <h3>${escapeHtml(wo.asset_code || "-")} <span>${escapeHtml(wo.asset_name || "")}</span></h3>
-        </div>
-        <div class="wo-card-badges">
-          <span class="wo-priority ${pClass}">Priority ${p}</span>
-          <span class="wo-status-label ${statusClass(wo.status)}">${String(wo.status || "unknown").replace(/_/g, " ")}</span>
-        </div>
+    <article class="wo-board-card${Number(wo.breakdown_critical) ? " is-critical" : ""}" data-wo-id="${wo.id}">
+      <header>
+        <span class="wo-number">WO #${wo.id}</span>
+        <span class="wo-priority pri-${p.toLowerCase()}" title="Priority from age and stage">${p}</span>
+      </header>
+      <h4>${escapeHtml(wo.asset_code || "-")} <span>${escapeHtml(wo.asset_name || "")}</span></h4>
+      <p class="wo-job">${escapeHtml(woJobLine(wo))}</p>
+      <dl class="wo-facts">
+        <div><dt>Technician</dt><dd class="${technician ? "" : "is-missing"}">${escapeHtml(technician || "Not assigned")}</dd></div>
+        <div><dt>Age</dt><dd>${woAgeLabel(woAgeHours(wo.opened_at))}</dd></div>
+        ${due ? `<div><dt>Due</dt><dd class="${overdue ? "is-overdue" : ""}">${escapeHtml(due)}</dd></div>` : ""}
+      </dl>
+      ${wo.parts_status && !["completed", "approved", "closed"].includes(woStageKey(wo.status)) ? `<p class="wo-flag">Parts: ${escapeHtml(wo.parts_status)}</p>` : ""}
+      ${wo.repair_progress ? `<p class="wo-progress-line" title="${escapeHtml(wo.repair_progress)}">${escapeHtml(String(wo.repair_progress).slice(0, 90))}${String(wo.repair_progress).length > 90 ? "…" : ""}</p>` : ""}
+      <div class="wo-board-actions">
+        ${actions}
+        <button type="button" class="wo-details-btn" data-view-id="${wo.id}">Details</button>
       </div>
-      <div class="wo-card-meta">
-        <span><strong>Age</strong> ${woAgeLabel(ageHours)}</span>
-        <span><strong>Technician</strong> ${escapeHtml(technician)}</span>
-        <span><strong>Source</strong> ${sourceLabel(wo.source)}</span>
-        ${equipmentType ? `<span><strong>Type</strong> ${escapeHtml(equipmentType)}</span>` : ""}
-      </div>
-      ${Number(wo.labor_hours || 0) > 0 ? `<div><strong>Repair hours:</strong> ${Number(wo.labor_hours).toFixed(2)}</div>` : ""}
-      ${Number(wo.total_oil_cost || wo.oil_cost || 0) > 0 ? `<div><strong>Oil cost:</strong> $${Number(wo.total_oil_cost || wo.oil_cost || 0).toFixed(2)}</div>` : ""}
-      ${wo.repair_progress ? `<div class="wo-progress-preview"><strong>Latest progress</strong><span>${escapeHtml(String(wo.repair_progress).slice(0, 160))}${String(wo.repair_progress).length > 160 ? "…" : ""}</span></div>` : ""}
-      <div class="wo-card-actions">
-        ${workflowActions}
-        <button data-view-id="${wo.id}" class="btn-primary">View details</button>
-      </div>
-      <details class="wo-card-more">
-        <summary>Documents &amp; QR</summary>
-        <div class="wo-card-more-actions">
-          <button data-pdf-id="${wo.id}">Open PDF</button>
-          <button data-pdf-download-id="${wo.id}">Download PDF</button>
-          <button data-wo-qr-open="${wo.id}">Open QR page</button>
-          <button data-wo-qr-print="${wo.id}">Print QR</button>
-          <button data-wo-qr-png="${wo.id}">Download QR PNG</button>
-          <button data-wo-qr-link="${wo.id}">Copy WO link</button>
-        </div>
-      </details>
-    </article>
-  `;
+    </article>`;
+}
+
+function renderWorkOrderBoard(rows, { includeClosed = false } = {}) {
+  const stages = WO_STAGES.filter((st) => includeClosed || st.key !== "closed");
+  const byStage = new Map(stages.map((st) => [st.key, []]));
+  for (const r of rows) {
+    const key = woStageKey(r.status);
+    if (byStage.has(key)) byStage.get(key).push(r);
+  }
+  // Oldest first inside each stage: the longest-waiting job is at the top.
+  for (const list of byStage.values()) list.sort((a, b) => String(a.opened_at || "").localeCompare(String(b.opened_at || "")) || Number(a.id) - Number(b.id));
+  const shown = stages.filter((st) => byStage.get(st.key).length || !["closed"].includes(st.key));
+  return `<div class="wo-board-columns" style="--wo-columns:${shown.length}">${shown.map((st) => {
+    const list = byStage.get(st.key);
+    return `<section class="wo-board-column" data-stage="${st.key}" aria-label="${escapeHtml(st.title)}">
+      <header><h3>${escapeHtml(st.title)} <span class="wo-board-count">${list.length}</span></h3>${st.hint ? `<p>${escapeHtml(st.hint)}</p>` : ""}</header>
+      <div class="wo-board-list">${list.length ? list.map(workOrderBoardCard).join("") : `<p class="wo-board-empty">Nothing here</p>`}</div>
+    </section>`;
+  }).join("")}</div>`;
+}
+
+function openWoDrawer() {
+  document.getElementById("woDrawer")?.classList.add("is-open");
+  document.getElementById("woDrawerBackdrop")?.classList.add("is-open");
+  document.getElementById("woDrawer")?.setAttribute("aria-hidden", "false");
+}
+
+function closeWoDrawer() {
+  document.getElementById("woDrawer")?.classList.remove("is-open");
+  document.getElementById("woDrawerBackdrop")?.classList.remove("is-open");
+  document.getElementById("woDrawer")?.setAttribute("aria-hidden", "true");
 }
 
 async function loadInspectionQuality() {
@@ -734,6 +778,7 @@ async function fetchWorkOrders() {
 
   try {
     const params = new URLSearchParams();
+    if (status === "active") params.set("active", "1");
     if (fromDate) params.set("from_date", fromDate);
     if (toDate) params.set("to_date", toDate);
     if (equipmentType) params.set("category", equipmentType);
@@ -779,8 +824,8 @@ async function fetchWorkOrders() {
     });
 
     listEl.innerHTML = filtered.length
-      ? filtered.map(workOrderCard).join("")
-      : "<div>No work orders found for current filters.</div>";
+      ? renderWorkOrderBoard(filtered, { includeClosed: status !== "active" })
+      : `<div class="wo-board-empty">No work orders found for current filters.</div>`;
 
     const requested = getRequestedWorkOrderId();
     if (requested && filtered.some((r) => Number(r.id) === requested)) {
@@ -924,6 +969,7 @@ async function loadWorkOrderDetail(id) {
 
   detailEl.innerHTML = `<div class="skeleton-block"></div>`;
   currentDetailWorkOrderId = woId;
+  openWoDrawer();
 
   try {
     const res = await fetch(`${API}/workorders/${woId}`, { headers: authHeaders() });
@@ -933,10 +979,18 @@ async function loadWorkOrderDetail(id) {
     }
     lastWorkOrderDetail = data;
     detailEl.innerHTML = renderDetail(data);
-    detailEl.closest(".wo-detail-card")?.scrollIntoView({
-      behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth",
-      block: "start",
-    });
+    const title = document.getElementById("woDrawerTitle");
+    if (title) title.textContent = `WO #${woId} • ${data.work_order?.asset_code || ""}`;
+    const docs = document.getElementById("woDrawerDocs");
+    if (docs) {
+      docs.innerHTML = `
+        <button type="button" data-pdf-id="${woId}">Open PDF</button>
+        <button type="button" data-pdf-download-id="${woId}">Download PDF</button>
+        <button type="button" data-wo-qr-open="${woId}">QR page</button>
+        <button type="button" data-wo-qr-print="${woId}">Print QR</button>
+        <button type="button" data-wo-qr-png="${woId}">QR PNG</button>
+        <button type="button" data-wo-qr-link="${woId}">Copy link</button>`;
+    }
     const techSelect = document.getElementById("woRepairCostTechnician");
     if (techSelect) {
       await loadTechnicians();
@@ -1683,8 +1737,11 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  document.getElementById("woDrawerClose")?.addEventListener("click", closeWoDrawer);
+  document.getElementById("woDrawerBackdrop")?.addEventListener("click", closeWoDrawer);
+  document.addEventListener("keydown", (evt) => { if (evt.key === "Escape") closeWoDrawer(); });
   if (listEl) {
-    listEl.addEventListener("click", (evt) => {
+    const handleWoAction = (evt) => {
       const target = evt.target;
       if (!(target instanceof HTMLElement)) return;
       const pdfId = target.getAttribute("data-pdf-id");
@@ -1756,7 +1813,9 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
       if (id) openCloseModalForRow(id, rowSource);
-    });
+    };
+    listEl.addEventListener("click", handleWoAction);
+    document.getElementById("woDrawerDocs")?.addEventListener("click", handleWoAction);
   }
   if (detailEl) {
     detailEl.addEventListener("click", (evt) => {

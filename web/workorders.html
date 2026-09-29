@@ -5,7 +5,7 @@
   <title>IRONLOG Work Orders</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./styles.css?v=16" />
+  <link rel="stylesheet" href="./styles.css?v=17" />
 </head>
 <body class="page-shell">
   <div class="page-header">
@@ -42,7 +42,7 @@
           Status
           <select id="woStatus">
             <option value="">All</option>
-            <option value="active" selected>Active Work</option>
+            <option value="active" selected>Board (not closed)</option>
             <option value="open">Open</option>
             <option value="in_progress">In Progress</option>
             <option value="assigned">Assigned</option>
@@ -155,17 +155,20 @@
     </details>
 
     <div class="stack-12">
-      <div id="woList" class="card-grid"></div>
+      <div id="woList" class="wo-board"></div>
     </div>
 
-    <div class="stack-12">
-      <div class="card wo-detail-card">
-        <h3 class="wo-detail-placeholder-title">Work Order workspace</h3>
-        <div id="woDetail">
-          <div class="muted">Select “View details” on a work-order card to open its workflow.</div>
-        </div>
+    <div id="woDrawerBackdrop" class="wo-drawer-backdrop"></div>
+    <aside id="woDrawer" class="wo-drawer" aria-hidden="true" aria-labelledby="woDrawerTitle">
+      <header class="wo-drawer-head">
+        <h3 id="woDrawerTitle">Work order</h3>
+        <button type="button" id="woDrawerClose" aria-label="Close work order panel">Close</button>
+      </header>
+      <div id="woDrawerDocs" class="wo-drawer-docs"></div>
+      <div id="woDetail" class="wo-drawer-body">
+        <div class="muted">Select “Details” on a work order card.</div>
       </div>
-    </div>
+    </aside>
   </section>
 
   <div
@@ -254,6 +257,6 @@
   </div>
 
   <script src="./session.js?v=1"></script>
-  <script src="./workorders.js?v=13"></script>
+  <script src="./workorders.js?v=14"></script>
 </body>
 </html>

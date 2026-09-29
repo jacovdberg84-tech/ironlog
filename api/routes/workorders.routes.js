@@ -7,6 +7,8 @@ import { holdsAnyRole } from "../utils/request.js";
 import registerBoardRoutes from "./workorders/board.routes.js";
 import registerSchedulingRoutes from "./workorders/scheduling.routes.js";
 import registerCloseoutRoutes from "./workorders/closeout.routes.js";
+import { repairBreakdownWorkOrderLinks } from "../utils/workOrderSync.js";
+import { writeAudit } from "../utils/audit.js";
 
 export default async function workOrderRoutes(app) {
   ensureStockCategorySchema(db);
@@ -491,4 +493,22 @@ export default async function workOrderRoutes(app) {
   registerBoardRoutes(app, ctx);
   registerSchedulingRoutes(app, ctx);
   registerCloseoutRoutes(app, ctx);
+
+  // Breakdowns and their work orders used to drift apart (finishing one left the
+  // other open). Bring existing records back in step; later changes stay in step.
+  try {
+    const repaired = repairBreakdownWorkOrderLinks(db);
+    if (repaired.breakdowns_closed.length || repaired.work_orders_closed.length) {
+      writeAudit(db, { headers: { "x-user-name": "system", "x-user-role": "system" } }, {
+        module: "workorders",
+        action: "breakdown_work_order_sync_repair",
+        entity_type: "breakdown",
+        entity_id: repaired.breakdowns_closed.join(",") || null,
+        payload: repaired,
+      });
+      app.log.info({ repaired }, "Closed breakdowns and work orders that were out of step");
+    }
+  } catch (err) {
+    app.log.error(err, "Breakdown / work order clean-up failed");
+  }
 }

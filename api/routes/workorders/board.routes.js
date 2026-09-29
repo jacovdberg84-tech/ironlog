@@ -4,6 +4,7 @@ import { db } from "../../db/client.js";
 import { notifyWorkOrderAssigned } from "../../utils/pushNotify.js";
 import { stockCategorySql } from "../../utils/stockCategory.js";
 import { writeAudit } from "../../utils/audit.js";
+import { closeBreakdownIfWorkFinished } from "../../utils/workOrderSync.js";
 
 export default function registerBoardRoutes(app, ctx) {
   const {
@@ -29,6 +30,8 @@ export default function registerBoardRoutes(app, ctx) {
     const fromDate = String(req.query?.from_date || "").trim().slice(0, 10);
     const toDate = String(req.query?.to_date || "").trim().slice(0, 10);
     const category = String(req.query?.category || req.query?.equipment_type || "").trim();
+    // active=1: every job not yet closed, however old (the board view).
+    const activeOnly = String(req.query?.active || "").trim() === "1";
     const siteCode = getSiteCode(req);
 
     const openedExpr = `
@@ -57,12 +60,21 @@ export default function registerBoardRoutes(app, ctx) {
         w.supervisor_name,
         ${openedExpr} AS opened_at,
         w.closed_at,
+        w.due_date,
+        w.priority,
+        b.description AS breakdown_description,
+        b.component AS breakdown_component,
+        b.critical AS breakdown_critical,
+        b.parts_status,
+        b.ets_repair_date,
+        mp.service_name,
         a.asset_code,
         a.asset_name,
         a.category
       FROM work_orders w
       JOIN assets a ON a.id = w.asset_id
       LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
+      LEFT JOIN maintenance_plans mp ON mp.id = w.reference_id AND w.source = 'service'
       WHERE LOWER(TRIM(COALESCE(w.site_code, 'main'))) = ?
     `;
     const params = [siteCode];
@@ -70,6 +82,8 @@ export default function registerBoardRoutes(app, ctx) {
     if (status) {
       sql += ` AND w.status = ?`;
       params.push(status);
+    } else if (activeOnly) {
+      sql += ` AND REPLACE(TRIM(LOWER(COALESCE(w.status, 'open'))), ' ', '_') <> 'closed'`;
     }
     if (category) {
       sql += ` AND LOWER(TRIM(COALESCE(a.category, ''))) = LOWER(?)`;
@@ -84,7 +98,7 @@ export default function registerBoardRoutes(app, ctx) {
       params.push(toDate);
     }
 
-    const limit = fromDate || toDate || category ? 2000 : 200;
+    const limit = fromDate || toDate || category || activeOnly ? 2000 : 200;
     sql += ` ORDER BY w.id DESC LIMIT ${limit}`;
 
     let rows = db.prepare(sql).all(...params);
@@ -288,7 +302,7 @@ export default function registerBoardRoutes(app, ctx) {
     }
 
     const wo = db.prepare(`
-      SELECT id, status, assigned_artisan_name, artisan_name
+      SELECT id, status, assigned_artisan_name, artisan_name, source, reference_id
       FROM work_orders
       WHERE id = ?
     `).get(id);
@@ -398,6 +412,12 @@ export default function registerBoardRoutes(app, ctx) {
           supervisor_signed_at = datetime('now')
         WHERE id = ?
       `).run(nextStatus, supervisor_name, id);
+    } else if (nextStatus === "closed") {
+      db.prepare(`
+        UPDATE work_orders
+        SET status = ?, closed_at = COALESCE(closed_at, datetime('now'))
+        WHERE id = ?
+      `).run(nextStatus, id);
     } else {
       db.prepare(`
         UPDATE work_orders
@@ -405,6 +425,10 @@ export default function registerBoardRoutes(app, ctx) {
         WHERE id = ?
       `).run(nextStatus, id);
     }
+    // Finished breakdown work returns the machine to service.
+    const breakdownClosed = String(wo.source || "").toLowerCase() === "breakdown" && ["completed", "approved", "closed"].includes(nextStatus)
+      ? closeBreakdownIfWorkFinished(db, wo.reference_id)
+      : false;
 
     writeAudit(db, req, {
       module: "workorders",
@@ -419,7 +443,7 @@ export default function registerBoardRoutes(app, ctx) {
       },
     });
 
-    return reply.send({ ok: true, id, from: currentStatus, status: nextStatus });
+    return reply.send({ ok: true, id, from: currentStatus, status: nextStatus, breakdown_closed: breakdownClosed });
   });
 
   // POST /api/workorders/:id/progress  { repair_progress } — shown on daily PDF for active jobs
