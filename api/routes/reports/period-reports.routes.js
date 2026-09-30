@@ -1281,7 +1281,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         managementTitle: "AML / DAILY OPERATIONS",
         subtitle: `Operating date ${dailyPdfLongDate(opsDay)} | Issued ${dailyPdfLongDate(date)} | ${dailyPdfSiteName}`,
         pageLabel: ({ pageIndex }) => dailyPdfPageLabels[pageIndex] || "OPERATIONS DETAIL",
-        sourceText: `Source: Ironlog | Operating day ${opsDay}`,
+        sourceText: `Operating day ${opsDay}`,
         headerStyle: "management",
         showPageNumbers: true,
         layout: "landscape",
