@@ -8348,3 +8348,12 @@ body.uc-qr-locked #ucAsset {
 .wo-helper-add select { flex: 1 1 180px; min-width: 0; }
 .wo-tag-unplanned { font-size: 0.72rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: #ede9fe; color: #5b21b6; }
 [data-theme="dark"] .wo-tag-unplanned { background: #2e1065; color: #c4b5fd; }
+
+/* Stock: reverse a receipt */
+.rr-list { margin-top: 10px; }
+.rr-row { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px; border: 1px solid var(--line, #e5e7eb); border-radius: 10px; margin-bottom: 8px; }
+.rr-row.rr-dup { background: rgba(234, 88, 12, 0.08); border-color: rgba(234, 88, 12, 0.45); }
+.rr-main { flex: 1 1 200px; min-width: 0; }
+.rr-qty { font-weight: 700; color: #15803d; }
+.rr-flag { font-size: 0.78rem; font-weight: 700; color: #c2410c; }
+[data-theme="dark"] .rr-flag { color: #fdba74; }

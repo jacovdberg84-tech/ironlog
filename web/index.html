@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=borris-3" />
+  <link rel="stylesheet" href="./styles.css?v=reversal-2" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -2398,6 +2398,39 @@
               </div>
             </div>
             <pre class="output" id="manualStockResult"></pre>
+          </div>
+        </div>
+
+        <!-- Reverse a Receipt Card -->
+        <div class="dash-card collapsible" data-collapsed="false" id="reverseReceiptCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fff7ed; color: #ea580c;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+              </div>
+              <div>
+                <h3>Reverse a Receipt</h3>
+                <p class="muted small">Undo a delivery captured twice or by mistake. Goes to Approvals like any adjustment.</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+              <div style="flex:1 1 220px">
+                <label class="muted small" for="rrPart">Part code or name</label>
+                <input id="rrPart" class="w-full" list="partCodeOptions" placeholder="e.g. oil, MLFPT6001" />
+              </div>
+              <div>
+                <label class="muted small" for="rrDays">Received in the last</label>
+                <select id="rrDays"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option></select>
+              </div>
+              <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="rrOnlyDup" /> Only possible duplicates</label>
+              <button type="button" class="btn" id="rrLoad">Show receipts</button>
+            </div>
+            <div id="rrList" class="rr-list"><p class="muted small">Show receipts to find the one to reverse.</p></div>
           </div>
         </div>
 
@@ -7731,12 +7764,12 @@
   <script src="./app/borris.js?v=89"></script>
   <script src="./app/fuel-lube.js?v=89"></script>
   <script src="./app/stock.js?v=91"></script>
-  <script src="./app/compliance.js?v=89"></script>
+  <script src="./app/compliance.js?v=89r"></script>
   <script src="./app/tabs.js?v=89"></script>
   <script src="./app/uploads.js?v=89"></script>
   <script src="./app/reports.js?v=89"></script>
   <script src="./app/breakdowns.js?v=89"></script>
-  <script src="./app/inventory.js?v=89"></script>
+  <script src="./app/inventory.js?v=91"></script>
   <script src="./app/procurement.js?v=89"></script>
   <script src="./app/site-ops.js?v=89"></script>
   <script src="./app/daily-input.js?v=89"></script>

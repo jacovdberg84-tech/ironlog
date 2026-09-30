@@ -129,7 +129,19 @@ async function loadApprovalRequests() {
         : st === "rejected"
         ? "<span class='pill red'>rejected</span>"
         : "<span class='pill orange'>pending</span>";
-    const payloadTxt = r.payload ? JSON.stringify(r.payload) : "{}";
+    let p = r.payload || null;
+    if (!p) {
+      try { p = JSON.parse(r.payload_json || "{}"); } catch { p = {}; }
+    }
+    const esc = typeof escapeHtml === "function" ? escapeHtml : (x) => String(x ?? "");
+    // Plain words for stock requests; other requests show their raw details.
+    const summary =
+      r.module === "stock" && r.action === "reverse_movement"
+        ? `Reverse receipt #${esc(p.movement_id)}: ${esc(p.part_code)} ${esc(p.quantity)} (received ${esc(String(p.received_at || "").slice(0, 16))}, ref ${esc(p.reference || "none")}) — ${esc(p.reason || "")}`
+        : r.module === "stock" && r.action === "adjust_movement"
+          ? `Stock adjustment: ${esc(p.part_code)} ${Number(p.quantity) > 0 ? "+" : ""}${esc(p.quantity)} (ref ${esc(p.reference || "none")})`
+          : "";
+    const payloadTxt = summary ? `<b>${summary}</b>` : r.payload ? JSON.stringify(r.payload) : "{}";
     const actionBtns =
       approver && st === "pending"
         ? `<br><button data-approval-approve-id="${r.id}" style="margin-top:8px;">Approve</button><button data-approval-reject-id="${r.id}" style="margin-top:8px;">Reject</button>`

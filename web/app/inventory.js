@@ -1299,3 +1299,69 @@ function wireCycleCountList() {
     });
   }
 }
+
+// ---- Reverse a receipt (delivery captured twice or by mistake) --------------
+async function loadReceiptsForReversal() {
+  const host = qs("rrList");
+  if (!host) return;
+  const part = (qs("rrPart")?.value || "").trim().split(" - ")[0];
+  const days = qs("rrDays")?.value || "30";
+  const onlyDup = Boolean(qs("rrOnlyDup")?.checked);
+  host.innerHTML = `<p class="muted small">Loading receipts…</p>`;
+  let rows;
+  try {
+    const q = new URLSearchParams({ days });
+    if (part) q.set("part_code", part);
+    rows = (await fetchJson(`${API}/api/stock/receipts?${q}`)).rows || [];
+  } catch (e) {
+    host.innerHTML = `<p class="muted small">${escapeHtml(e.message || String(e))}</p>`;
+    return;
+  }
+  if (onlyDup) rows = rows.filter((r) => r.possible_duplicate_of && !r.reversed_by);
+  if (!rows.length) {
+    host.innerHTML = `<p class="muted small">${onlyDup ? "No possible duplicates found." : "No receipts in this period."}</p>`;
+    return;
+  }
+  host.innerHTML = rows.map((r) => {
+    const dup = r.possible_duplicate_of && !r.reversed_by;
+    const action = r.reversed_by
+      ? `<span class="muted small">Reversed (movement #${r.reversed_by})</span>`
+      : r.pending_request_id
+        ? `<span class="muted small">Waiting for approval (request #${r.pending_request_id})</span>`
+        : `<button type="button" class="btn" data-rr-reverse="${r.id}" data-rr-label="${escapeHtml(`${r.part_code} +${Number(r.quantity)} (${r.reference || "no reference"})`)}">Reverse</button>`;
+    return `
+      <div class="rr-row${dup ? " rr-dup" : ""}">
+        <div class="rr-main">
+          <div><b>${escapeHtml(r.part_code)}</b> <span class="rr-qty">+${Number(r.quantity).toFixed(1)}</span></div>
+          <div class="muted small">${escapeHtml(r.part_name || "")}</div>
+          <div class="muted small">Received ${escapeHtml(String(r.created_at || "").slice(0, 16))} · #${r.id} · ref ${escapeHtml(r.reference || "—")}${r.location_code ? ` · ${escapeHtml([r.location_code, r.bin_code].filter(Boolean).join(" / "))}` : ""}</div>
+          ${dup ? `<div class="rr-flag">Possible duplicate of receipt #${r.possible_duplicate_of}</div>` : ""}
+        </div>
+        <div class="rr-action">${action}</div>
+      </div>`;
+  }).join("");
+}
+
+async function requestReceiptReversal(id, label) {
+  const reason = prompt(`Reverse receipt #${id}: ${label}\n\nWhy? (e.g. delivery captured twice)`);
+  if (reason == null) return;
+  if (!reason.trim()) return alert("Please give a reason.");
+  try {
+    const res = await fetchJson(`${API}/api/stock/movements/${id}/reverse`, { method: "POST", body: JSON.stringify({ reason: reason.trim() }) });
+    setStatus(`Reversal of receipt #${id} sent for approval (request #${res.request_id}).`);
+  } catch (e) {
+    alert(e.message || String(e));
+  }
+  await loadReceiptsForReversal();
+  if (typeof loadApprovalRequests === "function") loadApprovalRequests().catch(() => {});
+}
+
+(function initReceiptReversal() {
+  qs("rrLoad")?.addEventListener("click", () => loadReceiptsForReversal());
+  qs("rrOnlyDup")?.addEventListener("change", () => loadReceiptsForReversal());
+  qs("rrPart")?.addEventListener("keydown", (e) => { if (e.key === "Enter") loadReceiptsForReversal(); });
+  qs("rrList")?.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-rr-reverse]");
+    if (b) requestReceiptReversal(b.dataset.rrReverse, b.dataset.rrLabel);
+  });
+})();
