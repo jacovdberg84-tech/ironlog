@@ -37,6 +37,11 @@ export function isPublicAuthRequest(url, method) {
     normalizedMethod === "POST" &&
     /^\/api\/maintenance\/vehicle-ldv-checks\/\d+\/photo$/.test(normalizedUrl)
   ) return true;
+  // The pre-start's own PDF; the route itself requires a signed token for that check.
+  if (
+    normalizedMethod === "GET" &&
+    /^\/api\/reports\/prestart-check\/\d+\.pdf$/.test(normalizedUrl)
+  ) return true;
   // Older printed asset QR labels land on the hub first; its read-only profile
   // is needed to route the operator to the correct LDV or machine checklist.
   if (

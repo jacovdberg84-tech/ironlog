@@ -68,6 +68,7 @@
   let currentAssetCode = "";
   let currentDate = getCheckDateFromUrlOrToday();
   let currentCheckId = 0;
+  let currentPdfUrl = "";
 
   function queueKey(payload) {
     return `${String(payload.asset_code || "").toUpperCase()}::${String(payload.check_date || "")}`;
@@ -154,8 +155,9 @@
     txt("doneText", text);
     const pdf = qs("openPdfBtn");
     if (pdf) {
-      pdf.hidden = !(currentCheckId > 0);
-      pdf.href = currentCheckId > 0 ? `/api/reports/vehicle-ldv-check/${encodeURIComponent(String(currentCheckId))}.pdf` : "#";
+      // Signed link from the server: opens this check's PDF without a login.
+      pdf.hidden = !currentPdfUrl;
+      pdf.href = currentPdfUrl || "#";
     }
     form.hidden = true;
     done.hidden = false;
@@ -213,9 +215,11 @@
     renderChecklist(template);
 
     currentCheckId = 0;
+    currentPdfUrl = "";
     const existing = data?.existing_check || null;
     if (existing?.id) {
       currentCheckId = Number(existing.id || 0);
+      currentPdfUrl = String(existing.pdf_url || "");
       if (qs("smuHours") && existing.smu_hours != null) qs("smuHours").value = String(existing.smu_hours);
       if (qs("inspectorName")) qs("inspectorName").value = String(existing.inspector_name || "");
       const saved = PC.splitSavedNotes(existing.notes);
@@ -315,6 +319,7 @@
         body: JSON.stringify(body),
       });
       currentCheckId = Number(data?.id || 0);
+      currentPdfUrl = String(data?.pdf_url || "");
       let photoNote = "";
       if (qs("photoInput")?.files?.[0]) {
         try {

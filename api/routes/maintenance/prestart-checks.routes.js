@@ -6,6 +6,7 @@ import path from "node:path";
 import { checklistToJsonObject, getMachinePrestartTemplate, listMachinePrestartProfiles, machinePrestartCheckMode, normalizeMachinePrestartChecklist, resolveMachinePrestartProfile } from "../../utils/machinePrestartTemplates.js";
 import { db } from "../../db/client.js";
 import { isDate } from "../../utils/request.js";
+import { prestartPdfUrl } from "../../utils/signedLinks.js";
 import { withPortuguese } from "../../utils/prestartPortuguese.js";
 import { addEnglishToFaultComments, faultMessage, notesWithFaults, prestartFaultList, syncPrestartFaultWorkOrder, unansweredChecks } from "../../utils/prestartFaults.js";
 import { aiChatText, isAiConfigured } from "../../utils/ironmind.js";
@@ -329,6 +330,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
               inspector_name: existing.inspector_name || "",
               notes: existing.notes || "",
               checklist,
+              pdf_url: prestartPdfUrl(db, existing.id),
             }
           : null,
       });
@@ -446,6 +448,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
       return reply.send({
         ok: true,
         id: checkId,
+        pdf_url: prestartPdfUrl(db, checkId),
         faults: faults.length,
         fault_work_order_id: faultWo && !faultWo.closed ? faultWo.work_order_id : null,
         asset_code: String(asset.asset_code || ""),
@@ -723,6 +726,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
               inspector_name: existing.inspector_name || "",
               notes: existing.notes || "",
               checklist,
+              pdf_url: prestartPdfUrl(db, existing.id),
             }
           : null,
       });
@@ -846,6 +850,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
       return reply.send({
         ok: true,
         id: checkId,
+        pdf_url: prestartPdfUrl(db, checkId),
         faults: faults.length,
         fault_work_order_id: faultWo && !faultWo.closed ? faultWo.work_order_id : null,
         asset_code: String(asset.asset_code || ""),

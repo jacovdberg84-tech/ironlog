@@ -7,6 +7,7 @@ import { buildPdfBuffer, ensurePageSpace, kvGrid, sectionTitle, table, tryDrawLo
 import { cleanupTempPdfImages, drawPhotoInPdf } from "../../utils/imagePdf.js";
 import { db } from "../../db/client.js";
 import { isDate } from "../../utils/request.js";
+import { verifyRecordToken } from "../../utils/signedLinks.js";
 
 export default function registerInspectionsRoutes(app, ctx) {
   const {
@@ -23,7 +24,7 @@ export default function registerInspectionsRoutes(app, ctx) {
   } = ctx;
 
   // GET /api/reports/vehicle-ldv-check/:id.pdf?download=1
-  app.get("/vehicle-ldv-check/:id.pdf", async (req, reply) => {
+  async function sendVehicleCheckPdf(req, reply) {
     const id = Number(req.params?.id || 0);
     const download = String(req.query?.download || "").trim() === "1";
     if (!Number.isFinite(id) || id <= 0) {
@@ -181,6 +182,19 @@ export default function registerInspectionsRoutes(app, ctx) {
         `${download ? "attachment" : "inline"}; filename="${pdfBase}_${check.id}.pdf"`
       )
       .send(pdf);
+  }
+
+  app.get("/vehicle-ldv-check/:id.pdf", sendVehicleCheckPdf);
+
+  // GET /api/reports/prestart-check/:id.pdf?t=<signed token>
+  // No login: operators open the check they just submitted from the QR page.
+  // Only a valid, unexpired signature for this check id opens it.
+  app.get("/prestart-check/:id.pdf", async (req, reply) => {
+    const id = Number(req.params?.id || 0);
+    if (!verifyRecordToken(db, "prestart-pdf", id, req.query?.t)) {
+      return reply.code(403).send({ error: "This PDF link has expired or is not valid. Open the pre-start again to get a new link." });
+    }
+    return sendVehicleCheckPdf(req, reply);
   });
 
   // GET /api/reports/vehicle-ldv-checks.pdf?start=YYYY-MM-DD&end=YYYY-MM-DD&asset_id=123&with_photos=1&download=1

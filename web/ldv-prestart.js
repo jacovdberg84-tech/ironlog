@@ -109,8 +109,9 @@
     txt("doneText", text);
     const pdf = qs("openPdfBtn");
     if (pdf) {
-      pdf.hidden = !(currentCheckId > 0);
-      pdf.href = currentCheckId > 0 ? `/api/reports/vehicle-ldv-check/${encodeURIComponent(String(currentCheckId))}.pdf` : "#";
+      // Signed link from the server: opens this check's PDF without a login.
+      pdf.hidden = !currentPdfUrl;
+      pdf.href = currentPdfUrl || "#";
     }
     form.hidden = true;
     done.hidden = false;
@@ -126,6 +127,7 @@
   let currentDate = todayYmd();
   let previousKm = null;
   let currentCheckId = 0;
+  let currentPdfUrl = "";
 
   function queueKey(payload) {
     return `${String(payload.asset_code || "").toUpperCase()}::${String(payload.check_date || "")}`;
@@ -208,6 +210,7 @@
     const existing = data?.existing_prestart || null;
     if (existing) {
       currentCheckId = Number(existing.id || 0);
+      currentPdfUrl = String(existing.pdf_url || "");
       if (qs("odometerKm") && existing.odometer_km != null) qs("odometerKm").value = String(existing.odometer_km);
       if (qs("inspectorName")) qs("inspectorName").value = String(existing.inspector_name || "");
       const saved = PC.splitSavedNotes(existing.notes);
@@ -311,6 +314,7 @@
       });
       const savedKm = data?.odometer_km == null ? odometer : Number(data.odometer_km);
       currentCheckId = Number(data?.id || 0);
+      currentPdfUrl = String(data?.pdf_url || "");
       previousKm = Number.isFinite(savedKm) ? savedKm : previousKm;
       txt("prevKm", previousKm == null ? "-" : `${previousKm.toFixed(1)} km`);
       let photoNote = "";
