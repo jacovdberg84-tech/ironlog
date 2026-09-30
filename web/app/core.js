@@ -1128,6 +1128,11 @@ function applyRoleVisibility() {
       item.style.display = isAllowedDashboardTab(tab, allowed) ? "" : "none";
     });
     
+    const techPortal = qs("navTechPortal");
+    if (techPortal) {
+      const workshop = ["artisan", "supervisor", "workshop_admin", "admin", "plant_manager", "site_manager"];
+      techPortal.style.display = roles.some((r) => workshop.includes(String(r).toLowerCase())) ? "" : "none";
+    }
     const taskWorkspaceHeader = sidebar.querySelector(".task-workspace-header");
     if (taskWorkspaceHeader) taskWorkspaceHeader.style.display = allowed.has("tasks") ? "" : "none";
     orderNavSectionsForRoles(sidebar, roles);

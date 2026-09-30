@@ -1,0 +1,13 @@
+{
+  "name": "IRONLOG Technician",
+  "short_name": "IRONLOG Tech",
+  "start_url": "/web/technician-terminal.html",
+  "scope": "/web/technician-terminal.html",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    { "src": "/web/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/web/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

@@ -4,7 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0f172a" />
-  <title>IRONLOG Technician Terminal</title>
+  <title>IRONLOG Technician Portal</title>
+  <link rel="manifest" href="./tech-manifest.json" />
   <script>
     (function () {
       try {
@@ -14,14 +15,15 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./technician-terminal.css?v=2" />
+  <link rel="stylesheet" href="./technician-terminal.css?v=3" />
+  <link rel="stylesheet" href="./tech-portal.css?v=1" />
 </head>
 <body>
   <div id="loginScreen" class="screen">
     <div class="shell shell-wide">
       <div class="brand-block">
         <div class="brand-mark">IL</div>
-        <h1>Technician Terminal</h1>
+        <h1>Technician Portal</h1>
         <p class="muted">Tap your name, then enter your PIN</p>
       </div>
 
@@ -78,61 +80,46 @@
   <div id="appScreen" class="screen hidden">
     <header class="top">
       <div>
-        <div class="top-title">My Workshop</div>
+        <div class="top-title">Technician portal</div>
         <div id="sessionLabel" class="top-sub muted">—</div>
       </div>
-      <button type="button" id="logoutBtn" class="btn ghost sm">Sign out</button>
+      <div class="top-actions">
+        <button type="button" id="refreshJobsBtn" class="btn ghost sm" title="Refresh">↻</button>
+        <button type="button" id="logoutBtn" class="btn ghost sm">Sign out</button>
+      </div>
     </header>
 
-    <main class="main">
-      <section class="card">
-        <div class="section-head">
-          <h2>My work orders</h2>
-          <button type="button" id="refreshJobsBtn" class="btn ghost sm">Refresh</button>
-        </div>
-        <div id="jobsSummary" class="summary-pills"></div>
-        <div id="jobsList" class="jobs-list">
-          <div class="muted small">Loading…</div>
-        </div>
-      </section>
+    <div id="tpApp">
+      <div id="tpSync" class="tp-sync hidden"></div>
+      <main id="tpMain" class="tp-main"></main>
+      <div id="tpSheet" class="tp-sheet hidden"></div>
+      <div id="tpToast" class="tp-toast"></div>
+      <nav class="tp-tabs">
+        <button type="button" class="tp-tab" data-go="today"><span>▦</span>Today</button>
+        <button type="button" class="tp-tab" data-go="shift"><span>◷</span>Shift</button>
+        <button type="button" class="tp-tab" data-go="week"><span>▤</span>Week</button>
+        <button type="button" class="tp-tab" data-go="scan"><span>⌗</span>Machine</button>
+      </nav>
+    </div>
 
-      <section class="card">
-        <h2>Open work order</h2>
-        <p class="muted small">Scan a QR label or enter the work order number.</p>
-        <div class="row">
-          <input id="woLookupId" type="number" min="1" placeholder="WO #" class="grow" />
-          <button type="button" id="openWoBtn" class="btn primary">Open</button>
+    <section id="notifyAppBanner" class="card notify-app-card" style="display:none;">
+      <h2>IRONLOG Notify</h2>
+      <p class="muted small">Install on your phone for breakdown and work order push alerts.</p>
+      <p id="notifyPushStatus" class="muted small"></p>
+      <div class="notify-qr">
+        <img id="notifyExpoQr" alt="Scan to install IRONLOG Notify" />
+        <div class="notify-qr-links">
+          <strong class="small">Scan to install (recommended)</strong>
+          <a id="notifyExpoLink" href="#" target="_blank" rel="noopener">Open Expo install page</a>
+          <a id="notifyApkLink" class="btn primary" href="/web/downloads/ironlog-notify.apk">Or download APK</a>
         </div>
-      </section>
-
-      <section class="card links-card">
-        <h2>Quick links</h2>
-        <div class="link-grid">
-          <a href="./maintenance.html?section=parts-to-order" class="link-tile">Parts to Order</a>
-          <a href="./maintenance.html" class="link-tile">Maintenance</a>
-          <a href="./index.html#vehicle" class="link-tile">Checklists</a>
-          <a href="./workorders.html" class="link-tile">All WOs</a>
-        </div>
-      </section>
-
-      <section id="notifyAppBanner" class="card notify-app-card" style="display:none;">
-        <h2>IRONLOG Notify</h2>
-        <p class="muted small">Install on your phone for breakdown and work order push alerts.</p>
-        <p id="notifyPushStatus" class="muted small"></p>
-        <div class="notify-qr">
-          <img id="notifyExpoQr" alt="Scan to install IRONLOG Notify" />
-          <div class="notify-qr-links">
-            <strong class="small">Scan to install (recommended)</strong>
-            <a id="notifyExpoLink" href="#" target="_blank" rel="noopener">Open Expo install page</a>
-            <a id="notifyApkLink" class="btn primary" href="/web/downloads/ironlog-notify.apk">Or download APK</a>
-          </div>
-        </div>
-      </section>
-    </main>
+      </div>
+    </section>
   </div>
 
   <script src="./auth-shared.js?v=5"></script>
   <script src="./notify-banner.js?v=3"></script>
-  <script src="./technician-terminal.js?v=4"></script>
+  <script src="./tech-portal.js?v=1"></script>
+  <script src="./technician-terminal.js?v=6"></script>
 </body>
 </html>
