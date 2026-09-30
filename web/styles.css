@@ -8338,3 +8338,11 @@ body.uc-qr-locked #ucAsset {
 .bw-spinner { display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: bw-spin 1s linear infinite; }
 @keyframes bw-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .bw-spinner { animation: none; } }
+
+/* Work order drawer: helpers */
+.wo-helpers { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); display: grid; gap: 6px; }
+.wo-helper-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.wo-helper-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.wo-helper-list .link-btn { background: none; border: 0; padding: 0; color: var(--accent, #2563eb); text-decoration: underline; cursor: pointer; font-size: 0.85rem; }
+.wo-helper-add { display: flex; gap: 8px; flex-wrap: wrap; }
+.wo-helper-add select { flex: 1 1 180px; min-width: 0; }

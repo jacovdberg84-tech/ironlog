@@ -152,7 +152,9 @@ test("technician flow: today, start, finding, part, wait, resume, complete, shif
 
   // A helper added by the foreman logs their own time; artisans cannot add helpers.
   assert.equal((await call("jose", "POST", "/workorders/1/helpers", { username: "maria" })).code, 403);
-  assert.equal((await call("foreman", "POST", "/workorders/1/helpers", { username: "maria" }, "plant_manager")).code, 200);
+  assert.equal((await call("foreman", "POST", "/workorders/1/helpers", { username: "nobody" }, "plant_manager")).code, 400, "unknown user");
+  assert.equal((await call("foreman", "POST", "/workorders/1/helpers", { username: "jose" }, "plant_manager")).code, 400, "the lead is not a helper");
+  assert.equal((await call("foreman", "POST", "/workorders/1/helpers", { username: "Maria Chissano" }, "plant_manager")).code, 200, "by full name");
   assert.equal((await act("maria", "start", { at: new Date(Date.now() - 2 * 3600000).toISOString() })).code, 200);
 
   const finding = await call("jose", "POST", "/findings", { work_order_id: 1, text: "Hose chafed on chassis clamp", client_event_id: "f1" });
@@ -179,6 +181,11 @@ test("technician flow: today, start, finding, part, wait, resume, complete, shif
   assert.equal((await act("jose", "pause", {})).code, 200);
   assert.equal((await act("jose", "pause", {})).code, 409, "already paused");
   assert.equal((await act("jose", "resume", {})).code, 200);
+
+  const board = (await call("foreman", "GET", "/workorders/1/helpers", undefined, "plant_manager")).body;
+  assert.equal(board.can_edit, true);
+  assert.deepEqual(board.helpers.map((h) => [h.username, h.name, h.state]), [["maria", "Maria Chissano", "active"]]);
+  assert.equal((await call("jose", "GET", "/workorders/1/helpers")).body.can_edit, false);
 
   const view = (await call("jose", "GET", "/workorders/1")).body;
   assert.equal(view.me.role, "lead");
