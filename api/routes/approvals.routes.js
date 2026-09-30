@@ -2,6 +2,7 @@ import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { applyMasterDataApproval } from "../utils/masterdataGovernance.js";
 import { getRole, getUser, holdsAnyRole } from "../utils/request.js";
+import { REVERSAL_ACTION, applyReversal } from "../utils/stockReversal.js";
 
 function hasColumn(table, col) {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -398,6 +399,20 @@ export default async function approvalsRoutes(app) {
     let execution = { ok: true };
     if (row.module === "stock" && row.action === "adjust_movement") {
       execution = applyStockAdjustWithPayload(id, payload, req);
+    } else if (row.module === "stock" && row.action === REVERSAL_ACTION) {
+      // Receipt entered by mistake: post the opposite movement (refused if the stock was already issued).
+      try {
+        execution = applyReversal(db, payload.movement_id, { approvalId: id });
+      } catch (err) {
+        return reply.code(err.status || 400).send({ error: err.message || String(err) });
+      }
+      writeAudit(db, req, {
+        module: "stock",
+        action: "reverse_approved",
+        entity_type: "stock_movement",
+        entity_id: payload.movement_id,
+        payload: execution,
+      });
     } else if (row.module === "workorders" && row.action === "close_work_order") {
       execution = closeWorkOrderWithPayload(id, payload, req);
     } else if (row.module === "workorders" && row.action === "delete_work_order") {

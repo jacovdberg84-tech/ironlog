@@ -4,6 +4,7 @@ import { db } from "../../db/client.js";
 import { normalizeMdmCode, validateAgainstMdmPolicy, validatePartGovernanceOptional } from "../../utils/masterdataGovernance.js";
 import { writeAudit } from "../../utils/audit.js";
 import { autoCategorizePart } from "../../utils/stockCategory.js";
+import { REVERSAL_ACTION, recentReceipts, reversibleReceipt } from "../../utils/stockReversal.js";
 
 export default function registerMovementsRoutes(app, ctx) {
   const {
@@ -427,5 +428,54 @@ export default function registerMovementsRoutes(app, ctx) {
     `).all(...params);
 
     return reply.send({ ok: true, rows });
+  });
+
+  // Recent receipts (stock in) with reversal state and duplicate hints.
+  // GET /api/stock/receipts?part_code=&days=30
+  app.get("/receipts", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "stores", "storeman"])) return;
+    const days = Math.min(365, Math.max(1, Number(req.query?.days || 30)));
+    const rows = recentReceipts(db, { partCode: String(req.query?.part_code || "").trim(), days });
+    return { ok: true, days, rows };
+  });
+
+  // Ask to reverse a receipt entered by mistake; waits in Approvals like any adjustment.
+  // POST /api/stock/movements/:id/reverse  { reason }
+  app.post("/movements/:id/reverse", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin", "supervisor", "stores", "storeman"])) return;
+    const reason = String(req.body?.reason || "").trim().slice(0, 300);
+    if (!reason) return reply.code(400).send({ error: "Say why the receipt is being reversed (e.g. captured twice)." });
+    let found;
+    try {
+      found = reversibleReceipt(db, req.params.id);
+    } catch (err) {
+      return reply.code(err.status || 400).send({ error: err.message });
+    }
+    if (found.pending_request_id) {
+      return reply.code(409).send({ error: `A reversal for this receipt is already waiting for approval (request #${found.pending_request_id})`, request_id: found.pending_request_id });
+    }
+    const m = found.movement;
+    const payload = {
+      movement_id: m.id,
+      part_code: m.part_code,
+      quantity: -Number(m.quantity),
+      reference: m.reference || null,
+      received_at: m.created_at,
+      reason,
+    };
+    const user = String(req.headers["x-user-name"] || "session-user").trim() || "session-user";
+    const ins = db.prepare(`
+      INSERT INTO approval_requests (module, action, entity_type, entity_id, status, payload_json, requested_by, requested_role)
+      VALUES ('stock', ?, 'stock_movement', ?, 'pending', ?, ?, ?)
+    `).run(REVERSAL_ACTION, String(m.id), JSON.stringify(payload), user, getRole(req));
+    const request_id = Number(ins.lastInsertRowid);
+    writeAudit(db, req, {
+      module: "stock",
+      action: "reverse_requested",
+      entity_type: "stock_movement",
+      entity_id: m.id,
+      payload: { ...payload, request_id },
+    });
+    return { ok: true, pending_approval: true, request_id, ...payload, message: "Reversal submitted for approval" };
   });
 }
