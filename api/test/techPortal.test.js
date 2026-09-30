@@ -292,6 +292,26 @@ test("edge cases: reassignment, failed request retry, helper finishing, abandone
   assert.equal((await call("pedro", "GET", "/workorders/2")).code, 403);
   assert.equal((await call("jose", "GET", "/workorders/2")).body.me.role, "lead");
 
+  // Pick up an unassigned job: first technician wins, the board records who took it.
+  db.exec(`INSERT INTO work_orders (id, asset_id, source, status, opened_at, job_description) VALUES (3, 1, 'manual', 'open', datetime('now'), 'Grease pins')`);
+  const avail = (await call("maria", "GET", "/available")).body.rows;
+  assert.deepEqual(avail.map((r) => r.id), [3], "only open, unassigned jobs");
+  assert.equal((await call("maria", "GET", "/today")).body.available_count, 1);
+  const claim = await call("maria", "POST", "/workorders/3/claim", {});
+  assert.equal(claim.code, 200, JSON.stringify(claim.body));
+  const taken = await call("pedro", "POST", "/workorders/3/claim", {});
+  assert.equal(taken.code, 409, "second technician is refused");
+  const w3 = db.prepare("SELECT status, assigned_artisan_name, assigned_by, assigned_at FROM work_orders WHERE id = 3").get();
+  assert.equal(w3.status, "assigned");
+  assert.equal(w3.assigned_artisan_name, "maria");
+  assert.equal(w3.assigned_by, "maria");
+  assert.ok(w3.assigned_at);
+  assert.equal((await call("maria", "GET", "/available")).body.rows.length, 0);
+  assert.equal((await call("maria", "POST", "/workorders/3/action", { action: "start" })).code, 200, "she can start it now");
+  assert.equal(db.prepare("SELECT status FROM work_orders WHERE id = 3").get().status, "in_progress");
+  assert.equal((await call("maria", "POST", "/workorders/1/claim", {})).code, 409, "a finished or assigned job cannot be taken");
+  assert.equal((await call("op", "POST", "/workorders/3/claim", {}, "operator")).code, 403);
+
   // Pedro's job was left running: ending his shift stops the clock.
   const sub = await call("pedro", "POST", "/shift/submit", {});
   assert.equal(sub.code, 200, JSON.stringify(sub.body));

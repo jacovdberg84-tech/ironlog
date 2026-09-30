@@ -207,3 +207,4 @@ select.tp-input { width: auto; flex: 1; }
 .lang-switch button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
 .brand-block .lang-switch { margin-top: 10px; }
 .tp-note.warn-shift { background: rgba(239, 68, 68, 0.16); border-color: var(--danger); }
+.tp-pickup { border-style: dashed; border-color: var(--accent); color: #bfdbfe; }
