@@ -2,7 +2,10 @@
 // help filling them.
 //   GET  /api/maintenance/costing-gaps           open gaps (My Work card)
 //   POST /api/maintenance/costing-gaps/dismiss   { key, reason } mark "not needed"
-//   POST /api/maintenance/costing-gaps/assist    { key } evidence + checked proposal
+//   POST /api/maintenance/costing-gaps/assist    { key, refresh? } history proposal now,
+//                                                Borris's proposal queued in the background
+//   GET  /api/maintenance/costing-gaps/assist/status?key=   Borris's progress / result
+//   POST /api/maintenance/costing-gaps/notes     { plan_id, notes } what the planner knows
 // Proposals are never saved here: the person applies them through the normal
 // service-cost and part-cost endpoints.
 import { db } from "../../db/client.js";
@@ -13,23 +16,45 @@ import { dismissCostingGap, findCostingGaps, setPlanningSnapshotProvider, summar
 import {
   buildPartEvidence,
   buildServiceEvidence,
+  getPlannerNotes,
   proposalForPart,
   proposalFromAi,
   proposalFromHistory,
+  savePlannerNotes,
   serviceProposalMessages,
 } from "../../utils/costingAssist.js";
+import { createBorrisQueue } from "../../utils/borrisQueue.js";
 import { writeAudit } from "../../utils/audit.js";
 
 const COSTING_ROLES = ["admin", "supervisor", "workshop_admin", "plant_manager", "site_manager"];
 // Services due within this many hours (or km) are checked for a price.
 const HORIZON = 250;
-let borrisBusy = false;
 
-/** BORRIS_COSTING_TIMEOUT_MS, default 45 s, never above 80 s (proxies cut at ~100 s). */
+/** BORRIS_COSTING_TIMEOUT_MS: how long Borris may think in the background (default 5 min, max 15). */
 export function costingTimeoutMs() {
-  const n = Number(process.env.BORRIS_COSTING_TIMEOUT_MS || 45000);
-  return Number.isFinite(n) && n > 0 ? Math.min(80000, n) : 45000;
+  const n = Number(process.env.BORRIS_COSTING_TIMEOUT_MS || 300000);
+  return Number.isFinite(n) && n > 0 ? Math.min(900000, n) : 300000;
 }
+
+/** Borris's proposal for one unpriced service (runs in the background queue). */
+async function borrisServiceProposal(planId) {
+  // Evidence is rebuilt when the job starts, so the latest planner notes count.
+  const evidence = buildServiceEvidence(db, planId);
+  if (!evidence) throw new Error("service plan not found");
+  const text = await aiChatText(serviceProposalMessages(evidence), {
+    temperature: 0,
+    max_tokens: 700,
+    num_ctx: borrisNumCtx(),
+    json: true,
+    timeout_ms: costingTimeoutMs(),
+  });
+  if (text == null) throw new Error(getLastLlmChatError() || "Borris did not answer");
+  const proposal = proposalFromAi(db, evidence, text);
+  if (!proposal) throw new Error("Borris's reply could not be read");
+  return proposal;
+}
+
+const borrisQueue = createBorrisQueue({ run: (key) => borrisServiceProposal(Number(key.split(":")[1])) });
 
 function localToday() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
@@ -106,42 +131,18 @@ export default function registerCostingRoutes(app, ctx) {
       const evidence = buildServiceEvidence(db, Number(ref));
       if (!evidence) return reply.code(404).send({ ok: false, error: "service plan not found" });
 
-      const ai = { configured: isAiConfigured(), ...aiProviderSummary(), used: false, error: null };
-      let proposal = null;
-      if (ai.configured && borrisBusy) {
-        ai.error = "Borris is busy with another proposal";
-      } else if (ai.configured) {
-        // One proposal at a time, and a hard time limit well under the ~100 s a
-        // proxy allows: a local model must never tie up the server.
-        borrisBusy = true;
-        try {
-          const text = await aiChatText(serviceProposalMessages(evidence), {
-            temperature: 0,
-            max_tokens: 700,
-            num_ctx: borrisNumCtx(),
-            json: true,
-            timeout_ms: costingTimeoutMs(),
-          });
-          proposal = text == null ? null : proposalFromAi(db, evidence, text);
-          ai.used = Boolean(proposal);
-          if (!proposal) ai.error = text == null ? (getLastLlmChatError() || "no reply") : "reply was not usable JSON";
-        } finally {
-          borrisBusy = false;
-        }
-      }
-      // Borris came back empty-handed (or is offline): fall back to history so
-      // the person still gets a starting point, and say so.
-      if (!proposal || (!proposal.lines.length && !proposal.questions.length)) {
-        const fromHistory = proposalFromHistory(db, evidence);
-        if (!proposal || fromHistory.lines.length) proposal = { ...fromHistory, borris_note: proposal?.summary || null };
-      }
+      // Answer straight away from the records; Borris works in the background.
+      const ai = { configured: isAiConfigured(), ...aiProviderSummary() };
+      const borris = ai.configured ? borrisQueue.enqueue(key, { refresh: Boolean(req.body?.refresh) }) : { status: "off" };
       return {
         ok: true,
         key,
         kind: "service",
         plan: evidence.plan,
-        proposal,
+        proposal: proposalFromHistory(db, evidence),
+        borris,
         ai,
+        planner_notes: getPlannerNotes(db, evidence.plan.plan_id),
         evidence: {
           own_services: evidence.own_history.services,
           peer_assets: evidence.peers.assets,
@@ -153,5 +154,24 @@ export default function registerCostingRoutes(app, ctx) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message });
     }
+  });
+
+  app.get("/costing-gaps/assist/status", async (req, reply) => {
+    if (!requireMaintenanceRoles(req, reply, COSTING_ROLES)) return;
+    const key = String(req.query?.key || "").trim();
+    const st = borrisQueue.status(key);
+    return { ok: true, key, borris: { ...st, result: undefined }, proposal: st.status === "done" ? st.result : null };
+  });
+
+  app.post("/costing-gaps/notes", async (req, reply) => {
+    if (!requireMaintenanceRoles(req, reply, COSTING_ROLES)) return;
+    const planId = Number(req.body?.plan_id || 0);
+    if (!planId) return reply.code(400).send({ ok: false, error: "plan_id is required" });
+    const user = String(req.headers["x-user-name"] || "");
+    const saved = savePlannerNotes(db, planId, req.body?.notes, user);
+    writeAudit(db, req, { module: "costing", action: "costing_notes.save", entity_type: "maintenance_plan", entity_id: String(planId), payload: { length: String(req.body?.notes || "").length } });
+    // Borris re-reads the service with the new notes.
+    const borris = isAiConfigured() ? borrisQueue.enqueue(`service_unpriced:${planId}`, { refresh: true }) : { status: "off" };
+    return { ok: true, plan_id: planId, planner_notes: saved, borris };
   });
 }
