@@ -21,6 +21,7 @@ import { normalizeUploadedPhoto } from "../utils/imagePdf.js";
 import { getDataRoot } from "../utils/storagePaths.js";
 import { writeAudit } from "../utils/audit.js";
 import { technicianMatchesUser } from "../utils/technicianIdentity.js";
+import { notifyWorkOrderAssigned } from "../utils/pushNotify.js";
 import {
   STATE_LABELS,
   RUNNING_STATES,
@@ -35,6 +36,7 @@ import {
   segmentHours,
 } from "../utils/techActivity.js";
 import {
+  availableWorkOrders,
   eventsByUser,
   eventsFor,
   hasColumn,
@@ -234,9 +236,62 @@ export default async function techRoutes(app) {
         waiting_parts: cards.filter((c) => c.parts.waiting).length,
       },
       hours_today: labourHours(mySegs, { from: dayStart }),
+      available_count: availableWorkOrders(db, { site: getSiteCode(req) }).length,
       notifications: notifications.slice(0, 6),
       events_seen: events.length,
     };
+  });
+
+  // ---------------------------------------------------------------- Pick up a job
+  // Open, unassigned work orders a technician can take. Taking one assigns it
+  // exactly like the foreman's Assign (assigned_by, time, audit), so the board
+  // shows who took it.
+  app.get("/available", async (req) => {
+    const today = localDay();
+    const rows = availableWorkOrders(db, { site: getSiteCode(req) }).map((w) => ({
+      id: w.id,
+      asset_code: w.asset_code,
+      asset_name: w.asset_name,
+      job: jobLine(w),
+      source: w.source,
+      critical: Boolean(w.breakdown_critical),
+      urgent: isUrgent(w, today),
+      priority: w.priority || null,
+      opened_at: w.opened_at,
+      due_date: w.due_date || null,
+      parts: workOrderParts(db, w.id).summary,
+    }));
+    return { ok: true, rows };
+  });
+
+  app.post("/workorders/:id/claim", async (req, reply) => {
+    const me = userOf(req);
+    const id = Number(req.params.id);
+    const wo = db.prepare(`SELECT id, status, assigned_artisan_name FROM work_orders WHERE id = ?`).get(id);
+    if (!wo) return reply.code(404).send({ ok: false, error: "Work order not found" });
+    if (technicianMatchesUser(db, wo.assigned_artisan_name, me)) return { ok: true, id, already_yours: true };
+    // Only the first technician gets it: the update only matches while it is still open and unassigned.
+    const res = db.prepare(`
+      UPDATE work_orders
+      SET assigned_artisan_name = ?, assigned_at = datetime('now'), assigned_by = ?, status = 'assigned'
+      WHERE id = ?
+        AND REPLACE(TRIM(LOWER(COALESCE(status, ''))), ' ', '_') = 'open'
+        AND TRIM(COALESCE(assigned_artisan_name, '')) = ''
+    `).run(me, me, id);
+    if (!res.changes) {
+      return reply.code(409).send({ ok: false, error: "Someone already took this job, or it is no longer open." });
+    }
+    writeAudit(db, req, {
+      module: "workorders",
+      action: "assign",
+      entity_type: "work_order",
+      entity_id: id,
+      payload: { assigned_artisan_name: me, assigned_by: me, from_status: "open", self_assigned: true, via: "technician_portal" },
+    });
+    const detail = db.prepare(`SELECT w.source, a.asset_code FROM work_orders w JOIN assets a ON a.id = w.asset_id WHERE w.id = ?`).get(id);
+    notifyWorkOrderAssigned({ workOrderId: id, assignedUsername: me, assetCode: detail?.asset_code, source: detail?.source })
+      .catch((err) => req.log.warn({ err: err?.message || err }, "claim push failed"));
+    return { ok: true, id, status: "assigned", assigned_artisan_name: me };
   });
 
   // ---------------------------------------------------------------- Work order

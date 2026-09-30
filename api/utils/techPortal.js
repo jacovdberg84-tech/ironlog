@@ -197,3 +197,26 @@ export function workOrderParts(db, woId) {
     },
   };
 }
+
+/**
+ * Open work orders nobody is assigned to yet (for technicians to pick up).
+ * Critical breakdowns first, then breakdowns, then oldest.
+ */
+export function availableWorkOrders(db, { site = null, limit = 60 } = {}) {
+  const siteSql = site && hasColumn(db, "work_orders", "site_code") ? "AND LOWER(TRIM(COALESCE(w.site_code, 'main'))) = ?" : "";
+  return db.prepare(`
+    SELECT w.id, w.asset_id, w.source, w.reference_id, w.status, w.opened_at, w.due_date, w.priority, w.job_description,
+      a.asset_code, a.asset_name, a.category,
+      b.description AS breakdown_description, b.component AS breakdown_component, b.critical AS breakdown_critical,
+      mp.service_name, mp.interval_hours
+    FROM work_orders w
+    JOIN assets a ON a.id = w.asset_id
+    LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
+    LEFT JOIN maintenance_plans mp ON mp.id = w.reference_id AND w.source = 'service'
+    WHERE ${woStatusSql()} = 'open'
+      AND TRIM(COALESCE(w.assigned_artisan_name, '')) = ''
+      ${siteSql}
+    ORDER BY COALESCE(b.critical, 0) DESC, CASE WHEN w.source = 'breakdown' THEN 0 ELSE 1 END, w.opened_at ASC, w.id ASC
+    LIMIT ?
+  `).all(...(siteSql ? [String(site).toLowerCase(), limit] : [limit]));
+}

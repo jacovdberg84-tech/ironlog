@@ -761,6 +761,11 @@ function renderDetail(payload) {
         <summary>Work-order history</summary>
         <dl class="wo-detail-facts wo-detail-history">
           <div><dt>Assigned</dt><dd>${escapeHtml(wo.assigned_at || "-")}</dd></div>
+          <div><dt>Assigned by</dt><dd>${escapeHtml(
+            !wo.assigned_by ? "-"
+              : String(wo.assigned_by).toLowerCase() === String(wo.assigned_artisan_name || "").toLowerCase() ? "The technician took this job (portal)"
+              : wo.assigned_by
+          )}</dd></div>
           <div><dt>Started</dt><dd>${escapeHtml(wo.started_at || "-")}</dd></div>
           <div><dt>Completed</dt><dd>${escapeHtml(wo.completed_at || "-")}</dd></div>
           <div><dt>Closed</dt><dd>${escapeHtml(wo.closed_at || "-")}</dd></div>

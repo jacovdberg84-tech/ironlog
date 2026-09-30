@@ -285,6 +285,7 @@
       else if (view.name === "week") await renderWeek(main);
       else if (view.name === "asset") await renderAsset(main);
       else if (view.name === "scan") renderScan(main);
+      else if (view.name === "available") await renderAvailable(main);
     } catch (e) {
       main.innerHTML = `<div class="tp-card tp-error">${esc(e.message || e)}</div><button class="tp-btn" data-go="today">${esc(T("Back to Today"))}</button>`;
     }
@@ -357,6 +358,7 @@
         <div><b>${d.counts.waiting}</b><span>${esc(T("Waiting"))}</span></div>
         <div><b>${d.counts.completed}</b><span>${esc(T("Done today"))}</span></div>
       </div>
+      ${d.available_count ? `<button type="button" class="tp-btn full tp-pickup" data-go="available">${esc(N(d.available_count, "Pick up a job — {n} open job nobody has taken", "Pick up a job — {n} open jobs nobody has taken"))}</button>` : ""}
       ${section(T("Urgent"), g.urgent)}
       ${section(T("Planned"), g.planned)}
       ${section(T("Waiting"), g.waiting)}
@@ -693,6 +695,30 @@
       <div class="tp-card tp-muted small">${esc(N(d.shifts_submitted, "{n} shift report submitted this week", "{n} shift reports submitted this week"))}${d.shift_open ? ` · ${esc(T("a shift is open now"))}` : ""}.</div>`;
   }
 
+  // ------------------------------------------------------------ Pick up a job
+  async function renderAvailable(main) {
+    const r = await load("available", "/available");
+    const rows = r.data.rows || [];
+    main.innerHTML = `${staleNote(r)}
+      <div class="tp-jobhead"><button type="button" class="tp-back" data-go="today">‹ ${esc(T("Today"))}</button>
+        <div class="tp-jobhead-main"><h2 class="tp-title">${esc(T("Pick up a job"))}</h2>
+        <div class="tp-muted small">${esc(T("Open jobs nobody has taken yet. When you take one it is assigned to you and your foreman sees it on the board."))}</div></div></div>
+      ${rows.length ? rows.map((c) => `
+        <div class="tp-job ${c.critical ? "crit" : ""}">
+          <div class="tp-job-top">
+            <span class="tp-asset">${esc(c.asset_code)}</span>
+            ${c.critical ? `<span class="tp-chip bad">${esc(T("Critical"))}</span>` : c.urgent ? `<span class="tp-chip waiting">${esc(T("Urgent"))}</span>` : ""}
+          </div>
+          <div class="tp-job-line">${esc(c.job)}</div>
+          <div class="tp-job-meta">
+            <span>${esc(T("WO #{id}", { id: c.id }))}</span>
+            ${c.opened_at ? `<span>${esc(T("Opened {t}", { t: dayTime(c.opened_at) }))}</span>` : ""}
+            ${c.parts?.short ? `<span class="warn">${esc(N(c.parts.short, "{n} part short", "{n} parts short"))}</span>` : ""}
+          </div>
+          <div class="tp-row mt"><button type="button" class="tp-btn primary grow" data-act="claim" data-wo="${c.id}" data-label="${esc(`${c.asset_code} — ${c.job}`)}">${esc(T("Take this job"))}</button></div>
+        </div>`).join("") : `<div class="tp-card tp-empty">${esc(T("No open jobs waiting. Everything is assigned."))}</div>`}`;
+  }
+
   // ------------------------------------------------------------ Machine (QR)
   function renderScan(main) {
     main.innerHTML = `
@@ -890,6 +916,26 @@
         return go("today");
       }
       if (act === "teamShifts") return renderTeam();
+      if (act === "claim") {
+        sheet(`<h3>${esc(T("Take this job?"))}</h3>
+          <p><b>${esc(t.dataset.label)}</b></p>
+          <p class="tp-muted small">${esc(T("It will be assigned to you. You can start it straight away."))}</p>
+          <div class="tp-row"><button type="button" class="tp-btn" data-act="closeSheet">${esc(T("Cancel"))}</button><button type="button" class="tp-btn primary grow" data-act="claimGo" data-wo="${t.dataset.wo}">${esc(T("Take this job"))}</button></div>`);
+        return;
+      }
+      if (act === "claimGo") {
+        t.disabled = true;
+        try {
+          await A.fetchJson(api(`/workorders/${t.dataset.wo}/claim`), { method: "POST", body: "{}" });
+        } catch (err) {
+          closeSheet();
+          toast(isNetworkError(err) ? T("Taking a job needs signal. Try again when you have signal.") : err.status === 409 ? T("Someone already took this job.") : err.message || String(err), "bad");
+          return render();
+        }
+        closeSheet();
+        toast(T("The job is yours"), "ok");
+        return go("job", { id: Number(t.dataset.wo) });
+      }
       if (act === "ask") {
         const q = String(qs("tpAsk")?.value || "").trim();
         if (!q) return;
