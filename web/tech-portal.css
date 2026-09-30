@@ -194,7 +194,6 @@ select.tp-input { width: auto; flex: 1; }
 .tp-tab span { font-size: 1.3rem; line-height: 1; }
 .tp-tab.on { color: var(--ink); font-weight: 700; }
 
-#notifyAppBanner { max-width: 720px; margin: 0 auto 90px; }
 
 @media (max-width: 380px) {
   .tp-actions { grid-template-columns: 1fr; }
