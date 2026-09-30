@@ -9,6 +9,8 @@
   let pinValue = "";
   let roster = [];
 
+  const tt = (text, vars) => (window.TechPortal ? window.TechPortal.T(text, vars) : text);
+
   function qs(id) {
     return document.getElementById(id);
   }
@@ -43,7 +45,7 @@
     const roles = Array.isArray(user?.roles) ? user.roles : [user?.role || A.getSessionRole()];
     const ok = roles.some((r) => ALLOWED_ROLES.includes(String(r).toLowerCase()));
     if (!ok) {
-      throw new Error("This terminal is for workshop technicians (artisan role). Ask your supervisor for access.");
+      throw new Error(tt("This terminal is for workshop technicians (artisan role). Ask your supervisor for access."));
     }
   }
 
@@ -69,7 +71,7 @@
     });
     const sel = qs("pinSelectedUser");
     if (sel) {
-      sel.textContent = selectedUsername ? `Signing in as ${label || selectedUsername}` : "Select your name above";
+      sel.textContent = selectedUsername ? tt("Signing in as {name}", { name: label || selectedUsername }) : tt("Select your name above");
       sel.classList.toggle("hidden", !selectedUsername);
     }
     updatePinSubmitState();
@@ -80,7 +82,7 @@
     if (!host) return;
     roster = Array.isArray(list) ? list : [];
     if (!roster.length) {
-      host.innerHTML = `<div class="muted small">No PIN users yet. Ask your supervisor to set a PIN in User Admin, or use username &amp; password below.</div>`;
+      host.innerHTML = `<div class="muted small">${A.escapeHtml(tt("No PIN users yet. Ask your supervisor to set a PIN in User Admin, or use username & password below."))}</div>`;
       return;
     }
     host.innerHTML = "";
@@ -110,7 +112,7 @@
   function appendPinDigit(d) {
     if (!selectedUsername) {
       const err = qs("pinLoginError");
-      if (err) err.textContent = "Select your name first.";
+      if (err) err.textContent = tt("Select your name first.");
       return;
     }
     if (pinValue.length >= MAX_PIN) return;
@@ -166,7 +168,7 @@
     const password = String(qs("loginPassword")?.value || "");
     const remember = qs("loginRemember")?.checked !== false;
     if (!username || !password) {
-      if (errEl) errEl.textContent = "Enter username and password.";
+      if (errEl) errEl.textContent = tt("Enter username and password.");
       return;
     }
     try {

@@ -202,7 +202,7 @@ export default async function techRoutes(app) {
     const notifications = [];
     for (const w of rows) {
       if (w.assigned_at && Date.parse(`${String(w.assigned_at).replace(" ", "T")}Z`) > Date.now() - 24 * 3600000 && w.role === "lead" && !["completed", "approved", "closed"].includes(String(w.status).toLowerCase())) {
-        notifications.push({ kind: "assigned", wo_id: w.id, text: `New job: WO #${w.id} ${w.asset_code} — ${jobLine(w)}` });
+        notifications.push({ kind: "assigned", wo_id: w.id, asset_code: w.asset_code, job: jobLine(w), text: `New job: WO #${w.id} ${w.asset_code} — ${jobLine(w)}` });
       }
     }
     if (ids.length && hasTable(db, "maintenance_parts_requests")) {
@@ -211,7 +211,7 @@ export default async function techRoutes(app) {
         SELECT work_order_id, part_name, part_code, updated_at FROM maintenance_parts_requests
         WHERE work_order_id IN (${marks}) AND LOWER(status) = 'received' AND updated_at >= ?
       `).all(...ids, new Date(Date.now() - 48 * 3600000).toISOString())) {
-        notifications.push({ kind: "parts", wo_id: r.work_order_id, text: `Part arrived for WO #${r.work_order_id}: ${r.part_name || r.part_code}` });
+        notifications.push({ kind: "parts", wo_id: r.work_order_id, part: r.part_name || r.part_code, text: `Part arrived for WO #${r.work_order_id}: ${r.part_name || r.part_code}` });
       }
     }
     return {

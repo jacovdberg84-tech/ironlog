@@ -13,6 +13,30 @@
   const qs = (id) => document.getElementById(id);
   const api = (p) => `${A.API}/api/tech${p}`;
 
+  const LANG_KEY = "ironlog_prestart_lang"; // shared with the pre-start pages
+  const PT = window.TechPortalPT || {};
+
+  function lang() {
+    try {
+      const saved = localStorage.getItem(LANG_KEY);
+      if (saved === "en" || saved === "pt") return saved;
+    } catch { /* ignore */ }
+    return String(navigator.language || "").toLowerCase().startsWith("pt") ? "pt" : "en";
+  }
+
+  /** Screen text in the chosen language; {name} placeholders are filled from vars. */
+  function T(text, vars = {}) {
+    const s = (lang() === "pt" && PT[text]) || text;
+    return s.replace(/\{(\w+)\}/g, (_, k) => (vars[k] == null ? "" : String(vars[k])));
+  }
+
+  /** Singular / plural: N(n, "{n} job", "{n} jobs"). */
+  function N(n, one, many) {
+    return T(Number(n) === 1 ? one : many, { n });
+  }
+
+  const locale = () => (lang() === "pt" ? "pt-PT" : "en-GB");
+
   let root = null;
   let view = { name: "today" };
   let tick = null;
@@ -62,14 +86,14 @@
     if (!iso) return "";
     const d = new Date(String(iso).includes("T") ? iso : `${String(iso).replace(" ", "T")}Z`);
     if (Number.isNaN(d.getTime())) return String(iso);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    return d.toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit", hour12: false });
   }
 
   function dayTime(iso) {
     if (!iso) return "";
     const d = new Date(String(iso).includes("T") ? iso : `${String(iso).replace(" ", "T")}Z`);
     if (Number.isNaN(d.getTime())) return String(iso);
-    return `${d.toLocaleDateString([], { day: "2-digit", month: "short" })} ${time(iso)}`;
+    return `${d.toLocaleDateString(locale(), { day: "2-digit", month: "short" })} ${time(iso)}`;
   }
 
   function hrs(h) {
@@ -93,6 +117,19 @@
     clearTimeout(toast._t);
     toast._t = setTimeout(() => (t.className = "tp-toast"), 3200);
   }
+
+  const STATE_TEXT = {
+    idle: "Not started",
+    active: "Working",
+    paused: "Paused",
+    waiting_parts: "Waiting for parts",
+    waiting_ops: "Waiting for operations",
+    testing: "Testing",
+    done: "Completed",
+  };
+  const stateText = (st) => T(STATE_TEXT[st] || STATE_TEXT.idle);
+  const WO_STATUS = { open: "Open", assigned: "Assigned", in_progress: "In progress", completed: "Completed", approved: "Approved", closed: "Closed" };
+  const woStatus = (st) => T(WO_STATUS[String(st || "").toLowerCase()] || String(st || "").replace(/_/g, " "));
 
   const STATE_CLASS = { idle: "idle", active: "active", testing: "active", paused: "paused", waiting_parts: "waiting", waiting_ops: "waiting", done: "done" };
 
@@ -126,7 +163,7 @@
     }
     const q = queue();
     q.push(entry);
-    if (!setQueue(q)) throw new Error("Phone storage is full; could not keep this offline.");
+    if (!setQueue(q)) throw new Error(T("Phone storage is full; could not keep this offline."));
     renderSyncBar();
     return { ok: true, queued: true };
   }
@@ -171,7 +208,7 @@
       syncing = false;
     }
     if (sent) {
-      toast(`Sent ${sent} saved update${sent === 1 ? "" : "s"}`, "ok");
+      toast(N(sent, "Sent {n} saved update", "Sent {n} saved updates"), "ok");
       render();
     }
     renderSyncBar();
@@ -189,10 +226,11 @@
     }
     bar.className = `tp-sync ${refused.length ? "bad" : offline ? "off" : "wait"}`;
     const parts = [];
-    if (offline) parts.push("No signal — you can keep working.");
-    if (q.length - refused.length) parts.push(`${q.length - refused.length} update${q.length - refused.length === 1 ? "" : "s"} saved on this phone${syncing ? " (sending…)" : ""}.`);
-    if (refused.length) parts.push(`${refused.length} could not be saved: ${esc(refused[0].error)}`);
-    bar.innerHTML = `<span>${parts.join(" ")}</span>${q.length && !offline ? `<button type="button" class="tp-link" data-act="sync">Send now</button>` : ""}${refused.length ? `<button type="button" class="tp-link" data-act="dropRefused">Clear</button>` : ""}`;
+    const waiting = q.length - refused.length;
+    if (offline) parts.push(esc(T("No signal — you can keep working.")));
+    if (waiting) parts.push(esc(N(waiting, "{n} update saved on this phone.", "{n} updates saved on this phone.")) + (syncing ? ` ${esc(T("(sending…)"))}` : ""));
+    if (refused.length) parts.push(`${esc(N(refused.length, "{n} could not be saved:", "{n} could not be saved:"))} ${esc(refused[0].error)}`);
+    bar.innerHTML = `<span>${parts.join(" ")}</span>${q.length && !offline ? `<button type="button" class="tp-link" data-act="sync">${esc(T("Send now"))}</button>` : ""}${refused.length ? `<button type="button" class="tp-link" data-act="dropRefused">${esc(T("Clear"))}</button>` : ""}`;
   }
 
   // ------------------------------------------------------------ loading
@@ -205,12 +243,12 @@
       if (!isNetworkError(e)) throw e;
       const c = cacheGet(key);
       if (c) return { data: c.data, fresh: false, cachedAt: c.at };
-      throw new Error("No signal and nothing saved on this phone yet.");
+      throw new Error(T("No signal and nothing saved on this phone yet."));
     }
   }
 
   function staleNote(r) {
-    return r.fresh ? "" : `<div class="tp-stale">Showing what was saved at ${esc(dayTime(r.cachedAt))} — no signal.</div>`;
+    return r.fresh ? "" : `<div class="tp-stale">${esc(T("Showing what was saved at {t} — no signal.", { t: dayTime(r.cachedAt) }))}</div>`;
   }
 
   function pendingFor(woId) {
@@ -239,7 +277,7 @@
     clearInterval(tick);
     const main = qs("tpMain");
     if (!main) return;
-    if (!main.innerHTML.trim()) main.innerHTML = `<div class="tp-empty">Loading…</div>`;
+    if (!main.innerHTML.trim()) main.innerHTML = `<div class="tp-empty">${esc(T("Loading…"))}</div>`;
     try {
       if (view.name === "today") await renderToday(main);
       else if (view.name === "job") await renderJob(main);
@@ -248,7 +286,7 @@
       else if (view.name === "asset") await renderAsset(main);
       else if (view.name === "scan") renderScan(main);
     } catch (e) {
-      main.innerHTML = `<div class="tp-card tp-error">${esc(e.message || e)}</div><button class="tp-btn" data-go="today">Back to Today</button>`;
+      main.innerHTML = `<div class="tp-card tp-error">${esc(e.message || e)}</div><button class="tp-btn" data-go="today">${esc(T("Back to Today"))}</button>`;
     }
     renderSyncBar();
   }
@@ -257,21 +295,21 @@
   function jobCard(c) {
     const st = STATE_CLASS[c.my_state] || "idle";
     const pend = pendingFor(c.id).length;
-    const partsLine = c.parts?.short ? `${c.parts.short} part${c.parts.short === 1 ? "" : "s"} short` : c.parts?.open_requests ? `${c.parts.open_requests} part request${c.parts.open_requests === 1 ? "" : "s"} open` : "";
+    const partsLine = c.parts?.short ? N(c.parts.short, "{n} part short", "{n} parts short") : c.parts?.open_requests ? N(c.parts.open_requests, "{n} part request open", "{n} part requests open") : "";
     return `
       <button type="button" class="tp-job ${c.critical ? "crit" : ""}" data-open="${c.id}">
         <div class="tp-job-top">
           <span class="tp-asset">${esc(c.asset_code)}</span>
-          <span class="tp-chip ${st}">${esc(c.my_state_label)}</span>
+          <span class="tp-chip ${st}">${esc(stateText(c.my_state))}</span>
         </div>
         <div class="tp-job-line">${esc(c.job)}</div>
         <div class="tp-job-meta">
-          <span>WO #${esc(c.id)}</span>
-          ${c.role === "helper" ? `<span>Helper</span>` : ""}
-          ${c.due_date ? `<span>Due ${esc(String(c.due_date).slice(0, 10))}</span>` : ""}
-          ${c.my_hours_today ? `<span>${esc(hrs(c.my_hours_today))} today</span>` : ""}
+          <span>${esc(T("WO #{id}", { id: c.id }))}</span>
+          ${c.role === "helper" ? `<span>${esc(T("Helper"))}</span>` : ""}
+          ${c.due_date ? `<span>${esc(T("Due {d}", { d: String(c.due_date).slice(0, 10) }))}</span>` : ""}
+          ${c.my_hours_today ? `<span>${esc(T("{h} today", { h: hrs(c.my_hours_today) }))}</span>` : ""}
           ${partsLine ? `<span class="warn">${esc(partsLine)}</span>` : ""}
-          ${pend ? `<span class="warn">${pend} not sent</span>` : ""}
+          ${pend ? `<span class="warn">${esc(T("{n} not sent", { n: pend }))}</span>` : ""}
         </div>
       </button>`;
   }
@@ -292,40 +330,46 @@
       <div class="tp-hello">
         <div>
           <div class="tp-hello-name">${esc(d.user?.name || A.getSessionUser())}</div>
-          <div class="tp-muted">${d.shift ? `Shift since ${esc(time(d.shift.started_at))} · ${esc(hrs(d.hours_today))} on jobs today` : "Shift not started"}</div>
+          <div class="tp-muted">${esc(d.shift ? T("Shift since {t} · {h} on jobs today", { t: time(d.shift.started_at), h: hrs(d.hours_today) }) : T("Shift not started"))}</div>
         </div>
-        ${d.shift ? `<button type="button" class="tp-btn sm" data-go="shift">Shift report</button>` : `<button type="button" class="tp-btn sm primary" data-act="shiftStart">Start shift</button>`}
+        ${d.shift ? `<button type="button" class="tp-btn sm" data-go="shift">${esc(T("Shift report"))}</button>` : `<button type="button" class="tp-btn sm primary" data-act="shiftStart">${esc(T("Start shift"))}</button>`}
       </div>
       ${cur ? `
         <div class="tp-current" data-open="${cur.id}">
-          <div class="tp-muted small">${cur.state === "testing" ? "Testing now" : "Working on now"}</div>
-          <div class="tp-current-asset">${esc(cur.asset_code)} <span class="tp-muted">WO #${esc(cur.id)}</span></div>
+          <div class="tp-muted small">${esc(T(cur.state === "testing" ? "Testing now" : "Working on now"))}</div>
+          <div class="tp-current-asset">${esc(cur.asset_code)} <span class="tp-muted">${esc(T("WO #{id}", { id: cur.id }))}</span></div>
           <div>${esc(cur.job)}</div>
           <div class="tp-timer" data-since="${esc(cur.since)}">${esc(since(cur.since))}</div>
           <div class="tp-row">
-            <button type="button" class="tp-btn" data-quick="pause" data-wo="${cur.id}">Pause</button>
-            <button type="button" class="tp-btn primary" data-open="${cur.id}">Open job</button>
+            <button type="button" class="tp-btn" data-quick="pause" data-wo="${cur.id}">${esc(T("Pause"))}</button>
+            <button type="button" class="tp-btn primary" data-open="${cur.id}">${esc(T("Open job"))}</button>
           </div>
         </div>` : ""}
-      ${(d.notifications || []).map((n) => `<div class="tp-note ${esc(n.kind)}" data-open="${n.wo_id}">${esc(n.text)}</div>`).join("")}
+      ${(d.notifications || []).map((n) => `<div class="tp-note ${esc(n.kind)}" data-open="${n.wo_id}">${esc(noteText(n))}</div>`).join("")}
       <div class="tp-stats">
-        <div><b>${d.counts.urgent}</b><span>Urgent</span></div>
-        <div><b>${d.counts.planned}</b><span>Planned</span></div>
-        <div><b>${d.counts.waiting}</b><span>Waiting</span></div>
-        <div><b>${d.counts.completed}</b><span>Done today</span></div>
+        <div><b>${d.counts.urgent}</b><span>${esc(T("Urgent"))}</span></div>
+        <div><b>${d.counts.planned}</b><span>${esc(T("Planned"))}</span></div>
+        <div><b>${d.counts.waiting}</b><span>${esc(T("Waiting"))}</span></div>
+        <div><b>${d.counts.completed}</b><span>${esc(T("Done today"))}</span></div>
       </div>
-      ${section("Urgent", g.urgent)}
-      ${section("Planned", g.planned)}
-      ${section("Waiting", g.waiting)}
-      ${nothing ? `<div class="tp-card tp-empty">No open jobs for you. Your foreman assigns jobs on the Work Orders board.</div>` : ""}
-      ${section("Completed today", g.completed)}
+      ${section(T("Urgent"), g.urgent)}
+      ${section(T("Planned"), g.planned)}
+      ${section(T("Waiting"), g.waiting)}
+      ${nothing ? `<div class="tp-card tp-empty">${esc(T("No open jobs for you. Your foreman assigns jobs on the Work Orders board."))}</div>` : ""}
+      ${section(T("Completed today"), g.completed)}
       <div class="tp-card">
         <div class="tp-row">
-          <input id="tpWoNo" type="number" inputmode="numeric" min="1" placeholder="Open WO #" class="tp-input grow" />
-          <button type="button" class="tp-btn" data-act="openWoNo">Open</button>
+          <input id="tpWoNo" type="number" inputmode="numeric" min="1" placeholder="${esc(T("Open WO #"))}" class="tp-input grow" />
+          <button type="button" class="tp-btn" data-act="openWoNo">${esc(T("Open"))}</button>
         </div>
       </div>`;
     startTimers();
+  }
+
+  function noteText(n) {
+    if (n.kind === "assigned" && n.asset_code) return T("New job: WO #{id} {asset} — {job}", { id: n.wo_id, asset: n.asset_code, job: n.job || "" });
+    if (n.kind === "parts" && n.part) return T("Part arrived for WO #{id}: {part}", { id: n.wo_id, part: n.part });
+    return n.text;
   }
 
   function startTimers() {
@@ -364,32 +408,32 @@
     main.innerHTML = `
       ${staleNote(r)}
       <div class="tp-jobhead">
-        <button type="button" class="tp-back" data-go="today">‹ Today</button>
+        <button type="button" class="tp-back" data-go="today">‹ ${esc(T("Today"))}</button>
         <div class="tp-jobhead-main">
           <div class="tp-asset lg">${esc(d.asset.code)} <span class="tp-muted">${esc(d.asset.name || "")}</span></div>
           <div class="tp-job-line">${esc(d.wo.job)}</div>
           <div class="tp-job-meta">
-            <span>WO #${esc(d.wo.id)}</span>
-            <span>${esc(String(d.wo.status).replace(/_/g, " "))}</span>
-            ${Number(d.asset.meter?.hours) > 0 ? `<span>${esc(Number(d.asset.meter.hours).toFixed(0))} h on meter</span>` : ""}
-            ${me.role !== "lead" ? `<span>${me.role === "helper" ? "You are helping" : "Viewing as foreman"}</span>` : ""}
+            <span>${esc(T("WO #{id}", { id: d.wo.id }))}</span>
+            <span>${esc(woStatus(d.wo.status))}</span>
+            ${Number(d.asset.meter?.hours) > 0 ? `<span>${esc(T("{h} h on meter", { h: Number(d.asset.meter.hours).toFixed(0) }))}</span>` : ""}
+            ${me.role !== "lead" ? `<span>${esc(T(me.role === "helper" ? "You are helping" : "Viewing as foreman"))}</span>` : ""}
           </div>
         </div>
       </div>
       <div class="tp-state ${STATE_CLASS[state] || "idle"}">
         <div>
-          <div class="tp-state-label">${esc(finished ? "Job completed" : lastPending ? lastPending.label : me.state_label)}</div>
+          <div class="tp-state-label">${esc(finished ? T("Job completed") : stateText(state))}</div>
           <div class="tp-muted small">
-            You: ${esc(hrs(d.time.my_hours))} · Everyone: ${esc(hrs(d.time.total_hours))}
-            ${running && d.time.running_since ? ` · running <span data-since="${esc(d.time.running_since)}">${esc(since(d.time.running_since))}</span>` : ""}
+            ${esc(T("You: {a} · Everyone: {b}", { a: hrs(d.time.my_hours), b: hrs(d.time.total_hours) }))}
+            ${running && d.time.running_since ? ` · ${esc(T("running"))} <span data-since="${esc(d.time.running_since)}">${esc(since(d.time.running_since))}</span>` : ""}
           </div>
         </div>
-        ${pend.length ? `<span class="tp-chip waiting">${pend.length} not sent</span>` : ""}
+        ${pend.length ? `<span class="tp-chip waiting">${esc(T("{n} not sent", { n: pend.length }))}</span>` : ""}
       </div>
-      ${actions.length ? `<div class="tp-actions">${actions.map(([a, label, cls]) => `<button type="button" class="tp-btn ${cls}" data-action="${a}">${esc(label)}</button>`).join("")}</div>` : ""}
-      ${!finished && String(d.wo.status).toLowerCase() === "open" ? `<div class="tp-card tp-muted">This job is not assigned yet. Ask your foreman to assign it.</div>` : ""}
+      ${actions.length ? `<div class="tp-actions">${actions.map(([a, label, cls]) => `<button type="button" class="tp-btn ${cls}" data-action="${a}">${esc(T(label))}</button>`).join("")}</div>` : ""}
+      ${!finished && String(d.wo.status).toLowerCase() === "open" ? `<div class="tp-card tp-muted">${esc(T("This job is not assigned yet. Ask your foreman to assign it."))}</div>` : ""}
       <div class="tp-subtabs">
-        ${[["work", "Job"], ["parts", `Parts${d.parts.summary.short || d.parts.summary.open_requests ? " •" : ""}`], ["notes", `Notes & photos${d.findings.length + d.photos.length ? ` (${d.findings.length + d.photos.length})` : ""}`], ["history", "History"], ["borris", "Ask Borris"]]
+        ${[["work", T("Job")], ["parts", `${T("Parts")}${d.parts.summary.short || d.parts.summary.open_requests ? " •" : ""}`], ["notes", `${T("Notes & photos")}${d.findings.length + d.photos.length ? ` (${d.findings.length + d.photos.length})` : ""}`], ["history", T("History")], ["borris", T("Ask Borris")]]
           .map(([k, label]) => `<button type="button" class="tp-subtab ${tab === k ? "on" : ""}" data-tab="${k}">${esc(label)}</button>`).join("")}
       </div>
       <div id="tpJobTab">${jobTab(tab, d)}</div>`;
@@ -406,101 +450,102 @@
     const team = d.team || {};
     return `
       ${b ? `<div class="tp-card">
-        <div class="tp-h4">Breakdown ${b.critical ? `<span class="tp-chip bad">Critical</span>` : ""}</div>
+        <div class="tp-h4">${esc(T("Breakdown"))} ${b.critical ? `<span class="tp-chip bad">${esc(T("Critical"))}</span>` : ""}</div>
         <div>${esc([b.component, b.description].filter(Boolean).join(" — "))}</div>
-        <div class="tp-muted small">${b.since ? `Down since ${esc(dayTime(b.since))}` : ""}${b.return_date ? ` · Return date ${esc(b.return_date)}` : ""}${b.parts_status ? ` · Parts: ${esc(b.parts_status)}` : ""}</div>
+        <div class="tp-muted small">${b.since ? esc(T("Down since {t}", { t: dayTime(b.since) })) : ""}${b.return_date ? ` · ${esc(T("Return date {d}", { d: b.return_date }))}` : ""}${b.parts_status ? ` · ${esc(T("Parts: {s}", { s: b.parts_status }))}` : ""}</div>
       </div>` : ""}
       ${s ? `<div class="tp-card">
-        <div class="tp-h4">Service</div>
-        <div>${esc(s.name)} · every ${esc(s.interval)} h</div>
-        <div class="tp-muted small">Due at ${esc(s.next_due)} h · ${s.remaining >= 0 ? `${esc(s.remaining)} h to go` : `${esc(Math.abs(s.remaining))} h overdue`}</div>
+        <div class="tp-h4">${esc(T("Service"))}</div>
+        <div>${esc(s.name)} · ${esc(T("every {n} h", { n: s.interval }))}</div>
+        <div class="tp-muted small">${esc(T("Due at {n} h", { n: s.next_due }))} · ${esc(dueText(s.remaining))}</div>
       </div>` : ""}
-      ${d.wo.job_description ? `<div class="tp-card"><div class="tp-h4">Job card</div><div class="tp-pre">${esc(d.wo.job_description)}</div></div>` : ""}
-      ${d.wo.progress ? `<div class="tp-card"><div class="tp-h4">Latest progress</div><div>${esc(d.wo.progress)}</div></div>` : ""}
-      ${d.wo.completion_notes ? `<div class="tp-card"><div class="tp-h4">What was done</div><div>${esc(d.wo.completion_notes)}</div></div>` : ""}
+      ${d.wo.job_description ? `<div class="tp-card"><div class="tp-h4">${esc(T("Job card"))}</div><div class="tp-pre">${esc(d.wo.job_description)}</div></div>` : ""}
+      ${d.wo.progress ? `<div class="tp-card"><div class="tp-h4">${esc(T("Latest progress"))}</div><div>${esc(d.wo.progress)}</div></div>` : ""}
+      ${d.wo.completion_notes ? `<div class="tp-card"><div class="tp-h4">${esc(T("What was done"))}</div><div>${esc(d.wo.completion_notes)}</div></div>` : ""}
       <div class="tp-card">
-        <div class="tp-h4">Team</div>
-        <div>Lead: ${esc(team.lead_name || team.lead || "not assigned")}</div>
-        ${(team.helpers || []).map((h) => `<div>Helper: ${esc(h.name)} <span class="tp-muted small">${esc(labelOf(team.states?.[h.username]))}</span>
-          ${isLead() ? `<button type="button" class="tp-link" data-act="helperDel" data-user="${esc(h.username)}">Remove</button>` : ""}</div>`).join("")}
-        ${isLead() ? `<div class="tp-row mt"><input id="tpHelper" class="tp-input grow" placeholder="Add helper (username)" /><button type="button" class="tp-btn sm" data-act="helperAdd">Add</button></div>` : ""}
+        <div class="tp-h4">${esc(T("Team"))}</div>
+        <div>${esc(T("Lead: {name}", { name: team.lead_name || team.lead || T("not assigned") }))}</div>
+        ${(team.helpers || []).map((h) => `<div>${esc(T("Helper: {name}", { name: h.name }))} <span class="tp-muted small">${esc(stateText(team.states?.[h.username] || "idle"))}</span>
+          ${isLead() ? `<button type="button" class="tp-link" data-act="helperDel" data-user="${esc(h.username)}">${esc(T("Remove"))}</button>` : ""}</div>`).join("")}
+        ${isLead() ? `<div class="tp-row mt"><input id="tpHelper" class="tp-input grow" placeholder="${esc(T("Add helper (username)"))}" /><button type="button" class="tp-btn sm" data-act="helperAdd">${esc(T("Add"))}</button></div>` : ""}
       </div>`;
   }
 
-  function labelOf(st) {
-    return { idle: "not started", active: "working", testing: "testing", paused: "paused", waiting_parts: "waiting for parts", waiting_ops: "waiting for operations", done: "finished" }[st] || "not started";
+  function dueText(remaining) {
+    return remaining >= 0 ? T("{n} h to go", { n: remaining }) : T("{n} h overdue", { n: Math.abs(remaining) });
   }
 
   function partsTab(d) {
     const p = d.parts;
-    const stateChip = { issued: ["ok", "Issued"], in_stock: ["active", "In stores"], short: ["bad", "Short"] };
+    const stateChip = { issued: ["ok", T("Issued")], in_stock: ["active", T("In stores")], short: ["bad", T("Short")] };
+    const reqStatus = { requested: "Requested", ordered: "Ordered", received: "Received", cancelled: "Cancelled", rejected: "Rejected" };
     return `
-      ${p.planned.length ? `<div class="tp-card"><div class="tp-h4">Planned for this job</div>
+      ${p.planned.length ? `<div class="tp-card"><div class="tp-h4">${esc(T("Planned for this job"))}</div>
         ${p.planned.map((l) => `<div class="tp-part">
           <div><b>${esc(l.part_code || "")}</b> ${esc(l.description || "")}</div>
-          <div class="tp-muted small">Need ${esc(l.quantity_planned)} ${esc(l.unit_of_measure || "")} · issued ${esc(l.quantity_issued)} · in stores ${l.on_hand == null ? "?" : esc(l.on_hand)}${l.bin ? ` · bin ${esc(l.bin)}` : ""}</div>
-          <span class="tp-chip ${stateChip[l.state][0]}">${stateChip[l.state][1]}</span>
+          <div class="tp-muted small">${esc(T("Need {q} {u} · issued {i} · in stores {s}", { q: l.quantity_planned, u: l.unit_of_measure || "", i: l.quantity_issued, s: l.on_hand == null ? "?" : l.on_hand }))}${l.bin ? ` · ${esc(T("bin {b}", { b: l.bin }))}` : ""}</div>
+          <span class="tp-chip ${stateChip[l.state][0]}">${esc(stateChip[l.state][1])}</span>
         </div>`).join("")}</div>` : ""}
-      ${p.issued.length ? `<div class="tp-card"><div class="tp-h4">Issued to this job</div>
-        ${p.issued.map((l) => `<div class="tp-part"><div><b>${esc(l.part_code)}</b> ${esc(l.part_name)}</div><div class="tp-muted small">${esc(l.qty)} issued${l.bin ? ` · from ${esc(l.bin)}` : ""}</div></div>`).join("")}</div>` : ""}
-      <div class="tp-card"><div class="tp-h4">Requests to stores</div>
+      ${p.issued.length ? `<div class="tp-card"><div class="tp-h4">${esc(T("Issued to this job"))}</div>
+        ${p.issued.map((l) => `<div class="tp-part"><div><b>${esc(l.part_code)}</b> ${esc(l.part_name)}</div><div class="tp-muted small">${esc(T("{n} issued", { n: l.qty }))}${l.bin ? ` · ${esc(T("from {b}", { b: l.bin }))}` : ""}</div></div>`).join("")}</div>` : ""}
+      <div class="tp-card"><div class="tp-h4">${esc(T("Requests to stores"))}</div>
         ${p.requests.length ? p.requests.map((r) => `<div class="tp-part"><div><b>${esc(r.part_code || "")}</b> ${esc(r.part_name || "")} × ${esc(r.qty)}</div>
           <div class="tp-muted small">${esc(r.requested_by || "")} · ${esc(dayTime(r.created_at))}${r.status_notes ? ` · ${esc(r.status_notes)}` : ""}</div>
-          <span class="tp-chip ${String(r.status).toLowerCase() === "received" ? "ok" : String(r.status).toLowerCase() === "ordered" ? "active" : "waiting"}">${esc(r.status || "requested")}</span></div>`).join("") : `<div class="tp-muted">No requests yet.</div>`}
+          <span class="tp-chip ${String(r.status).toLowerCase() === "received" ? "ok" : String(r.status).toLowerCase() === "ordered" ? "active" : "waiting"}">${esc(T(reqStatus[String(r.status || "requested").toLowerCase()] || r.status))}</span></div>`).join("") : `<div class="tp-muted">${esc(T("No requests yet."))}</div>`}
       </div>
       <div class="tp-card">
-        <div class="tp-h4">Request a part</div>
-        <p class="tp-muted small">Stores issue parts to the job. Your request goes to the stores queue.</p>
-        <input id="tpPartQ" class="tp-input" placeholder="Search stores (code or name)" autocomplete="off" />
+        <div class="tp-h4">${esc(T("Request a part"))}</div>
+        <p class="tp-muted small">${esc(T("Stores issue parts to the job. Your request goes to the stores queue."))}</p>
+        <input id="tpPartQ" class="tp-input" placeholder="${esc(T("Search stores (code or name)"))}" autocomplete="off" />
         <div id="tpPartHits"></div>
-        <input id="tpPartCode" class="tp-input" placeholder="Part code (if known)" />
-        <input id="tpPartName" class="tp-input" placeholder="What part is needed" />
+        <input id="tpPartCode" class="tp-input" placeholder="${esc(T("Part code (if known)"))}" />
+        <input id="tpPartName" class="tp-input" placeholder="${esc(T("What part is needed"))}" />
         <div class="tp-row">
           <input id="tpPartQty" class="tp-input" type="number" inputmode="decimal" min="1" value="1" style="max-width:90px" />
-          <select id="tpPartUrg" class="tp-input"><option value="normal">Normal</option><option value="urgent">Urgent — machine down</option></select>
+          <select id="tpPartUrg" class="tp-input"><option value="normal">${esc(T("Normal"))}</option><option value="urgent">${esc(T("Urgent — machine down"))}</option></select>
         </div>
-        <input id="tpPartNote" class="tp-input" placeholder="Note for stores (optional)" />
-        <button type="button" class="tp-btn primary full" data-act="partRequest">Send to stores</button>
+        <input id="tpPartNote" class="tp-input" placeholder="${esc(T("Note for stores (optional)"))}" />
+        <button type="button" class="tp-btn primary full" data-act="partRequest">${esc(T("Send to stores"))}</button>
       </div>`;
   }
 
   function notesTab(d) {
     return `
       <div class="tp-card">
-        <div class="tp-h4">Add a finding</div>
-        <textarea id="tpFinding" class="tp-input" rows="3" placeholder="What did you find? e.g. hose chafed on the chassis clamp"></textarea>
+        <div class="tp-h4">${esc(T("Add a finding"))}</div>
+        <textarea id="tpFinding" class="tp-input" rows="3" placeholder="${esc(T("What did you find? e.g. hose chafed on the chassis clamp"))}"></textarea>
         <div class="tp-row">
-          <select id="tpFindingKind" class="tp-input"><option value="finding">Finding</option><option value="safety">Safety issue</option><option value="note">Note</option></select>
-          <button type="button" class="tp-btn primary" data-act="finding">Save</button>
+          <select id="tpFindingKind" class="tp-input"><option value="finding">${esc(T("Finding"))}</option><option value="safety">${esc(T("Safety issue"))}</option><option value="note">${esc(T("Note"))}</option></select>
+          <button type="button" class="tp-btn primary" data-act="finding">${esc(T("Save"))}</button>
         </div>
-        <label class="tp-btn full tp-photo-btn">📷 Add photo<input id="tpPhoto" type="file" accept="image/*" capture="environment" hidden /></label>
+        <label class="tp-btn full tp-photo-btn">📷 ${esc(T("Add photo"))}<input id="tpPhoto" type="file" accept="image/*" capture="environment" hidden /></label>
       </div>
-      ${d.photos.length ? `<div class="tp-photos">${d.photos.map((p) => `<a href="${esc(p.url)}" target="_blank" rel="noopener"><img src="${esc(p.url)}" alt="${esc(p.caption || "Job photo")}" loading="lazy" /></a>`).join("")}</div>` : ""}
-      ${d.findings.map((f) => `<div class="tp-card tp-finding ${esc(f.kind)}"><div class="tp-muted small">${esc(f.kind === "safety" ? "Safety" : f.kind === "note" ? "Note" : "Finding")} · ${esc(f.username)} · ${esc(dayTime(f.at))}</div><div>${esc(f.text)}</div></div>`).join("")}`;
+      ${d.photos.length ? `<div class="tp-photos">${d.photos.map((p) => `<a href="${esc(p.url)}" target="_blank" rel="noopener"><img src="${esc(p.url)}" alt="${esc(p.caption || T("Job photo"))}" loading="lazy" /></a>`).join("")}</div>` : ""}
+      ${d.findings.map((f) => `<div class="tp-card tp-finding ${esc(f.kind)}"><div class="tp-muted small">${esc(T(f.kind === "safety" ? "Safety" : f.kind === "note" ? "Note" : "Finding"))} · ${esc(f.username)} · ${esc(dayTime(f.at))}</div><div>${esc(f.text)}</div></div>`).join("")}`;
   }
 
   function historyTab(d) {
     return `
-      <div class="tp-card"><div class="tp-h4">Earlier jobs on ${esc(d.asset.code)}</div>
-        ${d.history.length ? d.history.map((h) => `<div class="tp-hist"><div><b>WO #${esc(h.id)}</b> ${esc(h.job)}</div><div class="tp-muted small">${esc(dayTime(h.done_at))}${h.notes ? ` · ${esc(h.notes)}` : ""}</div></div>`).join("") : `<div class="tp-muted">No earlier jobs recorded.</div>`}
+      <div class="tp-card"><div class="tp-h4">${esc(T("Earlier jobs on {code}", { code: d.asset.code }))}</div>
+        ${d.history.length ? d.history.map((h) => `<div class="tp-hist"><div><b>${esc(T("WO #{id}", { id: h.id }))}</b> ${esc(h.job)}</div><div class="tp-muted small">${esc(dayTime(h.done_at))}${h.notes ? ` · ${esc(h.notes)}` : ""}</div></div>`).join("") : `<div class="tp-muted">${esc(T("No earlier jobs recorded."))}</div>`}
       </div>
-      <div class="tp-card"><div class="tp-h4">Activity on this job</div>
-        ${d.activity.length ? d.activity.map((a) => `<div class="tp-hist"><div>${esc(a.text)}</div><div class="tp-muted small">${esc(a.who)} · ${esc(dayTime(a.at))}${a.auto ? " · automatic" : ""}</div></div>`).join("") : `<div class="tp-muted">Nothing yet.</div>`}
+      <div class="tp-card"><div class="tp-h4">${esc(T("Activity on this job"))}</div>
+        ${d.activity.length ? d.activity.map((a) => `<div class="tp-hist"><div>${esc(a.text)}</div><div class="tp-muted small">${esc(a.who)} · ${esc(dayTime(a.at))}${a.auto ? ` · ${esc(T("automatic"))}` : ""}</div></div>`).join("") : `<div class="tp-muted">${esc(T("Nothing yet."))}</div>`}
       </div>
-      <button type="button" class="tp-btn full" data-asset="${esc(d.asset.code)}">Machine view: ${esc(d.asset.code)}</button>`;
+      <button type="button" class="tp-btn full" data-asset="${esc(d.asset.code)}">${esc(T("Machine view: {code}", { code: d.asset.code }))}</button>`;
   }
 
   function borrisTab(d) {
-    const ideas = d.breakdown
+    const ideas = (d.breakdown
       ? ["What usually causes this failure?", "What should I check first?", "Which manual section covers this?"]
-      : ["What does this service include?", "Which manual section covers this?", "What torque or fluid spec applies?"];
+      : ["What does this service include?", "Which manual section covers this?", "What torque or fluid spec applies?"]).map((q) => T(q));
     return `
       <div class="tp-card">
-        <div class="tp-h4">Ask Borris about this job</div>
-        <p class="tp-muted small">Borris gives advice only. He cannot change the job, stock or the service plan.</p>
+        <div class="tp-h4">${esc(T("Ask Borris about this job"))}</div>
+        <p class="tp-muted small">${esc(T("Borris gives advice only. He cannot change the job, stock or the service plan."))}</p>
         <div class="tp-ideas">${ideas.map((q) => `<button type="button" class="tp-idea" data-idea="${esc(q)}">${esc(q)}</button>`).join("")}</div>
-        <textarea id="tpAsk" class="tp-input" rows="2" placeholder="Your question"></textarea>
-        <button type="button" class="tp-btn primary full" data-act="ask">Ask</button>
+        <textarea id="tpAsk" class="tp-input" rows="2" placeholder="${esc(T("Your question"))}"></textarea>
+        <button type="button" class="tp-btn primary full" data-act="ask">${esc(T("Ask"))}</button>
         <div id="tpAnswer"></div>
       </div>`;
   }
@@ -517,12 +562,12 @@
     qs("tpSheet")?.classList.add("hidden");
   }
 
-  const ACTION_LABEL = { start: "Working", resume: "Working", pause: "Paused", waiting_parts: "Waiting for parts", waiting_ops: "Waiting for operations", testing: "Testing", complete: "Completed" };
   const ACTION_STATE = { start: "active", resume: "active", pause: "paused", waiting_parts: "waiting_parts", waiting_ops: "waiting_ops", testing: "testing", complete: "done" };
 
   async function doAction(woId, action, extra = {}) {
-    const res = await send({ kind: "action", woId, url: `/workorders/${woId}/action`, body: { action, ...extra }, label: ACTION_LABEL[action], state: ACTION_STATE[action] });
-    toast(res.queued ? `${ACTION_LABEL[action]} — saved on this phone, will send when there is signal` : `${ACTION_LABEL[action]}`, res.queued ? "" : "ok");
+    const res = await send({ kind: "action", woId, url: `/workorders/${woId}/action`, body: { action, ...extra }, state: ACTION_STATE[action] });
+    const label = stateText(ACTION_STATE[action]);
+    toast(res.queued ? T("{s} — saved on this phone, will send when there is signal", { s: label }) : label, res.queued ? "" : "ok");
     return res;
   }
 
@@ -530,23 +575,23 @@
     if (action === "complete") {
       const lead = d?.me?.role !== "helper";
       sheet(`
-        <h3>${lead ? "Complete the job" : "Finish your part"}</h3>
-        ${lead ? `<label class="tp-label">What was done <b>(required)</b></label>
-        <textarea id="tpDone" class="tp-input" rows="4" placeholder="e.g. Replaced hydraulic hose and clamp, tested under load, no leaks"></textarea>
-        <label class="tp-label">Labour hours (leave empty to use the job timer: ${esc(hrs(d?.time?.total_hours || 0))})</label>
-        <input id="tpDoneHours" class="tp-input" type="number" inputmode="decimal" min="0" step="0.25" placeholder="${esc(Number(d?.time?.total_hours || 0).toFixed(2))}" />` : `<p class="tp-muted">The lead technician completes the work order. This stops your time on it.</p>
-        <textarea id="tpDone" class="tp-input" rows="2" placeholder="What you did (optional)"></textarea>`}
-        <div class="tp-row"><button type="button" class="tp-btn" data-act="closeSheet">Cancel</button><button type="button" class="tp-btn ok grow" data-act="confirmComplete" data-wo="${woId}" data-lead="${lead ? 1 : 0}">${lead ? "Complete job" : "Finish my part"}</button></div>`);
+        <h3>${esc(T(lead ? "Complete the job" : "Finish your part"))}</h3>
+        ${lead ? `<label class="tp-label">${esc(T("What was done"))} <b>${esc(T("(required)"))}</b></label>
+        <textarea id="tpDone" class="tp-input" rows="4" placeholder="${esc(T("e.g. Replaced hydraulic hose and clamp, tested under load, no leaks"))}"></textarea>
+        <label class="tp-label">${esc(T("Labour hours (leave empty to use the job timer: {h})", { h: hrs(d?.time?.total_hours || 0) }))}</label>
+        <input id="tpDoneHours" class="tp-input" type="number" inputmode="decimal" min="0" step="0.25" placeholder="${esc(Number(d?.time?.total_hours || 0).toFixed(2))}" />` : `<p class="tp-muted">${esc(T("The lead technician completes the work order. This stops your time on it."))}</p>
+        <textarea id="tpDone" class="tp-input" rows="2" placeholder="${esc(T("What you did (optional)"))}"></textarea>`}
+        <div class="tp-row"><button type="button" class="tp-btn" data-act="closeSheet">${esc(T("Cancel"))}</button><button type="button" class="tp-btn ok grow" data-act="confirmComplete" data-wo="${woId}" data-lead="${lead ? 1 : 0}">${esc(T(lead ? "Complete job" : "Finish my part"))}</button></div>`);
       return;
     }
     if (action === "waiting_parts" || action === "waiting_ops" || action === "pause") {
-      const title = { waiting_parts: "Waiting for parts", waiting_ops: "Waiting for operations", pause: "Pause the job" }[action];
-      const hint = { waiting_parts: "Which part? e.g. hose from stores, ordered from Maputo", waiting_ops: "e.g. machine needed on the bench, waiting for the operator", pause: "Why? (optional) e.g. lunch, called to another job" }[action];
+      const title = T({ waiting_parts: "Waiting for parts", waiting_ops: "Waiting for operations", pause: "Pause the job" }[action]);
+      const hint = T({ waiting_parts: "Which part? e.g. hose from stores, ordered from Maputo", waiting_ops: "e.g. machine needed on the bench, waiting for the operator", pause: "Why? (optional) e.g. lunch, called to another job" }[action]);
       sheet(`
         <h3>${esc(title)}</h3>
         <textarea id="tpWhy" class="tp-input" rows="2" placeholder="${esc(hint)}"></textarea>
-        <p class="tp-muted small">Time stops counting as labour until you resume.</p>
-        <div class="tp-row"><button type="button" class="tp-btn" data-act="closeSheet">Cancel</button><button type="button" class="tp-btn primary grow" data-act="confirmWhy" data-wo="${woId}" data-action="${action}">${esc(title)}</button></div>`);
+        <p class="tp-muted small">${esc(T("Time stops counting as labour until you resume."))}</p>
+        <div class="tp-row"><button type="button" class="tp-btn" data-act="closeSheet">${esc(T("Cancel"))}</button><button type="button" class="tp-btn primary grow" data-act="confirmWhy" data-wo="${woId}" data-action="${action}">${esc(title)}</button></div>`);
       return;
     }
     return doAction(woId, action).then(render).catch((e) => toast(e.message || e, "bad"));
@@ -567,32 +612,32 @@
     const s = r.data.shift;
     if (!s) {
       main.innerHTML = `${staleNote(r)}
-        <h2 class="tp-title">Shift report</h2>
-        <div class="tp-card"><p>Your shift has not started. It starts when you tap Start shift or start your first job, and ends when you submit the report — a night shift over midnight is one report.</p>
-        <button type="button" class="tp-btn primary big full" data-act="shiftStart">Start shift</button></div>
-        ${isLead() ? `<button type="button" class="tp-btn full" data-act="teamShifts">Team shift reports</button><div id="tpTeam"></div>` : ""}`;
+        <h2 class="tp-title">${esc(T("Shift report"))}</h2>
+        <div class="tp-card"><p>${esc(T("Your shift has not started. It starts when you tap Start shift or start your first job, and ends when you submit the report — a night shift over midnight is one report."))}</p>
+        <button type="button" class="tp-btn primary big full" data-act="shiftStart">${esc(T("Start shift"))}</button></div>
+        ${isLead() ? `<button type="button" class="tp-btn full" data-act="teamShifts">${esc(T("Team shift reports"))}</button><div id="tpTeam"></div>` : ""}`;
       return;
     }
     const labour = s.timeline.filter((t) => t.labour);
     main.innerHTML = `${staleNote(r)}
-      <h2 class="tp-title">Shift report</h2>
+      <h2 class="tp-title">${esc(T("Shift report"))}</h2>
       <div class="tp-card">
-        <div class="tp-row between"><div>Started ${esc(dayTime(s.started_at))}</div><div class="tp-big">${esc(hrs(s.hours))}</div></div>
-        <div class="tp-muted small">on jobs · ${labour.length} work block${labour.length === 1 ? "" : "s"} · ${s.findings_logged.length} finding${s.findings_logged.length === 1 ? "" : "s"} logged</div>
+        <div class="tp-row between"><div>${esc(T("Started {t}", { t: dayTime(s.started_at) }))}</div><div class="tp-big">${esc(hrs(s.hours))}</div></div>
+        <div class="tp-muted small">${esc(T("on jobs"))} · ${esc(N(labour.length, "{n} work block", "{n} work blocks"))} · ${esc(N(s.findings_logged.length, "{n} finding logged", "{n} findings logged"))}</div>
       </div>
-      <div class="tp-card"><div class="tp-h4">What you did</div>
+      <div class="tp-card"><div class="tp-h4">${esc(T("What you did"))}</div>
         ${s.timeline.length ? s.timeline.map((t) => `<div class="tp-tl ${STATE_CLASS[t.state] || ""}">
-          <div class="tp-tl-time">${esc(time(t.start))}–${t.open ? "now" : esc(time(t.end))}</div>
-          <div><b>${esc(t.asset_code || "")}</b> ${esc(t.job || "")} <span class="tp-muted small">WO #${esc(t.work_order_id)}</span><div class="tp-muted small">${esc(t.state_label)} · ${esc(hrs(t.hours))}</div></div>
-        </div>`).join("") : `<div class="tp-muted">No job time yet this shift.</div>`}
+          <div class="tp-tl-time">${esc(time(t.start))}–${t.open ? esc(T("now")) : esc(time(t.end))}</div>
+          <div><b>${esc(t.asset_code || "")}</b> ${esc(t.job || "")} <span class="tp-muted small">${esc(T("WO #{id}", { id: t.work_order_id }))}</span><div class="tp-muted small">${esc(stateText(t.state))} · ${esc(hrs(t.hours))}</div></div>
+        </div>`).join("") : `<div class="tp-muted">${esc(T("No job time yet this shift."))}</div>`}
       </div>
-      ${s.findings_logged.length ? `<div class="tp-card"><div class="tp-h4">Findings logged on jobs</div>${s.findings_logged.map((f) => `<div class="tp-hist">${esc(f.text)} <span class="tp-muted small">${f.work_order_id ? `WO #${esc(f.work_order_id)}` : ""} ${esc(time(f.at))}</span></div>`).join("")}</div>` : ""}
+      ${s.findings_logged.length ? `<div class="tp-card"><div class="tp-h4">${esc(T("Findings logged on jobs"))}</div>${s.findings_logged.map((f) => `<div class="tp-hist">${esc(f.text)} <span class="tp-muted small">${f.work_order_id ? `${esc(T("WO #{id}", { id: f.work_order_id }))}` : ""} ${esc(time(f.at))}</span></div>`).join("")}</div>` : ""}
       <div class="tp-card">
-        ${SHIFT_FIELDS.map(([k, label, hint]) => `<label class="tp-label">${esc(label)}</label><textarea class="tp-input" rows="2" data-shift="${k}" placeholder="${esc(hint)}">${esc(s[k] || "")}</textarea>`).join("")}
-        <div class="tp-muted small">Saved as you type.</div>
+        ${SHIFT_FIELDS.map(([k, label, hint]) => `<label class="tp-label">${esc(T(label))}</label><textarea class="tp-input" rows="2" data-shift="${k}" placeholder="${esc(T(hint))}">${esc(s[k] || "")}</textarea>`).join("")}
+        <div class="tp-muted small">${esc(T("Saved as you type."))}</div>
       </div>
-      <button type="button" class="tp-btn ok big full" data-act="shiftSubmit">Submit shift report</button>
-      ${isLead() ? `<button type="button" class="tp-btn full" data-act="teamShifts">Team shift reports</button><div id="tpTeam"></div>` : ""}`;
+      <button type="button" class="tp-btn ok big full" data-act="shiftSubmit">${esc(T("Submit shift report"))}</button>
+      ${isLead() ? `<button type="button" class="tp-btn full" data-act="teamShifts">${esc(T("Team shift reports"))}</button><div id="tpTeam"></div>` : ""}`;
   }
 
   let shiftSave = null;
@@ -615,13 +660,13 @@
   async function renderTeam() {
     const host = qs("tpTeam");
     if (!host) return;
-    host.innerHTML = `<div class="tp-muted">Loading…</div>`;
+    host.innerHTML = `<div class="tp-muted">${esc(T("Loading…"))}</div>`;
     const d = await A.fetchJson(api("/shifts?days=7"));
     host.innerHTML = d.rows.length ? d.rows.map((s) => `<details class="tp-card">
       <summary><b>${esc(s.name)}</b> · ${esc(dayTime(s.started_at))} → ${esc(time(s.ended_at))} · ${esc(hrs(s.hours))}</summary>
-      ${s.timeline.filter((t) => t.labour).map((t) => `<div class="tp-muted small">${esc(time(t.start))}–${esc(time(t.end))} ${esc(t.asset_code || "")} WO #${esc(t.work_order_id)} ${esc(t.job || "")} (${esc(hrs(t.hours))})</div>`).join("")}
-      ${SHIFT_FIELDS.filter(([k]) => s[k]).map(([k, label]) => `<div class="mt"><b>${esc(label)}:</b> ${esc(s[k])}</div>`).join("")}
-    </details>`).join("") : `<div class="tp-muted">No submitted reports in the last 7 days.</div>`;
+      ${s.timeline.filter((t) => t.labour).map((t) => `<div class="tp-muted small">${esc(time(t.start))}–${esc(time(t.end))} ${esc(t.asset_code || "")} ${esc(T("WO #{id}", { id: t.work_order_id }))} ${esc(t.job || "")} (${esc(hrs(t.hours))})</div>`).join("")}
+      ${SHIFT_FIELDS.filter(([k]) => s[k]).map(([k, label]) => `<div class="mt"><b>${esc(T(label))}:</b> ${esc(s[k])}</div>`).join("")}
+    </details>`).join("") : `<div class="tp-muted">${esc(T("No submitted reports in the last 7 days."))}</div>`;
   }
 
   // ------------------------------------------------------------ Week
@@ -630,26 +675,26 @@
     const d = r.data;
     const max = Math.max(8, ...d.days.map((x) => x.hours));
     main.innerHTML = `${staleNote(r)}
-      <h2 class="tp-title">My week</h2>
+      <h2 class="tp-title">${esc(T("My week"))}</h2>
       <div class="tp-stats">
-        <div><b>${esc(Number(d.hours).toFixed(1))}</b><span>Hours on jobs</span></div>
-        <div><b>${d.jobs_completed}</b><span>Completed</span></div>
-        <div><b>${d.jobs_open}</b><span>Open</span></div>
-        <div><b>${d.jobs_waiting}</b><span>Waiting</span></div>
+        <div><b>${esc(Number(d.hours).toFixed(1))}</b><span>${esc(T("Hours on jobs"))}</span></div>
+        <div><b>${d.jobs_completed}</b><span>${esc(T("Completed"))}</span></div>
+        <div><b>${d.jobs_open}</b><span>${esc(T("Open"))}</span></div>
+        <div><b>${d.jobs_waiting}</b><span>${esc(T("Waiting"))}</span></div>
       </div>
       <div class="tp-card">
-        ${d.days.map((x) => `<div class="tp-bar"><span class="tp-bar-day">${esc(new Date(`${x.day}T12:00:00`).toLocaleDateString([], { weekday: "short", day: "2-digit" }))}</span><span class="tp-bar-track"><span style="width:${Math.round((x.hours / max) * 100)}%"></span></span><span class="tp-bar-val">${esc(hrs(x.hours))}</span></div>`).join("")}
+        ${d.days.map((x) => `<div class="tp-bar"><span class="tp-bar-day">${esc(new Date(`${x.day}T12:00:00`).toLocaleDateString(locale(), { weekday: "short", day: "2-digit" }))}</span><span class="tp-bar-track"><span style="width:${Math.round((x.hours / max) * 100)}%"></span></span><span class="tp-bar-val">${esc(hrs(x.hours))}</span></div>`).join("")}
       </div>
-      <div class="tp-card tp-muted small">${d.shifts_submitted} shift report${d.shifts_submitted === 1 ? "" : "s"} submitted this week${d.shift_open ? " · a shift is open now" : ""}.</div>`;
+      <div class="tp-card tp-muted small">${esc(N(d.shifts_submitted, "{n} shift report submitted this week", "{n} shift reports submitted this week"))}${d.shift_open ? ` · ${esc(T("a shift is open now"))}` : ""}.</div>`;
   }
 
   // ------------------------------------------------------------ Machine (QR)
   function renderScan(main) {
     main.innerHTML = `
-      <h2 class="tp-title">Machine</h2>
+      <h2 class="tp-title">${esc(T("Machine"))}</h2>
       <div class="tp-card">
-        <p class="tp-muted">Scan the machine's QR label with the phone camera, or type the fleet number.</p>
-        <div class="tp-row"><input id="tpAssetCode" class="tp-input grow" placeholder="e.g. T01AM" autocapitalize="characters" /><button type="button" class="tp-btn primary" data-act="openAsset">Open</button></div>
+        <p class="tp-muted">${esc(T("Scan the machine's QR label with the phone camera, or type the fleet number."))}</p>
+        <div class="tp-row"><input id="tpAssetCode" class="tp-input grow" placeholder="${esc(T("e.g. T01AM"))}" autocapitalize="characters" /><button type="button" class="tp-btn primary" data-act="openAsset">${esc(T("Open"))}</button></div>
       </div>`;
   }
 
@@ -659,20 +704,20 @@
     const d = r.data;
     const a = d.asset;
     main.innerHTML = `${staleNote(r)}
-      <div class="tp-jobhead"><button type="button" class="tp-back" data-go="scan">‹ Machines</button>
+      <div class="tp-jobhead"><button type="button" class="tp-back" data-go="scan">‹ ${esc(T("Machines"))}</button>
         <div class="tp-jobhead-main"><div class="tp-asset lg">${esc(a.asset_code)} <span class="tp-muted">${esc(a.asset_name || "")}</span></div>
-        <div class="tp-job-meta">${Number(a.meter?.hours) > 0 ? `<span>${esc(Number(a.meter.hours).toFixed(0))} h on meter</span>` : ""}${d.breakdown ? `<span class="bad">Broken down</span>` : `<span>Running</span>`}</div></div></div>
-      ${d.breakdown ? `<div class="tp-card"><div class="tp-h4">Open breakdown ${d.breakdown.critical ? `<span class="tp-chip bad">Critical</span>` : ""}</div><div>${esc([d.breakdown.component, d.breakdown.description].filter(Boolean).join(" — "))}</div><div class="tp-muted small">Since ${esc(dayTime(d.breakdown.start_at || d.breakdown.breakdown_date))}${d.breakdown.ets_repair_date ? ` · return date ${esc(d.breakdown.ets_repair_date)}` : ""}</div></div>` : ""}
-      <div class="tp-card"><div class="tp-h4">Open jobs</div>
-        ${d.active.length ? d.active.map((w) => `<button type="button" class="tp-job" data-open="${w.id}"><div class="tp-job-top"><span>WO #${esc(w.id)}</span><span class="tp-chip ${w.mine ? "active" : "idle"}">${w.mine ? "Yours" : esc(w.lead || "Unassigned")}</span></div><div class="tp-job-line">${esc(w.job)}</div></button>`).join("") : `<div class="tp-muted">No open jobs on this machine.</div>`}
+        <div class="tp-job-meta">${Number(a.meter?.hours) > 0 ? `<span>${esc(T("{h} h on meter", { h: Number(a.meter.hours).toFixed(0) }))}</span>` : ""}${d.breakdown ? `<span class="bad">${esc(T("Broken down"))}</span>` : `<span>${esc(T("Running"))}</span>`}</div></div></div>
+      ${d.breakdown ? `<div class="tp-card"><div class="tp-h4">${esc(T("Open breakdown"))} ${d.breakdown.critical ? `<span class="tp-chip bad">${esc(T("Critical"))}</span>` : ""}</div><div>${esc([d.breakdown.component, d.breakdown.description].filter(Boolean).join(" — "))}</div><div class="tp-muted small">${esc(T("Down since {t}", { t: dayTime(d.breakdown.start_at || d.breakdown.breakdown_date) }))}${d.breakdown.ets_repair_date ? ` · ${esc(T("Return date {d}", { d: d.breakdown.ets_repair_date }))}` : ""}</div></div>` : ""}
+      <div class="tp-card"><div class="tp-h4">${esc(T("Open jobs"))}</div>
+        ${d.active.length ? d.active.map((w) => `<button type="button" class="tp-job" data-open="${w.id}"><div class="tp-job-top"><span>${esc(T("WO #{id}", { id: w.id }))}</span><span class="tp-chip ${w.mine ? "active" : "idle"}">${w.mine ? esc(T("Yours")) : esc(w.lead || T("Unassigned"))}</span></div><div class="tp-job-line">${esc(w.job)}</div></button>`).join("") : `<div class="tp-muted">${esc(T("No open jobs on this machine."))}</div>`}
       </div>
-      ${d.next_service ? `<div class="tp-card"><div class="tp-h4">Next service</div><div>${esc(d.next_service.service)} at ${esc(d.next_service.due_at)} h</div><div class="tp-muted small">${d.next_service.remaining >= 0 ? `${esc(d.next_service.remaining)} h to go` : `${esc(Math.abs(d.next_service.remaining))} h overdue`}</div></div>` : ""}
-      <div class="tp-card"><div class="tp-h4">Recent work</div>${d.history.length ? d.history.map((h) => `<div class="tp-hist"><div><b>WO #${esc(h.id)}</b> ${esc(h.job)}</div><div class="tp-muted small">${esc(dayTime(h.done_at))}${h.notes ? ` · ${esc(h.notes)}` : ""}</div></div>`).join("") : `<div class="tp-muted">No completed jobs yet.</div>`}</div>
-      ${d.findings.length ? `<div class="tp-card"><div class="tp-h4">Findings</div>${d.findings.map((f) => `<div class="tp-hist">${esc(f.text)} <span class="tp-muted small">${esc(f.username)} · ${esc(dayTime(f.at))}</span></div>`).join("")}</div>` : ""}
+      ${d.next_service ? `<div class="tp-card"><div class="tp-h4">${esc(T("Next service"))}</div><div>${esc(T("{s} at {n} h", { s: d.next_service.service, n: d.next_service.due_at }))}</div><div class="tp-muted small">${esc(dueText(d.next_service.remaining))}</div></div>` : ""}
+      <div class="tp-card"><div class="tp-h4">${esc(T("Recent work"))}</div>${d.history.length ? d.history.map((h) => `<div class="tp-hist"><div><b>${esc(T("WO #{id}", { id: h.id }))}</b> ${esc(h.job)}</div><div class="tp-muted small">${esc(dayTime(h.done_at))}${h.notes ? ` · ${esc(h.notes)}` : ""}</div></div>`).join("") : `<div class="tp-muted">${esc(T("No completed jobs yet."))}</div>`}</div>
+      ${d.findings.length ? `<div class="tp-card"><div class="tp-h4">${esc(T("Findings"))}</div>${d.findings.map((f) => `<div class="tp-hist">${esc(f.text)} <span class="tp-muted small">${esc(f.username)} · ${esc(dayTime(f.at))}</span></div>`).join("")}</div>` : ""}
       <div class="tp-card">
-        <div class="tp-h4">Found a problem?</div>
-        <textarea id="tpAssetFinding" class="tp-input" rows="2" placeholder="What did you find?"></textarea>
-        <div class="tp-row"><button type="button" class="tp-btn grow" data-act="assetFinding" data-asset-id="${a.id}">Save finding</button><button type="button" class="tp-btn warn grow" data-act="breakdownForm" data-code="${esc(a.asset_code)}">Report breakdown</button></div>
+        <div class="tp-h4">${esc(T("Found a problem?"))}</div>
+        <textarea id="tpAssetFinding" class="tp-input" rows="2" placeholder="${esc(T("What did you find?"))}"></textarea>
+        <div class="tp-row"><button type="button" class="tp-btn grow" data-act="assetFinding" data-asset-id="${a.id}">${esc(T("Save finding"))}</button><button type="button" class="tp-btn warn grow" data-act="breakdownForm" data-code="${esc(a.asset_code)}">${esc(T("Report breakdown"))}</button></div>
       </div>`;
   }
 
@@ -690,7 +735,7 @@
         URL.revokeObjectURL(url);
         resolve(c.toDataURL("image/jpeg", 0.78));
       };
-      img.onerror = () => reject(new Error("Could not read that photo"));
+      img.onerror = () => reject(new Error(T("Could not read that photo")));
       img.src = url;
     });
   }
@@ -739,7 +784,7 @@
       if (act === "confirmComplete") {
         const notes = String(qs("tpDone")?.value || "").trim();
         const lead = t.dataset.lead === "1";
-        if (lead && !notes) return toast("Say what was done first.", "bad");
+        if (lead && !notes) return toast(T("Say what was done first."), "bad");
         const hours = Number(qs("tpDoneHours")?.value || 0);
         const extra = lead ? { completion_notes: notes, ...(hours > 0 ? { labor_hours: hours } : {}) } : { note: notes || null };
         t.disabled = true;
@@ -756,33 +801,33 @@
       }
       if (act === "finding") {
         const text = String(qs("tpFinding")?.value || "").trim();
-        if (!text) return toast("Write what you found first.", "bad");
+        if (!text) return toast(T("Write what you found first."), "bad");
         const res = await send({ kind: "finding", woId: view.id, url: "/findings", body: { work_order_id: view.id, text, kind: qs("tpFindingKind").value } });
-        toast(res.queued ? "Saved on this phone — will send later" : "Finding saved", res.queued ? "" : "ok");
+        toast(T(res.queued ? "Saved on this phone — will send later" : "Finding saved"), res.queued ? "" : "ok");
         return render();
       }
       if (act === "assetFinding") {
         const text = String(qs("tpAssetFinding")?.value || "").trim();
-        if (!text) return toast("Write what you found first.", "bad");
+        if (!text) return toast(T("Write what you found first."), "bad");
         const res = await send({ kind: "finding", url: "/findings", body: { asset_id: Number(t.dataset.assetId), text } });
-        toast(res.queued ? "Saved on this phone — will send later" : "Finding saved", res.queued ? "" : "ok");
+        toast(T(res.queued ? "Saved on this phone — will send later" : "Finding saved"), res.queued ? "" : "ok");
         return render();
       }
       if (act === "breakdownForm") {
-        sheet(`<h3>Report breakdown on ${esc(t.dataset.code)}</h3>
-          <label class="tp-label">What failed</label><input id="tpBdComp" class="tp-input" placeholder="e.g. Hydraulics, engine, tyre" />
-          <label class="tp-label">What happened</label><textarea id="tpBdDesc" class="tp-input" rows="3"></textarea>
-          <label class="tp-check"><input id="tpBdCrit" type="checkbox" /> Machine cannot work (critical)</label>
-          <div class="tp-row"><button type="button" class="tp-btn" data-act="closeSheet">Cancel</button><button type="button" class="tp-btn warn grow" data-act="breakdownSend" data-code="${esc(t.dataset.code)}">Report breakdown</button></div>`);
+        sheet(`<h3>${esc(T("Report breakdown on {code}", { code: t.dataset.code }))}</h3>
+          <label class="tp-label">${esc(T("What failed"))}</label><input id="tpBdComp" class="tp-input" placeholder="${esc(T("e.g. Hydraulics, engine, tyre"))}" />
+          <label class="tp-label">${esc(T("What happened"))}</label><textarea id="tpBdDesc" class="tp-input" rows="3"></textarea>
+          <label class="tp-check"><input id="tpBdCrit" type="checkbox" /> ${esc(T("Machine cannot work (critical)"))}</label>
+          <div class="tp-row"><button type="button" class="tp-btn" data-act="closeSheet">${esc(T("Cancel"))}</button><button type="button" class="tp-btn warn grow" data-act="breakdownSend" data-code="${esc(t.dataset.code)}">${esc(T("Report breakdown"))}</button></div>`);
         return;
       }
       if (act === "breakdownSend") {
         const description = String(qs("tpBdDesc")?.value || "").trim();
-        if (!description) return toast("Describe what happened.", "bad");
+        if (!description) return toast(T("Describe what happened."), "bad");
         t.disabled = true;
         const res = await send({ kind: "breakdown", url: "/breakdowns", body: { asset_code: t.dataset.code, component: qs("tpBdComp").value, description, critical: qs("tpBdCrit").checked } });
         closeSheet();
-        toast(res.queued ? "Breakdown saved on this phone — will send later" : `Breakdown reported${res.data?.work_order_id ? ` — WO #${res.data.work_order_id}` : ""}`, res.queued ? "" : "ok");
+        toast(res.queued ? T("Breakdown saved on this phone — will send later") : res.data?.work_order_id ? T("Breakdown reported — WO #{id}", { id: res.data.work_order_id }) : T("Breakdown reported"), res.queued ? "" : "ok");
         return render();
       }
       if (act === "partRequest") {
@@ -793,10 +838,10 @@
           urgency: qs("tpPartUrg").value,
           notes: qs("tpPartNote").value.trim(),
         };
-        if (!body.part_code && !body.part_name) return toast("Say which part is needed.", "bad");
+        if (!body.part_code && !body.part_name) return toast(T("Say which part is needed."), "bad");
         t.disabled = true;
         const res = await send({ kind: "parts", woId: view.id, url: `/workorders/${view.id}/parts-request`, body });
-        toast(res.queued ? "Request saved on this phone — will send later" : "Sent to stores", res.queued ? "" : "ok");
+        toast(T(res.queued ? "Request saved on this phone — will send later" : "Sent to stores"), res.queued ? "" : "ok");
         return render();
       }
       if (act === "pickPart") {
@@ -809,7 +854,7 @@
         const u = String(qs("tpHelper")?.value || "").trim();
         if (!u) return;
         await A.fetchJson(api(`/workorders/${view.id}/helpers`), { method: "POST", body: JSON.stringify({ username: u }) });
-        toast("Helper added", "ok");
+        toast(T("Helper added"), "ok");
         return render();
       }
       if (act === "helperDel") {
@@ -818,15 +863,15 @@
       }
       if (act === "shiftStart") {
         const res = await send({ kind: "shift", url: "/shift/start", body: {} });
-        toast(res.queued ? "Shift start saved on this phone" : "Shift started", "ok");
+        toast(T(res.queued ? "Shift start saved on this phone" : "Shift started"), "ok");
         return render();
       }
       if (act === "shiftSubmit") {
         const s = cacheGet("shift")?.data?.shift;
-        sheet(`<h3>Submit shift report</h3>
-          <p>${esc(hrs(s?.hours || 0))} on jobs. Jobs still running will be paused, and your job time goes to the mechanics timesheet.</p>
-          <p class="tp-muted small">After submitting, the report is locked and your foreman can see it.</p>
-          <div class="tp-row"><button type="button" class="tp-btn" data-act="closeSheet">Cancel</button><button type="button" class="tp-btn ok grow" data-act="shiftSubmitGo">Submit</button></div>`);
+        sheet(`<h3>${esc(T("Submit shift report"))}</h3>
+          <p>${esc(T("{h} on jobs. Jobs still running will be paused, and your job time goes to the mechanics timesheet.", { h: hrs(s?.hours || 0) }))}</p>
+          <p class="tp-muted small">${esc(T("After submitting, the report is locked and your foreman can see it."))}</p>
+          <div class="tp-row"><button type="button" class="tp-btn" data-act="closeSheet">${esc(T("Cancel"))}</button><button type="button" class="tp-btn ok grow" data-act="shiftSubmitGo">${esc(T("Submit"))}</button></div>`);
         return;
       }
       if (act === "shiftSubmitGo") {
@@ -836,7 +881,7 @@
         const res = await send({ kind: "shift", url: "/shift/submit", body });
         try { localStorage.removeItem("ironlog-tech-shift-draft"); } catch { /* ignore */ }
         closeSheet();
-        toast(res.queued ? "Report saved on this phone — will send when there is signal" : `Shift submitted · ${hrs(res.data?.hours || 0)}`, "ok");
+        toast(res.queued ? T("Report saved on this phone — will send when there is signal") : T("Shift submitted · {h}", { h: hrs(res.data?.hours || 0) }), "ok");
         return go("today");
       }
       if (act === "teamShifts") return renderTeam();
@@ -845,7 +890,7 @@
         if (!q) return;
         const d = cached;
         const out = qs("tpAnswer");
-        out.innerHTML = `<div class="tp-muted">Borris is thinking…</div>`;
+        out.innerHTML = `<div class="tp-muted">${esc(T("Borris is thinking…"))}</div>`;
         t.disabled = true;
         const context = [
           `Work order #${d.wo.id} on ${d.asset.code} ${d.asset.name || ""} (${d.asset.category || ""}).`,
@@ -856,13 +901,14 @@
           d.findings.length ? `Findings: ${d.findings.slice(0, 5).map((f) => f.text).join("; ")}.` : "",
           d.history.length ? `Earlier jobs: ${d.history.slice(0, 4).map((h) => h.job).join("; ")}.` : "",
           "Answer for a workshop technician: short, practical steps. Advice only.",
+          lang() === "pt" ? "Answer in Portuguese (Mozambique)." : "",
         ].filter(Boolean).join(" ");
         try {
           const ans = await A.fetchJson(`${A.API}/api/ironmind/ask`, { method: "POST", body: JSON.stringify({ question: q, asset_code: d.asset.code, context_notes: context }) });
           const sources = (ans.sources || []).slice(0, 4).map((s) => esc(s.title || s.document_title || s.name || "")).filter(Boolean);
-          out.innerHTML = `<div class="tp-answer">${esc(ans.short_answer || ans.answer || "No answer.")}</div>${sources.length ? `<div class="tp-muted small">From: ${sources.join(", ")}</div>` : ""}`;
+          out.innerHTML = `<div class="tp-answer">${esc(ans.short_answer || ans.answer || T("No answer."))}</div>${sources.length ? `<div class="tp-muted small">${esc(T("From:"))} ${sources.join(", ")}</div>` : ""}`;
         } catch (err) {
-          out.innerHTML = `<div class="tp-error">${esc(isNetworkError(err) ? "Borris needs signal." : err.message || err)}</div>`;
+          out.innerHTML = `<div class="tp-error">${esc(isNetworkError(err) ? T("Borris needs signal.") : err.message || err)}</div>`;
         } finally {
           t.disabled = false;
         }
@@ -885,9 +931,9 @@
         if (q.length < 2) return (host.innerHTML = "");
         try {
           const d = await A.fetchJson(api(`/parts/search?q=${encodeURIComponent(q)}`));
-          host.innerHTML = d.rows.map((p) => `<button type="button" class="tp-hit" data-act="pickPart" data-code="${esc(p.part_code)}" data-name="${esc(p.part_name)}"><b>${esc(p.part_code)}</b> ${esc(p.part_name)} <span class="tp-muted small">${esc(p.on_hand)} in stores${p.bin ? ` · ${esc(p.bin)}` : ""}</span></button>`).join("") || `<div class="tp-muted small">Nothing in stores matches. Type the part below.</div>`;
+          host.innerHTML = d.rows.map((p) => `<button type="button" class="tp-hit" data-act="pickPart" data-code="${esc(p.part_code)}" data-name="${esc(p.part_name)}"><b>${esc(p.part_code)}</b> ${esc(p.part_name)} <span class="tp-muted small">${esc(T("{n} in stores", { n: p.on_hand }))}${p.bin ? ` · ${esc(p.bin)}` : ""}</span></button>`).join("") || `<div class="tp-muted small">${esc(T("Nothing in stores matches. Type the part below."))}</div>`;
         } catch {
-          host.innerHTML = `<div class="tp-muted small">Search needs signal. Type the part below.</div>`;
+          host.innerHTML = `<div class="tp-muted small">${esc(T("Search needs signal. Type the part below."))}</div>`;
         }
       }, 300);
     }
@@ -899,7 +945,7 @@
       const dataUrl = await compress(e.target.files[0]);
       const entry = { kind: "photo", woId: view.id, url: `/workorders/${view.id}/photos`, dataUrl };
       const res = await send(entry);
-      toast(res.queued ? "Photo kept on this phone — will send later" : "Photo added", res.queued ? "" : "ok");
+      toast(T(res.queued ? "Photo kept on this phone — will send later" : "Photo added"), res.queued ? "" : "ok");
       render();
     } catch (err) {
       toast(err.message || String(err), "bad");
@@ -910,6 +956,19 @@
   function registerWorker() {
     if (!("serviceWorker" in navigator)) return;
     navigator.serviceWorker.register("./tech-sw.js", { scope: "./technician-terminal.html" }).catch(() => {});
+  }
+
+  /** Tab bar and header text, and the EN | PT buttons. */
+  function translateChrome() {
+    document.documentElement.lang = lang();
+    document.querySelectorAll("[data-t]").forEach((el) => (el.textContent = T(el.dataset.t)));
+    document.querySelectorAll("[data-lang]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === lang())));
+  }
+
+  function setLang(l) {
+    try { localStorage.setItem(LANG_KEY, l); } catch { /* ignore */ }
+    translateChrome();
+    if (root) render();
   }
 
   function start() {
@@ -937,5 +996,9 @@
     syncQueue();
   }
 
-  window.TechPortal = { start, syncQueue };
+  // The language switch works on the sign-in screen too.
+  document.querySelectorAll("[data-lang]").forEach((b) => b.addEventListener("click", () => setLang(b.dataset.lang)));
+  translateChrome();
+
+  window.TechPortal = { start, syncQueue, T, lang, translateChrome };
 })();
