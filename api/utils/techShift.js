@@ -5,7 +5,7 @@
 // labour part of that timeline becomes rows in the mechanics timesheet, one per
 // work order, tagged with the work order number.
 
-import { LABOUR_STATES, STATE_LABELS, segmentHours } from "./techActivity.js";
+import { LABOUR_STATES, STATE_LABELS, localDay, segmentHours } from "./techActivity.js";
 
 function clip(seg, from, to) {
   const start = from && seg.start < from ? from : seg.start;
@@ -54,24 +54,33 @@ export function buildShiftTimeline(segments, { from, to, workOrders = new Map() 
   return out.sort((a, b) => String(a.start).localeCompare(String(b.start)));
 }
 
+// Work within this many hours of the shift start belongs to the shift's day (a
+// night shift over midnight stays on one date). Later work — a report left open
+// into the next day — goes on the day it was done.
+const SHIFT_DAY_HOURS = 16;
+
 /**
  * Timesheet rows from a shift timeline: labour time only, one row per work
- * order, from its first start to last finish in the shift.
+ * order and day, from its first start to last finish.
  */
-export function shiftTimesheetRows(timeline, { technicianName, day } = {}) {
-  const byWo = new Map();
+export function shiftTimesheetRows(timeline, { technicianName, day, shiftStart = null } = {}) {
+  const byKey = new Map();
+  const startMs = shiftStart ? Date.parse(shiftStart) : NaN;
   for (const t of timeline) {
     if (!t.labour || !t.asset_code || t.hours <= 0) continue;
-    const e = byWo.get(t.work_order_id) || { ...t, hours: 0, first: t.start, last: t.end };
+    const late = Number.isFinite(startMs) && Date.parse(t.start) - startMs >= SHIFT_DAY_HOURS * 3600000;
+    const workDate = late ? localDay(t.start) : day;
+    const key = `${t.work_order_id}|${workDate}`;
+    const e = byKey.get(key) || { ...t, workDate, hours: 0, first: t.start, last: t.end };
     e.hours += t.hours;
     if (t.start < e.first) e.first = t.start;
     if (t.end > e.last) e.last = t.end;
-    byWo.set(t.work_order_id, e);
+    byKey.set(key, e);
   }
-  return [...byWo.values()]
+  return [...byKey.values()]
     .sort((a, b) => String(a.first).localeCompare(String(b.first)))
     .map((e) => ({
-      work_date: day,
+      work_date: e.workDate,
       technician_name: technicianName,
       hours: Number(e.hours.toFixed(2)),
       asset_code: e.asset_code,
@@ -82,4 +91,32 @@ export function shiftTimesheetRows(timeline, { technicianName, day } = {}) {
       category: sourceCategory(e.source),
     }))
     .filter((r) => r.hours >= 0.01);
+}
+
+export const SHIFT_REMIND_HOURS = 12;
+
+/**
+ * Shift reports still open after `hours` (a technician forgot to submit).
+ * Oldest first, with how long each has been open.
+ */
+export function overdueShifts(db, { site = null, hours = SHIFT_REMIND_HOURS, now = new Date() } = {}) {
+  const has = db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tech_shifts'`).get();
+  if (!has) return [];
+  const cutoff = new Date(now.getTime() - hours * 3600000).toISOString();
+  const hasUsers = db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'users'`).get();
+  const rows = db.prepare(`
+    SELECT s.id, s.username, s.started_at, ${hasUsers ? "u.full_name" : "NULL"} AS full_name
+    FROM tech_shifts s
+    ${hasUsers ? "LEFT JOIN users u ON LOWER(u.username) = LOWER(s.username)" : ""}
+    WHERE s.status = 'open' AND s.started_at <= ?
+      ${site ? "AND LOWER(TRIM(COALESCE(s.site_code, 'main'))) = ?" : ""}
+    ORDER BY s.started_at ASC
+  `).all(...(site ? [cutoff, String(site).toLowerCase()] : [cutoff]));
+  return rows.map((r) => ({
+    id: r.id,
+    username: r.username,
+    name: String(r.full_name || "").trim() || r.username,
+    started_at: r.started_at,
+    hours_open: Number(((now.getTime() - Date.parse(r.started_at)) / 3600000).toFixed(1)),
+  }));
 }

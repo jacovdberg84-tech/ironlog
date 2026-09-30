@@ -47,7 +47,7 @@ import {
   workOrderLabourHours,
   workOrderParts,
 } from "../utils/techPortal.js";
-import { buildShiftTimeline, shiftTimesheetRows } from "../utils/techShift.js";
+import { SHIFT_REMIND_HOURS, buildShiftTimeline, shiftTimesheetRows } from "../utils/techShift.js";
 
 const PORTAL_ROLES = ["artisan", "supervisor", "workshop_admin", "admin", "plant_manager", "site_manager"];
 const LEAD_ROLES = ["supervisor", "workshop_admin", "admin", "plant_manager", "site_manager"];
@@ -214,11 +214,13 @@ export default async function techRoutes(app) {
         notifications.push({ kind: "parts", wo_id: r.work_order_id, part: r.part_name || r.part_code, text: `Part arrived for WO #${r.work_order_id}: ${r.part_name || r.part_code}` });
       }
     }
+    // A shift open for longer than a working day was probably never submitted.
+    const shiftHoursOpen = shift ? (Date.now() - Date.parse(shift.started_at)) / 3600000 : 0;
     return {
       ok: true,
       user: { username: me, name: fullName(me) },
       day: today,
-      shift,
+      shift: shift ? { ...shift, hours_open: Number(shiftHoursOpen.toFixed(1)), overdue: shiftHoursOpen >= SHIFT_REMIND_HOURS } : null,
       last_submitted_shift: lastSubmitted,
       current: currentCard
         ? { ...currentCard, state: running.state, since: running.start, running_minutes: Math.round(segmentHours({ start: running.start, end: nowIso }) * 60) }
@@ -634,7 +636,7 @@ export default async function techRoutes(app) {
       db.prepare(`UPDATE tech_shifts SET ended_at = ?, status = 'submitted', submitted_at = ? WHERE id = ?`).run(at, at, shift.id);
       const view = shiftView({ ...shift, ended_at: at, status: "submitted" }, me);
       // The shift's job time goes to the mechanics timesheet (decided: job + timesheet).
-      const rows = shiftTimesheetRows(view.timeline, { username: me, technicianName: fullName(me), day: localDay(shift.started_at) });
+      const rows = shiftTimesheetRows(view.timeline, { technicianName: fullName(me), day: localDay(shift.started_at), shiftStart: shift.started_at });
       let written = 0;
       if (rows.length && hasTable(db, "mechanic_labor_entries")) {
         // Same additive columns the timesheet screen adds on first use.

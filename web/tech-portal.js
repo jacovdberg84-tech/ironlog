@@ -334,6 +334,11 @@
         </div>
         ${d.shift ? `<button type="button" class="tp-btn sm" data-go="shift">${esc(T("Shift report"))}</button>` : `<button type="button" class="tp-btn sm primary" data-act="shiftStart">${esc(T("Start shift"))}</button>`}
       </div>
+      ${d.shift?.overdue ? `
+        <div class="tp-note warn-shift" data-go="shift">
+          <b>${esc(T("Your shift report from {t} is not submitted yet.", { t: dayTime(d.shift.started_at) }))}</b>
+          <div class="small">${esc(T("Submit it now so your job time reaches the timesheet. Your next job then starts a new shift."))}</div>
+        </div>` : ""}
       ${cur ? `
         <div class="tp-current" data-open="${cur.id}">
           <div class="tp-muted small">${esc(T(cur.state === "testing" ? "Testing now" : "Working on now"))}</div>

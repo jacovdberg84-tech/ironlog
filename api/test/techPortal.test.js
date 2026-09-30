@@ -70,6 +70,37 @@ test("a night shift across midnight is one report and one timesheet row per job"
   assert.ok(rows.every((r) => r.work_date === "2026-09-29" && r.reason.startsWith("WO #")));
 });
 
+test("a report left open into the next day puts that day's work on its own date", () => {
+  const segs = buildSegments([
+    ev(9, "jose", "start", "2026-09-29T05:00:00.000Z"), // 07:00 local, day 1
+    ev(9, "jose", "pause", "2026-09-29T08:00:00.000Z"),
+    ev(9, "jose", "resume", "2026-09-30T06:00:00.000Z"), // next morning, report never submitted
+    ev(9, "jose", "complete", "2026-09-30T08:00:00.000Z"),
+  ], { until: "2026-09-30T09:00:00.000Z" });
+  const wos = new Map([[9, { asset_code: "L05AM", job: "Bucket teeth", source: "manual" }]]);
+  const timeline = buildShiftTimeline(segs, { from: "2026-09-29T04:30:00.000Z", to: "2026-09-30T09:00:00.000Z", workOrders: wos });
+  const rows = shiftTimesheetRows(timeline, { technicianName: "Jose M", day: "2026-09-29", shiftStart: "2026-09-29T04:30:00.000Z" });
+  assert.deepEqual(rows.map((r) => [r.work_date, r.hours, r.category]), [["2026-09-29", 3, "Maintenance"], ["2026-09-30", 2, "Maintenance"]]);
+});
+
+test("shift reports open for more than 12 hours are listed for the foreman", async () => {
+  const { overdueShifts } = await import("../utils/techShift.js");
+  const Database = (await import("better-sqlite3")).default;
+  const mem = new Database(":memory:");
+  mem.exec(`
+    CREATE TABLE tech_shifts (id INTEGER PRIMARY KEY, username TEXT, site_code TEXT, started_at TEXT, status TEXT);
+    CREATE TABLE users (username TEXT, full_name TEXT);
+    INSERT INTO users VALUES ('jose', 'Jose Mabunda');
+    INSERT INTO tech_shifts VALUES
+      (1, 'jose', 'main', '2026-09-29T05:00:00.000Z', 'open'),
+      (2, 'maria', 'main', '2026-09-30T05:00:00.000Z', 'open'),
+      (3, 'pedro', 'main', '2026-09-28T05:00:00.000Z', 'submitted'),
+      (4, 'ana', 'other', '2026-09-28T05:00:00.000Z', 'open');
+  `);
+  const rows = overdueShifts(mem, { site: "main", now: new Date("2026-09-30T09:00:00.000Z") });
+  assert.deepEqual(rows.map((r) => [r.name, r.hours_open]), [["Jose Mabunda", 28]]);
+});
+
 test("offline timestamps are accepted only within a sane window", () => {
   const now = new Date("2026-09-30T10:00:00.000Z");
   assert.equal(eventTime("2026-09-30T08:00:00.000Z", now), "2026-09-30T08:00:00.000Z");

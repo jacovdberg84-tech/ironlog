@@ -206,3 +206,4 @@ select.tp-input { width: auto; flex: 1; }
 .lang-switch button { background: none; border: 0; color: var(--muted); padding: 6px 10px; font-size: 0.8rem; font-weight: 700; cursor: pointer; }
 .lang-switch button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
 .brand-block .lang-switch { margin-top: 10px; }
+.tp-note.warn-shift { background: rgba(239, 68, 68, 0.16); border-color: var(--danger); }
