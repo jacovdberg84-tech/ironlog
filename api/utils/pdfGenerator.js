@@ -100,7 +100,7 @@ function drawManagementHeaderFooter(doc, opts = {}) {
   const pageCount = Math.max(1, Number(opts.pageCount || 1));
   const title = String(opts.managementTitle || opts.title || "DAILY OPERATIONS").trim();
   const subtitle = String(opts.subtitle || "").trim();
-  const sourceText = String(opts.sourceText || "Source: IRONLOG").trim();
+  const sourceText = String(opts.sourceText || "").trim();
 
   doc.save();
   doc.rect(0, 0, doc.page.width, 64).fill(MANAGEMENT.header);
