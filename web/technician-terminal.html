@@ -16,20 +16,21 @@
     })();
   </script>
   <link rel="stylesheet" href="./technician-terminal.css?v=3" />
-  <link rel="stylesheet" href="./tech-portal.css?v=1" />
+  <link rel="stylesheet" href="./tech-portal.css?v=2" />
 </head>
 <body>
   <div id="loginScreen" class="screen">
     <div class="shell shell-wide">
       <div class="brand-block">
         <div class="brand-mark">IL</div>
-        <h1>Technician Portal</h1>
-        <p class="muted">Tap your name, then enter your PIN</p>
+        <h1 data-t="Technician Portal">Technician Portal</h1>
+        <p class="muted" data-t="Tap your name, then enter your PIN">Tap your name, then enter your PIN</p>
+        <div class="lang-switch" role="group" aria-label="Language"><button type="button" data-lang="en">EN</button><button type="button" data-lang="pt">PT</button></div>
       </div>
 
       <div id="pinLoginPanel" class="card">
         <div id="pinRoster" class="pin-roster">
-          <div class="muted small">Loading technicians…</div>
+          <div class="muted small" data-t="Loading technicians…">Loading technicians…</div>
         </div>
         <div id="pinSelectedUser" class="pin-selected muted small hidden">Select your name above</div>
         <div class="pin-display" id="pinDisplay" aria-live="polite">····</div>
@@ -43,49 +44,50 @@
           <button type="button" class="pin-key" data-digit="7">7</button>
           <button type="button" class="pin-key" data-digit="8">8</button>
           <button type="button" class="pin-key" data-digit="9">9</button>
-          <button type="button" class="pin-key pin-key-muted" id="pinClearBtn">Clear</button>
+          <button type="button" class="pin-key pin-key-muted" id="pinClearBtn" data-t="Clear">Clear</button>
           <button type="button" class="pin-key" data-digit="0">0</button>
           <button type="button" class="pin-key pin-key-muted" id="pinBackBtn">⌫</button>
         </div>
-        <button type="button" id="pinSubmitBtn" class="btn primary full" disabled>Sign in with PIN</button>
+        <button type="button" id="pinSubmitBtn" class="btn primary full" disabled data-t="Sign in with PIN">Sign in with PIN</button>
         <div id="pinLoginError" class="error"></div>
       </div>
 
       <div class="login-toggle-row">
-        <button type="button" id="showPasswordLoginBtn" class="btn ghost sm">Use username &amp; password</button>
+        <button type="button" id="showPasswordLoginBtn" class="btn ghost sm" data-t="Use username &amp; password">Use username &amp; password</button>
       </div>
 
       <div id="passwordLoginPanel" class="card hidden">
         <label class="field">
-          <span>Username</span>
+          <span data-t="Username">Username</span>
           <input id="loginUsername" type="text" autocomplete="username" placeholder="e.g. jsmith" />
         </label>
         <label class="field">
-          <span>Password</span>
+          <span data-t="Password">Password</span>
           <input id="loginPassword" type="password" autocomplete="current-password" placeholder="Your password" />
         </label>
         <label class="chk">
           <input id="loginRemember" type="checkbox" checked />
-          <span>Remember this device</span>
+          <span data-t="Remember this device">Remember this device</span>
         </label>
-        <button type="button" id="loginBtn" class="btn primary full">Sign in</button>
+        <button type="button" id="loginBtn" class="btn primary full" data-t="Sign in">Sign in</button>
         <div id="loginError" class="error"></div>
-        <button type="button" id="showPinLoginBtn" class="btn ghost sm full" style="margin-top:10px;">← Back to PIN</button>
+        <button type="button" id="showPinLoginBtn" class="btn ghost sm full" style="margin-top:10px;" data-t="← Back to PIN">← Back to PIN</button>
       </div>
 
-      <p class="foot muted">Supervisors set PINs in <strong>User Admin</strong>. PIN is 4–6 digits.</p>
+      <p class="foot muted" data-t="Supervisors set PINs in User Admin. PIN is 4–6 digits.">Supervisors set PINs in User Admin. PIN is 4–6 digits.</p>
     </div>
   </div>
 
   <div id="appScreen" class="screen hidden">
     <header class="top">
       <div>
-        <div class="top-title">Technician portal</div>
+        <div class="top-title" data-t="Technician portal">Technician portal</div>
         <div id="sessionLabel" class="top-sub muted">—</div>
       </div>
       <div class="top-actions">
+        <div class="lang-switch" role="group" aria-label="Language"><button type="button" data-lang="en">EN</button><button type="button" data-lang="pt">PT</button></div>
         <button type="button" id="refreshJobsBtn" class="btn ghost sm" title="Refresh">↻</button>
-        <button type="button" id="logoutBtn" class="btn ghost sm">Sign out</button>
+        <button type="button" id="logoutBtn" class="btn ghost sm" data-t="Sign out">Sign out</button>
       </div>
     </header>
 
@@ -95,10 +97,10 @@
       <div id="tpSheet" class="tp-sheet hidden"></div>
       <div id="tpToast" class="tp-toast"></div>
       <nav class="tp-tabs">
-        <button type="button" class="tp-tab" data-go="today"><span>▦</span>Today</button>
-        <button type="button" class="tp-tab" data-go="shift"><span>◷</span>Shift</button>
-        <button type="button" class="tp-tab" data-go="week"><span>▤</span>Week</button>
-        <button type="button" class="tp-tab" data-go="scan"><span>⌗</span>Machine</button>
+        <button type="button" class="tp-tab" data-go="today"><span>▦</span><b data-t="Today">Today</b></button>
+        <button type="button" class="tp-tab" data-go="shift"><span>◷</span><b data-t="Shift">Shift</b></button>
+        <button type="button" class="tp-tab" data-go="week"><span>▤</span><b data-t="Week">Week</b></button>
+        <button type="button" class="tp-tab" data-go="scan"><span>⌗</span><b data-t="Machine">Machine</b></button>
       </nav>
     </div>
 
@@ -119,7 +121,8 @@
 
   <script src="./auth-shared.js?v=5"></script>
   <script src="./notify-banner.js?v=3"></script>
-  <script src="./tech-portal.js?v=1"></script>
-  <script src="./technician-terminal.js?v=6"></script>
+  <script src="./tech-portal-pt.js?v=1"></script>
+  <script src="./tech-portal.js?v=2"></script>
+  <script src="./technician-terminal.js?v=7"></script>
 </body>
 </html>
