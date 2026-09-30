@@ -267,20 +267,29 @@ export function drawHeaderFooter(doc, opts = {}) {
 /**
  * PDF builder wrapper (buffer output)
  */
+/**
+ * File properties (Title, Author, Creator, Producer) shown by PDF viewers. They
+ * carry the company from Admin > PDF report settings instead of the library
+ * name, so a report sent to management is branded as the company's own.
+ */
+export function pdfDocumentInfo(opts = {}, { companyName = "", siteName = "" } = {}) {
+  const owner = companyName || siteName;
+  const rawTitle = String(opts.managementTitle || opts.title || "").trim();
+  const title = rawTitle && rawTitle.toUpperCase() !== "IRONLOG" ? rawTitle : "";
+  const info = { Title: [title, String(opts.subtitle || "").trim()].filter(Boolean).join(" — ") || "Report" };
+  if (owner) {
+    info.Author = owner;
+    info.Creator = owner;
+    info.Producer = owner;
+  } else {
+    info.Creator = "Maintenance reporting";
+    info.Producer = "Maintenance reporting";
+  }
+  return info;
+}
+
 export function buildPdfBuffer(buildFn, opts = {}) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({
-      size: "A4",
-      layout: opts.layout === "portrait" ? "portrait" : "landscape",
-      margins: DEFAULT_MARGINS,
-      bufferPages: true,
-    });
-
-    const chunks = [];
-    doc.on("data", (c) => chunks.push(c));
-    doc.on("end", () => resolve(Buffer.concat(chunks)));
-    doc.on("error", reject);
-
     let branding = { company_name: "", site_name: "" };
     try {
       branding = getPdfReportBranding(opts.db || db);
@@ -290,6 +299,19 @@ export function buildPdfBuffer(buildFn, opts = {}) {
 
     const companyName = String(opts.companyName || branding.company_name || "").trim();
     const siteName = String(opts.siteName || branding.site_name || "").trim();
+
+    const doc = new PDFDocument({
+      size: "A4",
+      layout: opts.layout === "portrait" ? "portrait" : "landscape",
+      margins: DEFAULT_MARGINS,
+      bufferPages: true,
+      info: pdfDocumentInfo(opts, { companyName, siteName }),
+    });
+
+    const chunks = [];
+    doc.on("data", (c) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
     const logoPath = String(opts.logoPath || resolvePdfCompanyLogoAbs(opts.db || db) || "").trim();
     const rawTitle = String(opts.title || "").trim();
     const headerTitle = companyName || (rawTitle && rawTitle.toUpperCase() !== "IRONLOG" ? rawTitle : "IRONLOG");
