@@ -508,13 +508,39 @@ export default async function techRoutes(app) {
     return { ok: true, rows: rows.map((r) => ({ part_code: r.part_code, part_name: r.part_name, on_hand: stock.get(r.id)?.on_hand ?? 0, bin: stock.get(r.id)?.bin || null })) };
   });
 
-  // Helpers on a job (foreman / supervisor).
+  // Helpers on a job: list (anyone who can see the job), add/remove (foreman / supervisor).
+  app.get("/workorders/:id/helpers", async (req, reply) => {
+    const acc = accessTo(req, req.params.id);
+    if (acc.error) return reply.code(acc.error).send({ ok: false, error: acc.error === 404 ? "Work order not found" : "This job is not assigned to you" });
+    const nowIso = new Date().toISOString();
+    const segs = buildSegments(eventsFor(db, [acc.wo.id]), { until: nowIso });
+    const states = stateMap(acc.wo.id);
+    const helpers = db.prepare(`SELECT username, added_by, added_at FROM work_order_technicians WHERE work_order_id = ? ORDER BY id`).all(acc.wo.id)
+      .map((h) => ({
+        ...h,
+        name: fullName(h.username),
+        state: states[h.username] || "idle",
+        state_label: STATE_LABELS[states[h.username] || "idle"],
+        hours: labourHours(segs.filter((x) => x.username.toLowerCase() === h.username.toLowerCase())),
+      }));
+    return { ok: true, lead: acc.wo.assigned_artisan_name || null, helpers, can_edit: roleOk(req, LEAD_ROLES) };
+  });
+
   app.post("/workorders/:id/helpers", async (req, reply) => {
     if (!roleOk(req, LEAD_ROLES)) return reply.code(403).send({ ok: false, error: "Only a foreman or supervisor adds helpers." });
-    const username = String(req.body?.username || "").trim();
-    if (!username) return reply.code(400).send({ ok: false, error: "username is required" });
-    const wo = db.prepare(`SELECT id FROM work_orders WHERE id = ?`).get(Number(req.params.id));
+    const wanted = String(req.body?.username || "").trim();
+    if (!wanted) return reply.code(400).send({ ok: false, error: "username is required" });
+    const wo = db.prepare(`SELECT id, assigned_artisan_name FROM work_orders WHERE id = ?`).get(Number(req.params.id));
     if (!wo) return reply.code(404).send({ ok: false, error: "Work order not found" });
+    // A helper is a real user (picked by username or full name), so their time and jobs line up.
+    const user = hasTable(db, "users")
+      ? db.prepare(`SELECT username FROM users WHERE COALESCE(active, 1) = 1 AND (LOWER(username) = LOWER(?) OR LOWER(TRIM(full_name)) = LOWER(?)) LIMIT 1`).get(wanted, wanted)
+      : null;
+    if (!user) return reply.code(400).send({ ok: false, error: `No active user '${wanted}'. Add the technician in Workshop technicians first.` });
+    const username = user.username;
+    if (technicianMatchesUser(db, wo.assigned_artisan_name, username)) {
+      return reply.code(400).send({ ok: false, error: `${fullName(username)} already leads this job.` });
+    }
     db.prepare(`INSERT OR IGNORE INTO work_order_technicians (work_order_id, username, added_by) VALUES (?, ?, ?)`).run(wo.id, username, userOf(req));
     writeAudit(db, req, { module: "tech", action: "tech.helper_add", entity_type: "work_order", entity_id: String(wo.id), payload: { username } });
     return { ok: true };

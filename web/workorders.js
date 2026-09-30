@@ -8,6 +8,7 @@ let currentDetailWorkOrderId = null;
 let lastWorkOrderDetail = null;
 let stockCatalogCache = [];
 let technicianOptions = [];
+let techniciansReady = Promise.resolve();
 let lastCreatedRepairWoId = null;
 
 const WORKSHOP_LEAD_ROLES = ["admin", "supervisor", "workshop_admin"];
@@ -730,6 +731,7 @@ function renderDetail(payload) {
           <div><dt>Supervisor sign-off</dt><dd>${escapeHtml(wo.supervisor_name || "Pending")}</dd></div>
           <div><dt>Reference</dt><dd>${wo.reference_id ?? "-"}</dd></div>
         </dl>
+        <div class="wo-helpers" id="woHelpers" data-wo-id="${wo.id}"><span class="muted small">Loading helpers…</span></div>
       </section>
     </div>
 
@@ -1086,6 +1088,7 @@ async function loadWorkOrderDetail(id) {
     }
     lastWorkOrderDetail = data;
     detailEl.innerHTML = renderDetail(data);
+    loadWorkOrderHelpers(woId).catch(() => {});
     const title = document.getElementById("woDrawerTitle");
     if (title) title.textContent = `WO #${woId} • ${data.work_order?.asset_code || ""}`;
     const docs = document.getElementById("woDrawerDocs");
@@ -1354,6 +1357,75 @@ async function saveWorkshopTechnician() {
     }
   } finally {
     if (btn) btn.disabled = false;
+  }
+}
+
+// Helpers: technicians who work on a job with the assigned (lead) technician.
+// They log their own time in the Technician portal; the lead completes the job.
+const HELPER_STATE = {
+  idle: "not started",
+  active: "working",
+  testing: "testing",
+  paused: "paused",
+  waiting_parts: "waiting for parts",
+  waiting_ops: "waiting for operations",
+  done: "finished",
+};
+
+async function loadWorkOrderHelpers(woId) {
+  const host = document.getElementById("woHelpers");
+  if (!host || Number(host.dataset.woId) !== Number(woId)) return;
+  let data;
+  try {
+    data = await fetchJson(`${API}/tech/workorders/${woId}/helpers`, { headers: authHeaders() });
+  } catch {
+    host.innerHTML = "";
+    return;
+  }
+  await techniciansReady;
+  if (Number(host.dataset.woId) !== Number(woId)) return;
+  const status = String(lastWorkOrderDetail?.work_order?.status || "").toLowerCase();
+  const editable = data.can_edit && !["approved", "closed"].includes(status);
+  const helpers = Array.isArray(data.helpers) ? data.helpers : [];
+  const taken = new Set(helpers.map((h) => String(h.username).toLowerCase()));
+  const lead = String(data.lead || "").toLowerCase();
+  const options = (Array.isArray(technicianOptions) ? technicianOptions : [])
+    .map((t) => ({ username: String(t.username || t || "").trim(), label: String(t.label || t.username || t || "").trim() }))
+    .filter((t) => t.username && !taken.has(t.username.toLowerCase()) && t.username.toLowerCase() !== lead && t.label.toLowerCase() !== lead);
+  host.innerHTML = `
+    <strong>Helpers</strong>
+    ${helpers.length
+      ? `<ul class="wo-helper-list">${helpers.map((h) => `
+          <li>
+            <span>${escapeHtml(h.name || h.username)}</span>
+            <span class="muted small">${escapeHtml(HELPER_STATE[h.state] || h.state)}${Number(h.hours) > 0 ? ` · ${Number(h.hours).toFixed(1)} h` : ""}</span>
+            ${editable ? `<button type="button" class="link-btn" data-helper-remove="${escapeHtml(h.username)}">Remove</button>` : ""}
+          </li>`).join("")}</ul>`
+      : `<div class="muted small">No helpers. The assigned technician works alone.</div>`}
+    ${editable ? `
+      <div class="wo-helper-add">
+        <select id="woHelperSelect">
+          <option value="">Add a helper…</option>
+          ${options.map((t) => `<option value="${escapeHtml(t.username)}">${escapeHtml(t.label)}</option>`).join("")}
+        </select>
+        <button type="button" data-helper-add="${woId}">Add helper</button>
+      </div>
+      <div class="muted small">Helpers log their own time in the Technician portal. The assigned technician completes the job.</div>
+      <div class="muted small" id="woHelperMsg"></div>` : ""}`;
+}
+
+async function changeWorkOrderHelper(woId, username, remove) {
+  const msg = document.getElementById("woHelperMsg");
+  try {
+    await fetchJson(
+      remove ? `${API}/tech/workorders/${woId}/helpers/${encodeURIComponent(username)}` : `${API}/tech/workorders/${woId}/helpers`,
+      remove
+        ? { method: "DELETE", headers: authHeaders() }
+        : { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ username }) }
+    );
+    await loadWorkOrderHelpers(woId);
+  } catch (err) {
+    if (msg) msg.textContent = err.message || String(err);
   }
 }
 
@@ -1942,6 +2014,18 @@ document.addEventListener("DOMContentLoaded", () => {
       const closeSource = target.getAttribute("data-close-source");
       const saveProgressId = target.getAttribute("data-wo-save-progress");
       const saveCostsId = target.getAttribute("data-wo-save-costs");
+      const helperAddId = target.getAttribute("data-helper-add");
+      const helperRemove = target.getAttribute("data-helper-remove");
+      if (helperAddId) {
+        const username = String(document.getElementById("woHelperSelect")?.value || "").trim();
+        if (username) changeWorkOrderHelper(helperAddId, username, false);
+        return;
+      }
+      if (helperRemove) {
+        const woId = document.getElementById("woHelpers")?.dataset.woId;
+        if (woId) changeWorkOrderHelper(woId, helperRemove, true);
+        return;
+      }
       if (issueId) {
         currentDetailWorkOrderId = Number(issueId);
         issueToWorkOrder();
@@ -1985,7 +2069,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadEquipmentTypeOptions().catch(() => {});
   fetchWorkOrders();
   loadInspectionQuality();
-  loadTechnicians().catch(() => {});
+  techniciansReady = loadTechnicians().catch(() => {});
   if (isSupervisorRole(getSessionRole())) {
     loadTechnicianRoster().catch(() => {});
     loadRepairAssetOptions().catch(() => {});
