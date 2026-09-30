@@ -89,10 +89,14 @@ export function ollamaNativeChatUrl(openAiUrl) {
   return `${u.origin}/api/chat`;
 }
 
-/** Context window for Borris on Ollama (tokens). BORRIS_NUM_CTX overrides; 0 keeps the model default. */
+/**
+ * Context window for Borris on Ollama (tokens). Off (0) unless BORRIS_NUM_CTX is
+ * set: a different window makes Ollama reload the model with more memory, which
+ * a small server may not have. 0 keeps the model's own default.
+ */
 export function borrisNumCtx() {
-  const n = Number(process.env.BORRIS_NUM_CTX ?? 8192);
-  return Number.isFinite(n) && n >= 0 ? Math.min(131072, Math.round(n)) : 8192;
+  const n = Number(process.env.BORRIS_NUM_CTX ?? 0);
+  return Number.isFinite(n) && n > 0 ? Math.min(131072, Math.round(n)) : 0;
 }
 
 /**
