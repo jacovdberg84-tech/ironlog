@@ -845,13 +845,11 @@ async function fetchJson(url, opts) {
   }
 
   if (!res.ok) {
-    if (res.status === 401 && LOGIN_GATE_ENABLED) {
-      const had = Boolean(getAuthToken());
-      clearAuthSession();
-      if (had) {
-        showLoginGate(true);
-        updateAuthChrome();
-      }
+    if (res.status === 401 && LOGIN_GATE_ENABLED && !String(url).includes("/api/auth/login")) {
+      // No valid sign-in (expired, or signed out in another tab of this browser):
+      // bring back the sign-in screen instead of showing a raw "login required".
+      promptSignInAgain();
+      throw Object.assign(new Error("Your sign-in has ended. Please sign in again, then repeat this step."), { status: 401 });
     }
     if ([502,503,504,524].includes(res.status)) throw new Error('Ironlog took too long to respond or is temporarily unavailable. Please retry shortly.');
     const message = typeof data.error === 'string' ? data.error : typeof data.message === 'string' ? data.message : '';
@@ -883,13 +881,11 @@ async function openAuthedPdf(url, fallbackName = "ironlog-report.pdf") {
   const res = await fetch(url, { headers: authHeaders() });
   const blob = await res.blob();
   if (!res.ok) {
-    if (res.status === 401 && LOGIN_GATE_ENABLED) {
-      const had = Boolean(getAuthToken());
-      clearAuthSession();
-      if (had) {
-        showLoginGate(true);
-        updateAuthChrome();
-      }
+    if (res.status === 401 && LOGIN_GATE_ENABLED && !String(url).includes("/api/auth/login")) {
+      // No valid sign-in (expired, or signed out in another tab of this browser):
+      // bring back the sign-in screen instead of showing a raw "login required".
+      promptSignInAgain();
+      throw Object.assign(new Error("Your sign-in has ended. Please sign in again, then repeat this step."), { status: 401 });
     }
     let msg = await blob.text().catch(() => "");
     try {
@@ -1653,6 +1649,25 @@ function initSessionControls() {
   );
 }
 
+/** Session gone while the page was open: show the sign-in screen with a short note. */
+var signedInOnThisPage = false; // var: read by functions that may run before this line
+
+function promptSignInAgain() {
+  const alreadyShown = qs("loginOverlay")?.style.display === "flex";
+  const wasSignedIn = signedInOnThisPage;
+  clearAuthSession();
+  showLoginGate(true);
+  updateAuthChrome();
+  const msg = qs("loginError");
+  if (msg && !alreadyShown && wasSignedIn) msg.textContent = "Your sign-in has ended (for example you signed out in another tab). Please sign in again.";
+}
+
+// Signing out in another tab of this browser (e.g. the Technician portal) removes
+// the shared sign-in; react straight away rather than on the next save.
+window.addEventListener("storage", (e) => {
+  if (e.key === TOKEN_KEY && e.oldValue && !e.newValue && LOGIN_GATE_ENABLED) promptSignInAgain();
+});
+
 function showLoginGate(on) {
   const el = qs("loginOverlay");
   if (!el) return;
@@ -1662,6 +1677,7 @@ function showLoginGate(on) {
 
 function updateAuthChrome() {
   const tok = getAuthToken();
+  signedInOnThisPage = Boolean(tok);
   const userEl = qs("sessionUser");
   const roleEl = qs("sessionRole");
   const applyBtn = qs("applySessionRole");
