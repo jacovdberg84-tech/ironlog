@@ -50,6 +50,19 @@ import {
   workOrderParts,
 } from "../utils/techPortal.js";
 import { SHIFT_REMIND_HOURS, buildShiftTimeline, shiftTimesheetRows } from "../utils/techShift.js";
+import {
+  OTHER_REASONS,
+  ensureOtherTimeSchema,
+  otherBlocks,
+  otherHours,
+  otherTimesheetRows,
+  runningOther,
+  startOther,
+  stopOther,
+} from "../utils/techOtherTime.js";
+
+// First line of the job card on work orders a technician opens for unplanned work.
+export const UNPLANNED_MARK = "Unplanned work (logged by technician)";
 
 const PORTAL_ROLES = ["artisan", "supervisor", "workshop_admin", "admin", "plant_manager", "site_manager"];
 const LEAD_ROLES = ["supervisor", "workshop_admin", "admin", "plant_manager", "site_manager"];
@@ -101,6 +114,7 @@ async function once(req, kind, fn) {
 
 export default async function techRoutes(app) {
   ensureTechSchema(db);
+  ensureOtherTimeSchema(db);
   await app.register(multipart, { limits: { fileSize: 15 * 1024 * 1024, files: 1 } });
   const photoDir = path.join(getDataRoot(), "uploads", "work-order-photos");
   fs.mkdirSync(photoDir, { recursive: true });
@@ -237,9 +251,88 @@ export default async function techRoutes(app) {
       },
       hours_today: labourHours(mySegs, { from: dayStart }),
       available_count: availableWorkOrders(db, { site: getSiteCode(req) }).length,
+      other_running: (() => {
+        const o = runningOther(db, me);
+        return o ? { reason: o.reason, reason_label: OTHER_REASONS[o.reason] || o.reason, note: o.note, since: o.started_at } : null;
+      })(),
       notifications: notifications.slice(0, 6),
       events_seen: events.length,
     };
+  });
+
+  // ---------------------------------------------------------------- Other time
+  // Time not on a machine: housekeeping, training, meetings, travel, waiting.
+  function ensureShiftOpen(me, req, at) {
+    if (!openShift(me)) db.prepare(`INSERT INTO tech_shifts (username, site_code, started_at) VALUES (?, ?, ?)`).run(me, getSiteCode(req), at);
+  }
+
+  app.post("/other/start", async (req, reply) => {
+    const result = await once(req, "other_start", async () => {
+      const me = userOf(req);
+      const reason = String(req.body?.reason || "").trim();
+      if (!OTHER_REASONS[reason]) return { ok: false, status: 400, error: `reason must be one of ${Object.keys(OTHER_REASONS).join(", ")}` };
+      const note = String(req.body?.note || "").trim().slice(0, 300) || null;
+      if (reason === "other" && !note) return { ok: false, status: 400, error: "Say what the other work was." };
+      const at = eventTime(req.body?.at);
+      // One thing at a time: a running job is paused.
+      const paused = pauseOtherJobs(me, 0, at);
+      ensureShiftOpen(me, req, at);
+      const started = startOther(db, { username: me, site: getSiteCode(req), reason, note, at });
+      writeAudit(db, req, { module: "tech", action: "tech.other_start", entity_type: "tech_other_time", entity_id: String(started.id), payload: { reason, note, at } });
+      return { ok: true, ...started, paused_jobs: paused };
+    });
+    if (result?.ok === false) return reply.code(result.status || 400).send(result);
+    return result;
+  });
+
+  app.post("/other/stop", async (req) => {
+    return once(req, "other_stop", async () => {
+      const stopped = stopOther(db, userOf(req), eventTime(req.body?.at));
+      return { ok: true, stopped: Boolean(stopped), id: stopped?.id || null };
+    });
+  });
+
+  // ---------------------------------------------------------------- Unplanned job on a machine
+  // Work on a machine with no work order (adjustment, greasing, quick fix): a
+  // work order is opened for it straight away, assigned to the technician and
+  // started, so its time, parts and cost land on the machine. Not a breakdown,
+  // so downtime and availability are not touched. The foreman signs it off on
+  // the board like any job.
+  app.post("/unplanned", async (req, reply) => {
+    const result = await once(req, "unplanned", async () => {
+      const me = userOf(req);
+      const code = String(req.body?.asset_code || "").trim();
+      const description = String(req.body?.description || "").trim().slice(0, 500);
+      const component = String(req.body?.component || "").trim().slice(0, 100);
+      if (!description) return { ok: false, status: 400, error: "Say what work you are doing." };
+      const asset = db.prepare(`SELECT id, asset_code FROM assets WHERE UPPER(asset_code) = UPPER(?)`).get(code);
+      if (!asset) return { ok: false, status: 404, error: "Machine not found" };
+      const at = eventTime(req.body?.at);
+      const jobDescription = `${UNPLANNED_MARK}\n- ${[component, description].filter(Boolean).join(" — ")}`;
+      const cols = ["asset_id", "source", "status", "opened_at", "assigned_artisan_name", "assigned_at", "assigned_by", "job_description"];
+      const vals = [asset.id, "manual", "assigned", at.replace("T", " ").slice(0, 19), me, at.replace("T", " ").slice(0, 19), me, jobDescription];
+      if (hasColumn(db, "work_orders", "site_code")) { cols.push("site_code"); vals.push(getSiteCode(req)); }
+      const ins = db.prepare(`INSERT INTO work_orders (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`).run(...vals);
+      const woId = Number(ins.lastInsertRowid);
+      writeAudit(db, req, {
+        module: "workorders",
+        action: "create",
+        entity_type: "work_order",
+        entity_id: woId,
+        payload: { source: "manual", unplanned: true, asset_code: asset.asset_code, assigned_artisan_name: me, via: "technician_portal" },
+      });
+      // Start it through the normal action (status route, timer, pauses other work).
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/tech/workorders/${woId}/action`,
+        headers: forwardHeaders(req),
+        payload: { action: "start", at },
+      });
+      const started = res.statusCode < 400;
+      return { ok: true, work_order_id: woId, started, start_error: started ? null : res.json()?.error || null };
+    });
+    if (result?.ok === false) return reply.code(result.status || 400).send(result);
+    return result;
   });
 
   // ---------------------------------------------------------------- Pick up a job
@@ -440,6 +533,7 @@ export default async function techRoutes(app) {
       } else {
         if (action === "start" || action === "resume") {
           pauseOtherJobs(me, woId, at);
+          stopOther(db, me, at); // back on a job: other time stops
           // The first job of the day opens the shift when Start shift was not tapped.
           if (!db.prepare(`SELECT 1 FROM tech_shifts WHERE LOWER(username) = LOWER(?) AND status = 'open'`).get(me)) {
             db.prepare(`INSERT INTO tech_shifts (username, site_code, started_at) VALUES (?, ?, ?)`).run(me, getSiteCode(req), at);
@@ -630,11 +724,14 @@ export default async function techRoutes(app) {
       SELECT f.id, f.work_order_id, f.kind, f.text, f.at FROM tech_findings f
       WHERE LOWER(f.username) = LOWER(?) AND f.at >= ? AND f.at <= ? ORDER BY f.at
     `).all(me, shift.started_at, until);
+    const other = otherBlocks(db, me, { from: shift.started_at, to: until });
     return {
       ...shift,
       timeline: buildShiftTimeline(buildSegments(events, { until }), { from: shift.started_at, to: until, workOrders: wos }),
       findings_logged: findings,
       hours: labourHours(buildSegments(events, { until }), { from: shift.started_at, to: until }),
+      other,
+      other_hours: otherHours(other),
     };
   }
 
@@ -688,10 +785,13 @@ export default async function techRoutes(app) {
       const events = eventsByUser(db, me, new Date(Date.parse(shift.started_at) - 14 * 86400000).toISOString());
       const running = buildSegments(events, { until: at }).filter((s) => s.open && RUNNING_STATES.has(s.state));
       for (const s of running) insertEvent({ woId: s.work_order_id, username: me, action: "pause", at, note: "Shift ended", auto: 1 });
+      stopOther(db, me, at);
       db.prepare(`UPDATE tech_shifts SET ended_at = ?, status = 'submitted', submitted_at = ? WHERE id = ?`).run(at, at, shift.id);
       const view = shiftView({ ...shift, ended_at: at, status: "submitted" }, me);
       // The shift's job time goes to the mechanics timesheet (decided: job + timesheet).
-      const rows = shiftTimesheetRows(view.timeline, { technicianName: fullName(me), day: localDay(shift.started_at), shiftStart: shift.started_at });
+      const rowOpts = { technicianName: fullName(me), day: localDay(shift.started_at), shiftStart: shift.started_at };
+      // Job time per work order, plus other (non-machine) time under WORKSHOP (decided: timesheet too).
+      const rows = [...shiftTimesheetRows(view.timeline, rowOpts), ...otherTimesheetRows(view.other, rowOpts)];
       let written = 0;
       if (rows.length && hasTable(db, "mechanic_labor_entries")) {
         // Same additive columns the timesheet screen adds on first use.
@@ -704,7 +804,7 @@ export default async function techRoutes(app) {
         for (const r of rows) {
           const cols = ["work_date", "technician_name", "hours", "asset_code", "reason", "site_code", "created_by"];
           const vals = [r.work_date, r.technician_name, r.hours, r.asset_code, r.reason, getSiteCode(req), `portal:${me}`];
-          if (hasJobCard) { cols.push("job_card_no"); vals.push(String(r.work_order_id)); }
+          if (hasJobCard) { cols.push("job_card_no"); vals.push(r.work_order_id ? String(r.work_order_id) : null); }
           if (hasTimes) { cols.push("time_started", "time_finished"); vals.push(r.time_started, r.time_finished); }
           if (hasCategory) { cols.push("category"); vals.push(r.category); }
           db.prepare(`INSERT INTO mechanic_labor_entries (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`).run(...vals);
@@ -712,8 +812,8 @@ export default async function techRoutes(app) {
         }
       }
       db.prepare(`UPDATE tech_shifts SET timesheet_rows = ? WHERE id = ?`).run(written, shift.id);
-      writeAudit(db, req, { module: "tech", action: "tech.shift_submit", entity_type: "tech_shift", entity_id: String(shift.id), payload: { hours: view.hours, timesheet_rows: written } });
-      return { ok: true, shift_id: shift.id, hours: view.hours, timesheet_rows: written, paused_jobs: running.map((s) => s.work_order_id) };
+      writeAudit(db, req, { module: "tech", action: "tech.shift_submit", entity_type: "tech_shift", entity_id: String(shift.id), payload: { hours: view.hours, other_hours: view.other_hours, timesheet_rows: written } });
+      return { ok: true, shift_id: shift.id, hours: view.hours, other_hours: view.other_hours, timesheet_rows: written, paused_jobs: running.map((s) => s.work_order_id) };
     });
     if (result?.ok === false) return reply.code(result.status || 400).send(result);
     return result;

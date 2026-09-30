@@ -117,3 +117,11 @@ Append-only `tech_activity_events` (wo, user, action, at, note, `client_event_id
 ### Migration and rollback
 - New tables only, created with `CREATE TABLE IF NOT EXISTS` at start-up: `tech_activity_events`, `tech_findings`, `work_order_photos`, `work_order_technicians`, `tech_shifts`, `tech_client_events`. The timesheet's optional columns (`category`, `time_started`, `time_finished`, `job_card_no`) are added if missing, as the timesheet screen already does.
 - Rollback: redeploy the previous release. The new tables are then unused; drop them only if wanted. Timesheet rows written by the portal are marked `created_by = 'portal:<user>'` and can be removed with that filter.
+
+## 8. Work without a work order (added 2026-09-30)
+
+### Unplanned job on a machine
+Machine screen → "Log work on this machine" (what, optional part). `POST /api/tech/unplanned` opens a work order straight away (decided: no foreman approval first): source `manual`, job card starting "Unplanned work (logged by technician)", assigned to and started by the technician through the normal action/status route. It is not a breakdown, so downtime and availability are untouched; time, parts and cost land on the machine like any job. The board tags it "Unplanned" and the foreman signs it off as usual. Needs signal; a retry with the same `client_event_id` returns the same work order.
+
+### Other time (not on a machine)
+Today / Shift → "Other time": a timer with a reason (workshop housekeeping, training / toolbox talk, safety meeting, tool and workshop repairs, travel, waiting for work, other + note). Table `tech_other_time` (additive). Starting other time pauses a running job; starting or resuming a job stops the timer; shift submit stops it. The shift report shows the blocks. On submit they go to the mechanics timesheet (decided: timesheet too) as one row per reason and day with asset code `WORKSHOP`, category `Workshop`, no job card. The cost dashboard joins timesheet rows to machines, so WORKSHOP hours never add to a machine's cost; monthly costs count them per technician; the costing view lists them as their own line.

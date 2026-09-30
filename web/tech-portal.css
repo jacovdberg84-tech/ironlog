@@ -207,3 +207,7 @@ select.tp-input { width: auto; flex: 1; }
 .brand-block .lang-switch { margin-top: 10px; }
 .tp-note.warn-shift { background: rgba(239, 68, 68, 0.16); border-color: var(--danger); }
 .tp-pickup { border-style: dashed; border-color: var(--accent); color: #bfdbfe; }
+.tp-current.other { background: linear-gradient(135deg, rgba(148, 163, 184, 0.3), rgba(30, 41, 59, 0.9)); border-color: var(--muted); cursor: default; }
+.tp-reasons { display: grid; gap: 6px; margin: 8px 0; }
+.tp-reason { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.tp-reason input { width: 20px; height: 20px; }

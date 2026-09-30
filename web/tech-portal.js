@@ -131,6 +131,17 @@
   const WO_STATUS = { open: "Open", assigned: "Assigned", in_progress: "In progress", completed: "Completed", approved: "Approved", closed: "Closed" };
   const woStatus = (st) => T(WO_STATUS[String(st || "").toLowerCase()] || String(st || "").replace(/_/g, " "));
 
+  const OTHER_REASONS = {
+    housekeeping: "Workshop housekeeping",
+    training: "Training / toolbox talk",
+    safety_meeting: "Safety meeting",
+    tools: "Tool and workshop repairs",
+    travel: "Travel",
+    waiting: "Waiting for work",
+    other: "Other",
+  };
+  const reasonText = (k) => T(OTHER_REASONS[k] || OTHER_REASONS.other);
+
   const STATE_CLASS = { idle: "idle", active: "active", testing: "active", paused: "paused", waiting_parts: "waiting", waiting_ops: "waiting", done: "done" };
 
   // ------------------------------------------------------------ offline queue
@@ -340,6 +351,14 @@
           <b>${esc(T("Your shift report from {t} is not submitted yet.", { t: dayTime(d.shift.started_at) }))}</b>
           <div class="small">${esc(T("Submit it now so your job time reaches the timesheet. Your next job then starts a new shift."))}</div>
         </div>` : ""}
+      ${d.other_running ? `
+        <div class="tp-current other">
+          <div class="tp-muted small">${esc(T("Other time (not on a machine)"))}</div>
+          <div class="tp-current-asset">${esc(reasonText(d.other_running.reason))}</div>
+          ${d.other_running.note ? `<div>${esc(d.other_running.note)}</div>` : ""}
+          <div class="tp-timer" data-since="${esc(d.other_running.since)}">${esc(since(d.other_running.since))}</div>
+          <div class="tp-row"><button type="button" class="tp-btn" data-act="otherStop">${esc(T("Stop"))}</button></div>
+        </div>` : ""}
       ${cur ? `
         <div class="tp-current" data-open="${cur.id}">
           <div class="tp-muted small">${esc(T(cur.state === "testing" ? "Testing now" : "Working on now"))}</div>
@@ -357,6 +376,10 @@
         <div><b>${d.counts.planned}</b><span>${esc(T("Planned"))}</span></div>
         <div><b>${d.counts.waiting}</b><span>${esc(T("Waiting"))}</span></div>
         <div><b>${d.counts.completed}</b><span>${esc(T("Done today"))}</span></div>
+      </div>
+      <div class="tp-row">
+        <button type="button" class="tp-btn grow" data-act="otherForm">${esc(T("Other time"))}</button>
+        <button type="button" class="tp-btn grow" data-go="scan">${esc(T("Work on a machine"))}</button>
       </div>
       ${d.available_count ? `<button type="button" class="tp-btn full tp-pickup" data-go="available">${esc(N(d.available_count, "Pick up a job — {n} open job nobody has taken", "Pick up a job — {n} open jobs nobody has taken"))}</button>` : ""}
       ${section(T("Urgent"), g.urgent)}
@@ -638,6 +661,10 @@
           <div><b>${esc(t.asset_code || "")}</b> ${esc(t.job || "")} <span class="tp-muted small">${esc(T("WO #{id}", { id: t.work_order_id }))}</span><div class="tp-muted small">${esc(stateText(t.state))} · ${esc(hrs(t.hours))}</div></div>
         </div>`).join("") : `<div class="tp-muted">${esc(T("No job time yet this shift."))}</div>`}
       </div>
+      <div class="tp-card"><div class="tp-row between"><div class="tp-h4">${esc(T("Other time"))}</div><div>${esc(hrs(s.other_hours || 0))}</div></div>
+        ${(s.other || []).length ? s.other.map((o) => `<div class="tp-tl paused"><div class="tp-tl-time">${esc(time(o.start))}–${o.open ? esc(T("now")) : esc(time(o.end))}</div><div><b>${esc(reasonText(o.reason))}</b>${o.note ? ` <span class="tp-muted small">${esc(o.note)}</span>` : ""}<div class="tp-muted small">${esc(hrs(o.hours))}</div></div></div>`).join("") : `<div class="tp-muted small">${esc(T("Housekeeping, training, meetings, travel or waiting — time that is not on a machine."))}</div>`}
+        <button type="button" class="tp-btn full mt" data-act="otherForm">${esc(T("Log other time"))}</button>
+      </div>
       ${s.findings_logged.length ? `<div class="tp-card"><div class="tp-h4">${esc(T("Findings logged on jobs"))}</div>${s.findings_logged.map((f) => `<div class="tp-hist">${esc(f.text)} <span class="tp-muted small">${f.work_order_id ? `${esc(T("WO #{id}", { id: f.work_order_id }))}` : ""} ${esc(time(f.at))}</span></div>`).join("")}</div>` : ""}
       <div class="tp-card">
         ${SHIFT_FIELDS.map(([k, label, hint]) => `<label class="tp-label">${esc(T(label))}</label><textarea class="tp-input" rows="2" data-shift="${k}" placeholder="${esc(T(hint))}">${esc(s[k] || "")}</textarea>`).join("")}
@@ -749,6 +776,11 @@
         <div class="tp-h4">${esc(T("Found a problem?"))}</div>
         <textarea id="tpAssetFinding" class="tp-input" rows="2" placeholder="${esc(T("What did you find?"))}"></textarea>
         <div class="tp-row"><button type="button" class="tp-btn grow" data-act="assetFinding" data-asset-id="${a.id}">${esc(T("Save finding"))}</button><button type="button" class="tp-btn warn grow" data-act="breakdownForm" data-code="${esc(a.asset_code)}">${esc(T("Report breakdown"))}</button></div>
+      </div>
+      <div class="tp-card">
+        <div class="tp-h4">${esc(T("Working on this machine without a work order?"))}</div>
+        <p class="tp-muted small">${esc(T("For adjustments, greasing, quick fixes or helping an operator. A work order is opened for you and your time starts. It is not a breakdown."))}</p>
+        <button type="button" class="tp-btn primary full" data-act="unplannedForm" data-code="${esc(a.asset_code)}">${esc(T("Log work on this machine"))}</button>
       </div>`;
   }
 
@@ -901,6 +933,7 @@
         const s = cacheGet("shift")?.data?.shift;
         sheet(`<h3>${esc(T("Submit shift report"))}</h3>
           <p>${esc(T("{h} on jobs. Jobs still running will be paused, and your job time goes to the mechanics timesheet.", { h: hrs(s?.hours || 0) }))}</p>
+          ${s?.other_hours ? `<p>${esc(T("{h} other time goes to the timesheet under WORKSHOP.", { h: hrs(s.other_hours) }))}</p>` : ""}
           <p class="tp-muted small">${esc(T("After submitting, the report is locked and your foreman can see it."))}</p>
           <div class="tp-row"><button type="button" class="tp-btn" data-act="closeSheet">${esc(T("Cancel"))}</button><button type="button" class="tp-btn ok grow" data-act="shiftSubmitGo">${esc(T("Submit"))}</button></div>`);
         return;
@@ -916,6 +949,52 @@
         return go("today");
       }
       if (act === "teamShifts") return renderTeam();
+      if (act === "otherForm") {
+        sheet(`<h3>${esc(T("Other time"))}</h3>
+          <p class="tp-muted small">${esc(T("Time that is not on a machine. A running job is paused; starting a job stops this timer."))}</p>
+          <div class="tp-reasons">${Object.keys(OTHER_REASONS).map((k) => `<label class="tp-reason"><input type="radio" name="tpReason" value="${k}" /> ${esc(reasonText(k))}</label>`).join("")}</div>
+          <input id="tpOtherNote" class="tp-input" placeholder="${esc(T("Note (required for Other)"))}" />
+          <div class="tp-row"><button type="button" class="tp-btn" data-act="closeSheet">${esc(T("Cancel"))}</button><button type="button" class="tp-btn primary grow" data-act="otherGo">${esc(T("Start timer"))}</button></div>`);
+        return;
+      }
+      if (act === "otherGo") {
+        const reason = document.querySelector("input[name=tpReason]:checked")?.value;
+        const note = String(qs("tpOtherNote")?.value || "").trim();
+        if (!reason) return toast(T("Choose what the time is for."), "bad");
+        if (reason === "other" && !note) return toast(T("Say what the other work was."), "bad");
+        t.disabled = true;
+        const res = await send({ kind: "other", url: "/other/start", body: { reason, note } });
+        closeSheet();
+        toast(res.queued ? T("Saved on this phone — will send later") : T("Timer started: {r}", { r: reasonText(reason) }), res.queued ? "" : "ok");
+        return render();
+      }
+      if (act === "otherStop") {
+        const res = await send({ kind: "other", url: "/other/stop", body: {} });
+        toast(res.queued ? T("Saved on this phone — will send later") : T("Timer stopped"), "ok");
+        return render();
+      }
+      if (act === "unplannedForm") {
+        sheet(`<h3>${esc(T("Log work on {code}", { code: t.dataset.code }))}</h3>
+          <label class="tp-label">${esc(T("Part of the machine (optional)"))}</label><input id="tpUpComp" class="tp-input" placeholder="${esc(T("e.g. Mirrors, greasing, lights"))}" />
+          <label class="tp-label">${esc(T("What are you doing?"))}</label><textarea id="tpUpDesc" class="tp-input" rows="3" placeholder="${esc(T("e.g. Adjusted left mirror for the operator"))}"></textarea>
+          <div class="tp-row"><button type="button" class="tp-btn" data-act="closeSheet">${esc(T("Cancel"))}</button><button type="button" class="tp-btn primary grow" data-act="unplannedGo" data-code="${esc(t.dataset.code)}">${esc(T("Start work"))}</button></div>`);
+        return;
+      }
+      if (act === "unplannedGo") {
+        const description = String(qs("tpUpDesc")?.value || "").trim();
+        if (!description) return toast(T("Say what work you are doing."), "bad");
+        t.disabled = true;
+        let data;
+        try {
+          data = await A.fetchJson(api("/unplanned"), { method: "POST", body: JSON.stringify({ asset_code: t.dataset.code, component: qs("tpUpComp").value, description, client_event_id: uid() }) });
+        } catch (err) {
+          t.disabled = false;
+          return toast(isNetworkError(err) ? T("Opening a work order needs signal. Try again when you have signal.") : err.message || String(err), "bad");
+        }
+        closeSheet();
+        toast(T("Work order #{id} opened — your time is running", { id: data.work_order_id }), "ok");
+        return go("job", { id: Number(data.work_order_id) });
+      }
       if (act === "claim") {
         sheet(`<h3>${esc(T("Take this job?"))}</h3>
           <p><b>${esc(t.dataset.label)}</b></p>
