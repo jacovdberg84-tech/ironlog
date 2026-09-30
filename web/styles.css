@@ -8323,3 +8323,18 @@ body.uc-qr-locked #ucAsset {
 .bw-followup summary { cursor: pointer; font-weight: 700; font-size: 13px; }
 .bw-followup textarea { width: 100%; margin: 8px 0; }
 .bw-answer { white-space: pre-wrap; font-size: 13px; line-height: 1.45; margin-top: 8px; }
+.bw-addpart { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.bw-addpart input[data-bw-add-code] { flex: 1; min-width: 180px; }
+.bw-addpart input[data-bw-add-qty] { width: 80px; }
+.bw-notes { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 10px; background: var(--card); }
+.bw-notes label { display: block; font-size: 13px; margin-bottom: 6px; }
+.bw-notes textarea { width: 100%; }
+.bw-notes-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+.bw-borris { margin: 10px 0; font-size: 13px; line-height: 1.45; }
+.bw-borris:empty { display: none; }
+.bw-ready { border: 1px solid var(--success); border-radius: 10px; padding: 10px 12px; background: var(--card); }
+.bw-ready button { margin-top: 8px; }
+.bw-warn-inline { color: var(--warn); font-weight: 600; }
+.bw-spinner { display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: bw-spin 1s linear infinite; }
+@keyframes bw-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .bw-spinner { animation: none; } }

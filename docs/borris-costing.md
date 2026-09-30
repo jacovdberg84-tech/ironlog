@@ -13,18 +13,27 @@ Plain database checks, no AI needed (`api/utils/costingGaps.js`):
 "Not needed" stores the gap in `costing_gap_dismissals` with a reason and user.
 
 ## Borris costing assistant
-`POST /api/maintenance/costing-gaps/assist { key }`
+`POST /api/maintenance/costing-gaps/assist { key }` answers straight away with a
+proposal from the records (the machine's history, else sister machines), and
+queues Borris in the background. The panel polls
+`GET /costing-gaps/assist/status?key=` and offers **Use Borris's proposal** when
+he is done.
 
-1. IRONLOG gathers evidence: this machine's service history, sister machines on
-   the same model (or category) and interval, store items that mention the model,
-   oils, matching Workshop Library pages and the standard labour hours.
-2. Borris picks parts and quantities from that evidence and replies in JSON.
-3. IRONLOG drops any part code that is not in stores, prices every line from the
-   store, and falls back to service history when Borris is offline or unsure.
-4. The person edits quantities or labour and clicks **Apply**. Services are saved
-   as weekly-forum service cost inputs; part prices through the part-cost endpoint.
-
-Nothing is written without that click.
+- Evidence: this machine's service history, sister machines on the same model (or
+  category) and interval, store items that mention the model, oils, Workshop
+  Library pages whose title/model/applicability names the model, the standard
+  labour hours, and the planner's notes.
+- **Tell Borris what you know**: notes saved per service plan
+  (`costing_planner_notes`, `POST /costing-gaps/notes`). Borris treats them as
+  facts first; store part codes typed in the notes join his candidates. Saving
+  notes asks Borris again.
+- **Add part**: the planner can add any store item to the proposal themselves.
+- Borris's reply is checked: part codes not in stores are dropped, every line is
+  priced from the store, implausible labour falls back to the standard.
+- One Borris job runs at a time (`api/utils/borrisQueue.js`); results are kept
+  for 30 minutes. Each opened gap is numbered in the browser so a late answer for
+  one machine never shows in another machine's panel.
+- Nothing is saved until the person clicks **Apply**.
 
 ## Ollama settings
 Borris runs on the server's Ollama. Costing proposals and planning questions use
@@ -35,10 +44,7 @@ Ollama's `/api/chat` in JSON mode.
   it when the server has the RAM to spare (roughly +1–2 GB for a 7–8B model at
   8192). On 2026-09-29 the default of 8192 exhausted the server and dropped the
   Cloudflare tunnel, which is why it is now off.
-- `BORRIS_COSTING_TIMEOUT_MS` (default `45000`, capped at `80000`): how long a
-  costing proposal may take before IRONLOG falls back to the service-history
-  proposal. Cloudflare cuts requests at about 100 s.
-- One costing proposal runs at a time; a second request gets the history
-  proposal straight away.
+- `BORRIS_COSTING_TIMEOUT_MS` (default `300000` = 5 min, max 15 min): how long
+  Borris may think in the background. The web request never waits for him.
 - A model that follows JSON instructions well (e.g. `qwen2.5:7b` or `llama3.1:8b`)
   gives better proposals than very small models.

@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import {
+  manualMatchesModel,
+  partCodesInNotes,
+  savePlannerNotes,
   buildPartEvidence,
   buildServiceEvidence,
   modelTokens,
@@ -90,4 +93,27 @@ test("part price is proposed only from a real purchase", () => {
   const none = proposalForPart(buildPartEvidence(db, "B25D-FF"));
   assert.equal(none.unit_cost, null);
   assert.match(none.summary, /No purchase price/);
+});
+
+test("planner notes are saved, fed to Borris and their part codes become candidates", () => {
+  const db = seed();
+  db.prepare("INSERT INTO parts VALUES (9, 'LF9009', 'Lube filter', 14, 'part')").run();
+  savePlannerNotes(db, 10, "1000 h: oil filter LF9009 x1, engine oil 18 L", "jaco");
+  assert.deepEqual(partCodesInNotes(db, "use lf9009 and XYZ").map((p) => p.part_code), ["LF9009"]);
+  const ev = buildServiceEvidence(db, 10);
+  assert.equal(ev.planner_notes, "1000 h: oil filter LF9009 x1, engine oil 18 L");
+  assert.equal(ev.store_candidates[0].part_code, "LF9009");
+  const msg = JSON.parse(serviceProposalMessages(ev)[1].content);
+  assert.match(msg.planner_notes, /LF9009/);
+  assert.match(serviceProposalMessages(ev)[0].content, /planner_notes are facts/);
+  assert.equal(proposalFromHistory(db, ev).questions.length, 0, "no need to ask again once notes exist");
+  savePlannerNotes(db, 10, "   ");
+  assert.equal(buildServiceEvidence(db, 10).planner_notes, "");
+});
+
+test("manual passages must be about the machine's model", () => {
+  const tokens = ["TEREX", "MDS", "M515"];
+  assert.equal(manualMatchesModel({ title: "BELL B30E Parts manual", model: "B30E" }, tokens), false);
+  assert.equal(manualMatchesModel({ title: "Operator manual", model: "Terex MDS M515" }, tokens), true);
+  assert.equal(manualMatchesModel({ title: "Service", applicability: "M515 from serial 100" }, tokens), true);
 });

@@ -353,11 +353,17 @@ function openBorrisPanel(title) {
 }
 
 function closeBorrisPanel() {
+  assistSeq += 1; // stops polling and ignores late answers for the closed gap
   if (qs("borrisCostingPanel")) qs("borrisCostingPanel").hidden = true;
   if (qs("borrisCostingBackdrop")) qs("borrisCostingBackdrop").hidden = true;
 }
 
 let borrisCurrent = null;
+// Each opened gap gets a number; answers for an older number are ignored, so a
+// slow reply for one machine can never land in another machine's panel.
+let assistSeq = 0;
+let borrisPoll = null;
+let storePartsCache = null;
 
 function money(n) {
   return `$${Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -369,7 +375,7 @@ function renderServiceProposal(data) {
   const unit = plan.meter_unit === "km" ? "km" : "h";
   const modeNote = p.mode === "borris"
     ? `<span class="bw-badge">Borris proposal</span>`
-    : `<span class="bw-badge is-history">From service history</span>${data.ai?.configured && data.ai.error ? ` <span class="bw-note">Borris could not answer (${escapeHtml(data.ai.error)}), so this uses the records only.</span>` : ""}`;
+    : `<span class="bw-badge is-history">From service history</span>`;
   const rows = p.lines.map((l, i) => `
     <tr>
       <td><strong>${escapeHtml(l.part_code)}</strong><div class="bw-sub">${escapeHtml(l.part_name || "")}</div>${l.why ? `<div class="bw-why">${escapeHtml(l.why)}</div>` : ""}</td>
@@ -396,7 +402,22 @@ function renderServiceProposal(data) {
       <span>× ${money(p.labour.rate)}/h = <strong data-bw-labour-total>${money(p.labour.total)}</strong></span>
     </div>
     <p class="bw-total">Service estimate: <strong data-bw-total>${money(p.totals.total)}</strong></p>
+    <div class="bw-addpart">
+      <input list="bwPartOptions" data-bw-add-code placeholder="Add a store part (code or name)" aria-label="Store part to add" />
+      <input type="number" min="0" step="0.01" value="1" data-bw-add-qty aria-label="Quantity to add" />
+      <button type="button" data-bw-add="1">Add part</button>
+    </div>
+    <datalist id="bwPartOptions"></datalist>
     ${p.questions.length ? `<div class="bw-questions"><strong>Borris needs to know:</strong><ul>${p.questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("")}</ul></div>` : ""}
+    <div class="bw-notes">
+      <label for="bwNotes"><strong>Tell Borris what you know</strong> <span class="bw-sub">Filters, oils and litres, part numbers, manual page or supplier kit. Saved for this service.</span></label>
+      <textarea id="bwNotes" rows="3" data-bw-notes placeholder="e.g. 1000 h: engine oil 18 L 15W40, oil filter LF9009, fuel filter FF5488, hydraulic return filter 1x">${escapeHtml(data.notes_draft ?? data.planner_notes?.notes ?? "")}</textarea>
+      <div class="bw-notes-foot">
+        <button type="button" data-bw-save-notes="1">Save and ask Borris again</button>
+        ${data.planner_notes?.updated_at ? `<span class="bw-sub">Saved ${escapeHtml(String(data.planner_notes.updated_at).slice(0, 16))}${data.planner_notes.updated_by ? ` by ${escapeHtml(data.planner_notes.updated_by)}` : ""}</span>` : ""}
+      </div>
+    </div>
+    <div class="bw-borris" data-bw-borris>${borrisStatusHtml(data.borris)}</div>
     <p class="bw-sources">Evidence: ${src.own_services} past service${src.own_services === 1 ? "" : "s"} on this machine${src.peer_assets.length ? `; ${src.peer_services} on ${escapeHtml(src.peer_assets.join(", "))}` : ""}${src.manual.length ? `; manual: ${escapeHtml(src.manual.join("; "))}` : "; no manual pages matched"}.</p>
     <div class="bw-actions">
       <button type="button" class="btn-primary" data-bw-apply="service">Apply to service cost</button>
@@ -437,18 +458,123 @@ function borrisFollowUpHtml() {
     </details>`;
 }
 
-async function openCostingAssist(key) {
+function borrisStatusHtml(b) {
+  const st = b?.status || "off";
+  if (st === "off") return `<span class="bw-sub">Borris (AI) is not set up on this server — use the records and your notes.</span>`;
+  if (st === "queued") return `<span class="bw-spinner" aria-hidden="true"></span> Borris is waiting his turn${b.ahead ? ` (${b.ahead} ahead)` : ""}. You can keep working; his proposal appears here.`;
+  if (st === "working") return `<span class="bw-spinner" aria-hidden="true"></span> Borris is working on a proposal${b.seconds ? ` (${b.seconds} s)` : ""}. You can keep working or close this; it appears here when ready.`;
+  if (st === "busy") return `<span class="bw-sub">${escapeHtml(b.error || "Borris is busy. Try again in a minute.")}</span>`;
+  if (st === "failed") return `<span class="bw-warn-inline">Borris could not answer (${escapeHtml(b.error || "no reply")}).</span> Tell him more above and ask again, or add the parts yourself.`;
+  if (st === "done" && b.proposal) {
+    const p = b.proposal;
+    return `<div class="bw-ready"><strong>Borris's proposal is ready:</strong> ${p.lines.length} part${p.lines.length === 1 ? "" : "s"}, ${escapeHtml(money(p.totals.total))} with labour.
+      ${p.summary ? `<div class="bw-sub">${escapeHtml(p.summary)}</div>` : ""}
+      <button type="button" class="btn-primary" data-bw-use-borris="1">Use Borris's proposal</button></div>`;
+  }
+  return "";
+}
+
+function setBorrisStatus(b) {
+  if (!borrisCurrent) return;
+  borrisCurrent.borris = b;
+  const el = qs("borrisCostingPanel")?.querySelector("[data-bw-borris]");
+  if (el) el.innerHTML = borrisStatusHtml(b);
+}
+
+function pollBorris(key, seq) {
+  clearTimeout(borrisPoll);
+  borrisPoll = setTimeout(async () => {
+    if (seq !== assistSeq) return;
+    try {
+      const res = await fetchJson(`${API}/api/maintenance/costing-gaps/assist/status?key=${encodeURIComponent(key)}`);
+      if (seq !== assistSeq) return;
+      const b = { ...res.borris, proposal: res.proposal };
+      setBorrisStatus(b);
+      if (["queued", "working"].includes(b.status)) pollBorris(key, seq);
+    } catch {
+      if (seq === assistSeq) pollBorris(key, seq);
+    }
+  }, 5000);
+}
+
+async function openCostingAssist(key, { refresh = false } = {}) {
+  const seq = ++assistSeq;
   const gap = myWorkCostingGaps.find((g) => g.key === key);
   openBorrisPanel(gap?.title || "Costing gap");
   const body = qs("bwBody");
-  body.innerHTML = `<div class="bw-thinking">Borris is reading the service history, sister machines, store prices and manuals…</div>`;
+  body.innerHTML = `<div class="bw-thinking">Reading the service history, sister machines, store prices and manuals…</div>`;
   try {
-    const data = await fetchJson(`${API}/api/maintenance/costing-gaps/assist`, { method: "POST", body: JSON.stringify({ key }) });
+    const data = await fetchJson(`${API}/api/maintenance/costing-gaps/assist`, { method: "POST", body: JSON.stringify({ key, refresh }) });
+    if (seq !== assistSeq) return; // another gap was opened meanwhile
     borrisCurrent = JSON.parse(JSON.stringify(data));
     body.innerHTML = data.kind === "part" ? renderPartProposal(data) : renderServiceProposal(data);
+    if (data.kind === "service") {
+      fillStorePartOptions().catch(() => {});
+      if (["queued", "working"].includes(data.borris?.status)) pollBorris(key, seq);
+    }
   } catch (err) {
-    body.innerHTML = `<p class="bw-warn">Could not get a proposal: ${escapeHtml(err.message || String(err))}</p>`;
+    if (seq === assistSeq) body.innerHTML = `<p class="bw-warn">Could not get a proposal: ${escapeHtml(err.message || String(err))}</p>`;
   }
+}
+
+async function fillStorePartOptions() {
+  if (!storePartsCache) {
+    const rows = await fetchJson(`${API}/api/stock/onhand`);
+    storePartsCache = Array.isArray(rows) ? rows : [];
+  }
+  const list = qs("bwPartOptions");
+  if (list && !list.children.length) {
+    list.innerHTML = storePartsCache.map((r) => `<option value="${escapeHtml(r.part_code)}">${escapeHtml(`${r.part_name || ""} · ${money(r.unit_cost)}${Number(r.on_hand) > 0 ? ` · ${r.on_hand} in stock` : ""}`)}</option>`).join("");
+  }
+}
+
+function rerenderService() {
+  const notes = qs("borrisCostingPanel")?.querySelector("[data-bw-notes]");
+  if (notes) borrisCurrent.notes_draft = notes.value;
+  qs("bwBody").innerHTML = renderServiceProposal(borrisCurrent);
+  recalcServiceProposal();
+  fillStorePartOptions().catch(() => {});
+}
+
+function addPartToProposal() {
+  const panel = qs("borrisCostingPanel");
+  const raw = String(panel.querySelector("[data-bw-add-code]")?.value || "").trim();
+  const qty = Number(panel.querySelector("[data-bw-add-qty]")?.value || 0);
+  if (!raw) return bwMsg("Pick a store part to add.", false);
+  if (!(qty > 0)) return bwMsg("Enter a quantity above zero.", false);
+  const part = (storePartsCache || []).find((r) => String(r.part_code).toLowerCase() === raw.toLowerCase());
+  if (!part) return bwMsg(`${raw} is not in stores. Add it to stock first, or tell Borris in the notes.`, false);
+  const p = borrisCurrent.proposal;
+  const existing = p.lines.find((l) => l.part_code === part.part_code);
+  const unit = Number(part.unit_cost || 0);
+  if (existing) {
+    existing.qty = Number((existing.qty + qty).toFixed(2));
+    existing.line_cost = Number((existing.qty * unit).toFixed(2));
+  } else {
+    p.lines.push({ part_code: part.part_code, part_name: part.part_name, type: part.stock_category === "oil" ? "oil" : "part", qty, unit_cost: unit, line_cost: Number((qty * unit).toFixed(2)), why: "added by you" });
+  }
+  p.unpriced_codes = p.lines.filter((l) => !(l.unit_cost > 0)).map((l) => l.part_code);
+  rerenderService();
+}
+
+async function saveNotesAndAskAgain() {
+  const d = borrisCurrent;
+  const notes = String(qs("borrisCostingPanel").querySelector("[data-bw-notes]")?.value || "");
+  const seq = assistSeq;
+  const res = await fetchJson(`${API}/api/maintenance/costing-gaps/notes`, { method: "POST", body: JSON.stringify({ plan_id: d.plan.plan_id, notes }) });
+  if (seq !== assistSeq) return;
+  d.planner_notes = res.planner_notes;
+  d.notes_draft = notes;
+  bwMsg(notes.trim() ? "Notes saved. Borris is reading them." : "Notes cleared.", true);
+  setBorrisStatus(res.borris);
+  if (["queued", "working"].includes(res.borris?.status)) pollBorris(d.key, seq);
+}
+
+function useBorrisProposal() {
+  const p = borrisCurrent?.borris?.proposal;
+  if (!p) return;
+  borrisCurrent.proposal = JSON.parse(JSON.stringify(p));
+  rerenderService();
 }
 
 function recalcServiceProposal() {
@@ -466,6 +592,7 @@ function recalcServiceProposal() {
 }
 
 function onBorrisPanelInput(e) {
+  if (e.target.dataset.bwNotes != null && borrisCurrent) borrisCurrent.notes_draft = e.target.value;
   const p = borrisCurrent?.proposal;
   if (!p) return;
   const qtyIdx = e.target.dataset.bwQty;
@@ -503,7 +630,7 @@ async function applyBorrisProposal(kind) {
         plan_id: data.plan.plan_id,
         items,
         labor_total: p.labour.total,
-        notes: `Borris ${p.mode === "borris" ? "proposal" : "history estimate"} approved by ${user || "user"} on ${today}. ${p.summary || ""}`.slice(0, 500),
+        notes: `${p.mode === "borris" ? "Borris proposal" : "Costing assistant estimate"} approved by ${user || "user"} on ${today}. ${p.summary || ""}`.slice(0, 500),
       }),
     });
     bwMsg(`Saved: ${data.plan.asset_code} ${data.plan.service_name} is now costed at ${money(p.totals.total)}.`, true);
@@ -549,8 +676,7 @@ function onBorrisPanelClick(e) {
   const rm = e.target.closest("[data-bw-remove]");
   if (rm && borrisCurrent?.proposal) {
     borrisCurrent.proposal.lines.splice(Number(rm.dataset.bwRemove), 1);
-    qs("bwBody").innerHTML = renderServiceProposal(borrisCurrent);
-    recalcServiceProposal();
+    rerenderService();
     return;
   }
   const apply = e.target.closest("[data-bw-apply]");
@@ -561,7 +687,14 @@ function onBorrisPanelClick(e) {
   }
   const dis = e.target.closest("[data-costing-dismiss]");
   if (dis) return void dismissCostingGapUi(dis.dataset.costingDismiss).catch((err) => bwMsg(err.message || String(err), false));
-  if (e.target.closest("[data-bw-ask]")) askBorrisFollowUp();
+  if (e.target.closest("[data-bw-ask]")) return void askBorrisFollowUp();
+  if (e.target.closest("[data-bw-add]")) return addPartToProposal();
+  if (e.target.closest("[data-bw-use-borris]")) return useBorrisProposal();
+  const save = e.target.closest("[data-bw-save-notes]");
+  if (save) {
+    save.disabled = true;
+    saveNotesAndAskAgain().catch((err) => bwMsg(err.message || String(err), false)).finally(() => { save.disabled = false; });
+  }
 }
 
 (function initCostingGaps() {
