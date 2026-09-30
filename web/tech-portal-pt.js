@@ -94,6 +94,8 @@ window.TechPortalPT = {
   "Completed today": "Concluído hoje",
   "No open jobs for you. Your foreman assigns jobs on the Work Orders board.": "Não tem trabalhos abertos. O seu encarregado atribui trabalhos no quadro de Ordens de Trabalho.",
   "Open WO #": "Abrir OT n.º",
+  "Your shift report from {t} is not submitted yet.": "O seu relatório de turno de {t} ainda não foi submetido.",
+  "Submit it now so your job time reaches the timesheet. Your next job then starts a new shift.": "Submeta-o agora para que o seu tempo chegue à folha de horas. O seu próximo trabalho começa então um novo turno.",
   "WO #{id}": "OT #{id}",
 
   // Job

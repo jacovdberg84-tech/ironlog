@@ -2,6 +2,7 @@
 // Overdue services come from /api/maintenance/due on the client so counts
 // match the Maintenance page. The low stock query is shared with /api/alerts.
 
+import { overdueShifts } from "./techShift.js";
 import { summarizeWaiting, workshopWaitingOnParts } from "./partsWaiting.js";
 
 export function queryLowStock(db, limit = 100) {
@@ -114,6 +115,7 @@ export function buildMyWork(db, { user, roles, site = "main", today }) {
   if (has(MAINTENANCE_ROLES)) {
     sections.open_breakdowns = openBreakdowns(db, ctx);
     sections.open_work_orders = openWorkOrders(db, ctx);
+    sections.open_shifts = section(overdueShifts(db, { site: ctx.site }));
   }
   if (has(STORES_ROLES)) {
     const waiting = workshopWaitingOnParts(db, ctx);

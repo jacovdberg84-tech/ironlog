@@ -14,7 +14,7 @@ function myWorkAllowed(tab) {
 }
 
 function myWorkGo(target) {
-  if (target.endsWith(".html")) {
+  if (/\.html(?:[?#]|$)/.test(target)) {
     location.href = target;
     return;
   }
@@ -144,6 +144,23 @@ function myWorkCards(sections, due) {
         badge: myWorkPill(String(x.status || "open").replace(/_/g, " "), "neutral"),
       })),
       action: myWorkAllowed("maintenance") ? { label: "Open work orders", target: "workorders.html" } : null,
+    });
+  }
+  const os = sections.open_shifts;
+  if (os && os.count) {
+    cards.push({
+      key: "shifts",
+      title: "Shift reports not submitted",
+      count: os.count,
+      tone: "warn",
+      meta: "Open for more than 12 hours. Job time reaches the timesheet only when the report is submitted.",
+      empty: "",
+      items: os.items.map((x) => ({
+        primary: x.name,
+        secondary: `Shift started ${myWorkDate(x.started_at) || x.started_at} · open ${Math.round(x.hours_open)} h`,
+        badge: myWorkPill("Not submitted", "warn"),
+      })),
+      action: { label: "Open technician portal", target: "technician-terminal.html?tab=shift" },
     });
   }
   const wp = sections.waiting_parts;

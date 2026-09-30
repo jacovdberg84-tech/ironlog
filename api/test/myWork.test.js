@@ -76,7 +76,7 @@ test("stores roles see low stock and outstanding part orders", () => {
 
 test("workshop admin covers both workshop and stores sections", () => {
   const w = buildMyWork(seed(), { ...ctx, roles: ["workshop_admin"] });
-  assert.deepEqual(Object.keys(w.sections).sort(), ["low_stock", "open_breakdowns", "open_work_orders", "parts_on_order", "tasks", "waiting_parts"]);
+  assert.deepEqual(Object.keys(w.sections).sort(), ["low_stock", "open_breakdowns", "open_shifts", "open_work_orders", "parts_on_order", "tasks", "waiting_parts"]);
 });
 
 test("previews are capped at five while count stays complete", () => {
