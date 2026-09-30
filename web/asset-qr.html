@@ -131,6 +131,7 @@
         <a class="btn primary" id="openTyreInspectionBtn" href="#" style="display:none;">Tyre inspection</a>
         <a class="btn" id="openHistoryBtn" href="#">Service History</a>
         <a class="btn" id="openWoBtn" href="#">Work Orders</a>
+        <a class="btn primary" id="openTechBtn" href="#" style="display:none;">Technician view</a>
       </div>
     </div>
 
@@ -161,6 +162,16 @@
         if (ins) ins.href = "./asset-qr-detail.html?view=inspections&asset_code=" + encodeURIComponent(code);
         if (his) his.href = "./asset-qr-detail.html?view=history&asset_code=" + encodeURIComponent(code);
         if (wo) wo.href = "./asset-qr-detail.html?view=workorders&asset_code=" + encodeURIComponent(code);
+        // Signed-in workshop staff get the technician portal's machine view (operators never see it).
+        var roles = [];
+        try { roles = JSON.parse(localStorage.getItem("ironlog_session_roles") || "[]"); } catch (e) {}
+        roles.push(localStorage.getItem("ironlog_session_role") || "");
+        var workshop = ["artisan", "supervisor", "workshop_admin", "plant_manager", "site_manager"];
+        var tech = document.getElementById("openTechBtn");
+        if (tech && localStorage.getItem("ironlog_session_user") && roles.some(function (r) { return workshop.indexOf(String(r).toLowerCase()) >= 0; })) {
+          tech.href = "./technician-terminal.html?asset=" + encodeURIComponent(code);
+          tech.style.display = "";
+        }
       } catch {}
     })();
   </script>

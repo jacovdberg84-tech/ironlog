@@ -1,5 +1,6 @@
 // IRONLOG/api/routes/workorders.routes.js
 import { db } from "../db/client.js";
+import { technicianMatchesUser as matchesTechnician } from "../utils/technicianIdentity.js";
 import { ensureAuditTable } from "../utils/audit.js";
 import { ensureServiceTemplateSchema } from "../utils/serviceTemplates.js";
 import { ensureStockCategorySchema, normalizeStockCategory } from "../utils/stockCategory.js";
@@ -53,44 +54,7 @@ export default async function workOrderRoutes(app) {
     return "";
   }
 
-  /** Match assigned technician to logged-in user (username or legacy display name). */
-  function technicianIdentityKeys(nameOrUsername) {
-    const raw = String(nameOrUsername || "").trim().toLowerCase();
-    const keys = new Set();
-    if (!raw) return keys;
-    keys.add(raw);
-    if (!hasTable("users")) return keys;
-    const byUser = db.prepare(`
-      SELECT username, full_name FROM users
-      WHERE LOWER(TRIM(username)) = ?
-      LIMIT 1
-    `).get(raw);
-    if (byUser) {
-      keys.add(String(byUser.username || "").trim().toLowerCase());
-      const fn = String(byUser.full_name || "").trim().toLowerCase();
-      if (fn) keys.add(fn);
-    }
-    const byName = db.prepare(`
-      SELECT username, full_name FROM users
-      WHERE LOWER(TRIM(COALESCE(full_name, ''))) = ?
-      LIMIT 1
-    `).get(raw);
-    if (byName) {
-      keys.add(String(byName.username || "").trim().toLowerCase());
-      keys.add(raw);
-    }
-    return keys;
-  }
-
-  function technicianMatchesUser(assignedName, userName) {
-    const assignedKeys = technicianIdentityKeys(assignedName);
-    const userKeys = technicianIdentityKeys(userName);
-    if (!assignedKeys.size || !userKeys.size) return false;
-    for (const k of userKeys) {
-      if (assignedKeys.has(k)) return true;
-    }
-    return false;
-  }
+  const technicianMatchesUser = (assignedName, userName) => matchesTechnician(db, assignedName, userName);
 
   /** Prefer login username when supervisor picks a display name. */
   function resolveAssignedUsername(nameOrUsername) {

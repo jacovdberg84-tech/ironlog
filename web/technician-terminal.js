@@ -2,7 +2,7 @@
   const A = window.IronlogAuth;
   if (!A) return;
 
-  const ALLOWED_ROLES = ["artisan", "admin", "supervisor"];
+  const ALLOWED_ROLES = ["artisan", "admin", "supervisor", "workshop_admin", "plant_manager", "site_manager"];
   const MAX_PIN = 6;
 
   let selectedUsername = "";
@@ -29,22 +29,6 @@
     if (!parts.length) return "?";
     if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  }
-
-  function statusLabel(s) {
-    const v = String(s || "").toLowerCase();
-    if (v === "assigned") return "Assigned";
-    if (v === "in_progress") return "In progress";
-    if (v === "completed") return "Awaiting approval";
-    return v.replace(/_/g, " ");
-  }
-
-  function statusClass(s) {
-    const v = String(s || "").toLowerCase();
-    if (v === "assigned") return "assigned";
-    if (v === "in_progress") return "in_progress";
-    if (v === "completed") return "completed";
-    return "";
   }
 
   function updateSessionChrome(user) {
@@ -154,7 +138,7 @@
     ensureRoleAccess(user);
     showLogin(false);
     updateSessionChrome(user);
-    await loadJobs();
+    window.TechPortal?.start();
   }
 
   async function handlePinLogin() {
@@ -193,74 +177,34 @@
     }
   }
 
-  async function loadJobs() {
-    const host = qs("jobsList");
-    const summary = qs("jobsSummary");
-    if (!host) return;
-    host.innerHTML = `<div class="muted small">Loading…</div>`;
-    const rows = await A.fetchJson(`${A.API}/api/workorders`);
-    const list = Array.isArray(rows) ? rows : [];
-    const active = list.filter((wo) => {
-      const s = String(wo.status || "").toLowerCase();
-      return ["assigned", "in_progress", "completed"].includes(s);
-    });
-
-    const counts = { assigned: 0, in_progress: 0, completed: 0 };
-    active.forEach((wo) => {
-      const s = String(wo.status || "").toLowerCase();
-      if (counts[s] != null) counts[s] += 1;
-    });
-
-    if (summary) {
-      summary.innerHTML = `
-        <span class="pill assigned">Assigned: ${counts.assigned}</span>
-        <span class="pill progress">In progress: ${counts.in_progress}</span>
-        <span class="pill done">Submitted: ${counts.completed}</span>
-      `;
+  async function serverReachable() {
+    if (navigator.onLine === false) return false;
+    try {
+      await fetch(`${A.API}/api/auth/config`, { cache: "no-store" });
+      return true;
+    } catch {
+      return false;
     }
-
-    if (!active.length) {
-      host.innerHTML = `<div class="muted small">No jobs assigned to you right now.</div>`;
-      return;
-    }
-
-    host.innerHTML = "";
-    active.forEach((wo) => {
-      const card = document.createElement("button");
-      card.type = "button";
-      card.className = "job-card";
-      const st = String(wo.status || "").toLowerCase();
-      card.innerHTML = `
-        <div class="job-card-top">
-          <span class="job-id">WO #${A.escapeHtml(wo.id)}</span>
-          <span class="job-status ${statusClass(st)}">${A.escapeHtml(statusLabel(st))}</span>
-        </div>
-        <div class="job-asset">${A.escapeHtml(wo.asset_code || "-")} · ${A.escapeHtml(wo.asset_name || "")}</div>
-        <div class="job-meta">${A.escapeHtml(wo.source || "")}${wo.opened_at ? ` · ${A.escapeHtml(wo.opened_at)}` : ""}</div>
-      `;
-      card.addEventListener("click", () => {
-        window.location.href = `./workorder-qr.html?wo_id=${encodeURIComponent(wo.id)}`;
-      });
-      host.appendChild(card);
-    });
-  }
-
-  function openWorkOrder() {
-    const id = Number(qs("woLookupId")?.value || 0);
-    if (!Number.isFinite(id) || id <= 0) {
-      alert("Enter a valid work order number.");
-      return;
-    }
-    window.location.href = `./workorder-qr.html?wo_id=${encodeURIComponent(id)}`;
   }
 
   async function boot() {
+    // No signal: someone already signed in on this phone keeps working from
+    // what was saved; their updates wait on the phone until the server is back.
+    if (!(await serverReachable()) && A.getSessionUser()) {
+      const roles = A.getSessionRoles();
+      if (roles.some((r) => ALLOWED_ROLES.includes(String(r).toLowerCase()))) {
+        showLogin(false);
+        updateSessionChrome({ username: A.getSessionUser(), role: A.getSessionRole(), roles });
+        window.TechPortal?.start();
+        return;
+      }
+    }
     await A.loadConfig();
     if (!A.LOGIN_GATE_ENABLED) {
       if (!A.getSessionUser()) A.setSessionContext("admin", "admin", "main");
       showLogin(false);
       updateSessionChrome({ username: A.getSessionUser(), role: A.getSessionRole(), roles: A.getSessionRoles() });
-      await loadJobs().catch(() => {});
+      window.TechPortal?.start();
       return;
     }
 
@@ -310,10 +254,9 @@
     loadPinRoster();
     if (qs("loginPassword")) qs("loginPassword").value = "";
   });
-  qs("refreshJobsBtn")?.addEventListener("click", () => loadJobs().catch((e) => alert(e.message || e)));
-  qs("openWoBtn")?.addEventListener("click", openWorkOrder);
-  qs("woLookupId")?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") openWorkOrder();
+  qs("refreshJobsBtn")?.addEventListener("click", () => {
+    window.TechPortal?.syncQueue();
+    window.TechPortal?.start();
   });
 
   boot().catch(() => {
