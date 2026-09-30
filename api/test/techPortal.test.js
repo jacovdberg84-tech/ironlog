@@ -312,6 +312,55 @@ test("edge cases: reassignment, failed request retry, helper finishing, abandone
   assert.equal((await call("maria", "POST", "/workorders/1/claim", {})).code, 409, "a finished or assigned job cannot be taken");
   assert.equal((await call("op", "POST", "/workorders/3/claim", {}, "operator")).code, 403);
 
+  // Other time (not on a machine) and unplanned machine work.
+  db.exec(`
+    INSERT INTO users (username, full_name, role, active) VALUES ('ana', 'Ana Tembe', 'artisan', 1);
+    INSERT INTO work_orders (id, asset_id, source, status, opened_at, assigned_artisan_name, assigned_at, job_description)
+    VALUES (4, 1, 'manual', 'assigned', datetime('now'), 'ana', datetime('now'), 'Adjust mirrors');
+  `);
+  const ago = (h) => new Date(Date.now() - h * 3600000).toISOString();
+  assert.equal((await call("ana", "POST", "/workorders/4/action", { action: "start", at: ago(3) })).code, 200);
+  const training = await call("ana", "POST", "/other/start", { reason: "training", note: "Toolbox talk", at: ago(2), client_event_id: "o1" });
+  assert.equal(training.code, 200, JSON.stringify(training.body));
+  assert.deepEqual(training.body.paused_jobs, [4], "other time pauses the running job");
+  assert.equal((await call("ana", "POST", "/other/start", { reason: "training", client_event_id: "o1" })).body.duplicate, true);
+  assert.equal((await call("ana", "GET", "/today")).body.other_running.reason, "training");
+  assert.equal((await call("ana", "POST", "/other/start", { reason: "other" })).code, 400, "other needs a note");
+  assert.equal((await call("ana", "POST", "/other/start", { reason: "sleeping" })).code, 400);
+  assert.equal((await call("ana", "POST", "/workorders/4/action", { action: "resume", at: ago(1) })).code, 200);
+  assert.equal((await call("ana", "GET", "/today")).body.other_running, null, "back on a job: other time stops");
+  const anaShift = (await call("ana", "GET", "/shift")).body.shift;
+  assert.equal(anaShift.other.length, 1);
+  assert.ok(Math.abs(anaShift.other_hours - 1) < 0.02, `other ${anaShift.other_hours}`);
+  const anaSubmit = await call("ana", "POST", "/shift/submit", {});
+  assert.equal(anaSubmit.code, 200, JSON.stringify(anaSubmit.body));
+  const anaRows = db.prepare("SELECT asset_code, hours, job_card_no, category, reason FROM mechanic_labor_entries WHERE technician_name = 'Ana Tembe' ORDER BY asset_code").all();
+  assert.equal(anaRows.length, 2);
+  assert.equal(anaRows[0].asset_code, "T01AM");
+  assert.ok(Math.abs(anaRows[0].hours - 2) < 0.02, `job ${anaRows[0].hours}`);
+  assert.equal(anaRows[0].job_card_no, "4");
+  assert.equal(anaRows[1].asset_code, "WORKSHOP");
+  assert.ok(Math.abs(anaRows[1].hours - 1) < 0.02, `workshop ${anaRows[1].hours}`);
+  assert.equal(anaRows[1].job_card_no, null);
+  assert.equal(anaRows[1].category, "Workshop");
+  assert.equal(anaRows[1].reason, "Other time — Training / toolbox talk: Toolbox talk");
+
+  const unplanned = await call("ana", "POST", "/unplanned", { asset_code: "t01am", component: "Mirrors", description: "Adjusted left mirror for operator", client_event_id: "u1" });
+  assert.equal(unplanned.code, 200, JSON.stringify(unplanned.body));
+  assert.equal(unplanned.body.started, true);
+  const uwo = db.prepare("SELECT source, status, assigned_artisan_name, assigned_by, job_description, reference_id FROM work_orders WHERE id = ?").get(unplanned.body.work_order_id);
+  assert.equal(uwo.source, "manual");
+  assert.equal(uwo.status, "in_progress");
+  assert.equal(uwo.assigned_artisan_name, "ana");
+  assert.equal(uwo.assigned_by, "ana");
+  assert.equal(uwo.reference_id, null, "not a breakdown");
+  assert.match(uwo.job_description, /^Unplanned work \(logged by technician\)\n- Mirrors — Adjusted left mirror/);
+  const again = await call("ana", "POST", "/unplanned", { asset_code: "t01am", description: "Adjusted left mirror for operator", client_event_id: "u1" });
+  assert.equal(again.body.work_order_id, unplanned.body.work_order_id, "offline retry does not open a second work order");
+  assert.equal((await call("ana", "POST", "/unplanned", { asset_code: "NOPE", description: "x" })).code, 404);
+  assert.equal((await call("ana", "POST", "/unplanned", { asset_code: "T01AM" })).code, 400);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM breakdowns").get().n, 1, "no breakdown was recorded");
+
   // Pedro's job was left running: ending his shift stops the clock.
   const sub = await call("pedro", "POST", "/shift/submit", {});
   assert.equal(sub.code, 200, JSON.stringify(sub.body));

@@ -63,13 +63,18 @@ const SHIFT_DAY_HOURS = 16;
  * Timesheet rows from a shift timeline: labour time only, one row per work
  * order and day, from its first start to last finish.
  */
+/** The timesheet date for a block of work in a shift (see SHIFT_DAY_HOURS). */
+export function shiftWorkDate(blockStart, { day, shiftStart = null } = {}) {
+  const startMs = shiftStart ? Date.parse(shiftStart) : NaN;
+  const late = Number.isFinite(startMs) && Date.parse(blockStart) - startMs >= SHIFT_DAY_HOURS * 3600000;
+  return late ? localDay(blockStart) : day;
+}
+
 export function shiftTimesheetRows(timeline, { technicianName, day, shiftStart = null } = {}) {
   const byKey = new Map();
-  const startMs = shiftStart ? Date.parse(shiftStart) : NaN;
   for (const t of timeline) {
     if (!t.labour || !t.asset_code || t.hours <= 0) continue;
-    const late = Number.isFinite(startMs) && Date.parse(t.start) - startMs >= SHIFT_DAY_HOURS * 3600000;
-    const workDate = late ? localDay(t.start) : day;
+    const workDate = shiftWorkDate(t.start, { day, shiftStart });
     const key = `${t.work_order_id}|${workDate}`;
     const e = byKey.get(key) || { ...t, workDate, hours: 0, first: t.start, last: t.end };
     e.hours += t.hours;

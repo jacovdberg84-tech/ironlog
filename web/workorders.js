@@ -120,8 +120,10 @@ function rolePermissionText(role) {
   return "Role permissions are limited in this view.";
 }
 
-function sourceLabel(source) {
+function sourceLabel(source, wo = null) {
   const s = String(source || "").toLowerCase();
+  // Opened by a technician in the portal for work on a machine that had no work order.
+  if (s === "manual" && /^Unplanned work \(logged by technician\)/.test(String(wo?.job_description || ""))) return "Unplanned (technician)";
   if (s === "service") return "Service";
   if (s === "breakdown") return "Breakdown";
   if (s === "inspection" || s === "manager_inspection") return "Inspection repair";
@@ -330,7 +332,7 @@ function woJobLine(wo) {
   const lines = String(wo.job_description || "").split("\n").map((l) => l.replace(/^-\s*/, "").trim()).filter(Boolean);
   if (source === "prestart" && lines.length > 1) return `Pre-start: ${lines.slice(1).join("; ")}`;
   if (lines.length) return lines[lines.length - 1];
-  return sourceLabel(wo.source);
+  return sourceLabel(wo.source, wo);
 }
 
 function workOrderBoardCard(wo) {
@@ -343,6 +345,7 @@ function workOrderBoardCard(wo) {
     <article class="wo-board-card${Number(wo.breakdown_critical) ? " is-critical" : ""}" data-wo-id="${wo.id}">
       <header>
         <span class="wo-number">WO #${wo.id}</span>
+        ${sourceLabel(wo.source, wo) === "Unplanned (technician)" ? `<span class="wo-tag-unplanned" title="Opened by the technician for work with no work order">Unplanned</span>` : ""}
         <span class="wo-priority pri-${p.toLowerCase()}" title="Priority from age and stage">${p}</span>
       </header>
       <h4>${escapeHtml(wo.asset_code || "-")} <span>${escapeHtml(wo.asset_name || "")}</span></h4>
@@ -699,7 +702,7 @@ function renderDetail(payload) {
       <div>
         <span class="wo-number">WORK ORDER #${wo.id}</span>
         <h2>${escapeHtml(wo.asset_code || "-")} <span>${escapeHtml(wo.asset_name || "")}</span></h2>
-        <div class="wo-detail-summary">${sourceLabel(wo.source)} · Opened ${escapeHtml(wo.opened_at || "-")} · ${escapeHtml(technician)}</div>
+        <div class="wo-detail-summary">${sourceLabel(wo.source, wo)} · Opened ${escapeHtml(wo.opened_at || "-")} · ${escapeHtml(technician)}</div>
       </div>
       <span class="wo-status-label ${statusClass(status)} wo-detail-status">${status.replace(/_/g, " ")}</span>
     </div>
