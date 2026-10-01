@@ -3,6 +3,7 @@
 import { applyIssuedQuantityToReservation, releaseWorkOrderReservations } from "../../utils/serviceTemplates.js";
 import { db } from "../../db/client.js";
 import { snapLastServiceHours } from "../../utils/serviceSchedule.js";
+import { rememberPlanHours, reopenWorkOrder } from "../../utils/workOrderReopen.js";
 import { writeAudit } from "../../utils/audit.js";
 
 export default function registerCloseoutRoutes(app, ctx) {
@@ -149,27 +150,40 @@ export default function registerCloseoutRoutes(app, ctx) {
     return reply.send({ ok: true, pending_approval: true, request_id });
   });
 
+  // Reopen a work order closed (or completed) by mistake: back to assigned/open
+  // so it can be (re)assigned, with service plans and a closed breakdown put back.
   app.post("/:id/reopen", async (req, reply) => {
     if (!requirePermission(req, reply, "workorders.reopen")) return;
-    if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
+    if (!requireRoles(req, reply, ["admin", "supervisor", "plant_manager", "site_manager"])) return;
     const id = Number(req.params.id);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
-    const note = String(req.body?.note || "").trim() || "Reopened by supervisor flow";
-    const wo = db.prepare(`SELECT id, status FROM work_orders WHERE id = ?`).get(id);
-    if (!wo) return reply.code(404).send({ error: "work order not found" });
-    const status = String(wo.status || "").toLowerCase();
-    if (!["closed", "approved", "completed"].includes(status)) {
-      return reply.code(409).send({ error: "only closed/approved/completed work orders can be reopened" });
+    const note = String(req.body?.note || "").trim();
+    if (!note) return reply.code(400).send({ error: "Say why the work order is reopened" });
+    // Older closes: the plan hours the close set are in its audit entry.
+    let rolledHours = null;
+    try {
+      const a = db.prepare(`
+        SELECT payload_json FROM audit_logs
+        WHERE module = 'workorders' AND action IN ('close', 'close_approved') AND entity_type = 'work_order' AND entity_id = ?
+        ORDER BY id DESC LIMIT 1
+      `).get(String(id));
+      const pl = a?.payload_json ? JSON.parse(a.payload_json) : null;
+      if (pl && pl.rolled_last_service_hours != null) rolledHours = Number(pl.rolled_last_service_hours);
+    } catch { /* no audit trail */ }
+    let result;
+    try {
+      result = reopenWorkOrder(db, id, { rolledHours });
+    } catch (err) {
+      return reply.code(err.status || 400).send({ error: err.message });
     }
-    db.prepare(`UPDATE work_orders SET status = 'in_progress', closed_at = NULL WHERE id = ?`).run(id);
     writeAudit(db, req, {
       module: "workorders",
       action: "reopen",
       entity_type: "work_order",
       entity_id: id,
-      payload: { from_status: status, to_status: "in_progress", note },
+      payload: { ...result, note },
     });
-    return reply.send({ ok: true, id, status: "in_progress" });
+    return reply.send({ ok: true, ...result });
   });
 
   app.post("/:id/delete-request", async (req, reply) => {
@@ -310,6 +324,7 @@ export default function registerCloseoutRoutes(app, ctx) {
       const planId = Number(wo.reference_id || 0);
 
       if (isServiceWO && planId > 0) {
+        rememberPlanHours(db, id, wo.asset_id);
         const currentHours = getAssetCurrentHours(Number(wo.asset_id || 0));
         const planRow = db.prepare(`
           SELECT mp.interval_hours, a.asset_code

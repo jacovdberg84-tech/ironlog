@@ -279,7 +279,11 @@ function renderRepairProgressPanel(wo) {
 function workflowActionButtons(wo) {
   const role = getSessionRole();
   const s = String(wo?.status || "").toLowerCase();
-  if (s === "closed") return "";
+  // Closed by mistake: a supervisor can reopen it (service plan put back) and assign it again.
+  const reopen = isSupervisorRole(role) && ["completed", "approved", "closed"].includes(s)
+    ? `<button data-reopen-id="${wo.id}" data-reopen-source="${escapeHtml(String(wo.source || "").toLowerCase())}" style="margin-top:8px;">Reopen work order</button>`
+    : "";
+  if (s === "closed") return reopen;
 
   const buttons = [];
   if (isSupervisorRole(role) && ["open", "assigned"].includes(s)) {
@@ -307,7 +311,29 @@ function workflowActionButtons(wo) {
     buttons.push(`<button data-request-close-id="${wo.id}" data-request-close-source="${String(wo.source || "").toLowerCase()}" style="margin-top:8px;">Request close approval</button>`);
   }
 
+  if (reopen) buttons.push(reopen);
   return buttons.join("");
+}
+
+async function reopenWorkOrder(id, source) {
+  const service = source === "service";
+  const reason = prompt(
+    `Reopen work order #${id}?${service ? "\n\nThe service will show as due again on the machine's service plan." : ""}\n\nWhy is it reopened? (e.g. closed by mistake)`
+  );
+  if (reason == null) return;
+  if (!reason.trim()) return alert("Please give a reason.");
+  const res = await fetchJson(`${API}/workorders/${id}/reopen`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ note: reason.trim() }),
+  });
+  const extra = [
+    res.plans_restored?.length ? `service plan put back (${res.plans_restored.length} plan${res.plans_restored.length === 1 ? "" : "s"})` : "",
+    res.breakdown_reopened ? "breakdown reopened" : "",
+  ].filter(Boolean).join(", ");
+  alert(`Work order #${id} is ${res.status === "assigned" ? "assigned again" : "open again"}${extra ? ` — ${extra}` : ""}. You can now assign it.`);
+  await fetchWorkOrders();
+  if (currentDetailWorkOrderId === Number(id)) await loadWorkOrderDetail(id);
 }
 
 const WO_STAGES = [
@@ -1935,6 +1961,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const handleWoAction = (evt) => {
       const target = evt.target;
       if (!(target instanceof HTMLElement)) return;
+      const boardReopenId = target.getAttribute("data-reopen-id");
+      if (boardReopenId) {
+        reopenWorkOrder(Number(boardReopenId), target.getAttribute("data-reopen-source")).catch((e) => alert(`Reopen failed: ${e.message}`));
+        return;
+      }
       const pdfId = target.getAttribute("data-pdf-id");
       const pdfDownloadId = target.getAttribute("data-pdf-download-id");
       const viewId = target.getAttribute("data-view-id");
@@ -2022,6 +2053,11 @@ document.addEventListener("DOMContentLoaded", () => {
       const closeSource = target.getAttribute("data-close-source");
       const saveProgressId = target.getAttribute("data-wo-save-progress");
       const saveCostsId = target.getAttribute("data-wo-save-costs");
+      const reopenId = target.getAttribute("data-reopen-id");
+      if (reopenId) {
+        reopenWorkOrder(Number(reopenId), target.getAttribute("data-reopen-source")).catch((e) => alert(`Reopen failed: ${e.message}`));
+        return;
+      }
       const helperAddId = target.getAttribute("data-helper-add");
       const helperRemove = target.getAttribute("data-helper-remove");
       if (helperAddId) {

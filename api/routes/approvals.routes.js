@@ -3,6 +3,7 @@ import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { applyMasterDataApproval } from "../utils/masterdataGovernance.js";
 import { getRole, getUser, holdsAnyRole } from "../utils/request.js";
 import { REVERSAL_ACTION, applyReversal } from "../utils/stockReversal.js";
+import { rememberPlanHours } from "../utils/workOrderReopen.js";
 
 function hasColumn(table, col) {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -128,6 +129,7 @@ function closeWorkOrderWithPayload(approvalId, payload, req) {
       const planId = Number(wo.reference_id || 0);
       if (planId > 0) {
         const current = getAssetCurrentHours(Number(wo.asset_id || 0));
+        rememberPlanHours(db, wo.id, wo.asset_id);
         db.prepare(`UPDATE maintenance_plans SET last_service_hours = ? WHERE id = ?`).run(current, planId);
       }
     }
