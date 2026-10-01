@@ -9,6 +9,7 @@ import registerCycleCountsRoutes from "./stock/cycle-counts.routes.js";
 import registerLubeRoutes from "./stock/lube.routes.js";
 import registerMovementsRoutes from "./stock/movements.routes.js";
 import registerPartOrdersRoutes from "./stock/part-orders.routes.js";
+import registerRequisitionRoutes from "./stock/requisitions.routes.js";
 import { autoCategorizePart, ensureStockCategorySchema } from "../utils/stockCategory.js";
 import { holdsAnyRole } from "../utils/request.js";
 
@@ -717,4 +718,5 @@ export default async function stockRoutes(app) {
   registerLubeRoutes(app, ctx);
   registerMovementsRoutes(app, ctx);
   registerPartOrdersRoutes(app, ctx);
+  registerRequisitionRoutes(app, ctx);
 }

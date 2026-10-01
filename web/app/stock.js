@@ -1299,6 +1299,9 @@ function waitingPartRowHtml(r) {
     if (r.status === "requested") actions += `<button type="button" data-waiting-status="ordered" data-waiting-id="${Number(r.id)}">Mark ordered</button>`;
     if (r.status === "ordered") actions += `<button type="button" data-waiting-status="received" data-waiting-id="${Number(r.id)}">Mark received</button>`;
     if (!r.in_stock && wo) actions += `<button type="button" data-waiting-open-wo="${wo}">Work order</button>`;
+    actions += wo
+      ? `<button type="button" data-req-wo="${wo}" title="Printable requisition with every open request on WO #${wo}">Print requisition</button>`
+      : `<button type="button" data-req-line="${Number(r.id)}">Print requisition</button>`;
   } else {
     what = `<strong>Part not listed yet</strong> <span class="muted">— parts ${escapeHtml(String(r.status || "").toLowerCase())}</span>`;
     if (wo) actions += `<button type="button" data-waiting-open-wo="${wo}">Work order</button>`;
@@ -1363,6 +1366,12 @@ function wireWorkshopWaitingParts() {
       location.href = `workorders.html?wo=${encodeURIComponent(open.dataset.waitingOpenWo)}`;
       return;
     }
+    const rq = e.target.closest("[data-req-wo],[data-req-line]");
+    if (rq) {
+      const body = rq.dataset.reqWo ? { work_order_id: Number(rq.dataset.reqWo) } : { request_ids: [Number(rq.dataset.reqLine)] };
+      printRequisition(body).catch((err) => alert(err.message || String(err)));
+      return;
+    }
     const st = e.target.closest("[data-waiting-status]");
     if (st) {
       st.disabled = true;
@@ -1378,6 +1387,7 @@ async function loadPartsTrackingTab() {
   ensurePartsTrackingDates();
   await Promise.all([
     loadWorkshopWaitingParts(),
+    loadRequisitionList().catch(() => {}),
     loadPtPartsOrders().catch((e) => setStatus("Parts tracking error: " + (e.message || e))),
     loadPtOffsiteRepairs().catch((e) => setStatus("Off-site tracking error: " + (e.message || e))),
   ]);
@@ -1542,3 +1552,91 @@ function wireStockControls() {
     );
   });
 }
+
+// ---- Stores requisitions (printable, English + Portuguese) -------------------
+async function printRequisition(body) {
+  const res = await fetchJson(`${API}/api/stock/requisitions`, { method: "POST", body: JSON.stringify(body) });
+  await openAuthedPdf(`${API}/api/stock/requisitions/${res.id}.pdf`, `${res.requisition?.number || "requisition"}.pdf`);
+  setStatus(`${res.requisition?.number || "Requisition"} ${res.created ? "created" : "reprinted"}.`);
+  loadRequisitionList().catch(() => {});
+}
+
+function requisitionLineHtml(i) {
+  return `<div class="rq-line" data-rq-line>
+    <input class="rq-part" list="partCodeOptions" placeholder="Part code or description" aria-label="Part ${i}" />
+    <input class="rq-qty" type="number" min="0.1" step="0.1" value="1" aria-label="Quantity ${i}" />
+    <button type="button" class="rq-remove" data-rq-remove title="Remove line">✕</button>
+  </div>`;
+}
+
+function resetRequisitionForm() {
+  const lines = qs("rqLines");
+  if (lines) lines.innerHTML = requisitionLineHtml(1);
+  ["rqRequestedBy", "rqAsset", "rqWo", "rqNotes"].forEach((id) => { if (qs(id)) qs(id).value = ""; });
+}
+
+async function submitWalkUpRequisition() {
+  const msg = qs("rqMsg");
+  const lines = [...document.querySelectorAll("#rqLines [data-rq-line]")].map((el) => {
+    const raw = String(el.querySelector(".rq-part")?.value || "").trim();
+    const qty = Number(el.querySelector(".rq-qty")?.value || 0);
+    // "CODE - Description" from the stock list, or free text for items not in stock.
+    const dash = raw.indexOf(" - ");
+    const known = dash > 0 || Boolean(window.__partNameByCode && window.__partNameByCode[raw.toUpperCase()]);
+    return dash > 0
+      ? { part_code: raw.slice(0, dash).trim(), part_name: raw.slice(dash + 3).trim(), qty }
+      : known ? { part_code: raw.toUpperCase(), qty } : { part_name: raw, qty };
+  }).filter((l) => (l.part_code || l.part_name) && l.qty > 0);
+  const body = {
+    requested_by: String(qs("rqRequestedBy")?.value || "").trim(),
+    asset_code: String(qs("rqAsset")?.value || "").trim().split(" - ")[0] || undefined,
+    work_order_id: Number(qs("rqWo")?.value || 0) || undefined,
+    notes: String(qs("rqNotes")?.value || "").trim() || undefined,
+    lines,
+  };
+  if (!body.requested_by) { if (msg) msg.textContent = "Enter who is asking for the parts."; return; }
+  if (!lines.length) { if (msg) msg.textContent = "Add at least one part with a quantity."; return; }
+  if (msg) msg.textContent = "Saving…";
+  try {
+    const res = await fetchJson(`${API}/api/stock/requisitions/walk-up`, { method: "POST", body: JSON.stringify(body) });
+    if (msg) msg.textContent = `${res.requisition.number} saved — opening the printable copy.`;
+    resetRequisitionForm();
+    await openAuthedPdf(`${API}/api/stock/requisitions/${res.id}.pdf`, `${res.requisition.number}.pdf`);
+    loadRequisitionList().catch(() => {});
+    loadWorkshopWaitingParts().catch(() => {});
+  } catch (e) {
+    if (msg) msg.textContent = e.message || String(e);
+  }
+}
+
+async function loadRequisitionList() {
+  const host = qs("rqList");
+  if (!host) return;
+  const data = await fetchJson(`${API}/api/stock/requisitions?days=30`);
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  host.innerHTML = rows.length
+    ? rows.map((r) => `<div class="rq-item">
+        <div><b>${escapeHtml(r.number)}</b> <span class="muted small">${escapeHtml(String(r.created_at || "").slice(0, 16))}</span>
+          <div class="muted small">${escapeHtml([r.requested_by, r.asset_code, r.work_order_id ? `WO #${r.work_order_id}` : "", `${r.line_count} line${r.line_count === 1 ? "" : "s"}`, r.walk_up ? "at the counter" : ""].filter(Boolean).join(" · "))}</div></div>
+        <button type="button" data-rq-print="${r.id}" data-rq-number="${escapeHtml(r.number)}">${r.printed_count ? "Reprint" : "Print"}</button>
+      </div>`).join("")
+    : `<p class="muted small">No requisitions in the last 30 days.</p>`;
+}
+
+(function initRequisitions() {
+  resetRequisitionForm();
+  qs("rqAddLine")?.addEventListener("click", () => {
+    const host = qs("rqLines");
+    if (host) host.insertAdjacentHTML("beforeend", requisitionLineHtml(host.children.length + 1));
+  });
+  qs("rqLines")?.addEventListener("click", (e) => {
+    const rm = e.target.closest("[data-rq-remove]");
+    if (rm && qs("rqLines").children.length > 1) rm.closest("[data-rq-line]").remove();
+  });
+  qs("rqSubmit")?.addEventListener("click", () => submitWalkUpRequisition());
+  qs("rqRefresh")?.addEventListener("click", () => loadRequisitionList().catch((e) => alert(e.message || e)));
+  qs("rqList")?.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-rq-print]");
+    if (b) openAuthedPdf(`${API}/api/stock/requisitions/${b.dataset.rqPrint}.pdf`, `${b.dataset.rqNumber}.pdf`).then(() => loadRequisitionList()).catch((err) => alert(err.message || err));
+  });
+})();
