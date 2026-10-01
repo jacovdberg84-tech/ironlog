@@ -129,6 +129,7 @@ function sourceLabel(source, wo = null) {
   if (s === "inspection" || s === "manager_inspection") return "Inspection repair";
   if (s === "manual") return "Manual repair";
   if (s === "prestart") return "Pre-start fault";
+  if (s === "artisan_inspection") return "Inspection fault";
   return s || "Unknown";
 }
 
@@ -357,6 +358,7 @@ function woJobLine(wo) {
   // Pre-start and repair jobs: the faults listed in the job description.
   const lines = String(wo.job_description || "").split("\n").map((l) => l.replace(/^-\s*/, "").trim()).filter(Boolean);
   if (source === "prestart" && lines.length > 1) return `Pre-start: ${lines.slice(1).join("; ")}`;
+  if (source === "artisan_inspection" && lines.length > 1) return `Inspection: ${lines.slice(1).join("; ")}`;
   if (lines.length) return lines[lines.length - 1];
   return sourceLabel(wo.source, wo);
 }
@@ -931,7 +933,7 @@ async function fetchWorkOrders() {
 
       const rowSource = String(r.source || "").toLowerCase();
       const sourceOk = !source
-        || (source === "inspection" && ["inspection", "manager_inspection"].includes(rowSource))
+        || (source === "inspection" && ["inspection", "manager_inspection", "artisan_inspection"].includes(rowSource))
         || rowSource === source;
       if (!sourceOk) return false;
 

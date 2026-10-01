@@ -125,3 +125,37 @@ Machine screen → "Log work on this machine" (what, optional part). `POST /api/
 
 ### Other time (not on a machine)
 Today / Shift → "Other time": a timer with a reason (workshop housekeeping, training / toolbox talk, safety meeting, tool and workshop repairs, travel, waiting for work, other + note). Table `tech_other_time` (additive). Starting other time pauses a running job; starting or resuming a job stops the timer; shift submit stops it. The shift report shows the blocks. On submit they go to the mechanics timesheet (decided: timesheet too) as one row per reason and day with asset code `WORKSHOP`, category `Workshop`, no job card. The cost dashboard joins timesheet rows to machines, so WORKSHOP hours never add to a machine's cost; monthly costs count them per technician; the costing view lists them as their own line.
+
+## 9. Artisan inspection (added 2026-10-01)
+
+The **Inspect** tab (and "Inspect this machine" on a machine page) runs the
+artisan inspection on the phone, in English or Portuguese.
+
+- **Checklist:** 25 checks in 7 sections, defined in
+  `api/utils/artisanInspection.js` (`ARTISAN_SECTIONS`). It keeps the 8 keys of
+  the old maintenance-page checklist. Every check is OK, Fault or N/A. A fault
+  needs a comment and can have photos.
+- **Details:** type (daily / weekly / before service / after repair / other),
+  shift, hour meter, where the machine is, overall result (fit / fit with
+  restrictions / not fit), notes. There are also general photos of the machine.
+- **Faults:** faults open one work order (`source = 'artisan_inspection'`,
+  `reference_id` = the inspection; priority `high` when the machine is not fit).
+  They also put up the operator notice, which says "do not operate" when the
+  machine is not fit. Photos are also added to the work order's photos.
+  Portuguese comments get an English copy on the work order when AI is set up.
+- **Offline:** the form is kept on the phone while it is filled in
+  (`ironlog-tech-insp:<code>`). Submitting without signal queues the inspection
+  and its photos. Photos find their inspection by `inspection_client_id`, so a
+  form sent twice is saved once.
+- **Routes (`/api/tech`):**
+  - `GET /inspection-template`
+  - `GET /inspections[?asset_code=]`
+  - `POST /inspections`
+  - `POST /inspections/photos?inspection_client_id=&item_key=`
+  - `GET /inspections/:id/pdf`
+- **Reports and storage:**
+  - The maintenance page PDF (`/api/reports/artisan-inspection/:id.pdf`) uses
+    the same report.
+  - Schema additions are additive: new columns on `artisan_inspections` and a
+    new `artisan_inspection_photos` table.
+  - The maintenance page's own artisan form still uses its 8-check list.

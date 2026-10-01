@@ -60,6 +60,18 @@ import {
   startOther,
   stopOther,
 } from "../utils/techOtherTime.js";
+import {
+  addInspectionPhoto,
+  artisanTemplate,
+  buildArtisanInspectionPdf,
+  ensureArtisanSchema,
+  getArtisanInspection,
+  recentInspections,
+  saveArtisanInspection,
+} from "../utils/artisanInspection.js";
+import { addEnglishToFaultComments } from "../utils/prestartFaults.js";
+import { aiChatText, isAiConfigured } from "../utils/ironmind.js";
+import { translateText } from "../utils/translate.js";
 
 // First line of the job card on work orders a technician opens for unplanned work.
 export const UNPLANNED_MARK = "Unplanned work (logged by technician)";
@@ -115,9 +127,12 @@ async function once(req, kind, fn) {
 export default async function techRoutes(app) {
   ensureTechSchema(db);
   ensureOtherTimeSchema(db);
+  ensureArtisanSchema(db);
   await app.register(multipart, { limits: { fileSize: 15 * 1024 * 1024, files: 1 } });
   const photoDir = path.join(getDataRoot(), "uploads", "work-order-photos");
   fs.mkdirSync(photoDir, { recursive: true });
+  const inspPhotoDir = path.join(getDataRoot(), "uploads", "artisan-inspections");
+  fs.mkdirSync(inspPhotoDir, { recursive: true });
 
   app.addHook("preHandler", async (req, reply) => {
     if (!roleOk(req, PORTAL_ROLES)) return reply.code(403).send({ ok: false, error: "The technician portal is for workshop staff." });
@@ -900,6 +915,104 @@ export default async function techRoutes(app) {
     `).all(a.id).map((h) => ({ id: h.id, job: jobLine(h), done_at: h.done_at, notes: h.completion_notes || null }));
     const findings = db.prepare(`SELECT id, username, kind, text, at FROM tech_findings WHERE asset_id = ? ORDER BY at DESC LIMIT 6`).all(a.id);
     return { ok: true, asset: { ...a, meter }, active, breakdown, next_service: next, history, findings };
+  });
+
+  // ---------------------------------------------------------------- Inspections
+  // Artisan inspection from the portal: checklist by section (EN/PT), details,
+  // photos; faults open a work order and the operator notice.
+  app.get("/inspection-template", async () => ({ ok: true, ...artisanTemplate() }));
+
+  app.get("/inspections", async (req, reply) => {
+    let assetId = null;
+    if (req.query?.asset_code) {
+      const a = db.prepare(`SELECT id FROM assets WHERE UPPER(asset_code) = UPPER(?)`).get(String(req.query.asset_code).trim());
+      if (!a) return reply.code(404).send({ ok: false, error: "Machine not found" });
+      assetId = a.id;
+    }
+    return { ok: true, rows: recentInspections(db, { assetId, username: assetId ? null : userOf(req), limit: assetId ? 5 : 15 }) };
+  });
+
+  app.post("/inspections", async (req, reply) => {
+    const result = await once(req, "inspection", async () => {
+      const b = req.body || {};
+      const a = db.prepare(`SELECT id FROM assets WHERE UPPER(asset_code) = UPPER(?)`).get(String(b.asset_code || "").trim());
+      const live = a ? getAssetCurrentHoursInfo(a.id) : null;
+      try {
+        const saved = saveArtisanInspection(db, {
+          assetCode: b.asset_code,
+          date: b.inspection_date || localDay(eventTime(b.at)),
+          type: b.inspection_type,
+          shift: b.shift,
+          hours: b.machine_hours,
+          liveHours: live ? Number(live.hours || 0) : null,
+          liveSource: live?.source || null,
+          location: b.location,
+          result: b.overall_result,
+          answers: b.answers,
+          comments: b.comments,
+          notes: b.notes,
+          inspector: fullName(userOf(req)),
+          username: userOf(req),
+          site: getSiteCode(req),
+          clientId: b.inspection_client_id,
+        });
+        const { fault_list: faultList, ...out } = saved;
+        // Comments written in Portuguese get an English copy on the work order.
+        if (out.work_order_id && String(b.lang || "").toLowerCase() === "pt" && isAiConfigured()) {
+          addEnglishToFaultComments(db, out.work_order_id, faultList, (text) => translateText(text, { to: "en", chat: aiChatText }))
+            .catch((err) => req.log.warn({ err }, "inspection comment translation failed"));
+        }
+        return { ok: true, ...out };
+      } catch (err) {
+        if (!err.status) throw err;
+        return { ok: false, status: err.status, error: err.message };
+      }
+    });
+    if (result?.ok === false) return reply.code(result.status || 400).send(result);
+    return result;
+  });
+
+  // Photos for an inspection (multipart "file"); the inspection is found by the
+  // id the phone gave it, so photos taken offline follow it once it is sent.
+  app.post("/inspections/photos", async (req, reply) => {
+    const clientId = String(req.query?.client_event_id || "").trim().slice(0, 80);
+    if (clientId) {
+      const prior = db.prepare(`SELECT result_json FROM tech_client_events WHERE client_event_id = ?`).get(clientId);
+      if (prior?.result_json) return { ...JSON.parse(prior.result_json), duplicate: true };
+    }
+    const inspCid = String(req.query?.inspection_client_id || "").trim();
+    const insp = inspCid
+      ? db.prepare(`SELECT id FROM artisan_inspections WHERE client_id = ?`).get(inspCid)
+      : db.prepare(`SELECT id FROM artisan_inspections WHERE id = ?`).get(Number(req.query?.inspection_id || 0));
+    if (!insp) return reply.code(404).send({ ok: false, error: "Inspection not found for this photo" });
+    const part = await req.file();
+    if (!part) return reply.code(400).send({ ok: false, error: "Attach a photo" });
+    let buf;
+    try {
+      buf = await normalizeUploadedPhoto(await part.toBuffer());
+    } catch {
+      return reply.code(400).send({ ok: false, error: "Could not read that image" });
+    }
+    const name = `ai_${insp.id}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}.jpg`;
+    await fs.promises.writeFile(path.join(inspPhotoDir, name), buf);
+    const result = { ok: true, ...addInspectionPhoto(db, {
+      inspectionId: insp.id,
+      itemKey: String(req.query?.item_key || "").trim() || null,
+      relPath: `uploads/artisan-inspections/${name}`,
+      caption: req.query?.caption,
+      username: userOf(req),
+    }) };
+    if (clientId) db.prepare(`INSERT OR REPLACE INTO tech_client_events (client_event_id, username, kind, result_json) VALUES (?, ?, 'inspection_photo', ?)`).run(clientId, userOf(req), JSON.stringify(result));
+    return result;
+  });
+
+  app.get("/inspections/:id/pdf", async (req, reply) => {
+    const insp = getArtisanInspection(db, req.params.id);
+    if (!insp) return reply.code(404).send({ ok: false, error: "Inspection not found" });
+    const pdf = await buildArtisanInspectionPdf(insp);
+    return reply.header("Content-Type", "application/pdf")
+      .header("Content-Disposition", `inline; filename="Artisan_Inspection_${insp.id}.pdf"`)
+      .send(pdf);
   });
 
   // Report a breakdown from the portal (normal breakdown route; creates its WO).

@@ -60,6 +60,7 @@ export function jobLine(w) {
   if (source === "service") return w.service_name ? `${w.service_name}${/^\d+$/.test(String(w.service_name).trim()) ? " h service" : ""}` : "Scheduled service";
   const lines = String(w.job_description || "").split("\n").map((l) => l.replace(/^-\s*/, "").trim()).filter(Boolean);
   if (source === "prestart" && lines.length > 1) return `Pre-start: ${lines.slice(1).join("; ")}`;
+  if (source === "artisan_inspection" && lines.length > 1) return `Inspection: ${lines.slice(1).join("; ")}`;
   return lines[lines.length - 1] || "Repair";
 }
 

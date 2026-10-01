@@ -8,6 +8,7 @@ import { buildPdfBuffer, pdfBodyTop } from "../../utils/pdfGenerator.js";
 import { db } from "../../db/client.js";
 import { getPdfReportBranding } from "../../utils/reportSettings.js";
 import { isDate } from "../../utils/request.js";
+import { ensureArtisanSchema } from "../../utils/artisanInspection.js";
 
 export default function registerInspectionsRoutes(app, ctx) {
   const {
@@ -950,6 +951,7 @@ export default function registerInspectionsRoutes(app, ctx) {
   // =====================================================
   app.get("/artisan-inspections", async (req, reply) => {
     try {
+      ensureArtisanSchema(db);
       const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
       const assetId = Number(req.query?.asset_id || 0);
       const start = String(req.query?.start || "").trim();
@@ -984,6 +986,11 @@ export default function registerInspectionsRoutes(app, ctx) {
           ai.live_hours_source,
           ai.checklist_json,
           ai.created_at,
+          ai.inspection_type,
+          ai.location,
+          ai.overall_result,
+          ai.work_order_id,
+          (SELECT COUNT(*) FROM artisan_inspection_photos p WHERE p.inspection_id = ai.id) AS photo_count,
           a.asset_code,
           a.asset_name
         FROM artisan_inspections ai

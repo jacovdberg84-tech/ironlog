@@ -89,13 +89,25 @@ export function noticeForOperator(db, assetId) {
   return n ? { id: n.id, message_en: n.message_en, message_pt: n.message_pt || null, work_order_id: n.work_order_id || null, since: n.created_at } : null;
 }
 
-export function autoNoticeText(assetCode, faults = []) {
+export function autoNoticeText(assetCode, faults = [], { origin = "prestart", notFit = false } = {}) {
   const labels = faults.map((f) => String(f.label || "").trim()).filter(Boolean);
   const listEn = labels.length ? ` (${labels.join(", ")})` : "";
-  const listPt = labels.length ? ` (${labels.map((l) => toPortuguese(l) || l).join(", ")})` : "";
+  const labelsPt = faults.filter((f) => String(f.label || "").trim()).map((f) => f.label_pt || toPortuguese(String(f.label).trim()) || String(f.label).trim());
+  const listPt = labelsPt.length ? ` (${labelsPt.join(", ")})` : "";
+  const inspection = origin === "inspection";
+  const whereEn = inspection ? "found on" : "reported on";
+  const atEn = inspection ? "at a workshop inspection" : "at a pre-start";
+  const wherePt = inspection ? "encontradas" : "reportadas";
+  const atPt = inspection ? "numa inspecção da oficina" : "numa inspecção pré-arranque";
+  const doEn = notFit
+    ? "Do not operate this machine. Wait for the workshop to clear it."
+    : "Report the machine to the workshop for repairs before you work with it.";
+  const doPt = notFit
+    ? "Não opere esta máquina. Aguarde que a oficina a liberte."
+    : "Leve a máquina à oficina para reparação antes de trabalhar com ela.";
   return {
-    en: `Faults were reported on ${assetCode} at a pre-start${listEn}. Report the machine to the workshop for repairs before you work with it.`,
-    pt: `Foram reportadas avarias na ${assetCode} numa inspecção pré-arranque${listPt}. Leve a máquina à oficina para reparação antes de trabalhar com ela.`,
+    en: `Faults were ${whereEn} ${assetCode} ${atEn}${listEn}. ${doEn}`,
+    pt: `Foram ${wherePt} avarias na ${assetCode} ${atPt}${listPt}. ${doPt}`,
   };
 }
 
@@ -103,10 +115,10 @@ export function autoNoticeText(assetCode, faults = []) {
  * Puts up the standard notice for a fault work order. A notice the admin wrote
  * is left alone; an automatic one for the same work order is refreshed.
  */
-export function autoNoticeForFaults(db, { assetId, assetCode, workOrderId, faults }) {
+export function autoNoticeForFaults(db, { assetId, assetCode, workOrderId, faults, origin = "prestart", notFit = false }) {
   ensureNoticeSchema(db);
   const cur = activeNotice(db, assetId);
-  const text = autoNoticeText(assetCode, faults);
+  const text = autoNoticeText(assetCode, faults, { origin, notFit });
   if (cur && cur.source !== "auto") return cur.id;
   if (cur && cur.source === "auto") {
     db.prepare(`UPDATE machine_notices SET message_en = ?, message_pt = ?, work_order_id = COALESCE(?, work_order_id), updated_at = datetime('now') WHERE id = ?`)

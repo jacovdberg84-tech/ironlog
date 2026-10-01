@@ -834,6 +834,19 @@ function openArtisanInspectionPdf(id, download = false) {
   });
 }
 
+const ARTISAN_RESULT_TEXT = { fit: "Fit for work", restricted: "Fit with restrictions", not_fit: "Not fit for work" };
+
+/** Details added by inspections done in the technician portal. */
+function artisanExtraLine(r) {
+  const bits = [];
+  if (r.inspection_type) bits.push(`Type: ${esc(String(r.inspection_type).replace(/_/g, " "))}`);
+  if (r.location) bits.push(`Location: ${esc(r.location)}`);
+  if (r.overall_result) bits.push(`Result: <b class="${r.overall_result === "not_fit" ? "status-overdue" : ""}">${esc(ARTISAN_RESULT_TEXT[r.overall_result] || r.overall_result)}</b>`);
+  if (Number(r.photo_count) > 0) bits.push(`${Number(r.photo_count)} photo${Number(r.photo_count) === 1 ? "" : "s"}`);
+  if (r.work_order_id) bits.push(`<a href="./workorders.html?wo=${Number(r.work_order_id)}">WO #${Number(r.work_order_id)}</a>`);
+  return bits.length ? `<div><small>${bits.join(" | ")}</small></div>` : "";
+}
+
 function artisanInspectionCard(r) {
   const hrs = r.machine_hours != null && Number.isFinite(Number(r.machine_hours))
     ? Number(r.machine_hours).toFixed(1)
@@ -855,6 +868,7 @@ function artisanInspectionCard(r) {
       <div><small>Date: ${esc(r.inspection_date)}${shift ? ` | Shift: ${esc(shift.toUpperCase())}` : ""} | Artisan: ${esc(r.inspector_name || "-")}</small></div>
       <div><small>Form No: <b>${esc(formNo || "-")}</b></small></div>
       <div><small>Machine hrs: ${esc(hrs)} | Live snapshot: ${live}</small></div>
+      ${artisanExtraLine(r)}
       ${failLine}
       <div style="margin-top:6px;"><small>${esc(r.notes || "")}</small></div>
       <div class="row stack-10" style="margin-top:8px;">
