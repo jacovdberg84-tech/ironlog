@@ -90,6 +90,7 @@ export function fuelBenchmarkAssetsInRangeSql() {
       COALESCE(NULLIF(a.km_per_hour_factor, 0), 10.0) AS km_per_hour_factor,
       COALESCE(a.baseline_fuel_l_per_hour, 5.0) AS oem_lph,
       COALESCE(a.baseline_fuel_km_per_l, 2.0) AS oem_kmpl,
+      a.fuel_benchmark_set_at,
       fl.fuel_liters AS fuel_liters,
       fl.fill_count AS fill_count
     FROM assets a

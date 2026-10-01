@@ -504,13 +504,31 @@ const FUEL_BENCHMARK_BY_ASSET_COLUMNS = [
   { header: "Variance km/L", key: "variance_km_per_l", width: 14 },
   { header: "Fill Count", key: "fill_count", width: 10 },
   { header: "Flag", key: "flag", width: 12 },
+  { header: "Fuel Matched to Readings (L)", key: "matched_liters", width: 16 },
+  { header: "Matched %", key: "coverage_pct", width: 11 },
+  { header: "Worked Out From", key: "run_source_text", width: 22 },
+  { header: "Rejected Readings", key: "suspect_readings", width: 12 },
+  { header: "Notes", key: "note", width: 48 },
 ];
+
+const RUN_SOURCE_TEXT = { fill_meter: "Meter readings on fills", daily_hours: "Daily hours", none: "No usable readings" };
+
+/** Benchmark rows as Excel rows: a missing OEM benchmark reads "Not set". */
+function fuelBenchmarkSheetRow(r) {
+  const out = { ...r, run_source_text: RUN_SOURCE_TEXT[r.run_source] || "" };
+  if (r.metric_mode === "km") {
+    if (r.oem_km_per_l == null && "oem_set" in r) out.oem_km_per_l = "Not set";
+  } else if (r.oem_lph == null && "oem_set" in r) {
+    out.oem_lph = "Not set";
+  }
+  return out;
+}
 
 function addFuelBenchmarkByAssetWorksheet(wb, sheetName, rows, emptyMessage = "No fuel benchmark data for period") {
   const ws = wb.addWorksheet(sheetName);
   ws.columns = FUEL_BENCHMARK_BY_ASSET_COLUMNS;
   if (rows.length) {
-    ws.addRows(rows);
+    ws.addRows(rows.map(fuelBenchmarkSheetRow));
   } else {
     ws.addRow({
       asset_code: "-",

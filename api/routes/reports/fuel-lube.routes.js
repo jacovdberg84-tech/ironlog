@@ -9,11 +9,11 @@ import { createManagementSummary, styleManagementDetailSheet } from "../../utils
 import { db } from "../../db/client.js";
 import { fetchLubeMonthStockSnapshot } from "../../utils/lubeMonthStock.js";
 import { fetchLubeUsageLines } from "../../utils/lubeUsageLines.js";
-import { fuelBenchmarkAssetsInRangeSql } from "../../utils/fuelMetricMode.js";
+import { fuelBenchmarkAssetsInRangeSql, sqlFuelMetricModeExpr } from "../../utils/fuelMetricMode.js";
 import { getMonthlyBudgetRow, getOperatingBudgetAmount } from "../../utils/monthlyBudget.js";
-import { getRunFromFuelRows, resolveBenchmarkHoursRun, summarizeFuelBenchmarkRows } from "../../utils/fuelRunFromLogs.js";
+import { summarizeFuelBenchmarkRows } from "../../utils/fuelRunFromLogs.js";
+import { assetConsumption, consumptionNote, ensureFuelBenchmarkSchema, sortBenchmarkRows } from "../../utils/fuelConsumption.js";
 import { isDate } from "../../utils/request.js";
-import { isOperationalHireAsset } from "../../utils/hiredEquipment.js";
 
 export default function registerFuelLubeRoutes(app, ctx) {
   const {
@@ -24,6 +24,7 @@ export default function registerFuelLubeRoutes(app, ctx) {
     monthsInRange,
     queryPeriodFleetCostTotals,
   } = ctx;
+  ensureFuelBenchmarkSchema(db);
 
   // =========================
   // LUBE USAGE PDF
@@ -389,110 +390,14 @@ export default function registerFuelLubeRoutes(app, ctx) {
     }
 
     const fuelByAsset = db.prepare(fuelBenchmarkAssetsInRangeSql()).all(start, end);
-
-    const getFuelLogsInRange = db.prepare(`
-      SELECT
-        id,
-        log_date,
-        COALESCE(LOWER(meter_unit), '') AS meter_unit,
-        COALESCE(meter_run_value, 0) AS meter_run_value,
-        COALESCE(hours_run, 0) AS hours_run,
-        open_meter_value,
-        close_meter_value
-      FROM fuel_logs
-      WHERE asset_id = ?
-        AND log_date BETWEEN ? AND ?
-      ORDER BY log_date ASC, id ASC
-    `);
-    const getFuelLogBeforeRange = db.prepare(`
-      SELECT
-        id,
-        log_date,
-        COALESCE(LOWER(meter_unit), '') AS meter_unit,
-        COALESCE(meter_run_value, 0) AS meter_run_value,
-        COALESCE(hours_run, 0) AS hours_run,
-        open_meter_value,
-        close_meter_value
-      FROM fuel_logs
-      WHERE asset_id = ?
-        AND log_date < ?
-        AND (
-          COALESCE(meter_run_value, 0) > 0
-          OR COALESCE(hours_run, 0) > 0
-        )
-      ORDER BY log_date DESC, id DESC
-      LIMIT 1
-    `);
-    const getDailyHoursRunInRange = db.prepare(`
-      SELECT COALESCE(SUM(COALESCE(dh.hours_run, 0)), 0) AS v
-      FROM daily_hours dh
-      WHERE dh.asset_id = ?
-        AND dh.work_date BETWEEN ? AND ?
-        AND COALESCE(dh.is_used, 1) = 1
-        AND LOWER(COALESCE(NULLIF(TRIM(dh.input_unit), ''), 'hours')) <> 'km'
-        AND COALESCE(dh.hours_run, 0) > 0
-    `);
-
-    function getRunFromFuel(assetId, startDate, endDate, assetMetricMode) {
-      const logs = getFuelLogsInRange.all(assetId, startDate, endDate);
-      const prev = getFuelLogBeforeRange.get(assetId, startDate);
-      return getRunFromFuelRows(logs, prev, assetMetricMode);
-    }
-
-    const benchmarkRows = fuelByAsset.map((r) => {
-      const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
-      const fuelRun = getRunFromFuel(r.asset_id, start, end, mode) || {};
-      const fuelKm = Number(fuelRun.km_run || 0);
-      const fuelHours = Number(fuelRun.hours_run || 0);
-      const skipDaily = Number(r.archived || 0) === 1 && isOperationalHireAsset(r);
-      const dailyHoursRun = mode === "hours" && !skipDaily
-        ? Number(getDailyHoursRunInRange.get(r.asset_id, start, end)?.v || 0)
-        : 0;
-      const km = fuelKm > 0 ? fuelKm : 0;
-      const hours = mode === "hours"
-        ? resolveBenchmarkHoursRun(fuelHours, dailyHoursRun, start, end)
-        : (fuelHours > 0 ? fuelHours : 0);
-      const fuel = Number(r.fuel_liters || 0);
-      const oem = Number(r.oem_lph || 5);
-      const oemK = Number(r.oem_kmpl || 2);
-      const fillCount = Number(r.fill_count || 0);
-      const lph = hours > 0 ? fuel / hours : null;
-      const kmpl = fuel > 0 && km > 0 ? km / fuel : null;
-      const excessiveThreshold = oem * (1 + tolerance);
-      const lowThresholdKmpl = oemK * Math.max(0, 1 - tolerance);
-      const hasEnoughSamples = fillCount >= 2;
-      const is_excessive = hasEnoughSamples && (mode === "km"
-        ? (kmpl != null && kmpl < lowThresholdKmpl)
-        : (lph != null && lph > excessiveThreshold));
-      return {
-        metric_mode: mode,
-        asset_code: r.asset_code,
-        asset_name: r.asset_name,
-        is_hired: isOperationalHireAsset(r) || Boolean(String(r.hire_billing_mode || "").trim()),
-        fuel_liters: Number(fuel.toFixed(2)),
-        km_run: Number(km.toFixed(2)),
-        hours_run: Number(hours.toFixed(2)),
-        actual_lph: lph == null ? null : Number(lph.toFixed(3)),
-        oem_lph: Number(oem.toFixed(3)),
-        threshold_lph: Number(excessiveThreshold.toFixed(3)),
-        variance_lph: lph == null ? null : Number((lph - oem).toFixed(3)),
-        actual_km_per_l: kmpl == null ? null : Number(kmpl.toFixed(3)),
-        oem_km_per_l: Number(oemK.toFixed(3)),
-        threshold_km_per_l: Number(lowThresholdKmpl.toFixed(3)),
-        variance_km_per_l: kmpl == null ? null : Number((kmpl - oemK).toFixed(3)),
-        fill_count: fillCount,
-        flag: is_excessive ? "EXCESSIVE" : "OK",
-      };
-    }).filter((r) => r.fuel_liters > 0)
+    const benchmarkRows = sortBenchmarkRows(fuelByAsset
+      .map((r) => {
+        const row = assetConsumption(db, r, start, end, tolerance);
+        return { ...row, note: consumptionNote(row) };
+      })
+      .filter((r) => r.fuel_liters > 0)
       .filter((r) => (assetFilter ? String(r.asset_code || "").trim().toLowerCase() === assetFilter : true))
-      .filter((r) => (modeFilter === "km" ? r.metric_mode === "km" : modeFilter === "hours" ? r.metric_mode === "hours" : true))
-      .sort((a, b) => {
-        const ex = (b.flag === "EXCESSIVE" ? 1 : 0) - (a.flag === "EXCESSIVE" ? 1 : 0);
-        if (ex !== 0) return ex;
-        const av = a.metric_mode === "km" ? Number(a.variance_km_per_l || -999) : Number(a.variance_lph || -999);
-        const bv = b.metric_mode === "km" ? Number(b.variance_km_per_l || -999) : Number(b.variance_lph || -999);
-        return bv - av;
-      });
+      .filter((r) => (modeFilter === "km" ? r.metric_mode === "km" : modeFilter === "hours" ? r.metric_mode === "hours" : true)));
 
     const rows = benchmarkRows;
     const categoryRows = assetFilter ? [] : aggregateFuelBenchmarkByCategory(
@@ -522,6 +427,7 @@ export default function registerFuelLubeRoutes(app, ctx) {
           { k: "Avg L/hr", v: summary.avg_lph == null ? "-" : fmtNum(summary.avg_lph, 3) },
         ], 2);
         doc.font("Helvetica-Bold").fontSize(9).fillColor("#b91c1c").text("Flag legend: EXCESSIVE = above OEM by tolerance", { align: "left" });
+        doc.font("Helvetica").fontSize(8.5).fillColor("#475569").text("Worked out fill to fill: each fill's litres over the meter movement since the previous good reading. Impossible readings are rejected; machines without an OEM benchmark are not flagged.", { align: "left" });
         doc.moveDown(0.4);
         doc.font("Helvetica").fontSize(9).fillColor("#111111");
 
@@ -542,15 +448,16 @@ export default function registerFuelLubeRoutes(app, ctx) {
                 { key: "flag", label: "Flag", width: 0.08, align: "center" },
               ]
             : [
-                { key: "asset_code", label: "Asset", width: 0.12 },
-                { key: "asset_name", label: "Name", width: 0.24 },
-                { key: "metric_mode", label: "Mode", width: 0.08, align: "center" },
-                { key: "fuel_liters", label: "Fuel (L)", width: 0.12, align: "right" },
-                { key: "run", label: "Run", width: 0.12, align: "right" },
+                { key: "asset_code", label: "Asset", width: 0.09 },
+                { key: "asset_name", label: "Name", width: 0.15 },
+                { key: "metric_mode", label: "Mode", width: 0.06, align: "center" },
+                { key: "fuel_liters", label: "Fuel (L)", width: 0.09, align: "right" },
+                { key: "run", label: "Run", width: 0.09, align: "right" },
                 { key: "actual", label: "Actual", width: 0.10, align: "right" },
-                { key: "oem", label: "OEM", width: 0.08, align: "right" },
-                { key: "variance", label: "Variance", width: 0.08, align: "right" },
+                { key: "oem", label: "OEM", width: 0.07, align: "right" },
+                { key: "variance", label: "Variance", width: 0.07, align: "right" },
                 { key: "flag", label: "Flag", width: 0.08, align: "center" },
+                { key: "note", label: "Notes", width: 0.20 },
               ],
           displayRows.length
             ? displayRows.map((r) => {
@@ -564,7 +471,7 @@ export default function registerFuelLubeRoutes(app, ctx) {
                     actual: r.metric_mode === "km"
                       ? (r.actual_km_per_l == null ? "-" : `${fmtNum(r.actual_km_per_l, 3)} km/L`)
                       : (r.actual_lph == null ? "-" : `${fmtNum(r.actual_lph, 3)} L/hr`),
-                    oem: r.metric_mode === "km" ? `${fmtNum(r.oem_km_per_l, 3)}` : `${fmtNum(r.oem_lph, 3)}`,
+                    oem: (r.metric_mode === "km" ? r.oem_km_per_l : r.oem_lph) == null ? "Not set" : fmtNum(r.metric_mode === "km" ? r.oem_km_per_l : r.oem_lph, 3),
                     variance: r.metric_mode === "km"
                       ? (r.variance_km_per_l == null ? "-" : fmtNum(r.variance_km_per_l, 3))
                       : (r.variance_lph == null ? "-" : fmtNum(r.variance_lph, 3)),
@@ -580,11 +487,12 @@ export default function registerFuelLubeRoutes(app, ctx) {
                   actual: r.metric_mode === "km"
                     ? (r.actual_km_per_l == null ? "-" : `${fmtNum(r.actual_km_per_l, 3)} km/L`)
                     : (r.actual_lph == null ? "-" : `${fmtNum(r.actual_lph, 3)} L/hr`),
-                  oem: r.metric_mode === "km" ? `${fmtNum(r.oem_km_per_l, 3)}` : `${fmtNum(r.oem_lph, 3)}`,
+                  oem: (r.metric_mode === "km" ? r.oem_km_per_l : r.oem_lph) == null ? "Not set" : fmtNum(r.metric_mode === "km" ? r.oem_km_per_l : r.oem_lph, 3),
                   variance: r.metric_mode === "km"
                     ? (r.variance_km_per_l == null ? "-" : fmtNum(r.variance_km_per_l, 3))
                     : (r.variance_lph == null ? "-" : fmtNum(r.variance_lph, 3)),
                   flag: r.flag,
+                  note: r.note || "",
                 };
               })
             : [{
@@ -641,72 +549,18 @@ export default function registerFuelLubeRoutes(app, ctx) {
 
     const fuelByAsset = db.prepare(fuelBenchmarkAssetsInRangeSql()).all(start, end);
 
-    const getFuelLogsInRange = db.prepare(`
-      SELECT
-        id,
-        log_date,
-        COALESCE(LOWER(meter_unit), '') AS meter_unit,
-        COALESCE(meter_run_value, 0) AS meter_run_value,
-        COALESCE(hours_run, 0) AS hours_run,
-        open_meter_value,
-        close_meter_value
-      FROM fuel_logs
-      WHERE asset_id = ?
-        AND log_date BETWEEN ? AND ?
-      ORDER BY log_date ASC, id ASC
-    `);
-    const getFuelLogBeforeRange = db.prepare(`
-      SELECT
-        id,
-        log_date,
-        COALESCE(LOWER(meter_unit), '') AS meter_unit,
-        COALESCE(meter_run_value, 0) AS meter_run_value,
-        COALESCE(hours_run, 0) AS hours_run,
-        open_meter_value,
-        close_meter_value
-      FROM fuel_logs
-      WHERE asset_id = ?
-        AND log_date < ?
-        AND (
-          COALESCE(meter_run_value, 0) > 0
-          OR COALESCE(hours_run, 0) > 0
-        )
-      ORDER BY log_date DESC, id DESC
-      LIMIT 1
-    `);
-    const getDailyHoursRunInRange = db.prepare(`
-      SELECT COALESCE(SUM(COALESCE(dh.hours_run, 0)), 0) AS v
-      FROM daily_hours dh
-      WHERE dh.asset_id = ?
-        AND dh.work_date BETWEEN ? AND ?
-        AND COALESCE(dh.is_used, 1) = 1
-        AND LOWER(COALESCE(NULLIF(TRIM(dh.input_unit), ''), 'hours')) <> 'km'
-        AND COALESCE(dh.hours_run, 0) > 0
-    `);
-
-    function getRunFromFuel(assetId, startDate, endDate, assetMetricMode) {
-      const logs = getFuelLogsInRange.all(assetId, startDate, endDate);
-      const prev = getFuelLogBeforeRange.get(assetId, startDate);
-      return getRunFromFuelRows(logs, prev, assetMetricMode);
-    }
-
     const rows = fuelByAsset
-      .map((r) => {
-        const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
-        const fuelRun = getRunFromFuel(r.asset_id, start, end, mode) || {};
-        const fuelKm = Number(fuelRun.km_run || 0);
-        const fuelHours = Number(fuelRun.hours_run || 0);
-        const dailyHoursRun = mode === "hours"
-          ? Number(getDailyHoursRunInRange.get(r.asset_id, start, end)?.v || 0)
-          : 0;
-        const km = fuelKm > 0 ? fuelKm : 0;
-        const hours = mode === "hours"
-          ? resolveBenchmarkHoursRun(fuelHours, dailyHoursRun, start, end)
-          : (fuelHours > 0 ? fuelHours : 0);
+      .map((asset) => {
+        const r = assetConsumption(db, asset, start, end, tolerance);
+        const mode = r.metric_mode;
+        const km = r.km_run;
+        const hours = r.hours_run;
+        // All fuel dispensed against what the recorded run should have used; fuel
+        // that could not be matched to meter readings is named in the reasons.
         const fuel = Number(r.fuel_liters || 0);
         const expected = mode === "km"
-          ? (km > 0 && Number(r.oem_kmpl || 0) > 0 ? km / Number(r.oem_kmpl || 0) : 0)
-          : (hours > 0 && Number(r.oem_lph || 0) > 0 ? hours * Number(r.oem_lph || 0) : 0);
+          ? (km > 0 && Number(r.oem_km_per_l || 0) > 0 ? km / Number(r.oem_km_per_l) : 0)
+          : (hours > 0 && Number(r.oem_lph || 0) > 0 ? hours * Number(r.oem_lph) : 0);
         const variance = fuel - expected;
         const allowed = expected * tolerance;
         const unexplained = Math.max(0, variance - allowed);
@@ -716,6 +570,10 @@ export default function registerFuelLubeRoutes(app, ctx) {
         if (runBase <= 0 && fuel > 0) reasons.push("fuel with no run basis");
         if (Number(r.fill_count || 0) < 2) reasons.push("low sample count");
         if (variancePct != null && variancePct > 50) reasons.push("variance > 50%");
+        const unmatchedL = Number((r.fuel_liters - Number(r.basis_liters || 0)).toFixed(2));
+        if (runBase > 0 && unmatchedL > 0) reasons.push(`${unmatchedL} L not matched to meter readings`);
+        if (r.suspect_readings) reasons.push(`${r.suspect_readings} meter reading(s) rejected`);
+        if (!r.oem_set) reasons.push("benchmark not set");
         return {
           asset_code: String(r.asset_code || ""),
           asset_name: String(r.asset_name || ""),
@@ -837,72 +695,18 @@ export default function registerFuelLubeRoutes(app, ctx) {
 
     const fuelByAsset = db.prepare(fuelBenchmarkAssetsInRangeSql()).all(start, end);
 
-    const getFuelLogsInRange = db.prepare(`
-      SELECT
-        id,
-        log_date,
-        COALESCE(LOWER(meter_unit), '') AS meter_unit,
-        COALESCE(meter_run_value, 0) AS meter_run_value,
-        COALESCE(hours_run, 0) AS hours_run,
-        open_meter_value,
-        close_meter_value
-      FROM fuel_logs
-      WHERE asset_id = ?
-        AND log_date BETWEEN ? AND ?
-      ORDER BY log_date ASC, id ASC
-    `);
-    const getFuelLogBeforeRange = db.prepare(`
-      SELECT
-        id,
-        log_date,
-        COALESCE(LOWER(meter_unit), '') AS meter_unit,
-        COALESCE(meter_run_value, 0) AS meter_run_value,
-        COALESCE(hours_run, 0) AS hours_run,
-        open_meter_value,
-        close_meter_value
-      FROM fuel_logs
-      WHERE asset_id = ?
-        AND log_date < ?
-        AND (
-          COALESCE(meter_run_value, 0) > 0
-          OR COALESCE(hours_run, 0) > 0
-        )
-      ORDER BY log_date DESC, id DESC
-      LIMIT 1
-    `);
-    const getDailyHoursRunInRange = db.prepare(`
-      SELECT COALESCE(SUM(COALESCE(dh.hours_run, 0)), 0) AS v
-      FROM daily_hours dh
-      WHERE dh.asset_id = ?
-        AND dh.work_date BETWEEN ? AND ?
-        AND COALESCE(dh.is_used, 1) = 1
-        AND LOWER(COALESCE(NULLIF(TRIM(dh.input_unit), ''), 'hours')) <> 'km'
-        AND COALESCE(dh.hours_run, 0) > 0
-    `);
-
-    function getRunFromFuel(assetId, startDate, endDate, assetMetricMode) {
-      const logs = getFuelLogsInRange.all(assetId, startDate, endDate);
-      const prev = getFuelLogBeforeRange.get(assetId, startDate);
-      return getRunFromFuelRows(logs, prev, assetMetricMode);
-    }
-
     const rows = fuelByAsset
-      .map((r) => {
-        const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
-        const fuelRun = getRunFromFuel(r.asset_id, start, end, mode) || {};
-        const fuelKm = Number(fuelRun.km_run || 0);
-        const fuelHours = Number(fuelRun.hours_run || 0);
-        const dailyHoursRun = mode === "hours"
-          ? Number(getDailyHoursRunInRange.get(r.asset_id, start, end)?.v || 0)
-          : 0;
-        const km = fuelKm > 0 ? fuelKm : 0;
-        const hours = mode === "hours"
-          ? resolveBenchmarkHoursRun(fuelHours, dailyHoursRun, start, end)
-          : (fuelHours > 0 ? fuelHours : 0);
+      .map((asset) => {
+        const r = assetConsumption(db, asset, start, end, tolerance);
+        const mode = r.metric_mode;
+        const km = r.km_run;
+        const hours = r.hours_run;
+        // All fuel dispensed against what the recorded run should have used; fuel
+        // that could not be matched to meter readings is named in the reasons.
         const fuel = Number(r.fuel_liters || 0);
         const expected = mode === "km"
-          ? (km > 0 && Number(r.oem_kmpl || 0) > 0 ? km / Number(r.oem_kmpl || 0) : 0)
-          : (hours > 0 && Number(r.oem_lph || 0) > 0 ? hours * Number(r.oem_lph || 0) : 0);
+          ? (km > 0 && Number(r.oem_km_per_l || 0) > 0 ? km / Number(r.oem_km_per_l) : 0)
+          : (hours > 0 && Number(r.oem_lph || 0) > 0 ? hours * Number(r.oem_lph) : 0);
         const variance = fuel - expected;
         const allowed = expected * tolerance;
         const unexplained = Math.max(0, variance - allowed);
@@ -912,6 +716,10 @@ export default function registerFuelLubeRoutes(app, ctx) {
         if (runBase <= 0 && fuel > 0) reasons.push("fuel with no run basis");
         if (Number(r.fill_count || 0) < 2) reasons.push("low sample count");
         if (variancePct != null && variancePct > 50) reasons.push("variance > 50%");
+        const unmatchedL = Number((r.fuel_liters - Number(r.basis_liters || 0)).toFixed(2));
+        if (runBase > 0 && unmatchedL > 0) reasons.push(`${unmatchedL} L not matched to meter readings`);
+        if (r.suspect_readings) reasons.push(`${r.suspect_readings} meter reading(s) rejected`);
+        if (!r.oem_set) reasons.push("benchmark not set");
         return {
           asset_code: String(r.asset_code || ""),
           asset_name: String(r.asset_name || ""),
@@ -1003,111 +811,16 @@ export default function registerFuelLubeRoutes(app, ctx) {
 
     const fuelByAssetStmt = db.prepare(fuelBenchmarkAssetsInRangeSql());
 
-    const getFuelLogsInRange = db.prepare(`
-      SELECT
-        id,
-        log_date,
-        COALESCE(LOWER(meter_unit), '') AS meter_unit,
-        COALESCE(meter_run_value, 0) AS meter_run_value,
-        COALESCE(hours_run, 0) AS hours_run,
-        open_meter_value,
-        close_meter_value
-      FROM fuel_logs
-      WHERE asset_id = ?
-        AND log_date BETWEEN ? AND ?
-      ORDER BY log_date ASC, id ASC
-    `);
-    const getFuelLogBeforeRange = db.prepare(`
-      SELECT
-        id,
-        log_date,
-        COALESCE(LOWER(meter_unit), '') AS meter_unit,
-        COALESCE(meter_run_value, 0) AS meter_run_value,
-        COALESCE(hours_run, 0) AS hours_run,
-        open_meter_value,
-        close_meter_value
-      FROM fuel_logs
-      WHERE asset_id = ?
-        AND log_date < ?
-        AND (
-          COALESCE(meter_run_value, 0) > 0
-          OR COALESCE(hours_run, 0) > 0
-        )
-      ORDER BY log_date DESC, id DESC
-      LIMIT 1
-    `);
-    const getDailyHoursRunInRange = db.prepare(`
-      SELECT COALESCE(SUM(COALESCE(dh.hours_run, 0)), 0) AS v
-      FROM daily_hours dh
-      WHERE dh.asset_id = ?
-        AND dh.work_date BETWEEN ? AND ?
-        AND COALESCE(dh.is_used, 1) = 1
-        AND LOWER(COALESCE(NULLIF(TRIM(dh.input_unit), ''), 'hours')) <> 'km'
-        AND COALESCE(dh.hours_run, 0) > 0
-    `);
-    function getRunFromFuel(assetId, startDate, endDate, assetMetricMode) {
-      const logs = getFuelLogsInRange.all(assetId, startDate, endDate);
-      const prev = getFuelLogBeforeRange.get(assetId, startDate);
-      return getRunFromFuelRows(logs, prev, assetMetricMode);
-    }
-
     function buildRowsForPeriod(periodStart, periodEnd) {
       const fuelByAsset = fuelByAssetStmt.all(periodStart, periodEnd);
       const benchmarkRows = fuelByAsset.map((r) => {
-        const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
-        const fuelRun = getRunFromFuel(r.asset_id, periodStart, periodEnd, mode) || {};
-        const fuelKm = Number(fuelRun.km_run || 0);
-        const fuelHours = Number(fuelRun.hours_run || 0);
-        const dailyHoursRun = mode === "hours"
-          ? Number(getDailyHoursRunInRange.get(r.asset_id, periodStart, periodEnd)?.v || 0)
-          : 0;
-        const km = fuelKm > 0 ? fuelKm : 0;
-        const hours = mode === "hours"
-          ? resolveBenchmarkHoursRun(fuelHours, dailyHoursRun, periodStart, periodEnd)
-          : (fuelHours > 0 ? fuelHours : 0);
-        const fuel = Number(r.fuel_liters || 0);
-        const oem = Number(r.oem_lph || 5);
-        const oemK = Number(r.oem_kmpl || 2);
-        const fillCount = Number(r.fill_count || 0);
-        const lph = hours > 0 ? fuel / hours : null;
-        const kmpl = fuel > 0 && km > 0 ? km / fuel : null;
-        const excessiveThreshold = oem * (1 + tolerance);
-        const lowThresholdKmpl = oemK * Math.max(0, 1 - tolerance);
-        const hasEnoughSamples = fillCount >= 2;
-        const is_excessive = hasEnoughSamples && (mode === "km"
-          ? (kmpl != null && kmpl < lowThresholdKmpl)
-          : (lph != null && lph > excessiveThreshold));
-        return {
-          metric_mode: mode,
-          asset_code: r.asset_code,
-          asset_name: r.asset_name,
-          category: r.category || "",
-          fuel_liters: Number(fuel.toFixed(2)),
-          km_run: Number(km.toFixed(2)),
-          hours_run: Number(hours.toFixed(2)),
-          actual_lph: lph == null ? null : Number(lph.toFixed(3)),
-          oem_lph: Number(oem.toFixed(3)),
-          threshold_lph: Number(excessiveThreshold.toFixed(3)),
-          variance_lph: lph == null ? null : Number((lph - oem).toFixed(3)),
-          actual_km_per_l: kmpl == null ? null : Number(kmpl.toFixed(3)),
-          oem_km_per_l: Number(oemK.toFixed(3)),
-          threshold_km_per_l: Number(lowThresholdKmpl.toFixed(3)),
-          variance_km_per_l: kmpl == null ? null : Number((kmpl - oemK).toFixed(3)),
-          fill_count: fillCount,
-          flag: is_excessive ? "EXCESSIVE" : "OK",
-        };
+        const row = assetConsumption(db, r, periodStart, periodEnd, tolerance);
+        return { ...row, note: consumptionNote(row) };
       });
-      const rows = benchmarkRows
+      const rows = sortBenchmarkRows(benchmarkRows
         .filter((r) => r.fuel_liters > 0)
         .filter((r) => (assetFilter ? String(r.asset_code || "").trim().toLowerCase() === assetFilter : true))
-        .filter((r) => (modeFilter === "km" ? r.metric_mode === "km" : modeFilter === "hours" ? r.metric_mode === "hours" : true))
-        .sort((a, b) => {
-          const ex = (b.flag === "EXCESSIVE" ? 1 : 0) - (a.flag === "EXCESSIVE" ? 1 : 0);
-          if (ex !== 0) return ex;
-          const av = a.metric_mode === "km" ? Number(a.variance_km_per_l || -999) : Number(a.variance_lph || -999);
-          const bv = b.metric_mode === "km" ? Number(b.variance_km_per_l || -999) : Number(b.variance_lph || -999);
-          return bv - av;
-        });
+        .filter((r) => (modeFilter === "km" ? r.metric_mode === "km" : modeFilter === "hours" ? r.metric_mode === "hours" : true)));
       return { rows, benchmarkRows };
     }
 
@@ -1500,151 +1213,57 @@ export default function registerFuelLubeRoutes(app, ctx) {
     }
 
     const asset = db.prepare(`
-      SELECT
-        id, asset_code, asset_name, category,
-        COALESCE(baseline_fuel_l_per_hour, 5.0) AS oem_lph,
-        COALESCE(baseline_fuel_km_per_l, 2.0) AS oem_kmpl,
-        CASE
-          WHEN UPPER(COALESCE(asset_code, '')) GLOB 'V[0-9][0-9]AM' THEN 'km'
-          ELSE COALESCE(NULLIF(TRIM(utilization_mode), ''), CASE
-          WHEN LOWER(COALESCE(category, '')) LIKE '%truck%'
-            OR LOWER(COALESCE(category, '')) LIKE '%vehicle%'
-            OR LOWER(COALESCE(category, '')) LIKE '%ldv%'
-            OR LOWER(COALESCE(category, '')) LIKE '%pickup%'
-            OR LOWER(COALESCE(category, '')) LIKE '%bakkie%'
-            OR LOWER(COALESCE(asset_code, '')) LIKE 'ldv%'
-            OR UPPER(COALESCE(asset_code, '')) GLOB 'V[0-9][0-9]AM'
-            OR LOWER(COALESCE(asset_name, '')) LIKE '%ldv%'
-            THEN 'km'
-          ELSE 'hours'
-        END)
-        END AS metric_mode,
-        COALESCE(NULLIF(km_per_hour_factor, 0), 10.0) AS km_per_hour_factor
-      FROM assets
-      WHERE asset_code = ?
+      SELECT a.id AS asset_id, a.id, a.asset_code, a.asset_name, a.category, a.archived, a.hire_billing_mode,
+        COALESCE(a.baseline_fuel_l_per_hour, 5.0) AS oem_lph,
+        COALESCE(a.baseline_fuel_km_per_l, 2.0) AS oem_kmpl,
+        a.fuel_benchmark_set_at,
+        ${sqlFuelMetricModeExpr("a")} AS metric_mode
+      FROM assets a
+      WHERE a.asset_code = ?
     `).get(assetCode);
     if (!asset) return reply.code(404).send({ error: `asset not found: ${assetCode}` });
 
-    const fuelRows = db.prepare(`
-      SELECT
-        fl.id,
-        fl.log_date,
-        COALESCE(fl.liters, 0) AS fuel_liters,
-        COALESCE(CASE WHEN fl.hours_run > 0 THEN fl.hours_run ELSE 0 END, 0) AS meter_hours,
-        COALESCE(fl.meter_run_value, 0) AS meter_run_value,
-        COALESCE(LOWER(fl.meter_unit), '') AS meter_unit,
-        fl.open_meter_value,
-        fl.close_meter_value,
-        fl.source
-      FROM fuel_logs fl
-      WHERE fl.asset_id = ?
-        AND fl.log_date BETWEEN ? AND ?
-      ORDER BY fl.log_date ASC, fl.id ASC
-    `).all(asset.id, start, end);
-
-    const previousFill = db.prepare(`
-      SELECT
-        fl.hours_run,
-        fl.meter_run_value,
-        fl.open_meter_value,
-        fl.close_meter_value,
-        COALESCE(LOWER(fl.meter_unit), '') AS meter_unit
-      FROM fuel_logs fl
-      WHERE fl.asset_id = ?
-        AND fl.log_date < ?
-        AND (
-          fl.hours_run > 0
-          OR fl.meter_run_value > 0
-          OR COALESCE(fl.close_meter_value, 0) > 0
-        )
-      ORDER BY fl.log_date DESC, fl.id DESC
-      LIMIT 1
-    `).get(asset.id, start);
-
-    const mode = String(asset.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
-    const kmPerHour = Math.max(0.1, Number(asset.km_per_hour_factor || 10));
-    const oem = Number(asset.oem_lph || 5);
-    const oemK = Number(asset.oem_kmpl || 2);
-    const threshold = oem * (1 + tolerance);
-    const lowThresholdKmpl = oemK * Math.max(0, 1 - tolerance);
-    function toModeMeter(row) {
-      let unit = String(row?.meter_unit || "").toLowerCase();
-      const closeV = Number(row?.close_meter_value || 0);
-      const v = closeV > 0 ? closeV : Number(row?.meter_run_value || 0);
-      if (!unit && v > 0) unit = mode;
-      if (unit === "km" && v > 0) return mode === "km" ? v : (v / kmPerHour);
-      if (unit === "hours" && v > 0) return mode === "km" ? (v * kmPerHour) : v;
-      const h = Number(row?.meter_hours || row?.hours_run || 0);
-      if (h > 0) return mode === "km" ? (h * kmPerHour) : h;
-      return 0;
-    }
-    let prevMeter = previousFill ? toModeMeter(previousFill) : 0;
-    if (!(prevMeter > 0)) prevMeter = null;
-
-    const rows = fuelRows.map((d) => {
-      const meter = toModeMeter(d);
-      const rowOpen = d.open_meter_value == null ? null : Number(d.open_meter_value);
-      const rowClose = d.close_meter_value == null ? null : Number(d.close_meter_value);
-      const hasRowMeters = rowOpen != null && rowClose != null && rowOpen > 0 && rowClose > 0;
-      let openMeter = prevMeter;
-      let closeMeter = meter > 0 ? meter : null;
-      let runBetween = null;
-      let invalidDelta = false;
-      if (hasRowMeters) {
-        openMeter = rowOpen;
-        closeMeter = rowClose;
-        const delta = rowClose - rowOpen;
-        if (Number.isFinite(delta) && delta > 0) runBetween = delta;
-        else if (Number.isFinite(delta) && delta <= 0) invalidDelta = true;
-      } else if (prevMeter != null && meter > 0) {
-        const delta = meter - prevMeter;
-        if (Number.isFinite(delta) && delta > 0) runBetween = delta;
-        else if (Number.isFinite(delta) && delta <= 0) invalidDelta = true;
-      }
-      const fuel = Number(d.fuel_liters || 0);
-      const lph = (!invalidDelta && mode === "hours" && runBetween != null && runBetween > 0) ? fuel / runBetween : null;
-      const kmpl = (!invalidDelta && mode === "km" && fuel > 0 && runBetween != null && runBetween > 0) ? runBetween / fuel : null;
-      const flag = mode === "km"
-        ? (invalidDelta ? "INVALID DELTA" : (kmpl != null && kmpl < lowThresholdKmpl ? "EXCESSIVE" : "OK"))
-        : (invalidDelta ? "INVALID DELTA" : (lph != null && lph > threshold ? "EXCESSIVE" : "OK"));
-      if (closeMeter != null && closeMeter > 0) prevMeter = closeMeter;
+    // Same calculation as the benchmark, fill by fill.
+    const calc = assetConsumption(db, asset, start, end, tolerance, { withTrace: true });
+    const mode = calc.metric_mode;
+    const oem = calc.oem_lph;
+    const oemK = calc.oem_km_per_l;
+    const rows = calc.trace.map((t) => {
+      const run = Number(t.run || 0);
+      const lph = mode === "hours" && run > 0 ? t.interval_liters / run : null;
+      const kmpl = mode === "km" && run > 0 && t.interval_liters > 0 ? run / t.interval_liters : null;
+      const over = mode === "km"
+        ? kmpl != null && calc.threshold_km_per_l != null && kmpl < calc.threshold_km_per_l
+        : lph != null && calc.threshold_lph != null && lph > calc.threshold_lph;
       return {
-        log_date: d.log_date,
+        log_date: t.date,
         metric_mode: mode,
-        fuel_liters: Number(fuel.toFixed(2)),
-        run_between: runBetween == null ? 0 : Number(runBetween.toFixed(2)),
-        hours_between: mode === "hours" ? (runBetween == null ? 0 : Number(runBetween.toFixed(2))) : 0,
-        km_between: mode === "km" ? (runBetween == null ? 0 : Number(runBetween.toFixed(2))) : 0,
+        fuel_liters: Number(Number(t.liters || 0).toFixed(2)),
+        reading: t.reading,
+        run_between: run,
+        hours_between: mode === "hours" ? run : 0,
+        km_between: mode === "km" ? run : 0,
+        interval_liters: t.interval_liters,
         actual_lph: lph == null ? null : Number(lph.toFixed(3)),
-        oem_lph: Number(oem.toFixed(3)),
         actual_km_per_l: kmpl == null ? null : Number(kmpl.toFixed(3)),
-        oem_km_per_l: Number(oemK.toFixed(3)),
-        flag,
-        source: d.source || "",
+        flag: t.status === "ok" ? (over ? "EXCESSIVE" : "OK") : "CHECK",
+        status: t.status === "ok" ? "" : t.status,
+        source: t.source || "",
       };
     });
-
-    const summary = rows.reduce(
-      (acc, r) => {
-        acc.fill_days += 1;
-        acc.fuel_liters += Number(r.fuel_liters || 0);
-        acc.hours_between += Number(r.hours_between || 0);
-        acc.km_between += Number(r.km_between || 0);
-        if (r.flag === "EXCESSIVE") acc.excessive_days += 1;
-        return acc;
-      },
-      { fill_days: 0, fuel_liters: 0, hours_between: 0, km_between: 0, excessive_days: 0 }
-    );
-    summary.fuel_liters = Number(summary.fuel_liters.toFixed(2));
-    summary.hours_between = Number(summary.hours_between.toFixed(2));
-    summary.km_between = Number(summary.km_between.toFixed(2));
-    summary.metric_mode = mode;
-    summary.avg_lph = summary.hours_between > 0
-      ? Number((summary.fuel_liters / summary.hours_between).toFixed(3))
-      : null;
-    summary.avg_km_per_l = summary.fuel_liters > 0 && summary.km_between > 0
-      ? Number((summary.km_between / summary.fuel_liters).toFixed(3))
-      : null;
+    const summary = {
+      fill_days: rows.length,
+      excessive_days: rows.filter((r) => r.flag === "EXCESSIVE").length,
+      fuel_liters: calc.fuel_liters,
+      matched_liters: calc.matched_liters,
+      hours_between: calc.hours_run,
+      km_between: calc.km_run,
+      avg_lph: calc.actual_lph,
+      avg_km_per_l: calc.actual_km_per_l,
+      run_source: calc.run_source,
+      note: consumptionNote(calc),
+      metric_mode: mode,
+    };
 
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
     const pdf = await buildPdfBuffer(
@@ -1656,11 +1275,14 @@ export default function registerFuelLubeRoutes(app, ctx) {
           { k: "Asset", v: `${asset.asset_code} ${asset.asset_name ? `- ${asset.asset_name}` : ""}` },
           { k: "Period", v: `${start} to ${end}` },
           { k: "Tolerance", v: `${fmtNum(tolerance * 100, 1)}% (${mode === "km" ? "below OEM" : "above OEM"})` },
-          { k: mode === "km" ? "OEM km/L" : "OEM L/hr", v: mode === "km" ? fmtNum(oemK, 3) : fmtNum(oem, 3) },
-          { k: "Fill Days", v: fmtNum(summary.fill_days, 0) },
-          { k: "Excessive Days", v: fmtNum(summary.excessive_days, 0) },
+          { k: mode === "km" ? "OEM km/L" : "OEM L/hr", v: (mode === "km" ? oemK : oem) == null ? "Not set" : fmtNum(mode === "km" ? oemK : oem, 3) },
+          { k: "Fills", v: fmtNum(summary.fill_days, 0) },
+          { k: "Excessive intervals", v: fmtNum(summary.excessive_days, 0) },
           { k: "Fuel Total (L)", v: fmtNum(summary.fuel_liters, 2) },
-          { k: mode === "km" ? "Distance Between Fills (km)" : "Hours Between Fills", v: mode === "km" ? fmtNum(summary.km_between, 2) : fmtNum(summary.hours_between, 2) },
+          { k: "Fuel matched to readings (L)", v: fmtNum(summary.matched_liters, 2) },
+          { k: "Worked out from", v: summary.run_source === "fill_meter" ? "Meter readings on the fills" : summary.run_source === "daily_hours" ? "Daily hours (fill readings incomplete)" : "No usable readings" },
+          ...(summary.note ? [{ k: "Notes", v: summary.note }] : []),
+          { k: mode === "km" ? "Distance (km)" : "Hours", v: mode === "km" ? fmtNum(summary.km_between, 2) : fmtNum(summary.hours_between, 2) },
           { k: mode === "km" ? "Avg km/L" : "Avg L/hr", v: mode === "km" ? (summary.avg_km_per_l == null ? "-" : fmtNum(summary.avg_km_per_l, 3)) : (summary.avg_lph == null ? "-" : fmtNum(summary.avg_lph, 3)) },
         ], 2);
 
@@ -1668,34 +1290,37 @@ export default function registerFuelLubeRoutes(app, ctx) {
         table(
           doc,
           [
-            { key: "log_date", label: "Date", width: 0.16 },
-            { key: "fuel_liters", label: "Fuel (L)", width: 0.14, align: "right" },
-            { key: "run_between", label: mode === "km" ? "Distance (km)" : "Hours Between", width: 0.16, align: "right" },
-            { key: "actual", label: mode === "km" ? "km/L" : "L/hr", width: 0.12, align: "right" },
-            { key: "oem", label: mode === "km" ? "OEM km/L" : "OEM L/hr", width: 0.12, align: "right" },
-            { key: "flag", label: "Status", width: 0.10, align: "center" },
-            { key: "source", label: "Source", width: 0.20 },
+            { key: "log_date", label: "Date", width: 0.10 },
+            { key: "fuel_liters", label: "Fuel (L)", width: 0.08, align: "right" },
+            { key: "reading", label: mode === "km" ? "Odometer" : "Hour meter", width: 0.10, align: "right" },
+            { key: "run_between", label: mode === "km" ? "km since last" : "Hours since last", width: 0.11, align: "right" },
+            { key: "actual", label: mode === "km" ? "km/L" : "L/hr", width: 0.08, align: "right" },
+            { key: "flag", label: "Status", width: 0.09, align: "center" },
+            { key: "status", label: "What happened", width: 0.34 },
+            { key: "source", label: "Source", width: 0.10 },
           ],
           rows.length
             ? rows.map((r) => ({
                 log_date: r.log_date,
                 fuel_liters: fmtNum(r.fuel_liters, 2),
-                run_between: mode === "km" ? fmtNum(r.km_between, 2) : fmtNum(r.hours_between, 2),
+                reading: r.reading == null ? "-" : fmtNum(r.reading, 1),
+                run_between: r.run_between ? fmtNum(r.run_between, 1) : "-",
                 actual: mode === "km"
-                  ? (r.actual_km_per_l == null ? "-" : fmtNum(r.actual_km_per_l, 3))
-                  : (r.actual_lph == null ? "-" : fmtNum(r.actual_lph, 3)),
-                oem: mode === "km" ? fmtNum(r.oem_km_per_l, 3) : fmtNum(r.oem_lph, 3),
+                  ? (r.actual_km_per_l == null ? "-" : fmtNum(r.actual_km_per_l, 2))
+                  : (r.actual_lph == null ? "-" : fmtNum(r.actual_lph, 2)),
                 flag: r.flag,
+                status: r.status,
                 source: r.source || "",
               }))
             : [{
                 log_date: "-",
                 fuel_liters: "-",
+                reading: "-",
                 run_between: "-",
                 actual: "-",
-                oem: "-",
                 flag: "-",
-                source: "No fill data in selected period",
+                status: "No fill data in selected period",
+                source: "",
               }]
         );
       },

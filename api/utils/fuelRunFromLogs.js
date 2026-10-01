@@ -100,6 +100,8 @@ export function summarizeFuelBenchmarkRows(rows) {
     (acc, r) => {
       const mode = String(r.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
       const fuel = Number(r.fuel_liters || 0);
+      // Litres behind the L/hr or km/L (fill-to-fill matched fuel when available).
+      const basis = r.basis_liters != null ? Number(r.basis_liters || 0) : fuel;
       const hours = Number(r.hours_run || 0);
       const km = Number(r.km_run || 0);
       acc.assets += 1;
@@ -107,11 +109,11 @@ export function summarizeFuelBenchmarkRows(rows) {
       if (mode === "km") {
         acc.km_assets += 1;
         acc.km_run += km;
-        if (km > 0) acc.km_fuel += fuel;
+        if (km > 0) acc.km_fuel += basis;
       } else {
         acc.hours_assets += 1;
         acc.hours_run += hours;
-        if (hours > 0) acc.hours_fuel += fuel;
+        if (hours > 0) acc.hours_fuel += basis;
       }
       if (r.is_excessive || r.flag === "EXCESSIVE") acc.excessive += 1;
       return acc;

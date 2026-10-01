@@ -573,16 +573,10 @@ function fuelEquipChartRows(rows) {
     .filter((r) => String(r.metric_mode || "hours").toLowerCase() !== "km")
     .filter((r) => Number(r.actual_lph || 0) > 0 || Number(r.oem_lph || 0) > 0)
     .map((r) => {
-      const oem = Number(r.oem_lph || 0);
-      const threshold = Number(
-        r.excessive_threshold_lph != null
-          ? r.excessive_threshold_lph
-          : r.threshold_lph != null
-            ? r.threshold_lph
-            : oem > 0
-              ? oem * 1.15
-              : 0
-      );
+      // No OEM benchmark set: no green/red point for this machine.
+      const oem = r.oem_lph == null || !(Number(r.oem_lph) > 0) ? null : Number(r.oem_lph);
+      const thr = r.excessive_threshold_lph != null ? r.excessive_threshold_lph : r.threshold_lph;
+      const threshold = oem == null ? null : Number(thr != null ? thr : oem * 1.15);
       return {
         asset_code: String(r.asset_code || "").trim(),
         label: String(r.asset_name || r.asset_code || "").trim() || String(r.asset_code || "Unknown"),
@@ -668,7 +662,7 @@ function fuelSvgEquipmentConsumption(points) {
   const n = Math.max(rows.length, 1);
   const vals = [];
   for (const r of rows) {
-    vals.push(Number(r.actual || 0), Number(r.oem || 0), Number(r.threshold || 0));
+    vals.push(Number(r.actual || 0), Number(r.oem || 0), Number(r.threshold || 0)); // null counts as 0
   }
   const rawMax = Math.max(...vals, 1);
   const max = Math.ceil(rawMax / 5) * 5 || 5;
@@ -699,9 +693,10 @@ function fuelSvgEquipmentConsumption(points) {
   }).join("");
 
   const linePath = (key, color) => {
-    const pts = rows.map((r, i) => ({ x: xCenter(i), y: yAt(r[key]), v: Number(r[key] || 0) }));
-    const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
-    const dots = pts.map((p) => `
+    // Machines without a benchmark leave a gap in the line.
+    const pts = rows.map((r, i) => (r[key] == null ? null : { x: xCenter(i), y: yAt(r[key]), v: Number(r[key] || 0) }));
+    const d = pts.map((p, i) => (p ? `${i === 0 || !pts[i - 1] ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}` : "")).filter(Boolean).join(" ");
+    const dots = pts.filter(Boolean).map((p) => `
       <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" fill="${color}" stroke="#fff" stroke-width="1"/>
       <text x="${p.x.toFixed(1)}" y="${(p.y - 10).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="600" fill="#111827">${p.v.toFixed(0)}</text>
     `).join("");
@@ -746,7 +741,10 @@ function aggregateFuelByType(points) {
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g).push(r);
   }
-  const avg = (arr, key) => arr.reduce((s, r) => s + Number(r[key] || 0), 0) / arr.length;
+  const avg = (arr, key) => {
+    const set = arr.filter((r) => r[key] != null);
+    return set.length ? set.reduce((s, r) => s + Number(r[key] || 0), 0) / set.length : null;
+  };
   return [...groups.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([g, members]) => ({
@@ -795,7 +793,8 @@ function renderFuelEquipmentChart(rows) {
       const unitCount = points.length;
       summaryEl.textContent = `Showing ${typeCount} type${typeCount !== 1 ? "s" : ""} averaged from ${unitCount} unit${unitCount !== 1 ? "s" : ""}. Actual L/hr (bar) vs OEM (green) and threshold (red).`;
     } else {
-      summaryEl.textContent = `Showing ${points.length} of ${all.length} machines (L/hr). Actual bars vs OEM (green) and threshold (red).`;
+      const unset = points.filter((r) => r.oem == null).length;
+      summaryEl.textContent = `Showing ${points.length} of ${all.length} machines (L/hr). Actual bars vs OEM (green) and threshold (red).${unset ? ` ${unset} without an OEM benchmark (no line).` : ""}`;
     }
   }
   if (wrap) wrap.style.display = "";
@@ -1013,6 +1012,8 @@ async function loadFuelBenchmark() {
   const list = qs("fuelBenchmarkList");
   if (list) {
     const isRowFlagged = (r) => {
+      // Same rule as the reports: over the benchmark by the tolerance, benchmark set.
+      if (r && "is_excessive" in r) return Boolean(r.is_excessive);
       const mode = String(r?.metric_mode || "hours").toLowerCase() === "km" ? "km" : "hours";
       if (mode === "km") {
         const actual = Number(r?.actual_km_per_l);
@@ -1048,9 +1049,12 @@ async function loadFuelBenchmark() {
       const hiredTag = r.is_hired ? " <span class='pill' style='font-size:0.65rem;'>HIRED</span>" : "";
       const archTag = Number(r.archived) ? " <span class='pill' style='font-size:0.65rem;'>ARCH</span>" : "";
       const modeTag = `<span class='pill blue' style='font-size:0.65rem;'>${isKm ? "km/L" : "L/hr"}</span>`;
+      const RUN_SRC = { fill_meter: "meter readings on fills", daily_hours: "daily hours" };
       const runSrc = r.run_source && r.run_source !== "none"
-        ? ` | Run: ${isKm ? `${Number(r.km_run || 0).toFixed(2)} km` : `${Number(r.hours_run || 0).toFixed(2)} h`} (${String(r.run_source).replace(/_/g, " ")})`
+        ? ` | From: ${RUN_SRC[r.run_source] || String(r.run_source).replace(/_/g, " ")}${r.run_source === "fill_meter" && r.coverage_pct != null ? ` (${r.coverage_pct}% of fuel matched)` : ""}`
         : "";
+      const oemTxt = (v, unit) => (v == null ? "Not set" : `${Number(v).toFixed(3)} ${unit}`);
+      const noteLine = r.note ? `<small class="fuel-item-meta muted">${escapeHtml(r.note)}</small>` : "";
       const flag = isRowFlagged(r)
         ? `<span class='pill red'>${isKm ? "UNDER BENCHMARK" : "EXCESSIVE"}</span>`
         : "<span class='pill blue'>OK</span>";
@@ -1065,9 +1069,9 @@ async function loadFuelBenchmark() {
           `<small class="fuel-item-desc">${r.asset_name || ""}</small>` +
           `<small class="fuel-item-meta">${
             isKm
-              ? `OEM: ${Number(r.oem_km_per_l || 0).toFixed(3)} km/L | Fuel: ${Number(r.fuel_liters || 0).toFixed(2)}L | Distance: ${Number(r.km_run || 0).toFixed(2)} km${runSrc}`
-              : `OEM: ${Number(r.oem_lph || 0).toFixed(3)} L/hr | Fuel: ${Number(r.fuel_liters || 0).toFixed(2)}L | Hours: ${Number(r.hours_run || 0).toFixed(2)}${runSrc}`
-          }</small>` +
+              ? `OEM: ${oemTxt(r.oem_km_per_l, "km/L")} | Fuel: ${Number(r.fuel_liters || 0).toFixed(2)}L | Distance: ${Number(r.km_run || 0).toFixed(2)} km${runSrc}`
+              : `OEM: ${oemTxt(r.oem_lph, "L/hr")} | Fuel: ${Number(r.fuel_liters || 0).toFixed(2)}L | Hours: ${Number(r.hours_run || 0).toFixed(2)}${runSrc}`
+          }</small>` + noteLine +
           `<br><button data-fuel-machine="${String(r.asset_code || "").replace(/"/g, "&quot;")}">Open machine history</button> ` +
           `<button data-fuel-machine-pdf="${String(r.asset_code || "").replace(/"/g, "&quot;")}">Machine PDF</button>` +
           `<div class="fuel-inline-history" id="fuel-inline-${machineKey}"></div>`
@@ -1508,6 +1512,7 @@ async function loadFuelMachineDailyInline(assetCode, mountEl) {
   const mode = String(data.summary?.metric_mode || "hours");
   const isInlineFlagged = (r) => {
     if (r?.invalid_delta) return false;
+    if (r && "is_excessive" in r) return Boolean(r.is_excessive);
     if (mode === "km") {
       const actual = Number(r?.actual_km_per_l);
       const benchmark = Number(r?.oem_km_per_l);
@@ -1521,12 +1526,13 @@ async function loadFuelMachineDailyInline(assetCode, mountEl) {
     if (!Number.isFinite(benchmark) || benchmark <= 0) return false;
     return actual > benchmark;
   };
-  const top = `<div class="fuel-inline-summary"><small><b>Fill days:</b> ${Number(data.summary?.days || 0)} | <b>Fuel:</b> ${Number(data.summary?.fuel_liters || 0).toFixed(2)}L | <b>Fill ${mode === "km" ? "distance" : "hours"}:</b> ${Number(mode === "km" ? (data.summary?.km_run || 0) : (data.summary?.hours_run || 0)).toFixed(2)} | <b>Avg:</b> ${mode === "km" ? (data.summary?.avg_km_per_l == null ? "-" : Number(data.summary.avg_km_per_l).toFixed(3) + " km/L") : (data.summary?.avg_lph == null ? "-" : Number(data.summary.avg_lph).toFixed(3) + " L/hr")} | <b>${mode === "km" ? "Under benchmark days" : "Over benchmark days"}:</b> ${Number(data.summary?.excessive_days || 0)}</small></div>`;
+  const top = `<div class="fuel-inline-summary"><small><b>Fill days:</b> ${Number(data.summary?.days || 0)} | <b>Fuel:</b> ${Number(data.summary?.fuel_liters || 0).toFixed(2)}L | <b>Fill ${mode === "km" ? "distance" : "hours"}:</b> ${Number(mode === "km" ? (data.summary?.km_run || 0) : (data.summary?.hours_run || 0)).toFixed(2)} | <b>Avg:</b> ${mode === "km" ? (data.summary?.avg_km_per_l == null ? "-" : Number(data.summary.avg_km_per_l).toFixed(3) + " km/L") : (data.summary?.avg_lph == null ? "-" : Number(data.summary.avg_lph).toFixed(3) + " L/hr")} | <b>${mode === "km" ? "Under benchmark" : "Over benchmark"}:</b> ${Number(data.summary?.excessive_days || 0)}${data.summary?.coverage_pct != null ? ` | <b>Fuel matched to readings:</b> ${Number(data.summary.coverage_pct)}%` : ""}${data.summary?.rejected_readings ? ` | <b>Rejected readings:</b> ${Number(data.summary.rejected_readings)}` : ""}</small>${data.summary?.note ? `<br><small class="muted">${escapeHtml(data.summary.note)}</small>` : ""}${Number(data.summary?.rejected_readings || 0) ? `<br><small class="muted">Fix a wrong reading by typing the correct close reading on that fill and pressing Save.</small>` : ""}</div>`;
   const tableRows = rows.map((r) => {
     const flagged = isInlineFlagged(r);
     const invalid = Boolean(r?.invalid_delta);
-    const statusClass = invalid ? "fh-status-excessive" : (flagged ? "fh-status-excessive" : "fh-status-ok");
-    const statusText = invalid ? "INVALID DELTA" : (flagged ? (mode === "km" ? "UNDER BENCHMARK" : "EXCESSIVE") : "OK");
+    const note = String(r?.status || "");
+    const statusClass = invalid ? "fh-status-excessive" : (flagged ? "fh-status-excessive" : note ? "" : "fh-status-ok");
+    const statusText = invalid ? "CHECK READING" : (flagged ? (mode === "km" ? "UNDER BENCHMARK" : "EXCESSIVE") : note ? "CARRIED" : "OK");
     const meterUnit = mode === "km" ? "km" : "hrs";
     const openMeterValue = r.open_meter_value == null ? "" : Number(r.open_meter_value).toFixed(2);
     const closeMeterValue = r.close_meter_value == null ? "" : Number(r.close_meter_value).toFixed(2);
@@ -1538,7 +1544,7 @@ async function loadFuelMachineDailyInline(assetCode, mountEl) {
       `<td class="fh-col-num"><input data-fuel-close-input="1" class="w-110" type="number" step="0.01" min="0" value="${closeMeterValue}"> ${meterUnit}</td>` +
       `<td class="fh-col-num">${invalid ? "-" : Number((mode === "km" ? r.km_run : r.hours_run) || 0).toFixed(2)}</td>` +
       `<td class="fh-col-num">${invalid ? "-" : (mode === "km" ? (r.actual_km_per_l == null ? "-" : Number(r.actual_km_per_l).toFixed(3)) : (r.actual_lph == null ? "-" : Number(r.actual_lph).toFixed(3)))}</td>` +
-      `<td class="fh-col-status"><span class="fh-status ${statusClass}">${statusText}</span></td>` +
+      `<td class="fh-col-status"><span class="fh-status ${statusClass}" title="${escapeHtml(note)}">${statusText}</span>${note ? `<br><small class="muted">${escapeHtml(note)}</small>` : ""}</td>` +
       `<td class="fh-col-action"><button data-fuel-save="${Number(r.id || 0)}">Save</button> <button data-fuel-delete="${Number(r.id || 0)}">Delete</button></td>` +
       `</tr>`
     );

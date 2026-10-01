@@ -30,6 +30,10 @@ export function aggregateFuelBenchmarkByCategory(assetRows, tolerance = 0.15) {
       oem_km_per_l_weighted: 0,
       hours_weight: 0,
       fuel_weight_km: 0,
+      basis_hours_liters: 0,
+      basis_km_liters: 0,
+      basis_hours: 0,
+      basis_km: 0,
       asset_codes: [],
     };
 
@@ -40,17 +44,28 @@ export function aggregateFuelBenchmarkByCategory(assetRows, tolerance = 0.15) {
     g.fill_count += Number(r.fill_count || 0);
     if (r.is_excessive || r.flag === "EXCESSIVE") g.excessive_asset_count += 1;
 
+    // Litres behind the machine's L/hr or km/L (fill-to-fill matched fuel when available).
+    const basis = r.basis_liters != null ? Number(r.basis_liters || 0) : Number(r.fuel_liters || 0);
     if (mode === "hours") {
       const hrs = Number(r.hours_run || 0);
-      if (hrs > 0) {
+      if (hrs > 0 && basis > 0) {
+        g.basis_hours += hrs;
+        g.basis_hours_liters += basis;
+      }
+      // Machines without a benchmark (oem_lph null) are left out of the category benchmark.
+      if (hrs > 0 && r.oem_lph != null) {
         g.hours_weight += hrs;
-        g.oem_lph_weighted += hrs * Number(r.oem_lph || 5);
+        g.oem_lph_weighted += hrs * Number(r.oem_lph);
       }
     } else {
-      const fuel = Number(r.fuel_liters || 0);
-      if (fuel > 0) {
-        g.fuel_weight_km += fuel;
-        g.oem_km_per_l_weighted += fuel * Number(r.oem_km_per_l || 2);
+      const km = Number(r.km_run || 0);
+      if (km > 0 && basis > 0) {
+        g.basis_km += km;
+        g.basis_km_liters += basis;
+      }
+      if (basis > 0 && r.oem_km_per_l != null) {
+        g.fuel_weight_km += basis;
+        g.oem_km_per_l_weighted += basis * Number(r.oem_km_per_l);
       }
     }
     if (r.asset_code) g.asset_codes.push(String(r.asset_code));
@@ -70,7 +85,7 @@ export function aggregateFuelBenchmarkByCategory(assetRows, tolerance = 0.15) {
       let is_excessive = false;
 
       if (mode === "km") {
-        actual_km_per_l = fuel > 0 && km > 0 ? Number((km / fuel).toFixed(3)) : null;
+        actual_km_per_l = g.basis_km_liters > 0 && g.basis_km > 0 ? Number((g.basis_km / g.basis_km_liters).toFixed(3)) : null;
         oem_km_per_l = g.fuel_weight_km > 0
           ? Number((g.oem_km_per_l_weighted / g.fuel_weight_km).toFixed(3))
           : null;
@@ -80,7 +95,7 @@ export function aggregateFuelBenchmarkByCategory(assetRows, tolerance = 0.15) {
           && lowThreshold != null
           && actual_km_per_l < lowThreshold;
       } else {
-        actual_lph = hours > 0 ? Number((fuel / hours).toFixed(3)) : null;
+        actual_lph = g.basis_hours > 0 ? Number((g.basis_hours_liters / g.basis_hours).toFixed(3)) : null;
         oem_lph = g.hours_weight > 0
           ? Number((g.oem_lph_weighted / g.hours_weight).toFixed(3))
           : null;
