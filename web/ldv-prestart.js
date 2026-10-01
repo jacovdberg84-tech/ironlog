@@ -203,6 +203,7 @@
     document.title = `${String(asset.asset_code || currentAssetCode)} pre-start`;
     PC.render(qs("checklistRoot"), LDV_CHECKS, updateProgress);
     applyChecklist([]);
+    PC.renderNotice(qs("noticeHost"), data?.notice || null);
     showForm();
     txt("checkDate", String(data?.check_date || currentDate));
     txt("prevKm", previousKm == null ? "-" : `${previousKm.toFixed(1)} km`);
@@ -284,9 +285,11 @@
       throw new Error(PC.t("enterName"));
     }
 
+    const notice_ack = PC.noticeAck(qs("noticeHost"));
     const body = {
       asset_code: currentAssetCode,
       check_date: currentDate,
+      notice_ack,
       odometer_km: odometer,
       inspector_name,
       notes: String(qs("notes")?.value || "").trim(),
@@ -379,6 +382,7 @@
 
   PC.bindLanguageToggle(() => {
     PC.render(qs("checklistRoot"), LDV_CHECKS, updateProgress);
+    PC.renderNotice(qs("noticeHost"), qs("noticeHost")?.__notice || null);
     refreshOfflineBanner();
     if (qs("sub") && qs("checklistRoot")?.querySelector(".pc-item")) txt("sub", PC.t("tapEvery"));
   });

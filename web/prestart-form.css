@@ -54,3 +54,14 @@
 .pc-lang button[aria-pressed="true"] { background: var(--accent); color: #fff; }
 .pc-label-en { display: block; font-size: 12px; color: var(--muted); font-weight: 400; margin-top: 2px; }
 .pc-notice { font-size: 15px; line-height: 1.4; }
+
+/* Workshop notice for this machine (shown above the checklist) */
+#noticeHost { margin: 0 0 14px; }
+.pc-wn { background: #3b0d0d; border: 2px solid #ef4444; border-radius: 14px; padding: 14px; color: #fee2e2; }
+.pc-wn-title { font-weight: 800; font-size: 16px; margin-bottom: 6px; color: #fecaca; }
+.pc-wn-text { font-size: 17px; line-height: 1.4; font-weight: 600; color: #fff; }
+.pc-wn-other { font-size: 13px; color: #fca5a5; margin-top: 6px; }
+.pc-wn-wo { font-size: 13px; color: #fca5a5; margin-top: 4px; }
+.pc-wn-ack { display: flex; gap: 10px; align-items: center; margin-top: 12px; padding: 10px; background: rgba(255,255,255,0.08); border-radius: 10px; font-weight: 700; font-size: 15px; }
+.pc-wn-ack input { width: 24px; height: 24px; }
+#noticeHost.is-missing .pc-wn-ack { outline: 3px solid #fbbf24; }
