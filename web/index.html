@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=reversal-2" />
+  <link rel="stylesheet" href="./styles.css?v=requisition-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -2640,6 +2640,36 @@
           </div>
           <div id="ptWaitingSummary" class="stores-waiting-summary"></div>
           <div id="ptWaitingList" class="stores-waiting-list"><div class="skeleton-block"></div></div>
+        </div>
+        <div class="dash-card full-width" id="requisitionCard">
+          <div class="stores-waiting-head">
+            <div>
+              <h3>Stores requisitions</h3>
+              <p class="muted small">Printable requisition (English + Portuguese) with sign-off boxes. Print one for a work order with "Print requisition" in the list above, or fill this in when someone asks at the counter.</p>
+            </div>
+          </div>
+          <div class="rq-grid">
+            <div class="rq-form">
+              <h4>Someone asking at the counter</h4>
+              <label class="muted small" for="rqRequestedBy">Requested by (name)</label>
+              <input id="rqRequestedBy" class="w-full" placeholder="e.g. Carlos, operator T01AM" />
+              <div class="rq-two">
+                <div><label class="muted small" for="rqAsset">Machine (optional)</label><input id="rqAsset" class="w-full" list="assetCodeOptions" placeholder="e.g. T01AM" /></div>
+                <div><label class="muted small" for="rqWo">Work order # (optional)</label><input id="rqWo" class="w-full" type="number" min="1" /></div>
+              </div>
+              <label class="muted small">Parts</label>
+              <div id="rqLines"></div>
+              <button type="button" id="rqAddLine" class="rq-add">+ Add line</button>
+              <label class="muted small" for="rqNotes">Notes (optional)</label>
+              <input id="rqNotes" class="w-full" placeholder="e.g. daily service" />
+              <button type="button" id="rqSubmit" class="btn-primary">Save and print requisition</button>
+              <p id="rqMsg" class="muted small"></p>
+            </div>
+            <div class="rq-recent">
+              <div class="rq-recent-head"><h4>Last 30 days</h4><button type="button" id="rqRefresh">Refresh</button></div>
+              <div id="rqList"><p class="muted small">Loading…</p></div>
+            </div>
+          </div>
         </div>
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
@@ -7763,7 +7793,7 @@
   <script src="./app/dashboard.js?v=89"></script>
   <script src="./app/borris.js?v=89"></script>
   <script src="./app/fuel-lube.js?v=89"></script>
-  <script src="./app/stock.js?v=91"></script>
+  <script src="./app/stock.js?v=92"></script>
   <script src="./app/compliance.js?v=89r"></script>
   <script src="./app/tabs.js?v=89"></script>
   <script src="./app/uploads.js?v=89"></script>
