@@ -184,7 +184,7 @@
       const blob = await (await fetch(entry.dataUrl)).blob();
       const fd = new FormData();
       fd.append("file", blob, "photo.jpg");
-      const p = new URLSearchParams({ client_event_id: entry.id, at: entry.at, caption: entry.caption || "" });
+      const p = new URLSearchParams({ client_event_id: entry.id, at: entry.at, caption: entry.caption || "", ...(entry.query || {}) });
       return A.fetchJson(`${api(entry.url)}?${p}`, { method: "POST", body: fd });
     }
     return A.fetchJson(api(entry.url), { method: entry.method || "POST", body: JSON.stringify(entry.body) });
@@ -270,17 +270,19 @@
   function go(name, params = {}) {
     view = { name, ...params };
     const url = new URL(window.location.href);
-    ["wo", "asset", "tab"].forEach((k) => url.searchParams.delete(k));
+    ["wo", "asset", "tab", "inspect"].forEach((k) => url.searchParams.delete(k));
     if (name === "job") url.searchParams.set("wo", params.id);
     if (name === "asset") url.searchParams.set("asset", params.code);
-    if (["shift", "week"].includes(name)) url.searchParams.set("tab", name);
+    if (name === "inspectForm") url.searchParams.set("inspect", params.code);
+    if (["shift", "week", "inspect"].includes(name)) url.searchParams.set("tab", name);
     history.replaceState(null, "", url);
     render();
     window.scrollTo(0, 0);
   }
 
   function setTabs() {
-    document.querySelectorAll(".tp-tab").forEach((b) => b.classList.toggle("on", b.dataset.go === view.name || (view.name === "job" && b.dataset.go === "today")));
+    const tab = { job: "today", inspectForm: "inspect", asset: "scan", available: "today" }[view.name] || view.name;
+    document.querySelectorAll(".tp-tab").forEach((b) => b.classList.toggle("on", b.dataset.go === tab));
   }
 
   async function render() {
@@ -297,6 +299,8 @@
       else if (view.name === "asset") await renderAsset(main);
       else if (view.name === "scan") renderScan(main);
       else if (view.name === "available") await renderAvailable(main);
+      else if (view.name === "inspect") await renderInspect(main);
+      else if (view.name === "inspectForm") await renderInspectForm(main);
     } catch (e) {
       main.innerHTML = `<div class="tp-card tp-error">${esc(e.message || e)}</div><button class="tp-btn" data-go="today">${esc(T("Back to Today"))}</button>`;
     }
@@ -778,10 +782,221 @@
         <div class="tp-row"><button type="button" class="tp-btn grow" data-act="assetFinding" data-asset-id="${a.id}">${esc(T("Save finding"))}</button><button type="button" class="tp-btn warn grow" data-act="breakdownForm" data-code="${esc(a.asset_code)}">${esc(T("Report breakdown"))}</button></div>
       </div>
       <div class="tp-card">
+        <div class="tp-h4">${esc(T("Inspection"))}</div>
+        <p class="tp-muted small">${esc(T("Check the machine section by section, with photos. Faults open a work order and the next operator is told to bring it to the workshop."))}</p>
+        <button type="button" class="tp-btn primary full" data-act="inspectStart" data-code="${esc(a.asset_code)}">${esc(T("Inspect this machine"))}</button>
+      </div>
+      <div class="tp-card">
         <div class="tp-h4">${esc(T("Working on this machine without a work order?"))}</div>
         <p class="tp-muted small">${esc(T("For adjustments, greasing, quick fixes or helping an operator. A work order is opened for you and your time starts. It is not a breakdown."))}</p>
         <button type="button" class="tp-btn primary full" data-act="unplannedForm" data-code="${esc(a.asset_code)}">${esc(T("Log work on this machine"))}</button>
       </div>`;
+  }
+
+
+  // ------------------------------------------------------------ Inspection
+  // Artisan inspection: every check OK / Fault / N/A (a fault needs a comment
+  // and can have photos), details and the overall result. The form is kept on
+  // the phone while it is filled in, and is sent later when there is no signal.
+  const INSP_DRAFT = (code) => `ironlog-tech-insp:${code}`;
+  let insp = null; // { code, answers, comments, details, photos: [{ id, key, dataUrl }], cid }
+  let inspTpl = null;
+
+  const pick = (o) => (lang() === "pt" ? o.pt || o.en : o.en);
+  const other = (o) => (lang() === "pt" ? o.en : o.pt || "");
+  const RESULT_CLASS = { fit: "ok", restricted: "waiting", not_fit: "bad" };
+
+  function inspDraft(code) {
+    if (insp && insp.code === code) return insp;
+    const hour = new Date().getHours();
+    insp = {
+      code,
+      answers: {},
+      comments: {},
+      photos: [],
+      details: { type: "daily", shift: hour >= 6 && hour < 18 ? "day" : "night", hours: "", location: "", result: "", notes: "" },
+      ...read(INSP_DRAFT(code), {}),
+    };
+    return insp;
+  }
+
+  function saveDraft() {
+    if (!insp) return;
+    if (!write(INSP_DRAFT(insp.code), insp)) toast(T("Phone storage is full: take fewer photos or send the inspection now."), "bad");
+  }
+
+  function dropDraft(code) {
+    try { localStorage.removeItem(INSP_DRAFT(code)); } catch { /* ignore */ }
+    if (insp?.code === code) insp = null;
+  }
+
+  async function openInspectionPdf(id) {
+    const w = window.open("", "_blank");
+    try {
+      const res = await fetch(api(`/inspections/${id}/pdf`), { headers: A.authHeaders() });
+      if (!res.ok) throw new Error(T("Could not open the PDF."));
+      const url = URL.createObjectURL(await res.blob());
+      if (w) w.location.href = url;
+      else window.location.href = url;
+    } catch (e) {
+      if (w) w.close();
+      toast(e instanceof TypeError ? T("The PDF needs signal.") : e.message || String(e), "bad");
+    }
+  }
+
+  function inspRow(r, withAsset = true) {
+    const res = (inspTpl?.results || []).find((x) => x.key === r.overall_result);
+    return `<div class="tp-hist">
+      <div class="tp-job-top">${withAsset ? `<span class="tp-asset">${esc(r.asset_code)}</span>` : `<span>${esc(r.inspection_date)}</span>`}${res ? `<span class="tp-chip ${RESULT_CLASS[r.overall_result] || ""}">${esc(pick(res))}</span>` : ""}</div>
+      <div class="tp-muted small">${withAsset ? `${esc(r.inspection_date)} · ` : ""}${esc(r.inspector_name || "")}${r.faults.length ? ` · ${esc(N(r.faults.length, "{n} fault", "{n} faults"))}` : ` · ${esc(T("No faults"))}`}${r.photo_count ? ` · ${esc(N(r.photo_count, "{n} photo", "{n} photos"))}` : ""}</div>
+      <div class="tp-row mt">${r.work_order_id ? `<button type="button" class="tp-btn sm" data-open="${r.work_order_id}">${esc(T("WO #{id}", { id: r.work_order_id }))}</button>` : ""}<button type="button" class="tp-btn sm" data-act="inspPdf" data-id="${r.id}">${esc(T("PDF"))}</button></div>
+    </div>`;
+  }
+
+  async function renderInspect(main) {
+    const tpl = await load("insp:tpl", "/inspection-template").catch(() => null);
+    if (tpl) inspTpl = tpl.data;
+    let mine = null;
+    try { mine = await load("insp:mine", "/inspections"); } catch { mine = null; }
+    const drafts = Object.keys(localStorage).filter((k) => k.startsWith("ironlog-tech-insp:")).map((k) => k.split(":")[1]);
+    main.innerHTML = `
+      <h2 class="tp-title">${esc(T("Inspection"))}</h2>
+      <div class="tp-card">
+        <p class="tp-muted">${esc(T("Scan the machine's QR label, or type the fleet number."))}</p>
+        <div class="tp-row"><input id="tpInspCode" class="tp-input grow" placeholder="${esc(T("e.g. T01AM"))}" autocapitalize="characters" /><button type="button" class="tp-btn primary" data-act="inspectOpen">${esc(T("Start"))}</button></div>
+      </div>
+      ${drafts.length ? `<div class="tp-card"><div class="tp-h4">${esc(T("Not sent yet"))}</div>${drafts.map((c) => `<button type="button" class="tp-btn full mt" data-act="inspectStart" data-code="${esc(c)}">${esc(T("Carry on with {code}", { code: c }))}</button>`).join("")}</div>` : ""}
+      <div class="tp-card"><div class="tp-h4">${esc(T("My inspections"))}</div>
+        ${mine ? staleNote(mine) : ""}
+        ${mine?.data?.rows?.length ? mine.data.rows.map((r) => inspRow(r)).join("") : `<div class="tp-muted">${esc(T("No inspections yet."))}</div>`}
+      </div>`;
+  }
+
+  function answerButtons(key, cur) {
+    return `<div class="tp-ans">${[["ok", "OK"], ["fault", "Fault"], ["na", "N/A"]].map(([v, l]) => `<button type="button" class="tp-ans-b ${v} ${cur === v ? "on" : ""}" data-insp-ans="${esc(key)}" data-v="${v}" aria-pressed="${cur === v}">${esc(T(l))}</button>`).join("")}</div>`;
+  }
+
+  function photoStrip(key) {
+    const list = insp.photos.filter((p) => (p.key || "") === key);
+    return `<div class="tp-insp-photos">
+      ${list.map((p) => `<div class="tp-insp-ph"><img src="${p.dataUrl}" alt="" /><button type="button" data-act="inspPhotoDel" data-id="${esc(p.id)}" aria-label="${esc(T("Remove photo"))}">×</button></div>`).join("")}
+      <label class="tp-insp-add">📷 ${esc(T("Add photo"))}<input type="file" accept="image/*" capture="environment" data-insp-photo="${esc(key)}" hidden /></label>
+    </div>`;
+  }
+
+  async function renderInspectForm(main) {
+    const code = String(view.code || "").toUpperCase();
+    const t = await load("insp:tpl", "/inspection-template");
+    const tpl = t.data;
+    inspTpl = tpl;
+    let asset = null;
+    try { asset = (await load(`asset:${code}`, `/assets/${encodeURIComponent(code)}`)).data.asset; } catch (e) {
+      if (!isNetworkError(e) || e.status) throw e;
+    }
+    const d = inspDraft(code);
+    const items = tpl.sections.flatMap((x) => x.items);
+    const done = items.filter((i) => d.answers[i.key]).length;
+    const faults = items.filter((i) => d.answers[i.key] === "fault").length;
+    const meter = Number(asset?.meter?.hours) > 0 ? Number(asset.meter.hours).toFixed(0) : "";
+    const y = window.scrollY;
+    main.innerHTML = `
+      <div class="tp-jobhead"><button type="button" class="tp-back" data-go="inspect">‹ ${esc(T("Inspection"))}</button>
+        <div class="tp-jobhead-main"><div class="tp-asset lg">${esc(code)} <span class="tp-muted">${esc(asset?.asset_name || "")}</span></div>
+        <div class="tp-job-meta"><span>${esc(T("{n} of {total} checked", { n: done, total: items.length }))}</span>${faults ? `<span class="bad">${esc(N(faults, "{n} fault", "{n} faults"))}</span>` : ""}</div></div></div>
+      <div class="tp-card">
+        <div class="tp-h4">${esc(T("Details"))}</div>
+        <label class="tp-label">${esc(T("Type of inspection"))}</label>
+        <select class="tp-input" data-insp-d="type">${tpl.inspection_types.map((x) => `<option value="${x.key}" ${d.details.type === x.key ? "selected" : ""}>${esc(pick(x))}</option>`).join("")}</select>
+        <label class="tp-label">${esc(T("Shift"))}</label>
+        <div class="tp-ans">${["day", "night"].map((v) => `<button type="button" class="tp-ans-b ${d.details.shift === v ? "on" : ""}" data-insp-shift="${v}">${esc(T(v === "day" ? "Day" : "Night"))}</button>`).join("")}</div>
+        <label class="tp-label">${esc(T("Hour meter"))}</label>
+        <input class="tp-input" type="number" inputmode="decimal" min="0" step="0.1" data-insp-d="hours" value="${esc(d.details.hours)}" placeholder="${esc(meter ? T("Last known {h} h", { h: meter }) : "")}" />
+        <label class="tp-label">${esc(T("Where is the machine?"))}</label>
+        <input class="tp-input" data-insp-d="location" value="${esc(d.details.location)}" placeholder="${esc(T("e.g. Pit 2, plant, workshop bay 3"))}" />
+      </div>
+      ${tpl.sections.map((sec) => `
+        <div class="tp-card">
+          <div class="tp-h4">${esc(pick(sec))} <span class="tp-muted small">${esc(other(sec))}</span></div>
+          ${sec.items.map((i) => {
+            const a = d.answers[i.key] || "";
+            return `<div class="tp-insp-item ${a === "fault" ? "fault" : ""}" id="tpi-${esc(i.key)}">
+              <div class="tp-insp-label">${esc(pick(i))}<div class="tp-muted small">${esc(other(i))}</div></div>
+              ${answerButtons(i.key, a)}
+              ${a === "fault" ? `<textarea class="tp-input" rows="2" data-insp-note="${esc(i.key)}" placeholder="${esc(T("What is wrong? (required)"))}">${esc(d.comments[i.key] || "")}</textarea>${photoStrip(i.key)}` : ""}
+            </div>`;
+          }).join("")}
+        </div>`).join("")}
+      ${done < items.length ? `<button type="button" class="tp-btn full" data-act="inspAllOk">${esc(N(items.length - done, "Mark the {n} check left as OK", "Mark the {n} checks left as OK"))}</button>` : ""}
+      <div class="tp-card">
+        <div class="tp-h4">${esc(T("Photos of the machine"))}</div>
+        <p class="tp-muted small">${esc(T("Optional: overall view, meter, anything worth showing."))}</p>
+        ${photoStrip("")}
+      </div>
+      <div class="tp-card">
+        <div class="tp-h4">${esc(T("Overall result"))}</div>
+        <div class="tp-results">${tpl.results.map((x) => `<button type="button" class="tp-result ${RESULT_CLASS[x.key]} ${d.details.result === x.key ? "on" : ""}" data-insp-result="${x.key}">${esc(pick(x))}</button>`).join("")}</div>
+        <label class="tp-label">${esc(T("Notes"))}</label>
+        <textarea class="tp-input" rows="3" data-insp-d="notes" placeholder="${esc(T("Anything else the workshop should know"))}">${esc(d.details.notes)}</textarea>
+      </div>
+      <div class="tp-row">
+        <button type="button" class="tp-btn" data-act="inspDiscard" data-code="${esc(code)}">${esc(T("Discard"))}</button>
+        <button type="button" class="tp-btn ok grow big" data-act="inspSubmit">${esc(T("Submit inspection"))}</button>
+      </div>`;
+    window.scrollTo(0, y);
+  }
+
+  /** Checks the form; returns the first problem, or null. */
+  function inspProblem(tpl) {
+    const items = tpl.sections.flatMap((x) => x.items);
+    const missing = items.find((i) => !insp.answers[i.key]);
+    if (missing) return { text: T("Answer every check: {label}", { label: pick(missing) }), key: missing.key };
+    const noNote = items.find((i) => insp.answers[i.key] === "fault" && !String(insp.comments[i.key] || "").trim());
+    if (noNote) return { text: T("Say what is wrong: {label}", { label: pick(noNote) }), key: noNote.key };
+    if (!insp.details.result) return { text: T("Choose the overall result.") };
+    if (insp.details.result === "not_fit" && !items.some((i) => insp.answers[i.key] === "fault") && !String(insp.details.notes || "").trim()) {
+      return { text: T("Say why the machine is not fit for work.") };
+    }
+    return null;
+  }
+
+  async function submitInspection(btn) {
+    const tpl = inspTpl;
+    const problem = inspProblem(tpl);
+    if (problem) {
+      toast(problem.text, "bad");
+      if (problem.key) qs(`tpi-${problem.key}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    btn.disabled = true;
+    insp.cid = insp.cid || uid();
+    saveDraft();
+    const d = insp;
+    const res = await send({
+      kind: "inspection",
+      url: "/inspections",
+      body: {
+        asset_code: d.code,
+        inspection_type: d.details.type,
+        shift: d.details.shift,
+        machine_hours: d.details.hours === "" ? null : Number(d.details.hours),
+        location: d.details.location,
+        overall_result: d.details.result,
+        notes: d.details.notes,
+        answers: d.answers,
+        comments: d.comments,
+        inspection_client_id: d.cid,
+        lang: lang(),
+      },
+    });
+    let queued = Boolean(res.queued);
+    for (const p of d.photos) {
+      const r = await send({ kind: "photo", url: "/inspections/photos", dataUrl: p.dataUrl, query: { inspection_client_id: d.cid, item_key: p.key || "" } });
+      if (r.queued) queued = true;
+    }
+    dropDraft(d.code);
+    const wo = res.data?.work_order_id;
+    toast(queued ? T("Inspection saved on this phone — will send when there is signal") : wo ? T("Inspection saved — work order #{id} opened for the faults", { id: wo }) : T("Inspection saved"), "ok");
+    go("inspect");
   }
 
   // ------------------------------------------------------------ photo
@@ -805,6 +1020,14 @@
 
   // ------------------------------------------------------------ events
   async function onClick(e) {
+    const ans = e.target.closest("[data-insp-ans],[data-insp-shift],[data-insp-result]");
+    if (ans && insp) {
+      if (ans.dataset.inspAns) insp.answers[ans.dataset.inspAns] = ans.dataset.v;
+      if (ans.dataset.inspShift) insp.details.shift = ans.dataset.inspShift;
+      if (ans.dataset.inspResult) insp.details.result = ans.dataset.inspResult;
+      saveDraft();
+      return render();
+    }
     const t = e.target.closest("[data-go],[data-open],[data-action],[data-act],[data-tab],[data-asset],[data-quick],[data-idea]");
     if (!t) return;
     const cached = view.name === "job" ? cacheGet(`wo:${view.id}`)?.data : null;
@@ -838,6 +1061,35 @@
         const n = Number(qs("tpWoNo")?.value || 0);
         if (n > 0) go("job", { id: n });
         return;
+      }
+      if (act === "inspectOpen") {
+        const c = String(qs("tpInspCode")?.value || "").trim();
+        if (c) go("inspectForm", { code: c.toUpperCase() });
+        return;
+      }
+      if (act === "inspectStart") return go("inspectForm", { code: t.dataset.code });
+      if (act === "inspPdf") return openInspectionPdf(Number(t.dataset.id));
+      if (act === "inspSubmit") return submitInspection(t);
+      if (act === "inspAllOk") {
+        for (const i of inspTpl.sections.flatMap((x) => x.items)) if (!insp.answers[i.key]) insp.answers[i.key] = "ok";
+        saveDraft();
+        return render();
+      }
+      if (act === "inspPhotoDel") {
+        insp.photos = insp.photos.filter((p) => p.id !== t.dataset.id);
+        saveDraft();
+        return render();
+      }
+      if (act === "inspDiscard") {
+        sheet(`<h3>${esc(T("Discard this inspection?"))}</h3>
+          <p class="tp-muted small">${esc(T("The answers and photos on this phone are deleted."))}</p>
+          <div class="tp-row"><button type="button" class="tp-btn" data-act="closeSheet">${esc(T("Cancel"))}</button><button type="button" class="tp-btn warn grow" data-act="inspDiscardGo" data-code="${esc(t.dataset.code)}">${esc(T("Discard"))}</button></div>`);
+        return;
+      }
+      if (act === "inspDiscardGo") {
+        dropDraft(t.dataset.code);
+        closeSheet();
+        return go("inspect");
       }
       if (act === "openAsset") {
         const c = String(qs("tpAssetCode")?.value || "").trim();
@@ -1052,6 +1304,11 @@
   let partTimer = null;
   function onInput(e) {
     if (e.target.dataset.shift) return queueShiftSave();
+    if (insp && (e.target.dataset.inspNote || e.target.dataset.inspD)) {
+      if (e.target.dataset.inspNote) insp.comments[e.target.dataset.inspNote] = e.target.value;
+      else insp.details[e.target.dataset.inspD] = e.target.value;
+      return saveDraft();
+    }
     if (e.target.id === "tpPartQ") {
       clearTimeout(partTimer);
       const q = e.target.value.trim();
@@ -1070,6 +1327,20 @@
   }
 
   async function onChange(e) {
+    if (insp && e.target.dataset.inspD) {
+      insp.details[e.target.dataset.inspD] = e.target.value;
+      return saveDraft();
+    }
+    if (insp && e.target.dataset.inspPhoto != null && e.target.files?.length) {
+      try {
+        for (const f of e.target.files) insp.photos.push({ id: uid(), key: e.target.dataset.inspPhoto, dataUrl: await compress(f) });
+        saveDraft();
+        render();
+      } catch (err) {
+        toast(err.message || String(err), "bad");
+      }
+      return;
+    }
     if (e.target.id !== "tpPhoto" || !e.target.files?.[0]) return;
     try {
       const dataUrl = await compress(e.target.files[0]);
@@ -1120,7 +1391,8 @@
     const p = new URLSearchParams(window.location.search);
     if (p.get("wo")) view = { name: "job", id: Number(p.get("wo")) };
     else if (p.get("asset")) view = { name: "asset", code: p.get("asset").toUpperCase() };
-    else if (["shift", "week"].includes(p.get("tab"))) view = { name: p.get("tab") };
+    else if (p.get("inspect")) view = { name: "inspectForm", code: p.get("inspect").toUpperCase() };
+    else if (["shift", "week", "inspect"].includes(p.get("tab"))) view = { name: p.get("tab") };
     registerWorker();
     render();
     syncQueue();
