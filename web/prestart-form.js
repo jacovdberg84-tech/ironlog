@@ -31,6 +31,8 @@
       online: "Online.", offline: "No signal.", queued: "{n} pre-start(s) waiting to send.",
       vehiclePrestart: "Vehicle pre-start", machinePrestart: "Machine pre-start",
       noTemplate: "This machine has no pre-start checklist yet. Tell the workshop.",
+      noticeTitle: "Message from the workshop", noticeAck: "I have read this message",
+      noticeMust: "Tick 'I have read this message' at the top first.", noticeWo: "Work order #{id}",
     },
     pt: {
       yourName: "O seu nome", operatorPh: "Nome do operador", driverPh: "Nome do motorista",
@@ -56,6 +58,8 @@
       online: "Com rede.", offline: "Sem rede.", queued: "{n} pré-arranque(s) à espera de envio.",
       vehiclePrestart: "Pré-arranque do veículo", machinePrestart: "Pré-arranque da máquina",
       noTemplate: "Esta máquina ainda não tem lista de pré-arranque. Informe a oficina.",
+      noticeTitle: "Mensagem da oficina", noticeAck: "Li esta mensagem",
+      noticeMust: "Marque primeiro 'Li esta mensagem' no topo.", noticeWo: "Ordem de trabalho n.º {id}",
     },
   };
 
@@ -246,8 +250,50 @@
     }
   }
 
+  /**
+   * Workshop notice for this machine (from the server context): shown in red
+   * above the checklist in the operator's language, with an "I have read this"
+   * tick that must be set before submitting.
+   */
+  function renderNotice(host, notice) {
+    if (!host) return;
+    host.dataset.noticeId = notice && notice.id ? String(notice.id) : "";
+    host.__notice = notice || null;
+    if (!notice || !notice.id) {
+      host.innerHTML = "";
+      host.hidden = true;
+      return;
+    }
+    const pt = lang() === "pt";
+    const main = (pt && notice.message_pt) || notice.message_en;
+    const other = pt ? (notice.message_pt ? notice.message_en : "") : notice.message_pt || "";
+    const wasTicked = host.querySelector(".pc-wn-ack input")?.checked;
+    host.hidden = false;
+    host.innerHTML = `
+      <div class="pc-wn" role="alert">
+        <div class="pc-wn-title">⚠ ${esc(t("noticeTitle"))}</div>
+        <div class="pc-wn-text">${esc(main)}</div>
+        ${other ? `<div class="pc-wn-other">${esc(other)}</div>` : ""}
+        ${notice.work_order_id ? `<div class="pc-wn-wo">${esc(t("noticeWo", { id: notice.work_order_id }))}</div>` : ""}
+        <label class="pc-wn-ack"><input type="checkbox" ${wasTicked ? "checked" : ""} /> ${esc(t("noticeAck"))}</label>
+      </div>`;
+  }
+
+  /** The notice id to send when ticked; throws when a notice is shown but not ticked. */
+  function noticeAck(host) {
+    if (!host || !host.dataset.noticeId) return null;
+    const ticked = host.querySelector(".pc-wn-ack input")?.checked;
+    if (!ticked) {
+      host.scrollIntoView({ behavior: "smooth", block: "start" });
+      host.classList.add("is-missing");
+      throw new Error(t("noticeMust"));
+    }
+    host.classList.remove("is-missing");
+    return Number(host.dataset.noticeId);
+  }
+
   window.IronlogPrestart = {
     render, read, apply, progress, firstUnanswered, rememberOperator, splitSavedNotes, applyFaultComments,
-    lang, t, translatePage, bindLanguageToggle,
+    lang, t, translatePage, bindLanguageToggle, renderNotice, noticeAck,
   };
 })();

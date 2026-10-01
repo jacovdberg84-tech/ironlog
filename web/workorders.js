@@ -761,6 +761,7 @@ function renderDetail(payload) {
           <div><dt>Reference</dt><dd>${wo.reference_id ?? "-"}</dd></div>
         </dl>
         <div class="wo-helpers" id="woHelpers" data-wo-id="${wo.id}"><span class="muted small">Loading helpers…</span></div>
+        ${isSupervisorRole(getSessionRole()) ? `<div class="wo-notice" id="woNotice" data-wo-id="${wo.id}"><span class="muted small">Loading operator notice…</span></div>` : ""}
       </section>
     </div>
 
@@ -1123,6 +1124,7 @@ async function loadWorkOrderDetail(id) {
     lastWorkOrderDetail = data;
     detailEl.innerHTML = renderDetail(data);
     loadWorkOrderHelpers(woId).catch(() => {});
+    loadMachineNotice(woId).catch(() => {});
     const title = document.getElementById("woDrawerTitle");
     if (title) title.textContent = `WO #${woId} • ${data.work_order?.asset_code || ""}`;
     const docs = document.getElementById("woDrawerDocs");
@@ -1446,6 +1448,78 @@ async function loadWorkOrderHelpers(woId) {
       </div>
       <div class="muted small">Helpers log their own time in the Technician portal. The assigned technician completes the job.</div>
       <div class="muted small" id="woHelperMsg"></div>` : ""}`;
+}
+
+// Operator notice: shown at the top of the machine's next pre-start (QR), with
+// an "I have read this" tick. A pre-start fault puts up a standard one.
+async function loadMachineNotice(woId, { editing = false } = {}) {
+  const host = document.getElementById("woNotice");
+  if (!host || Number(host.dataset.woId) !== Number(woId)) return;
+  let data;
+  try {
+    data = await fetchJson(`${API}/maintenance/machine-notices?work_order_id=${encodeURIComponent(woId)}`, { headers: authHeaders() });
+  } catch {
+    host.innerHTML = "";
+    return;
+  }
+  if (Number(host.dataset.woId) !== Number(woId)) return;
+  const n = data.notice;
+  const presets = Array.isArray(data.presets) ? data.presets : [];
+  const acks = Array.isArray(data.acks) ? data.acks : [];
+  if (editing || !n) {
+    host.innerHTML = `
+      <strong>Operator notice</strong>
+      <div class="muted small">${n ? "Change the message." : "No notice yet."} The next operator who scans ${escapeHtml(data.asset_code || "the machine")}'s QR for a pre-start sees it at the top and ticks "I have read this".</div>
+      ${editing || !n ? `
+        <div class="wo-notice-presets">${presets.map((p) => `<button type="button" data-notice-preset="${escapeHtml(p.key)}" data-en="${escapeHtml(p.en)}" data-pt="${escapeHtml(p.pt)}">${escapeHtml(p.en)}</button>`).join("")}</div>
+        <label class="muted small">Message (English)</label>
+        <textarea id="woNoticeEn" rows="2">${escapeHtml(n?.message_en || "")}</textarea>
+        <label class="muted small">Portuguese (leave empty to translate automatically)</label>
+        <textarea id="woNoticePt" rows="2">${escapeHtml(n?.message_pt || "")}</textarea>
+        <div class="wo-notice-actions">
+          <button type="button" data-notice-save="${woId}">${n ? "Save notice" : "Put up notice"}</button>
+          ${n ? `<button type="button" data-notice-cancel="${woId}">Cancel</button>` : ""}
+        </div>` : ""}
+      <div class="muted small" id="woNoticeMsg"></div>`;
+    return;
+  }
+  host.innerHTML = `
+    <strong>Operator notice</strong> <span class="muted small">${n.source === "auto" ? "(automatic, from the pre-start fault)" : `(by ${escapeHtml(n.created_by || "admin")})`}</span>
+    <div class="wo-notice-box">
+      <div>${escapeHtml(n.message_en)}</div>
+      ${n.message_pt ? `<div class="muted small">${escapeHtml(n.message_pt)}</div>` : ""}
+    </div>
+    <div class="muted small">${acks.length
+      ? `Read by ${acks.length} operator${acks.length === 1 ? "" : "s"}: ${acks.slice(0, 5).map((a) => `${escapeHtml(a.operator || "operator")} (${escapeHtml(String(a.acknowledged_at || "").slice(0, 16))})`).join(", ")}`
+      : "Not read by an operator yet."} Ends by itself when this work order is completed.</div>
+    <div class="wo-notice-actions">
+      <button type="button" data-notice-edit="${woId}">Change message</button>
+      <button type="button" data-notice-clear="${woId}">Clear notice</button>
+    </div>
+    <div class="muted small" id="woNoticeMsg"></div>`;
+}
+
+async function saveMachineNotice(woId) {
+  const en = String(document.getElementById("woNoticeEn")?.value || "").trim();
+  const pt = String(document.getElementById("woNoticePt")?.value || "").trim();
+  const msg = document.getElementById("woNoticeMsg");
+  if (!en) { if (msg) msg.textContent = "Write the message, or tap one of the ready-made messages."; return; }
+  try {
+    await fetchJson(`${API}/maintenance/machine-notices`, {
+      method: "PUT",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ work_order_id: woId, message_en: en, message_pt: pt || undefined }),
+    });
+    await loadMachineNotice(woId);
+  } catch (e) {
+    if (msg) msg.textContent = e.message || String(e);
+  }
+}
+
+async function clearMachineNotice(woId) {
+  if (!confirm("Clear the operator notice for this machine?")) return;
+  await fetchJson(`${API}/maintenance/machine-notices?work_order_id=${encodeURIComponent(woId)}`, { method: "DELETE", headers: authHeaders() });
+  await loadMachineNotice(woId);
 }
 
 async function changeWorkOrderHelper(woId, username, remove) {
@@ -2053,6 +2127,21 @@ document.addEventListener("DOMContentLoaded", () => {
       const closeSource = target.getAttribute("data-close-source");
       const saveProgressId = target.getAttribute("data-wo-save-progress");
       const saveCostsId = target.getAttribute("data-wo-save-costs");
+      const noticeHost = target.closest("#woNotice");
+      if (noticeHost) {
+        const woIdN = Number(noticeHost.dataset.woId);
+        if (target.dataset.noticePreset) {
+          const en = document.getElementById("woNoticeEn");
+          const pt = document.getElementById("woNoticePt");
+          if (en) en.value = target.dataset.en || "";
+          if (pt) pt.value = target.dataset.pt || "";
+          return;
+        }
+        if (target.dataset.noticeSave) { saveMachineNotice(woIdN).catch(() => {}); return; }
+        if (target.dataset.noticeEdit) { loadMachineNotice(woIdN, { editing: true }).catch(() => {}); return; }
+        if (target.dataset.noticeCancel) { loadMachineNotice(woIdN).catch(() => {}); return; }
+        if (target.dataset.noticeClear) { clearMachineNotice(woIdN).catch((e) => alert(e.message || e)); return; }
+      }
       const reopenId = target.getAttribute("data-reopen-id");
       if (reopenId) {
         reopenWorkOrder(Number(reopenId), target.getAttribute("data-reopen-source")).catch((e) => alert(`Reopen failed: ${e.message}`));

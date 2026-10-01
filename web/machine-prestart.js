@@ -213,6 +213,7 @@
     showForm();
 
     renderChecklist(template);
+    PC.renderNotice(qs("noticeHost"), data?.notice || null);
 
     currentCheckId = 0;
     currentPdfUrl = "";
@@ -291,9 +292,11 @@
       smu_hours = smu;
     }
 
+    const notice_ack = PC.noticeAck(qs("noticeHost"));
     const body = {
       asset_code: currentAssetCode,
       check_date: currentDate,
+      notice_ack,
       smu_hours,
       inspector_name,
       notes: String(qs("notes")?.value || "").trim(),
@@ -382,7 +385,10 @@
   });
   window.addEventListener("offline", refreshOfflineBanner);
 
-  PC.bindLanguageToggle(() => renderChecklist());
+  PC.bindLanguageToggle(() => {
+    renderChecklist();
+    PC.renderNotice(qs("noticeHost"), qs("noticeHost")?.__notice || null);
+  });
   loadContext().catch((e) => msg(String(e.message || e), "err"));
   refreshOfflineBanner();
   syncOfflineQueue().catch(() => {});

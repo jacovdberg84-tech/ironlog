@@ -5,7 +5,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { checklistToJsonObject, getMachinePrestartTemplate, listMachinePrestartProfiles, machinePrestartCheckMode, normalizeMachinePrestartChecklist, resolveMachinePrestartProfile } from "../../utils/machinePrestartTemplates.js";
 import { db } from "../../db/client.js";
-import { isDate } from "../../utils/request.js";
+import { holdsAnyRole, isDate } from "../../utils/request.js";
+import { NOTICE_PRESETS, activeNotice, autoNoticeForFaults, clearNotice, noticeAcks, noticeForOperator, recordAck, setNotice } from "../../utils/machineNotices.js";
 import { prestartPdfUrl } from "../../utils/signedLinks.js";
 import { withPortuguese } from "../../utils/prestartPortuguese.js";
 import { addEnglishToFaultComments, faultMessage, notesWithFaults, prestartFaultList, syncPrestartFaultWorkOrder, unansweredChecks } from "../../utils/prestartFaults.js";
@@ -321,6 +322,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
         previous_odometer_km,
         raw_previous_odometer_km,
         baseline_poisoned,
+        notice: noticeForOperator(db, asset.id),
         previous_odometer_source:
           previous_odometer_km != null ? "sanitized_prior_prestart_or_daily" : null,
         existing_prestart: existing
@@ -440,10 +442,17 @@ export default function registerPrestartChecksRoutes(app, ctx) {
         { unusual_km: kmReviewNeeded }
       );
 
+      // "I have read this": saved against the notice the operator saw, before any new faults replace it.
+      if (req.body?.notice_ack) {
+        recordAck(db, { noticeId: req.body.notice_ack, assetId: asset.id, checkKind: "ldv", checkId, operator: inspector_name });
+      }
       const faultWo = syncPrestartFaultWorkOrder(db, {
         assetId: Number(asset.id), checkId, siteCode: site_code, checkDate: check_date, operator: inspector_name, faults,
       });
       translateFaultCommentsLater(req, faultWo, faults);
+      if (faults.length && faultWo && !faultWo.closed) {
+        autoNoticeForFaults(db, { assetId: asset.id, assetCode: asset.asset_code, workOrderId: faultWo.work_order_id, faults });
+      }
 
       return reply.send({
         ok: true,
@@ -719,6 +728,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
         previous_smu_hours,
         previous_smu_source:
           previous_smu_hours != null ? "daily_hours_or_prior_prestart" : null,
+        notice: noticeForOperator(db, asset.id),
         existing_check: existing
           ? {
               id: Number(existing.id),
@@ -842,10 +852,17 @@ export default function registerPrestartChecksRoutes(app, ctx) {
         );
       }
 
+      // "I have read this": saved against the notice the operator saw, before any new faults replace it.
+      if (req.body?.notice_ack) {
+        recordAck(db, { noticeId: req.body.notice_ack, assetId: asset.id, checkKind: "machine", checkId, operator: inspector_name });
+      }
       const faultWo = syncPrestartFaultWorkOrder(db, {
         assetId: Number(asset.id), checkId, siteCode: site_code, checkDate: check_date, operator: inspector_name, faults,
       });
       translateFaultCommentsLater(req, faultWo, faults);
+      if (faults.length && faultWo && !faultWo.closed) {
+        autoNoticeForFaults(db, { assetId: asset.id, assetCode: asset.asset_code, workOrderId: faultWo.work_order_id, faults });
+      }
 
       return reply.send({
         ok: true,
@@ -1366,5 +1383,66 @@ export default function registerPrestartChecksRoutes(app, ctx) {
       req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message });
     }
+  });
+
+  // ---- Workshop notices shown to operators on the next pre-start -------------
+  const NOTICE_ROLES = ["admin", "supervisor", "workshop_admin", "plant_manager", "site_manager"];
+  function noticeAsset(req) {
+    const q = { ...(req.query || {}), ...(req.body || {}) };
+    if (q.asset_id) return db.prepare(`SELECT id, asset_code FROM assets WHERE id = ?`).get(Number(q.asset_id));
+    if (q.asset_code) return db.prepare(`SELECT id, asset_code FROM assets WHERE UPPER(asset_code) = UPPER(?)`).get(String(q.asset_code).trim());
+    if (q.work_order_id) {
+      return db.prepare(`SELECT a.id, a.asset_code FROM work_orders w JOIN assets a ON a.id = w.asset_id WHERE w.id = ?`).get(Number(q.work_order_id));
+    }
+    return null;
+  }
+
+  // GET /api/maintenance/machine-notices?asset_code= | work_order_id=
+  app.get("/machine-notices", async (req, reply) => {
+    if (!holdsAnyRole(req, NOTICE_ROLES)) return reply.code(403).send({ ok: false, error: "Not allowed" });
+    const asset = noticeAsset(req);
+    if (!asset) return reply.code(404).send({ ok: false, error: "Machine not found" });
+    const notice = activeNotice(db, asset.id);
+    return {
+      ok: true,
+      asset_code: asset.asset_code,
+      notice,
+      acks: notice ? noticeAcks(db, notice.id) : [],
+      presets: NOTICE_PRESETS,
+    };
+  });
+
+  // PUT /api/maintenance/machine-notices { asset_code | work_order_id, message_en, message_pt?, preset? }
+  app.put("/machine-notices", async (req, reply) => {
+    if (!holdsAnyRole(req, NOTICE_ROLES)) return reply.code(403).send({ ok: false, error: "Not allowed" });
+    const asset = noticeAsset(req);
+    if (!asset) return reply.code(404).send({ ok: false, error: "Machine not found" });
+    const preset = NOTICE_PRESETS.find((p) => p.key === String(req.body?.preset || ""));
+    const en = String(req.body?.message_en || preset?.en || "").trim();
+    const ptGiven = String(req.body?.message_pt || "").trim();
+    const pt = ptGiven || (preset && en === preset.en ? preset.pt : "");
+    const user = String(req.headers["x-user-name"] || "").trim() || null;
+    let id;
+    try {
+      id = setNotice(db, { assetId: asset.id, workOrderId: Number(req.body?.work_order_id || 0) || null, messageEn: en, messagePt: pt || null, user });
+    } catch (err) {
+      return reply.code(err.status || 400).send({ ok: false, error: err.message });
+    }
+    // A message written in English gets a Portuguese copy for the operators.
+    if (!pt && isAiConfigured()) {
+      translateText(en, { to: "pt", chat: aiChatText })
+        .then((out) => { if (out) db.prepare(`UPDATE machine_notices SET message_pt = ? WHERE id = ? AND message_pt IS NULL`).run(out, id); })
+        .catch((err) => req.log.warn({ err }, "notice translation failed"));
+    }
+    return { ok: true, notice: activeNotice(db, asset.id) };
+  });
+
+  // DELETE /api/maintenance/machine-notices?asset_code= — clear it (machine fixed / not needed)
+  app.delete("/machine-notices", async (req, reply) => {
+    if (!holdsAnyRole(req, NOTICE_ROLES)) return reply.code(403).send({ ok: false, error: "Not allowed" });
+    const asset = noticeAsset(req);
+    if (!asset) return reply.code(404).send({ ok: false, error: "Machine not found" });
+    clearNotice(db, asset.id, String(req.headers["x-user-name"] || "").trim() || null);
+    return { ok: true };
   });
 }
