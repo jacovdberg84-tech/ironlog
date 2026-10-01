@@ -9,6 +9,7 @@ import { db } from "../../db/client.js";
 import { getPdfReportBranding } from "../../utils/reportSettings.js";
 import { isDate } from "../../utils/request.js";
 import { listPlannedMaintenanceForDate } from "../../utils/shortBreakdowns.js";
+import { capDowntime, downtimeCapForRun } from "../../utils/downtimeCap.js";
 
 export default function registerPeriodReportsRoutes(app, ctx) {
   const {
@@ -273,6 +274,12 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         ];
       }),
     );
+    // Hours each machine ran (Daily Input): it cannot also be down for them.
+    const runByAssetId = new Map(hours.map((r) => [Number(r.asset_id || 0), Math.max(0, Number(r.hours_run || 0))]));
+    const downCapFor = (assetId) => downtimeCapForRun({
+      scheduled: scheduledByAssetId.get(Number(assetId)) || scheduledFallback,
+      run: runByAssetId.get(Number(assetId)),
+    });
     const loggedDowntimeByAssetId = new Map();
     for (const row of dailyDowntimeLogs) {
       const assetId = Number(row.asset_id || 0);
@@ -287,7 +294,10 @@ export default function registerPeriodReportsRoutes(app, ctx) {
     const completedBreakdownRepairDowntime = completedBreakdownRepairCandidates
       .map((row) => {
         const assetId = Number(row.asset_id || 0);
-        const dayCap = Math.max(0, Number(scheduledByAssetId.get(assetId) || scheduledFallback));
+        const dayCap = Math.min(
+          Math.max(0, Number(scheduledByAssetId.get(assetId) || scheduledFallback)),
+          downCapFor(assetId),
+        );
         const alreadyLogged = Math.max(0, Number(loggedDowntimeByAssetId.get(assetId) || 0));
         const alreadyAllocated = Math.max(0, Number(repairDowntimeAllocatedByAssetId.get(assetId) || 0));
         const repairHours = Math.max(0, Number(row.repair_hours || 0));
@@ -462,7 +472,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         recordedHours: recordedDowntimeByAssetId.get(assetId),
         totalHours: downtimeByAssetId.get(assetId),
       });
-      const down = sched > 0 ? Math.min(downRaw, sched) : downRaw;
+      const down = capDowntime(sched > 0 ? Math.min(downRaw, sched) : downRaw, { scheduled: sched, run });
       const prestartDone = prestartAssetIds.has(assetId);
       const inspection = prestartDone && sched > down
         ? Math.min(PRESTART_DEDUCTION_HOURS, sched - down)
@@ -564,19 +574,29 @@ export default function registerPeriodReportsRoutes(app, ctx) {
     }));
 
     const loggedDowntimeAssets = new Set();
+    const shownDowntimeByAssetId = new Map();
     const dailyDowntimeRows = dailyDowntimeLogs.map((row) => {
       loggedDowntimeAssets.add(String(row.asset_code || ""));
       const serviceLabel = serviceLabelFromDailyDowntime(row.component, row.notes, row.description);
       const isMaintenance = Boolean(serviceLabel);
+      // Never more downtime than the shift hours the machine did not run.
+      const assetId = Number(row.asset_id || 0);
+      const logged = Math.max(0, Number(row.hours_down || 0));
+      const already = shownDowntimeByAssetId.get(assetId) || 0;
+      const shown = Math.min(logged, Math.max(0, downCapFor(assetId) - already));
+      shownDowntimeByAssetId.set(assetId, already + shown);
+      const cappedNote = shown < logged
+        ? ` (logged ${fmtNum(logged, 1)} h; machine ran ${fmtNum(runByAssetId.get(assetId) || 0, 1)} h)`
+        : "";
       return {
         asset: row.asset_code,
         equipment: compactCell(row.asset_name ?? "", 48),
         type: isMaintenance ? "Maintenance" : "Breakdown",
-        hrs: fmtNum(Math.max(0, Number(row.hours_down || 0)), 1),
+        hrs: fmtNum(shown, 1),
         area: isMaintenance ? serviceLabel : (compactCell(row.component ?? "", 42) || "-"),
         detail: isMaintenance
           ? serviceLabel
-          : compactCell(String(row.notes || row.description || "").replace(/^(?:Auto from Daily Input \(DOWN\)|Daily Log breakdown)\s*[-]?\s*/i, ""), 220),
+          : compactCell(`${String(row.notes || row.description || "").replace(/^(?:Auto from Daily Input \(DOWN\)|Daily Log breakdown)\s*[-]?\s*/i, "")}${cappedNote}`, 220),
       };
     });
     for (const row of completedBreakdownRepairDowntime) {

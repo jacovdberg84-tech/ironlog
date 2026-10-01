@@ -766,17 +766,29 @@ function kpiDaily(date, scheduled, dailyHoursDate = date, opts = {}) {
   const activeBreakdownPredicate = hasBreakdownEndAt
     ? `(${endAtPredicate} OR ${openStatePredicate})`
     : `${openStatePredicate}`;
-  const dtLogParams = [date, date];
+  // Logged downtime per machine, never more than the shift hours it did not
+  // run (a machine cannot be down while it runs; see utils/downtimeCap.js).
   const dtLogsRow = db.prepare(`
-    SELECT IFNULL(SUM(l.hours_down), 0) AS downtime_hours
-    FROM breakdown_downtime_logs l
-    JOIN breakdowns b ON b.id = l.breakdown_id
-    JOIN assets a ON a.id = b.asset_id
-    WHERE l.log_date = ?
-      AND DATE(COALESCE(b.breakdown_date, l.log_date)) <= ?
-      AND UPPER(TRIM(COALESCE(b.description, ''))) NOT LIKE 'MANAGER INSPECTION ALERT%'
-      ${andAssetFleetHoursOnly("a")}
-  `).get(...dtLogParams);
+    SELECT IFNULL(SUM(
+      CASE WHEN COALESCE(x.run, 0) > 0 THEN MIN(x.down, MAX(0, x.sched - x.run)) ELSE x.down END
+    ), 0) AS downtime_hours
+    FROM (
+      SELECT
+        b.asset_id,
+        SUM(l.hours_down) AS down,
+        (SELECT MAX(COALESCE(dh.hours_run, 0)) FROM daily_hours dh WHERE dh.asset_id = b.asset_id AND dh.work_date = ?) AS run,
+        (SELECT MAX(CASE WHEN COALESCE(dh.scheduled_hours, 0) > 0 THEN dh.scheduled_hours ELSE ? END)
+           FROM daily_hours dh WHERE dh.asset_id = b.asset_id AND dh.work_date = ?) AS sched
+      FROM breakdown_downtime_logs l
+      JOIN breakdowns b ON b.id = l.breakdown_id
+      JOIN assets a ON a.id = b.asset_id
+      WHERE l.log_date = ?
+        AND DATE(COALESCE(b.breakdown_date, l.log_date)) <= ?
+        AND UPPER(TRIM(COALESCE(b.description, ''))) NOT LIKE 'MANAGER INSPECTION ALERT%'
+        ${andAssetFleetHoursOnly("a")}
+      GROUP BY b.asset_id
+    ) x
+  `).get(dailyHoursDate, Number(scheduled || 0), dailyHoursDate, date, date);
   let downtime_hours = Number(dtLogsRow?.downtime_hours || 0);
   const openNoLogParams = [Number(scheduled || 0), date, dailyHoursDate];
   if (hasBreakdownEndAt) openNoLogParams.push(date);
