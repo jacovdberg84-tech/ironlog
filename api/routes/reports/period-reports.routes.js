@@ -181,123 +181,9 @@ export default function registerPeriodReportsRoutes(app, ctx) {
       return true;
     }).sort((a, b) => Number(b.days_down || 0) - Number(a.days_down || 0));
 
-    const hasWOCompletedAt = hasColumn("work_orders", "completed_at");
-    const woCompletedFilter = hasWOCompletedAt
-      ? "AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')"
-      : "";
-    const breakdownOpenChecks = [];
-    if (hasBreakdownStatus) {
-      breakdownOpenChecks.push("TRIM(LOWER(COALESCE(b.status, ''))) IN ('open', 'in_progress')");
-    }
-    if (hasBreakdownEndAt) {
-      breakdownOpenChecks.push("(b.end_at IS NULL OR TRIM(COALESCE(b.end_at, '')) = '')");
-    }
-    const breakdownOpenFilter = breakdownOpenChecks.length
-      ? `AND (
-          w.source <> 'breakdown'
-          OR (b.id IS NOT NULL AND (${breakdownOpenChecks.join(" AND ")}))
-        )`
-      : "AND (w.source <> 'breakdown' OR b.id IS NOT NULL)";
-    const noClosedShadowWOFilter = `AND NOT EXISTS (
-      SELECT 1
-      FROM work_orders wx
-      WHERE wx.source = 'breakdown'
-        AND wx.asset_id = w.asset_id
-        AND COALESCE(wx.reference_id, -1) = COALESCE(w.reference_id, -1)
-        AND REPLACE(TRIM(LOWER(COALESCE(wx.status, ''))), ' ', '_') IN ('completed', 'approved', 'closed')
-    )`;
-    const latestActivePerAssetSourceFilter = `AND NOT EXISTS (
-      SELECT 1
-      FROM work_orders wn
-      LEFT JOIN breakdowns bn ON bn.id = wn.reference_id AND wn.source = 'breakdown'
-      LEFT JOIN breakdowns bw ON bw.id = w.reference_id AND w.source = 'breakdown'
-      WHERE wn.asset_id = w.asset_id
-        AND COALESCE(wn.source, '') = COALESCE(w.source, '')
-        AND (
-          COALESCE(
-            CASE
-              WHEN wn.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(bn.start_at), ''), NULLIF(TRIM(bn.breakdown_date), ''), wn.opened_at)
-              ELSE wn.opened_at
-            END,
-            ''
-          ) > COALESCE(
-            CASE
-              WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(bw.start_at), ''), NULLIF(TRIM(bw.breakdown_date), ''), w.opened_at)
-              ELSE w.opened_at
-            END,
-            ''
-          )
-          OR (
-            COALESCE(
-              CASE
-                WHEN wn.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(bn.start_at), ''), NULLIF(TRIM(bn.breakdown_date), ''), wn.opened_at)
-                ELSE wn.opened_at
-              END,
-              ''
-            ) = COALESCE(
-              CASE
-                WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(bw.start_at), ''), NULLIF(TRIM(bw.breakdown_date), ''), w.opened_at)
-                ELSE w.opened_at
-              END,
-              ''
-            )
-            AND wn.id > w.id
-          )
-        )
-        AND REPLACE(TRIM(LOWER(COALESCE(wn.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
-    )`;
-    const hasApprovalRequestsTable = (() => {
-      try {
-        const row = db
-          .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?")
-          .get("approval_requests");
-        return Boolean(row);
-      } catch {
-        return false;
-      }
-    })();
-    const closeApprovalFilter = hasApprovalRequestsTable
-      ? `AND NOT EXISTS (
-          SELECT 1
-          FROM approval_requests ar
-          WHERE ar.entity_type = 'work_order'
-            AND CAST(ar.entity_id AS INTEGER) = w.id
-            AND TRIM(LOWER(COALESCE(ar.action, ''))) = 'close_approved'
-            AND TRIM(LOWER(COALESCE(ar.status, ''))) = 'approved'
-        )`
-      : "";
-    const staleClosedWoIds = new Set([3, 5, 10, 11, 14, 18, 19, 20]);
-    const openWOs = db.prepare(`
-      SELECT
-        w.id,
-        a.asset_code,
-        a.asset_name,
-        w.source,
-        w.status,
-        w.assigned_artisan_name,
-        w.repair_progress,
-        ${hasPartsStatus ? "b.parts_status" : "NULL AS parts_status"},
-        CASE
-          WHEN w.source = 'breakdown' THEN COALESCE(NULLIF(TRIM(b.start_at), ''), NULLIF(TRIM(b.breakdown_date), ''), w.opened_at)
-          ELSE w.opened_at
-        END AS opened_at
-      FROM work_orders w
-      JOIN assets a ON a.id = w.asset_id
-      LEFT JOIN breakdowns b ON b.id = w.reference_id AND w.source = 'breakdown'
-      WHERE w.closed_at IS NULL
-        AND REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
-        ${woCompletedFilter}
-        ${breakdownOpenFilter}
-        ${noClosedShadowWOFilter}
-        ${latestActivePerAssetSourceFilter}
-        ${closeApprovalFilter}
-      ORDER BY w.id DESC
-      LIMIT 30
-    `).all().filter((r) => !staleClosedWoIds.has(Number(r.id)));
 
     const hoursPdf = hours.slice(0, 500);
     const breakdownsPdf = breakdowns.slice(0, 40);
-    const openWOsPdf = openWOs.slice(0, 40);
 
     // Daily PDF is opened "today" for yesterday's ops — short BDs, fuel, and
     // per-asset availability downtime all use the previous calendar day.
@@ -718,22 +604,6 @@ export default function registerPeriodReportsRoutes(app, ctx) {
       });
     }
 
-    const openWorkOrderRows = openWOsPdf.map((row) => ({
-      wo: String(row.id),
-      asset: row.asset_code,
-      equipment: compactCell(row.asset_name ?? "", 48),
-      source: ({
-        breakdown: "Breakdown",
-        service: "Maintenance",
-        manager_inspection: "Inspection",
-        inspection: "Inspection",
-      })[String(row.source || "").toLowerCase()] || compactCell(row.source ?? "", 20),
-      status: compactCell(String(row.status ?? "").replace(/_/g, " "), 16),
-      parts: compactCell(row.parts_status ?? "", 26) || "-",
-      tech: compactCell(row.assigned_artisan_name ?? "", 28),
-      progress: compactCell(row.repair_progress ?? "", 260) || "No progress update",
-    }));
-
     const fleetReadingRows = hoursPdfEnriched.map((row) => {
       const noEntry = !row.has_daily_entry;
       const formatHours = (value) =>
@@ -929,27 +799,6 @@ export default function registerPeriodReportsRoutes(app, ctx) {
             );
           } else {
             drawDailyPdfExceptions(doc, [], "No repair or maintenance downtime was recorded.");
-          }
-
-          dailyPdfManagementSection(doc, "Open work orders");
-          if (openWorkOrderRows.length) {
-            table(
-              doc,
-              [
-                { key: "wo", label: "WO#", width: 0.07, align: "right" },
-                { key: "asset", label: "Plant #", width: 0.09 },
-                { key: "equipment", label: "Equipment", width: 0.16 },
-                { key: "source", label: "Source", width: 0.10 },
-                { key: "status", label: "Status", width: 0.09 },
-                { key: "parts", label: "Parts status", width: 0.12 },
-                { key: "tech", label: "Technician", width: 0.11 },
-                { key: "progress", label: "Progress / next action", width: 0.26 },
-              ],
-              openWorkOrderRows,
-              managementTableStyle,
-            );
-          } else {
-            drawDailyPdfExceptions(doc, [], "No open work orders require action.");
           }
 
           if (cartrackSpeeding?.total_speeding_events) {
@@ -1216,36 +1065,6 @@ export default function registerPeriodReportsRoutes(app, ctx) {
           legacyDailyDowntimeRows.length
             ? legacyDailyDowntimeRows
             : [{ asset: "—", equipment: "No downtime recorded", type: "—", hrs: "0.0", area: "—", detail: "—" }],
-        );
-
-        sectionTitle(doc, "Open Work Orders");
-        table(
-          doc,
-          [
-            { key: "wo", label: "WO#", width: 0.07, align: "right" },
-            { key: "asset", label: "Plant #", width: 0.09 },
-            { key: "equipment", label: "Equipment", width: 0.16 },
-            { key: "source", label: "Source", width: 0.10 },
-            { key: "status", label: "Status", width: 0.09 },
-            { key: "parts", label: "Parts status", width: 0.12 },
-            { key: "tech", label: "Technician", width: 0.11 },
-            { key: "progress", label: "Progress / next action", width: 0.26 },
-          ],
-          openWOsPdf.map(r => ({
-            wo: String(r.id),
-            asset: r.asset_code,
-            equipment: compactCell(r.asset_name ?? "", 48),
-            source: ({
-              breakdown: "Breakdown",
-              service: "Maintenance",
-              manager_inspection: "Inspection",
-              inspection: "Inspection",
-            })[String(r.source || "").toLowerCase()] || compactCell(r.source ?? "", 20),
-            status: compactCell(String(r.status ?? "").replace(/_/g, " "), 16),
-            parts: compactCell(r.parts_status ?? "", 26) || "—",
-            tech: compactCell(r.assigned_artisan_name ?? "", 28),
-            progress: compactCell(r.repair_progress ?? "", 260) || "No progress update",
-          }))
         );
 
         if (cartrackSpeeding) {
