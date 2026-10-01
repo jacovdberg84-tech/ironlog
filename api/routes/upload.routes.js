@@ -1,4 +1,5 @@
 // IRONLOG/api/routes/upload.routes.js
+import { ensureFuelBenchmarkSchema } from "../utils/fuelConsumption.js";
 import multipart from "@fastify/multipart";
 import { parse } from "csv-parse/sync";
 import { db } from "../db/client.js";
@@ -1088,9 +1089,10 @@ export default async function uploadRoutes(app) {
     const rows = parseCsvToObjects(buf);
     requireHeaders(rows, ["asset_code", "baseline_fuel_l_per_hour"]);
 
+    ensureFuelBenchmarkSchema(db);
     const updateBaseline = db.prepare(`
       UPDATE assets
-      SET baseline_fuel_l_per_hour = ?
+      SET baseline_fuel_l_per_hour = ?, fuel_benchmark_set_at = datetime('now')
       WHERE id = ?
     `);
 
