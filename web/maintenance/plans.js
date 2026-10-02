@@ -1249,10 +1249,24 @@ async function generateWO() {
     if (!res.ok) throw new Error(data.error || "Failed to generate work orders");
     const mode = selectedPlans.length ? "selected plans" : "overdue plans";
     const skipped = Array.isArray(data.skipped) ? data.skipped : [];
-    const skippedMsg = skipped.length
-      ? `\n\nAlready open: ${skipped.map((r) => `${r.asset_code || "asset"} — WO #${r.work_order_id}`).join(", ")}`
-      : "";
-    alert(`Created ${Number(data.created_count || 0)} work orders (${mode})${skippedMsg}`);
+    const createdRows = Array.isArray(data.created) ? data.created : [];
+    const lines = [`Created ${Number(data.created_count || 0)} work orders (${mode})`];
+    createdRows.forEach((r) => {
+      if (r.asset_code) lines.push(`• ${r.asset_code}: WO #${r.work_order_id}${r.note ? ` (${r.note})` : ""}`);
+    });
+    if (skipped.length) {
+      lines.push("", "Not created:");
+      skipped.forEach((r) => {
+        const why = r.reason === "open_work_order_exists"
+          ? `already has open service WO #${r.work_order_id} (${String(r.work_order_status || "open").replace(/_/g, " ")})`
+          : r.reason_text || String(r.reason || "").replace(/_/g, " ");
+        const last = r.last_service_work_order
+          ? ` Last service WO: #${r.last_service_work_order.id} (${String(r.last_service_work_order.status || "").replace(/_/g, " ")}${r.last_service_work_order.finished_at ? `, ${String(r.last_service_work_order.finished_at).slice(0, 10)}` : ""}).`
+          : "";
+        lines.push(`• ${r.asset_code || `plan ${r.plan_id}`}: ${why}.${last}`);
+      });
+    }
+    alert(lines.join("\n"));
     selectedDuePlanIds.clear();
     await loadPlans();
     await loadDue();

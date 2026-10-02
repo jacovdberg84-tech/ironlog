@@ -1211,15 +1211,22 @@ export default function registerPlansRoutes(app, ctx) {
               AND a.archived = 0
           `).all();
 
+      // One open service work order per machine, whichever of its plans it was raised for.
       const findOpenServiceWO = db.prepare(`
         SELECT id, status
         FROM work_orders
         WHERE source = 'service'
-          AND reference_id = ?
+          AND asset_id = ?
           AND REPLACE(TRIM(LOWER(COALESCE(status, ''))), ' ', '_')
             NOT IN ('closed', 'completed', 'approved', 'cancelled')
         ORDER BY id DESC
         LIMIT 1
+      `);
+      const lastServiceWO = db.prepare(`
+        SELECT id, status, COALESCE(closed_at, completed_at) AS finished_at
+        FROM work_orders
+        WHERE source = 'service' AND asset_id = ?
+        ORDER BY id DESC LIMIT 1
       `);
 
       const insertWO = db.prepare(`
@@ -1252,7 +1259,7 @@ export default function registerPlansRoutes(app, ctx) {
           const isRequestedPlan = requestedPlanIds.includes(Number(p.plan_id || 0));
           const shouldCreate = requestedPlanIds.length ? isRequestedPlan : isOverdue;
           if (!shouldCreate) continue;
-          const existing = findOpenServiceWO.get(p.plan_id);
+          const existing = findOpenServiceWO.get(p.asset_id);
           if (existing) {
             skipped.push({
               plan_id: Number(p.plan_id),
@@ -1276,6 +1283,55 @@ export default function registerPlansRoutes(app, ctx) {
           });
         }
 
+        // Ticked plans the due list did not cover: machines on standby, set
+        // inactive or archived, plans switched off, or a plan that is not the
+        // machine's next service. Raise the work order anyway when it makes
+        // sense, otherwise say why.
+        const handled = new Set([...created, ...skipped].map((r) => Number(r.plan_id)));
+        const planInfo = db.prepare(`
+          SELECT mp.id AS plan_id, mp.asset_id, mp.service_name, mp.active AS plan_active,
+            a.asset_code, a.active AS asset_active, a.archived, a.is_standby
+          FROM maintenance_plans mp JOIN assets a ON a.id = mp.asset_id WHERE mp.id = ?
+        `);
+        for (const planId of requestedPlanIds) {
+          if (handled.has(planId)) continue;
+          const p = planInfo.get(planId);
+          if (!p) {
+            skipped.push({ plan_id: planId, reason: "plan_not_found", reason_text: "service plan not found" });
+            continue;
+          }
+          const base = { plan_id: planId, asset_id: Number(p.asset_id), asset_code: p.asset_code };
+          if (Number(p.archived) === 1) {
+            skipped.push({ ...base, reason: "asset_archived", reason_text: "machine is archived" });
+            continue;
+          }
+          if (Number(p.plan_active) === 0) {
+            skipped.push({ ...base, reason: "plan_inactive", reason_text: "this service plan is switched off" });
+            continue;
+          }
+          const existing = findOpenServiceWO.get(p.asset_id);
+          if (existing) {
+            skipped.push({ ...base, reason: "open_work_order_exists", work_order_id: Number(existing.id), work_order_status: String(existing.status || "open") });
+            continue;
+          }
+          const wo = insertWO.run(p.asset_id, planId);
+          created.push({
+            work_order_id: Number(wo.lastInsertRowid),
+            plan_id: planId,
+            asset_id: Number(p.asset_id),
+            asset_code: p.asset_code,
+            service_name: p.service_name,
+            note: Number(p.is_standby) === 1 ? "machine is on standby" : Number(p.asset_active) === 0 ? "machine is set inactive" : null,
+            current_hours: Number(Number(currentByAsset.get(Number(p.asset_id)) ?? getAssetCurrentHours(Number(p.asset_id)) ?? 0).toFixed(2)),
+          });
+        }
+
+        // The machine's last service work order, so a closed one can be found and reopened.
+        for (const r of skipped) {
+          if (!r.asset_id || r.reason === "open_work_order_exists") continue;
+          const last = lastServiceWO.get(r.asset_id);
+          if (last) r.last_service_work_order = { id: Number(last.id), status: last.status, finished_at: last.finished_at || null };
+        }
         return { created, skipped };
       });
 
