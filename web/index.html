@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=requisition-1" />
+  <link rel="stylesheet" href="./styles.css?v=stock-tabs-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -1878,8 +1878,64 @@
           </div>
         </div>
 
+        <nav class="stock-tabs full-width" id="stockTabs" role="tablist" aria-label="Stock Control">
+          <button type="button" role="tab" data-stock-tab-btn="onhand">Stock on hand</button>
+          <button type="button" role="tab" data-stock-tab-btn="receive">Receive</button>
+          <button type="button" role="tab" data-stock-tab-btn="issue">Issue</button>
+          <button type="button" role="tab" data-stock-tab-btn="requests">Requests &amp; orders</button>
+          <button type="button" role="tab" data-stock-tab-btn="counts">Counts &amp; corrections</button>
+          <button type="button" role="tab" data-stock-tab-btn="setup">Setup</button>
+          <button type="button" role="tab" data-stock-tab-btn="reports">Reports</button>
+        </nav>
+
+        <!-- Receive a delivery (many lines) -->
+        <div data-stock-tab="receive" class="dash-card full-width" id="deliveryCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              </div>
+              <div>
+                <h3>Receive a delivery</h3>
+                <p class="muted small">Enter the invoice once, then one line per part. All lines are saved together.</p>
+              </div>
+            </div>
+          </div>
+          <div class="dlv-head">
+            <div class="form-field"><label for="dlvSupplier">Supplier</label><input id="dlvSupplier" class="w-full" placeholder="Supplier name" autocomplete="off" /></div>
+            <div class="form-field"><label for="dlvRef">Invoice / GRN no.</label><input id="dlvRef" class="w-full" placeholder="e.g. INV-2231" autocomplete="off" /></div>
+            <div class="form-field"><label for="dlvDate">Date received</label><input id="dlvDate" type="date" class="w-full" /></div>
+            <div class="form-field"><label for="dlvCurrency">Currency</label><select id="dlvCurrency" class="w-full"><option value="USD">USD</option><option value="ZAR">ZAR</option><option value="MZN">MZN</option></select></div>
+            <div class="form-field"><label for="dlvLocation">Store</label><input id="dlvLocation" list="locationCodeOptions" class="w-full" value="MAIN" /></div>
+          </div>
+          <div class="dlv-table-wrap">
+            <table class="dlv-table" id="dlvTable">
+              <thead><tr><th class="dlv-part">Part (type code or name)</th><th>On hand</th><th>Bin</th><th class="dlv-num">Qty</th><th class="dlv-num">Unit cost</th><th class="dlv-num">Line total</th><th></th></tr></thead>
+              <tbody id="dlvLines"></tbody>
+            </table>
+          </div>
+          <div class="dlv-foot">
+            <button type="button" class="btn btn-secondary" id="dlvAddLine">+ Add line</button>
+            <div class="dlv-total" id="dlvTotal"></div>
+          </div>
+          <div class="form-field"><label for="dlvNotes">Notes (optional)</label><input id="dlvNotes" class="w-full" placeholder="e.g. short delivered, damaged drum" /></div>
+          <div id="dlvMsg" class="dlv-msg" role="status" aria-live="polite"></div>
+          <div class="dlv-actions">
+            <button type="button" class="btn btn-secondary" id="dlvClear">Clear</button>
+            <button type="button" class="btn btn-primary" id="dlvSave">Receive delivery</button>
+          </div>
+        </div>
+
+        <div data-stock-tab="receive" class="dash-card full-width" id="deliveryRecentCard">
+          <div class="dash-card-header"><div class="dash-card-title"><div><h3>Recent deliveries</h3><p class="muted small">Last 30 days. To undo a line received by mistake, use Reverse a Receipt on Counts &amp; corrections.</p></div></div></div>
+          <div id="dlvRecent" class="dlv-recent muted">Loading…</div>
+        </div>
+
+        <!-- Requests & orders: the Parts Orders cards are shown here while this tab is open -->
+        <div data-stock-tab="requests" class="full-width stock-requests-host" id="stockRequestsHost"></div>
+
         <!-- GM stock report -->
-        <div class="dash-card collapsible full-width" data-collapsed="false">
+        <div data-stock-tab="reports" class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
@@ -1919,7 +1975,7 @@
         </div>
 
         <!-- Store QR — field terminal -->
-        <div class="dash-card collapsible full-width" data-collapsed="false">
+        <div data-stock-tab="setup" class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon" style="background: #ecfdf5; color: #059669;">
@@ -1962,7 +2018,7 @@
         </div>
 
         <!-- Stock On Hand Card -->
-        <div class="dash-card collapsible full-width" data-collapsed="false">
+        <div data-stock-tab="onhand" class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
@@ -2044,7 +2100,7 @@
         </div>
 
         <!-- Stock movements report -->
-        <div class="dash-card collapsible full-width" data-collapsed="false">
+        <div data-stock-tab="reports" class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon" style="background: #f0fdf4; color: #15803d;">
@@ -2105,7 +2161,7 @@
         </div>
 
         <!-- Parts purchases & site cost forecast -->
-        <div class="dash-card collapsible full-width" data-collapsed="false">
+        <div data-stock-tab="requests" class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon" style="background: #fdf4ff; color: #9333ea;">
@@ -2238,7 +2294,7 @@
         </div>
 
         <!-- Stores Allocation Card -->
-        <div class="dash-card collapsible" data-collapsed="false">
+        <div data-stock-tab="issue" class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon">
@@ -2317,15 +2373,15 @@
         </div>
 
         <!-- Manual Stock Entry Card -->
-        <div class="dash-card collapsible" data-collapsed="false">
+        <div data-stock-tab="counts" class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
               </div>
               <div>
-                <h3>Receive or Adjust Stock</h3>
-                <p class="muted small">Receive deliveries or record a controlled stock adjustment</p>
+                <h3>Adjust or Remove Stock</h3>
+                <p class="muted small">Remove stock or ask for a stock adjustment (adjustments go to Approvals). Deliveries are received on the Receive tab.</p>
               </div>
             </div>
             <button class="report-card-toggle" aria-label="Toggle">
@@ -2353,7 +2409,6 @@
               <div class="form-field">
                 <label>Type</label>
                 <select id="msType" class="w-full">
-                  <option value="in">Receive stock</option>
                   <option value="out">Remove stock</option>
                   <option value="adjust">Adjustment</option>
                 </select>
@@ -2402,7 +2457,7 @@
         </div>
 
         <!-- Reverse a Receipt Card -->
-        <div class="dash-card collapsible" data-collapsed="false" id="reverseReceiptCard">
+        <div data-stock-tab="counts" class="dash-card collapsible" data-collapsed="false" id="reverseReceiptCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon" style="background: #fff7ed; color: #ea580c;">
@@ -2435,7 +2490,7 @@
         </div>
 
         <!-- Inventory Control Card -->
-        <div class="dash-card collapsible" data-collapsed="false">
+        <div data-stock-tab="counts" class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon" style="background: #fef2f2; color: #dc2626;">
@@ -2497,7 +2552,7 @@
         </div>
 
         <!-- Location Management Card -->
-        <div class="dash-card collapsible" data-collapsed="false">
+        <div data-stock-tab="setup" class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon" style="background: #e0e7ff; color: #4338ca;">
@@ -2555,7 +2610,7 @@
           </div>
         </div>
 
-        <div class="dash-card collapsible full-width" data-collapsed="false">
+        <div data-stock-tab="setup" class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
               <div class="dash-card-icon" style="background:#ecfeff; color:#0e7490;">
@@ -7793,18 +7848,19 @@
   <script src="./app/dashboard.js?v=89"></script>
   <script src="./app/borris.js?v=89"></script>
   <script src="./app/fuel-lube.js?v=90"></script>
-  <script src="./app/stock.js?v=92"></script>
+  <script src="./app/stock.js?v=93"></script>
   <script src="./app/compliance.js?v=89r"></script>
   <script src="./app/tabs.js?v=89"></script>
   <script src="./app/uploads.js?v=89"></script>
   <script src="./app/reports.js?v=89"></script>
   <script src="./app/breakdowns.js?v=89"></script>
-  <script src="./app/inventory.js?v=91"></script>
+  <script src="./app/inventory.js?v=92"></script>
+  <script src="./app/stock-receive.js?v=2"></script>
   <script src="./app/procurement.js?v=89"></script>
   <script src="./app/site-ops.js?v=89"></script>
   <script src="./app/daily-input.js?v=89"></script>
   <script src="./app/assets.js?v=89"></script>
-  <script src="./app/init.js?v=89"></script>
+  <script src="./app/init.js?v=90"></script>
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=89"></script>
   <script src="./app/finance.js?v=89"></script>

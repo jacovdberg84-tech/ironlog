@@ -451,7 +451,7 @@ async function saveManualStock() {
     if (qs("msBin")) qs("msBin").value = "";
     if (qs("msCostCenter")) qs("msCostCenter").value = "";
     if (qs("msUnitCost")) qs("msUnitCost").value = "";
-    if (qs("msType")) qs("msType").value = "in";
+    if (qs("msType")) qs("msType").value = "out";
     if (qs("msCostCurrency")) qs("msCostCurrency").value = "USD";
     updateManualStockCostRowVisibility();
     qs("msPart")?.focus();
