@@ -48,6 +48,7 @@ async function init() {
   wireBorrisControls();
   wireDocumentControls();
   wireLubeControls();
+  wireStockReceive();
   wireProcurementControls();
   wireFuelLogControls();
   wireSiteOpsControls();

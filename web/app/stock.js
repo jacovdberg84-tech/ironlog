@@ -197,7 +197,11 @@ function openStockAction(card, action) {
   const name = String(card?.dataset?.stockName || "").trim();
   if (!code) return;
   let target = null;
-  if (action === "receive") {
+  if (action === "receive" && typeof stockReceivePart === "function") {
+    stockReceivePart(code, name);
+    setStatus(`Ready to receive ${code}.`);
+    return;
+  } else if (action === "receive") {
     if (qs("msPart")) qs("msPart").value = code;
     if (qs("msPartDesc")) qs("msPartDesc").value = name;
     if (qs("msType")) qs("msType").value = "in";
@@ -217,6 +221,8 @@ function openStockAction(card, action) {
     setStatus(`Ready to count ${code}.`);
   }
   if (!target) return;
+  // The form may be on another Stock Control tab.
+  if (target.dataset.stockTab && typeof showStockTab === "function") showStockTab(target.dataset.stockTab);
   target.dataset.collapsed = "false";
   target.scrollIntoView({ behavior: "smooth", block: "center" });
   setTimeout(() => target.querySelector("input:not([disabled]), select:not([disabled])")?.focus(), 350);
@@ -225,6 +231,7 @@ function openStockAction(card, action) {
 function openUtilityWorkflow(cardId) {
   const card = document.getElementById(String(cardId || ""));
   if (!card) return;
+  if (card.dataset.stockTab && typeof showStockTab === "function") showStockTab(card.dataset.stockTab);
   card.classList.remove("collapsed");
   card.dataset.collapsed = "false";
   card.scrollIntoView({ behavior: "smooth", block: "start" });
