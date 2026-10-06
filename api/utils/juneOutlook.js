@@ -27,7 +27,7 @@ function connectorKey() {
   return crypto.createHash("sha256").update(raw).digest();
 }
 
-function encrypt(value) {
+export function encryptJuneConnectorSecret(value) {
   const key = connectorKey();
   if (!key) throw new Error("June's Outlook token encryption secret is not configured.");
   const iv = crypto.randomBytes(12);
@@ -37,7 +37,7 @@ function encrypt(value) {
   return `${iv.toString("base64")}.${tag.toString("base64")}.${encrypted.toString("base64")}`;
 }
 
-function decrypt(value) {
+export function decryptJuneConnectorSecret(value) {
   const raw = text(value, 50000);
   const key = connectorKey();
   if (!raw || !key) return null;
@@ -219,7 +219,7 @@ function markReconnectRequired(context) {
 async function refreshAccessToken(context, row) {
   const cfg = config();
   if (!cfg.ready) throw new Error(cfg.detail);
-  const refreshToken = decrypt(row?.refresh_token_enc);
+  const refreshToken = decryptJuneConnectorSecret(row?.refresh_token_enc);
   if (!refreshToken) {
     markReconnectRequired(context);
     throw new Error("June cannot unlock the saved Outlook connection. Reconnect Outlook to continue.");
@@ -249,7 +249,7 @@ async function refreshAccessToken(context, row) {
     UPDATE june_outlook_connections
     SET access_token_enc = ?, refresh_token_enc = ?, token_expires_at_ms = ?, status = 'connected', updated_at = datetime('now')
     WHERE site_code = ? AND username = ?
-  `).run(encrypt(accessToken), nextRefresh ? encrypt(nextRefresh) : row.refresh_token_enc, expiresAt, siteCode, user);
+  `).run(encryptJuneConnectorSecret(accessToken), nextRefresh ? encryptJuneConnectorSecret(nextRefresh) : row.refresh_token_enc, expiresAt, siteCode, user);
   return accessToken;
 }
 
@@ -257,7 +257,7 @@ async function accessTokenFor(context, { forceRefresh = false } = {}) {
   const status = publicConnectionStatus(context);
   if (status.state !== "connected") throw new Error(status.detail);
   const row = connectionRow(context);
-  const accessToken = !forceRefresh ? decrypt(row?.access_token_enc) : null;
+  const accessToken = !forceRefresh ? decryptJuneConnectorSecret(row?.access_token_enc) : null;
   if (accessToken && Number(row?.token_expires_at_ms || 0) > Date.now() + TOKEN_SKEW_MS) return accessToken;
   return refreshAccessToken(context, row);
 }
@@ -303,7 +303,7 @@ export function beginOutlookAuthorization(context) {
   db.prepare(`
     INSERT INTO june_outlook_oauth_states (state, site_code, username, code_verifier_enc, expires_at_ms)
     VALUES (?, ?, ?, ?, ?)
-  `).run(state, siteCode, user, encrypt(codeVerifier), Date.now() + STATE_TTL_MS);
+  `).run(state, siteCode, user, encryptJuneConnectorSecret(codeVerifier), Date.now() + STATE_TTL_MS);
   const authorize = new URL(`${MICROSOFT_LOGIN_BASE}/${encodeURIComponent(cfg.tenantId)}/oauth2/v2.0/authorize`);
   authorize.searchParams.set("client_id", cfg.clientId);
   authorize.searchParams.set("response_type", "code");
@@ -335,7 +335,7 @@ export async function completeOutlookAuthorization({ state, code, error, errorDe
     return { ok: false, redirect_url: stateFailureUrl(cfg, message), message };
   }
   const authorizationCode = text(code, 8000);
-  const codeVerifier = decrypt(pending.code_verifier_enc);
+  const codeVerifier = decryptJuneConnectorSecret(pending.code_verifier_enc);
   if (!authorizationCode || !codeVerifier) {
     const message = "Outlook connection details were incomplete. Start the connection again from June.";
     return { ok: false, redirect_url: stateFailureUrl(cfg, message), message };
@@ -394,8 +394,8 @@ export async function completeOutlookAuthorization({ state, code, error, errorDe
     cfg.tenantId,
     accountEmail || null,
     displayName || null,
-    encrypt(accessToken),
-    encrypt(refreshToken),
+    encryptJuneConnectorSecret(accessToken),
+    encryptJuneConnectorSecret(refreshToken),
     expiresAt,
     OUTLOOK_SCOPES.join(" "),
   );

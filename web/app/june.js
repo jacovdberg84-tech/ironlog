@@ -7,6 +7,7 @@ let juneDataChannel = null;
 let juneLocalStream = null;
 let juneAudio = null;
 let juneProcessedCalls = new Set();
+let juneIcsCalendar = null;
 
 function juneIsAdmin() {
   return getSessionRoles().includes("admin");
@@ -90,12 +91,58 @@ function juneRenderOutlookControl(outlook) {
   disconnect.hidden = state !== "connected";
 }
 
+function juneCalendarSetFormVisible(visible) {
+  const form = qs("juneCalendarForm");
+  if (form) form.hidden = !visible;
+}
+
+function juneRenderCalendarEvents(events, { error = "", emptyMessage = "No upcoming events in the next 21 days." } = {}) {
+  const host = qs("juneCalendarEvents");
+  if (!host) return;
+  if (error) {
+    host.innerHTML = `<div class="june-calendar-empty june-calendar-error">${juneEscape(error)}</div>`;
+    return;
+  }
+  const list = Array.isArray(events) ? events : [];
+  if (!list.length) {
+    host.innerHTML = `<div class="june-calendar-empty">${juneEscape(emptyMessage)}</div>`;
+    return;
+  }
+  host.innerHTML = list.map((event) => {
+    const when = event?.all_day
+      ? `${juneEscape(event?.start_date || "")} · All day`
+      : `${juneEscape(event?.start_date || "")} · ${juneEscape(event?.start_time || "")}`;
+    const location = String(event?.location || "").trim();
+    return `<article class="june-calendar-event"><time>${when}</time><strong>${juneEscape(event?.summary || "(No title)")}</strong>${location ? `<span>${juneEscape(location)}</span>` : ""}</article>`;
+  }).join("");
+}
+
+function juneRenderIcsCalendar(calendar) {
+  const card = qs("juneCalendarCard");
+  const title = qs("juneCalendarTitle");
+  const state = qs("juneCalendarState");
+  const edit = qs("juneCalendarEditBtn");
+  const refresh = qs("juneCalendarRefreshBtn");
+  const remove = qs("juneCalendarRemoveBtn");
+  if (!card || !title || !state || !edit || !refresh || !remove) return;
+  juneIcsCalendar = calendar || null;
+  const connection = String(calendar?.state || "not_connected");
+  const name = String(calendar?.name || "My calendar").trim() || "My calendar";
+  title.textContent = name;
+  state.textContent = String(calendar?.last_error || calendar?.detail || "Add a private ICS link to see your upcoming meetings in Ironlog.");
+  edit.textContent = connection === "connected" ? "Edit calendar link" : "Add calendar link";
+  refresh.hidden = connection !== "connected";
+  remove.hidden = connection !== "connected";
+  if (connection !== "connected") juneRenderCalendarEvents([], { emptyMessage: "Your upcoming calendar events will appear here." });
+}
+
 async function loadJuneStatus({ quiet = false } = {}) {
   if (!juneIsAdmin()) return;
   try {
     const data = await fetchJson(`${API}/api/june/status`);
     juneRenderConnectors(data?.connectors || {});
     juneRenderOutlookControl(data?.outlook || null);
+    juneRenderIcsCalendar(data?.ics_calendar || null);
     if (!data?.live_ready) {
       juneSetState("June Live needs the server OpenAI configuration.", "warning");
       const start = qs("juneStartBtn");
@@ -113,6 +160,66 @@ async function loadJuneStatus({ quiet = false } = {}) {
     if (!junePeerConnection && !quiet) juneSetState(`Ready — ${data?.voice || "gleam"} voice.`, "ready");
   } catch (error) {
     juneSetState("June is unavailable right now.", "warning");
+  }
+}
+
+async function juneLoadIcsCalendar() {
+  const refresh = qs("juneCalendarRefreshBtn");
+  const state = qs("juneCalendarState");
+  if (refresh) refresh.disabled = true;
+  if (state) state.textContent = "Refreshing your private calendar…";
+  try {
+    const data = await juneApiJson(`${API}/api/june/calendar/ics/events`, { headers: authHeaders() });
+    const calendar = data?.calendar || {};
+    juneRenderIcsCalendar(calendar);
+    juneRenderCalendarEvents(calendar?.events, { error: calendar?.error || "" });
+  } catch (error) {
+    juneRenderCalendarEvents([], { error: `Calendar could not be refreshed: ${error?.message || String(error)}` });
+  } finally {
+    if (refresh) refresh.disabled = false;
+  }
+}
+
+async function juneSaveIcsCalendar(event) {
+  event?.preventDefault?.();
+  const url = String(qs("juneCalendarUrl")?.value || "").trim();
+  const name = String(qs("juneCalendarName")?.value || "").trim();
+  if (!url) return;
+  const form = qs("juneCalendarForm");
+  const submit = form?.querySelector('button[type="submit"]');
+  if (submit) submit.disabled = true;
+  try {
+    const data = await juneApiJson(`${API}/api/june/calendar/ics`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ url, name }),
+    });
+    juneRenderIcsCalendar(data?.calendar || null);
+    if (qs("juneCalendarUrl")) qs("juneCalendarUrl").value = "";
+    juneCalendarSetFormVisible(false);
+    await juneLoadIcsCalendar();
+  } catch (error) {
+    juneRenderCalendarEvents([], { error: `Calendar link was not saved: ${error?.message || String(error)}` });
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+}
+
+async function juneRemoveIcsCalendar() {
+  const remove = qs("juneCalendarRemoveBtn");
+  if (remove) remove.disabled = true;
+  try {
+    const data = await juneApiJson(`${API}/api/june/calendar/ics/remove`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: "{}",
+    });
+    juneRenderIcsCalendar(data?.calendar || null);
+    juneCalendarSetFormVisible(false);
+  } catch (error) {
+    juneRenderCalendarEvents([], { error: `Calendar link could not be removed: ${error?.message || String(error)}` });
+  } finally {
+    if (remove) remove.disabled = false;
   }
 }
 
@@ -162,9 +269,11 @@ function juneShowOutlookCallbackNotice() {
 
 function syncJuneVisibility() {
   const card = qs("juneAssistantCard");
+  const calendarCard = qs("juneCalendarCard");
   if (!card) return;
   const visible = juneIsAdmin();
   card.hidden = !visible;
+  if (calendarCard) calendarCard.hidden = !visible;
   if (!visible && junePeerConnection) juneStopLive({ silent: true });
   if (visible) loadJuneStatus({ quiet: true }).catch(() => {});
 }
@@ -394,5 +503,15 @@ function wireJuneControls() {
   qs("juneRefreshBtn")?.addEventListener("click", () => loadJuneStatus());
   qs("juneConnectOutlookBtn")?.addEventListener("click", () => juneConnectOutlook());
   qs("juneDisconnectOutlookBtn")?.addEventListener("click", () => juneDisconnectOutlook());
+  qs("juneCalendarEditBtn")?.addEventListener("click", () => {
+    const name = qs("juneCalendarName");
+    if (name) name.value = String(juneIcsCalendar?.name || "My calendar");
+    juneCalendarSetFormVisible(true);
+    qs("juneCalendarUrl")?.focus();
+  });
+  qs("juneCalendarCancelBtn")?.addEventListener("click", () => juneCalendarSetFormVisible(false));
+  qs("juneCalendarForm")?.addEventListener("submit", juneSaveIcsCalendar);
+  qs("juneCalendarRefreshBtn")?.addEventListener("click", () => juneLoadIcsCalendar());
+  qs("juneCalendarRemoveBtn")?.addEventListener("click", () => juneRemoveIcsCalendar());
 }
 

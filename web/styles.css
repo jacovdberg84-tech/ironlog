@@ -8470,12 +8470,29 @@ body.uc-qr-locked #ucAsset {
 .june-transcript-user .june-transcript-message { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); background: color-mix(in srgb, var(--accent) 7%, var(--card)); }
 .june-transcript-empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
 .june-safety-note { margin: 0; padding: 10px 20px 14px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); }
+.june-calendar-card { margin: 0 0 14px; border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line)); }
+.june-calendar-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 20px 12px; }
+.june-calendar-head h3 { margin: 2px 0 5px; }
+.june-calendar-head p { margin: 0; max-width: 680px; }
+.june-calendar-form { display: grid; grid-template-columns: minmax(140px, .65fr) minmax(250px, 1.65fr) auto; align-items: end; gap: 10px; margin: 0 20px 12px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card-soft); }
+.june-calendar-form label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 800; }
+.june-calendar-form input { min-width: 0; width: 100%; }
+.june-calendar-form-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.june-calendar-events { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 9px; padding: 0 20px 14px; }
+.june-calendar-event { display: grid; gap: 4px; min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--card-soft); }
+.june-calendar-event time { color: var(--accent); font-size: 11px; font-weight: 800; }
+.june-calendar-event strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.june-calendar-event span { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.june-calendar-empty { grid-column: 1 / -1; padding: 11px; border: 1px dashed var(--line); border-radius: 9px; color: var(--muted); font-size: 12px; text-align: center; }
+.june-calendar-error { border-style: solid; border-color: color-mix(in srgb, var(--danger) 44%, var(--line)); color: var(--danger); }
 @media (max-width: 760px) {
-  .june-assistant-head { display: grid; padding: 15px; }
+  .june-assistant-head, .june-calendar-head { display: grid; padding: 15px; }
   .june-actions { justify-content: flex-start; }
   .june-status-line, .june-gateway-head, .june-connector-list, .june-safety-note { padding-left: 15px; padding-right: 15px; }
   .june-outlook-control { margin-left: 15px; margin-right: 15px; align-items: flex-start; }
   .june-transcript { margin-left: 15px; margin-right: 15px; }
+  .june-calendar-form { grid-template-columns: 1fr; margin-left: 15px; margin-right: 15px; }
+  .june-calendar-events { padding-left: 15px; padding-right: 15px; }
 }
 @media (max-width: 640px) {
   .stock-tabs { overflow-x: auto; flex-wrap: nowrap; }

@@ -426,7 +426,7 @@
           <div>
             <p class="june-eyebrow">PRIVATE ADMIN ASSISTANT</p>
             <h3 id="juneTitle">June <span class="june-voice-tag">Gleam voice</span></h3>
-            <p class="muted small">Talk through your day while June checks Ironlog, Borris and live weather. Calendar and email stay disconnected until you authorise them.</p>
+            <p class="muted small">Talk through your day while June checks Ironlog, Borris and live weather. Link a private calendar now; Outlook mail can follow when Microsoft Graph is ready.</p>
           </div>
           <div class="june-actions">
             <button id="juneRefreshBtn" type="button" class="btn btn-secondary btn-sm">Check tools</button>
@@ -451,6 +451,36 @@
           <div class="june-transcript-empty">Start a conversation to hear and see June’s answers here.</div>
         </div>
         <p class="june-safety-note">June can look up facts and prepare review-only task drafts. She will never create Ironlog records, send email, or book meetings without a separate approval flow.</p>
+      </section>
+      <section class="dash-card full-width june-calendar-card" id="juneCalendarCard" hidden aria-labelledby="juneCalendarTitle">
+        <div class="june-calendar-head">
+          <div>
+            <p class="june-eyebrow">PRIVATE CALENDAR</p>
+            <h3 id="juneCalendarTitle">My calendar</h3>
+            <p id="juneCalendarState" class="muted small">Add a private ICS link to see your upcoming meetings in Ironlog.</p>
+          </div>
+          <div class="june-actions">
+            <button id="juneCalendarEditBtn" type="button" class="btn btn-secondary btn-sm">Add calendar link</button>
+            <button id="juneCalendarRefreshBtn" type="button" class="btn btn-secondary btn-sm" hidden>Refresh calendar</button>
+          </div>
+        </div>
+        <form id="juneCalendarForm" class="june-calendar-form" hidden>
+          <label>Calendar name
+            <input id="juneCalendarName" type="text" maxlength="120" value="My calendar" placeholder="My calendar" />
+          </label>
+          <label class="june-calendar-url">Private ICS link
+            <input id="juneCalendarUrl" type="url" autocomplete="off" inputmode="url" placeholder="https://…/calendar.ics" required />
+          </label>
+          <div class="june-calendar-form-actions">
+            <button type="submit" class="btn btn-primary btn-sm">Save calendar</button>
+            <button id="juneCalendarCancelBtn" type="button" class="btn btn-secondary btn-sm">Cancel</button>
+            <button id="juneCalendarRemoveBtn" type="button" class="btn btn-secondary btn-sm" hidden>Remove link</button>
+          </div>
+        </form>
+        <div id="juneCalendarEvents" class="june-calendar-events" aria-live="polite">
+          <div class="june-calendar-empty">Your upcoming calendar events will appear here.</div>
+        </div>
+        <p class="june-safety-note">Your ICS link is encrypted on the server and never shown back in Ironlog. June can brief you on the calendar; she cannot change it.</p>
       </section>
       <div class="mywork-grid" id="myWorkGrid" aria-live="polite"></div>
     </section>
@@ -7957,7 +7987,7 @@
   <script src="./app/init.js?v=91"></script>
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=89"></script>
-  <script src="./app/june.js?v=7"></script>
+  <script src="./app/june.js?v=8"></script>
   <script src="./app/finance.js?v=89"></script>
   <script src="./app/enterprise.js?v=89"></script>
   <script src="./app/workshop-docs.js?v=89"></script>

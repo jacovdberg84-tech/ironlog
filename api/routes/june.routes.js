@@ -13,6 +13,13 @@ import {
   getOutlookConnectionStatus,
   getOutlookPriorityEmails,
 } from "../utils/juneOutlook.js";
+import {
+  getIcsCalendarEvents,
+  getIcsCalendarOverview,
+  getIcsCalendarStatus,
+  removeIcsCalendar,
+  saveIcsCalendar,
+} from "../utils/juneIcsCalendar.js";
 
 const OPENAI_LIVE_URL = "https://api.openai.com/v1/live/sessions";
 const LIVE_MODEL = "gpt-live-1";
@@ -109,7 +116,7 @@ const TOOL_DEFINITIONS = [
   {
     type: "function",
     name: "june_calendar_overview",
-    description: "Check whether June has an authorised calendar connection before discussing meetings.",
+    description: "Get the next meetings from June's private ICS calendar or authorised Outlook calendar. This is read-only.",
     parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
   },
   {
@@ -179,10 +186,12 @@ function safeRow(sql, params = []) {
 
 function connectorStatus(context = {}) {
   const outlook = getOutlookConnectionStatus(context);
+  const icsCalendar = getIcsCalendarStatus(context);
+  const calendar = icsCalendar.state === "connected" || outlook.state !== "connected" ? icsCalendar : outlook;
   return {
     calendar: {
-      state: outlook.state,
-      detail: outlook.detail,
+      state: calendar.state,
+      detail: calendar.detail,
     },
     email: {
       state: outlook.state,
@@ -402,9 +411,18 @@ async function executeGatewayTool(name, args, context) {
     return getBorrisEngineeringBrief(safeArgs.asset_code, isDate(safeArgs.as_of) ? String(safeArgs.as_of) : todayYmd());
   }
   if (tool === "june_draft_task") return buildTaskDraft(safeArgs, context.user);
-  if (tool === "june_calendar_overview") return getOutlookCalendarOverview(context);
+  if (tool === "june_calendar_overview") {
+    return getIcsCalendarStatus(context).state === "connected"
+      ? getIcsCalendarOverview(context)
+      : getOutlookCalendarOverview(context);
+  }
   if (tool === "june_email_priorities") return getOutlookPriorityEmails(context);
-  if (tool === "june_connector_status") return { review_only: true, connectors: connectorStatus(context), outlook: getOutlookConnectionStatus(context) };
+  if (tool === "june_connector_status") return {
+    review_only: true,
+    connectors: connectorStatus(context),
+    outlook: getOutlookConnectionStatus(context),
+    ics_calendar: getIcsCalendarStatus(context),
+  };
   return { error: `Unsupported June tool: ${tool}` };
 }
 
@@ -506,7 +524,37 @@ export default async function juneRoutes(app) {
       last_live_attempt: lastLiveAttempt,
       connectors: connectorStatus(context),
       outlook: getOutlookConnectionStatus(context),
+      ics_calendar: getIcsCalendarStatus(context),
     };
+  });
+
+  app.get("/calendar/ics/status", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    return { ok: true, calendar: getIcsCalendarStatus({ siteCode: getSiteCode(req), user: getUser(req) }) };
+  });
+
+  app.post("/calendar/ics", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    try {
+      const calendar = await saveIcsCalendar(
+        { siteCode: getSiteCode(req), user: getUser(req) },
+        { url: req.body?.url, name: req.body?.name },
+      );
+      return { ok: true, calendar };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: safeText(error?.message || "The ICS calendar could not be saved.", 350) });
+    }
+  });
+
+  app.get("/calendar/ics/events", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    const calendar = await getIcsCalendarEvents({ siteCode: getSiteCode(req), user: getUser(req) });
+    return { ok: !calendar.error, calendar };
+  });
+
+  app.post("/calendar/ics/remove", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    return { ok: true, ...removeIcsCalendar({ siteCode: getSiteCode(req), user: getUser(req) }) };
   });
 
   // Starts the user-authorised Microsoft OAuth flow. This endpoint remains
