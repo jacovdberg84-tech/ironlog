@@ -8438,6 +8438,7 @@ body.uc-qr-locked #ucAsset {
 .dlv-recent { overflow-x: auto; }
 
 /* June — admin-only GPT-Live task assistant */
+.june-mywork-assistant { margin: 0 0 14px; }
 .june-assistant-card { border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line)); overflow: hidden; }
 .june-assistant-head { display: flex; gap: 18px; justify-content: space-between; align-items: flex-start; padding: 18px 20px 14px; background: linear-gradient(125deg, color-mix(in srgb, var(--accent) 10%, var(--card)), var(--card)); }
 .june-assistant-head h3 { margin: 2px 0 5px; display: flex; align-items: center; gap: 8px; }

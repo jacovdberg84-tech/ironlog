@@ -42,8 +42,8 @@ jobs:
               touch "$env_file"
               chmod 600 "$env_file"
               env_tmp="$(mktemp)"
-              grep -v -E '^(OPENAI_API_KEY|BORRIS_USE_OPENAI_RESPONSES|BORRIS_OPENAI_MODEL)=' "$env_file" > "$env_tmp" || true
-              printf '\nOPENAI_API_KEY=%s\nBORRIS_USE_OPENAI_RESPONSES=1\nBORRIS_OPENAI_MODEL=gpt-4o-mini\n' "$OPENAI_API_KEY" >> "$env_tmp"
+              grep -v -E '^(OPENAI_API_KEY|BORRIS_USE_OPENAI_RESPONSES|BORRIS_OPENAI_MODEL|JUNE_BACKEND_MODEL)=' "$env_file" > "$env_tmp" || true
+              printf '\nOPENAI_API_KEY=%s\nBORRIS_USE_OPENAI_RESPONSES=1\nBORRIS_OPENAI_MODEL=gpt-4o-mini\nJUNE_BACKEND_MODEL=gpt-5.6-terra\n' "$OPENAI_API_KEY" >> "$env_tmp"
               mv "$env_tmp" "$env_file"
               chmod 600 "$env_file"
             fi

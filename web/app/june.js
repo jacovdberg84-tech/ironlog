@@ -116,6 +116,39 @@ function juneClientEventId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+async function juneWaitForIceGathering(peerConnection, timeoutMs = 4_000) {
+  if (peerConnection?.iceGatheringState === "complete") return;
+  await new Promise((resolve) => {
+    let timeoutId;
+    const done = () => {
+      clearTimeout(timeoutId);
+      peerConnection?.removeEventListener("icegatheringstatechange", onStateChange);
+      resolve();
+    };
+    const onStateChange = () => {
+      if (peerConnection?.iceGatheringState === "complete") done();
+    };
+    timeoutId = window.setTimeout(done, timeoutMs);
+    peerConnection?.addEventListener("icegatheringstatechange", onStateChange);
+  });
+}
+
+async function juneCreateLiveSession(sdp) {
+  const response = await fetch(`${API}/api/june/live/session`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ sdp }),
+  });
+  const text = await response.text();
+  let data = {};
+  try { data = JSON.parse(text); } catch {}
+  if (!response.ok) {
+    if (response.status === 401 && LOGIN_GATE_ENABLED) promptSignInAgain();
+    throw Object.assign(new Error(String(data?.error || "June could not start a live voice session.")), { status: response.status });
+  }
+  return data;
+}
+
 async function juneRunTool(item) {
   const callId = String(item?.call_id || "").trim();
   const name = String(item?.name || "").trim();
@@ -225,10 +258,11 @@ async function juneStartLive() {
     });
     const offer = await junePeerConnection.createOffer();
     await junePeerConnection.setLocalDescription(offer);
-    const response = await fetchJson(`${API}/api/june/live/session`, {
-      method: "POST",
-      body: JSON.stringify({ sdp: offer.sdp }),
-    });
+    // OpenAI's WebRTC flow expects the SDP after candidate gathering has had a
+    // chance to complete. Using localDescription also includes those candidates.
+    await juneWaitForIceGathering(junePeerConnection);
+    const sdp = String(junePeerConnection.localDescription?.sdp || offer.sdp || "").trim();
+    const response = await juneCreateLiveSession(sdp);
     await junePeerConnection.setRemoteDescription({ type: "answer", sdp: response.sdp });
     juneSetConnected(true);
     juneSetState("June is starting…", "working");

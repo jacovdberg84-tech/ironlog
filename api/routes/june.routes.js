@@ -388,7 +388,11 @@ function executeGatewayTool(name, args, context) {
 }
 
 function liveBackendModel() {
-  return safeText(process.env.JUNE_BACKEND_MODEL || process.env.BORRIS_OPENAI_MODEL || "gpt-6-luna", 100);
+  // June's voice session needs a Responses-delegation model. Do not inherit
+  // Borris's text-only model setting here: production Borris is deliberately
+  // pinned to a lighter model, which can make the Live session fail before it
+  // has a chance to start.
+  return safeText(process.env.JUNE_BACKEND_MODEL || "gpt-5.6-terra", 100);
 }
 
 function safetyIdentifier(req) {
@@ -435,18 +439,13 @@ export default async function juneRoutes(app) {
             instructions: JUNE_BACKEND_INSTRUCTIONS,
             tools: TOOL_DEFINITIONS,
             tool_choice: "auto",
-            parallel_tool_calls: false,
-          },
-        },
-        client: {
-          data_channel: {
-            allowed_client_events: ["response.item.create", "response.create", "session.close"],
-            allowed_server_events: "all",
           },
         },
       },
       transport: { type: "webrtc", sdp },
     };
+    const abortController = new AbortController();
+    const requestTimeout = setTimeout(() => abortController.abort(), 25_000);
     try {
       const response = await fetch(OPENAI_LIVE_URL, {
         method: "POST",
@@ -456,13 +455,20 @@ export default async function juneRoutes(app) {
           "OpenAI-Safety-Identifier": safetyIdentifier(req),
         },
         body: JSON.stringify(payload),
+        signal: abortController.signal,
       });
       const text = await response.text();
       let data = {};
       try { data = JSON.parse(text); } catch {}
       if (!response.ok) {
-        req.log.warn({ status: response.status, error: safeText(data?.error?.message || text, 300) }, "June Live session request failed");
-        return reply.code(502).send({ ok: false, error: "June could not start a live voice session. Check the server's OpenAI Live access." });
+        const upstreamError = safeText(data?.error?.message || text, 300);
+        req.log.warn({ status: response.status, error: upstreamError }, "June Live session request failed");
+        return reply.code(502).send({
+          ok: false,
+          error: upstreamError
+            ? `OpenAI could not start June's live session: ${upstreamError}`
+            : "OpenAI could not start June's live session. Confirm that this project has GPT-Live access.",
+        });
       }
       const answer = String(data?.transport?.sdp || "").trim();
       if (!answer) return reply.code(502).send({ ok: false, error: "June received an incomplete live session response." });
@@ -475,7 +481,15 @@ export default async function juneRoutes(app) {
       };
     } catch (error) {
       req.log.warn({ error: safeText(error?.message || error, 300) }, "June Live network request failed");
-      return reply.code(502).send({ ok: false, error: "June could not contact the live voice service." });
+      const timedOut = error?.name === "AbortError";
+      return reply.code(502).send({
+        ok: false,
+        error: timedOut
+          ? "June's live-session request timed out. Please retry; if it continues, check the server's connection to OpenAI."
+          : "June could not contact the live voice service.",
+      });
+    } finally {
+      clearTimeout(requestTimeout);
     }
   });
 
