@@ -87,6 +87,12 @@ async function loadJuneStatus({ quiet = false } = {}) {
     }
     const start = qs("juneStartBtn");
     if (start) start.disabled = false;
+    const lastAttempt = data?.last_live_attempt;
+    if (!junePeerConnection && lastAttempt?.state === "failed") {
+      const detail = String(lastAttempt?.message || "June's last live session could not start.").trim();
+      juneSetState(`June needs attention: ${detail}`, "warning");
+      return;
+    }
     if (!junePeerConnection && !quiet) juneSetState(`Ready — ${data?.voice || "gleam"} voice.`, "ready");
   } catch (error) {
     juneSetState("June is unavailable right now.", "warning");

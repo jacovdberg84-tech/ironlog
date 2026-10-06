@@ -12,7 +12,12 @@ const LIVE_VOICE = "gleam";
 const LIVE_SESSION_TIMEOUT_MS = 50_000;
 const LIVE_TICKET_TTL_MS = 3 * 60_000;
 const LIVE_TICKET_LIMIT = 24;
+// A reverse proxy can replace 5xx application responses with its own generic
+// error page. Keep an upstream Live failure in the 4xx range so the authenticated
+// admin receives Ironlog's useful, safe error message instead.
+const LIVE_UPSTREAM_FAILURE_STATUS = 424;
 const liveSessionTickets = new Map();
+let lastLiveAttempt = null;
 
 const JUNE_LIVE_INSTRUCTIONS = [
   "You are June, the private executive assistant for the Ironlog administrator.",
@@ -410,10 +415,19 @@ function cleanupLiveTickets(now = Date.now()) {
   }
 }
 
-function liveSessionError(message, statusCode = 502) {
+function liveSessionError(message, statusCode = LIVE_UPSTREAM_FAILURE_STATUS) {
   const error = new Error(message);
   error.statusCode = statusCode;
   return error;
+}
+
+function recordLiveAttempt({ state, message = "", statusCode = 0 }) {
+  lastLiveAttempt = {
+    state: safeText(state, 32) || "unknown",
+    message: safeText(message, 400),
+    status_code: Number(statusCode || 0) || 0,
+    recorded_at: new Date().toISOString(),
+  };
 }
 
 async function createOpenAiLiveSession({ apiKey, payload, log, safetyId }) {
@@ -440,10 +454,9 @@ async function createOpenAiLiveSession({ apiKey, payload, log, safetyId }) {
         upstreamError
           ? `OpenAI could not start June's live session: ${upstreamError}`
           : "OpenAI could not start June's live session. Confirm that this project has GPT-Live access.",
-        // Keep the browser-facing status separate from the upstream provider's
-        // status. A provider 401/403 must not make Ironlog think its own user
-        // session has expired.
-        502,
+        // Keep this distinct from Ironlog's own login status and from a proxy
+        // gateway error. The browser needs the JSON message, not an HTML 502.
+        LIVE_UPSTREAM_FAILURE_STATUS,
       );
     }
     const answer = String(data?.transport?.sdp || "").trim();
@@ -477,6 +490,7 @@ export default async function juneRoutes(app) {
       model: LIVE_MODEL,
       voice: LIVE_VOICE,
       backend_model: liveBackendModel(),
+      last_live_attempt: lastLiveAttempt,
       connectors: connectorStatus(),
     };
   });
@@ -529,16 +543,23 @@ export default async function juneRoutes(app) {
       error: "",
     };
     liveSessionTickets.set(ticket, pending);
+    recordLiveAttempt({ state: "pending" });
     void createOpenAiLiveSession({ apiKey, payload, log: req.log, safetyId: owner })
       .then((result) => {
         pending.state = "ready";
         pending.status_code = 200;
         pending.result = result;
+        recordLiveAttempt({ state: "ready", statusCode: 200 });
       })
       .catch((error) => {
         pending.state = "failed";
-        pending.status_code = Number(error?.statusCode || 502);
+        pending.status_code = Number(error?.statusCode || LIVE_UPSTREAM_FAILURE_STATUS);
         pending.error = safeText(error?.message || "June could not start a live voice session.", 400);
+        recordLiveAttempt({
+          state: "failed",
+          statusCode: pending.status_code,
+          message: pending.error,
+        });
       });
     return reply.code(202).send({ ok: true, state: "pending", ticket, retry_after_ms: 800 });
   });
