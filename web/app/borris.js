@@ -46,10 +46,13 @@ async function loadIronmindHealth() {
     const mode = String(data?.last_ask_mode || "unknown");
     const err = String(data?.last_ask_error || "").trim();
     const transportLabel = transport === "openai_responses" ? "OpenAI Responses" : provider;
-    const left = live ? `Borris: Connected (${transportLabel}${model ? `/${model}` : ""})` : `Borris: Not connected (${provider})`;
+    const providerFailed = mode === "fallback" && Boolean(err);
+    const left = providerFailed
+      ? `Borris: AI response unavailable (${transportLabel}${model ? `/${model}` : ""})`
+      : (live ? `Borris: Connected (${transportLabel}${model ? `/${model}` : ""})` : `Borris: Not connected (${provider})`);
     const right = `Last ask mode: ${mode}${err ? ` | Last error: ${err}` : ""}`;
     healthEl.textContent = `${left} | ${right}`;
-    healthEl.className = live ? "status-ok" : "status-overdue";
+    healthEl.className = live && !providerFailed ? "status-ok" : "status-overdue";
   } catch (e) {
     healthEl.textContent = `OpenAI status unavailable: ${e.message || e}`;
     healthEl.className = "status-overdue";

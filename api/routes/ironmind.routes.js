@@ -588,6 +588,55 @@ export default async function ironmindRoutes(app) {
       ORDER BY downtime_hours DESC, a.asset_code ASC
       LIMIT 5
     `).all(start, end);
+    // Keep the actual asset codes in Borris' live context. A count on its own
+    // is not actionable for a maintenance planner, and it prevented Borris
+    // from answering the most common question: "which machines are overdue?"
+    const overduePmAssets = db.prepare(`
+      SELECT
+        a.asset_code,
+        a.asset_name,
+        mp.service_name,
+        mp.interval_hours,
+        mp.last_service_hours,
+        COALESCE((
+          SELECT SUM(dh.hours_run)
+          FROM daily_hours dh
+          WHERE dh.asset_id = mp.asset_id
+            AND dh.is_used = 1
+            AND dh.hours_run > 0
+            AND dh.work_date <= ?
+        ), 0) AS current_hours,
+        (COALESCE((
+          SELECT SUM(dh.hours_run)
+          FROM daily_hours dh
+          WHERE dh.asset_id = mp.asset_id
+            AND dh.is_used = 1
+            AND dh.hours_run > 0
+            AND dh.work_date <= ?
+        ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
+      FROM maintenance_plans mp
+      JOIN assets a ON a.id = mp.asset_id
+      WHERE mp.active = 1
+        AND (COALESCE((
+          SELECT SUM(dh.hours_run)
+          FROM daily_hours dh
+          WHERE dh.asset_id = mp.asset_id
+            AND dh.is_used = 1
+            AND dh.hours_run > 0
+            AND dh.work_date <= ?
+        ), 0) - (mp.last_service_hours + mp.interval_hours)) > 0
+      ORDER BY overdue_hours DESC, a.asset_code ASC, mp.id ASC
+      LIMIT 30
+    `).all(end, end, end).map((row) => ({
+      asset_code: String(row.asset_code || "").trim(),
+      asset_name: String(row.asset_name || "").trim() || null,
+      service_name: String(row.service_name || "").trim() || null,
+      current_hours: Number(row.current_hours || 0),
+      overdue_hours: Number(row.overdue_hours || 0),
+    })).filter((row, index, rows) => (
+      Boolean(row.asset_code)
+      && rows.findIndex((candidate) => candidate.asset_code === row.asset_code) === index
+    ));
     const assetContext = assetCode
       ? db.prepare(`
           SELECT a.asset_code, a.asset_name, a.category
@@ -637,6 +686,7 @@ export default async function ironmindRoutes(app) {
         incidents: Number(fleet?.incidents || 0),
         open_breakdowns: openBreakdowns,
         top_downtime_assets: topDown,
+        overdue_pm_assets: overduePmAssets,
       },
       asset_context: assetContext || null,
       latest_summary: summary || null,
@@ -647,12 +697,13 @@ export default async function ironmindRoutes(app) {
       const instructions = planning
         ? `${system} For planning and costing: use context.planning (upcoming services with cost and cost_source, costing gaps). Name the machines, amounts and gaps; say which gaps to fill first. Up to 8 bullets.`
         : system;
+      const pmListInstruction = "When the question is about overdue PM or services, list each matching fleet number from context.fleet.overdue_pm_assets, with its overdue hours and service. Never answer with only a count when asset rows are available.";
       const messages = [
         ...hist,
         { role: "user", content: `Read-only live fleet context JSON:\n${JSON.stringify(context)}\n\nQuestion:\n${question}` },
       ];
       const directResponseText = await openAiResponsesText({
-        instructions: `${instructions} The fleet context is read-only. Never claim to update records, create work orders, or take an operational action. Explain proposed actions for the user to approve.`,
+        instructions: `${instructions} ${pmListInstruction} The fleet context is read-only. Never claim to update records, create work orders, or take an operational action. Explain proposed actions for the user to approve.`,
         messages,
         model: cfg.model || "gpt-4o-mini",
         maxOutputTokens: planning ? Math.max(askMaxTokens, 700) : askMaxTokens,
@@ -678,7 +729,11 @@ export default async function ironmindRoutes(app) {
       ].some((s) => lower.includes(s));
       if (!text || looksGeneric) return null;
       return text;
-    } catch {
+    } catch (error) {
+      // The route still has a deterministic fallback, but retain a safe
+      // diagnostic for the Admin-only Borris status so a failed provider does
+      // not masquerade as a successful live AI response.
+      ironmindRuntime.last_ask_error = String(error?.message || error || "Borris provider request failed").slice(0, 500);
       return null;
     }
   }
@@ -1458,8 +1513,46 @@ export default async function ironmindRoutes(app) {
         return reply.send({ ok: true, short_answer: live });
       }
       ironmindRuntime.last_ask_mode = "fallback";
-      ironmindRuntime.last_ask_error = "";
+      ironmindRuntime.last_ask_error = String(getLastOpenAiResponsesError() || getLastLlmChatError() || "").slice(0, 500);
       ironmindRuntime.last_ask_at = new Date().toISOString();
+      const asksPm = /\b(pm|planned maintenance|service|services|maintenance)\b/i.test(question)
+        && /\b(overdue|due|behind|late|next|upcoming|schedule)\b/i.test(question);
+      const overduePmRows = () => db.prepare(`
+        SELECT
+          a.asset_code,
+          a.asset_name,
+          mp.service_name,
+          (COALESCE((
+            SELECT SUM(dh.hours_run)
+            FROM daily_hours dh
+            WHERE dh.asset_id = mp.asset_id
+              AND dh.is_used = 1
+              AND dh.hours_run > 0
+              AND dh.work_date <= ?
+          ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
+        FROM maintenance_plans mp
+        JOIN assets a ON a.id = mp.asset_id
+        WHERE mp.active = 1
+          AND (COALESCE((
+            SELECT SUM(dh.hours_run)
+            FROM daily_hours dh
+            WHERE dh.asset_id = mp.asset_id
+              AND dh.is_used = 1
+              AND dh.hours_run > 0
+              AND dh.work_date <= ?
+          ), 0) - (mp.last_service_hours + mp.interval_hours)) > 0
+        ORDER BY overdue_hours DESC, a.asset_code ASC, mp.id ASC
+        LIMIT 30
+      `).all(end, end).filter((row, index, rows) => (
+        rows.findIndex((candidate) => String(candidate.asset_code || "").trim() === String(row.asset_code || "").trim()) === index
+      ));
+      const formatOverduePmRows = (rows) => rows.length
+        ? rows.map((row) => {
+            const fleetNo = String(row.asset_code || "-").trim() || "-";
+            const service = String(row.service_name || "service").trim() || "service";
+            return `- ${fleetNo}: ${Number(row.overdue_hours || 0).toFixed(1)}h overdue — ${service}`;
+          }).join("\n")
+        : "- None";
       const buildFleetSnapshotText = () => {
         const totalDowntime = Number(db.prepare(`
           SELECT COALESCE(SUM(l.hours_down), 0) AS h
@@ -1471,24 +1564,7 @@ export default async function ironmindRoutes(app) {
           FROM breakdowns
           WHERE status = 'OPEN'
         `).get()?.c || 0);
-        const overduePm = Number(db.prepare(`
-          SELECT COUNT(*) AS c
-          FROM (
-            SELECT
-              mp.id,
-              (COALESCE((
-                SELECT SUM(dh.hours_run)
-                FROM daily_hours dh
-                WHERE dh.asset_id = mp.asset_id
-                  AND dh.is_used = 1
-                  AND dh.hours_run > 0
-                  AND dh.work_date <= ?
-              ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
-            FROM maintenance_plans mp
-            WHERE mp.active = 1
-          ) x
-          WHERE x.overdue_hours > 0
-        `).get(end)?.c || 0);
+        const overdueRows = overduePmRows();
         const topDownRows = db.prepare(`
           SELECT
             a.asset_code,
@@ -1508,27 +1584,29 @@ export default async function ironmindRoutes(app) {
           `Fleet snapshot (${start} to ${end}):`,
           `- Total downtime: ${totalDowntime.toFixed(1)}h`,
           `- Open breakdowns: ${openBreakdowns}`,
-          `- PM overdue assets: ${overduePm}`,
+          `- PM overdue assets: ${overdueRows.length}`,
+          "- PM overdue fleet numbers:",
+          formatOverduePmRows(overdueRows),
           `- Top downtime assets: ${topDownText}`,
         ].join("\n");
       };
       if (!assetCode) {
-        const latest = getLatestIronmindReport("daily_admin");
-        const summary = String(latest?.summary || "").trim();
-        const firstLine = summary
-          .split(/\r?\n/)
-          .map((s) => String(s || "").trim())
-          .filter(Boolean)
-          .find((s) => !s.startsWith("#") && !s.startsWith("- "))
-          || "";
-        const broad = buildFleetSnapshotText();
-
-        if (firstLine) {
+        if (asksPm) {
+          const rows = overduePmRows();
           return reply.send({
             ok: true,
-            short_answer: `Borris: ${firstLine}\n\n${broad}\n\nTip: include an asset code for deep analysis (e.g. G01AM from 2026-02-14 to 2026-04-07).`,
+            short_answer: `PM overdue fleet numbers as at ${end}:\n${formatOverduePmRows(rows)}`,
+            details: {
+              as_of: end,
+              overdue_assets: rows.map((row) => ({
+                asset_code: String(row.asset_code || "").trim(),
+                service_name: String(row.service_name || "").trim() || null,
+                overdue_hours: Number(row.overdue_hours || 0),
+              })),
+            },
           });
         }
+        const broad = buildFleetSnapshotText();
         return reply.send({
           ok: true,
           short_answer: `${broad}\n\nTip: include an asset code for deep analysis (e.g. G01AM from 2026-02-14 to 2026-04-07).`,
@@ -1574,7 +1652,7 @@ export default async function ironmindRoutes(app) {
 
       const asksFuel = qLower.includes("fuel") || qLower.includes("l/hr") || qLower.includes("km/l");
       const asksRecurring = qLower.includes("recurring") || qLower.includes("repeat") || qLower.includes("failures");
-      const asksPm = qLower.includes("pm") || qLower.includes("overdue") || qLower.includes("maintenance");
+      const asksPmForAsset = qLower.includes("pm") || qLower.includes("overdue") || qLower.includes("maintenance");
 
       if (asksFuel) {
         const hasBaseline = db.prepare(`PRAGMA table_info(assets)`).all().some((c) => String(c.name) === "baseline_fuel_l_per_hour");
@@ -1648,7 +1726,7 @@ export default async function ironmindRoutes(app) {
         });
       }
 
-      if (asksPm) {
+      if (asksPmForAsset) {
         const pm = db.prepare(`
           SELECT
             mp.service_name,
