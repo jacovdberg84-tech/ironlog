@@ -10,6 +10,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
     steps:
       - name: Deploy over SSH
@@ -31,6 +33,16 @@ jobs:
             git fetch origin
             git checkout main
             git pull --ff-only origin main
+            if [ -n "${OPENAI_API_KEY:-}" ]; then
+              env_file="/data/ironlog/api/.env"
+              touch "$env_file"
+              chmod 600 "$env_file"
+              env_tmp="$(mktemp)"
+              grep -v -E '^(OPENAI_API_KEY|BORRIS_USE_OPENAI_RESPONSES)=' "$env_file" > "$env_tmp" || true
+              printf '\nOPENAI_API_KEY=%s\nBORRIS_USE_OPENAI_RESPONSES=1\n' "$OPENAI_API_KEY" >> "$env_tmp"
+              mv "$env_tmp" "$env_file"
+              chmod 600 "$env_file"
+            fi
             cd api
             npm ci
             pm2 restart ironlog-api --update-env

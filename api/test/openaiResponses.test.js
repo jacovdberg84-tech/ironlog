@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { buildBorrisResponsesInput, isDirectOpenAiResponsesConfigured } from "../utils/openaiResponses.js";
 
 function withEnv(values, run) {
-  const keys = ["OPENAI_API_KEY", "OPENAI_BASE_URL", "LLM_BASE_URL", "OLLAMA_HOST", "OLLAMA_BASE_URL"];
+  const keys = ["OPENAI_API_KEY", "OPENAI_BASE_URL", "LLM_BASE_URL", "OLLAMA_HOST", "OLLAMA_BASE_URL", "BORRIS_USE_OPENAI_RESPONSES"];
   const before = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   try {
     for (const key of keys) {
@@ -27,6 +27,9 @@ test("Borris Responses is enabled only for a direct OpenAI configuration", () =>
   });
   withEnv({ OPENAI_API_KEY: "sk-test", OPENAI_BASE_URL: "https://api.groq.com/openai/v1" }, () => {
     assert.equal(isDirectOpenAiResponsesConfigured(), false);
+  });
+  withEnv({ OPENAI_API_KEY: "sk-test", OPENAI_BASE_URL: "https://api.groq.com/openai/v1", BORRIS_USE_OPENAI_RESPONSES: "1" }, () => {
+    assert.equal(isDirectOpenAiResponsesConfigured(), true);
   });
 });
 

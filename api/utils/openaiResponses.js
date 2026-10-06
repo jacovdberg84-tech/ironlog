@@ -9,7 +9,10 @@ let lastOpenAiResponsesError = "";
  * without sending a Groq, Ollama, or other provider request to OpenAI.
  */
 export function isDirectOpenAiResponsesConfigured() {
-  return Boolean(String(process.env.OPENAI_API_KEY || "").trim()) && !usesCustomChatBase();
+  const forceBorrisOpenAi = ["1", "true", "yes", "on"].includes(
+    String(process.env.BORRIS_USE_OPENAI_RESPONSES || "").trim().toLowerCase(),
+  );
+  return Boolean(String(process.env.OPENAI_API_KEY || "").trim()) && (forceBorrisOpenAi || !usesCustomChatBase());
 }
 
 export function getLastOpenAiResponsesError() {

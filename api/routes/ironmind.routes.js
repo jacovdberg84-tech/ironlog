@@ -657,7 +657,7 @@ export default async function ironmindRoutes(app) {
         maxOutputTokens: planning ? Math.max(askMaxTokens, 700) : askMaxTokens,
         timeoutMs: Math.min(askTimeoutMs, 60000),
       });
-      const data = directResponseText ? null : await openAiCompatibleChatCompletion({
+      const data = (directResponseText || isDirectOpenAiResponsesConfigured()) ? null : await openAiCompatibleChatCompletion({
         model: cfg.model || "gpt-4o-mini",
         temperature: 0.2,
         max_tokens: planning ? Math.max(askMaxTokens, 700) : askMaxTokens,
@@ -1336,7 +1336,7 @@ export default async function ironmindRoutes(app) {
         maxOutputTokens: helpMaxTokens,
         timeoutMs: helpTimeoutMs,
       });
-      const data = directResponseText ? null : await openAiCompatibleChatCompletion({
+      const data = (directResponseText || isDirectOpenAiResponsesConfigured()) ? null : await openAiCompatibleChatCompletion({
         model: cfg.model || "gpt-4o-mini",
         temperature: 0.25,
         max_tokens: helpMaxTokens,
