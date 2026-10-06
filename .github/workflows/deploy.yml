@@ -51,6 +51,16 @@ jobs:
               printf '\nJUNE_CONNECTOR_ENCRYPTION_SECRET=%s\n' "$june_connector_secret" >> "$env_file"
               chmod 600 "$env_file"
             fi
+            # Keep the same secret in a root-owned local file as a resilient
+            # fallback for PM2 installations that do not reload api/.env.
+            # Never replace an existing file: it may protect live connectors.
+            june_key_file="/data/ironlog/api/.june-connector.key"
+            if [ ! -s "$june_key_file" ]; then
+              umask 077
+              june_connector_secret="$(sed -n 's/^JUNE_CONNECTOR_ENCRYPTION_SECRET=//p' "$env_file" | head -n 1)"
+              printf '%s\n' "$june_connector_secret" > "$june_key_file"
+              chmod 600 "$june_key_file"
+            fi
             if [ -n "${OPENAI_API_KEY:-}" ]; then
               env_file="/data/ironlog/api/.env"
               touch "$env_file"
