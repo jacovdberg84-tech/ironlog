@@ -22,10 +22,10 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
           port: ${{ secrets.SERVER_PORT }}
-        # appleboy/ssh-action only forwards named workflow variables to the
-        # remote shell. Without this, the private Actions secret never reaches
-        # api/.env and Borris silently uses its deterministic fallback.
-        envs: OPENAI_API_KEY
+          # appleboy/ssh-action only forwards named workflow variables to the
+          # remote shell. Without this, the private Actions secret never reaches
+          # api/.env and Borris silently uses its deterministic fallback.
+          envs: OPENAI_API_KEY
           script_stop: true
           script: |
             set -e
