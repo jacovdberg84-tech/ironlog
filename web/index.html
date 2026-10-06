@@ -423,10 +423,20 @@
       </div>
       <section class="dash-card full-width june-assistant-card june-mywork-assistant" id="juneAssistantCard" hidden aria-labelledby="juneTitle">
         <div class="june-assistant-head">
-          <div>
-            <p class="june-eyebrow">PRIVATE ADMIN ASSISTANT</p>
-            <h3 id="juneTitle">June <span class="june-voice-tag">Gleam voice</span></h3>
-            <p class="muted small">Talk through your day while June checks Ironlog, Borris and live weather. Link a private calendar now; Outlook mail can follow when Microsoft Graph is ready.</p>
+          <div class="june-identity">
+            <div class="june-avatar" id="juneAvatar" data-state="idle" aria-label="June is ready">
+              <div class="june-avatar-motion">
+                <img class="june-avatar-photo" src="./assets/june-portrait.png" alt="June, Ironlog's private admin assistant" />
+              </div>
+              <span class="june-avatar-state-dot" aria-hidden="true"></span>
+              <span class="june-avatar-wave" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="sr-only" id="juneAvatarStatus">June is ready</span>
+            </div>
+            <div>
+              <p class="june-eyebrow">PRIVATE ADMIN ASSISTANT</p>
+              <h3 id="juneTitle">June <span class="june-voice-tag">Gleam voice</span></h3>
+              <p class="muted small">Talk through your day while June checks Ironlog, Borris and live weather. Link a private calendar now; Outlook mail can follow when Microsoft Graph is ready.</p>
+            </div>
           </div>
           <div class="june-actions">
             <button id="juneRefreshBtn" type="button" class="btn btn-secondary btn-sm">Check tools</button>
@@ -7987,7 +7997,8 @@
   <script src="./app/init.js?v=91"></script>
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=89"></script>
-  <script src="./app/june.js?v=8"></script>
+  <script src="./app/june-avatar.js?v=1"></script>
+  <script src="./app/june.js?v=9"></script>
   <script src="./app/finance.js?v=89"></script>
   <script src="./app/enterprise.js?v=89"></script>
   <script src="./app/workshop-docs.js?v=89"></script>

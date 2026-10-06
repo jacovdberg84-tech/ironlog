@@ -9,6 +9,26 @@ let juneAudio = null;
 let juneProcessedCalls = new Set();
 let juneIcsCalendar = null;
 
+// The portrait layer is optional visual polish. It must never be able to
+// interrupt June's live voice session if a browser cannot load or analyse it.
+function juneSetAvatarState(state) {
+  try {
+    if (typeof setJuneAvatarVisualState === "function") setJuneAvatarVisualState(state);
+  } catch {}
+}
+
+function juneStartAvatarAudio(stream) {
+  try {
+    if (typeof startJuneAvatarAudioAnalysis === "function") startJuneAvatarAudioAnalysis(stream);
+  } catch {}
+}
+
+function juneStopAvatarAudio() {
+  try {
+    if (typeof stopJuneAvatarAudioAnalysis === "function") stopJuneAvatarAudioAnalysis();
+  } catch {}
+}
+
 function juneIsAdmin() {
   return getSessionRoles().includes("admin");
 }
@@ -27,6 +47,8 @@ function juneSetState(message, tone = "neutral") {
   if (!el) return;
   el.textContent = message;
   el.dataset.tone = tone;
+  const visual = tone === "live" ? "listening" : tone === "working" ? "thinking" : "idle";
+  juneSetAvatarState(visual);
 }
 
 function juneAppendTranscript(speaker, content, kind = "assistant") {
@@ -386,6 +408,18 @@ function juneNestedLiveEvent(envelope) {
   if (type === "response.output_text.delta" || type === "response.output_audio_transcript.delta") {
     juneAppendTranscript("June", event.delta, "assistant");
   }
+  if (type === "response.created" || type === "response.output_item.added") {
+    juneSetAvatarState("thinking");
+  }
+  if (type === "response.output_audio.delta") juneSetAvatarState("speaking");
+  if (type === "input_audio_buffer.speech_started") {
+    juneSetState("June is listening.", "live");
+    return;
+  }
+  if (type === "input_audio_buffer.speech_stopped") {
+    juneSetState("June is considering that…", "working");
+    return;
+  }
   if (type === "response.output_item.done" && String(event?.item?.type || "") === "function_call") {
     juneRunTool(event.item).catch(() => {});
   }
@@ -397,12 +431,21 @@ function juneHandleLiveMessage(message) {
   try { event = JSON.parse(message?.data || "{}"); } catch { return; }
   const type = String(event?.type || "");
   if (type === "session.started") {
-    juneSetState("June is listening.", "live");
+    juneSetState("June is ready — start talking.", "ready");
     juneAppendTranscript("June", "June online. What are we taking on first?", "assistant");
+    return;
+  }
+  if (type === "input_audio_buffer.speech_started") {
+    juneSetState("June is listening.", "live");
+    return;
+  }
+  if (type === "input_audio_buffer.speech_stopped") {
+    juneSetState("June is considering that…", "working");
     return;
   }
   if (type === "session.input_transcript.delta") {
     juneAppendTranscript("You", event.delta, "user");
+    juneSetAvatarState("listening");
     return;
   }
   if (type === "session.output_transcript.delta") {
@@ -437,9 +480,20 @@ async function juneStartLive() {
     juneAudio = new Audio();
     juneAudio.autoplay = true;
     junePeerConnection.ontrack = (event) => {
-      juneAudio.srcObject = event.streams?.[0] || null;
+      const remoteStream = event.streams?.[0] || null;
+      juneAudio.srcObject = remoteStream;
+      if (remoteStream) juneStartAvatarAudio(remoteStream);
       juneAudio.play().catch(() => {});
     };
+    juneAudio.addEventListener("playing", () => {
+      juneSetAvatarState("speaking");
+      if (juneAudio?.srcObject instanceof MediaStream) juneStartAvatarAudio(juneAudio.srcObject);
+    });
+    const returnToIdle = () => {
+      if (junePeerConnection) juneSetAvatarState("idle");
+    };
+    juneAudio.addEventListener("pause", returnToIdle);
+    juneAudio.addEventListener("ended", returnToIdle);
     junePeerConnection.onconnectionstatechange = () => {
       const state = String(junePeerConnection?.connectionState || "");
       if (state === "failed" || state === "disconnected") juneSetState("June’s voice connection was interrupted.", "warning");
@@ -483,6 +537,8 @@ function juneStopLive({ silent = false } = {}) {
     try { juneAudio.pause(); } catch {}
     juneAudio.srcObject = null;
   }
+  juneStopAvatarAudio();
+  juneSetAvatarState("idle");
   junePeerConnection = null;
   juneDataChannel = null;
   juneLocalStream = null;
