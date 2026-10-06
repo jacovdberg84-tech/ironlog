@@ -1,0 +1,270 @@
+// IRONLOG/web/app/june.js — June, the admin-only GPT-Live task assistant.
+// The OpenAI project key is never exposed to this page. WebRTC negotiation is
+// proxied through /api/june/live/session and all private tool calls are sent
+// to Ironlog's authenticated June gateway.
+let junePeerConnection = null;
+let juneDataChannel = null;
+let juneLocalStream = null;
+let juneAudio = null;
+let juneProcessedCalls = new Set();
+
+function juneIsAdmin() {
+  return getSessionRoles().includes("admin");
+}
+
+function juneEscape(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function juneSetState(message, tone = "neutral") {
+  const el = qs("juneLiveState");
+  if (!el) return;
+  el.textContent = message;
+  el.dataset.tone = tone;
+}
+
+function juneAppendTranscript(speaker, content, kind = "assistant") {
+  const host = qs("juneTranscript");
+  const text = String(content || "").trim();
+  if (!host || !text) return;
+  const row = document.createElement("div");
+  row.className = `june-transcript-row june-transcript-${kind}`;
+  const name = document.createElement("span");
+  name.className = "june-transcript-speaker";
+  name.textContent = speaker;
+  const message = document.createElement("div");
+  message.className = "june-transcript-message";
+  message.textContent = text;
+  row.append(name, message);
+  host.appendChild(row);
+  host.scrollTop = host.scrollHeight;
+}
+
+function juneClearTranscript() {
+  const host = qs("juneTranscript");
+  if (host) host.innerHTML = "";
+}
+
+function juneSetConnected(connected) {
+  const start = qs("juneStartBtn");
+  const stop = qs("juneStopBtn");
+  if (start) start.hidden = Boolean(connected);
+  if (stop) stop.hidden = !connected;
+}
+
+function juneRenderConnectors(connectors) {
+  const host = qs("juneConnectorList");
+  if (!host) return;
+  const labels = {
+    calendar: "Calendar",
+    email: "Email",
+    weather: "Weather",
+    ironlog: "Ironlog",
+    borris: "Borris",
+  };
+  host.innerHTML = Object.entries(connectors || {}).map(([key, value]) => {
+    const state = String(value?.state || "not_connected");
+    const label = labels[key] || key;
+    return `<div class="june-connector june-connector-${juneEscape(state)}"><span>${juneEscape(label)}</span><b>${juneEscape(state.replace(/_/g, " "))}</b></div>`;
+  }).join("");
+}
+
+async function loadJuneStatus({ quiet = false } = {}) {
+  if (!juneIsAdmin()) return;
+  try {
+    const data = await fetchJson(`${API}/api/june/status`);
+    juneRenderConnectors(data?.connectors || {});
+    if (!data?.live_ready) {
+      juneSetState("June Live needs the server OpenAI configuration.", "warning");
+      const start = qs("juneStartBtn");
+      if (start) start.disabled = true;
+      return;
+    }
+    const start = qs("juneStartBtn");
+    if (start) start.disabled = false;
+    if (!junePeerConnection && !quiet) juneSetState(`Ready — ${data?.voice || "gleam"} voice.`, "ready");
+  } catch (error) {
+    juneSetState("June is unavailable right now.", "warning");
+  }
+}
+
+function syncJuneVisibility() {
+  const card = qs("juneAssistantCard");
+  if (!card) return;
+  const visible = juneIsAdmin();
+  card.hidden = !visible;
+  if (!visible && junePeerConnection) juneStopLive({ silent: true });
+  if (visible) loadJuneStatus({ quiet: true }).catch(() => {});
+}
+
+function juneSendEvent(payload) {
+  if (!juneDataChannel || juneDataChannel.readyState !== "open") return false;
+  try {
+    juneDataChannel.send(JSON.stringify(payload));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function juneClientEventId(prefix) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function juneRunTool(item) {
+  const callId = String(item?.call_id || "").trim();
+  const name = String(item?.name || "").trim();
+  if (!callId || !name || juneProcessedCalls.has(callId)) return;
+  juneProcessedCalls.add(callId);
+  let args = {};
+  try { args = JSON.parse(String(item?.arguments || "{}")); } catch {}
+  juneSetState("June is checking Ironlog…", "working");
+  let output;
+  try {
+    const data = await fetchJson(`${API}/api/june/gateway/execute`, {
+      method: "POST",
+      body: JSON.stringify({ name, arguments: args }),
+    });
+    output = data?.result || { error: "June received no result from the gateway." };
+  } catch (error) {
+    output = { error: `June could not complete ${name}: ${error?.message || String(error)}` };
+  }
+  const submitted = juneSendEvent({
+    type: "response.item.create",
+    event_id: juneClientEventId("june-tool"),
+    item: {
+      type: "function_call_output",
+      call_id: callId,
+      output: JSON.stringify(output),
+    },
+  });
+  if (submitted) {
+    juneSendEvent({ type: "response.create", event_id: juneClientEventId("june-continue") });
+    juneSetState("June is preparing her answer…", "working");
+  } else {
+    juneSetState("June lost the live connection before the tool result returned.", "warning");
+  }
+}
+
+function juneNestedLiveEvent(envelope) {
+  const event = envelope?.type === "response.event" ? envelope.event : envelope;
+  if (!event || typeof event !== "object") return;
+  const type = String(event.type || "");
+  if (type === "response.output_text.delta" || type === "response.output_audio_transcript.delta") {
+    juneAppendTranscript("June", event.delta, "assistant");
+  }
+  if (type === "response.output_item.done" && String(event?.item?.type || "") === "function_call") {
+    juneRunTool(event.item).catch(() => {});
+  }
+  if (type === "error") juneSetState(String(event?.error?.message || "June encountered a live-session error."), "warning");
+}
+
+function juneHandleLiveMessage(message) {
+  let event;
+  try { event = JSON.parse(message?.data || "{}"); } catch { return; }
+  const type = String(event?.type || "");
+  if (type === "session.started") {
+    juneSetState("June is listening.", "live");
+    juneAppendTranscript("June", "Hello. I’m June. What would you like to work through?", "assistant");
+    return;
+  }
+  if (type === "session.input_transcript.delta") {
+    juneAppendTranscript("You", event.delta, "user");
+    return;
+  }
+  if (type === "session.output_transcript.delta") {
+    juneAppendTranscript("June", event.delta, "assistant");
+    return;
+  }
+  if (type === "session.closed") {
+    juneStopLive({ silent: true });
+    juneSetState("June has ended the live conversation.", "neutral");
+    return;
+  }
+  if (type === "error") {
+    juneSetState(String(event?.error?.message || "June encountered a live-session error."), "warning");
+    return;
+  }
+  juneNestedLiveEvent(event);
+}
+
+async function juneStartLive() {
+  if (!juneIsAdmin()) return;
+  if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection) {
+    juneSetState("This browser does not support the microphone connection June needs.", "warning");
+    return;
+  }
+  const start = qs("juneStartBtn");
+  if (start) start.disabled = true;
+  juneClearTranscript();
+  juneSetState("Requesting microphone access…", "working");
+  try {
+    juneLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    junePeerConnection = new RTCPeerConnection();
+    juneAudio = new Audio();
+    juneAudio.autoplay = true;
+    junePeerConnection.ontrack = (event) => {
+      juneAudio.srcObject = event.streams?.[0] || null;
+      juneAudio.play().catch(() => {});
+    };
+    junePeerConnection.onconnectionstatechange = () => {
+      const state = String(junePeerConnection?.connectionState || "");
+      if (state === "failed" || state === "disconnected") juneSetState("June’s voice connection was interrupted.", "warning");
+    };
+    juneLocalStream.getTracks().forEach((track) => junePeerConnection.addTrack(track, juneLocalStream));
+    juneDataChannel = junePeerConnection.createDataChannel("oai-events");
+    juneDataChannel.addEventListener("message", juneHandleLiveMessage);
+    juneDataChannel.addEventListener("open", () => juneSetState("June is connecting…", "working"));
+    juneDataChannel.addEventListener("close", () => {
+      if (junePeerConnection) juneSetState("June’s live channel closed.", "neutral");
+    });
+    const offer = await junePeerConnection.createOffer();
+    await junePeerConnection.setLocalDescription(offer);
+    const response = await fetchJson(`${API}/api/june/live/session`, {
+      method: "POST",
+      body: JSON.stringify({ sdp: offer.sdp }),
+    });
+    await junePeerConnection.setRemoteDescription({ type: "answer", sdp: response.sdp });
+    juneSetConnected(true);
+    juneSetState("June is starting…", "working");
+  } catch (error) {
+    juneStopLive({ silent: true });
+    juneSetState(`June could not start: ${error?.message || String(error)}`, "warning");
+  } finally {
+    if (start && !junePeerConnection) start.disabled = false;
+  }
+}
+
+function juneStopLive({ silent = false } = {}) {
+  juneSendEvent({ type: "session.close", event_id: juneClientEventId("june-close") });
+  try { juneDataChannel?.close(); } catch {}
+  try { junePeerConnection?.close(); } catch {}
+  try { juneLocalStream?.getTracks()?.forEach((track) => track.stop()); } catch {}
+  if (juneAudio) {
+    try { juneAudio.pause(); } catch {}
+    juneAudio.srcObject = null;
+  }
+  junePeerConnection = null;
+  juneDataChannel = null;
+  juneLocalStream = null;
+  juneAudio = null;
+  juneProcessedCalls = new Set();
+  juneSetConnected(false);
+  if (!silent) juneSetState("June is ready when you are.", "ready");
+}
+
+function initJune() {
+  syncJuneVisibility();
+}
+
+function wireJuneControls() {
+  qs("juneStartBtn")?.addEventListener("click", () => juneStartLive());
+  qs("juneStopBtn")?.addEventListener("click", () => juneStopLive());
+  qs("juneRefreshBtn")?.addEventListener("click", () => loadJuneStatus());
+}
+

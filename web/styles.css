@@ -8436,6 +8436,40 @@ body.uc-qr-locked #ucAsset {
 .dlv-msg.bad { border-color: var(--danger); color: var(--danger); }
 .dlv-msg.warn { border-color: var(--warn); }
 .dlv-recent { overflow-x: auto; }
+
+/* June — admin-only GPT-Live task assistant */
+.june-assistant-card { border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line)); overflow: hidden; }
+.june-assistant-head { display: flex; gap: 18px; justify-content: space-between; align-items: flex-start; padding: 18px 20px 14px; background: linear-gradient(125deg, color-mix(in srgb, var(--accent) 10%, var(--card)), var(--card)); }
+.june-assistant-head h3 { margin: 2px 0 5px; display: flex; align-items: center; gap: 8px; }
+.june-assistant-head p { max-width: 660px; margin: 0; }
+.june-eyebrow { margin: 0; color: var(--accent); font-size: 10px; letter-spacing: .13em; font-weight: 800; }
+.june-voice-tag { font-size: 11px; font-weight: 700; color: var(--accent); background: color-mix(in srgb, var(--accent) 11%, transparent); border-radius: 999px; padding: 4px 8px; white-space: nowrap; }
+.june-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.june-status-line { display: flex; align-items: center; gap: 8px; padding: 10px 20px; font-size: 13px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--card-soft); }
+.june-live-dot { width: 8px; height: 8px; border-radius: 99px; background: var(--muted); box-shadow: 0 0 0 3px color-mix(in srgb, var(--muted) 16%, transparent); }
+#juneLiveState[data-tone="live"] { color: var(--success); font-weight: 700; }
+#juneLiveState[data-tone="working"] { color: var(--accent); }
+#juneLiveState[data-tone="warning"] { color: var(--warn); }
+.june-gateway-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 12px 20px 0; color: var(--muted); font-size: 11px; }
+.june-gateway-head span { color: var(--ink); font-weight: 800; font-size: 12px; }
+.june-connector-list { display: flex; flex-wrap: wrap; gap: 7px; padding: 8px 20px 0; }
+.june-connector { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font-size: 11px; background: var(--card-soft); }
+.june-connector b { font-size: 10px; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); }
+.june-connector-connected b, .june-connector-ready b { color: var(--success); }
+.june-connector-not_connected b { color: var(--warn); }
+.june-transcript { margin: 12px 20px; min-height: 66px; max-height: 220px; overflow-y: auto; display: grid; gap: 8px; }
+.june-transcript-row { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 8px; align-items: start; font-size: 13px; }
+.june-transcript-speaker { color: var(--muted); font-weight: 800; font-size: 11px; padding-top: 3px; text-transform: uppercase; }
+.june-transcript-message { padding: 8px 10px; border: 1px solid var(--line); background: var(--card-soft); border-radius: 2px 9px 9px 9px; white-space: pre-wrap; }
+.june-transcript-user .june-transcript-message { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); background: color-mix(in srgb, var(--accent) 7%, var(--card)); }
+.june-transcript-empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+.june-safety-note { margin: 0; padding: 10px 20px 14px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); }
+@media (max-width: 760px) {
+  .june-assistant-head { display: grid; padding: 15px; }
+  .june-actions { justify-content: flex-start; }
+  .june-status-line, .june-gateway-head, .june-connector-list, .june-safety-note { padding-left: 15px; padding-right: 15px; }
+  .june-transcript { margin-left: 15px; margin-right: 15px; }
+}
 @media (max-width: 640px) {
   .stock-tabs { overflow-x: auto; flex-wrap: nowrap; }
   .stock-tabs button { white-space: nowrap; }

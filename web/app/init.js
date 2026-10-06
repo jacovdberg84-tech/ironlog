@@ -25,6 +25,7 @@ async function init() {
   });
   initReportsHub();
   initTasks();
+  initJune();
   initTelematicsFaultBanner();
   initCartrackSpeedFloat();
   applyRoleVisibility();
@@ -46,6 +47,7 @@ async function init() {
   // Feature wiring, in the original start-up order. Each function lives in its feature's file.
   wireDashboardControls();
   wireBorrisControls();
+  wireJuneControls();
   wireDocumentControls();
   wireLubeControls();
   wireStockReceive();

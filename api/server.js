@@ -45,6 +45,7 @@ import unitechRoutes from "./routes/unitech.routes.js";
 import safetyRoutes from "./routes/safety.routes.js";
 import notificationsRoutes from "./routes/notifications.routes.js";
 import aiEngineerRoutes from "./routes/aiEngineer.routes.js";
+import juneRoutes from "./routes/june.routes.js";
 import { ironlogAuthHook } from "./auth/hook.js";
 
 export function buildServer() {
@@ -86,6 +87,7 @@ app.register(dashboardRoutes, { prefix: "/api/dashboard" });
 app.register(authRoutes, { prefix: "/api/auth" });
 app.register(notificationsRoutes, { prefix: "/api/notifications" });
 app.register(aiEngineerRoutes, { prefix: "/api/ai-engineer" });
+app.register(juneRoutes, { prefix: "/api/june" });
 app.register(auditRoutes, { prefix: "/api/audit" });
 app.register(legalRoutes, { prefix: "/api/legal" });
 app.register(approvalsRoutes, { prefix: "/api/approvals" });

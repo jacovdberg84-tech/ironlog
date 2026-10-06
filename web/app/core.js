@@ -1086,6 +1086,7 @@ function applyRoleVisibility() {
   const role = getSessionRole();
   const roles = getSessionRoles();
   renderSessionRolesBadge();
+  if (typeof syncJuneVisibility === "function") syncJuneVisibility();
   const allowedList = getEffectiveAllowedTabs();
   const allowed = new Set(allowedList);
   document.querySelectorAll(".dashboard-quick-action[data-required-tab]").forEach((button) => {
