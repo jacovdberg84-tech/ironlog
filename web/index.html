@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=lube-model-1" />
+  <link rel="stylesheet" href="./styles.css?v=borris-command-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -775,6 +775,37 @@
     <section class="panel" id="tab-ironmind">
       <div class="borris-page">
         <header class="borris-header"><div><p class="borris-eyebrow">YOUR WORKSHOP ASSISTANT</p><h2>Borris</h2><p>Talk through a fault, explore your manuals, or plan the week ahead.</p></div><button id="ironmindResetMemoryBtn" class="btn btn-secondary" type="button">Clear conversation</button></header>
+        <section class="borris-command" aria-labelledby="borrisCommandTitle">
+          <div class="borris-command-head"><div><p class="borris-eyebrow">DAILY COMMAND BRIEF</p><h3 id="borrisCommandTitle">What needs your attention</h3><p id="borrisCommandMeta" class="muted">Loading today’s fleet position…</p></div><button id="borrisCommandRefreshBtn" class="btn btn-secondary" type="button">Refresh brief</button></div>
+          <p id="borrisCommandHeadline" class="borris-command-headline"></p>
+          <div id="borrisCommandMetrics" class="borris-command-metrics" aria-live="polite"></div>
+          <div id="borrisCommandPriorities" class="borris-command-priorities"></div>
+        </section>
+        <section class="borris-draft-studio" aria-labelledby="borrisDraftTitle">
+          <div><p class="borris-eyebrow">DRAFT STUDIO</p><h3 id="borrisDraftTitle">Prepare it with Borris</h3><p class="muted">Drafts are safe to review. Nothing is created in Ironlog until you take it into the relevant module and approve it.</p></div>
+          <div class="borris-draft-actions" role="group" aria-label="Borris draft tools">
+            <button class="borris-draft-action" type="button" data-borris-draft-type="work-order"><b>Draft work order</b><span>Prepare a repair scope</span></button>
+            <button class="borris-draft-action" type="button" data-borris-draft-type="requisition"><b>Draft requisition</b><span>Check the part and quantity</span></button>
+            <button class="borris-draft-action" type="button" data-borris-draft-type="service-plan"><b>Draft service plan</b><span>Build the next interval</span></button>
+            <button class="borris-draft-action" type="button" data-borris-draft-type="report"><b>Draft report</b><span>Prepare a management summary</span></button>
+          </div>
+          <form id="borrisDraftForm" class="borris-draft-form" hidden>
+            <div class="borris-draft-form-head"><div><b id="borrisDraftFormTitle">Draft with Borris</b><small id="borrisDraftFormHint" class="muted"></small></div><button id="borrisDraftCloseBtn" class="btn btn-secondary btn-compact" type="button">Close</button></div>
+            <input id="borrisDraftType" name="type" type="hidden">
+            <div class="borris-draft-fields">
+              <label class="borris-draft-asset">Fleet number<input id="borrisDraftAsset" name="asset_code" maxlength="32" placeholder="e.g. A300AM"></label>
+              <label class="borris-draft-detail"><span id="borrisDraftDetailLabel">Scope / reason</span><textarea id="borrisDraftDetail" name="detail" rows="2" maxlength="3000" placeholder="What should Borris prepare?"></textarea></label>
+              <label class="borris-draft-part" hidden>Part number or description<input id="borrisDraftPart" name="part_query" maxlength="160" placeholder="e.g. oil filter"></label>
+              <label class="borris-draft-qty" hidden>Quantity<input id="borrisDraftQty" name="quantity" type="number" min="0.01" step="0.01" value="1"></label>
+              <label class="borris-draft-interval" hidden>Service interval (hours)<input id="borrisDraftInterval" name="interval_hours" type="number" min="1" step="1" value="500"></label>
+              <label class="borris-draft-start" hidden>Period starts<input id="borrisDraftStart" name="start" type="date"></label>
+              <label class="borris-draft-end" hidden>Period ends<input id="borrisDraftEnd" name="end" type="date"></label>
+              <label>Needed / planned date<input id="borrisDraftDueDate" name="due_date" type="date"></label>
+            </div>
+            <div class="borris-draft-submit"><small class="muted">This produces a review-only draft.</small><button class="btn btn-primary" type="submit">Generate draft</button></div>
+          </form>
+          <div id="borrisDraftResult" class="borris-draft-result" aria-live="polite"></div>
+        </section>
         <div class="borris-conversation">
           <div id="ironmindAskResult" class="borris-messages" role="log" aria-label="Conversation with Borris" aria-live="polite"><p class="muted">What are we working on today?</p></div>
           <div class="borris-composer">
@@ -7877,7 +7908,7 @@
   <script src="./app/ui-helpers.js?v=89"></script>
   <script src="./app/telematics.js?v=91"></script>
   <script src="./app/dashboard.js?v=89"></script>
-  <script src="./app/borris.js?v=89"></script>
+  <script src="./app/borris.js?v=91"></script>
   <script src="./app/fuel-lube.js?v=90"></script>
   <script src="./app/stock.js?v=93"></script>
   <script src="./app/compliance.js?v=89r"></script>

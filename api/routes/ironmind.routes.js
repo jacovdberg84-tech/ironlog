@@ -125,6 +125,177 @@ export default async function ironmindRoutes(app) {
     const rows = db.prepare(`PRAGMA table_info(${table})`).all();
     return rows.some((r) => String(r.name) === col);
   }
+  function positiveNumber(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  }
+  function roundMetric(value, digits = 1) {
+    const n = Number(value || 0);
+    const factor = 10 ** digits;
+    return Number.isFinite(n) ? Math.round(n * factor) / factor : 0;
+  }
+  function addDaysYmd(ymd, days) {
+    const date = new Date(`${String(ymd || todayYmd()).slice(0, 10)}T12:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + Number(days || 0));
+    return date.toISOString().slice(0, 10);
+  }
+  function getAssetForBorris(assetCode, asOf) {
+    const code = String(assetCode || "").trim().toUpperCase();
+    if (!code) return null;
+    const asset = db.prepare(`
+      SELECT id, asset_code, asset_name, category
+      FROM assets
+      WHERE UPPER(TRIM(asset_code)) = ?
+      LIMIT 1
+    `).get(code);
+    if (!asset) return null;
+    const currentHours = db.prepare(`
+      SELECT COALESCE(SUM(hours_run), 0) AS current_hours
+      FROM daily_hours
+      WHERE asset_id = ?
+        AND is_used = 1
+        AND hours_run > 0
+        AND work_date <= ?
+    `).get(asset.id, asOf);
+    return {
+      id: Number(asset.id || 0),
+      asset_code: String(asset.asset_code || code),
+      asset_name: String(asset.asset_name || ""),
+      category: String(asset.category || ""),
+      current_hours: roundMetric(currentHours?.current_hours, 1),
+    };
+  }
+  function getPmDueRows(asOf, limit = 12) {
+    const maxRows = Math.max(1, Math.min(50, Number(limit || 12)));
+    return db.prepare(`
+      SELECT
+        mp.id AS plan_id,
+        a.asset_code,
+        a.asset_name,
+        mp.service_name,
+        mp.interval_hours,
+        mp.last_service_hours,
+        COALESCE((
+          SELECT SUM(dh.hours_run)
+          FROM daily_hours dh
+          WHERE dh.asset_id = mp.asset_id
+            AND dh.is_used = 1
+            AND dh.hours_run > 0
+            AND dh.work_date <= ?
+        ), 0) AS current_hours
+      FROM maintenance_plans mp
+      JOIN assets a ON a.id = mp.asset_id
+      WHERE mp.active = 1
+      ORDER BY a.asset_code ASC, mp.id ASC
+    `).all(asOf).map((row) => {
+      const nextDue = Number(row.last_service_hours || 0) + Number(row.interval_hours || 0);
+      const remaining = nextDue - Number(row.current_hours || 0);
+      return {
+        plan_id: Number(row.plan_id || 0),
+        asset_code: String(row.asset_code || ""),
+        asset_name: String(row.asset_name || ""),
+        service_name: String(row.service_name || "Service"),
+        interval_hours: roundMetric(row.interval_hours, 1),
+        current_hours: roundMetric(row.current_hours, 1),
+        next_due_hours: roundMetric(nextDue, 1),
+        remaining_hours: roundMetric(remaining, 1),
+        status: remaining < 0 ? "overdue" : remaining <= 50 ? "due_soon" : "planned",
+      };
+    }).filter((row) => row.status !== "planned")
+      .sort((a, b) => a.remaining_hours - b.remaining_hours || a.asset_code.localeCompare(b.asset_code))
+      .slice(0, maxRows);
+  }
+  function getOpenBreakdownRows(limit = 8) {
+    const maxRows = Math.max(1, Math.min(30, Number(limit || 8)));
+    return db.prepare(`
+      SELECT
+        b.id AS breakdown_id,
+        a.asset_code,
+        a.asset_name,
+        b.breakdown_date,
+        b.component,
+        b.description,
+        COALESCE(b.critical, 0) AS critical,
+        b.parts_status,
+        b.ets_repair_date,
+        COALESCE(b.downtime_total_hours, 0) AS downtime_hours,
+        b.primary_work_order_id
+      FROM breakdowns b
+      JOIN assets a ON a.id = b.asset_id
+      WHERE UPPER(TRIM(b.status)) = 'OPEN'
+      ORDER BY COALESCE(b.critical, 0) DESC, b.breakdown_date ASC, a.asset_code ASC
+      LIMIT ?
+    `).all(maxRows).map((row) => ({
+      breakdown_id: Number(row.breakdown_id || 0),
+      asset_code: String(row.asset_code || ""),
+      asset_name: String(row.asset_name || ""),
+      breakdown_date: String(row.breakdown_date || ""),
+      component: String(row.component || ""),
+      description: String(row.description || ""),
+      critical: Boolean(row.critical),
+      parts_status: String(row.parts_status || ""),
+      ets_repair_date: String(row.ets_repair_date || ""),
+      downtime_hours: roundMetric(row.downtime_hours, 1),
+      work_order_id: Number(row.primary_work_order_id || 0),
+    }));
+  }
+  function buildCommandBrief(asOf) {
+    const openBreakdowns = getOpenBreakdownRows(8);
+    const pmDue = getPmDueRows(asOf, 12);
+    const openWorkOrders = Number(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM work_orders
+      WHERE LOWER(TRIM(COALESCE(status, 'open'))) NOT IN ('closed', 'completed', 'approved')
+    `).get()?.count || 0);
+    const priorities = [];
+    for (const row of openBreakdowns) {
+      const detail = [
+        row.component || null,
+        row.description || null,
+        row.downtime_hours > 0 ? `${row.downtime_hours.toFixed(1)}h logged down` : null,
+        row.parts_status ? `parts: ${row.parts_status}` : null,
+        row.ets_repair_date ? `ETS ${row.ets_repair_date}` : null,
+      ].filter(Boolean).join(" • ");
+      priorities.push({
+        type: "breakdown",
+        severity: row.critical ? "critical" : "high",
+        asset_code: row.asset_code,
+        title: `${row.asset_code} — open breakdown`,
+        detail,
+        suggested_action: row.work_order_id
+          ? `Review work order #${row.work_order_id} and confirm repair progress.`
+          : "Draft a repair work order and assign an owner.",
+      });
+    }
+    for (const row of pmDue) {
+      priorities.push({
+        type: "pm",
+        severity: row.status === "overdue" ? "high" : "medium",
+        asset_code: row.asset_code,
+        title: `${row.asset_code} — ${row.service_name}`,
+        detail: row.remaining_hours < 0
+          ? `${Math.abs(row.remaining_hours).toFixed(1)}h overdue • due at ${row.next_due_hours.toFixed(1)}h`
+          : `${row.remaining_hours.toFixed(1)}h remaining • due at ${row.next_due_hours.toFixed(1)}h`,
+        suggested_action: "Draft the service plan, confirm parts readiness, then schedule the work.",
+      });
+    }
+    return {
+      as_of: asOf,
+      headline: openBreakdowns.length || pmDue.length
+        ? "Focus the workshop on the highest-risk work first."
+        : "No open breakdowns or near-due PMs need escalation today.",
+      metrics: {
+        open_breakdowns: openBreakdowns.length,
+        critical_breakdowns: openBreakdowns.filter((row) => row.critical).length,
+        overdue_pm: pmDue.filter((row) => row.status === "overdue").length,
+        pm_due_soon: pmDue.filter((row) => row.status === "due_soon").length,
+        open_work_orders: openWorkOrders,
+      },
+      priorities: priorities.slice(0, 12),
+      open_breakdowns: openBreakdowns,
+      pm_due: pmDue,
+    };
+  }
   function getAskMemoryCtx(req) {
     const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
     const user_name = String(req.headers?.["x-user-name"] || "unknown").trim().toLowerCase() || "unknown";
@@ -1787,6 +1958,191 @@ export default async function ironmindRoutes(app) {
       ironmindRuntime.last_ask_mode = "error";
       ironmindRuntime.last_ask_error = err?.message || String(err);
       ironmindRuntime.last_ask_at = new Date().toISOString();
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // A deterministic, read-only starting point for the Borris command centre.
+  // This deliberately does not depend on the LLM: fleet risks remain visible
+  // whenever the provider is unavailable and the data can be audited easily.
+  app.get("/command-brief", async (req, reply) => {
+    try {
+      const asOf = isDate(req.query?.date) ? String(req.query.date) : todayYmd();
+      return reply.send({ ok: true, brief: buildCommandBrief(asOf) });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: err.message || String(err) });
+    }
+  });
+
+  // Drafts are review-only. Borris can prepare the same fields used by the
+  // operational modules, but this endpoint never creates a work order,
+  // requisition, maintenance plan, or report record.
+  app.post("/drafts/:type", async (req, reply) => {
+    try {
+      const type = String(req.params?.type || "").trim().toLowerCase();
+      const body = req.body || {};
+      const asOf = isDate(body.as_of) ? String(body.as_of) : todayYmd();
+      const assetCode = String(body.asset_code || "").trim().toUpperCase();
+      const asset = assetCode ? getAssetForBorris(assetCode, asOf) : null;
+      if (assetCode && !asset) {
+        return reply.code(404).send({ ok: false, error: `Asset not found: ${assetCode}` });
+      }
+      const detail = String(body.detail || body.description || body.notes || "").trim().slice(0, 3000);
+      const dueDate = isDate(body.due_date) ? String(body.due_date) : addDaysYmd(asOf, 7);
+      const commandBrief = buildCommandBrief(asOf);
+
+      if (type === "work-order") {
+        if (!asset) return reply.code(400).send({ ok: false, error: "asset_code is required for a work-order draft" });
+        const linkedBreakdown = commandBrief.open_breakdowns.find((row) => row.asset_code === asset.asset_code) || null;
+        const description = detail || linkedBreakdown?.description || "Describe the repair required.";
+        return reply.send({
+          ok: true,
+          draft: {
+            type: "work_order",
+            state: "review_only",
+            title: `Draft repair work order — ${asset.asset_code}`,
+            create_path: "/api/workorders/repair",
+            fields: {
+              asset_code: asset.asset_code,
+              equipment: asset.asset_name,
+              component: String(body.component || linkedBreakdown?.component || "").trim(),
+              description,
+              priority: String(body.priority || (linkedBreakdown?.critical ? "critical" : "normal")).trim(),
+              target_date: dueDate,
+              current_hours: asset.current_hours,
+            },
+            review_checks: [
+              linkedBreakdown ? `An open breakdown is already recorded for ${asset.asset_code}. Link this draft to that incident rather than duplicating it.` : "Confirm that this is not already covered by an open breakdown or work order.",
+              "Confirm the work scope, responsible artisan, and target completion date before creating the work order.",
+            ],
+          },
+        });
+      }
+
+      if (type === "requisition") {
+        const partQuery = String(body.part_query || body.part_code || detail || "").trim();
+        if (!partQuery) return reply.code(400).send({ ok: false, error: "part_query is required for a requisition draft" });
+        const hasUnitCost = hasColumn("parts", "unit_cost");
+        const part = db.prepare(`
+          SELECT id, part_code, part_name${hasUnitCost ? ", unit_cost" : ""}
+          FROM parts
+          WHERE UPPER(TRIM(part_code)) = UPPER(TRIM(?))
+             OR LOWER(part_name) LIKE LOWER(?)
+          ORDER BY CASE WHEN UPPER(TRIM(part_code)) = UPPER(TRIM(?)) THEN 0 ELSE 1 END, part_code ASC
+          LIMIT 1
+        `).get(partQuery, `%${partQuery}%`, partQuery);
+        const onHand = part ? Number(db.prepare(`
+          SELECT COALESCE(SUM(quantity), 0) AS on_hand
+          FROM stock_movements
+          WHERE part_id = ?
+        `).get(part.id)?.on_hand || 0) : null;
+        const qty = positiveNumber(body.quantity || body.qty, 1);
+        const unitCost = hasUnitCost ? Number(part?.unit_cost || 0) : 0;
+        return reply.send({
+          ok: true,
+          draft: {
+            type: "requisition",
+            state: "review_only",
+            title: `Draft stores requisition${asset ? ` — ${asset.asset_code}` : ""}`,
+            create_path: "/api/procurement/requisitions",
+            fields: {
+              asset_code: asset?.asset_code || "",
+              equipment: asset?.asset_name || "",
+              part_code: String(part?.part_code || ""),
+              part_description: String(part?.part_name || partQuery),
+              qty_requested: qty,
+              on_hand_qty: onHand == null ? null : roundMetric(onHand, 2),
+              unit_cost: roundMetric(unitCost, 2),
+              estimated_value: roundMetric(qty * unitCost, 2),
+              needed_by_date: dueDate,
+              reason: detail || (asset ? `Required for ${asset.asset_code}.` : "Operational stores requirement."),
+            },
+            review_checks: [
+              part ? "Confirm the part number, quantity, and supplier quotation before creating the requisition." : "No exact stores item was matched. Add or select the correct part before creating the requisition.",
+              onHand != null && onHand >= qty ? `Stores currently shows ${roundMetric(onHand, 2)} on hand; verify whether a purchase is still needed.` : "Verify stock on hand and open purchase orders before creating the requisition.",
+            ],
+          },
+        });
+      }
+
+      if (type === "service-plan") {
+        if (!asset) return reply.code(400).send({ ok: false, error: "asset_code is required for a service-plan draft" });
+        const existing = db.prepare(`
+          SELECT id, service_name, interval_hours, last_service_hours
+          FROM maintenance_plans
+          WHERE asset_id = ? AND active = 1
+          ORDER BY interval_hours ASC, id ASC
+          LIMIT 1
+        `).get(asset.id);
+        const interval = positiveNumber(body.interval_hours, positiveNumber(existing?.interval_hours, 500));
+        const serviceName = String(body.service_name || existing?.service_name || `${interval} hour service`).trim();
+        const nextDue = Number(asset.current_hours || 0) + interval;
+        return reply.send({
+          ok: true,
+          draft: {
+            type: "service_plan",
+            state: "review_only",
+            title: `Draft service plan — ${asset.asset_code}`,
+            fields: {
+              asset_code: asset.asset_code,
+              equipment: asset.asset_name,
+              service_name: serviceName,
+              interval_hours: interval,
+              last_service_hours: asset.current_hours,
+              next_due_hours: roundMetric(nextDue, 1),
+              suggested_schedule_date: dueDate,
+              work_scope: detail || "Confirm OEM tasks, service kit, lubricants, and release checks.",
+            },
+            review_checks: [
+              existing ? `An active ${existing.service_name || existing.interval_hours} plan already exists. Review it before adding a duplicate plan.` : "Confirm the service interval against the OEM schedule before saving.",
+              "Confirm the current meter reading and stores readiness before scheduling the service.",
+            ],
+          },
+        });
+      }
+
+      if (type === "report") {
+        const start = isDate(body.start) ? String(body.start) : asOf;
+        const end = isDate(body.end) ? String(body.end) : asOf;
+        const reportType = String(body.report_type || "Daily operations summary").trim();
+        const priorityLines = commandBrief.priorities.length
+          ? commandBrief.priorities.slice(0, 6).map((row) => `- ${row.title}: ${row.detail || row.suggested_action}`).join("\n")
+          : "- No high-priority open breakdowns or near-due PMs identified.";
+        return reply.send({
+          ok: true,
+          draft: {
+            type: "report",
+            state: "review_only",
+            title: `Draft ${reportType}`,
+            fields: { report_type: reportType, start, end, prepared_as_of: asOf },
+            report_text: [
+              reportType.toUpperCase(),
+              `Period: ${start} to ${end}`,
+              "",
+              "Fleet position",
+              `- Open breakdowns: ${commandBrief.metrics.open_breakdowns} (${commandBrief.metrics.critical_breakdowns} critical)`,
+              `- PM overdue: ${commandBrief.metrics.overdue_pm}; due soon: ${commandBrief.metrics.pm_due_soon}`,
+              `- Open work orders: ${commandBrief.metrics.open_work_orders}`,
+              "",
+              "Priority actions",
+              priorityLines,
+              detail ? `\nManagement note\n${detail}` : "",
+            ].filter(Boolean).join("\n"),
+            review_checks: [
+              "Confirm the date range and operational facts before sharing externally.",
+              "Add fuel, production, safety, and cost commentary where the audience requires it.",
+            ],
+          },
+        });
+      }
+
+      return reply.code(400).send({
+        ok: false,
+        error: "Unsupported draft type. Use work-order, requisition, service-plan, or report.",
+      });
+    } catch (err) {
+      req.log.error(err);
       return reply.code(500).send({ ok: false, error: err.message || String(err) });
     }
   });

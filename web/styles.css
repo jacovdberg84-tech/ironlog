@@ -8098,6 +8098,28 @@ body.uc-qr-locked #ucAsset {
 .borris-extra>summary,.borris-context>summary {cursor:pointer;font-weight:600;}
 .borris-extra[open]>summary,.borris-context[open]>summary {margin-bottom:18px;}
 .borris-context textarea {width:100%;box-sizing:border-box;margin-top:8px;}
+.borris-command,.borris-draft-studio {border:1px solid var(--border,#dce3eb);border-radius:18px;background:var(--card,#fff);padding:20px;box-shadow:0 5px 22px #0f172a06;}
+.borris-command-head,.borris-draft-form-head {display:flex;align-items:flex-start;justify-content:space-between;gap:16px;}
+.borris-command h3,.borris-draft-studio h3 {margin:2px 0 5px;font-size:20px;letter-spacing:-.2px;}
+.borris-command-head .muted {margin:0;}
+.borris-command-headline {margin:16px 0 14px;color:#334155;font-weight:600;}
+.borris-command-metrics {display:grid;grid-template-columns:repeat(5,minmax(105px,1fr));gap:10px;}
+.borris-command-metric {border:1px solid var(--border,#dce3eb);border-radius:12px;padding:12px;background:var(--bg,#f6f8fa);}
+.borris-command-metric b {display:block;font-size:22px;line-height:1.1;color:var(--ink,#0f172a);}
+.borris-command-metric span {display:block;margin-top:5px;font-size:11px;line-height:1.25;color:#64748b;text-transform:uppercase;letter-spacing:.45px;font-weight:700;}
+.borris-command-priorities {display:grid;gap:8px;margin-top:14px;}
+.borris-priority {display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;padding:12px 0;border-top:1px solid var(--border,#dce3eb);}
+.borris-priority:first-child {border-top:0;}
+.borris-priority-badge {display:inline-flex;align-items:center;height:20px;border-radius:999px;padding:0 8px;font-size:10px;font-weight:800;letter-spacing:.45px;text-transform:uppercase;background:#e2e8f0;color:#475569;}
+.borris-priority-badge.critical {background:#fee2e2;color:#991b1b;}.borris-priority-badge.high {background:#ffedd5;color:#9a3412;}.borris-priority-badge.medium {background:#fef3c7;color:#92400e;}
+.borris-priority h4 {margin:0;font-size:14px;}.borris-priority p {margin:4px 0 0;font-size:13px;color:#475569;}.borris-priority .borris-priority-action {color:#1d4ed8;font-weight:650;}
+.borris-draft-studio {display:grid;gap:14px;}.borris-draft-studio>div>p {margin:0;}
+.borris-draft-actions {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;}
+.borris-draft-action {appearance:none;border:1px solid var(--border,#dce3eb);border-radius:12px;background:var(--bg,#f8fafc);padding:14px;text-align:left;color:var(--ink,#0f172a);cursor:pointer;font:inherit;transition:border-color .15s,background .15s,transform .15s;}.borris-draft-action:hover,.borris-draft-action:focus-visible {border-color:#2563eb;background:#eff6ff;transform:translateY(-1px);outline:none;}.borris-draft-action b,.borris-draft-action span {display:block;}.borris-draft-action b {font-size:13px;}.borris-draft-action span {margin-top:4px;font-size:12px;color:#64748b;line-height:1.35;}
+.borris-draft-form {display:grid;gap:14px;border:1px solid #bfdbfe;border-radius:14px;padding:16px;background:#f8fbff;}.borris-draft-form-head small {display:block;margin-top:3px;}.borris-draft-fields {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}.borris-draft-fields label {display:grid;gap:5px;font-size:12px;font-weight:650;color:#334155;}.borris-draft-fields input,.borris-draft-fields textarea {width:100%;box-sizing:border-box;font:inherit;font-size:13px;}.borris-draft-detail {grid-column:span 2;}.borris-draft-submit {display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.borris-draft-result {display:grid;gap:10px;}.borris-draft-result:empty {display:none;}.borris-draft-card {border:1px solid var(--border,#dce3eb);border-radius:14px;padding:16px;background:var(--bg,#f8fafc);}.borris-draft-card h4 {margin:0 0 4px;font-size:16px;}.borris-draft-state {display:inline-block;margin-bottom:12px;border-radius:999px;background:#dbeafe;color:#1e40af;padding:4px 8px;font-size:10px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;}.borris-draft-table {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px;margin:12px 0;}.borris-draft-table div {border-top:1px solid #dbe3ee;padding-top:7px;}.borris-draft-table span {display:block;font-size:10px;font-weight:750;letter-spacing:.45px;text-transform:uppercase;color:#64748b;}.borris-draft-table b {display:block;margin-top:2px;font-size:13px;overflow-wrap:anywhere;}.borris-draft-card pre {white-space:pre-wrap;font:inherit;line-height:1.55;margin:12px 0 0;color:#334155;}.borris-draft-checks {margin:12px 0 0;padding-left:18px;font-size:13px;line-height:1.55;color:#475569;}
+@media(max-width:900px){.borris-command-metrics{grid-template-columns:repeat(3,minmax(105px,1fr));}.borris-draft-actions{grid-template-columns:repeat(2,minmax(0,1fr));}.borris-draft-fields{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(max-width:640px){.borris-command,.borris-draft-studio{padding:15px;}.borris-command-head,.borris-draft-form-head,.borris-draft-submit{align-items:flex-start;flex-direction:column;}.borris-command-metrics,.borris-draft-actions,.borris-draft-fields,.borris-draft-table{grid-template-columns:1fr;}.borris-draft-detail{grid-column:auto;}}
 @media(max-width:640px){.borris-header{align-items:flex-start;flex-direction:column;gap:12px}.borris-messages{padding:14px;min-height:250px}.borris-message{max-width:100%;padding:12px}.borris-composer{padding:14px}.borris-composer-actions small{width:100%}}
 
 /* My Work home screen */

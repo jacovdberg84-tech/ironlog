@@ -239,6 +239,182 @@ async function planIronmindWeek() {
   } finally { if (button) button.disabled = false; }
 }
 
+function borrisCommandMetric(label, value) {
+  return `<div class="borris-command-metric"><b>${escapeHtml(String(value ?? 0))}</b><span>${escapeHtml(label)}</span></div>`;
+}
+
+function renderBorrisCommandBrief(brief) {
+  const meta = qs("borrisCommandMeta");
+  const headline = qs("borrisCommandHeadline");
+  const metricsEl = qs("borrisCommandMetrics");
+  const prioritiesEl = qs("borrisCommandPriorities");
+  if (meta) meta.textContent = `Live position as at ${String(brief?.as_of || "-")}.`;
+  if (headline) headline.textContent = String(brief?.headline || "No command brief is available yet.");
+  const metrics = brief?.metrics || {};
+  if (metricsEl) {
+    metricsEl.innerHTML = [
+      borrisCommandMetric("Open breakdowns", Number(metrics.open_breakdowns || 0)),
+      borrisCommandMetric("Critical", Number(metrics.critical_breakdowns || 0)),
+      borrisCommandMetric("PM overdue", Number(metrics.overdue_pm || 0)),
+      borrisCommandMetric("PM due soon", Number(metrics.pm_due_soon || 0)),
+      borrisCommandMetric("Open work orders", Number(metrics.open_work_orders || 0)),
+    ].join("");
+  }
+  const priorities = Array.isArray(brief?.priorities) ? brief.priorities : [];
+  if (prioritiesEl) {
+    prioritiesEl.innerHTML = priorities.length
+      ? priorities.map((item) => {
+          const severity = String(item?.severity || "medium").toLowerCase();
+          return `<article class="borris-priority"><span class="borris-priority-badge ${escapeHtml(severity)}">${escapeHtml(severity)}</span><div><h4>${escapeHtml(String(item?.title || "Priority item"))}</h4>${item?.detail ? `<p>${escapeHtml(String(item.detail))}</p>` : ""}${item?.suggested_action ? `<p class="borris-priority-action">Next: ${escapeHtml(String(item.suggested_action))}</p>` : ""}</div></article>`;
+        }).join("")
+      : `<p class="muted">No immediate breakdown or PM actions have been identified.</p>`;
+  }
+}
+
+async function loadBorrisCommandBrief(options = {}) {
+  const button = qs("borrisCommandRefreshBtn");
+  const silent = Boolean(options.silent);
+  if (button) button.disabled = true;
+  try {
+    const date = qs("date")?.value || todayLocalYmd();
+    const res = await fetchJson(`${API}/api/ironmind/command-brief?date=${encodeURIComponent(date)}`);
+    renderBorrisCommandBrief(res?.brief || {});
+    if (!silent) setStatus("Borris command brief refreshed.");
+  } catch (err) {
+    const meta = qs("borrisCommandMeta");
+    if (meta) meta.textContent = "Command brief is unavailable right now.";
+    if (!silent) setStatus("Borris command brief error: " + (err.message || err));
+    throw err;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+const BORRIS_DRAFT_COPY = {
+  "work-order": {
+    title: "Draft repair work order",
+    hint: "Borris checks the asset and any open breakdown before preparing the scope.",
+    detailLabel: "Repair scope / fault description",
+    detailPlaceholder: "Describe the fault or repair required",
+    assetRequired: true,
+  },
+  requisition: {
+    title: "Draft stores requisition",
+    hint: "Borris matches the part against Stores and checks the current quantity on hand.",
+    detailLabel: "Reason / work reference",
+    detailPlaceholder: "Why is this part required?",
+    assetRequired: false,
+  },
+  "service-plan": {
+    title: "Draft service plan",
+    hint: "Borris uses the current meter reading and existing plan as a starting point.",
+    detailLabel: "Service scope / notes",
+    detailPlaceholder: "Optional service-kit, oil or scheduling notes",
+    assetRequired: true,
+  },
+  report: {
+    title: "Draft management report",
+    hint: "Borris creates a fact-based operations summary for your selected period.",
+    detailLabel: "Management note (optional)",
+    detailPlaceholder: "Any context to include in the report",
+    assetRequired: false,
+  },
+};
+
+function localYmdAfter(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + Number(days || 0));
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function setBorrisDraftVisibility(selector, visible) {
+  const el = document.querySelector(selector);
+  if (el) el.hidden = !visible;
+}
+
+function openBorrisDraft(type) {
+  const config = BORRIS_DRAFT_COPY[type];
+  if (!config) return;
+  const form = qs("borrisDraftForm");
+  if (!form) return;
+  form.reset();
+  form.hidden = false;
+  qs("borrisDraftType").value = type;
+  qs("borrisDraftFormTitle").textContent = config.title;
+  qs("borrisDraftFormHint").textContent = config.hint;
+  qs("borrisDraftDetailLabel").textContent = config.detailLabel;
+  qs("borrisDraftDetail").placeholder = config.detailPlaceholder;
+  qs("borrisDraftDueDate").value = localYmdAfter(7);
+  qs("borrisDraftStart").value = qs("date")?.value || todayLocalYmd();
+  qs("borrisDraftEnd").value = qs("date")?.value || todayLocalYmd();
+  setBorrisDraftVisibility(".borris-draft-asset", type !== "report" || config.assetRequired);
+  setBorrisDraftVisibility(".borris-draft-part", type === "requisition");
+  setBorrisDraftVisibility(".borris-draft-qty", type === "requisition");
+  setBorrisDraftVisibility(".borris-draft-interval", type === "service-plan");
+  setBorrisDraftVisibility(".borris-draft-start", type === "report");
+  setBorrisDraftVisibility(".borris-draft-end", type === "report");
+  const assetInput = qs("borrisDraftAsset");
+  if (assetInput) assetInput.required = Boolean(config.assetRequired);
+  const partInput = qs("borrisDraftPart");
+  if (partInput) partInput.required = type === "requisition";
+  qs("borrisDraftResult").innerHTML = "";
+  form.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function humanizeBorrisDraftField(key) {
+  return String(key || "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function renderBorrisDraft(draft) {
+  const out = qs("borrisDraftResult");
+  if (!out) return;
+  const fields = Object.entries(draft?.fields || {}).filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== "");
+  const fieldsHtml = fields.length
+    ? `<div class="borris-draft-table">${fields.map(([key, value]) => `<div><span>${escapeHtml(humanizeBorrisDraftField(key))}</span><b>${escapeHtml(String(value))}</b></div>`).join("")}</div>`
+    : "";
+  const report = String(draft?.report_text || "").trim();
+  const checks = Array.isArray(draft?.review_checks) ? draft.review_checks.filter(Boolean) : [];
+  out.innerHTML = `<article class="borris-draft-card"><span class="borris-draft-state">Review-only draft</span><h4>${escapeHtml(String(draft?.title || "Borris draft"))}</h4><p class="muted">Borris has prepared the fields below. Review and then create it through the relevant Ironlog module.</p>${fieldsHtml}${report ? `<pre>${escapeHtml(report)}</pre>` : ""}${checks.length ? `<ul class="borris-draft-checks">${checks.map((check) => `<li>${escapeHtml(String(check))}</li>`).join("")}</ul>` : ""}</article>`;
+}
+
+async function submitBorrisDraft(event) {
+  event.preventDefault();
+  const form = qs("borrisDraftForm");
+  const type = String(qs("borrisDraftType")?.value || "").trim();
+  if (!form || !BORRIS_DRAFT_COPY[type]) return;
+  const submit = form.querySelector('button[type="submit"]');
+  if (submit) submit.disabled = true;
+  const out = qs("borrisDraftResult");
+  if (out) out.innerHTML = `<p class="muted">Borris is preparing the draft…</p>`;
+  try {
+    const res = await fetchJson(`${API}/api/ironmind/drafts/${encodeURIComponent(type)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        as_of: qs("date")?.value || todayLocalYmd(),
+        asset_code: String(qs("borrisDraftAsset")?.value || "").trim().toUpperCase(),
+        detail: String(qs("borrisDraftDetail")?.value || "").trim(),
+        part_query: String(qs("borrisDraftPart")?.value || "").trim(),
+        quantity: Number(qs("borrisDraftQty")?.value || 0),
+        interval_hours: Number(qs("borrisDraftInterval")?.value || 0),
+        due_date: String(qs("borrisDraftDueDate")?.value || "").trim(),
+        start: String(qs("borrisDraftStart")?.value || "").trim(),
+        end: String(qs("borrisDraftEnd")?.value || "").trim(),
+      }),
+    });
+    renderBorrisDraft(res?.draft || {});
+    setStatus("Borris draft is ready for review.");
+  } catch (err) {
+    if (out) out.innerHTML = `<p class="muted">Draft failed: ${escapeHtml(err.message || String(err))}</p>`;
+    setStatus("Borris draft error: " + (err.message || err));
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+}
+
 async function askIronmindQuestion() {
   const input = qs("ironmindAskInput");
   const out = qs("ironmindAskResult");
@@ -522,6 +698,19 @@ function wireBorrisControls() {
     saveIronmindSettings().catch((e) => setStatus("Borris settings error: " + (e.message || e)))
   );
   qs("ironmindWeeklyPlanBtn")?.addEventListener("click", planIronmindWeek);
+  qs("borrisCommandRefreshBtn")?.addEventListener("click", () =>
+    loadBorrisCommandBrief().catch(() => {})
+  );
+  document.querySelectorAll("button[data-borris-draft-type]").forEach((button) => {
+    button.addEventListener("click", () => openBorrisDraft(String(button.dataset.borrisDraftType || "")));
+  });
+  qs("borrisDraftForm")?.addEventListener("submit", submitBorrisDraft);
+  qs("borrisDraftCloseBtn")?.addEventListener("click", () => {
+    const form = qs("borrisDraftForm");
+    if (form) form.hidden = true;
+    const out = qs("borrisDraftResult");
+    if (out) out.innerHTML = "";
+  });
   qs("ironmindAskBtn")?.addEventListener("click", () =>
     askIronmindQuestion().catch((e) => setStatus("BORRIS ask error: " + e.message))
   );
@@ -535,6 +724,7 @@ function wireBorrisControls() {
     }
   });
   hydrateIronmindAskMemory().catch(() => {});
+  loadBorrisCommandBrief({ silent: true }).catch(() => {});
   qs("saveThresholds")?.addEventListener("click", () => saveThresholdsFromUI());
   qs("saveLdvThresholds")?.addEventListener("click", () => saveLdvPrestartThresholdsFromUI());
   qs("ironmindSummary")?.addEventListener("click", (e) => {
