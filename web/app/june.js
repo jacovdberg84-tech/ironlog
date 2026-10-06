@@ -286,7 +286,12 @@ async function juneStartLive() {
     // OpenAI's WebRTC flow expects the SDP after candidate gathering has had a
     // chance to complete. Using localDescription also includes those candidates.
     await juneWaitForIceGathering(junePeerConnection);
-    const sdp = String(junePeerConnection.localDescription?.sdp || offer.sdp || "").trim();
+    // Preserve the exact browser-produced SDP. The Live API accepts the SDP
+    // offer verbatim; trimming its final CRLF can leave strict parsers at EOF.
+    const sdp = junePeerConnection.localDescription?.sdp || offer.sdp || "";
+    if (typeof sdp !== "string" || !sdp.startsWith("v=0") || !sdp.includes("m=audio")) {
+      throw new Error("June could not create a valid WebRTC offer in this browser. Please retry after refreshing Ironlog.");
+    }
     const response = await juneCreateLiveSession(sdp);
     await junePeerConnection.setRemoteDescription({ type: "answer", sdp: response.sdp });
     juneSetConnected(true);

@@ -501,8 +501,11 @@ export default async function juneRoutes(app) {
   // to the authenticated administrator who created the ticket.
   app.post("/live/session", async (req, reply) => {
     if (!requireJuneAdmin(req, reply)) return;
-    const sdp = String(req.body?.sdp || "").trim();
-    if (!sdp || sdp.length > 750000) {
+    // SDP is line-oriented and must be forwarded exactly as the browser
+    // generated it. In particular, do not trim the terminal CRLF: some SDP
+    // parsers treat a trimmed offer as an unexpected EOF.
+    const sdp = typeof req.body?.sdp === "string" ? req.body.sdp : "";
+    if (!sdp.trim() || sdp.length > 750000) {
       return reply.code(400).send({ ok: false, error: "A valid WebRTC offer is required." });
     }
     const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
