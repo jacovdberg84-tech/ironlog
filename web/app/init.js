@@ -49,6 +49,7 @@ async function init() {
   wireDocumentControls();
   wireLubeControls();
   wireStockReceive();
+  wireLubeModel();
   wireProcurementControls();
   wireFuelLogControls();
   wireSiteOpsControls();

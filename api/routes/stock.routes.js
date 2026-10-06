@@ -11,6 +11,7 @@ import registerMovementsRoutes from "./stock/movements.routes.js";
 import registerPartOrdersRoutes from "./stock/part-orders.routes.js";
 import registerRequisitionRoutes from "./stock/requisitions.routes.js";
 import registerDeliveryRoutes from "./stock/deliveries.routes.js";
+import registerLubeModelRoutes from "./stock/lube-model.routes.js";
 import { autoCategorizePart, ensureStockCategorySchema } from "../utils/stockCategory.js";
 import { holdsAnyRole } from "../utils/request.js";
 
@@ -721,4 +722,5 @@ export default async function stockRoutes(app) {
   registerPartOrdersRoutes(app, ctx);
   registerRequisitionRoutes(app, ctx);
   registerDeliveryRoutes(app, ctx);
+  registerLubeModelRoutes(app, ctx);
 }
