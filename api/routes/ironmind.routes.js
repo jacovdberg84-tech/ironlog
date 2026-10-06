@@ -12,6 +12,11 @@ import {
   isOpenAiCompatibleConfigured,
   openAiCompatibleChatCompletion,
 } from "../utils/llmChat.js";
+import {
+  getLastOpenAiResponsesError,
+  isDirectOpenAiResponsesConfigured,
+  openAiResponsesText,
+} from "../utils/openaiResponses.js";
 import { db } from "../db/client.js";
 import { getPlanningSnapshot, isPlanningQuestion } from "../utils/costingGaps.js";
 import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
@@ -638,20 +643,29 @@ export default async function ironmindRoutes(app) {
       ...(planning ? { planning } : {}),
     };
     try {
-      const data = await openAiCompatibleChatCompletion({
+      const instructions = planning
+        ? `${system} For planning and costing: use context.planning (upcoming services with cost and cost_source, costing gaps). Name the machines, amounts and gaps; say which gaps to fill first. Up to 8 bullets.`
+        : system;
+      const messages = [
+        ...hist,
+        { role: "user", content: `Read-only live fleet context JSON:\n${JSON.stringify(context)}\n\nQuestion:\n${question}` },
+      ];
+      const directResponseText = await openAiResponsesText({
+        instructions: `${instructions} The fleet context is read-only. Never claim to update records, create work orders, or take an operational action. Explain proposed actions for the user to approve.`,
+        messages,
+        model: cfg.model || "gpt-4o-mini",
+        maxOutputTokens: planning ? Math.max(askMaxTokens, 700) : askMaxTokens,
+        timeoutMs: Math.min(askTimeoutMs, 60000),
+      });
+      const data = directResponseText ? null : await openAiCompatibleChatCompletion({
         model: cfg.model || "gpt-4o-mini",
         temperature: 0.2,
         max_tokens: planning ? Math.max(askMaxTokens, 700) : askMaxTokens,
         timeout_ms: Math.min(askTimeoutMs, 60000),
         ...(planning && borrisNumCtx() ? { num_ctx: borrisNumCtx() } : {}),
-        messages: [
-          { role: "system", content: planning ? `${system} For planning and costing: use context.planning (upcoming services with cost and cost_source, costing gaps). Name the machines, amounts and gaps; say which gaps to fill first. Up to 8 bullets.` : system },
-          ...hist,
-          { role: "user", content: `Context JSON:\n${JSON.stringify(context)}\n\nQuestion:\n${question}` },
-        ],
+        messages: [{ role: "system", content: instructions }, ...messages],
       });
-      if (!data) return null;
-      const text = String(data?.choices?.[0]?.message?.content || "").trim();
+      const text = String(directResponseText || data?.choices?.[0]?.message?.content || "").trim();
       const lower = text.toLowerCase();
       const looksGeneric = [
         "up until october 2023",
@@ -1314,15 +1328,22 @@ export default async function ironmindRoutes(app) {
     });
 
     try {
-      const data = await openAiCompatibleChatCompletion({
+      const messages = [...msgHist, { role: "user", content: question.slice(0, 1200) }];
+      const directResponseText = await openAiResponsesText({
+        instructions: system,
+        messages,
+        model: cfg.model || "gpt-4o-mini",
+        maxOutputTokens: helpMaxTokens,
+        timeoutMs: helpTimeoutMs,
+      });
+      const data = directResponseText ? null : await openAiCompatibleChatCompletion({
         model: cfg.model || "gpt-4o-mini",
         temperature: 0.25,
         max_tokens: helpMaxTokens,
         timeout_ms: helpTimeoutMs,
-        messages: [{ role: "system", content: system }, ...msgHist, { role: "user", content: question.slice(0, 1200) }],
+        messages: [{ role: "system", content: system }, ...messages],
       });
-      if (!data) return null;
-      const text = String(data?.choices?.[0]?.message?.content || "").trim();
+      const text = String(directResponseText || data?.choices?.[0]?.message?.content || "").trim();
       return text || null;
     } catch {
       return null;
@@ -1700,9 +1721,10 @@ export default async function ironmindRoutes(app) {
         ok: true,
         provider,
         model,
+        ai_transport: isDirectOpenAiResponsesConfigured() ? "openai_responses" : "openai_compatible_chat",
         chat_endpoint: chatEndpointSummaryForLogs(),
         live_enabled: provider === "openai",
-        last_llm_chat_error: getLastLlmChatError() || null,
+        last_llm_chat_error: getLastOpenAiResponsesError() || getLastLlmChatError() || null,
         last_ask_mode: ironmindRuntime.last_ask_mode,
         last_ask_error: ironmindRuntime.last_ask_error || null,
         last_ask_at: ironmindRuntime.last_ask_at || null,
