@@ -19,6 +19,10 @@ export function getLastOpenAiResponsesError() {
   return lastOpenAiResponsesError;
 }
 
+export function getBorrisResponsesModel() {
+  return String(process.env.BORRIS_OPENAI_MODEL || getChatModel()).trim() || "gpt-4o-mini";
+}
+
 export function buildBorrisResponsesInput(messages = []) {
   return messages
     .map((message) => {
@@ -39,7 +43,7 @@ export function buildBorrisResponsesInput(messages = []) {
 export async function openAiResponsesText({
   instructions,
   messages,
-  model = getChatModel(),
+  model = "",
   maxOutputTokens = 220,
   timeoutMs = 45000,
 } = {}) {
@@ -66,7 +70,7 @@ export async function openAiResponsesText({
       maxRetries: 0,
     });
     const response = await client.responses.create({
-      model: String(model || getChatModel()).trim() || "gpt-4o-mini",
+      model: String(process.env.BORRIS_OPENAI_MODEL || model || getChatModel()).trim() || "gpt-4o-mini",
       instructions: String(instructions || "").trim(),
       input,
       max_output_tokens: safeMaxOutputTokens,

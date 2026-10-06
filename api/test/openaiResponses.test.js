@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildBorrisResponsesInput, isDirectOpenAiResponsesConfigured } from "../utils/openaiResponses.js";
+import { buildBorrisResponsesInput, getBorrisResponsesModel, isDirectOpenAiResponsesConfigured } from "../utils/openaiResponses.js";
 
 function withEnv(values, run) {
-  const keys = ["OPENAI_API_KEY", "OPENAI_BASE_URL", "LLM_BASE_URL", "OLLAMA_HOST", "OLLAMA_BASE_URL", "BORRIS_USE_OPENAI_RESPONSES"];
+  const keys = ["OPENAI_API_KEY", "OPENAI_BASE_URL", "LLM_BASE_URL", "OLLAMA_HOST", "OLLAMA_BASE_URL", "BORRIS_USE_OPENAI_RESPONSES", "BORRIS_OPENAI_MODEL", "LLM_MODEL"];
   const before = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   try {
     for (const key of keys) {
@@ -38,4 +38,10 @@ test("Borris Responses input preserves conversational roles as plain text", () =
     buildBorrisResponsesInput([{ role: "user", content: "Status for G01AM" }, { role: "assistant", content: "One open work order." }]),
     "USER:\nStatus for G01AM\n\nASSISTANT:\nOne open work order.",
   );
+});
+
+test("Borris can use its OpenAI model without changing a legacy provider model", () => {
+  withEnv({ BORRIS_OPENAI_MODEL: "gpt-4o-mini", LLM_MODEL: "llama3.2" }, () => {
+    assert.equal(getBorrisResponsesModel(), "gpt-4o-mini");
+  });
 });

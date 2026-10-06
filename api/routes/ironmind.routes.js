@@ -14,6 +14,7 @@ import {
 } from "../utils/llmChat.js";
 import {
   getLastOpenAiResponsesError,
+  getBorrisResponsesModel,
   isDirectOpenAiResponsesConfigured,
   openAiResponsesText,
 } from "../utils/openaiResponses.js";
@@ -1716,7 +1717,9 @@ export default async function ironmindRoutes(app) {
     try {
       const cfg = getAiConfig();
       const provider = String(cfg?.provider || "none");
-      const model = provider === "openai" ? String(cfg?.model || getChatModel()) : "";
+      const model = provider === "openai"
+        ? (isDirectOpenAiResponsesConfigured() ? getBorrisResponsesModel() : String(cfg?.model || getChatModel()))
+        : "";
       return reply.send({
         ok: true,
         provider,
