@@ -228,7 +228,7 @@ function juneHandleLiveMessage(message) {
   const type = String(event?.type || "");
   if (type === "session.started") {
     juneSetState("June is listening.", "live");
-    juneAppendTranscript("June", "Hello. I’m June. What would you like to work through?", "assistant");
+    juneAppendTranscript("June", "June online. What are we taking on first?", "assistant");
     return;
   }
   if (type === "session.input_transcript.delta") {
