@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=june-avatar-1" />
+  <link rel="stylesheet" href="./styles.css?v=june-minimal-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -421,7 +421,7 @@
         </div>
         <button type="button" class="btn-secondary" id="myWorkRefresh">Refresh</button>
       </div>
-      <section class="dash-card full-width june-assistant-card june-mywork-assistant" id="juneAssistantCard" hidden aria-labelledby="juneTitle">
+      <section class="dash-card full-width june-assistant-card june-mywork-assistant june-minimal-card" id="juneAssistantCard" hidden aria-labelledby="juneTitle">
         <div class="june-assistant-head">
           <div class="june-identity">
             <div class="june-avatar" id="juneAvatar" data-state="idle" aria-label="June is ready">
@@ -433,18 +433,14 @@
               <span class="sr-only" id="juneAvatarStatus">June is ready</span>
             </div>
             <div>
-              <p class="june-eyebrow">PRIVATE ADMIN ASSISTANT</p>
-              <h3 id="juneTitle">June <span class="june-voice-tag">Gleam voice</span></h3>
-              <p class="muted small">Talk through your day while June checks Ironlog, Borris and live weather. Link a private calendar now; Outlook mail can follow when Microsoft Graph is ready.</p>
+              <h3 id="juneTitle">June</h3>
             </div>
           </div>
           <div class="june-actions">
-            <button id="juneRefreshBtn" type="button" class="btn btn-secondary btn-sm">Check tools</button>
             <button id="juneStartBtn" type="button" class="btn btn-primary">Start talking</button>
             <button id="juneStopBtn" type="button" class="btn btn-secondary" hidden>End conversation</button>
           </div>
         </div>
-        <div class="june-status-line"><span class="june-live-dot" aria-hidden="true"></span><span id="juneLiveState" aria-live="polite">Checking June…</span></div>
         <div class="june-gateway-head"><span>Emma Tool Gateway</span><small>Private operational tools</small></div>
         <div id="juneConnectorList" class="june-connector-list" aria-label="June tool gateway status"></div>
         <div class="june-outlook-control" id="juneOutlookControl" hidden>
@@ -461,6 +457,7 @@
           <div class="june-transcript-empty">Start a conversation to hear and see June’s answers here.</div>
         </div>
         <p class="june-safety-note">June can look up facts and prepare review-only task drafts. She will never create Ironlog records, send email, or book meetings without a separate approval flow.</p>
+        <div class="june-status-line june-conversation-bar"><span class="june-live-dot" aria-hidden="true"></span><span id="juneLiveState" aria-live="polite">Checking June…</span></div>
       </section>
       <section class="dash-card full-width june-calendar-card" id="juneCalendarCard" hidden aria-labelledby="juneCalendarTitle">
         <div class="june-calendar-head">
@@ -7998,7 +7995,7 @@
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=89"></script>
   <script src="./app/june-avatar.js?v=1"></script>
-  <script src="./app/june.js?v=9"></script>
+  <script src="./app/june.js?v=10"></script>
   <script src="./app/finance.js?v=89"></script>
   <script src="./app/enterprise.js?v=89"></script>
   <script src="./app/workshop-docs.js?v=89"></script>

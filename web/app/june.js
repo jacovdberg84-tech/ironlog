@@ -295,7 +295,8 @@ function syncJuneVisibility() {
   if (!card) return;
   const visible = juneIsAdmin();
   card.hidden = !visible;
-  if (calendarCard) calendarCard.hidden = !visible;
+  // June can still use the private ICS feed, but My Work stays focused on her voice card.
+  if (calendarCard) calendarCard.hidden = true;
   if (!visible && junePeerConnection) juneStopLive({ silent: true });
   if (visible) loadJuneStatus({ quiet: true }).catch(() => {});
 }
