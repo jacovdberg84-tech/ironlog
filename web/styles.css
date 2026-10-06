@@ -8418,3 +8418,15 @@ body.uc-qr-locked #ucAsset {
   .stock-tabs { overflow-x: auto; flex-wrap: nowrap; }
   .stock-tabs button { white-space: nowrap; }
 }
+
+/* Monthly lube model */
+.lm-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 8px 0; }
+.lm-template { flex: 1; min-width: 240px; align-self: center; }
+.lm-upload { cursor: pointer; }
+.lm-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 10px 0; }
+.lm-stats > div { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--card-soft); }
+.lm-stats b { display: block; font-size: 1.2rem; }
+.lm-stats span { font-size: 0.8rem; color: var(--muted); }
+.lm-parts { margin-top: 12px; }
+.lm-parts summary { cursor: pointer; font-weight: 600; }
+.lm-missing td { background: rgba(245, 158, 11, 0.12); }

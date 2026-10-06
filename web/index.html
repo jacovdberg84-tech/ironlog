@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=stock-tabs-1" />
+  <link rel="stylesheet" href="./styles.css?v=lube-model-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -1933,6 +1933,37 @@
 
         <!-- Requests & orders: the Parts Orders cards are shown here while this tab is open -->
         <div data-stock-tab="requests" class="full-width stock-requests-host" id="stockRequestsHost"></div>
+
+        <!-- Monthly lube model (costing workbook) -->
+        <div data-stock-tab="reports" class="dash-card full-width" id="lubeModelCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #fefce8; color: #a16207;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path></svg>
+              </div>
+              <div>
+                <h3>Monthly lube model</h3>
+                <p class="muted small">Your lube costing workbook, filled from IronLog: lube issues per day, deliveries and opening stock. Formulas, macros and the summary stay as they are.</p>
+              </div>
+            </div>
+          </div>
+          <div class="lm-row">
+            <div class="lm-template" id="lmTemplate">Loading…</div>
+            <label class="btn btn-secondary lm-upload">Upload template (.xlsm)<input type="file" id="lmFile" accept=".xlsm,.xlsx" hidden /></label>
+          </div>
+          <div class="lm-row">
+            <div class="form-field"><label for="lmMonth">Month</label><input id="lmMonth" type="month" /></div>
+            <button type="button" class="btn btn-secondary" id="lmPreview">Check the month</button>
+            <button type="button" class="btn btn-primary" id="lmDownload">Download filled model</button>
+          </div>
+          <div id="lmMsg" class="dlv-msg" role="status" aria-live="polite"></div>
+          <div id="lmSummary" class="lm-summary"></div>
+          <details class="lm-parts" id="lmPartsBox">
+            <summary>Lube items and their oil type in the model</summary>
+            <p class="muted small">IronLog suggests the oil type and container size from each item's name. Fix any that are wrong; litres = quantity × container size.</p>
+            <div id="lmParts" class="dlv-table-wrap"></div>
+          </details>
+        </div>
 
         <!-- GM stock report -->
         <div data-stock-tab="reports" class="dash-card collapsible full-width" data-collapsed="false">
@@ -7856,11 +7887,12 @@
   <script src="./app/breakdowns.js?v=89"></script>
   <script src="./app/inventory.js?v=92"></script>
   <script src="./app/stock-receive.js?v=2"></script>
+  <script src="./app/lube-model.js?v=2"></script>
   <script src="./app/procurement.js?v=89"></script>
   <script src="./app/site-ops.js?v=89"></script>
   <script src="./app/daily-input.js?v=89"></script>
   <script src="./app/assets.js?v=89"></script>
-  <script src="./app/init.js?v=90"></script>
+  <script src="./app/init.js?v=91"></script>
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=89"></script>
   <script src="./app/finance.js?v=89"></script>
