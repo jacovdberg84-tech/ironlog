@@ -74,11 +74,28 @@ function juneRenderConnectors(connectors) {
   }).join("");
 }
 
+function juneRenderOutlookControl(outlook) {
+  const control = qs("juneOutlookControl");
+  const detail = qs("juneOutlookDetail");
+  const connect = qs("juneConnectOutlookBtn");
+  const disconnect = qs("juneDisconnectOutlookBtn");
+  if (!control || !detail || !connect || !disconnect) return;
+  const state = String(outlook?.state || "not_configured");
+  const account = String(outlook?.account || "").trim();
+  control.hidden = false;
+  detail.textContent = account ? `${outlook?.detail || "Outlook connected."} (${account})` : String(outlook?.detail || "Outlook is not configured.");
+  connect.hidden = !["not_connected", "needs_reconnect"].includes(state);
+  connect.textContent = state === "needs_reconnect" ? "Reconnect Outlook" : "Connect Outlook";
+  connect.disabled = state === "not_configured";
+  disconnect.hidden = state !== "connected";
+}
+
 async function loadJuneStatus({ quiet = false } = {}) {
   if (!juneIsAdmin()) return;
   try {
     const data = await fetchJson(`${API}/api/june/status`);
     juneRenderConnectors(data?.connectors || {});
+    juneRenderOutlookControl(data?.outlook || null);
     if (!data?.live_ready) {
       juneSetState("June Live needs the server OpenAI configuration.", "warning");
       const start = qs("juneStartBtn");
@@ -97,6 +114,50 @@ async function loadJuneStatus({ quiet = false } = {}) {
   } catch (error) {
     juneSetState("June is unavailable right now.", "warning");
   }
+}
+
+async function juneConnectOutlook() {
+  const button = qs("juneConnectOutlookBtn");
+  if (button) button.disabled = true;
+  juneSetState("June is opening Microsoft sign-in…", "working");
+  try {
+    const data = await juneApiJson(`${API}/api/june/outlook/connect`, { headers: authHeaders() });
+    if (!data?.authorize_url) throw new Error("Ironlog did not receive a Microsoft authorisation link.");
+    window.location.assign(data.authorize_url);
+  } catch (error) {
+    juneSetState(`Outlook could not start: ${error?.message || String(error)}`, "warning");
+    if (button) button.disabled = false;
+  }
+}
+
+async function juneDisconnectOutlook() {
+  const button = qs("juneDisconnectOutlookBtn");
+  if (button) button.disabled = true;
+  juneSetState("Disconnecting Outlook…", "working");
+  try {
+    await juneApiJson(`${API}/api/june/outlook/disconnect`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: "{}",
+    });
+    await loadJuneStatus({ quiet: true });
+    juneSetState("Outlook disconnected. June is back to keeping her nose out of your inbox.", "ready");
+  } catch (error) {
+    juneSetState(`Outlook could not be disconnected: ${error?.message || String(error)}`, "warning");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function juneShowOutlookCallbackNotice() {
+  const url = new URL(window.location.href);
+  const state = String(url.searchParams.get("june_outlook") || "").trim();
+  if (!state) return;
+  const message = String(url.searchParams.get("june_outlook_message") || "Outlook connection updated.").trim();
+  juneSetState(message, state === "connected" ? "ready" : "warning");
+  url.searchParams.delete("june_outlook");
+  url.searchParams.delete("june_outlook_message");
+  window.history.replaceState({}, "", url.toString());
 }
 
 function syncJuneVisibility() {
@@ -324,11 +385,14 @@ function juneStopLive({ silent = false } = {}) {
 
 function initJune() {
   syncJuneVisibility();
+  juneShowOutlookCallbackNotice();
 }
 
 function wireJuneControls() {
   qs("juneStartBtn")?.addEventListener("click", () => juneStartLive());
   qs("juneStopBtn")?.addEventListener("click", () => juneStopLive());
   qs("juneRefreshBtn")?.addEventListener("click", () => loadJuneStatus());
+  qs("juneConnectOutlookBtn")?.addEventListener("click", () => juneConnectOutlook());
+  qs("juneDisconnectOutlookBtn")?.addEventListener("click", () => juneDisconnectOutlook());
 }
 

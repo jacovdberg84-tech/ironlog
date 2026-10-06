@@ -5,6 +5,14 @@
 import crypto from "node:crypto";
 import { db } from "../db/client.js";
 import { getRoles, getSiteCode, getUser } from "../utils/request.js";
+import {
+  beginOutlookAuthorization,
+  completeOutlookAuthorization,
+  disconnectOutlook,
+  getOutlookCalendarOverview,
+  getOutlookConnectionStatus,
+  getOutlookPriorityEmails,
+} from "../utils/juneOutlook.js";
 
 const OPENAI_LIVE_URL = "https://api.openai.com/v1/live/sessions";
 const LIVE_MODEL = "gpt-live-1";
@@ -169,15 +177,16 @@ function safeRow(sql, params = []) {
   }
 }
 
-function connectorStatus() {
+function connectorStatus(context = {}) {
+  const outlook = getOutlookConnectionStatus(context);
   return {
     calendar: {
-      state: String(process.env.JUNE_CALENDAR_CONNECTED || "").toLowerCase() === "true" ? "connected" : "not_connected",
-      detail: "Calendar needs an authorised Google or Microsoft connection before June can read meetings.",
+      state: outlook.state,
+      detail: outlook.detail,
     },
     email: {
-      state: String(process.env.JUNE_EMAIL_CONNECTED || "").toLowerCase() === "true" ? "connected" : "not_connected",
-      detail: "Email needs an authorised Microsoft or Google connection before June can read important messages.",
+      state: outlook.state,
+      detail: outlook.detail,
     },
     weather: { state: "ready", detail: "June can use live web lookup for weather questions." },
     ironlog: { state: "connected", detail: "Read-only operational facts and review-only drafts are available." },
@@ -380,7 +389,7 @@ function buildTaskDraft(args, user) {
   };
 }
 
-function executeGatewayTool(name, args, context) {
+async function executeGatewayTool(name, args, context) {
   const tool = safeText(name, 80);
   const safeArgs = args && typeof args === "object" && !Array.isArray(args) ? args : {};
   if (tool === "june_get_task_brief") {
@@ -393,13 +402,9 @@ function executeGatewayTool(name, args, context) {
     return getBorrisEngineeringBrief(safeArgs.asset_code, isDate(safeArgs.as_of) ? String(safeArgs.as_of) : todayYmd());
   }
   if (tool === "june_draft_task") return buildTaskDraft(safeArgs, context.user);
-  if (tool === "june_calendar_overview") {
-    return { ...connectorStatus().calendar, review_only: true, next_step: "Connect the calendar provider before June can read meetings." };
-  }
-  if (tool === "june_email_priorities") {
-    return { ...connectorStatus().email, review_only: true, next_step: "Connect the email provider before June can read messages." };
-  }
-  if (tool === "june_connector_status") return { review_only: true, connectors: connectorStatus() };
+  if (tool === "june_calendar_overview") return getOutlookCalendarOverview(context);
+  if (tool === "june_email_priorities") return getOutlookPriorityEmails(context);
+  if (tool === "june_connector_status") return { review_only: true, connectors: connectorStatus(context), outlook: getOutlookConnectionStatus(context) };
   return { error: `Unsupported June tool: ${tool}` };
 }
 
@@ -489,6 +494,7 @@ async function createOpenAiLiveSession({ apiKey, payload, log, safetyId }) {
 export default async function juneRoutes(app) {
   app.get("/status", async (req, reply) => {
     if (!requireJuneAdmin(req, reply)) return;
+    const context = { siteCode: getSiteCode(req), user: getUser(req) };
     return {
       ok: true,
       gateway_name: "Emma Tool Gateway",
@@ -498,8 +504,47 @@ export default async function juneRoutes(app) {
       voice: LIVE_VOICE,
       backend_model: liveBackendModel(),
       last_live_attempt: lastLiveAttempt,
-      connectors: connectorStatus(),
+      connectors: connectorStatus(context),
+      outlook: getOutlookConnectionStatus(context),
     };
+  });
+
+  // Starts the user-authorised Microsoft OAuth flow. This endpoint remains
+  // authenticated: only the callback is public, and it is protected by an
+  // expiring, single-use state value bound to this administrator.
+  app.get("/outlook/connect", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    try {
+      const connection = beginOutlookAuthorization({ siteCode: getSiteCode(req), user: getUser(req) });
+      return { ok: true, ...connection };
+    } catch (error) {
+      return reply.code(503).send({ ok: false, error: safeText(error?.message || "Outlook is not configured on the server.", 350) });
+    }
+  });
+
+  // Microsoft redirects here after consent. Auth cannot be required on this
+  // callback because it arrives from Microsoft's browser redirect, not from a
+  // fetch carrying Ironlog's Bearer token. The stored state is the authority.
+  app.get("/outlook/callback", async (req, reply) => {
+    try {
+      const result = await completeOutlookAuthorization({
+        state: req.query?.state,
+        code: req.query?.code,
+        error: req.query?.error,
+        errorDescription: req.query?.error_description,
+      });
+      if (result.redirect_url) return reply.redirect(result.redirect_url);
+      return reply.code(400).type("text/plain; charset=utf-8").send(result.message || "Outlook connection could not be completed.");
+    } catch (error) {
+      req.log.warn({ error: safeText(error?.message || error, 350) }, "June Outlook callback failed");
+      return reply.code(502).type("text/plain; charset=utf-8").send("Outlook could not be connected right now. Return to Ironlog and try again.");
+    }
+  });
+
+  app.post("/outlook/disconnect", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    const result = disconnectOutlook({ siteCode: getSiteCode(req), user: getUser(req) });
+    return { ok: true, ...result };
   });
 
   // Receives a browser-created SDP offer and immediately returns a short-lived
@@ -598,11 +643,16 @@ export default async function juneRoutes(app) {
     if (!requireJuneAdmin(req, reply)) return;
     const name = safeText(req.body?.name, 80);
     const args = req.body?.arguments;
-    const result = executeGatewayTool(name, args, {
-      siteCode: getSiteCode(req),
-      user: getUser(req),
-    });
-    return { ok: true, tool: name, result };
+    try {
+      const result = await executeGatewayTool(name, args, {
+        siteCode: getSiteCode(req),
+        user: getUser(req),
+      });
+      return { ok: true, tool: name, result };
+    } catch (error) {
+      req.log.warn({ tool: name, error: safeText(error?.message || error, 350) }, "June gateway tool failed");
+      return { ok: false, tool: name, result: { error: safeText(error?.message || "June could not complete that Outlook request.", 350) } };
+    }
   });
 }
 

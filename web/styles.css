@@ -8457,7 +8457,12 @@ body.uc-qr-locked #ucAsset {
 .june-connector { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font-size: 11px; background: var(--card-soft); }
 .june-connector b { font-size: 10px; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); }
 .june-connector-connected b, .june-connector-ready b { color: var(--success); }
-.june-connector-not_connected b { color: var(--warn); }
+.june-connector-not_connected b, .june-connector-needs_reconnect b { color: var(--warn); }
+.june-connector-not_configured b { color: var(--muted); }
+.june-outlook-control { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 12px 20px 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card-soft); }
+.june-outlook-control strong { display: block; font-size: 12px; }
+.june-outlook-control p { margin: 3px 0 0; max-width: 640px; }
+.june-outlook-actions { display: flex; gap: 8px; flex: 0 0 auto; }
 .june-transcript { margin: 12px 20px; min-height: 66px; max-height: 220px; overflow-y: auto; display: grid; gap: 8px; }
 .june-transcript-row { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 8px; align-items: start; font-size: 13px; }
 .june-transcript-speaker { color: var(--muted); font-weight: 800; font-size: 11px; padding-top: 3px; text-transform: uppercase; }
@@ -8469,6 +8474,7 @@ body.uc-qr-locked #ucAsset {
   .june-assistant-head { display: grid; padding: 15px; }
   .june-actions { justify-content: flex-start; }
   .june-status-line, .june-gateway-head, .june-connector-list, .june-safety-note { padding-left: 15px; padding-right: 15px; }
+  .june-outlook-control { margin-left: 15px; margin-right: 15px; align-items: flex-start; }
   .june-transcript { margin-left: 15px; margin-right: 15px; }
 }
 @media (max-width: 640px) {

@@ -12,6 +12,10 @@ jobs:
     timeout-minutes: 20
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      JUNE_OUTLOOK_CLIENT_ID: ${{ secrets.JUNE_OUTLOOK_CLIENT_ID }}
+      JUNE_OUTLOOK_CLIENT_SECRET: ${{ secrets.JUNE_OUTLOOK_CLIENT_SECRET }}
+      JUNE_OUTLOOK_TENANT_ID: ${{ secrets.JUNE_OUTLOOK_TENANT_ID }}
+      JUNE_CONNECTOR_ENCRYPTION_SECRET: ${{ secrets.JUNE_CONNECTOR_ENCRYPTION_SECRET }}
 
     steps:
       - name: Deploy over SSH
@@ -25,7 +29,7 @@ jobs:
           # appleboy/ssh-action only forwards named workflow variables to the
           # remote shell. Without this, the private Actions secret never reaches
           # api/.env and Borris silently uses its deterministic fallback.
-          envs: OPENAI_API_KEY
+          envs: OPENAI_API_KEY,JUNE_OUTLOOK_CLIENT_ID,JUNE_OUTLOOK_CLIENT_SECRET,JUNE_OUTLOOK_TENANT_ID,JUNE_CONNECTOR_ENCRYPTION_SECRET
           script_stop: true
           script: |
             set -e
@@ -44,6 +48,19 @@ jobs:
               env_tmp="$(mktemp)"
               grep -v -E '^(OPENAI_API_KEY|BORRIS_USE_OPENAI_RESPONSES|BORRIS_OPENAI_MODEL|JUNE_BACKEND_MODEL)=' "$env_file" > "$env_tmp" || true
               printf '\nOPENAI_API_KEY=%s\nBORRIS_USE_OPENAI_RESPONSES=1\nBORRIS_OPENAI_MODEL=gpt-4o-mini\nJUNE_BACKEND_MODEL=gpt-5.6-terra\n' "$OPENAI_API_KEY" >> "$env_tmp"
+              mv "$env_tmp" "$env_file"
+              chmod 600 "$env_file"
+            fi
+            # Outlook is optional. Only replace these settings when every
+            # required secret is present, so an ordinary application deploy
+            # cannot accidentally disconnect June's existing mailbox access.
+            if [ -n "${JUNE_OUTLOOK_CLIENT_ID:-}" ] && [ -n "${JUNE_OUTLOOK_CLIENT_SECRET:-}" ] && [ -n "${JUNE_OUTLOOK_TENANT_ID:-}" ] && [ -n "${JUNE_CONNECTOR_ENCRYPTION_SECRET:-}" ]; then
+              env_file="/data/ironlog/api/.env"
+              touch "$env_file"
+              chmod 600 "$env_file"
+              env_tmp="$(mktemp)"
+              grep -v -E '^(JUNE_OUTLOOK_CLIENT_ID|JUNE_OUTLOOK_CLIENT_SECRET|JUNE_OUTLOOK_TENANT_ID|JUNE_OUTLOOK_REDIRECT_URI|JUNE_CONNECTOR_ENCRYPTION_SECRET)=' "$env_file" > "$env_tmp" || true
+              printf '\nJUNE_OUTLOOK_CLIENT_ID=%s\nJUNE_OUTLOOK_CLIENT_SECRET=%s\nJUNE_OUTLOOK_TENANT_ID=%s\nJUNE_OUTLOOK_REDIRECT_URI=https://ironlog.ironlogafrica.com/api/june/outlook/callback\nJUNE_CONNECTOR_ENCRYPTION_SECRET=%s\n' "$JUNE_OUTLOOK_CLIENT_ID" "$JUNE_OUTLOOK_CLIENT_SECRET" "$JUNE_OUTLOOK_TENANT_ID" "$JUNE_CONNECTOR_ENCRYPTION_SECRET" >> "$env_tmp"
               mv "$env_tmp" "$env_file"
               chmod 600 "$env_file"
             fi

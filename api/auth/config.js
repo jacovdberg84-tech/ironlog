@@ -16,6 +16,10 @@ const PUBLIC_AUTH_REQUESTS = new Set([
   "GET /api/auth/pin/roster",
   "GET /api/auth/config",
   "GET /api/auth/tabs",
+  // Microsoft redirects the signed-in administrator here after Outlook OAuth.
+  // The June route validates an expiring, single-use OAuth state instead of a
+  // bearer token, which Microsoft does not carry on its browser redirect.
+  "GET /api/june/outlook/callback",
 ]);
 
 export function isPublicAuthRequest(url, method) {

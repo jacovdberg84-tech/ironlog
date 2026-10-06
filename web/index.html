@@ -437,6 +437,16 @@
         <div class="june-status-line"><span class="june-live-dot" aria-hidden="true"></span><span id="juneLiveState" aria-live="polite">Checking June…</span></div>
         <div class="june-gateway-head"><span>Emma Tool Gateway</span><small>Private operational tools</small></div>
         <div id="juneConnectorList" class="june-connector-list" aria-label="June tool gateway status"></div>
+        <div class="june-outlook-control" id="juneOutlookControl" hidden>
+          <div>
+            <strong>Microsoft Outlook</strong>
+            <p id="juneOutlookDetail" class="muted small">Checking Outlook connection…</p>
+          </div>
+          <div class="june-outlook-actions">
+            <button id="juneConnectOutlookBtn" type="button" class="btn btn-secondary btn-sm" hidden>Connect Outlook</button>
+            <button id="juneDisconnectOutlookBtn" type="button" class="btn btn-secondary btn-sm" hidden>Disconnect</button>
+          </div>
+        </div>
         <div id="juneTranscript" class="june-transcript" role="log" aria-live="polite" aria-label="Conversation with June">
           <div class="june-transcript-empty">Start a conversation to hear and see June’s answers here.</div>
         </div>
@@ -7947,7 +7957,7 @@
   <script src="./app/init.js?v=91"></script>
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=89"></script>
-  <script src="./app/june.js?v=6"></script>
+  <script src="./app/june.js?v=7"></script>
   <script src="./app/finance.js?v=89"></script>
   <script src="./app/enterprise.js?v=89"></script>
   <script src="./app/workshop-docs.js?v=89"></script>
