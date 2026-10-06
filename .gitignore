@@ -10,6 +10,7 @@
 .env.*
 !.env.example
 api/secrets/
+api/.june-connector.key
 
 # Built mobile APK — deploy to server manually (too large for git)
 web/downloads/*.apk

@@ -2,6 +2,9 @@
 // Private, user-authorised Microsoft Outlook connector for June. Tokens are
 // encrypted at rest and never leave the API server.
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { db } from "../db/client.js";
 
 const MICROSOFT_LOGIN_BASE = "https://login.microsoftonline.com";
@@ -10,6 +13,8 @@ const TOKEN_SKEW_MS = 120_000;
 const STATE_TTL_MS = 10 * 60_000;
 const GRAPH_TIMEOUT_MS = 20_000;
 const OUTLOOK_SCOPES = ["openid", "profile", "offline_access", "User.Read", "Mail.Read", "Calendars.Read"];
+const connectorKeyFile = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".june-connector.key");
+let localConnectorSecret = null;
 
 function text(value, max = 500) {
   return String(value || "").trim().slice(0, max);
@@ -19,10 +24,50 @@ function contextValue(value, fallback) {
   return text(value, 160).toLowerCase() || fallback;
 }
 
+function loadOrCreateLocalConnectorSecret() {
+  if (localConnectorSecret) return localConnectorSecret;
+  try {
+    const saved = fs.readFileSync(connectorKeyFile, "utf8").trim();
+    if (saved.length >= 32) {
+      localConnectorSecret = saved;
+      return saved;
+    }
+    // A malformed file must be repaired by an administrator rather than
+    // overwritten silently, which would make existing protected data unreadable.
+    if (saved) return "";
+  } catch (error) {
+    if (error?.code !== "ENOENT") return "";
+  }
+  const generated = crypto.randomBytes(48).toString("base64url");
+  try {
+    const handle = fs.openSync(connectorKeyFile, "wx", 0o600);
+    fs.writeFileSync(handle, `${generated}\n`, "utf8");
+    fs.closeSync(handle);
+    localConnectorSecret = generated;
+    return generated;
+  } catch (error) {
+    if (error?.code !== "EEXIST") return "";
+    try {
+      const saved = fs.readFileSync(connectorKeyFile, "utf8").trim();
+      if (saved.length >= 32) {
+        localConnectorSecret = saved;
+        return saved;
+      }
+    } catch {
+      // A retry will surface the normal connector-not-configured message.
+    }
+    return "";
+  }
+}
+
 function connectorKey() {
-  // Prefer a dedicated connector key. IRONLOG_AUTH_SECRET is an acceptable
-  // fallback for existing secured installations, but no default is allowed.
-  const raw = text(process.env.JUNE_CONNECTOR_ENCRYPTION_SECRET || process.env.IRONLOG_AUTH_SECRET, 2000);
+  // Prefer the deployment-managed secret, then an existing auth secret. A
+  // server-local 0600 key keeps private connectors usable on deployments
+  // where the environment file is managed outside PM2's process settings.
+  const raw = text(
+    process.env.JUNE_CONNECTOR_ENCRYPTION_SECRET || process.env.IRONLOG_AUTH_SECRET || loadOrCreateLocalConnectorSecret(),
+    2000,
+  );
   if (raw.length < 32) return null;
   return crypto.createHash("sha256").update(raw).digest();
 }
