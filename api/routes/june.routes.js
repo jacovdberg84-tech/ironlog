@@ -9,6 +9,10 @@ import { getRoles, getSiteCode, getUser } from "../utils/request.js";
 const OPENAI_LIVE_URL = "https://api.openai.com/v1/live/sessions";
 const LIVE_MODEL = "gpt-live-1";
 const LIVE_VOICE = "gleam";
+const LIVE_SESSION_TIMEOUT_MS = 50_000;
+const LIVE_TICKET_TTL_MS = 3 * 60_000;
+const LIVE_TICKET_LIMIT = 24;
+const liveSessionTickets = new Map();
 
 const JUNE_LIVE_INSTRUCTIONS = [
   "You are June, the private executive assistant for the Ironlog administrator.",
@@ -400,6 +404,68 @@ function safetyIdentifier(req) {
   return crypto.createHash("sha256").update(value).digest("hex").slice(0, 48);
 }
 
+function cleanupLiveTickets(now = Date.now()) {
+  for (const [id, ticket] of liveSessionTickets) {
+    if (Number(ticket?.expires_at || 0) <= now) liveSessionTickets.delete(id);
+  }
+}
+
+function liveSessionError(message, statusCode = 502) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+async function createOpenAiLiveSession({ apiKey, payload, log, safetyId }) {
+  const abortController = new AbortController();
+  const requestTimeout = setTimeout(() => abortController.abort(), LIVE_SESSION_TIMEOUT_MS);
+  try {
+    const response = await fetch(OPENAI_LIVE_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "OpenAI-Safety-Identifier": safetyId,
+      },
+      body: JSON.stringify(payload),
+      signal: abortController.signal,
+    });
+    const text = await response.text();
+    let data = {};
+    try { data = JSON.parse(text); } catch {}
+    if (!response.ok) {
+      const upstreamError = safeText(data?.error?.message || text, 300);
+      log.warn({ status: response.status, error: upstreamError }, "June Live session request failed");
+      throw liveSessionError(
+        upstreamError
+          ? `OpenAI could not start June's live session: ${upstreamError}`
+          : "OpenAI could not start June's live session. Confirm that this project has GPT-Live access.",
+        // Keep the browser-facing status separate from the upstream provider's
+        // status. A provider 401/403 must not make Ironlog think its own user
+        // session has expired.
+        502,
+      );
+    }
+    const answer = String(data?.transport?.sdp || "").trim();
+    if (!answer) throw liveSessionError("June received an incomplete live session response.");
+    return {
+      session_id: safeText(data?.session?.id, 160),
+      sdp: answer,
+      model: LIVE_MODEL,
+      voice: LIVE_VOICE,
+    };
+  } catch (error) {
+    if (error?.statusCode) throw error;
+    log.warn({ error: safeText(error?.message || error, 300) }, "June Live network request failed");
+    if (error?.name === "AbortError") {
+      throw liveSessionError("June's live-session request timed out. Please retry; if it continues, check the server's connection to OpenAI.", 504);
+    }
+    throw liveSessionError("June could not contact the live voice service.");
+  } finally {
+    clearTimeout(requestTimeout);
+  }
+}
+
 export default async function juneRoutes(app) {
   app.get("/status", async (req, reply) => {
     if (!requireJuneAdmin(req, reply)) return;
@@ -407,6 +473,7 @@ export default async function juneRoutes(app) {
       ok: true,
       gateway_name: "Emma Tool Gateway",
       live_ready: Boolean(String(process.env.OPENAI_API_KEY || "").trim()),
+      live_start_mode: "secure_async_poll",
       model: LIVE_MODEL,
       voice: LIVE_VOICE,
       backend_model: liveBackendModel(),
@@ -414,8 +481,10 @@ export default async function juneRoutes(app) {
     };
   });
 
-  // Receives a browser-created SDP offer and returns OpenAI's SDP answer. The
-  // standard project key stays on the server throughout the call.
+  // Receives a browser-created SDP offer and immediately returns a short-lived
+  // ticket. The OpenAI call happens in the background, avoiding proxy timeouts
+  // while GPT-Live allocates the WebRTC session. The SDP answer remains bound
+  // to the authenticated administrator who created the ticket.
   app.post("/live/session", async (req, reply) => {
     if (!requireJuneAdmin(req, reply)) return;
     const sdp = String(req.body?.sdp || "").trim();
@@ -426,6 +495,11 @@ export default async function juneRoutes(app) {
     if (!apiKey) {
       return reply.code(503).send({ ok: false, error: "June Live is not configured on the server." });
     }
+    cleanupLiveTickets();
+    if (liveSessionTickets.size >= LIVE_TICKET_LIMIT) {
+      return reply.code(429).send({ ok: false, error: "June is starting several sessions. Please retry in a moment." });
+    }
+    const owner = safetyIdentifier(req);
     const payload = {
       session: {
         model: LIVE_MODEL,
@@ -444,53 +518,46 @@ export default async function juneRoutes(app) {
       },
       transport: { type: "webrtc", sdp },
     };
-    const abortController = new AbortController();
-    const requestTimeout = setTimeout(() => abortController.abort(), 25_000);
-    try {
-      const response = await fetch(OPENAI_LIVE_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-          "OpenAI-Safety-Identifier": safetyIdentifier(req),
-        },
-        body: JSON.stringify(payload),
-        signal: abortController.signal,
+    const ticket = crypto.randomUUID();
+    const pending = {
+      owner,
+      state: "pending",
+      status_code: 202,
+      created_at: Date.now(),
+      expires_at: Date.now() + LIVE_TICKET_TTL_MS,
+      result: null,
+      error: "",
+    };
+    liveSessionTickets.set(ticket, pending);
+    void createOpenAiLiveSession({ apiKey, payload, log: req.log, safetyId: owner })
+      .then((result) => {
+        pending.state = "ready";
+        pending.status_code = 200;
+        pending.result = result;
+      })
+      .catch((error) => {
+        pending.state = "failed";
+        pending.status_code = Number(error?.statusCode || 502);
+        pending.error = safeText(error?.message || "June could not start a live voice session.", 400);
       });
-      const text = await response.text();
-      let data = {};
-      try { data = JSON.parse(text); } catch {}
-      if (!response.ok) {
-        const upstreamError = safeText(data?.error?.message || text, 300);
-        req.log.warn({ status: response.status, error: upstreamError }, "June Live session request failed");
-        return reply.code(502).send({
-          ok: false,
-          error: upstreamError
-            ? `OpenAI could not start June's live session: ${upstreamError}`
-            : "OpenAI could not start June's live session. Confirm that this project has GPT-Live access.",
-        });
-      }
-      const answer = String(data?.transport?.sdp || "").trim();
-      if (!answer) return reply.code(502).send({ ok: false, error: "June received an incomplete live session response." });
-      return {
-        ok: true,
-        session_id: safeText(data?.session?.id, 160),
-        sdp: answer,
-        model: LIVE_MODEL,
-        voice: LIVE_VOICE,
-      };
-    } catch (error) {
-      req.log.warn({ error: safeText(error?.message || error, 300) }, "June Live network request failed");
-      const timedOut = error?.name === "AbortError";
-      return reply.code(502).send({
-        ok: false,
-        error: timedOut
-          ? "June's live-session request timed out. Please retry; if it continues, check the server's connection to OpenAI."
-          : "June could not contact the live voice service.",
-      });
-    } finally {
-      clearTimeout(requestTimeout);
+    return reply.code(202).send({ ok: true, state: "pending", ticket, retry_after_ms: 800 });
+  });
+
+  app.get("/live/session/:ticket", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    cleanupLiveTickets();
+    const ticketId = safeText(req.params?.ticket, 100);
+    const ticket = liveSessionTickets.get(ticketId);
+    if (!ticket || ticket.owner !== safetyIdentifier(req)) {
+      return reply.code(404).send({ ok: false, error: "June session request was not found. Please start again." });
     }
+    if (ticket.state === "pending") {
+      return reply.code(202).send({ ok: true, state: "pending", retry_after_ms: 800 });
+    }
+    if (ticket.state === "failed") {
+      return reply.code(ticket.status_code || 502).send({ ok: false, state: "failed", error: ticket.error || "June could not start a live voice session." });
+    }
+    return { ok: true, state: "ready", ...ticket.result };
   });
 
   // This gateway is the only executor for private June functions. Its tool set

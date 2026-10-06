@@ -133,20 +133,39 @@ async function juneWaitForIceGathering(peerConnection, timeoutMs = 4_000) {
   });
 }
 
-async function juneCreateLiveSession(sdp) {
-  const response = await fetch(`${API}/api/june/live/session`, {
-    method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ sdp }),
-  });
+async function juneApiJson(url, options = {}) {
+  const response = await fetch(url, options);
   const text = await response.text();
   let data = {};
   try { data = JSON.parse(text); } catch {}
   if (!response.ok) {
     if (response.status === 401 && LOGIN_GATE_ENABLED) promptSignInAgain();
-    throw Object.assign(new Error(String(data?.error || "June could not start a live voice session.")), { status: response.status });
+    const fallback = `June's voice service returned HTTP ${response.status}. Please retry shortly.`;
+    throw Object.assign(new Error(String(data?.error || fallback)), { status: response.status });
   }
   return data;
+}
+
+function juneDelay(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function juneCreateLiveSession(sdp) {
+  const started = await juneApiJson(`${API}/api/june/live/session`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ sdp }),
+  });
+  if (!started?.ticket || started?.state !== "pending") return started;
+  const ticket = encodeURIComponent(String(started.ticket));
+  const retryAfter = Math.max(300, Math.min(2_000, Number(started.retry_after_ms || 800)));
+  for (let attempt = 0; attempt < 70; attempt += 1) {
+    juneSetState("June is preparing her secure voice session…", "working");
+    await juneDelay(retryAfter);
+    const update = await juneApiJson(`${API}/api/june/live/session/${ticket}`, { headers: authHeaders() });
+    if (update?.state === "ready" && update?.sdp) return update;
+  }
+  throw new Error("June's voice session is taking too long to initialise. Please retry.");
 }
 
 async function juneRunTool(item) {
