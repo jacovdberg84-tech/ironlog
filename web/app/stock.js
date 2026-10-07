@@ -148,6 +148,7 @@ function renderStockInventoryTable(rows) {
           <div class="stores-stock-actions">
             <button type="button" class="btn btn-secondary btn-sm" data-stock-action="receive">Receive</button>
             <button type="button" class="btn btn-primary btn-sm" data-stock-action="issue"${onHand <= 0 ? " disabled" : ""}>Issue</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-stock-action="requisition"${onHand <= 0 ? " disabled" : ""}>Issue req</button>
             <button type="button" class="btn btn-secondary btn-sm" data-stock-action="count">Count</button>
           </div>
         </footer>
@@ -214,6 +215,24 @@ function openStockAction(card, action) {
     if (qs("saQty")) qs("saQty").value = "1";
     target = qs("saPart")?.closest(".dash-card");
     setStatus(`Ready to issue ${code}. Select an asset or work order.`);
+  } else if (action === "requisition") {
+    if (typeof showStockTab === "function") showStockTab("issue");
+    const lines = qs("rqLines");
+    let line = [...(lines?.querySelectorAll("[data-rq-line]") || [])].find(
+      (row) => !String(row.querySelector(".rq-part")?.value || "").trim()
+    );
+    if (!line && lines && typeof requisitionLineHtml === "function") {
+      lines.insertAdjacentHTML("beforeend", requisitionLineHtml(lines.children.length + 1));
+      line = lines.lastElementChild;
+    }
+    const partInput = line?.querySelector(".rq-part");
+    if (partInput) partInput.value = code;
+    const qtyInput = line?.querySelector(".rq-qty");
+    if (qtyInput) qtyInput.value = "1";
+    target = qs("requisitionCard");
+    const message = qs("rqMsg");
+    if (message) message.textContent = `${code}${name ? ` — ${name}` : ""} added to the issue requisition.`;
+    setStatus(`Ready to print an issue requisition for ${code}.`);
   } else if (action === "count") {
     if (qs("icPartCode")) qs("icPartCode").value = code;
     target = qs("icPartCode")?.closest(".dash-card");
@@ -1643,10 +1662,30 @@ async function printRequisition(body) {
 
 function requisitionLineHtml(i) {
   return `<div class="rq-line" data-rq-line>
-    <input class="rq-part" list="partCodeOptions" placeholder="Part code or description" aria-label="Part ${i}" />
+    <input class="rq-part" list="rqPartCodeOptions" placeholder="Select a part currently in stock" aria-label="Part ${i}" />
     <input class="rq-qty" type="number" min="0.1" step="0.1" value="1" aria-label="Quantity ${i}" />
     <button type="button" class="rq-remove" data-rq-remove title="Remove line">✕</button>
   </div>`;
+}
+
+let issueRequisitionStock = new Map();
+
+async function loadIssueRequisitionStockOptions() {
+  const list = qs("rqPartCodeOptions");
+  if (!list) return;
+  const rows = await fetchJson(`${API}/api/stock/onhand`);
+  issueRequisitionStock = new Map();
+  list.innerHTML = (Array.isArray(rows) ? rows : [])
+    .filter((row) => Number(row.on_hand || 0) > 0)
+    .map((row) => {
+      const code = String(row.part_code || "").trim().toUpperCase();
+      const name = String(row.part_name || "").trim();
+      const onHand = Number(row.on_hand || 0);
+      if (!code) return "";
+      issueRequisitionStock.set(code, onHand);
+      return `<option value="${escapeHtml(code)}">${escapeHtml(`${code} — ${name} (${onHand.toFixed(1)} on hand)`)}</option>`;
+    })
+    .join("");
 }
 
 function resetRequisitionForm() {
@@ -1657,6 +1696,12 @@ function resetRequisitionForm() {
 
 async function submitWalkUpRequisition() {
   const msg = qs("rqMsg");
+  try {
+    await loadIssueRequisitionStockOptions();
+  } catch (e) {
+    if (msg) msg.textContent = `Could not confirm current stock: ${e.message || e}`;
+    return;
+  }
   const lines = [...document.querySelectorAll("#rqLines [data-rq-line]")].map((el) => {
     const raw = String(el.querySelector(".rq-part")?.value || "").trim();
     const qty = Number(el.querySelector(".rq-qty")?.value || 0);
@@ -1676,6 +1721,18 @@ async function submitWalkUpRequisition() {
   };
   if (!body.requested_by) { if (msg) msg.textContent = "Enter who is asking for the parts."; return; }
   if (!lines.length) { if (msg) msg.textContent = "Add at least one part with a quantity."; return; }
+  const unavailable = lines.find((line) => {
+    if (!line.part_code) return false;
+    const available = issueRequisitionStock.get(String(line.part_code).toUpperCase());
+    return available === undefined || Number(line.qty || 0) > available;
+  });
+  if (unavailable) {
+    const available = issueRequisitionStock.get(String(unavailable.part_code).toUpperCase());
+    if (msg) msg.textContent = available === undefined
+      ? `${unavailable.part_code} is not currently in stock. Choose a part from the stock list.`
+      : `Only ${available.toFixed(1)} of ${unavailable.part_code} is currently in stock.`;
+    return;
+  }
   if (msg) msg.textContent = "Saving…";
   try {
     const res = await fetchJson(`${API}/api/stock/requisitions/walk-up`, { method: "POST", body: JSON.stringify(body) });
@@ -1705,6 +1762,7 @@ async function loadRequisitionList() {
 
 (function initRequisitions() {
   resetRequisitionForm();
+  loadIssueRequisitionStockOptions().catch(() => {});
   qs("rqAddLine")?.addEventListener("click", () => {
     const host = qs("rqLines");
     if (host) host.insertAdjacentHTML("beforeend", requisitionLineHtml(host.children.length + 1));

@@ -2506,6 +2506,38 @@
           </div>
         </div>
 
+        <!-- Printable issue requisition for parts currently in store stock -->
+        <div data-stock-tab="issue" class="dash-card full-width" id="requisitionCard">
+          <div class="stores-waiting-head">
+            <div>
+              <h3>Issue requisition</h3>
+              <p class="muted small">Create a printable, signed stores issue requisition from the parts currently on hand. Use the Issue Part card above to post the physical stock movement to the asset or work order.</p>
+            </div>
+          </div>
+          <div class="rq-grid">
+            <div class="rq-form">
+              <h4>Issue from current stock</h4>
+              <label class="muted small" for="rqRequestedBy">Issued to / requested by</label>
+              <input id="rqRequestedBy" class="w-full" placeholder="e.g. Carlos, operator T01AM" />
+              <div class="rq-two">
+                <div><label class="muted small" for="rqAsset">Machine (optional)</label><input id="rqAsset" class="w-full" list="assetCodeOptions" placeholder="e.g. T01AM" /></div>
+                <div><label class="muted small" for="rqWo">Work order # (optional)</label><input id="rqWo" class="w-full" type="number" min="1" /></div>
+              </div>
+              <label class="muted small">Parts in stock</label>
+              <div id="rqLines"></div>
+              <button type="button" id="rqAddLine" class="rq-add">+ Add stock line</button>
+              <label class="muted small" for="rqNotes">Notes (optional)</label>
+              <input id="rqNotes" class="w-full" placeholder="e.g. daily service" />
+              <button type="button" id="rqSubmit" class="btn-primary">Save and print issue requisition</button>
+              <p id="rqMsg" class="muted small"></p>
+            </div>
+            <div class="rq-recent">
+              <div class="rq-recent-head"><h4>Last 30 days</h4><button type="button" id="rqRefresh">Refresh</button></div>
+              <div id="rqList"><p class="muted small">Loading…</p></div>
+            </div>
+          </div>
+        </div>
+
         <!-- Manual Stock Entry Card -->
         <div data-stock-tab="counts" class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
@@ -2829,36 +2861,6 @@
           </div>
           <div id="ptWaitingSummary" class="stores-waiting-summary"></div>
           <div id="ptWaitingList" class="stores-waiting-list"><div class="skeleton-block"></div></div>
-        </div>
-        <div class="dash-card full-width" id="requisitionCard">
-          <div class="stores-waiting-head">
-            <div>
-              <h3>Stores requisitions</h3>
-              <p class="muted small">Printable requisition (English + Portuguese) with sign-off boxes. Print one for a work order with "Print requisition" in the list above, or fill this in when someone asks at the counter.</p>
-            </div>
-          </div>
-          <div class="rq-grid">
-            <div class="rq-form">
-              <h4>Someone asking at the counter</h4>
-              <label class="muted small" for="rqRequestedBy">Requested by (name)</label>
-              <input id="rqRequestedBy" class="w-full" placeholder="e.g. Carlos, operator T01AM" />
-              <div class="rq-two">
-                <div><label class="muted small" for="rqAsset">Machine (optional)</label><input id="rqAsset" class="w-full" list="assetCodeOptions" placeholder="e.g. T01AM" /></div>
-                <div><label class="muted small" for="rqWo">Work order # (optional)</label><input id="rqWo" class="w-full" type="number" min="1" /></div>
-              </div>
-              <label class="muted small">Parts</label>
-              <div id="rqLines"></div>
-              <button type="button" id="rqAddLine" class="rq-add">+ Add line</button>
-              <label class="muted small" for="rqNotes">Notes (optional)</label>
-              <input id="rqNotes" class="w-full" placeholder="e.g. daily service" />
-              <button type="button" id="rqSubmit" class="btn-primary">Save and print requisition</button>
-              <p id="rqMsg" class="muted small"></p>
-            </div>
-            <div class="rq-recent">
-              <div class="rq-recent-head"><h4>Last 30 days</h4><button type="button" id="rqRefresh">Refresh</button></div>
-              <div id="rqList"><p class="muted small">Loading…</p></div>
-            </div>
-          </div>
         </div>
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
@@ -7991,6 +7993,7 @@
   <datalist id="assetCodeOptions"></datalist>
   <datalist id="costCenterOptions"></datalist>
   <datalist id="partCodeOptions"></datalist>
+  <datalist id="rqPartCodeOptions"></datalist>
   <datalist id="locationCodeOptions"></datalist>
   <datalist id="saBinCodeOptions"></datalist>
   <datalist id="msBinCodeOptions"></datalist>

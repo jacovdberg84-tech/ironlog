@@ -2,8 +2,8 @@
 // Part of the main app; index.html loads these files in order and they share one global scope.
 //
 // Tabs: each card in #tab-stock carries data-stock-tab; only the open tab's
-// cards show. The Parts Orders cards (workshop requests, requisitions, parts on
-// order, off-site repairs) are moved into "Requests & orders" while it is open
+// cards show. The Parts Orders cards (workshop requests, parts on order and
+// off-site repairs) are moved into "Requests & orders" while it is open
 // and back to their own page when that page is opened from the menu.
 //
 // Receive: one delivery (supplier, invoice/GRN, date, currency, store) with many
@@ -53,6 +53,9 @@ function showStockTab(tab) {
   if (k === "receive") {
     ensureDeliveryForm();
     loadRecentDeliveries().catch(() => {});
+  }
+  if (k === "issue" && typeof loadIssueRequisitionStockOptions === "function") {
+    loadIssueRequisitionStockOptions().catch(() => {});
   }
 }
 
