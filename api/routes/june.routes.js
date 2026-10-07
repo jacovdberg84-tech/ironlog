@@ -28,6 +28,7 @@ import {
   startJuneAvatar,
   stopJuneAvatar,
 } from "../utils/juneAvatar.js";
+import { makeJuneLiveAnswerBrowserCompatible } from "../utils/juneLiveSdp.js";
 
 const OPENAI_LIVE_URL = "https://api.openai.com/v1/live/sessions";
 const LIVE_MODEL = "gpt-live-1";
@@ -497,8 +498,13 @@ async function createOpenAiLiveSession({ apiKey, payload, log, safetyId }) {
         LIVE_UPSTREAM_FAILURE_STATUS,
       );
     }
-    const answer = String(data?.transport?.sdp || "").trim();
-    if (!answer) throw liveSessionError("June received an incomplete live session response.");
+    const rawAnswer = String(data?.transport?.sdp || "");
+    if (!rawAnswer.trim()) throw liveSessionError("June received an incomplete live session response.");
+    // Do not make standard Chromium browsers opt into OpenAI's experimental
+    // SNAP/WARP SDP extension. The original browser offer tells us whether
+    // SNAP was actually negotiated; otherwise use standard SCTP port syntax.
+    const answer = makeJuneLiveAnswerBrowserCompatible({ offer: payload?.transport?.sdp, answer: rawAnswer });
+    if (answer !== rawAnswer) log.warn("June converted a SNAP-only SDP answer for browser compatibility");
     return {
       session_id: safeText(data?.session?.id, 160),
       sdp: answer,
