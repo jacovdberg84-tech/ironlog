@@ -18,6 +18,7 @@ import {
   isDirectOpenAiResponsesConfigured,
   openAiResponsesText,
 } from "../utils/openaiResponses.js";
+import { getAssetHoursInfoAsOf } from "../utils/assetMeterHours.js";
 import { db } from "../db/client.js";
 import { getPlanningSnapshot, isPlanningQuestion } from "../utils/costingGaps.js";
 import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
@@ -149,20 +150,15 @@ export default async function ironmindRoutes(app) {
       LIMIT 1
     `).get(code);
     if (!asset) return null;
-    const currentHours = db.prepare(`
-      SELECT COALESCE(SUM(hours_run), 0) AS current_hours
-      FROM daily_hours
-      WHERE asset_id = ?
-        AND is_used = 1
-        AND hours_run > 0
-        AND work_date <= ?
-    `).get(asset.id, asOf);
+    const meter = getAssetHoursInfoAsOf(asset.id, asOf);
     return {
       id: Number(asset.id || 0),
       asset_code: String(asset.asset_code || code),
       asset_name: String(asset.asset_name || ""),
       category: String(asset.category || ""),
-      current_hours: roundMetric(currentHours?.current_hours, 1),
+      current_hours: roundMetric(meter.hours, 1),
+      meter_source: String(meter.source || "unknown"),
+      meter_date: meter.latest_work_date || null,
     };
   }
   function getPmDueRows(asOf, limit = 12) {
@@ -170,33 +166,29 @@ export default async function ironmindRoutes(app) {
     return db.prepare(`
       SELECT
         mp.id AS plan_id,
+        mp.asset_id,
         a.asset_code,
         a.asset_name,
         mp.service_name,
         mp.interval_hours,
-        mp.last_service_hours,
-        COALESCE((
-          SELECT SUM(dh.hours_run)
-          FROM daily_hours dh
-          WHERE dh.asset_id = mp.asset_id
-            AND dh.is_used = 1
-            AND dh.hours_run > 0
-            AND dh.work_date <= ?
-        ), 0) AS current_hours
+        mp.last_service_hours
       FROM maintenance_plans mp
       JOIN assets a ON a.id = mp.asset_id
       WHERE mp.active = 1
       ORDER BY a.asset_code ASC, mp.id ASC
-    `).all(asOf).map((row) => {
+    `).all().map((row) => {
+      const meter = getAssetHoursInfoAsOf(row.asset_id, asOf);
+      const currentHours = Number(meter.hours || 0);
       const nextDue = Number(row.last_service_hours || 0) + Number(row.interval_hours || 0);
-      const remaining = nextDue - Number(row.current_hours || 0);
+      const remaining = nextDue - currentHours;
       return {
         plan_id: Number(row.plan_id || 0),
         asset_code: String(row.asset_code || ""),
         asset_name: String(row.asset_name || ""),
         service_name: String(row.service_name || "Service"),
         interval_hours: roundMetric(row.interval_hours, 1),
-        current_hours: roundMetric(row.current_hours, 1),
+        current_hours: roundMetric(currentHours, 1),
+        meter_source: String(meter.source || "unknown"),
         next_due_hours: roundMetric(nextDue, 1),
         remaining_hours: roundMetric(remaining, 1),
         status: remaining < 0 ? "overdue" : remaining <= 50 ? "due_soon" : "planned",
@@ -759,63 +751,16 @@ export default async function ironmindRoutes(app) {
       ORDER BY downtime_hours DESC, a.asset_code ASC
       LIMIT 5
     `).all(start, end);
-    // Keep the actual asset codes in Borris' live context. A count on its own
-    // is not actionable for a maintenance planner, and it prevented Borris
-    // from answering the most common question: "which machines are overdue?"
-    const overduePmAssets = db.prepare(`
-      SELECT
-        a.asset_code,
-        a.asset_name,
-        mp.service_name,
-        mp.interval_hours,
-        mp.last_service_hours,
-        COALESCE((
-          SELECT SUM(dh.hours_run)
-          FROM daily_hours dh
-          WHERE dh.asset_id = mp.asset_id
-            AND dh.is_used = 1
-            AND dh.hours_run > 0
-            AND dh.work_date <= ?
-        ), 0) AS current_hours,
-        (COALESCE((
-          SELECT SUM(dh.hours_run)
-          FROM daily_hours dh
-          WHERE dh.asset_id = mp.asset_id
-            AND dh.is_used = 1
-            AND dh.hours_run > 0
-            AND dh.work_date <= ?
-        ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
-      FROM maintenance_plans mp
-      JOIN assets a ON a.id = mp.asset_id
-      WHERE mp.active = 1
-        AND (COALESCE((
-          SELECT SUM(dh.hours_run)
-          FROM daily_hours dh
-          WHERE dh.asset_id = mp.asset_id
-            AND dh.is_used = 1
-            AND dh.hours_run > 0
-            AND dh.work_date <= ?
-        ), 0) - (mp.last_service_hours + mp.interval_hours)) > 0
-      ORDER BY overdue_hours DESC, a.asset_code ASC, mp.id ASC
-      LIMIT 30
-    `).all(end, end, end).map((row) => ({
-      asset_code: String(row.asset_code || "").trim(),
-      asset_name: String(row.asset_name || "").trim() || null,
-      service_name: String(row.service_name || "").trim() || null,
-      current_hours: Number(row.current_hours || 0),
-      overdue_hours: Number(row.overdue_hours || 0),
-    })).filter((row, index, rows) => (
-      Boolean(row.asset_code)
-      && rows.findIndex((candidate) => candidate.asset_code === row.asset_code) === index
-    ));
-    const assetContext = assetCode
-      ? db.prepare(`
-          SELECT a.asset_code, a.asset_name, a.category
-          FROM assets a
-          WHERE UPPER(a.asset_code) = UPPER(?)
-          LIMIT 1
-        `).get(assetCode)
-      : null;
+    // Keep real meter readings in Borris' context. A summed daily production
+    // total is not an SMR and can become wildly wrong after imported history.
+    const overduePmAssets = getPmDueRows(end, 50)
+      .filter((row) => row.status === "overdue")
+      .filter((row, index, rows) => (
+        Boolean(row.asset_code)
+        && rows.findIndex((candidate) => candidate.asset_code === row.asset_code) === index
+      ))
+      .slice(0, 30);
+    const assetContext = assetCode ? getAssetForBorris(assetCode, end) : null;
     const askMaxTokens = (() => {
       const n = Number(process.env.IRONMIND_ASK_MAX_TOKENS ?? 220);
       return Number.isFinite(n) && n > 0 ? Math.min(600, n) : 220;
@@ -832,6 +777,7 @@ export default async function ironmindRoutes(app) {
       "Do not ask for asset code unless absolutely needed.",
       "Use available fleet context and provide actionable next steps.",
       "If uncertain, say what data is missing and still provide best guidance.",
+      "Meter readings in asset_context.current_hours and fleet.overdue_pm_assets.current_hours are authoritative current meter readings. Never calculate a machine meter by summing daily hours_run records.",
       "Never mention model training cutoff dates, being an AI model, or inability to learn.",
       "Never answer with generic assistant disclaimers.",
       "Stay specific to the provided operational context.",
@@ -1688,35 +1634,11 @@ export default async function ironmindRoutes(app) {
       ironmindRuntime.last_ask_at = new Date().toISOString();
       const asksPm = /\b(pm|planned maintenance|service|services|maintenance)\b/i.test(question)
         && /\b(overdue|due|behind|late|next|upcoming|schedule)\b/i.test(question);
-      const overduePmRows = () => db.prepare(`
-        SELECT
-          a.asset_code,
-          a.asset_name,
-          mp.service_name,
-          (COALESCE((
-            SELECT SUM(dh.hours_run)
-            FROM daily_hours dh
-            WHERE dh.asset_id = mp.asset_id
-              AND dh.is_used = 1
-              AND dh.hours_run > 0
-              AND dh.work_date <= ?
-          ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
-        FROM maintenance_plans mp
-        JOIN assets a ON a.id = mp.asset_id
-        WHERE mp.active = 1
-          AND (COALESCE((
-            SELECT SUM(dh.hours_run)
-            FROM daily_hours dh
-            WHERE dh.asset_id = mp.asset_id
-              AND dh.is_used = 1
-              AND dh.hours_run > 0
-              AND dh.work_date <= ?
-          ), 0) - (mp.last_service_hours + mp.interval_hours)) > 0
-        ORDER BY overdue_hours DESC, a.asset_code ASC, mp.id ASC
-        LIMIT 30
-      `).all(end, end).filter((row, index, rows) => (
-        rows.findIndex((candidate) => String(candidate.asset_code || "").trim() === String(row.asset_code || "").trim()) === index
-      ));
+      const overduePmRows = () => getPmDueRows(end, 50)
+        .filter((row) => row.status === "overdue")
+        .filter((row, index, rows) => (
+          rows.findIndex((candidate) => String(candidate.asset_code || "").trim() === String(row.asset_code || "").trim()) === index
+        ));
       const formatOverduePmRows = (rows) => rows.length
         ? rows.map((row) => {
             const fleetNo = String(row.asset_code || "-").trim() || "-";
@@ -1898,30 +1820,30 @@ export default async function ironmindRoutes(app) {
       }
 
       if (asksPmForAsset) {
+        const assetMeter = getAssetForBorris(assetCode, end);
+        const currentHours = Number(assetMeter?.current_hours || 0);
         const pm = db.prepare(`
-          SELECT
-            mp.service_name,
-            (COALESCE((
-              SELECT SUM(dh.hours_run)
-              FROM daily_hours dh
-              JOIN assets a2 ON a2.id = dh.asset_id
-              WHERE dh.asset_id = mp.asset_id
-                AND dh.is_used = 1
-                AND dh.hours_run > 0
-                AND dh.work_date <= ?
-            ), 0) - (mp.last_service_hours + mp.interval_hours)) AS overdue_hours
+          SELECT mp.service_name, mp.interval_hours, mp.last_service_hours
           FROM maintenance_plans mp
           JOIN assets a ON a.id = mp.asset_id
           WHERE UPPER(a.asset_code) = UPPER(?)
             AND mp.active = 1
-          ORDER BY overdue_hours DESC
-          LIMIT 1
-        `).get(end, assetCode);
+        `).all(assetCode).map((plan) => {
+          const nextDue = Number(plan.last_service_hours || 0) + Number(plan.interval_hours || 0);
+          return {
+            service_name: String(plan.service_name || "Service"),
+            next_due_hours: nextDue,
+            overdue_hours: currentHours - nextDue,
+          };
+        }).sort((a, b) => b.overdue_hours - a.overdue_hours)[0] || null;
         const overdue = Number(pm?.overdue_hours || 0);
         const riskBand = overdue >= 200 ? "high" : overdue >= 50 ? "medium" : overdue > 0 ? "low" : "none";
+        const meterLabel = assetMeter?.meter_source === "daily_closing" ? "latest daily meter" : "current asset meter";
         const short = overdue > 0
-          ? `${assetCode}: PM overdue by ${overdue.toFixed(1)}h (${riskBand} risk) as of ${end}${pm?.service_name ? ` on ${pm.service_name}` : ""}.`
-          : `${assetCode}: no active PM overdue as of ${end}.`;
+          ? `${assetCode}: ${meterLabel} ${currentHours.toFixed(1)}h. PM overdue by ${overdue.toFixed(1)}h (${riskBand} risk) as of ${end}${pm?.service_name ? ` on ${pm.service_name}` : ""}.`
+          : pm
+            ? `${assetCode}: ${meterLabel} ${currentHours.toFixed(1)}h. ${pm.service_name} is due at ${Number(pm.next_due_hours || 0).toFixed(1)}h (${Math.max(0, -overdue).toFixed(1)}h remaining).`
+            : `${assetCode}: ${meterLabel} ${currentHours.toFixed(1)}h. No active maintenance plan is configured.`;
         return reply.send({
           ok: true,
           short_answer: short,
@@ -1929,6 +1851,8 @@ export default async function ironmindRoutes(app) {
             asset_code: assetCode,
             as_of: end,
             service_name: pm?.service_name || null,
+            current_hours: currentHours,
+            meter_source: assetMeter?.meter_source || null,
             overdue_hours: overdue,
             risk_band: riskBand,
           },
