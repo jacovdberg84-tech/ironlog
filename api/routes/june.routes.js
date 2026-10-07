@@ -20,6 +20,14 @@ import {
   removeIcsCalendar,
   saveIcsCalendar,
 } from "../utils/juneIcsCalendar.js";
+import {
+  finishJuneAvatarTurn,
+  getJuneAvatarStatus,
+  interruptJuneAvatar,
+  sendJuneAvatarAudio,
+  startJuneAvatar,
+  stopJuneAvatar,
+} from "../utils/juneAvatar.js";
 
 const OPENAI_LIVE_URL = "https://api.openai.com/v1/live/sessions";
 const LIVE_MODEL = "gpt-live-1";
@@ -522,6 +530,7 @@ export default async function juneRoutes(app) {
       voice: LIVE_VOICE,
       backend_model: liveBackendModel(),
       last_live_attempt: lastLiveAttempt,
+      avatar: getJuneAvatarStatus(),
       connectors: connectorStatus(context),
       outlook: getOutlookConnectionStatus(context),
       ics_calendar: getIcsCalendarStatus(context),
@@ -555,6 +564,51 @@ export default async function juneRoutes(app) {
   app.post("/calendar/ics/remove", async (req, reply) => {
     if (!requireJuneAdmin(req, reply)) return;
     return { ok: true, ...removeIcsCalendar({ siteCode: getSiteCode(req), user: getUser(req) }) };
+  });
+
+  // LemonSlice renders June's visual only. The authenticated browser keeps
+  // OpenAI's existing WebRTC audio and delegates response audio to this
+  // server-side tunnel; no provider key or LiveKit publish token reaches it.
+  app.post("/avatar/session", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    try {
+      const session = await startJuneAvatar({ owner: safetyIdentifier(req), log: req.log });
+      return { ok: true, session };
+    } catch (error) {
+      return reply.code(Number(error?.statusCode || 503)).send({ ok: false, error: safeText(error?.message || "June's live visual could not start.", 350) });
+    }
+  });
+
+  app.post("/avatar/session/:id/audio", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    try {
+      return sendJuneAvatarAudio({ id: req.params?.id, owner: safetyIdentifier(req), audio: req.body?.audio });
+    } catch (error) {
+      return reply.code(Number(error?.statusCode || 503)).send({ ok: false, error: safeText(error?.message || "June's visual-audio stream could not continue.", 350) });
+    }
+  });
+
+  app.post("/avatar/session/:id/end-turn", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    try {
+      return finishJuneAvatarTurn({ id: req.params?.id, owner: safetyIdentifier(req) });
+    } catch (error) {
+      return reply.code(Number(error?.statusCode || 503)).send({ ok: false, error: safeText(error?.message || "June's visual could not finish this response.", 350) });
+    }
+  });
+
+  app.post("/avatar/session/:id/interrupt", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    try {
+      return interruptJuneAvatar({ id: req.params?.id, owner: safetyIdentifier(req) });
+    } catch (error) {
+      return reply.code(Number(error?.statusCode || 503)).send({ ok: false, error: safeText(error?.message || "June's visual could not be interrupted.", 350) });
+    }
+  });
+
+  app.post("/avatar/session/:id/stop", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    return stopJuneAvatar({ id: req.params?.id, owner: safetyIdentifier(req) });
   });
 
   // Starts the user-authorised Microsoft OAuth flow. This endpoint remains

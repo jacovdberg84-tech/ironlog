@@ -8,6 +8,229 @@ let juneLocalStream = null;
 let juneAudio = null;
 let juneProcessedCalls = new Set();
 let juneIcsCalendar = null;
+let juneAvatarConfig = null;
+let juneRemoteAudioStream = null;
+let juneLemonSlice = null;
+let juneLiveGeneration = 0;
+let juneLiveKitLoadPromise = null;
+
+function juneLemonSliceEnabled() {
+  return Boolean(juneAvatarConfig?.configured);
+}
+
+function juneEnsureLiveKitClient() {
+  if (window.LivekitClient?.Room && window.LivekitClient?.RoomEvent) return Promise.resolve(window.LivekitClient);
+  if (juneLiveKitLoadPromise) return juneLiveKitLoadPromise;
+  juneLiveKitLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/livekit-client@2.22.3/dist/livekit-client.umd.min.js";
+    script.async = true;
+    script.dataset.juneLivekit = "true";
+    script.onload = () => window.LivekitClient?.Room
+      ? resolve(window.LivekitClient)
+      : reject(new Error("June's visual library did not initialise."));
+    script.onerror = () => reject(new Error("June could not load her visual library."));
+    document.head.appendChild(script);
+  }).catch((error) => {
+    juneLiveKitLoadPromise = null;
+    throw error;
+  });
+  return juneLiveKitLoadPromise;
+}
+
+function juneLemonSliceClearVideo() {
+  const video = qs("juneAvatarVideo");
+  const avatar = qs("juneAvatar");
+  if (video) {
+    try { video.pause(); } catch {}
+    video.srcObject = null;
+    video.hidden = true;
+  }
+  if (avatar) delete avatar.dataset.renderer;
+}
+
+function juneLemonSliceFail(error) {
+  // The animated layer is intentionally best-effort. A provider or network
+  // issue must not break the existing GPT-Live conversation.
+  if (!juneLemonSlice?.warned) {
+    console.warn("June visual paused; voice remains available.", error);
+    juneLemonSlice = { ...juneLemonSlice, warned: true, enabled: false };
+  }
+  juneLemonSliceClearVideo();
+}
+
+function juneLemonSliceBase64(bytes) {
+  const view = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let text = "";
+  for (let i = 0; i < view.length; i += 0x8000) {
+    text += String.fromCharCode(...view.subarray(i, i + 0x8000));
+  }
+  return btoa(text);
+}
+
+function juneLemonSliceResample(input, sourceRate) {
+  const rate = Number(sourceRate || 48_000);
+  const outputLength = Math.max(1, Math.round(input.length * 16_000 / rate));
+  const output = new Int16Array(outputLength);
+  for (let index = 0; index < outputLength; index += 1) {
+    const start = Math.floor(index * rate / 16_000);
+    const end = Math.min(input.length, Math.max(start + 1, Math.floor((index + 1) * rate / 16_000)));
+    let sum = 0;
+    for (let sample = start; sample < end; sample += 1) sum += input[sample] || 0;
+    output[index] = Math.max(-1, Math.min(1, sum / Math.max(1, end - start))) * 0x7fff;
+  }
+  return output;
+}
+
+function juneLemonSliceQueue(path, body = {}) {
+  const state = juneLemonSlice;
+  if (!state?.enabled || !state?.id) return Promise.resolve();
+  const id = encodeURIComponent(state.id);
+  state.queue = state.queue.then(async () => {
+    if (!juneLemonSlice?.enabled || juneLemonSlice.id !== state.id) return;
+    const response = await fetch(`${API}/api/june/avatar/session/${id}/${path}`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`June visual stream returned HTTP ${response.status}.`);
+  }).catch((error) => juneLemonSliceFail(error));
+  return state.queue;
+}
+
+function juneLemonSliceFlushAudio() {
+  const state = juneLemonSlice;
+  if (!state?.enabled || !state.pending.length) return;
+  const length = state.pending.reduce((total, chunk) => total + chunk.length, 0);
+  const combined = new Int16Array(length);
+  let offset = 0;
+  for (const chunk of state.pending) {
+    combined.set(chunk, offset);
+    offset += chunk.length;
+  }
+  state.pending = [];
+  juneLemonSliceQueue("audio", { audio: juneLemonSliceBase64(combined) });
+}
+
+function juneLemonSliceStartAudio(stream) {
+  const state = juneLemonSlice;
+  if (!state?.enabled || state.processor || !stream) return;
+  try {
+    const context = new AudioContext();
+    const source = context.createMediaStreamSource(stream);
+    const processor = context.createScriptProcessor(4096, 1, 1);
+    const silence = context.createGain();
+    silence.gain.value = 0;
+    processor.onaudioprocess = (event) => {
+      const active = juneLemonSlice;
+      if (!active?.enabled || active.id !== state.id) return;
+      const pcm = juneLemonSliceResample(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate);
+      active.pending.push(pcm);
+      const pendingSamples = active.pending.reduce((total, chunk) => total + chunk.length, 0);
+      if (pendingSamples >= 4_000) juneLemonSliceFlushAudio();
+    };
+    source.connect(processor);
+    processor.connect(silence);
+    silence.connect(context.destination);
+    state.audioContext = context;
+    state.source = source;
+    state.processor = processor;
+    state.silence = silence;
+    context.resume().catch(() => {});
+  } catch (error) {
+    juneLemonSliceFail(error);
+  }
+}
+
+function juneLemonSliceCommitResponse() {
+  if (!juneLemonSlice?.enabled) return;
+  juneLemonSliceFlushAudio();
+  juneLemonSliceQueue("end-turn");
+}
+
+function juneLemonSliceInterrupt() {
+  if (!juneLemonSlice?.enabled) return;
+  juneLemonSlice.pending = [];
+  juneLemonSliceQueue("interrupt");
+}
+
+async function juneStartLemonSliceAvatar(generation) {
+  if (!juneLemonSliceEnabled()) return false;
+  try {
+    const livekit = await juneEnsureLiveKitClient();
+    const data = await juneApiJson(`${API}/api/june/avatar/session`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: "{}",
+    });
+    const session = data?.session;
+    if (!session?.id || !session?.livekit_url || !session?.viewer_token) throw new Error("June's visual session response was incomplete.");
+    // June may have been stopped/restarted while LemonSlice was preparing.
+    // Close that now-orphaned server session instead of attaching it to a
+    // newer conversation.
+    if (generation !== juneLiveGeneration) {
+      fetch(`${API}/api/june/avatar/session/${encodeURIComponent(session.id)}/stop`, {
+        method: "POST",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: "{}",
+        keepalive: true,
+      }).catch(() => {});
+      return false;
+    }
+    const room = new livekit.Room({ adaptiveStream: true, dynacast: false });
+    juneLemonSlice = {
+      id: String(session.id), room, enabled: true, warned: false, queue: Promise.resolve(), pending: [],
+      audioContext: null, source: null, processor: null, silence: null,
+    };
+    room.on(livekit.RoomEvent.TrackSubscribed, (track) => {
+      const kind = String(track?.kind || "").toLowerCase();
+      if (kind === "audio") {
+        try { track.setVolume?.(0); } catch {}
+        return;
+      }
+      if (kind !== "video") return;
+      const video = qs("juneAvatarVideo");
+      const avatar = qs("juneAvatar");
+      if (!video || !avatar) return;
+      track.attach(video);
+      video.hidden = false;
+      avatar.dataset.renderer = "lemonslice";
+      video.play().catch(() => {});
+    });
+    room.on(livekit.RoomEvent.Disconnected, () => {
+      if (juneLemonSlice?.id === session.id) juneLemonSliceFail(new Error("June's visual stream closed."));
+    });
+    await room.connect(session.livekit_url, session.viewer_token);
+    if (juneRemoteAudioStream) juneLemonSliceStartAudio(juneRemoteAudioStream);
+    return true;
+  } catch (error) {
+    juneLemonSliceFail(error);
+    return false;
+  }
+}
+
+function juneStopLemonSliceAvatar() {
+  const state = juneLemonSlice;
+  juneLemonSlice = null;
+  if (!state) {
+    juneLemonSliceClearVideo();
+    return;
+  }
+  try { state.processor?.disconnect(); } catch {}
+  try { state.source?.disconnect(); } catch {}
+  try { state.silence?.disconnect(); } catch {}
+  try { state.audioContext?.close(); } catch {}
+  try { state.room?.disconnect(); } catch {}
+  juneLemonSliceClearVideo();
+  if (state.id) {
+    fetch(`${API}/api/june/avatar/session/${encodeURIComponent(state.id)}/stop`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: "{}",
+      keepalive: true,
+    }).catch(() => {});
+  }
+}
 
 // The portrait layer is optional visual polish. It must never be able to
 // interrupt June's live voice session if a browser cannot load or analyse it.
@@ -162,6 +385,7 @@ async function loadJuneStatus({ quiet = false } = {}) {
   if (!juneIsAdmin()) return;
   try {
     const data = await fetchJson(`${API}/api/june/status`);
+    juneAvatarConfig = data?.avatar || null;
     juneRenderConnectors(data?.connectors || {});
     juneRenderOutlookControl(data?.outlook || null);
     juneRenderIcsCalendar(data?.ics_calendar || null);
@@ -413,7 +637,12 @@ function juneNestedLiveEvent(envelope) {
     juneSetAvatarState("thinking");
   }
   if (type === "response.output_audio.delta") juneSetAvatarState("speaking");
+  if (type === "response.done") {
+    juneLemonSliceCommitResponse();
+    return;
+  }
   if (type === "input_audio_buffer.speech_started") {
+    juneLemonSliceInterrupt();
     juneSetState("June is listening.", "live");
     return;
   }
@@ -437,6 +666,7 @@ function juneHandleLiveMessage(message) {
     return;
   }
   if (type === "input_audio_buffer.speech_started") {
+    juneLemonSliceInterrupt();
     juneSetState("June is listening.", "live");
     return;
   }
@@ -472,6 +702,7 @@ async function juneStartLive() {
     return;
   }
   const start = qs("juneStartBtn");
+  const liveGeneration = ++juneLiveGeneration;
   if (start) start.disabled = true;
   juneClearTranscript();
   juneSetState("Requesting microphone access…", "working");
@@ -483,7 +714,11 @@ async function juneStartLive() {
     junePeerConnection.ontrack = (event) => {
       const remoteStream = event.streams?.[0] || null;
       juneAudio.srcObject = remoteStream;
-      if (remoteStream) juneStartAvatarAudio(remoteStream);
+      juneRemoteAudioStream = remoteStream;
+      if (remoteStream) {
+        juneStartAvatarAudio(remoteStream);
+        juneLemonSliceStartAudio(remoteStream);
+      }
       juneAudio.play().catch(() => {});
     };
     juneAudio.addEventListener("playing", () => {
@@ -519,6 +754,9 @@ async function juneStartLive() {
     }
     const response = await juneCreateLiveSession(sdp);
     await junePeerConnection.setRemoteDescription({ type: "answer", sdp: response.sdp });
+    // A visual failure (or a slow visual provider) is non-fatal: never make
+    // Jaco wait for June's already-working voice, intelligence, and tools.
+    void juneStartLemonSliceAvatar(liveGeneration);
     juneSetConnected(true);
     juneSetState("June is starting…", "working");
   } catch (error) {
@@ -530,10 +768,12 @@ async function juneStartLive() {
 }
 
 function juneStopLive({ silent = false } = {}) {
+  juneLiveGeneration += 1;
   juneSendEvent({ type: "session.close", event_id: juneClientEventId("june-close") });
   try { juneDataChannel?.close(); } catch {}
   try { junePeerConnection?.close(); } catch {}
   try { juneLocalStream?.getTracks()?.forEach((track) => track.stop()); } catch {}
+  juneStopLemonSliceAvatar();
   if (juneAudio) {
     try { juneAudio.pause(); } catch {}
     juneAudio.srcObject = null;
@@ -544,6 +784,7 @@ function juneStopLive({ silent = false } = {}) {
   juneDataChannel = null;
   juneLocalStream = null;
   juneAudio = null;
+  juneRemoteAudioStream = null;
   juneProcessedCalls = new Set();
   juneSetConnected(false);
   if (!silent) juneSetState("June is ready when you are.", "ready");
