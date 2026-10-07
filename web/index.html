@@ -2322,6 +2322,7 @@
                 <select id="spoFilterStatus" class="w-full">
                   <option value="">All active</option>
                   <option value="on_order">On order</option>
+                  <option value="warehouse_ready">Warehouse ready</option>
                   <option value="in_transit">In transit</option>
                   <option value="arrived">Arrived</option>
                   <option value="cancelled">Cancelled</option>
@@ -2332,11 +2333,12 @@
               </div>
             </div>
             <div class="kpi-pills">
-              <span class="kpi-pill kpi-pill-orange"><strong>On order:</strong> $<span id="spoOnOrderValue">0.00</span></span>
-              <span class="kpi-pill kpi-pill-blue"><strong>In transit:</strong> $<span id="spoInTransitValue">0.00</span></span>
-              <span class="kpi-pill kpi-pill-green"><strong>Arrived:</strong> $<span id="spoArrivedValue">0.00</span></span>
-              <span class="kpi-pill kpi-pill-blue"><strong>Pending forecast:</strong> $<span id="spoPendingValue">0.00</span></span>
-              <span class="kpi-pill kpi-pill-blue"><strong>Total period:</strong> $<span id="spoForecastValue">0.00</span></span>
+              <span class="kpi-pill kpi-pill-orange"><strong>On order value:</strong> <span id="spoOnOrderValue">0.00</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Warehouse ready value:</strong> <span id="spoWarehouseReadyValue">0.00</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>In transit value:</strong> <span id="spoInTransitValue">0.00</span></span>
+              <span class="kpi-pill kpi-pill-green"><strong>Arrived value:</strong> <span id="spoArrivedValue">0.00</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Pending forecast value:</strong> <span id="spoPendingValue">0.00</span></span>
+              <span class="kpi-pill kpi-pill-blue"><strong>Total period value:</strong> <span id="spoForecastValue">0.00</span></span>
             </div>
             <div class="action-buttons" style="margin-top: 12px;">
               <button id="spoExportXlsx" type="button" class="btn btn-secondary btn-sm">
@@ -2404,6 +2406,7 @@
                 <label>Status</label>
                 <select id="spoStatus" class="w-full">
                   <option value="on_order">On order</option>
+                  <option value="warehouse_ready">Warehouse ready</option>
                   <option value="in_transit">In transit</option>
                   <option value="arrived">Arrived</option>
                 </select>
@@ -2874,7 +2877,7 @@
           </div>
           <div class="report-card-body">
             <div class="kpi-pills" id="ptKpiStrip">
-              <span class="kpi-pill kpi-pill-orange"><strong>Parts pending:</strong> $<span id="ptPartsPending">0.00</span></span>
+              <span class="kpi-pill kpi-pill-orange"><strong>Parts pending value:</strong> <span id="ptPartsPending">0.00</span></span>
               <span class="kpi-pill kpi-pill-blue"><strong>Parts overdue ETA:</strong> <span id="ptPartsOverdue">0</span></span>
               <span class="kpi-pill kpi-pill-orange"><strong>Off-site est. cost:</strong> $<span id="ptOffsiteEst">0.00</span></span>
               <span class="kpi-pill kpi-pill-green"><strong>Off-site actual:</strong> $<span id="ptOffsiteActual">0.00</span></span>
@@ -2914,6 +2917,7 @@
                 <select id="ptPartsStatus" class="w-full">
                   <option value="">All active</option>
                   <option value="on_order">On order</option>
+                  <option value="warehouse_ready">Warehouse ready</option>
                   <option value="in_transit">In transit</option>
                   <option value="arrived">Arrived</option>
                   <option value="cancelled">Cancelled</option>
@@ -2926,7 +2930,30 @@
               <div class="form-field form-field-action">
                 <button id="ptPartsLoad" type="button" class="btn btn-primary">Load parts</button>
               </div>
+              <div class="form-field form-field-action">
+                <button id="ptPartsExportXlsx" type="button" class="btn btn-secondary">Management Excel</button>
+              </div>
             </div>
+            <div class="form-row" style="align-items:end; margin-top:12px; padding:12px; border:1px solid var(--border, #dbe5f0); border-radius:10px; background:#f8fafc;">
+              <div class="form-field" style="flex:1.5; min-width:260px;">
+                <label>Weekly supplier warehouse update</label>
+                <input id="ptWarehouseFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="w-full" />
+              </div>
+              <div class="form-field">
+                <label>File currency</label>
+                <select id="ptWarehouseCurrency" class="w-full">
+                  <option value="ZAR" selected>ZAR</option>
+                  <option value="USD">USD</option>
+                </select>
+              </div>
+              <div class="form-field form-field-action">
+                <button id="ptWarehouseImport" type="button" class="btn btn-primary">Import &amp; update</button>
+              </div>
+              <div class="form-field" style="flex:1; min-width:230px;">
+                <p class="muted small" style="margin:0;">Matches on supplier order + part number. Existing arrived or cancelled lines stay protected.</p>
+              </div>
+            </div>
+            <div id="ptWarehouseMsg" class="muted small" role="status" aria-live="polite" style="margin-top:8px;"></div>
             <hr class="hr-soft" style="margin:16px 0;" />
             <p class="muted small" style="margin-top:0;">Add / update purchase line</p>
             <div class="form-row">
@@ -2968,6 +2995,7 @@
                 <label>Status</label>
                 <select id="ptStatus" class="w-full">
                   <option value="on_order">On order</option>
+                  <option value="warehouse_ready">Warehouse ready</option>
                   <option value="in_transit">In transit</option>
                   <option value="arrived">Arrived</option>
                 </select>

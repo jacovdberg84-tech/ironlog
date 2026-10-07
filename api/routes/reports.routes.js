@@ -2476,6 +2476,7 @@ export default async function reportsRoutes(app) {
   function partOrderStatusLabel(status) {
     const s = String(status || "").toLowerCase();
     if (s === "on_order") return "On order";
+    if (s === "warehouse_ready") return "Warehouse ready";
     if (s === "in_transit") return "In transit";
     if (s === "arrived") return "Arrived";
     if (s === "cancelled") return "Cancelled";
@@ -2489,7 +2490,7 @@ export default async function reportsRoutes(app) {
     params.push(start);
     where.push("o.order_date <= ?");
     params.push(end);
-    const allowed = new Set(["on_order", "in_transit", "arrived", "cancelled"]);
+    const allowed = new Set(["on_order", "warehouse_ready", "in_transit", "arrived", "cancelled"]);
     if (status && allowed.has(status)) {
       where.push("LOWER(COALESCE(o.status, 'on_order')) = ?");
       params.push(status);
@@ -2511,6 +2512,15 @@ export default async function reportsRoutes(app) {
         o.requisition_number,
         o.invoice_number,
         o.current_location,
+        o.warehouse_code,
+        o.warehouse_date,
+        o.warehouse_waiting_days,
+        o.supplier_qty_received,
+        o.supplier_outstanding_qty,
+        o.sales_order,
+        o.source_last_imported_at,
+        a.asset_code,
+        a.asset_name,
         o.order_date,
         o.expected_arrival_date,
         o.arrived_date,
@@ -2518,6 +2528,7 @@ export default async function reportsRoutes(app) {
         o.notes,
         o.created_by
       FROM stores_part_orders o
+      LEFT JOIN assets a ON a.id = o.asset_id
       WHERE ${where.join(" AND ")}
       ORDER BY o.order_date DESC, o.id DESC
       LIMIT 5000
@@ -2530,6 +2541,7 @@ export default async function reportsRoutes(app) {
 
     const summary = {
       on_order: { count: 0, qty: 0, value: 0 },
+      warehouse_ready: { count: 0, qty: 0, value: 0 },
       in_transit: { count: 0, qty: 0, value: 0 },
       arrived: { count: 0, qty: 0, value: 0 },
       cancelled: { count: 0, qty: 0, value: 0 },
@@ -2547,10 +2559,10 @@ export default async function reportsRoutes(app) {
         bucket.value += value;
       }
       if (st === "arrived") summary.total_arrived += value;
-      if (st === "on_order" || st === "in_transit") summary.total_pending += value;
+      if (st === "on_order" || st === "warehouse_ready" || st === "in_transit") summary.total_pending += value;
       if (st !== "cancelled") summary.total_forecast += value;
     }
-    for (const key of ["on_order", "in_transit", "arrived", "cancelled"]) {
+    for (const key of ["on_order", "warehouse_ready", "in_transit", "arrived", "cancelled"]) {
       summary[key].qty = Number(summary[key].qty.toFixed(2));
       summary[key].value = Number(summary[key].value.toFixed(2));
     }

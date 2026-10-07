@@ -331,7 +331,7 @@ export default async function stockRoutes(app) {
     LIMIT 1
   `);
 
-  const PART_ORDER_STATUSES = new Set(["on_order", "in_transit", "arrived", "cancelled"]);
+  const PART_ORDER_STATUSES = new Set(["on_order", "warehouse_ready", "in_transit", "arrived", "cancelled"]);
   const PART_ORDER_WRITE_ROLES = ["admin", "supervisor", "stores", "storeman", "procurement", "plant_manager", "site_manager"];
 
   db.prepare(`
@@ -346,6 +346,17 @@ export default async function stockRoutes(app) {
       currency TEXT NOT NULL DEFAULT 'USD',
       supplier_name TEXT,
       po_number TEXT,
+      requisition_number TEXT,
+      invoice_number TEXT,
+      current_location TEXT,
+      warehouse_code TEXT,
+      warehouse_date TEXT,
+      warehouse_waiting_days REAL,
+      supplier_qty_received REAL,
+      supplier_outstanding_qty REAL,
+      sales_order TEXT,
+      source_reference TEXT,
+      source_last_imported_at TEXT,
       order_date TEXT NOT NULL,
       expected_arrival_date TEXT,
       arrived_date TEXT,
@@ -377,11 +388,22 @@ export default async function stockRoutes(app) {
     ["breakdown_id", "breakdown_id INTEGER"],
     ["offsite_repair_id", "offsite_repair_id INTEGER"],
     ["responsible_person", "responsible_person TEXT"],
+    ["warehouse_code", "warehouse_code TEXT"],
+    ["warehouse_date", "warehouse_date TEXT"],
+    ["warehouse_waiting_days", "warehouse_waiting_days REAL"],
+    ["supplier_qty_received", "supplier_qty_received REAL"],
+    ["supplier_outstanding_qty", "supplier_outstanding_qty REAL"],
+    ["sales_order", "sales_order TEXT"],
+    ["source_reference", "source_reference TEXT"],
+    ["source_last_imported_at", "source_last_imported_at TEXT"],
   ]) {
     if (!hasColumn("stores_part_orders", name)) db.prepare(`ALTER TABLE stores_part_orders ADD COLUMN ${ddl}`).run();
   }
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_stores_part_orders_asset ON stores_part_orders(asset_id)`).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_stores_part_orders_work_order ON stores_part_orders(work_order_id)`).run();
+  db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS ux_stores_part_orders_source_reference
+    ON stores_part_orders(site_code, source_reference)
+    WHERE source_reference IS NOT NULL AND TRIM(source_reference) <> ''`).run();
 
   function partOrderReceiveRef(orderId) {
     return `part_order:${Number(orderId)}`;
@@ -508,6 +530,7 @@ export default async function stockRoutes(app) {
   function summarizePartOrders(rows) {
     const summary = {
       on_order: { count: 0, qty: 0, value: 0 },
+      warehouse_ready: { count: 0, qty: 0, value: 0 },
       in_transit: { count: 0, qty: 0, value: 0 },
       arrived: { count: 0, qty: 0, value: 0 },
       cancelled: { count: 0, qty: 0, value: 0 },
@@ -526,7 +549,7 @@ export default async function stockRoutes(app) {
         bucket.value += value;
       }
       if (status === "arrived") summary.total_arrived += value;
-      if (status === "on_order" || status === "in_transit") summary.total_pending += value;
+      if (status === "on_order" || status === "warehouse_ready" || status === "in_transit") summary.total_pending += value;
       if (status !== "cancelled") summary.total_forecast += value;
     }
     for (const key of Object.keys(summary)) {
@@ -567,7 +590,7 @@ export default async function stockRoutes(app) {
       breakdownId = Number(offsite?.breakdown_id || 0) || null;
     }
     if (!breakdownId) return;
-    const label = { on_order: "Ordered", in_transit: "In transit", arrived: "Received", cancelled: "Cancelled" }[String(row.status || "on_order").toLowerCase()] || "Ordered";
+    const label = { on_order: "Ordered", warehouse_ready: "Warehouse ready", in_transit: "In transit", arrived: "Received", cancelled: "Cancelled" }[String(row.status || "on_order").toLowerCase()] || "Ordered";
     db.prepare(`
       UPDATE breakdowns
       SET parts_ordered_date = COALESCE(parts_ordered_date, ?),

@@ -155,7 +155,7 @@
     const rows = Array.isArray(data.rows) ? data.rows : [];
     state.pendingOrders = rows.filter((r) => {
       const st = String(r.status || "").toLowerCase();
-      return (st === "on_order" || st === "in_transit") && !r.in_store_inventory;
+      return (st === "on_order" || st === "warehouse_ready" || st === "in_transit") && !r.in_store_inventory;
     });
     renderPendingOrders();
     updateKpis();

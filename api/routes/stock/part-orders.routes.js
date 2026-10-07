@@ -1,7 +1,9 @@
 // IRONLOG/api/routes/stock/part-orders.routes.js — Stores part orders and store QR profile.
 // Registered by routes/stock.routes.js; shared helpers arrive through ctx.
+import multipart from "@fastify/multipart";
 import { db } from "../../db/client.js";
 import { writeAudit } from "../../utils/audit.js";
+import { parseWarehousePartsWorkbook } from "../../utils/warehousePartsImport.js";
 
 export default function registerPartOrdersRoutes(app, ctx) {
   const {
@@ -60,6 +62,14 @@ export default function registerPartOrdersRoutes(app, ctx) {
         o.requisition_number,
         o.invoice_number,
         o.current_location,
+        o.warehouse_code,
+        o.warehouse_date,
+        o.warehouse_waiting_days,
+        o.supplier_qty_received,
+        o.supplier_outstanding_qty,
+        o.sales_order,
+        o.source_reference,
+        o.source_last_imported_at,
         o.asset_id,
         a.asset_code,
         a.asset_name,
@@ -92,6 +102,178 @@ export default function registerPartOrdersRoutes(app, ctx) {
       end: end || null,
       rows,
       summary: summarizePartOrders(rows),
+    });
+  });
+
+  // POST /api/stock/part-orders/warehouse-import — weekly Durban / Boksburg supplier update.
+  // A line is keyed by supplier order + part number, so re-uploading the next
+  // weekly workbook updates the live status instead of duplicating purchases.
+  app.register(async (sub) => {
+    await sub.register(multipart, { limits: { fileSize: 12 * 1024 * 1024, files: 1 } });
+
+    sub.post("/part-orders/warehouse-import", async (req, reply) => {
+      if (!requireRoles(req, reply, PART_ORDER_WRITE_ROLES)) return;
+      try {
+        const file = await req.file();
+        if (!file) return reply.code(400).send({ ok: false, error: "Attach the weekly supplier workbook in the file field." });
+        const filename = String(file.filename || "warehouse-update.xlsx");
+        const parsed = await parseWarehousePartsWorkbook(await file.toBuffer(), filename);
+        if (parsed.errors.length) {
+          return reply.code(400).send({ ok: false, error: parsed.errors[0], errors: parsed.errors });
+        }
+        if (!parsed.rows.length) {
+          return reply.code(400).send({ ok: false, error: "No valid warehouse lines found in that workbook.", warnings: parsed.warnings });
+        }
+
+        const site_code = getSiteCode(req);
+        const userName = String(req.headers["x-user-name"] || "system").trim() || "system";
+        const fields = file.fields || {};
+        const fieldValue = (name) => String(fields?.[name]?.value || "").trim();
+        const requestedStatus = fieldValue("status").toLowerCase() || "warehouse_ready";
+        const status = PART_ORDER_STATUSES.has(requestedStatus) && requestedStatus !== "cancelled"
+          ? requestedStatus
+          : "warehouse_ready";
+        const requestedCurrency = fieldValue("currency").toUpperCase();
+        const currency = /^[A-Z]{3}$/.test(requestedCurrency) ? requestedCurrency : "ZAR";
+        const now = new Date().toISOString();
+
+        const assets = db.prepare(`SELECT id, asset_code FROM assets WHERE COALESCE(active, 1) = 1`).all();
+        const sourceMatch = db.prepare(`
+          SELECT * FROM stores_part_orders
+          WHERE LOWER(TRIM(COALESCE(site_code, 'main'))) = ? AND source_reference = ?
+          LIMIT 1
+        `);
+        const poMatch = db.prepare(`
+          SELECT * FROM stores_part_orders
+          WHERE LOWER(TRIM(COALESCE(site_code, 'main'))) = ?
+            AND UPPER(TRIM(COALESCE(po_number, ''))) = UPPER(TRIM(?))
+            AND UPPER(TRIM(COALESCE(part_code, ''))) = UPPER(TRIM(?))
+          LIMIT 1
+        `);
+        const insert = db.prepare(`
+          INSERT INTO stores_part_orders (
+            site_code, part_id, part_code, part_name, qty, unit_cost, currency,
+            supplier_name, po_number, requisition_number, invoice_number, current_location,
+            warehouse_code, warehouse_date, warehouse_waiting_days, supplier_qty_received,
+            supplier_outstanding_qty, sales_order, source_reference, source_last_imported_at,
+            asset_id, order_date, status, notes, created_by, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const update = db.prepare(`
+          UPDATE stores_part_orders
+          SET
+            part_id = COALESCE(?, part_id),
+            part_code = COALESCE(NULLIF(?, ''), part_code),
+            part_name = ?,
+            qty = ?,
+            unit_cost = ?,
+            currency = ?,
+            supplier_name = ?,
+            po_number = COALESCE(NULLIF(?, ''), po_number),
+            requisition_number = COALESCE(NULLIF(?, ''), requisition_number),
+            invoice_number = COALESCE(NULLIF(?, ''), invoice_number),
+            current_location = ?,
+            warehouse_code = ?,
+            warehouse_date = ?,
+            warehouse_waiting_days = ?,
+            supplier_qty_received = ?,
+            supplier_outstanding_qty = ?,
+            sales_order = ?,
+            source_reference = ?,
+            source_last_imported_at = ?,
+            asset_id = COALESCE(asset_id, ?),
+            order_date = ?,
+            status = CASE WHEN LOWER(COALESCE(status, '')) IN ('arrived', 'cancelled') THEN status ELSE ? END,
+            notes = ?,
+            updated_at = ?
+          WHERE id = ?
+        `);
+
+        const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const assetForReference = (reference) => {
+          const text = String(reference || "").trim().toUpperCase();
+          if (!text) return null;
+          return assets
+            .slice()
+            .sort((a, b) => String(b.asset_code || "").length - String(a.asset_code || "").length)
+            .find((asset) => new RegExp(`(^|[^A-Z0-9])${escapeRegExp(String(asset.asset_code || "").toUpperCase())}($|[^A-Z0-9])`).test(text)) || null;
+        };
+        const importNotes = (row) => [
+          row.priority_code ? `Priority ${row.priority_code}` : "",
+          row.fleet_reference ? `Fleet / manual req: ${row.fleet_reference}` : "",
+          row.sales_order ? `Sales order: ${row.sales_order}` : "",
+          row.country_of_origin ? `Origin: ${row.country_of_origin}` : "",
+          row.comments,
+        ].filter(Boolean).join(" | ") || "Weekly supplier warehouse update";
+        const locationFor = (row) => row.warehouse_code ? `Warehouse — ${row.warehouse_code}` : "Supplier warehouse";
+
+        const result = db.transaction(() => {
+          const outcome = { created: 0, updated: 0, completion_preserved: 0, unlinked_assets: 0 };
+          for (const row of parsed.rows) {
+            const part = row.part_code ? getPartByCode.get(row.part_code) : null;
+            const asset = assetForReference(row.fleet_reference);
+            if (row.fleet_reference && !asset) outcome.unlinked_assets += 1;
+            const existing = sourceMatch.get(site_code, row.source_reference)
+              || (row.order_number && row.part_code ? poMatch.get(site_code, row.order_number, row.part_code) : null);
+            const values = [
+              part ? Number(part.id) : null,
+              row.part_code || null,
+              row.part_name || row.part_code,
+              Number(row.qty_ordered || row.qty_received || 0),
+              Number(row.unit_cost || 0),
+              currency,
+              row.supplier_name || null,
+              row.order_number || null,
+              row.requisition_number || row.fleet_reference || null,
+              row.invoice_number || null,
+              locationFor(row),
+              row.warehouse_code || null,
+              row.warehouse_date || null,
+              row.waiting_days == null ? null : Number(row.waiting_days),
+              Number(row.qty_received || 0),
+              Number(row.outstanding_qty || 0),
+              row.sales_order || null,
+              row.source_reference,
+              now,
+              asset ? Number(asset.id) : null,
+              row.order_date,
+              status,
+              importNotes(row),
+            ];
+            if (existing) {
+              update.run(...values, now, Number(existing.id));
+              outcome.updated += 1;
+              if (["arrived", "cancelled"].includes(String(existing.status || "").toLowerCase())) outcome.completion_preserved += 1;
+            } else {
+              insert.run(site_code, ...values, userName, now, now);
+              outcome.created += 1;
+            }
+          }
+          return outcome;
+        })();
+
+        writeAudit(db, req, {
+          module: "stock",
+          action: "part_order.warehouse_import",
+          entity_type: "stores_part_order",
+          entity_id: filename,
+          payload: { filename, sheet: parsed.sheet_name, status, currency, rows: parsed.rows.length, ...result, warnings: parsed.warnings.length },
+        });
+        return reply.send({
+          ok: true,
+          filename,
+          sheet_name: parsed.sheet_name,
+          status,
+          currency,
+          imported: parsed.rows.length,
+          ...result,
+          warnings: parsed.warnings.slice(0, 20),
+          date_range: parsed.date_range,
+        });
+      } catch (err) {
+        req.log.error(err);
+        return reply.code(500).send({ ok: false, error: err.message || String(err) });
+      }
     });
   });
 

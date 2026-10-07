@@ -577,6 +577,7 @@ function ensureStoresPartOrderDates() {
 function spoStatusLabel(status) {
   const s = String(status || "").toLowerCase();
   if (s === "on_order") return "On order";
+  if (s === "warehouse_ready") return "Warehouse ready";
   if (s === "in_transit") return "In transit";
   if (s === "arrived") return "Arrived";
   if (s === "cancelled") return "Cancelled";
@@ -590,6 +591,7 @@ function moneyUsd(n) {
 function renderStoresPartOrdersSummary(summary) {
   const s = summary || {};
   setText("spoOnOrderValue", moneyUsd(s.on_order?.value));
+  setText("spoWarehouseReadyValue", moneyUsd(s.warehouse_ready?.value));
   setText("spoInTransitValue", moneyUsd(s.in_transit?.value));
   setText("spoArrivedValue", moneyUsd(s.arrived?.value));
   setText("spoPendingValue", moneyUsd(s.total_pending));
@@ -655,7 +657,7 @@ function renderStoresPartOrdersTable(rows) {
           const partLabel = r.part_code
             ? `<strong>${String(r.part_code).replace(/</g, "&lt;")}</strong><br><small class="muted">${String(r.part_name || "").replace(/</g, "&lt;")}</small>`
             : String(r.part_name || "").replace(/</g, "&lt;");
-          const statusOpts = ["on_order", "in_transit", "arrived", "cancelled"]
+          const statusOpts = ["on_order", "warehouse_ready", "in_transit", "arrived", "cancelled"]
             .map((st) => `<option value="${st}"${String(r.status || "").toLowerCase() === st ? " selected" : ""}>${spoStatusLabel(st)}</option>`)
             .join("");
           const inStore = Boolean(r.in_store_inventory || r.stock_movement_id);
@@ -936,7 +938,7 @@ function ptIsOverdueEta(eta, statusDone) {
 
 function updatePartsTrackingKpis() {
   const partsPending = (ptPartsCache || [])
-    .filter((r) => ["on_order", "in_transit"].includes(String(r.status || "").toLowerCase()))
+    .filter((r) => ["on_order", "warehouse_ready", "in_transit"].includes(String(r.status || "").toLowerCase()))
     .reduce((s, r) => s + Number(r.line_total || 0), 0);
   const partsOverdue = (ptPartsCache || []).filter((r) =>
     ptIsOverdueEta(r.expected_arrival_date, String(r.status || "").toLowerCase() === "arrived" || String(r.status || "").toLowerCase() === "cancelled")
@@ -988,7 +990,7 @@ function renderPtPartsTable(rows) {
           const partLabel = r.part_code
             ? `<strong>${escapeHtml(String(r.part_code))}</strong><br><small class="muted">${escapeHtml(String(r.part_name || ""))}</small>`
             : escapeHtml(String(r.part_name || ""));
-          const statusOpts = ["on_order", "in_transit", "arrived", "cancelled"]
+          const statusOpts = ["on_order", "warehouse_ready", "in_transit", "arrived", "cancelled"]
             .map((st) => `<option value="${st}"${String(r.status || "").toLowerCase() === st ? " selected" : ""}>${spoStatusLabel(st)}</option>`)
             .join("");
           const dis = cancelled ? " disabled" : "";
@@ -1063,6 +1065,65 @@ async function loadPtPartsOrders() {
   ptPartsCache = Array.isArray(data?.rows) ? data.rows : [];
   renderPtPartsTable(ptPartsCache);
   updatePartsTrackingKpis();
+}
+
+async function importPtWarehouseParts() {
+  const fileEl = qs("ptWarehouseFile");
+  const msg = qs("ptWarehouseMsg") || qs("ptPartsMsg");
+  const file = fileEl?.files?.[0];
+  if (!file) throw new Error("Choose the weekly supplier .xlsx file first.");
+  if (!/\.xlsx$/i.test(file.name || "")) throw new Error("Please choose an .xlsx supplier update.");
+
+  const form = new FormData();
+  form.append("status", "warehouse_ready");
+  form.append("currency", String(qs("ptWarehouseCurrency")?.value || "ZAR").trim().toUpperCase());
+  form.append("file", file, file.name);
+  if (msg) msg.textContent = "Checking supplier lines and updating Parts Orders…";
+  const res = await fetch(`${API}/api/stock/part-orders/warehouse-import`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: form,
+  });
+  let payload = null;
+  try { payload = await res.json(); } catch { /* handled below */ }
+  if (!res.ok || !payload?.ok) throw new Error(payload?.error || `Import failed (${res.status})`);
+
+  if (payload.date_range?.start && qs("ptPartsFrom")) qs("ptPartsFrom").value = payload.date_range.start;
+  if (payload.date_range?.end && qs("ptPartsTo")) qs("ptPartsTo").value = payload.date_range.end;
+  if (fileEl) fileEl.value = "";
+  const preserved = Number(payload.completion_preserved || 0);
+  const warning = Array.isArray(payload.warnings) && payload.warnings.length ? ` ${payload.warnings.length} source warning(s) retained.` : "";
+  if (msg) msg.textContent = `Warehouse update complete: ${payload.created || 0} new, ${payload.updated || 0} updated.${preserved ? ` ${preserved} completed line(s) protected.` : ""}${warning}`;
+  await loadPtPartsOrders();
+  loadStoresPartOrders().catch(() => {});
+}
+
+async function exportPtPartsStatusXlsx() {
+  ensurePartsTrackingDates();
+  const start = String(qs("ptPartsFrom")?.value || "").trim();
+  const end = String(qs("ptPartsTo")?.value || "").trim();
+  const status = String(qs("ptPartsStatus")?.value || "").trim();
+  if (!start || !end) throw new Error("Choose a period from and to date first.");
+  const q = new URLSearchParams({ start, end });
+  if (status) q.set("status", status);
+  const msg = qs("ptWarehouseMsg") || qs("ptPartsMsg");
+  if (msg) msg.textContent = "Preparing management Excel…";
+  const res = await fetch(`${API}/api/reports/part-orders.xlsx?${q.toString()}`, { headers: authHeaders() });
+  if (!res.ok) {
+    let text = await res.text().catch(() => "");
+    try { text = JSON.parse(text).error || text; } catch { /* plain response */ }
+    throw new Error(text || `Export failed (${res.status})`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `IRONLOG_Parts_Status_${start}_${end}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  if (msg) msg.textContent = "Management Excel downloaded.";
 }
 
 async function savePtPartsOrder() {
@@ -1483,6 +1544,18 @@ function wireStockControls() {
 
   qs("ptPartsLoad")?.addEventListener("click", () =>
     loadPtPartsOrders().catch((e) => setStatus("Parts tracking error: " + e.message))
+  );
+  qs("ptWarehouseImport")?.addEventListener("click", () =>
+    importPtWarehouseParts().catch((e) => {
+      const msg = qs("ptWarehouseMsg") || qs("ptPartsMsg");
+      if (msg) msg.textContent = e.message || String(e);
+    })
+  );
+  qs("ptPartsExportXlsx")?.addEventListener("click", () =>
+    exportPtPartsStatusXlsx().catch((e) => {
+      const msg = qs("ptWarehouseMsg") || qs("ptPartsMsg");
+      if (msg) msg.textContent = e.message || String(e);
+    })
   );
   qs("ptPartsSave")?.addEventListener("click", () =>
     savePtPartsOrder().catch((e) => {

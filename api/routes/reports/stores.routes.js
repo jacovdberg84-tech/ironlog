@@ -332,11 +332,12 @@ export default function registerStoresRoutes(app, ctx) {
             { k: "Site", v: site_code },
             { k: "Period", v: `${start} → ${end}` },
             { k: "Status filter", v: status ? partOrderStatusLabel(status) : "All active" },
-            { k: "On order", v: `$${fmtNum(summary.on_order.value, 2)} (${summary.on_order.count} lines)` },
-            { k: "In transit", v: `$${fmtNum(summary.in_transit.value, 2)} (${summary.in_transit.count} lines)` },
-            { k: "Arrived", v: `$${fmtNum(summary.arrived.value, 2)} (${summary.arrived.count} lines)` },
-            { k: "Pending forecast", v: `$${fmtNum(summary.total_pending, 2)}` },
-            { k: "Total period", v: `$${fmtNum(summary.total_forecast, 2)}` },
+            { k: "On order value", v: `${fmtNum(summary.on_order.value, 2)} (${summary.on_order.count} lines)` },
+            { k: "Warehouse ready value", v: `${fmtNum(summary.warehouse_ready.value, 2)} (${summary.warehouse_ready.count} lines)` },
+            { k: "In transit value", v: `${fmtNum(summary.in_transit.value, 2)} (${summary.in_transit.count} lines)` },
+            { k: "Arrived value", v: `${fmtNum(summary.arrived.value, 2)} (${summary.arrived.count} lines)` },
+            { k: "Pending forecast value", v: fmtNum(summary.total_pending, 2) },
+            { k: "Total period value", v: fmtNum(summary.total_forecast, 2) },
           ],
           2,
         );
@@ -349,8 +350,8 @@ export default function registerStoresRoutes(app, ctx) {
             { key: "part_code", label: "Part", width: 0.1 },
             { key: "part_name", label: "Description", width: 0.18 },
             { key: "qty", label: "Qty", width: 0.06, align: "right" },
-            { key: "unit_cost", label: "Unit $", width: 0.08, align: "right" },
-            { key: "line_total", label: "Line $", width: 0.08, align: "right" },
+            { key: "unit_cost", label: "Unit cost", width: 0.08, align: "right" },
+            { key: "line_total", label: "Line cost", width: 0.08, align: "right" },
             { key: "supplier", label: "Supplier", width: 0.11 },
             { key: "po", label: "PO", width: 0.07 },
             { key: "req", label: "Req #", width: 0.08 },
@@ -390,7 +391,7 @@ export default function registerStoresRoutes(app, ctx) {
       },
       {
         title: "IRONLOG",
-        subtitle: "Parts purchases & site forecast",
+        subtitle: "Parts order & warehouse status",
         rightText: `${site_code} · ${start} → ${end}`,
         showPageNumbers: true,
       },
@@ -419,14 +420,15 @@ export default function registerStoresRoutes(app, ctx) {
       title: "IRONLOG Parts Purchases Report",
       periodLabel: `Reporting period: ${start} to ${end}`,
       cards: [
-        { label: "ON ORDER", value: summary.on_order.value, numFmt: "$#,##0.00" },
-        { label: "IN TRANSIT", value: summary.in_transit.value, numFmt: "$#,##0.00" },
-        { label: "ARRIVED", value: summary.arrived.value, numFmt: "$#,##0.00" },
-        { label: "TOTAL PERIOD", value: summary.total_forecast, numFmt: "$#,##0.00" },
+        { label: "ON ORDER VALUE", value: summary.on_order.value, numFmt: "#,##0.00" },
+        { label: "WAREHOUSE READY VALUE", value: summary.warehouse_ready.value, numFmt: "#,##0.00" },
+        { label: "IN TRANSIT VALUE", value: summary.in_transit.value, numFmt: "#,##0.00" },
+        { label: "ARRIVED VALUE", value: summary.arrived.value, numFmt: "#,##0.00" },
+        { label: "TOTAL PERIOD VALUE", value: summary.total_forecast, numFmt: "#,##0.00" },
       ],
       scopeLines: [
         `Site: ${site_code}. Status filter: ${status ? partOrderStatusLabel(status) : "all active"}.`,
-        `${summary.on_order.count} on-order, ${summary.in_transit.count} in-transit, and ${summary.arrived.count} arrived line items in the selected period.`,
+        `${summary.on_order.count} on-order, ${summary.warehouse_ready.count} warehouse-ready, ${summary.in_transit.count} in-transit, and ${summary.arrived.count} arrived line items in the selected period. Amounts retain the currency shown on each line.`,
       ],
     });
 
@@ -444,6 +446,13 @@ export default function registerStoresRoutes(app, ctx) {
       { header: "Requisition #", key: "requisition_number", width: 14 },
       { header: "Invoice #", key: "invoice_number", width: 14 },
       { header: "Location", key: "current_location", width: 18 },
+      { header: "Warehouse", key: "warehouse_code", width: 12 },
+      { header: "Warehouse date", key: "warehouse_date", width: 14 },
+      { header: "Days waiting", key: "warehouse_waiting_days", width: 13 },
+      { header: "Qty at warehouse", key: "supplier_qty_received", width: 17 },
+      { header: "Outstanding qty", key: "supplier_outstanding_qty", width: 16 },
+      { header: "Sales order", key: "sales_order", width: 16 },
+      { header: "Asset", key: "asset_code", width: 13 },
       { header: "ETA on site", key: "expected_arrival_date", width: 14 },
       { header: "Arrived date", key: "arrived_date", width: 14 },
       { header: "Status", key: "status_label", width: 14 },
@@ -456,14 +465,14 @@ export default function registerStoresRoutes(app, ctx) {
         status_label: partOrderStatusLabel(r.status),
       });
     }
-    ["qty", "unit_cost", "line_total"].forEach((key) => {
+    ["qty", "supplier_qty_received", "supplier_outstanding_qty", "unit_cost", "line_total"].forEach((key) => {
       ws.getColumn(key).numFmt = "#,##0.00";
     });
     styleManagementDetailSheet(ws, {
-      title: "Parts purchase detail",
+      title: "Parts order & warehouse status detail",
       subtitle: `Reporting period: ${start} to ${end} · Site: ${site_code}`,
       frozenColumns: 2,
-      numberFormats: { qty: "#,##0.00", unit_cost: "$#,##0.00", line_total: "$#,##0.00" },
+      numberFormats: { qty: "#,##0.00", supplier_qty_received: "#,##0.00", supplier_outstanding_qty: "#,##0.00", unit_cost: "#,##0.00", line_total: "#,##0.00" },
     });
 
     const buffer = await wb.xlsx.writeBuffer();
