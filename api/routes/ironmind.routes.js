@@ -19,6 +19,11 @@ import {
   openAiResponsesText,
 } from "../utils/openaiResponses.js";
 import { getAssetHoursInfoAsOf } from "../utils/assetMeterHours.js";
+import {
+  buildFuchsServiceOilItems,
+  getFuchsLubricationProfile,
+  getFuchsServiceRequirements,
+} from "../utils/fuchsLubeSchedule.js";
 import { db } from "../db/client.js";
 import { getPlanningSnapshot, isPlanningQuestion } from "../utils/costingGaps.js";
 import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
@@ -151,6 +156,10 @@ export default async function ironmindRoutes(app) {
     `).get(code);
     if (!asset) return null;
     const meter = getAssetHoursInfoAsOf(asset.id, asOf);
+    const fuchsLubrication = getFuchsLubricationProfile({
+      equipmentName: asset.asset_name,
+      category: asset.category,
+    });
     return {
       id: Number(asset.id || 0),
       asset_code: String(asset.asset_code || code),
@@ -159,6 +168,7 @@ export default async function ironmindRoutes(app) {
       current_hours: roundMetric(meter.hours, 1),
       meter_source: String(meter.source || "unknown"),
       meter_date: meter.latest_work_date || null,
+      fuchs_lubrication: fuchsLubrication,
     };
   }
   function getPmDueRows(asOf, limit = 12) {
@@ -687,7 +697,13 @@ export default async function ironmindRoutes(app) {
     }).filter((o) => o.name && Number.isFinite(o.qty) && o.qty > 0);
   }
 
-  async function tryGenerateRsgPlanWithAi({ equipmentLabel, serviceHours, preferredOils = [] }) {
+  async function tryGenerateRsgPlanWithAi({
+    equipmentLabel,
+    serviceHours,
+    preferredOils = [],
+    fuchsLubrication = null,
+    fuchsRequirements = [],
+  }) {
     const cfg = getAiConfig();
     if (!cfg.provider) return null;
     const system = [
@@ -695,11 +711,18 @@ export default async function ironmindRoutes(app) {
       "Return strict JSON only.",
       "Schema: {service_title:string,tasks:[string],oils:[{name:string,qty:number,unit:string}],checks:[string],post_service_checks:[string],safety:[string]}",
       "Use practical values. If exact OEM value is unknown, provide conservative estimate and mention 'verify with OEM manual' in checks.",
+      "When a Fuchs lubrication schedule is supplied, it is the approved site source for product names, component intervals and full-system capacities. Never turn a system capacity into an automatic top-up quantity. Do not invent products or quantities for a component with multiple capacity variants.",
     ].join(" ");
     const oilHint = preferredOils.length
       ? `Use these site oils and quantities as the default unless clearly unsafe: ${preferredOils.map((o) => `${o.name} ${o.qty}${o.unit || "L"}`).join("; ")}.`
       : "If exact oil grades are uncertain, keep conservative values and tell user to verify with OEM manual.";
-    const user = `Generate a ${serviceHours} hour Recommended Service Guide for ${equipmentLabel}. Include key tasks, oil/lube quantities, checks before release, and safety steps. ${oilHint}`;
+    const fuchsHint = fuchsLubrication
+      ? `Approved Fuchs schedule for ${fuchsLubrication.matched_model}: ${JSON.stringify({
+          due_at_this_service: fuchsRequirements,
+          all_components: fuchsLubrication.components,
+        })}`
+      : "No matching Fuchs schedule is available for this asset.";
+    const user = `Generate a ${serviceHours} hour Recommended Service Guide for ${equipmentLabel}. Include key tasks, oil/lube quantities, checks before release, and safety steps. ${oilHint} ${fuchsHint}`;
     const data = await openAiCompatibleChatCompletion({
       model: cfg.model,
       temperature: 0.2,
@@ -778,6 +801,7 @@ export default async function ironmindRoutes(app) {
       "Use available fleet context and provide actionable next steps.",
       "If uncertain, say what data is missing and still provide best guidance.",
       "Meter readings in asset_context.current_hours and fleet.overdue_pm_assets.current_hours are authoritative current meter readings. Never calculate a machine meter by summing daily hours_run records.",
+      "When asset_context.fuchs_lubrication is present, it is the approved Fuchs schedule for that matched model. Use its exact products and capacities when discussing maintenance. Treat capacities as full-system reference values, never as a presumed top-up. If the sheet has multiple capacity variants, show the options and ask for the machine configuration instead of choosing one.",
       "Never mention model training cutoff dates, being an AI model, or inability to learn.",
       "Never answer with generic assistant disclaimers.",
       "Stay specific to the provided operational context.",
@@ -924,8 +948,17 @@ export default async function ironmindRoutes(app) {
   async function buildRsgPlan({ assetId, assetCode, equipmentName, serviceHours }) {
     const label = [assetCode, equipmentName].filter(Boolean).join(" - ") || "Equipment";
     const preferredOils = getAssetOilProfile(assetId, 6);
+    const fuchsLubrication = getFuchsLubricationProfile({ equipmentName });
+    const fuchsRequirements = getFuchsServiceRequirements(fuchsLubrication, serviceHours);
+    const fuchsOilItems = buildFuchsServiceOilItems(fuchsLubrication, serviceHours);
     const profile = pickRsgServiceProfile({ assetCode, equipmentName, serviceHours });
-    const aiPlan = await tryGenerateRsgPlanWithAi({ equipmentLabel: label, serviceHours, preferredOils });
+    const aiPlan = await tryGenerateRsgPlanWithAi({
+      equipmentLabel: label,
+      serviceHours,
+      preferredOils,
+      fuchsLubrication,
+      fuchsRequirements,
+    });
     const plan = normalizeRsgPlan(aiPlan, label, serviceHours);
 
     if (profile) {
@@ -953,8 +986,23 @@ export default async function ironmindRoutes(app) {
       ];
     }
 
-    // Prefer real site-recorded oils/quantities when available for this asset.
-    if (!profile && preferredOils.length) {
+    // The approved Fuchs schedule wins over estimated/profile quantities. Only
+    // items with one unambiguous full-system capacity can be requisitioned.
+    if (fuchsLubrication) {
+      if (fuchsOilItems.length) plan.oils = fuchsOilItems;
+      const needsConfiguration = fuchsRequirements.filter((item) => !item.system_capacity_l && item.capacity_options_l.length > 1);
+      plan.checks = [
+        ...plan.checks,
+        `Fuchs lubrication schedule applied for ${fuchsLubrication.matched_model}. Listed quantities are full-system capacities, not top-up quantities.`,
+        ...(needsConfiguration.length
+          ? [`Confirm machine configuration before ordering ${needsConfiguration.map((item) => item.component).join(", ")}; the Fuchs sheet lists more than one capacity.`]
+          : []),
+      ];
+    }
+
+    // Prefer real site-recorded oils/quantities only when no approved Fuchs
+    // schedule has been matched for the asset.
+    if (!profile && !fuchsLubrication && preferredOils.length) {
       plan.oils = preferredOils;
       plan.checks = [
         ...plan.checks,
@@ -962,7 +1010,13 @@ export default async function ironmindRoutes(app) {
       ];
     }
     const readiness = buildRsgReadiness({ oils: plan.oils || [], filters: plan.filters || [] });
-    return { plan, readiness, profile_key: profile?.key || null };
+    return {
+      plan,
+      readiness,
+      profile_key: profile?.key || null,
+      lubrication_source: fuchsLubrication?.source || (preferredOils.length ? "site oil history" : null),
+      lubrication_model: fuchsLubrication?.matched_model || null,
+    };
   }
 
   app.get("/history", async (req, reply) => {
