@@ -307,6 +307,129 @@ export default function registerBoardRoutes(app, ctx) {
     };
   });
 
+  // Admin correction for a breakdown recorded against the wrong machine.  The
+  // breakdown is the source of truth for downtime, so its work orders and any
+  // related off-site / parts records must move in the same transaction.
+  app.post("/:id/move-asset", async (req, reply) => {
+    if (!requireRoles(req, reply, ["admin"])) return;
+
+    const id = Number(req.params.id);
+    const targetCode = String(req.body?.asset_code || "").trim();
+    if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: "invalid work order id" });
+    if (!targetCode) return reply.code(400).send({ error: "target asset_code is required" });
+
+    const siteCode = getSiteCode(req);
+    const workOrder = db.prepare(`
+      SELECT w.id, w.asset_id, w.source, w.reference_id, w.site_code,
+             a.asset_code, a.asset_name
+      FROM work_orders w
+      JOIN assets a ON a.id = w.asset_id
+      WHERE w.id = ?
+        AND LOWER(TRIM(COALESCE(w.site_code, 'main'))) = ?
+    `).get(id, siteCode);
+    if (!workOrder) return reply.code(404).send({ error: "work order not found" });
+    if (String(workOrder.source || "").toLowerCase() !== "breakdown" || !Number(workOrder.reference_id)) {
+      return reply.code(409).send({ error: "only breakdown work orders can be moved with this correction" });
+    }
+
+    const target = db.prepare(`
+      SELECT id, asset_code, asset_name
+      FROM assets
+      WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?))
+      LIMIT 1
+    `).get(targetCode);
+    if (!target) return reply.code(404).send({ error: "target asset not found" });
+
+    const breakdownId = Number(workOrder.reference_id);
+    const breakdown = db.prepare(`
+      SELECT id, asset_id, status
+      FROM breakdowns
+      WHERE id = ?
+    `).get(breakdownId);
+    if (!breakdown) return reply.code(404).send({ error: "linked breakdown not found" });
+
+    if (Number(breakdown.asset_id) === Number(target.id)) {
+      return reply.send({
+        ok: true,
+        unchanged: true,
+        work_order_id: id,
+        breakdown_id: breakdownId,
+        asset_code: target.asset_code,
+      });
+    }
+
+    const targetOpen = db.prepare(`
+      SELECT id
+      FROM breakdowns
+      WHERE asset_id = ?
+        AND UPPER(TRIM(COALESCE(status, 'OPEN'))) = 'OPEN'
+        AND id <> ?
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(target.id, breakdownId);
+    if (targetOpen) {
+      return reply.code(409).send({
+        error: `Cannot move the breakdown: ${target.asset_code} already has open breakdown #${targetOpen.id}`,
+      });
+    }
+
+    const linkedWorkOrders = db.prepare(`
+      SELECT id
+      FROM work_orders
+      WHERE source = 'breakdown' AND reference_id = ?
+    `).all(breakdownId).map((row) => Number(row.id));
+
+    const move = db.transaction(() => {
+      db.prepare(`UPDATE breakdowns SET asset_id = ? WHERE id = ?`).run(target.id, breakdownId);
+      db.prepare(`
+        UPDATE work_orders
+        SET asset_id = ?
+        WHERE source = 'breakdown' AND reference_id = ?
+      `).run(target.id, breakdownId);
+
+      if (hasTable("breakdown_offsite_repairs")) {
+        const offsiteSet = ["asset_id = ?"];
+        if (hasColumn("breakdown_offsite_repairs", "updated_at")) offsiteSet.push("updated_at = datetime('now')");
+        db.prepare(`UPDATE breakdown_offsite_repairs SET ${offsiteSet.join(", ")} WHERE breakdown_id = ?`)
+          .run(target.id, breakdownId);
+      }
+      if (partsRequestsTableExists() && linkedWorkOrders.length) {
+        const marks = linkedWorkOrders.map(() => "?").join(", ");
+        const requestSet = ["asset_id = ?"];
+        if (hasColumn("maintenance_parts_requests", "asset_code")) requestSet.push("asset_code = ?");
+        if (hasColumn("maintenance_parts_requests", "updated_at")) requestSet.push("updated_at = datetime('now')");
+        const requestArgs = hasColumn("maintenance_parts_requests", "asset_code")
+          ? [target.id, target.asset_code, ...linkedWorkOrders]
+          : [target.id, ...linkedWorkOrders];
+        db.prepare(`UPDATE maintenance_parts_requests SET ${requestSet.join(", ")} WHERE work_order_id IN (${marks})`)
+          .run(...requestArgs);
+      }
+    });
+    move();
+
+    writeAudit(db, req, {
+      module: "workorders",
+      action: "breakdown_asset_corrected",
+      entity_type: "breakdown",
+      entity_id: breakdownId,
+      payload: {
+        work_order_id: id,
+        from_asset_code: workOrder.asset_code,
+        to_asset_code: target.asset_code,
+        linked_work_order_ids: linkedWorkOrders,
+      },
+    });
+
+    return reply.send({
+      ok: true,
+      work_order_id: id,
+      breakdown_id: breakdownId,
+      from_asset: { asset_code: workOrder.asset_code, asset_name: workOrder.asset_name },
+      to_asset: { asset_code: target.asset_code, asset_name: target.asset_name },
+      linked_work_order_ids: linkedWorkOrders,
+    });
+  });
+
   // Work order status transitions
   // Body: { status }
   app.post("/:id/status", async (req, reply) => {

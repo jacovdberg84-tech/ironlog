@@ -693,8 +693,22 @@ function refreshIssueOptions(searchTerm = "") {
   select.innerHTML = `<option value="">Select part or lube...</option>${formatStockOptions(filtered)}`;
 }
 
-function renderBreakdown(breakdown) {
+function renderBreakdown(breakdown, workOrder) {
   if (!breakdown) return `<div class="muted">No linked breakdown.</div>`;
+
+  const canCorrectAsset = sessionRoleList().includes("admin");
+  const correction = canCorrectAsset ? `
+    <form class="wo-asset-correction" data-wo-move-asset="${Number(workOrder?.id || 0)}" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line, #d7dee9);">
+      <strong>Admin correction</strong>
+      <div class="muted small" style="margin:4px 0 8px;">Move this breakdown, its linked work orders and outstanding parts requests to the correct machine. Daily production entries are left unchanged.</div>
+      <div class="row" style="gap:8px;align-items:end;flex-wrap:wrap;">
+        <label style="min-width:190px;flex:1;">Correct fleet number
+          <input name="asset_code" list="woRepairAssetList" placeholder="e.g. E504AM" autocomplete="off" required />
+        </label>
+        <button type="submit" class="btn-secondary">Move to correct asset</button>
+      </div>
+      <p class="wo-asset-correction-msg muted small" role="status" style="margin:8px 0 0;"></p>
+    </form>` : "";
 
   return `
     <div class="item">
@@ -702,6 +716,7 @@ function renderBreakdown(breakdown) {
       <div><strong>Date:</strong> ${breakdown.breakdown_date || "-"}</div>
       <div><strong>Critical:</strong> ${breakdown.critical ? "Yes" : "No"}</div>
       <div><strong>Description:</strong> ${breakdown.description || "-"}</div>
+      ${correction}
     </div>
   `;
 }
@@ -776,7 +791,7 @@ function renderDetail(payload) {
         <summary>Repair hours and costs</summary>
         ${renderRepairCostsPanel(wo) || `<div class="muted">No repair costs recorded.</div>`}
       </details>
-      ${breakdown ? `<details><summary>Linked breakdown</summary>${renderBreakdown(breakdown)}</details>` : ""}
+      ${breakdown ? `<details><summary>Linked breakdown</summary>${renderBreakdown(breakdown, wo)}</details>` : ""}
       <details>
         <summary>Issued parts <span class="wo-detail-count">${partsCount}</span></summary>
         ${renderParts(nonLubeIssued)}
@@ -1794,6 +1809,41 @@ async function saveRepairProgress(woId) {
   }
 }
 
+async function moveBreakdownToCorrectAsset(form) {
+  const workOrderId = Number(form?.getAttribute("data-wo-move-asset") || 0);
+  const assetCode = String(form?.elements?.asset_code?.value || "").trim().toUpperCase();
+  const msg = form?.querySelector(".wo-asset-correction-msg");
+  if (!workOrderId || !assetCode) return;
+
+  if (!window.confirm(`Move breakdown and linked work orders for WO #${workOrderId} to ${assetCode}? This does not alter production-hour entries.`)) {
+    return;
+  }
+  const btn = form.querySelector("button[type=submit]");
+  if (btn) btn.disabled = true;
+  if (msg) {
+    msg.className = "wo-asset-correction-msg muted small";
+    msg.textContent = "Moving linked records…";
+  }
+  try {
+    const data = await fetchJson(`${API}/workorders/${workOrderId}/move-asset`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ asset_code: assetCode }),
+    });
+    const target = data?.to_asset?.asset_code || data?.asset_code || assetCode;
+    await fetchWorkOrders();
+    await loadWorkOrderDetail(workOrderId);
+    alert(`WO #${workOrderId} and its linked breakdown are now assigned to ${target}.`);
+  } catch (err) {
+    if (msg) {
+      msg.className = "wo-asset-correction-msg message-error";
+      msg.textContent = err.message || String(err);
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function setWorkOrderStatus(id, status, extraBody = {}) {
   const woId = Number(id || 0);
   const next = String(status || "").trim().toLowerCase();
@@ -2187,7 +2237,14 @@ document.addEventListener("DOMContentLoaded", () => {
       if (saveCostsId) saveRepairCosts(saveCostsId).catch(() => {});
     });
     detailEl.addEventListener("submit", (evt) => {
-      const form = evt.target instanceof HTMLElement ? evt.target.closest("[data-wo-part-request]") : null;
+      const target = evt.target instanceof HTMLElement ? evt.target : null;
+      const moveForm = target?.closest("[data-wo-move-asset]");
+      if (moveForm) {
+        evt.preventDefault();
+        moveBreakdownToCorrectAsset(moveForm).catch(() => {});
+        return;
+      }
+      const form = target?.closest("[data-wo-part-request]");
       if (!form) return;
       evt.preventDefault();
       submitPartRequest(form).catch(() => {});
