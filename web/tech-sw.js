@@ -2,14 +2,14 @@
 // Keeps only the portal's own page, scripts and styles so it opens without
 // signal. API data is never cached here: the portal keeps its own last-seen
 // copy and its unsent updates in the phone's storage.
-const CACHE = "ironlog-tech-shell-v7";
+const CACHE = "ironlog-tech-shell-v8";
 const SHELL = [
   "./technician-terminal.html",
   "./technician-terminal.css?v=3",
-  "./tech-portal.css?v=6",
+  "./tech-portal.css?v=7",
   "./auth-shared.js?v=5",
-  "./tech-portal-pt.js?v=5",
-  "./tech-portal.js?v=6",
+  "./tech-portal-pt.js?v=6",
+  "./tech-portal.js?v=7",
   "./technician-terminal.js?v=7",
   "./tech-manifest.json",
 ];

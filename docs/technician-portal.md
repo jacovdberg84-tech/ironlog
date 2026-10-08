@@ -159,3 +159,8 @@ artisan inspection on the phone, in English or Portuguese.
   - Schema additions are additive: new columns on `artisan_inspections` and a
     new `artisan_inspection_photos` table.
   - The maintenance page's own artisan form still uses its 8-check list.
+
+## Manuals (Workshop library)
+
+The **📚 Manuals** tab opens the Workshop Library: search manuals (filter by type), read one in the portal's own PDF viewer (page buttons, tap the page number to jump, − / + to zoom), or **Ask the manuals**. Each answer lists the manual pages it came from; tap one to open the manual at that page. The viewer is pdf.js (`web/vendor/pdfjs-3.11.174`, Apache-2.0), loaded only when a manual is opened, so it works the same on Android and iPhone. Manuals are uploaded and indexed in the main app's Workshop Library; they need signal to open.
+
