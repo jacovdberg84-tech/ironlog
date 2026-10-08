@@ -55,8 +55,17 @@ function juneLemonSliceFail(error) {
   if (!juneLemonSlice?.warned) {
     console.warn("June visual paused; voice remains available.", error);
     juneLemonSlice = { ...juneLemonSlice, warned: true, enabled: false };
+    juneAvatarNote(`Animated avatar off: ${error?.message || String(error)} Voice still works.`);
   }
   juneLemonSliceClearVideo();
+}
+
+/** A short line under June saying why her LemonSlice avatar is not showing. */
+function juneAvatarNote(text) {
+  const note = qs("juneAvatarNote");
+  if (!note) return;
+  note.textContent = String(text || "");
+  note.hidden = !text;
 }
 
 function juneLemonSliceBase64(bytes) {
@@ -341,28 +350,16 @@ function juneCalendarEventWhen(event) {
 }
 
 function juneRenderInternalCalendarEvents(events, { error = "" } = {}) {
-  const host = qs("juneInternalCalendarEvents");
-  if (!host) return;
-  if (error) {
-    host.innerHTML = `<div class="june-calendar-empty june-calendar-error">${juneEscape(error)}</div>`;
-    return;
-  }
-  const list = Array.isArray(events) ? events : [];
-  if (!list.length) {
-    host.innerHTML = "<div class=\"june-calendar-empty\">No Ironlog schedule entries in the next 21 days. Give June something worth organising.</div>";
-    return;
-  }
-  host.innerHTML = list.map((event) => {
-    const detail = [String(event?.category || "meeting").replace(/_/g, " "), event?.asset_code ? `Asset ${event.asset_code}` : "", event?.work_order_id ? `WO #${event.work_order_id}` : ""].filter(Boolean).join(" · ");
-    return `<article class="june-calendar-event"><time>${juneEscape(juneCalendarEventWhen(event))}</time><strong>${juneEscape(event?.title || "(No title)")}</strong>${detail ? `<span>${juneEscape(detail)}</span>` : ""}</article>`;
-  }).join("");
+  window.JuneCalendar?.setSource("ironlog", events, error);
 }
 
 async function juneLoadInternalCalendar({ quiet = false } = {}) {
   const refresh = qs("juneInternalCalendarRefreshBtn");
   if (refresh) refresh.disabled = true;
   try {
-    const data = await juneApiJson(`${API}/api/june/calendar/internal/events?days=21`, { headers: authHeaders() });
+    const range = window.JuneCalendar?.range();
+    const query = range ? `from=${range.from}&to=${range.to}` : "days=21";
+    const data = await juneApiJson(`${API}/api/june/calendar/internal/events?${query}`, { headers: authHeaders() });
     juneRenderInternalCalendarEvents(data?.calendar?.events || []);
   } catch (error) {
     juneRenderInternalCalendarEvents([], { error: `Ironlog schedule could not be refreshed: ${error?.message || String(error)}` });
@@ -507,25 +504,8 @@ function juneCalendarSetFormVisible(visible) {
   if (form) form.hidden = !visible;
 }
 
-function juneRenderCalendarEvents(events, { error = "", emptyMessage = "No upcoming events in the next 21 days." } = {}) {
-  const host = qs("juneCalendarEvents");
-  if (!host) return;
-  if (error) {
-    host.innerHTML = `<div class="june-calendar-empty june-calendar-error">${juneEscape(error)}</div>`;
-    return;
-  }
-  const list = Array.isArray(events) ? events : [];
-  if (!list.length) {
-    host.innerHTML = `<div class="june-calendar-empty">${juneEscape(emptyMessage)}</div>`;
-    return;
-  }
-  host.innerHTML = list.map((event) => {
-    const when = event?.all_day
-      ? `${juneEscape(event?.start_date || "")} · All day`
-      : `${juneEscape(event?.start_date || "")} · ${juneEscape(event?.start_time || "")}`;
-    const location = String(event?.location || "").trim();
-    return `<article class="june-calendar-event"><time>${when}</time><strong>${juneEscape(event?.summary || "(No title)")}</strong>${location ? `<span>${juneEscape(location)}</span>` : ""}</article>`;
-  }).join("");
+function juneRenderCalendarEvents(events, { error = "" } = {}) {
+  window.JuneCalendar?.setSource("ics", events, error);
 }
 
 function juneRenderIcsCalendar(calendar) {
@@ -541,10 +521,9 @@ function juneRenderIcsCalendar(calendar) {
   const name = String(calendar?.name || "My calendar").trim() || "My calendar";
   title.textContent = name;
   state.textContent = String(calendar?.last_error || calendar?.detail || "Add a private ICS link to see your upcoming meetings in Ironlog.");
-  edit.textContent = connection === "connected" ? "Edit calendar link" : "Add calendar link";
-  refresh.hidden = connection !== "connected";
+  edit.title = connection === "connected" ? "Edit calendar link" : "Add your Outlook / private calendar link";
   remove.hidden = connection !== "connected";
-  if (connection !== "connected") juneRenderCalendarEvents([], { emptyMessage: "Your upcoming calendar events will appear here." });
+  window.JuneCalendar?.setIcs({ connected: connection === "connected", name });
 }
 
 async function loadJuneStatus({ quiet = false } = {}) {
@@ -552,6 +531,10 @@ async function loadJuneStatus({ quiet = false } = {}) {
   try {
     const data = await fetchJson(`${API}/api/june/status`);
     juneAvatarConfig = data?.avatar || null;
+    const av = juneAvatarConfig;
+    if (av && !av.configured) juneAvatarNote(`Animated avatar off: the server is missing ${(av.missing || []).join(", ")}.`);
+    else if (av?.last_error) juneAvatarNote(`Animated avatar: LemonSlice refused the last session (HTTP ${av.last_error.status}${av.last_error.message ? `: ${av.last_error.message}` : ""}).`);
+    else juneAvatarNote("");
     juneRenderConnectors(data?.connectors || {});
     juneRenderOutlookControl(data?.outlook || null);
     juneRenderIcsCalendar(data?.ics_calendar || null);
@@ -576,12 +559,13 @@ async function loadJuneStatus({ quiet = false } = {}) {
 }
 
 async function juneLoadIcsCalendar() {
+  if (String(juneIcsCalendar?.state || "") !== "connected") return;
   const refresh = qs("juneCalendarRefreshBtn");
-  const state = qs("juneCalendarState");
   if (refresh) refresh.disabled = true;
-  if (state) state.textContent = "Refreshing your private calendar…";
   try {
-    const data = await juneApiJson(`${API}/api/june/calendar/ics/events`, { headers: authHeaders() });
+    const range = window.JuneCalendar?.range();
+    const query = range ? `?from=${range.from}&to=${range.to}` : "";
+    const data = await juneApiJson(`${API}/api/june/calendar/ics/events${query}`, { headers: authHeaders() });
     const calendar = data?.calendar || {};
     juneRenderIcsCalendar(calendar);
     juneRenderCalendarEvents(calendar?.events, { error: calendar?.error || "" });
@@ -682,17 +666,21 @@ function juneShowOutlookCallbackNotice() {
 function syncJuneVisibility() {
   const card = qs("juneAssistantCard");
   const calendarCard = qs("juneCalendarCard");
-  const internalCalendarCard = qs("juneInternalCalendarCard");
+  const row = qs("juneRow");
   if (!card) return;
   const visible = juneIsAdmin();
   card.hidden = !visible;
-  // June can still use the private ICS feed, but My Work stays focused on her voice card.
-  if (calendarCard) calendarCard.hidden = true;
-  if (internalCalendarCard) internalCalendarCard.hidden = !visible;
+  if (row) row.hidden = !visible;
+  // The Outlook-style calendar sits next to June: private calendar link + Ironlog schedule.
+  if (calendarCard) calendarCard.hidden = !visible;
   if (!visible && junePeerConnection) juneStopLive({ silent: true });
   if (visible) {
-    loadJuneStatus({ quiet: true }).catch(() => {});
-    juneLoadInternalCalendar({ quiet: true }).catch(() => {});
+    loadJuneStatus({ quiet: true })
+      .catch(() => {})
+      .then(() => window.JuneCalendar?.start(() => {
+        juneLoadInternalCalendar({ quiet: true }).catch(() => {});
+        juneLoadIcsCalendar().catch(() => {});
+      }));
   }
 }
 
@@ -993,6 +981,7 @@ function wireJuneControls() {
   qs("juneConnectOutlookBtn")?.addEventListener("click", () => juneConnectOutlook());
   qs("juneDisconnectOutlookBtn")?.addEventListener("click", () => juneDisconnectOutlook());
   qs("juneCalendarEditBtn")?.addEventListener("click", () => {
+    if (!qs("juneCalendarForm")?.hidden) return juneCalendarSetFormVisible(false);
     const name = qs("juneCalendarName");
     if (name) name.value = String(juneIcsCalendar?.name || "My calendar");
     juneCalendarSetFormVisible(true);
@@ -1000,7 +989,10 @@ function wireJuneControls() {
   });
   qs("juneCalendarCancelBtn")?.addEventListener("click", () => juneCalendarSetFormVisible(false));
   qs("juneCalendarForm")?.addEventListener("submit", juneSaveIcsCalendar);
-  qs("juneCalendarRefreshBtn")?.addEventListener("click", () => juneLoadIcsCalendar());
+  qs("juneCalendarRefreshBtn")?.addEventListener("click", () => {
+    juneLoadIcsCalendar();
+    juneLoadInternalCalendar();
+  });
   qs("juneCalendarRemoveBtn")?.addEventListener("click", () => juneRemoveIcsCalendar());
   qs("juneInternalCalendarRefreshBtn")?.addEventListener("click", () => juneLoadInternalCalendar());
 }

@@ -280,11 +280,17 @@ function formatEvent(event, startTimestamp) {
   };
 }
 
-function upcomingEvents(ics) {
-  const now = Date.now();
+/**
+ * Occurrences in a window. By default: still-running or upcoming events in the
+ * next WINDOW_DAYS (June's briefing). With a range (the calendar view): every
+ * event touching [from, to], past ones included.
+ */
+function upcomingEvents(ics, range = null) {
+  const now = range ? Date.parse(`${range.from}T00:00:00Z`) : Date.now();
   const start = new Date(now);
   start.setUTCHours(0, 0, 0, 0);
-  const windowEnd = start.getTime() + WINDOW_DAYS * 86_400_000;
+  const windowEnd = range ? Date.parse(`${range.to}T23:59:59Z`) : start.getTime() + WINDOW_DAYS * 86_400_000;
+  const limit = range ? 400 : 18;
   const all = [];
   for (const event of parseEvents(ics).slice(0, 500)) {
     const excluded = new Set((event.exdates || []).map((item) => item.timestamp));
@@ -308,7 +314,7 @@ function upcomingEvents(ics) {
       if (timestamp + eventDuration(event) >= now && !excluded.has(timestamp)) all.push(formatEvent(event, timestamp));
     }
   }
-  return all.sort((a, b) => a.start_at.localeCompare(b.start_at)).slice(0, 18);
+  return all.sort((a, b) => a.start_at.localeCompare(b.start_at)).slice(0, limit);
 }
 
 function safeRefreshError(error) {
@@ -367,7 +373,7 @@ export function removeIcsCalendar(context) {
   return { removed: Number(result.changes || 0) > 0, calendar: getIcsCalendarStatus(context) };
 }
 
-export async function getIcsCalendarEvents(context) {
+export async function getIcsCalendarEvents(context, range = null) {
   const status = getIcsCalendarStatus(context);
   if (status.state !== "connected") return { ...status, events: [], next_step: "Add a private ICS link before refreshing your calendar." };
   const row = sourceRow(context);
@@ -375,7 +381,7 @@ export async function getIcsCalendarEvents(context) {
   if (!url) return { ...status, state: "needs_reconnect", events: [], next_step: "Add the calendar link again." };
   try {
     const document = await fetchIcsDocument(url);
-    const events = upcomingEvents(document);
+    const events = upcomingEvents(document, range);
     const { siteCode, user } = contextKey(context);
     db.prepare(`
       UPDATE june_ics_calendars
@@ -402,3 +408,4 @@ export async function getIcsCalendarOverview(context) {
       : data.next_step || "Add a private ICS calendar link first.",
   };
 }
+export const __test = { upcomingEvents };

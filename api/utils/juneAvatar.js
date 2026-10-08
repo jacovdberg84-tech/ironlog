@@ -10,6 +10,7 @@ const DEFAULT_IMAGE_URL = "https://ironlog.ironlogafrica.com/web/assets/june-por
 const SESSION_TTL_MS = 60 * 60_000;
 const SESSION_LIMIT = 8;
 const sessions = new Map();
+let lastError = null;
 
 function value(name, fallback = "") {
   return String(process.env[name] || fallback).trim();
@@ -59,6 +60,9 @@ function config() {
     livekitApiSecret,
     agentId: value("JUNE_LEMONSLICE_AGENT_ID", DEFAULT_AGENT_ID),
     imageUrl: value("JUNE_LEMONSLICE_IMAGE_URL", DEFAULT_IMAGE_URL),
+    // The character built in the LemonSlice web app is used by default; set
+    // JUNE_LEMONSLICE_SOURCE=image to animate the portrait image instead.
+    source: value("JUNE_LEMONSLICE_SOURCE", "agent").toLowerCase() === "image" ? "image" : "agent",
     prompt: value("JUNE_LEMONSLICE_PROMPT", "June is a sharp, confident executive assistant. Use natural, attentive expressions and understated hand gestures."),
   };
 }
@@ -71,8 +75,17 @@ export function getJuneAvatarStatus() {
     // This is an identifier only, not a credential. It documents the
     // LemonSlice character Jaco created while Ironlog retains June's brain.
     agent_id: settings.agentId,
+    source: settings.source === "agent" && settings.agentId ? "agent" : "image",
     missing: settings.missing,
+    last_error: lastError,
   };
+}
+
+/** LemonSlice's own reason for a refusal, short and without secrets. */
+function providerDetail(data, raw) {
+  const pick = data?.detail || data?.error?.message || data?.error || data?.message || "";
+  const text = typeof pick === "string" ? pick : JSON.stringify(pick);
+  return String(text || raw || "").replace(/\s+/g, " ").replace(/(key|token)[^,;]*/gi, "$1 …").trim().slice(0, 200);
 }
 
 function avatarError(message, statusCode = 503) {
@@ -179,7 +192,9 @@ export async function startJuneAvatar({ owner, log }) {
       body: JSON.stringify({
         transport_type: "websocket-livekit",
         livekit_properties: { livekit_url: settings.livekitUrl, livekit_token: avatarToken },
-        agent_image_url: settings.imageUrl,
+        // LemonSlice takes exactly one avatar source: the agent built in its web
+        // app (agent_id) or an image to animate (agent_image_url).
+        ...(settings.source === "agent" && settings.agentId ? { agent_id: settings.agentId } : { agent_image_url: settings.imageUrl }),
         agent_prompt: settings.prompt,
       }),
       signal: controller.signal,
@@ -196,9 +211,12 @@ export async function startJuneAvatar({ owner, log }) {
   let data = {};
   try { data = JSON.parse(raw); } catch {}
   if (!response.ok) {
-    log?.warn?.({ status: response.status }, "June LemonSlice session request failed");
-    throw avatarError("LemonSlice could not prepare June's visual. Please retry shortly.", 424);
+    const detail = providerDetail(data, raw);
+    log?.warn?.({ status: response.status, detail }, "June LemonSlice session request failed");
+    lastError = { at: new Date().toISOString(), status: response.status, message: detail };
+    throw avatarError(`LemonSlice refused June's visual (HTTP ${response.status}${detail ? `: ${detail}` : ""}).`, 424);
   }
+  lastError = null;
   const address = String(data?.websocket_address || "").trim();
   if (!address) throw avatarError("LemonSlice did not return a visual-session connection.", 424);
   const socket = await openTunnel(address);

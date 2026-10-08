@@ -947,6 +947,16 @@ async function createOpenAiLiveSession({ apiKey, payload, log, safetyId }) {
   }
 }
 
+/** A from/to date range for the calendar view, or null. */
+function calendarRange(query = {}) {
+  const ymd = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v) : null);
+  const from = ymd(query.from);
+  const to = ymd(query.to);
+  if (!from || !to || to < from) return null;
+  const days = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000;
+  return days <= 62 ? { from, to } : null;
+}
+
 export default async function juneRoutes(app) {
   app.get("/status", async (req, reply) => {
     if (!requireJuneAdmin(req, reply)) return;
@@ -988,7 +998,9 @@ export default async function juneRoutes(app) {
 
   app.get("/calendar/ics/events", async (req, reply) => {
     if (!requireJuneAdmin(req, reply)) return;
-    const calendar = await getIcsCalendarEvents({ siteCode: getSiteCode(req), user: getUser(req) });
+    // ?from=YYYY-MM-DD&to=YYYY-MM-DD (the calendar view, up to 62 days); none = upcoming.
+    const range = calendarRange(req.query);
+    const calendar = await getIcsCalendarEvents({ siteCode: getSiteCode(req), user: getUser(req) }, range);
     return { ok: !calendar.error, calendar };
   });
 
@@ -1002,9 +1014,10 @@ export default async function juneRoutes(app) {
   app.get("/calendar/internal/events", async (req, reply) => {
     if (!requireJuneAdmin(req, reply)) return;
     const requestedDays = Math.max(1, Math.min(90, Number(req.query?.days) || 21));
-    const start = new Date();
-    const end = new Date(start);
-    end.setUTCDate(end.getUTCDate() + requestedDays);
+    const range = calendarRange(req.query);
+    const start = range ? new Date(`${range.from}T00:00:00Z`) : new Date();
+    const end = range ? new Date(`${range.to}T00:00:00Z`) : new Date(start);
+    if (!range) end.setUTCDate(end.getUTCDate() + requestedDays);
     const context = { siteCode: getSiteCode(req), user: getUser(req) };
     return {
       ok: true,
@@ -1015,7 +1028,7 @@ export default async function juneRoutes(app) {
         events: listInternalCalendarEvents(context, {
           fromDate: start.toISOString().slice(0, 10),
           toDate: end.toISOString().slice(0, 10),
-          limit: 32,
+          limit: range ? 100 : 32,
         }),
       },
     };
