@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1220" />
+  <title>IRONLOG Stores Scanner</title>
+  <style>
+    :root { color-scheme: dark; --bg: #0b1220; --panel: #152033; --line: #34445f; --ink: #f4f7fb; --muted: #9fb0c8; --ok: #16a34a; --bad: #dc2626; --accent: #3b82f6; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
+    header { padding: 14px 16px; background: var(--panel); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+    header b { font-size: 1.1rem; }
+    header .lang { margin-left: auto; display: flex; gap: 6px; }
+    header .lang button { min-width: 44px; min-height: 38px; border-radius: 8px; border: 2px solid var(--line); background: transparent; color: var(--ink); font-weight: 700; }
+    header .lang button.on { background: var(--accent); border-color: var(--accent); }
+    main { flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+    .cam { position: relative; width: 100%; aspect-ratio: 3 / 4; max-height: 60vh; background: #000; border-radius: 16px; overflow: hidden; }
+    .cam video { width: 100%; height: 100%; object-fit: cover; }
+    .cam .aim { position: absolute; inset: 22% 12%; border: 3px solid rgba(255, 255, 255, 0.85); border-radius: 14px; box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.25); pointer-events: none; }
+    .cam.hit .aim { border-color: var(--ok); }
+    .cam .start { position: absolute; inset: 0; display: grid; place-items: center; }
+    .btn { border: 0; border-radius: 14px; min-height: 58px; padding: 0 18px; font-size: 1.1rem; font-weight: 700; color: var(--ink); background: var(--accent); }
+    .btn.ghost { background: transparent; border: 2px solid var(--line); }
+    .row { display: flex; gap: 10px; }
+    .row input { flex: 1; min-height: 58px; border-radius: 14px; border: 2px solid var(--line); background: var(--panel); color: var(--ink); font-size: 1.1rem; padding: 0 14px; min-width: 0; }
+    .status { min-height: 64px; border-radius: 14px; padding: 14px 16px; background: var(--panel); font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; }
+    .status.ok { background: rgba(22, 163, 74, 0.22); }
+    .status.bad { background: rgba(220, 38, 38, 0.22); }
+    .muted { color: var(--muted); }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li { padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--muted); }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <header><b>📱 <span data-t="Stores scanner">Stores scanner</span></b>
+    <div class="lang"><button type="button" data-lang="en">EN</button><button type="button" data-lang="pt">PT</button></div>
+  </header>
+  <main>
+    <div id="noKey" class="status bad hidden" data-t="Open this page by scanning the pairing code on the stores terminal (📱 Phone scanner).">Open this page by scanning the pairing code on the stores terminal (📱 Phone scanner).</div>
+    <div id="scanner">
+      <div class="cam" id="cam">
+        <video id="video" playsinline muted></video>
+        <div class="aim"></div>
+        <div class="start" id="startBox"><button type="button" class="btn" id="startBtn" data-t="Start camera">Start camera</button></div>
+      </div>
+      <p class="muted" data-t="Point the camera at a part label, machine QR or work order. Each code goes straight to the terminal.">Point the camera at a part label, machine QR or work order. Each code goes straight to the terminal.</p>
+      <div class="status" id="status" data-t="Ready">Ready</div>
+      <div class="row" style="margin-top:14px">
+        <input id="manual" type="text" autocomplete="off" autocapitalize="characters" placeholder="Type a code" data-tp="Type a code" />
+        <button type="button" class="btn" id="sendBtn" data-t="Send">Send</button>
+      </div>
+      <h3 class="muted" data-t="Sent">Sent</h3>
+      <ul id="sent"></ul>
+    </div>
+  </main>
+  <script>
+  (function () {
+    const PT = {
+      "Stores scanner": "Leitor do armazém",
+      "Open this page by scanning the pairing code on the stores terminal (📱 Phone scanner).": "Abra esta página lendo o código de ligação no terminal do armazém (📱 Telemóvel como leitor).",
+      "Start camera": "Ligar câmara",
+      "Point the camera at a part label, machine QR or work order. Each code goes straight to the terminal.": "Aponte a câmara para uma etiqueta de peça, QR da máquina ou ordem de trabalho. Cada código vai direto para o terminal.",
+      "Ready": "Pronto",
+      "Type a code": "Escreva um código",
+      "Send": "Enviar",
+      "Sent": "Enviados",
+      "Sent to the terminal: {code}": "Enviado para o terminal: {code}",
+      "Could not send. Check the network and try again.": "Não foi possível enviar. Verifique a rede e tente de novo.",
+      "The camera could not start. Allow camera access, or type the code below.": "A câmara não ligou. Permita o acesso à câmara ou escreva o código abaixo.",
+      "This phone cannot read codes with the camera. Type the code below.": "Este telemóvel não lê códigos com a câmara. Escreva o código abaixo.",
+    };
+    let lang = (() => { try { return localStorage.getItem("ironlog-terminal-lang") || "en"; } catch { return "en"; } })();
+    const T = (s, v) => { let o = lang === "pt" && PT[s] ? PT[s] : s; if (v) for (const k in v) o = o.split(`{${k}}`).join(v[k]); return o; };
+    const $ = (id) => document.getElementById(id);
+    function applyText() {
+      document.querySelectorAll("[data-t]").forEach((el) => { el.textContent = T(el.dataset.t); });
+      document.querySelectorAll("[data-tp]").forEach((el) => { el.placeholder = T(el.dataset.tp); });
+      document.querySelectorAll("[data-lang]").forEach((b) => b.classList.toggle("on", b.dataset.lang === lang));
+    }
+    document.querySelectorAll("[data-lang]").forEach((b) => b.addEventListener("click", () => {
+      lang = b.dataset.lang;
+      try { localStorage.setItem("ironlog-terminal-lang", lang); } catch { /* storage off */ }
+      applyText();
+    }));
+    applyText();
+
+    const key = new URLSearchParams(location.search).get("key") || "";
+    if (!/^[a-f0-9]{32}$/.test(key)) {
+      $("noKey").classList.remove("hidden");
+      $("scanner").classList.add("hidden");
+      return;
+    }
+
+    function status(text, kind = "") {
+      const el = $("status");
+      el.textContent = text;
+      el.className = `status ${kind}`;
+    }
+    let audio = null;
+    function beep(ok) {
+      try {
+        audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+        const o = audio.createOscillator(); const g = audio.createGain();
+        o.frequency.value = ok ? 1250 : 220; g.gain.value = 0.15;
+        o.connect(g).connect(audio.destination); o.start(); o.stop(audio.currentTime + (ok ? 0.08 : 0.3));
+      } catch { /* no audio */ }
+      try { navigator.vibrate?.(ok ? 60 : [80, 60, 80]); } catch { /* no vibration */ }
+    }
+
+    let last = "";
+    let lastAt = 0;
+    async function send(code) {
+      code = String(code || "").trim();
+      if (!code) return;
+      // The camera sees the same label many times a second: send it once.
+      if (code === last && Date.now() - lastAt < 2500) return;
+      last = code;
+      lastAt = Date.now();
+      try {
+        const res = await fetch("/api/stock/terminal/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, code }) });
+        if (!res.ok) throw new Error(String(res.status));
+        beep(true);
+        const shown = code.length > 60 ? `${code.slice(0, 57)}…` : code;
+        status(T("Sent to the terminal: {code}", { code: shown }), "ok");
+        const li = document.createElement("li");
+        li.textContent = `${new Date().toLocaleTimeString().slice(0, 5)}  ${shown}`;
+        $("sent").prepend(li);
+        while ($("sent").children.length > 8) $("sent").lastChild.remove();
+        $("cam").classList.add("hit");
+        setTimeout(() => $("cam").classList.remove("hit"), 600);
+      } catch {
+        last = "";
+        beep(false);
+        status(T("Could not send. Check the network and try again."), "bad");
+      }
+    }
+
+    $("sendBtn").addEventListener("click", () => { send($("manual").value); $("manual").value = ""; });
+    $("manual").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("sendBtn").click(); } });
+
+    const FORMATS = ["qr_code", "code_128", "code_39", "code_93", "ean_13", "ean_8", "upc_a", "upc_e", "itf", "data_matrix"];
+    async function startCamera() {
+      $("startBox").classList.add("hidden");
+      const video = $("video");
+      // Android Chrome reads codes natively; elsewhere (iPhone) use the bundled reader.
+      let native = null;
+      try {
+        if ("BarcodeDetector" in window) {
+          const supported = await window.BarcodeDetector.getSupportedFormats();
+          const formats = FORMATS.filter((f) => supported.includes(f));
+          if (formats.length) native = new window.BarcodeDetector({ formats });
+        }
+      } catch { native = null; }
+
+      if (native) {
+        try {
+          video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+          await video.play();
+        } catch {
+          $("startBox").classList.remove("hidden");
+          return status(T("The camera could not start. Allow camera access, or type the code below."), "bad");
+        }
+        const tick = async () => {
+          try {
+            if (video.readyState >= 2) {
+              const codes = await native.detect(video);
+              if (codes.length) await send(codes[0].rawValue);
+            }
+          } catch { /* next frame */ }
+          setTimeout(tick, 180);
+        };
+        tick();
+        return;
+      }
+
+      try {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = "./vendor/zxing-browser-0.1.5.min.js";
+          s.onload = resolve;
+          s.onerror = reject;
+          document.head.appendChild(s);
+        });
+        const reader = new window.ZXingBrowser.BrowserMultiFormatReader();
+        await reader.decodeFromConstraints({ video: { facingMode: "environment" }, audio: false }, video, (result) => {
+          if (result) send(result.getText());
+        });
+      } catch (e) {
+        $("startBox").classList.remove("hidden");
+        const denied = e && /NotAllowed|Permission|NotFound|NotReadable/i.test(String(e.name || e.message));
+        status(denied ? T("The camera could not start. Allow camera access, or type the code below.") : T("This phone cannot read codes with the camera. Type the code below."), "bad");
+      }
+    }
+    $("startBtn").addEventListener("click", startCamera);
+    // Keep the screen awake while scanning where the phone allows it.
+    try { navigator.wakeLock?.request("screen").catch(() => {}); } catch { /* not supported */ }
+  })();
+  </script>
+</body>
+</html>

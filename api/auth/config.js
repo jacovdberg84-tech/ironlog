@@ -20,6 +20,10 @@ const PUBLIC_AUTH_REQUESTS = new Set([
   // The June route validates an expiring, single-use OAuth state instead of a
   // bearer token, which Microsoft does not carry on its browser redirect.
   "GET /api/june/outlook/callback",
+  // A phone camera paired with the stores terminal relays scans; the random
+  // pairing key in the body/query is the secret, and nothing is read back but codes.
+  "POST /api/stock/terminal/scan",
+  "GET /api/stock/terminal/scans",
 ]);
 
 export function isPublicAuthRequest(url, method) {

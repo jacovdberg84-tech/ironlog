@@ -186,6 +186,9 @@ function pickPrimaryRole(roles) {
   return "operator";
 }
 
+// Stores staff sign in with a PIN at the stores counter terminal.
+const PIN_STORES_ROLES = ["storeman", "stores", "workshop_admin"];
+
 export default async function authRoutes(app) {
   ensureAuditTable(db);
   db.prepare(`
@@ -408,7 +411,13 @@ export default async function authRoutes(app) {
   });
 
   // GET /api/auth/pin/roster — technicians with PIN enabled (terminal tile picker)
-  app.get("/pin/roster", async () => {
+  // ?terminal=stores also lists stores staff for the stores counter terminal.
+  app.get("/pin/roster", async (req) => {
+    const stores = String(req.query?.terminal || "") === "stores";
+    const storesClause = stores
+      ? `OR LOWER(TRIM(COALESCE(role, ''))) IN (${PIN_STORES_ROLES.map((r) => `'${r}'`).join(", ")})
+          ${PIN_STORES_ROLES.map((r) => `OR LOWER(COALESCE(roles_json, '')) LIKE '%"${r}"%'`).join("\n          ")}`
+      : "";
     const rows = db.prepare(`
       SELECT username, full_name, department, role, roles_json
       FROM users
@@ -421,6 +430,7 @@ export default async function authRoutes(app) {
           OR LOWER(TRIM(COALESCE(role, ''))) IN ('admin', 'supervisor')
           OR LOWER(COALESCE(roles_json, '')) LIKE '%admin%'
           OR LOWER(COALESCE(roles_json, '')) LIKE '%supervisor%'
+          ${storesClause}
         )
       ORDER BY COALESCE(full_name, username) ASC
     `).all();
@@ -457,7 +467,7 @@ export default async function authRoutes(app) {
     }
 
     const roles = parseRoles(row.roles_json, row.role);
-    const allowed = roles.some((r) => ["artisan", "admin", "supervisor"].includes(r));
+    const allowed = roles.some((r) => ["artisan", "admin", "supervisor", ...PIN_STORES_ROLES].includes(r));
     if (!allowed) {
       return reply.code(403).send({ error: "pin login is not enabled for this account" });
     }
