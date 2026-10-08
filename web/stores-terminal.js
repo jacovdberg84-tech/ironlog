@@ -114,6 +114,19 @@
     "Could not reach IronLog. Check the network.": "Sem ligação ao IronLog. Verifique a rede.",
     "Tap anywhere to stay signed in": "Toque em qualquer lado para continuar",
     "No work order": "Sem OT",
+    "New barcode": "Código de barras novo",
+    "Which part is in this box? Choose it once; after that this barcode finds the part for everyone.": "Que peça está nesta caixa? Escolha uma vez; depois este código encontra a peça para todos.",
+    "Linked: {barcode} → {code}": "Ligado: {barcode} → {code}",
+    "This barcode is linked to {code}": "Este código está ligado a {code}",
+    "Move it to {code}?": "Passar para {code}?",
+    "Move it": "Passar",
+    "Not found: {code}. Ask the storeman to link this barcode.": "Não encontrado: {code}. Peça ao fiel de armazém para ligar este código.",
+    "Box barcodes": "Códigos de barras da caixa",
+    "Link a box barcode": "Ligar código de barras da caixa",
+    "Scan the barcode on the box now": "Leia agora o código de barras da caixa",
+    "or type it here": "ou escreva aqui",
+    "Remove barcode {barcode}?": "Remover o código {barcode}?",
+    "Remove": "Remover",
   };
   let lang = (() => { try { return localStorage.getItem(LANG_KEY) || "en"; } catch { return "en"; } })();
   function T(s, vars) {
@@ -183,6 +196,8 @@
   // ------------------------------------------------------------- overlays
   function overlay(html) {
     const o = $("stOverlay");
+    o.onclick = null;
+    o._keys = null;
     o.innerHTML = html;
     o.classList.remove("hidden");
     return o;
@@ -192,6 +207,7 @@
     o.classList.add("hidden");
     o.innerHTML = "";
     o.onclick = null;
+    st.captureScan = null;
   }
   const overlayOpen = () => !$("stOverlay").classList.contains("hidden");
 
@@ -869,12 +885,133 @@
         ${p.bin ? `<div class="bin">${esc(T("Bin"))} ${esc(p.bin)}</div>` : ""}
         ${Number(p.min_stock) > 0 ? `<p class="muted">${esc(T("Minimum"))}: ${fmtQty(p.min_stock)}</p>` : ""}
       </div>
-      ${Number(p.on_hand) > 0 ? `<button type="button" class="btn primary huge" id="fsIssue">${esc(st.me.stores ? T("Issue this part") : T("Collect parts"))}</button>` : ""}`;
+      ${Number(p.on_hand) > 0 ? `<button type="button" class="btn primary huge" id="fsIssue">${esc(st.me.stores ? T("Issue this part") : T("Collect parts"))}</button>` : ""}
+      ${st.me.stores ? `<div class="st-barcodes" id="fsBarcodes"></div>` : ""}`;
     $("fsIssue")?.addEventListener("click", () => {
       const lines = [];
       addLine(lines, p);
       startIssue({ lines });
     });
+    if (st.me.stores) renderPartBarcodes(p);
+  }
+
+  // ------------------------------------------------------------- box barcodes
+  async function renderPartBarcodes(p) {
+    const box = $("fsBarcodes");
+    if (!box) return;
+    let codes = [];
+    try {
+      codes = (await api(`/stock/terminal/lookup?code=${encodeURIComponent(`PART:${p.part_code}`)}`)).barcodes || [];
+    } catch { /* show the button anyway */ }
+    if (st.find?.part !== p || !$("fsBarcodes")) return;
+    box.innerHTML = `
+      <h3>${esc(T("Box barcodes"))}</h3>
+      <div class="st-chips">${codes.map((c) => `<button type="button" class="st-chip" data-unlink="${esc(c)}">${esc(c)} <span aria-hidden="true">✕</span></button>`).join("")}</div>
+      <button type="button" class="btn ghost" style="width:100%" id="fsLink">＋ ${esc(T("Link a box barcode"))}</button>`;
+    $("fsLink").onclick = () => captureBarcodeFor(p);
+    box.querySelectorAll("[data-unlink]").forEach((b) => {
+      b.onclick = () => confirmSheet({
+        title: T("Remove barcode {barcode}?", { barcode: b.dataset.unlink }),
+        body: `<p class="muted">${esc(p.part_code)} · ${esc(p.part_name || "")}</p>`,
+        yes: T("Remove"),
+        yesClass: "bad",
+        onYes: async () => {
+          await api(`/stock/terminal/barcodes/${encodeURIComponent(b.dataset.unlink)}`, { method: "DELETE" });
+          closeOverlay();
+          renderPartBarcodes(p);
+        },
+      });
+    });
+  }
+
+  /** Save a barcode → part link, asking before moving a barcode off another part. */
+  async function saveBarcodeLink(barcode, part, replace = false) {
+    const resp = await fetch(`${API}/api/stock/terminal/barcodes`, {
+      method: "POST",
+      headers: A.authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ barcode, part_code: part.part_code, replace }),
+    });
+    const res = await resp.json().catch(() => ({}));
+    if (resp.status === 409 && res.linked_to) {
+      return new Promise((resolve, reject) => {
+        confirmSheet({
+          title: T("This barcode is linked to {code}", { code: res.linked_to.part_code }),
+          body: `<p class="muted">${esc(res.linked_to.part_name || "")}</p><p style="font-size:1.2rem">${esc(T("Move it to {code}?", { code: part.part_code }))}</p>`,
+          yes: T("Move it"),
+          onYes: async () => { resolve(await saveBarcodeLink(barcode, part, true)); },
+        });
+        // Cancel closes the sheet without resolving: treat it as not linked.
+        const o = $("stOverlay");
+        const cancel = o.querySelector('[data-cf="no"]');
+        cancel?.addEventListener("click", () => reject(Object.assign(new Error("cancelled"), { cancelled: true })), { once: true });
+      });
+    }
+    if (!resp.ok) throw Object.assign(new Error(res.error || `Request failed (${resp.status})`), { status: resp.status });
+    return res;
+  }
+
+  /** An unknown scan at the stores: ask which part the box holds, then carry on with the scan. */
+  function linkUnknownBarcode(barcode) {
+    overlay(`
+      <div class="st-sheet wide">
+        <h2>${esc(T("New barcode"))}: ${esc(barcode)}</h2>
+        <p class="muted">${esc(T("Which part is in this box? Choose it once; after that this barcode finds the part for everyone."))}</p>
+        <div class="st-search"><input id="lkFind" type="search" placeholder="${esc(T("Scan or type the part"))}" autocomplete="off" /></div>
+        <div class="st-list" id="lkResults" style="max-height:44vh;overflow-y:auto"></div>
+        <div class="st-error" id="lkErr"></div>
+        <div class="row"><button type="button" class="btn ghost" id="lkCancel">${esc(T("Cancel"))}</button></div>
+      </div>`);
+    $("lkCancel").onclick = closeOverlay;
+    wireSearch("lkFind", "lkResults", async (part) => {
+      try {
+        await saveBarcodeLink(barcode, part);
+        closeOverlay();
+        beep(true);
+        toast(T("Linked: {barcode} → {code}", { barcode, code: part.part_code }), "ok");
+        await onScan(barcode); // continue: add to the basket, show stock …
+      } catch (e) {
+        if (e.cancelled) { setTimeout(() => linkUnknownBarcode(barcode), 0); return; }
+        $("lkErr") && ($("lkErr").textContent = errText(e));
+      }
+    });
+    setTimeout(() => $("lkFind")?.focus(), 50);
+  }
+
+  /** From Find stock: the next scan (scanner, phone or typed) becomes this part's barcode. */
+  function captureBarcodeFor(part) {
+    const done = () => { st.captureScan = null; };
+    const link = async (barcode) => {
+      done();
+      try {
+        await saveBarcodeLink(barcode, part);
+        closeOverlay();
+        beep(true);
+        toast(T("Linked: {barcode} → {code}", { barcode: String(barcode).toUpperCase(), code: part.part_code }), "ok");
+      } catch (e) {
+        if (!e.cancelled) toast(errText(e), "bad");
+        closeOverlay();
+      }
+      renderPartBarcodes(part);
+    };
+    const o = overlay(`
+      <div class="st-sheet">
+        <h2>${esc(T("Scan the barcode on the box now"))}</h2>
+        <p class="muted">${esc(part.part_code)} · ${esc(part.part_name || "")}</p>
+        <label class="st-field"><span>${esc(T("or type it here"))}</span><input id="cbCode" type="text" autocomplete="off" /></label>
+        <div class="row">
+          <button type="button" class="btn ghost" data-cb="no">${esc(T("Cancel"))}</button>
+          <button type="button" class="btn ok" data-cb="yes">${esc(T("OK"))}</button>
+        </div>
+      </div>`);
+    st.captureScan = (code) => link(code);
+    const typed = () => { const v = $("cbCode").value.trim(); if (v) link(v); };
+    o.onclick = (e) => {
+      const b = e.target.closest("[data-cb]");
+      if (!b) return;
+      if (b.dataset.cb === "no") { done(); closeOverlay(); } else typed();
+    };
+    $("cbCode").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); typed(); } });
+    $("cbCode").focus();
   }
 
   /** A part from a lookup (scan) in the shape the screens use. */
@@ -986,6 +1123,7 @@
     if (!code) return false;
     touch();
     if (!st.me) { toast(T("Sign in first"), "bad"); beep(false); return false; }
+    if (st.captureScan) { st.captureScan(code); return true; }
     if (overlayOpen()) return false;
     let hit;
     try {
@@ -996,7 +1134,11 @@
       return false;
     }
     if (hit.kind === "unknown" || hit.kind === "none") {
-      if (!quietUnknown) { toast(T("Not found: {code}", { code }), "bad"); beep(false); }
+      if (quietUnknown) return false;
+      beep(false);
+      // An unknown box barcode: the stores links it to its part once.
+      if (st.me.stores) { linkUnknownBarcode(code); return true; }
+      toast(T("Not found: {code}. Ask the storeman to link this barcode.", { code }), "bad");
       return false;
     }
     if (hit.kind === "work_order" && !hit.allowed) {

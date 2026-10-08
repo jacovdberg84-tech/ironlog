@@ -154,3 +154,42 @@ test("a paired phone relays scans to the terminal by its key", async () => {
     await app2.close();
   }
 });
+
+test("a supplier's box barcode is linked to a part once and then found by a scan", async () => {
+  const app3 = Fastify({ logger: false });
+  await app3.register(stockRoutes, { prefix: "/api/stock" });
+  await app3.ready();
+  const req = async (headers, method, url, payload) => {
+    const res = await app3.inject({ method, url: `/api/stock${url}`, headers, payload });
+    return { code: res.statusCode, body: res.json() };
+  };
+  try {
+    assert.equal((await req(STORES, "GET", "/terminal/lookup?code=6001234567890")).body.kind, "unknown");
+    // Technicians cannot link; a part or machine code cannot be used as a barcode.
+    assert.equal((await req(as("ana", "artisan"), "POST", "/terminal/barcodes", { barcode: "6001234567890", part_code: "FLT-01" })).code, 403);
+    assert.match((await req(STORES, "POST", "/terminal/barcodes", { barcode: "a303am", part_code: "FLT-01" })).body.error, /already a part or machine code/);
+
+    const linked = await req(STORES, "POST", "/terminal/barcodes", { barcode: " 6001234567890 ", part_code: "flt-01" });
+    assert.equal(linked.code, 200, JSON.stringify(linked.body));
+    assert.equal(linked.body.part_code, "FLT-01");
+    const hit = (await req(as("ana", "artisan"), "GET", "/terminal/lookup?code=6001234567890")).body;
+    assert.equal(hit.kind, "part");
+    assert.equal(hit.part_code, "FLT-01");
+    assert.deepEqual(hit.barcodes, ["6001234567890"]);
+    assert.equal((await req(STORES, "GET", "/parts/search?q=6001234567890")).body.rows[0].part_code, "FLT-01");
+
+    // Linked to another part: refused until replace is confirmed.
+    const clash = await req(STORES, "POST", "/terminal/barcodes", { barcode: "6001234567890", part_code: "MLFPT6001" });
+    assert.equal(clash.code, 409);
+    assert.equal(clash.body.linked_to.part_code, "FLT-01");
+    const moved = await req(STORES, "POST", "/terminal/barcodes", { barcode: "6001234567890", part_code: "MLFPT6001", replace: true });
+    assert.equal(moved.body.moved_from, "FLT-01");
+    assert.equal((await req(STORES, "GET", "/terminal/lookup?code=6001234567890")).body.part_code, "MLFPT6001");
+
+    assert.equal((await req(STORES, "DELETE", "/terminal/barcodes/6001234567890")).code, 200);
+    assert.equal((await req(STORES, "GET", "/terminal/lookup?code=6001234567890")).body.kind, "unknown");
+    assert.equal((await req(STORES, "DELETE", "/terminal/barcodes/6001234567890")).code, 404);
+  } finally {
+    await app3.close();
+  }
+});
