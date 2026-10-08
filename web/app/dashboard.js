@@ -396,7 +396,7 @@ async function loadDashboard() {
             <small class="muted">Backlog trend (last ${trendRows.length} samples)</small>
             <small class="muted">Unsynced <span style="color:#2563eb;">●</span> Errors <span style="color:#dc2626;">●</span></small>
           </div>
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" style="width:100%; height:90px; background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px;">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" style="width:100%; height:90px; background:var(--bg-f8fafc); border:1px solid var(--bd-e5e7eb); border-radius:8px;">
             <polyline fill="none" stroke="#2563eb" stroke-width="2.2" points="${pointsUnsynced}"></polyline>
             <polyline fill="none" stroke="#dc2626" stroke-width="2.2" points="${pointsErrors}"></polyline>
           </svg>
