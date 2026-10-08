@@ -270,18 +270,19 @@
   function go(name, params = {}) {
     view = { name, ...params };
     const url = new URL(window.location.href);
-    ["wo", "asset", "tab", "inspect"].forEach((k) => url.searchParams.delete(k));
+    ["wo", "asset", "tab", "inspect", "task"].forEach((k) => url.searchParams.delete(k));
     if (name === "job") url.searchParams.set("wo", params.id);
     if (name === "asset") url.searchParams.set("asset", params.code);
     if (name === "inspectForm") url.searchParams.set("inspect", params.code);
-    if (["shift", "week", "inspect", "manuals"].includes(name)) url.searchParams.set("tab", name);
+    if (["shift", "week", "inspect", "manuals", "tasks"].includes(name)) url.searchParams.set("tab", name);
+    if (name === "task") url.searchParams.set("task", params.id);
     history.replaceState(null, "", url);
     render();
     window.scrollTo(0, 0);
   }
 
   function setTabs() {
-    const tab = { job: "today", inspectForm: "inspect", asset: "scan", available: "today", manual: "manuals" }[view.name] || view.name;
+    const tab = { job: "today", inspectForm: "inspect", asset: "scan", available: "today", manual: "manuals", tasks: "today", task: "today", taskNew: "today" }[view.name] || view.name;
     document.querySelectorAll(".tp-tab").forEach((b) => b.classList.toggle("on", b.dataset.go === tab));
   }
 
@@ -302,6 +303,9 @@
       else if (view.name === "inspect") await renderInspect(main);
       else if (view.name === "inspectForm") await renderInspectForm(main);
       else if (view.name === "manuals") await renderManuals(main);
+      else if (view.name === "tasks") await renderTasks(main);
+      else if (view.name === "task") await renderTask(main);
+      else if (view.name === "taskNew") await renderTaskNew(main);
       else if (view.name === "manual") await renderManual(main);
     } catch (e) {
       main.innerHTML = `<div class="tp-card tp-error">${esc(e.message || e)}</div><button class="tp-btn" data-go="today">${esc(T("Back to Today"))}</button>`;
@@ -495,6 +499,208 @@
     await drawPage();
   }
 
+  // ------------------------------------------------------------ Tasks & messages
+  // Team tasks: the ones assigned to me, that I created or follow, and where
+  // someone @mentioned me. New assignments and mentions show as "New for you".
+  let team = null;
+  const TASK_STATUS = { open: "Open", in_progress: "In progress", done: "Done" };
+
+  async function teamList() {
+    if (team) return team;
+    try {
+      team = (await A.fetchJson(`${A.API}/api/auth/team`)).rows || [];
+    } catch {
+      team = [];
+    }
+    return team;
+  }
+  const personName = (u) => (team || []).find((p) => String(p.username).toLowerCase() === String(u || "").toLowerCase())?.full_name || u || "";
+  const collab = (p, opts) => A.fetchJson(`${A.API}/api${p}`, opts);
+
+  async function fillTasksCard() {
+    const box = qs("tpTasksCard");
+    if (!box) return;
+    const [inbox, mine] = await Promise.all([collab("/collab/inbox?limit=20"), collab("/tasks?view=involved")]);
+    if (!qs("tpTasksCard")) return;
+    const unread = Number(inbox.unread || 0);
+    const open = (mine.tasks || []).length;
+    box.innerHTML = `
+      <button type="button" class="tp-taskcard ${unread ? "new" : ""}" data-go="tasks">
+        <span class="tp-taskcard-ic">💬</span>
+        <span class="grow"><b>${esc(T("Tasks & messages"))}</b><br><span class="tp-muted small">${esc(N(open, "{n} open task", "{n} open tasks"))}</span></span>
+        ${unread ? `<span class="tp-badge">${esc(N(unread, "{n} new", "{n} new"))}</span>` : ""}
+      </button>`;
+  }
+
+  function relTime(ts) {
+    const t = new Date(String(ts || "").replace(" ", "T") + (String(ts || "").includes("Z") ? "" : "Z"));
+    const s = Math.max(0, (Date.now() - t.getTime()) / 1000);
+    if (!Number.isFinite(s)) return "";
+    if (s < 60) return T("just now");
+    if (s < 3600) return T("{n} min ago", { n: Math.round(s / 60) });
+    if (s < 86400) return T("{n} h ago", { n: Math.round(s / 3600) });
+    return t.toLocaleDateString(locale(), { day: "numeric", month: "short" });
+  }
+  const richText = (text) => esc(text).replace(/(^|[^\w@])@([A-Za-z0-9._-]{2,40})/g, (m, pre, name) => `${pre}<b class="tp-at">@${name}</b>`).replace(/\n/g, "<br>");
+
+  async function renderTasks(main) {
+    await teamList();
+    const [inbox, mine] = await Promise.all([collab("/collab/inbox?limit=30"), collab(`/tasks?view=${view.done ? "done" : "involved"}`)]);
+    const fresh = (inbox.items || []).filter((i) => !i.read_at);
+    const me = A.getSessionUser();
+    main.innerHTML = `
+      <div class="tp-jobhead"><button type="button" class="tp-back" data-go="today">‹ ${esc(T("Today"))}</button>
+        <div class="tp-doc-title">${esc(T("Tasks & messages"))}</div></div>
+      <button type="button" class="tp-btn primary full" data-go="taskNew">＋ ${esc(T("New task"))}</button>
+      ${fresh.length ? `
+        <h3 class="tp-h">${esc(T("New for you"))} <span class="tp-count">${fresh.length}</span></h3>
+        ${fresh.map((i) => `
+          <button type="button" class="tp-job tp-inbox" data-task-open="${i.task_id}">
+            <div class="tp-job-top"><span class="tp-asset">${esc(i.kind === "assigned" ? T("{name} assigned you a task", { name: personName(i.actor) }) : T("{name} mentioned you", { name: personName(i.actor) }))}</span><span class="tp-muted small">${esc(relTime(i.created_at))}</span></div>
+            <div class="tp-job-line"><b>#${i.task_id}</b> ${esc(i.task_title || "")}</div>
+            ${i.snippet ? `<div class="tp-job-meta"><span>${esc(i.snippet)}</span></div>` : ""}
+          </button>`).join("")}` : ""}
+      <div class="tp-subtabs">
+        <button type="button" class="tp-subtab ${view.done ? "" : "on"}" data-act="tasksOpen">${esc(T("Open"))}</button>
+        <button type="button" class="tp-subtab ${view.done ? "on" : ""}" data-act="tasksDone">${esc(T("Done"))}</button>
+      </div>
+      ${(mine.tasks || []).length ? (mine.tasks || []).map((t) => {
+        const late = t.due_date && t.status !== "done" && String(t.due_date).slice(0, 10) < new Date().toISOString().slice(0, 10);
+        const role = String(t.assigned_to || "").toLowerCase() === me.toLowerCase() ? T("For you") : String(t.created_by || "").toLowerCase() === me.toLowerCase() ? T("You asked {name}", { name: personName(t.assigned_to) || T("nobody yet") }) : T("Following");
+        return `
+          <button type="button" class="tp-job ${t.priority === "high" && t.status !== "done" ? "crit" : ""}" data-task-open="${t.id}">
+            <div class="tp-job-top"><span class="tp-asset">${esc(t.title)}</span><span class="tp-chip ${t.status === "done" ? "done" : t.status === "in_progress" ? "active" : "idle"}">${esc(T(TASK_STATUS[t.status] || "Open"))}</span></div>
+            <div class="tp-job-meta">
+              <span>#${t.id}</span>
+              <span>${esc(role)}</span>
+              ${t.due_date ? `<span class="${late ? "warn" : ""}">${esc(late ? T("Overdue · {d}", { d: String(t.due_date).slice(0, 10) }) : T("Due {d}", { d: String(t.due_date).slice(0, 10) }))}</span>` : ""}
+              ${t.comments_count ? `<span>💬 ${t.comments_count}</span>` : ""}
+            </div>
+          </button>`;
+      }).join("") : `<div class="tp-empty">${esc(view.done ? T("No finished tasks yet.") : T("No open tasks. Tap New task to ask someone for something."))}</div>`}`;
+  }
+
+  async function renderTask(main) {
+    await teamList();
+    const d = await collab(`/tasks/${view.id}`);
+    collab("/collab/inbox/read", { method: "POST", body: JSON.stringify({ task_id: view.id }) }).catch(() => {});
+    const t = d.task;
+    const me = A.getSessionUser();
+    main.innerHTML = `
+      <div class="tp-jobhead"><button type="button" class="tp-back" data-go="tasks">‹ ${esc(T("Tasks"))}</button>
+        <div class="tp-doc-title">#${t.id}</div></div>
+      <div class="tp-card">
+        <h2 class="tp-title">${esc(t.title)}</h2>
+        <div class="tp-job-meta">
+          <span class="tp-chip ${t.status === "done" ? "done" : t.status === "in_progress" ? "active" : "idle"}">${esc(T(TASK_STATUS[t.status] || "Open"))}</span>
+          <span>${esc(T("For {name}", { name: personName(t.assigned_to) || T("nobody yet") }))}</span>
+          ${t.due_date ? `<span>${esc(T("Due {d}", { d: String(t.due_date).slice(0, 10) }))}</span>` : ""}
+          <span>${esc(T("From {name}", { name: personName(t.created_by) }))}</span>
+        </div>
+        ${t.description ? `<p class="tp-desc">${richText(t.description)}</p>` : ""}
+        <div class="tp-row">
+          ${t.status !== "in_progress" && t.status !== "done" ? `<button type="button" class="tp-btn grow" data-task-status="in_progress">${esc(T("Start"))}</button>` : ""}
+          ${t.status !== "done" ? `<button type="button" class="tp-btn primary grow" data-task-status="done">✓ ${esc(T("Mark done"))}</button>` : `<button type="button" class="tp-btn grow" data-task-status="open">${esc(T("Reopen"))}</button>`}
+          <button type="button" class="tp-btn grow" data-task-watch="${d.watching ? "0" : "1"}">${esc(d.watching ? T("Unfollow") : T("Follow"))}</button>
+        </div>
+      </div>
+      <h3 class="tp-h">${esc(T("Conversation"))}</h3>
+      <div class="tp-thread">
+        ${(d.comments || []).length ? d.comments.map((c) => {
+          const mine = String(c.author || "").toLowerCase() === me.toLowerCase();
+          return `<div class="tp-msg ${mine ? "mine" : ""}"><div class="tp-msg-head"><b>${esc(personName(c.author))}</b> <span>${esc(relTime(c.created_at))}</span></div><div>${richText(c.comment)}</div></div>`;
+        }).join("") : `<div class="tp-empty">${esc(T("No messages yet."))}</div>`}
+      </div>
+      <div class="tp-reply">
+        <textarea id="tpTaskReply" class="tp-input" rows="2" placeholder="${esc(T("Write a message… type @ to tag someone"))}"></textarea>
+        <div class="tp-chips" id="tpMention" hidden></div>
+        <button type="button" class="tp-btn primary full" data-act="taskSend">${esc(T("Send"))}</button>
+      </div>`;
+    wireMentions(qs("tpTaskReply"), qs("tpMention"));
+  }
+
+  /** @name suggestions as tappable chips under the message box. */
+  function wireMentions(ta, box) {
+    if (!ta || !box) return;
+    ta.addEventListener("input", () => {
+      const m = /(^|\s)@([\w.-]*)$/.exec(ta.value.slice(0, ta.selectionStart));
+      if (!m) { box.hidden = true; return; }
+      const q = m[2].toLowerCase();
+      const hits = (team || []).filter((p) => String(p.username).toLowerCase().startsWith(q) || String(p.full_name || "").toLowerCase().split(/\s+/).some((w) => w.startsWith(q))).slice(0, 6);
+      box.innerHTML = hits.map((p) => `<button type="button" class="tp-chip-btn" data-mention="${esc(p.username)}">@${esc(p.full_name || p.username)}</button>`).join("");
+      box.hidden = !hits.length;
+    });
+    box.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-mention]");
+      if (!b) return;
+      const pos = ta.selectionStart;
+      const before = ta.value.slice(0, pos).replace(/@([\w.-]*)$/, `@${b.dataset.mention} `);
+      ta.value = before + ta.value.slice(pos);
+      box.hidden = true;
+      ta.focus();
+      ta.setSelectionRange(before.length, before.length);
+    });
+  }
+
+  async function renderTaskNew(main) {
+    await teamList();
+    const people = [...(team || [])].sort((a, b) => String(a.full_name || a.username).localeCompare(String(b.full_name || b.username)));
+    main.innerHTML = `
+      <div class="tp-jobhead"><button type="button" class="tp-back" data-go="tasks">‹ ${esc(T("Tasks"))}</button>
+        <div class="tp-doc-title">${esc(T("New task"))}</div></div>
+      <div class="tp-card">
+        <label class="tp-label">${esc(T("What is needed?"))}</label>
+        <input id="tpNewTitle" class="tp-input" maxlength="200" placeholder="${esc(T("e.g. Need 2 oil filters for A303AM"))}" />
+        <label class="tp-label">${esc(T("Who should do it?"))}</label>
+        <select id="tpNewWho" class="tp-input"><option value="">${esc(T("Nobody yet"))}</option>${people.map((p) => `<option value="${esc(p.username)}">${esc(p.full_name || p.username)}</option>`).join("")}</select>
+        <label class="tp-label">${esc(T("By when? (optional)"))}</label>
+        <input id="tpNewDue" class="tp-input" type="date" />
+        <label class="tp-label">${esc(T("Details (optional, @ to tag someone)"))}</label>
+        <textarea id="tpNewDesc" class="tp-input" rows="3"></textarea>
+        <div class="tp-chips" id="tpNewMention" hidden></div>
+        <label class="tp-check"><input id="tpNewUrgent" type="checkbox" /> ${esc(T("Urgent"))}</label>
+        <div class="tp-form-err" id="tpNewErr"></div>
+        <button type="button" class="tp-btn primary full" data-act="taskCreate">${esc(T("Create task"))}</button>
+      </div>`;
+    wireMentions(qs("tpNewDesc"), qs("tpNewMention"));
+    setTimeout(() => qs("tpNewTitle")?.focus(), 50);
+  }
+
+  async function taskAction(act, t) {
+    if (act === "tasksOpen" || act === "tasksDone") {
+      view.done = act === "tasksDone";
+      return render();
+    }
+    if (act === "taskSend") {
+      const text = String(qs("tpTaskReply")?.value || "").trim();
+      if (!text) return;
+      t.disabled = true;
+      await collab(`/tasks/${view.id}/comments`, { method: "POST", body: JSON.stringify({ comment: text }) });
+      return render();
+    }
+    if (act === "taskCreate") {
+      const title = String(qs("tpNewTitle")?.value || "").trim();
+      if (!title) { qs("tpNewErr").textContent = T("Write what is needed."); return; }
+      t.disabled = true;
+      try {
+        const res = await collab("/tasks", {
+          method: "POST",
+          body: JSON.stringify({
+            title,
+            assigned_to: qs("tpNewWho").value || null,
+            due_date: qs("tpNewDue").value || null,
+            description: String(qs("tpNewDesc").value || "").trim() || null,
+            priority: qs("tpNewUrgent").checked ? "high" : "medium",
+          }),
+        });
+        return go("task", { id: res.task.id });
+      } catch (e) {
+        qs("tpNewErr").textContent = e.message || String(e);
+        t.disabled = false;
+      }
+    }
+  }
+
   // ------------------------------------------------------------ Today
   function jobCard(c) {
     const st = STATE_CLASS[c.my_state] || "idle";
@@ -526,6 +732,7 @@
   async function renderToday(main) {
     const r = await load("today", "/today");
     const d = r.data;
+    setTimeout(() => fillTasksCard().catch(() => {}), 0);
     const cur = d.current;
     const g = d.groups || { urgent: [], planned: [], waiting: [], completed: [] };
     const nothing = !g.urgent.length && !g.planned.length && !g.waiting.length;
@@ -538,6 +745,7 @@
         </div>
         ${d.shift ? `<button type="button" class="tp-btn sm" data-go="shift">${esc(T("Shift report"))}</button>` : `<button type="button" class="tp-btn sm primary" data-act="shiftStart">${esc(T("Start shift"))}</button>`}
       </div>
+      <div id="tpTasksCard"></div>
       ${d.shift?.overdue ? `
         <div class="tp-note warn-shift" data-go="shift">
           <b>${esc(T("Your shift report from {t} is not submitted yet.", { t: dayTime(d.shift.started_at) }))}</b>
@@ -1216,6 +1424,18 @@
       saveDraft();
       return render();
     }
+    const taskOpen = e.target.closest("[data-task-open]");
+    if (taskOpen) return go("task", { id: Number(taskOpen.dataset.taskOpen) });
+    const taskStatus = e.target.closest("[data-task-status]");
+    if (taskStatus) {
+      await A.fetchJson(`${A.API}/api/tasks/${view.id}`, { method: "PUT", body: JSON.stringify({ status: taskStatus.dataset.taskStatus }) });
+      return render();
+    }
+    const taskWatch = e.target.closest("[data-task-watch]");
+    if (taskWatch) {
+      await A.fetchJson(`${A.API}/api/tasks/${view.id}/watch`, { method: "POST", body: JSON.stringify({ watch: taskWatch.dataset.taskWatch === "1" }) });
+      return render();
+    }
     const libType = e.target.closest("[data-lib-type]");
     if (libType) {
       lib.type = libType.dataset.libType;
@@ -1257,6 +1477,7 @@
       const act = t.dataset.act;
       if (act === "closeSheet") return closeSheet();
       if (act === "libAsk") return askManuals();
+      if (["tasksOpen", "tasksDone", "taskSend", "taskCreate"].includes(act)) return taskAction(act, t);
       if (act && act.startsWith("pdf")) return pdfAction(act);
       if (act === "sync") return syncQueue();
       if (act === "dropRefused") {
@@ -1598,7 +1819,8 @@
     if (p.get("wo")) view = { name: "job", id: Number(p.get("wo")) };
     else if (p.get("asset")) view = { name: "asset", code: p.get("asset").toUpperCase() };
     else if (p.get("inspect")) view = { name: "inspectForm", code: p.get("inspect").toUpperCase() };
-    else if (["shift", "week", "inspect", "manuals"].includes(p.get("tab"))) view = { name: p.get("tab") };
+    else if (p.get("task")) view = { name: "task", id: Number(p.get("task")) };
+    else if (["shift", "week", "inspect", "manuals", "tasks"].includes(p.get("tab"))) view = { name: p.get("tab") };
     registerWorker();
     render();
     syncQueue();

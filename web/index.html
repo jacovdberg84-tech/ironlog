@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=stores-terminal-1" />
+  <link rel="stylesheet" href="./styles.css?v=collab-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -186,33 +186,6 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
           <span>Tasks</span>
         </a>
-        <div class="task-workspace-header">
-          <button type="button" class="nav-item task-workspace-toggle" id="taskWorkspaceToggle" aria-expanded="true">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 8h10"></path><path d="M7 12h6"></path></svg>
-            <span>Task Workspace</span>
-          </button>
-        </div>
-        <div id="taskWorkspaceLinks">
-          <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="inbox" data-active-key="tasks:inbox">
-            <span>Inbox</span>
-          </a>
-          <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="today" data-active-key="tasks:today">
-            <span>Today</span>
-          </a>
-          <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="upcoming" data-active-key="tasks:upcoming">
-            <span>Upcoming</span>
-          </a>
-          <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="overdue" data-active-key="tasks:overdue">
-            <span>Overdue</span>
-          </a>
-          <a href="#" class="nav-item nav-subitem" data-tab="tasks" data-task-view="mine" data-active-key="tasks:mine">
-            <span>My Tasks</span>
-          </a>
-          <div class="task-subheader">Projects</div>
-          <div id="taskProjectSidebarLinks"></div>
-          <div class="task-subheader">Saved Views</div>
-          <div id="taskCustomViewSidebarLinks"></div>
-        </div>
       </div>
 
       <div class="nav-section" data-nav-section="workshop">
@@ -5730,163 +5703,58 @@
 
     <!-- TASKS -->
     <section class="panel" id="tab-tasks">
-      <div class="tasks-layout">
-        <!-- Left Column - Tasks List -->
-        <div class="tasks-main">
-          <div class="dash-card full-width">
-            <div class="dash-card-header">
-              <div class="dash-card-title">
-                <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-                </div>
-                <div>
-                  <h3 style="display:flex;align-items:center;gap:8px;">Task Management <span id="taskApiIndicator" class="api-indicator api-indicator-unknown">API checking...</span></h3>
-                  <p class="muted small">Create and track tasks across your team</p>
-                </div>
-              </div>
-            </div>
-            <div class="report-card-body">
-              <div class="kpi-pills" id="tasksStats"></div>
-            </div>
+      <div class="tw">
+        <div class="tw-head">
+          <div>
+            <h2 class="tw-title">Tasks</h2>
+            <p class="muted small" id="twSummary">Loading…</p>
           </div>
-
-          <!-- Project Tabs -->
-          <div class="dash-card full-width">
-            <div class="project-tabs" id="projectTabs">
-              <button class="project-tab active" data-project="">All Tasks</button>
-            </div>
-            <div class="report-card-body" style="padding-top:0;">
-              <div class="form-row" style="margin-bottom:12px;">
-                <div class="form-field">
-                  <select id="taskFilterStatus">
-                    <option value="">All Status</option>
-                    <option value="open">Open</option>
-                    <option value="in_progress">In Progress</option>
-                    <option value="done">Done</option>
-                  </select>
-                </div>
-                <div class="form-field">
-                  <select id="taskFilterPriority">
-                    <option value="">All Priority</option>
-                    <option value="high">High</option>
-                    <option value="medium">Medium</option>
-                    <option value="low">Low</option>
-                  </select>
-                </div>
-                <div class="form-field">
-                  <input id="taskFilterAssigned" placeholder="Filter by assignee" />
-                </div>
-                <button id="loadTasksBtn" class="btn btn-primary">Refresh</button>
-                <button id="myTasksBtn" class="btn btn-secondary">My Tasks</button>
-                <button id="saveTaskViewBtn" class="btn btn-secondary">Save View</button>
-              </div>
-              <div class="list" id="tasksList"></div>
-            </div>
-          </div>
+          <button type="button" class="btn btn-primary" id="twNewBtn">＋ New task</button>
         </div>
+        <div class="tw-toolbar">
+          <input id="twSearch" type="search" class="tw-search" placeholder="Search tasks, people or #number" autocomplete="off" />
+          <div class="tw-chips" id="twViews" role="tablist">
+            <button type="button" class="tw-chip" data-tw-view="mine">Mine</button>
+            <button type="button" class="tw-chip" data-tw-view="created">I assigned</button>
+            <button type="button" class="tw-chip" data-tw-view="watching">Following</button>
+            <button type="button" class="tw-chip" data-tw-view="open">All open</button>
+            <button type="button" class="tw-chip" data-tw-view="overdue">Overdue</button>
+            <button type="button" class="tw-chip" data-tw-view="done">Done</button>
+          </div>
+          <select id="twProject" class="tw-project" aria-label="Project"><option value="">All projects</option></select>
+        </div>
+        <div class="tw-body">
+          <div class="tw-list" id="twList"><div class="tw-empty">Loading…</div></div>
+          <aside class="tw-detail" id="twDetail" hidden></aside>
+        </div>
+      </div>
 
-        <!-- Right Column - Create & Details -->
-        <div class="tasks-sidebar">
-          <!-- Create Task Card -->
-          <div class="dash-card">
-            <div class="dash-card-header">
-              <div class="dash-card-title">
-                <h3>Create Task</h3>
-              </div>
-            </div>
-            <div class="report-card-body">
-              <div class="form-field">
-                <label>Title *</label>
-                <input id="taskTitle" placeholder="What needs to be done?" />
-              </div>
-              <div class="form-field">
-                <label>Project</label>
-                <select id="taskProject">
-                  <option value="">No Project</option>
-                </select>
-              </div>
-              <div class="form-field">
-                <label>Priority</label>
-                <select id="taskPriority">
-                  <option value="high">High</option>
-                  <option value="medium" selected>Medium</option>
-                  <option value="low">Low</option>
-                </select>
-              </div>
-              <div class="form-field">
-                <label>Assigned To</label>
-                <input id="taskAssigned" placeholder="Username" list="teamMemberList" />
-              </div>
-              <div id="taskAssignQuickPicks" class="muted" style="font-size:12px;margin:-6px 0 8px;"></div>
-              <div class="form-field">
-                <label>Watchers (shared updates)</label>
-                <input id="taskWatchers" placeholder="user1, user2" list="teamMemberList" />
-              </div>
-              <div class="form-field">
-                <label class="chk" style="display:flex;align-items:center;gap:8px;">
-                  <input id="taskNotifyAssignee" type="checkbox" checked />
-                  Notify assignee in task comments
-                </label>
-              </div>
-              <div class="form-field">
-                <label>Due Date</label>
-                <input id="taskDueDate" type="date" />
-              </div>
-              <div class="form-field">
-                <label>Description</label>
-                <textarea id="taskDescription" rows="3" placeholder="Additional details"></textarea>
-              </div>
-              <button id="createTaskBtn" class="btn btn-primary w-full">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
-                Create Task
-              </button>
-              <small class="muted" style="display:block;margin-top:8px;">Collaboration area: use the Task Details card below (always visible) for Post As + @mentions.</small>
+      <div class="tw-modal" id="twModal" hidden>
+        <div class="tw-modal-card" role="dialog" aria-modal="true" aria-labelledby="twModalTitle">
+          <h3 id="twModalTitle">New task</h3>
+          <label class="tw-field"><span>What needs to be done?</span><input id="twNewTitle" maxlength="200" autocomplete="off" /></label>
+          <div class="tw-row">
+            <label class="tw-field"><span>Assign to</span><select id="twNewAssignee"></select></label>
+            <label class="tw-field"><span>Due</span><input id="twNewDue" type="date" /></label>
+          </div>
+          <div class="tw-field"><span>Priority</span>
+            <div class="tw-seg" id="twNewPriority">
+              <button type="button" data-p="low">Low</button><button type="button" data-p="medium" class="on">Medium</button><button type="button" data-p="high">High</button>
             </div>
           </div>
-
-          <!-- Task Detail Panel -->
-          <div class="dash-card" id="taskDetailPanel">
-            <div class="dash-card-header">
-              <div class="dash-card-title">
-                <h3>Task Details & Collaboration</h3>
-              </div>
-              <button class="report-card-toggle" id="closeTaskDetail" aria-label="Close">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-              </button>
+          <details class="tw-more">
+            <summary>More details</summary>
+            <label class="tw-field"><span>Description (use @name to tag someone)</span><textarea id="twNewDesc" rows="3"></textarea></label>
+            <div class="tw-row">
+              <label class="tw-field"><span>Project</span><select id="twNewProject"></select></label>
+              <label class="tw-field"><span>New project</span><span class="tw-inline"><input id="twNewProjectName" placeholder="Name" /><button type="button" class="btn btn-secondary btn-sm" id="twAddProject">Add</button></span></label>
             </div>
-            <div class="report-card-body">
-              <div id="taskDetailContent"><small class="muted">Select a task from the list to open shared comments and collaboration tools.</small></div>
-              <hr style="margin:16px 0; border-color:var(--line);" />
-              <h4 style="margin:0 0 12px 0;">Comments</h4>
-              <div id="taskComments"></div>
-              <div class="form-row" style="margin-top:8px;">
-                <div class="form-field">
-                  <label>Post As</label>
-                  <select id="taskCommentAuthor"></select>
-                </div>
-              </div>
-              <div id="taskCommentMentions" class="muted" style="font-size:12px;margin:4px 0 8px;"></div>
-              <div class="form-field" style="margin-top:12px;">
-                <textarea id="newComment" rows="2" placeholder="Add a comment..."></textarea>
-              </div>
-              <button id="addCommentBtn" class="btn btn-primary btn-sm w-full" style="margin-top:8px;">Add Comment</button>
-            </div>
-          </div>
-
-          <!-- Projects Management -->
-          <div class="dash-card">
-            <div class="dash-card-header">
-              <div class="dash-card-title">
-                <h4>Projects</h4>
-              </div>
-            </div>
-            <div class="report-card-body">
-              <div id="projectsList"></div>
-              <div class="form-row" style="margin-top:12px;">
-                <input id="newProjectName" placeholder="New project name" style="flex:1;" />
-                <button id="createProjectBtn" class="btn btn-secondary btn-sm">Add</button>
-              </div>
-            </div>
+            <label class="tw-field"><span>Followers (they can see it under Following)</span><select id="twNewFollowers" multiple size="4"></select></label>
+          </details>
+          <div class="tw-error" id="twNewErr"></div>
+          <div class="tw-modal-actions">
+            <button type="button" class="btn btn-secondary" id="twNewCancel">Cancel</button>
+            <button type="button" class="btn btn-primary" id="twNewSave">Create task</button>
           </div>
         </div>
       </div>
@@ -8079,7 +7947,8 @@
   <script src="./app/assets.js?v=89"></script>
   <script src="./app/init.js?v=91"></script>
   <script src="./app/documents.js?v=89"></script>
-  <script src="./app/tasks.js?v=89"></script>
+  <script src="./app/tasks.js?v=90"></script>
+  <script src="./app/collab-inbox.js?v=1"></script>
   <script src="./app/june-avatar.js?v=1"></script>
   <script src="./app/june.js?v=14"></script>
   <script src="./app/finance.js?v=89"></script>
