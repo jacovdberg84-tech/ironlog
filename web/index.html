@@ -458,8 +458,25 @@
           <div class="june-transcript-empty">Start a conversation to hear and see June’s answers here.</div>
         </div>
         <div id="juneDraftDownloads" class="june-draft-downloads" hidden aria-live="polite"></div>
+        <div id="juneCalendarApproval" class="june-calendar-approval" hidden aria-live="polite"></div>
         <p class="june-safety-note">June can look up facts and prepare review-only task or maintenance-schedule drafts. She will never create Ironlog records, send email, or book meetings without a separate approval flow.</p>
         <div class="june-status-line june-conversation-bar"><span class="june-live-dot" aria-hidden="true"></span><span id="juneLiveState" aria-live="polite">Checking June…</span></div>
+      </section>
+      <section class="dash-card full-width june-calendar-card june-internal-calendar-card" id="juneInternalCalendarCard" hidden aria-labelledby="juneInternalCalendarTitle">
+        <div class="june-calendar-head">
+          <div>
+            <p class="june-eyebrow">IRONLOG SCHEDULE</p>
+            <h3 id="juneInternalCalendarTitle">My internal calendar</h3>
+            <p class="muted small">Private Ironlog entries. Ask June to add, move, or cancel one; you confirm each change here.</p>
+          </div>
+          <div class="june-actions">
+            <button id="juneInternalCalendarRefreshBtn" type="button" class="btn btn-secondary btn-sm">Refresh</button>
+          </div>
+        </div>
+        <div id="juneInternalCalendarEvents" class="june-calendar-events" aria-live="polite">
+          <div class="june-calendar-empty">Ask June to add your first internal schedule entry.</div>
+        </div>
+        <p class="june-safety-note">Outlook and private ICS feeds remain separate and read-only. This schedule belongs to Ironlog only.</p>
       </section>
       <section class="dash-card full-width june-calendar-card" id="juneCalendarCard" hidden aria-labelledby="juneCalendarTitle">
         <div class="june-calendar-head">
@@ -8064,7 +8081,7 @@
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=89"></script>
   <script src="./app/june-avatar.js?v=1"></script>
-  <script src="./app/june.js?v=13"></script>
+  <script src="./app/june.js?v=14"></script>
   <script src="./app/finance.js?v=89"></script>
   <script src="./app/enterprise.js?v=89"></script>
   <script src="./app/workshop-docs.js?v=89"></script>

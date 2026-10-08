@@ -22,6 +22,15 @@ import {
   saveIcsCalendar,
 } from "../utils/juneIcsCalendar.js";
 import {
+  cancelInternalCalendarEvent,
+  createInternalCalendarEvent,
+  getInternalCalendarEvent,
+  getInternalCalendarOverview,
+  listInternalCalendarEvents,
+  prepareInternalCalendarEvent,
+  updateInternalCalendarEvent,
+} from "../utils/juneInternalCalendar.js";
+import {
   finishJuneAvatarTurn,
   getJuneAvatarStatus,
   interruptJuneAvatar,
@@ -39,24 +48,28 @@ const LIVE_TICKET_TTL_MS = 3 * 60_000;
 const LIVE_TICKET_LIMIT = 24;
 const SCHEDULE_REPORT_TTL_MS = 15 * 60_000;
 const SCHEDULE_REPORT_LIMIT = 36;
+const CALENDAR_APPROVAL_TTL_MS = 10 * 60_000;
+const CALENDAR_APPROVAL_LIMIT = 32;
 // A reverse proxy can replace 5xx application responses with its own generic
 // error page. Keep an upstream Live failure in the 4xx range so the authenticated
 // admin receives Ironlog's useful, safe error message instead.
 const LIVE_UPSTREAM_FAILURE_STATUS = 424;
 const liveSessionTickets = new Map();
 const maintenanceScheduleReports = new Map();
+const internalCalendarApprovals = new Map();
 let lastLiveAttempt = null;
 
 const JUNE_LIVE_INSTRUCTIONS = [
   "You are June, the private executive assistant for the Ironlog administrator.",
   "Jaco prefers direct answers, not corporate politeness. Speak with sharp, calm confidence; be practical, decisive, and concise.",
-  "Use dry wit and an occasional light tease when it suits the moment. It must feel friendly and earned, never cruel, personal, or distracting.",
+  "You know Jaco is capable and impatient with filler. Use dry wit, a little friendly bite, and the occasional earned tease; call out vague asks, impossible timing, or an overloaded day. Do not become rude, insulting, or performatively sarcastic.",
   "You may point out when Jaco is overloading his day or piling unrelated requests together. Say what should be prioritised, then move on.",
   "If a request contradicts verified facts, challenge it clearly: state the conflict, give the evidence you have, and recommend the sensible next step.",
   "Never tease during safety matters, incidents, injuries, financial or people-sensitive topics, frustration, or urgent operational decisions. In those cases be steady, respectful, and direct.",
   "Keep normal replies to one or two short sentences. For troubleshooting, give one concrete next step and wait for the answer.",
   "Use the backend whenever the user asks about their calendar, email, weather, Ironlog, Borris, tasks, KPIs, equipment, or a draft.",
   "When the administrator asks for a maintenance schedule for named equipment, prepare the review-only schedule through the backend. Once it reports an Excel file is ready, say it is ready to review and download on screen; never read an internal report identifier aloud.",
+  "Ironlog has its own private internal calendar. Outlook and ICS are read-only external sources. For an internal calendar create, move, update, or cancel request, use the preparation tool, repeat the exact change, and tell Jaco to press the on-screen Confirm button. Never claim it was changed until Ironlog reports that confirmation succeeded.",
   "Never claim that a calendar or email account is connected unless the tool result says it is.",
   "Do not say that a task, work order, requisition, service plan, report, or external message has been created. June only prepares review-only drafts.",
   "If a tool reports that approval is required, clearly say what the administrator must review next.",
@@ -73,6 +86,7 @@ const JUNE_BACKEND_INSTRUCTIONS = [
   "For calendar or email requests, first call the relevant connector function. If it is not connected, explain the connection requirement without pretending to access data.",
   "For engineering questions, use June's Borris engineering tool and identify uncertainty or missing source data.",
   "For a maintenance schedule request, use the dedicated schedule-draft tool. Its meter and service data are factual Ironlog data; describe forecast dates as planning estimates, never as completed work.",
+  "For internal Ironlog calendar changes, prepare a precise proposal only. Do not create, move, or cancel an entry yourself; the authenticated administrator must use the confirmation card in Ironlog. External Outlook and ICS calendars stay read-only.",
 ].join(" ");
 
 const TOOL_DEFINITIONS = [
@@ -150,8 +164,45 @@ const TOOL_DEFINITIONS = [
   {
     type: "function",
     name: "june_calendar_overview",
-    description: "Get the next meetings from June's private ICS calendar or authorised Outlook calendar. This is read-only.",
+    description: "Get June's upcoming private Ironlog schedule entries plus any connected read-only Outlook or ICS calendar events.",
     parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
+  },
+  {
+    type: "function",
+    name: "june_list_internal_calendar_events",
+    description: "List upcoming entries from June's private internal Ironlog calendar. This does not access Outlook or ICS.",
+    parameters: {
+      type: "object",
+      properties: {
+        from_date: { type: "string", description: "Optional YYYY-MM-DD start date." },
+        to_date: { type: "string", description: "Optional YYYY-MM-DD end date." },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "june_prepare_internal_calendar_change",
+    description: "Prepare a private internal Ironlog calendar add, update/move, or cancellation for the administrator to explicitly confirm in the browser. This does not create or change anything by itself.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["create", "update", "cancel"] },
+        event_id: { type: "number", description: "Required for update or cancel; obtain it by listing the internal calendar when needed." },
+        title: { type: "string" },
+        event_date: { type: "string", description: "YYYY-MM-DD." },
+        start_time: { type: "string", description: "Optional 24-hour HH:MM." },
+        end_time: { type: "string", description: "Optional 24-hour HH:MM." },
+        all_day: { type: "boolean" },
+        category: { type: "string", enum: ["meeting", "maintenance", "shutdown", "reminder", "follow_up", "other"] },
+        asset_code: { type: "string" },
+        work_order_id: { type: "number" },
+        notes: { type: "string" },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
   },
   {
     type: "function",
@@ -226,6 +277,10 @@ function connectorStatus(context = {}) {
     calendar: {
       state: calendar.state,
       detail: calendar.detail,
+    },
+    ironlog_calendar: {
+      state: "ready",
+      detail: "Private Ironlog schedule is available. June can prepare changes for explicit confirmation.",
     },
     email: {
       state: outlook.state,
@@ -497,6 +552,119 @@ function buildMaintenanceScheduleDraft(args, context) {
   };
 }
 
+function cleanupInternalCalendarApprovals(now = Date.now()) {
+  for (const [id, approval] of internalCalendarApprovals) {
+    if (Number(approval?.expires_at || 0) <= now) internalCalendarApprovals.delete(id);
+  }
+}
+
+function calendarApprovalSummary(action, event) {
+  const when = event?.all_day
+    ? `${event.event_date} (all day)`
+    : `${event.event_date}${event?.start_time ? ` ${event.start_time}` : ""}${event?.end_time ? `–${event.end_time}` : ""}`;
+  if (action === "cancel") return `Cancel “${event.title}” on ${when}.`;
+  if (action === "update") return `Update “${event.title}” to ${when}.`;
+  return `Add “${event.title}” on ${when}.`;
+}
+
+function keepInternalCalendarApproval(context, action, event, eventId = null) {
+  cleanupInternalCalendarApprovals();
+  if (internalCalendarApprovals.size >= CALENDAR_APPROVAL_LIMIT) {
+    const oldest = [...internalCalendarApprovals.entries()]
+      .sort((a, b) => Number(a[1]?.created_at || 0) - Number(b[1]?.created_at || 0))[0];
+    if (oldest) internalCalendarApprovals.delete(oldest[0]);
+  }
+  const token = crypto.randomUUID();
+  internalCalendarApprovals.set(token, {
+    owner: context.owner,
+    context: { siteCode: context.siteCode, user: context.user },
+    action,
+    event,
+    event_id: eventId,
+    created_at: Date.now(),
+    expires_at: Date.now() + CALENDAR_APPROVAL_TTL_MS,
+  });
+  return token;
+}
+
+function calendarAction(value) {
+  const action = safeText(value, 20).toLowerCase();
+  return ["create", "update", "cancel"].includes(action) ? action : "";
+}
+
+function calendarEventId(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function prepareInternalCalendarChange(args, context) {
+  const action = calendarAction(args?.action);
+  if (!action) throw new Error("Choose whether June should add, update, or cancel the internal calendar entry.");
+  const eventId = calendarEventId(args?.event_id);
+  let existing = null;
+  if (action !== "create") {
+    if (!eventId) throw new Error("June needs the calendar entry to update or cancel. Ask her to list your internal schedule first.");
+    existing = getInternalCalendarEvent(context, eventId);
+    if (!existing) throw new Error("That Ironlog calendar entry was not found or has already been cancelled.");
+  }
+  const event = action === "cancel"
+    ? existing
+    : prepareInternalCalendarEvent(args, existing);
+  const token = keepInternalCalendarApproval(context, action, event, eventId);
+  return {
+    state: "pending_confirmation",
+    type: "internal_calendar_change",
+    action,
+    event,
+    approval: {
+      token,
+      expires_in_minutes: Math.round(CALENDAR_APPROVAL_TTL_MS / 60_000),
+    },
+    action_summary: calendarApprovalSummary(action, event),
+    next_step: "Review the proposed internal calendar change, then use the Confirm button in Ironlog. Nothing has been changed yet.",
+  };
+}
+
+function applyInternalCalendarApproval(token, owner) {
+  cleanupInternalCalendarApprovals();
+  const key = safeText(token, 100);
+  const approval = internalCalendarApprovals.get(key);
+  if (!approval || approval.owner !== owner) return null;
+  // Consume before writing so a retry cannot create duplicate meetings.
+  internalCalendarApprovals.delete(key);
+  const options = { actor: approval.context.user };
+  let event;
+  if (approval.action === "create") event = createInternalCalendarEvent(approval.context, approval.event, options);
+  else if (approval.action === "update") event = updateInternalCalendarEvent(approval.context, approval.event_id, approval.event, options);
+  else if (approval.action === "cancel") event = cancelInternalCalendarEvent(approval.context, approval.event_id, options);
+  else throw new Error("The proposed internal calendar change was invalid.");
+  return {
+    action: approval.action,
+    event,
+    message: approval.action === "cancel"
+      ? `Cancelled “${event.title}” in your Ironlog schedule.`
+      : approval.action === "update"
+        ? `Updated “${event.title}” in your Ironlog schedule.`
+        : `Added “${event.title}” to your Ironlog schedule.`,
+  };
+}
+
+async function getJuneCalendarOverview(context) {
+  const internal = getInternalCalendarOverview(context);
+  const ics = getIcsCalendarStatus(context);
+  const outlook = getOutlookConnectionStatus(context);
+  const external = ics.state === "connected"
+    ? await getIcsCalendarOverview(context)
+    : await getOutlookCalendarOverview(context);
+  return {
+    internal_calendar: internal,
+    external_calendar: external,
+    outlook_state: outlook.state,
+    ics_state: ics.state,
+    note: "Ironlog schedule entries can be changed only through an explicit confirmation. Outlook and ICS entries remain read-only.",
+  };
+}
+
 async function executeGatewayTool(name, args, context) {
   const tool = safeText(name, 80);
   const safeArgs = args && typeof args === "object" && !Array.isArray(args) ? args : {};
@@ -511,17 +679,20 @@ async function executeGatewayTool(name, args, context) {
   }
   if (tool === "june_draft_task") return buildTaskDraft(safeArgs, context.user);
   if (tool === "june_draft_maintenance_schedule") return buildMaintenanceScheduleDraft(safeArgs, context);
-  if (tool === "june_calendar_overview") {
-    return getIcsCalendarStatus(context).state === "connected"
-      ? getIcsCalendarOverview(context)
-      : getOutlookCalendarOverview(context);
-  }
+  if (tool === "june_calendar_overview") return getJuneCalendarOverview(context);
+  if (tool === "june_list_internal_calendar_events") return {
+    source: "internal_ironlog",
+    events: listInternalCalendarEvents(context, { fromDate: safeArgs.from_date, toDate: safeArgs.to_date, limit: 24 }),
+    next_step: "Use a calendar-change preparation only after the administrator has reviewed the relevant entry.",
+  };
+  if (tool === "june_prepare_internal_calendar_change") return prepareInternalCalendarChange(safeArgs, context);
   if (tool === "june_email_priorities") return getOutlookPriorityEmails(context);
   if (tool === "june_connector_status") return {
     review_only: true,
     connectors: connectorStatus(context),
     outlook: getOutlookConnectionStatus(context),
     ics_calendar: getIcsCalendarStatus(context),
+    internal_calendar: getInternalCalendarOverview(context),
   };
   return { error: `Unsupported June tool: ${tool}` };
 }
@@ -631,6 +802,7 @@ export default async function juneRoutes(app) {
       connectors: connectorStatus(context),
       outlook: getOutlookConnectionStatus(context),
       ics_calendar: getIcsCalendarStatus(context),
+      internal_calendar: getInternalCalendarOverview(context),
     };
   });
 
@@ -661,6 +833,53 @@ export default async function juneRoutes(app) {
   app.post("/calendar/ics/remove", async (req, reply) => {
     if (!requireJuneAdmin(req, reply)) return;
     return { ok: true, ...removeIcsCalendar({ siteCode: getSiteCode(req), user: getUser(req) }) };
+  });
+
+  // Internal calendar entries belong to Ironlog, never to the external ICS
+  // or Outlook source. A browser-side confirm endpoint is the only writer.
+  app.get("/calendar/internal/events", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    const requestedDays = Math.max(1, Math.min(90, Number(req.query?.days) || 21));
+    const start = new Date();
+    const end = new Date(start);
+    end.setUTCDate(end.getUTCDate() + requestedDays);
+    const context = { siteCode: getSiteCode(req), user: getUser(req) };
+    return {
+      ok: true,
+      calendar: {
+        source: "internal_ironlog",
+        writable_with_confirmation: true,
+        window_days: requestedDays,
+        events: listInternalCalendarEvents(context, {
+          fromDate: start.toISOString().slice(0, 10),
+          toDate: end.toISOString().slice(0, 10),
+          limit: 32,
+        }),
+      },
+    };
+  });
+
+  app.post("/calendar/internal/approvals/:token/confirm", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    try {
+      const result = applyInternalCalendarApproval(req.params?.token, safetyIdentifier(req));
+      if (!result) return reply.code(404).send({ ok: false, error: "This calendar confirmation expired or belongs to another administrator. Ask June to prepare it again." });
+      return { ok: true, ...result };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: safeText(error?.message || "Ironlog could not apply that calendar change.", 350) });
+    }
+  });
+
+  app.post("/calendar/internal/approvals/:token/discard", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    cleanupInternalCalendarApprovals();
+    const token = safeText(req.params?.token, 100);
+    const approval = internalCalendarApprovals.get(token);
+    if (!approval || approval.owner !== safetyIdentifier(req)) {
+      return reply.code(404).send({ ok: false, error: "This calendar proposal is no longer available." });
+    }
+    internalCalendarApprovals.delete(token);
+    return { ok: true, discarded: true };
   });
 
   // LemonSlice renders June's visual only. The authenticated browser keeps

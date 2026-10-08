@@ -332,6 +332,136 @@ function juneRenderMaintenanceScheduleDownload(result) {
   host.hidden = false;
 }
 
+function juneCalendarEventWhen(event) {
+  const date = String(event?.event_date || event?.start_date || "").trim();
+  if (event?.all_day) return `${date} · All day`;
+  const start = String(event?.start_time || "").trim();
+  const end = String(event?.end_time || "").trim();
+  return `${date}${start ? ` · ${start}` : ""}${end ? `–${end}` : ""}`;
+}
+
+function juneRenderInternalCalendarEvents(events, { error = "" } = {}) {
+  const host = qs("juneInternalCalendarEvents");
+  if (!host) return;
+  if (error) {
+    host.innerHTML = `<div class="june-calendar-empty june-calendar-error">${juneEscape(error)}</div>`;
+    return;
+  }
+  const list = Array.isArray(events) ? events : [];
+  if (!list.length) {
+    host.innerHTML = "<div class=\"june-calendar-empty\">No Ironlog schedule entries in the next 21 days. Give June something worth organising.</div>";
+    return;
+  }
+  host.innerHTML = list.map((event) => {
+    const detail = [String(event?.category || "meeting").replace(/_/g, " "), event?.asset_code ? `Asset ${event.asset_code}` : "", event?.work_order_id ? `WO #${event.work_order_id}` : ""].filter(Boolean).join(" · ");
+    return `<article class="june-calendar-event"><time>${juneEscape(juneCalendarEventWhen(event))}</time><strong>${juneEscape(event?.title || "(No title)")}</strong>${detail ? `<span>${juneEscape(detail)}</span>` : ""}</article>`;
+  }).join("");
+}
+
+async function juneLoadInternalCalendar({ quiet = false } = {}) {
+  const refresh = qs("juneInternalCalendarRefreshBtn");
+  if (refresh) refresh.disabled = true;
+  try {
+    const data = await juneApiJson(`${API}/api/june/calendar/internal/events?days=21`, { headers: authHeaders() });
+    juneRenderInternalCalendarEvents(data?.calendar?.events || []);
+  } catch (error) {
+    juneRenderInternalCalendarEvents([], { error: `Ironlog schedule could not be refreshed: ${error?.message || String(error)}` });
+    if (!quiet) juneSetState("June could not refresh the Ironlog schedule.", "warning");
+  } finally {
+    if (refresh) refresh.disabled = false;
+  }
+}
+
+function juneHideCalendarApproval() {
+  const host = qs("juneCalendarApproval");
+  if (!host) return;
+  host.hidden = true;
+  host.replaceChildren();
+}
+
+function juneRenderCalendarApproval(result) {
+  const host = qs("juneCalendarApproval");
+  const approval = result?.approval || {};
+  const token = String(approval?.token || "").trim();
+  const event = result?.event || {};
+  const action = String(result?.action || "").toLowerCase();
+  if (!host || !token || !["create", "update", "cancel"].includes(action)) return;
+  const card = document.createElement("div");
+  card.className = "june-calendar-approval-card";
+  const copy = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = action === "cancel" ? "June is ready to cancel this entry" : action === "update" ? "June is ready to update this entry" : "June is ready to add this entry";
+  const detail = document.createElement("span");
+  detail.textContent = `${String(event?.title || "Calendar entry")} · ${juneCalendarEventWhen(event)}${event?.asset_code ? ` · ${event.asset_code}` : ""}`;
+  const note = document.createElement("small");
+  note.textContent = action === "cancel" ? "Confirming removes it from the active Ironlog schedule." : "Nothing changes until you confirm.";
+  copy.append(title, detail, note);
+  const actions = document.createElement("div");
+  actions.className = "june-calendar-approval-actions";
+  const discard = document.createElement("button");
+  discard.type = "button";
+  discard.className = "btn btn-secondary btn-sm";
+  discard.textContent = "Discard";
+  const confirm = document.createElement("button");
+  confirm.type = "button";
+  confirm.className = action === "cancel" ? "btn btn-danger btn-sm" : "btn btn-primary btn-sm";
+  confirm.textContent = action === "cancel" ? "Confirm cancellation" : "Confirm change";
+  discard.addEventListener("click", async () => {
+    discard.disabled = true;
+    confirm.disabled = true;
+    try {
+      await juneApiJson(`${API}/api/june/calendar/internal/approvals/${encodeURIComponent(token)}/discard`, {
+        method: "POST",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: "{}",
+      });
+      juneHideCalendarApproval();
+      juneSetState("Calendar change discarded. Sensible restraint for once.", "ready");
+    } catch (error) {
+      confirm.disabled = false;
+      juneSetState(`Calendar change could not be discarded: ${error?.message || String(error)}`, "warning");
+    }
+  });
+  confirm.addEventListener("click", async () => {
+    discard.disabled = true;
+    confirm.disabled = true;
+    juneSetState("June is applying your confirmed calendar change…", "working");
+    try {
+      const data = await juneApiJson(`${API}/api/june/calendar/internal/approvals/${encodeURIComponent(token)}/confirm`, {
+        method: "POST",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: "{}",
+      });
+      juneHideCalendarApproval();
+      await juneLoadInternalCalendar({ quiet: true });
+      const message = String(data?.message || "Ironlog schedule updated.");
+      juneAppendTranscript("June", message, "assistant");
+      juneSetState(message, "ready");
+    } catch (error) {
+      confirm.disabled = false;
+      discard.disabled = false;
+      juneSetState(`Calendar change could not be applied: ${error?.message || String(error)}`, "warning");
+    }
+  });
+  actions.append(discard, confirm);
+  card.append(copy, actions);
+  host.replaceChildren(card);
+  host.hidden = false;
+}
+
+function juneCalendarToolOutputForLive(result) {
+  const approval = result?.approval || {};
+  const { token: _token, ...approvalForLive } = approval;
+  return {
+    ...result,
+    approval: {
+      ...approvalForLive,
+      confirmation_required: true,
+      confirm_on_screen: true,
+    },
+  };
+}
+
 function juneSetConnected(connected) {
   const start = qs("juneStartBtn");
   const stop = qs("juneStopBtn");
@@ -552,13 +682,18 @@ function juneShowOutlookCallbackNotice() {
 function syncJuneVisibility() {
   const card = qs("juneAssistantCard");
   const calendarCard = qs("juneCalendarCard");
+  const internalCalendarCard = qs("juneInternalCalendarCard");
   if (!card) return;
   const visible = juneIsAdmin();
   card.hidden = !visible;
   // June can still use the private ICS feed, but My Work stays focused on her voice card.
   if (calendarCard) calendarCard.hidden = true;
+  if (internalCalendarCard) internalCalendarCard.hidden = !visible;
   if (!visible && junePeerConnection) juneStopLive({ silent: true });
-  if (visible) loadJuneStatus({ quiet: true }).catch(() => {});
+  if (visible) {
+    loadJuneStatus({ quiet: true }).catch(() => {});
+    juneLoadInternalCalendar({ quiet: true }).catch(() => {});
+  }
 }
 
 function juneSendEvent(payload) {
@@ -654,6 +789,13 @@ async function juneRunTool(item) {
           expires_in_minutes: output.download.expires_in_minutes,
         } : null,
       };
+    }
+    if (name === "june_prepare_internal_calendar_change") {
+      juneRenderCalendarApproval(output);
+      // The opaque approval token belongs solely to the authenticated browser.
+      // Keep it out of the live model's context so it cannot bypass the
+      // explicit, visible confirmation step.
+      output = juneCalendarToolOutputForLive(output);
     }
   } catch (error) {
     output = { error: `June could not complete ${name}: ${error?.message || String(error)}` };
@@ -860,5 +1002,6 @@ function wireJuneControls() {
   qs("juneCalendarForm")?.addEventListener("submit", juneSaveIcsCalendar);
   qs("juneCalendarRefreshBtn")?.addEventListener("click", () => juneLoadIcsCalendar());
   qs("juneCalendarRemoveBtn")?.addEventListener("click", () => juneRemoveIcsCalendar());
+  qs("juneInternalCalendarRefreshBtn")?.addEventListener("click", () => juneLoadInternalCalendar());
 }
 

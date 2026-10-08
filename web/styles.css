@@ -8503,6 +8503,13 @@ body.uc-qr-locked #ucAsset {
 .june-draft-download strong { display: block; font-size: 12px; }
 .june-draft-download span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
 .june-draft-download button { flex: 0 0 auto; }
+.june-calendar-approval { margin: 0 20px 12px; }
+.june-calendar-approval-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line)); border-radius: 10px; background: color-mix(in srgb, var(--accent) 7%, var(--card)); }
+.june-calendar-approval-card strong, .june-calendar-approval-card span, .june-calendar-approval-card small { display: block; }
+.june-calendar-approval-card strong { font-size: 13px; }
+.june-calendar-approval-card span { margin-top: 3px; color: var(--ink); font-size: 12px; }
+.june-calendar-approval-card small { margin-top: 4px; color: var(--muted); font-size: 11px; }
+.june-calendar-approval-actions { display: flex; flex: 0 0 auto; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .june-safety-note { margin: 0; padding: 10px 20px 14px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); }
 .june-calendar-card { margin: 0 0 14px; border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line)); }
 .june-calendar-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 20px 12px; }
@@ -8540,6 +8547,9 @@ body.uc-qr-locked #ucAsset {
   .june-status-line, .june-gateway-head, .june-connector-list, .june-safety-note { padding-left: 15px; padding-right: 15px; }
   .june-outlook-control { margin-left: 15px; margin-right: 15px; align-items: flex-start; }
   .june-transcript { margin-left: 15px; margin-right: 15px; }
+  .june-calendar-approval { margin-left: 15px; margin-right: 15px; }
+  .june-calendar-approval-card { align-items: flex-start; flex-direction: column; }
+  .june-calendar-approval-actions { justify-content: flex-start; }
   .june-calendar-form { grid-template-columns: 1fr; margin-left: 15px; margin-right: 15px; }
   .june-calendar-events { padding-left: 15px; padding-right: 15px; }
   .june-minimal-card .june-assistant-head { display: flex; min-height: 0; padding: 18px; align-items: center; }
