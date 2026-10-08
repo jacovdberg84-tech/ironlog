@@ -3,6 +3,12 @@
 // Emma Tool Gateway, session auth, and all Ironlog permissions stay in the
 // existing OpenAI WebRTC flow.
 import crypto from "node:crypto";
+import { WebSocket as WsWebSocket } from "ws";
+
+// Node 22+ has a built-in WebSocket; older Node (the production server) does
+// not, so the ws library carries June's LemonSlice tunnel there.
+const SocketImpl = typeof globalThis.WebSocket === "function" ? globalThis.WebSocket : WsWebSocket;
+const OPEN = 1; // WebSocket.OPEN in both implementations
 
 const LEMONSLICE_SESSIONS_URL = "https://lemonslice.com/api/liveai/sessions";
 const DEFAULT_AGENT_ID = "agent_1cadda06586e6670";
@@ -99,7 +105,7 @@ function removeSession(id, { terminate = false } = {}) {
   if (!session) return;
   sessions.delete(id);
   try {
-    if (terminate && session.socket?.readyState === WebSocket.OPEN) {
+    if (terminate && session.socket?.readyState === OPEN) {
       session.socket.send(JSON.stringify({ command: "terminate" }));
     }
     session.socket?.close();
@@ -113,9 +119,6 @@ function cleanExpiredSessions(now = Date.now()) {
 }
 
 function openTunnel(address) {
-  if (typeof WebSocket !== "function") {
-    throw avatarError("This Ironlog server runtime does not support June's avatar tunnel.");
-  }
   return new Promise((resolve, reject) => {
     let settled = false;
     let timeoutId = null;
@@ -127,7 +130,7 @@ function openTunnel(address) {
     };
     let socket;
     try {
-      socket = new WebSocket(address);
+      socket = new SocketImpl(address);
     } catch {
       reject(avatarError("June could not open LemonSlice's visual connection."));
       return;
@@ -145,7 +148,7 @@ function ownerSession(id, owner) {
   cleanExpiredSessions();
   const session = sessions.get(String(id || ""));
   if (!session || session.owner !== owner) throw avatarError("June's visual session was not found. Please start the conversation again.", 404);
-  if (session.socket?.readyState !== WebSocket.OPEN) throw avatarError("June's visual session has ended. Her voice session is still available.", 409);
+  if (session.socket?.readyState !== OPEN) throw avatarError("June's visual session has ended. Her voice session is still available.", 409);
   return session;
 }
 
@@ -268,3 +271,5 @@ export function stopJuneAvatar({ id, owner }) {
 }
 
 export const __test = { createLiveKitToken, getConfig: config };
+
+export const __testSocket = { SocketImpl, WsWebSocket };
