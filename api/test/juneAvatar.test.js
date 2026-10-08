@@ -47,3 +47,33 @@ test("June avatar creates separate signed LiveKit viewer and publisher tokens", 
   assert.equal(viewer.video.canSubscribe, true);
   assert.equal(publisher.video.room, "ironlog-june-test");
 });
+
+test("June asks LemonSlice for the agent built in its web app and reports its refusal reason", async () => {
+  const { startJuneAvatar } = await import("../utils/juneAvatar.js");
+  const env = { LEMONSLICE_API_KEY: "ls-key", LIVEKIT_URL: "wss://demo.livekit.cloud", LIVEKIT_API_KEY: "lk", LIVEKIT_API_SECRET: "secret" };
+  const previous = Object.fromEntries([...Object.keys(env), "JUNE_LEMONSLICE_SOURCE"].map((k) => [k, process.env[k]]));
+  Object.assign(process.env, env);
+  const realFetch = global.fetch;
+  const bodies = [];
+  try {
+    global.fetch = async (url, init) => {
+      bodies.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ detail: "Agent not found" }), { status: 404 });
+    };
+    await assert.rejects(() => startJuneAvatar({ owner: "jaco" }), /HTTP 404: Agent not found/);
+    assert.equal(bodies[0].agent_id, "agent_1cadda06586e6670");
+    assert.equal(Object.hasOwn(bodies[0], "agent_image_url"), false, "exactly one avatar source");
+    assert.equal(getJuneAvatarStatus().last_error.status, 404);
+
+    process.env.JUNE_LEMONSLICE_SOURCE = "image";
+    await assert.rejects(() => startJuneAvatar({ owner: "jaco" }));
+    assert.match(bodies[1].agent_image_url, /june-portrait\.png$/);
+    assert.equal(Object.hasOwn(bodies[1], "agent_id"), false);
+  } finally {
+    global.fetch = realFetch;
+    for (const [k, v] of Object.entries(previous)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});

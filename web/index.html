@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=collab-1" />
+  <link rel="stylesheet" href="./styles.css?v=june-cal-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -394,6 +394,7 @@
         </div>
         <button type="button" class="btn-secondary" id="myWorkRefresh">Refresh</button>
       </div>
+      <div class="june-row" id="juneRow">
       <section class="dash-card full-width june-assistant-card june-mywork-assistant june-minimal-card" id="juneAssistantCard" hidden aria-labelledby="juneTitle">
         <div class="june-assistant-head">
           <div class="june-identity">
@@ -433,41 +434,34 @@
         <div id="juneDraftDownloads" class="june-draft-downloads" hidden aria-live="polite"></div>
         <div id="juneCalendarApproval" class="june-calendar-approval" hidden aria-live="polite"></div>
         <p class="june-safety-note">June can look up facts and prepare review-only task or maintenance-schedule drafts. She will never create Ironlog records, send email, or book meetings without a separate approval flow.</p>
+        <p class="june-avatar-note" id="juneAvatarNote" hidden></p>
         <div class="june-status-line june-conversation-bar"><span class="june-live-dot" aria-hidden="true"></span><span id="juneLiveState" aria-live="polite">Checking June…</span></div>
       </section>
-      <section class="dash-card full-width june-calendar-card june-internal-calendar-card" id="juneInternalCalendarCard" hidden aria-labelledby="juneInternalCalendarTitle">
-        <div class="june-calendar-head">
-          <div>
-            <p class="june-eyebrow">IRONLOG SCHEDULE</p>
-            <h3 id="juneInternalCalendarTitle">My internal calendar</h3>
-            <p class="muted small">Private Ironlog entries. Ask June to add, move, or cancel one; you confirm each change here.</p>
+      <section class="dash-card june-cal" id="juneCalendarCard" hidden aria-labelledby="jcTitle">
+        <div class="jc-toolbar">
+          <button type="button" class="btn btn-secondary btn-sm" data-jc-today>Today</button>
+          <span class="jc-nav">
+            <button type="button" class="jc-icon" data-jc-prev aria-label="Previous">‹</button>
+            <button type="button" class="jc-icon" data-jc-next aria-label="Next">›</button>
+          </span>
+          <h3 id="jcTitle" class="jc-title">Calendar</h3>
+          <span class="jc-grow"></span>
+          <div class="jc-views" role="tablist" aria-label="Calendar view">
+            <button type="button" data-jc-view="day">Day</button>
+            <button type="button" data-jc-view="workweek">Work week</button>
+            <button type="button" data-jc-view="week">Week</button>
+            <button type="button" data-jc-view="month">Month</button>
           </div>
-          <div class="june-actions">
-            <button id="juneInternalCalendarRefreshBtn" type="button" class="btn btn-secondary btn-sm">Refresh</button>
-          </div>
+          <button type="button" class="jc-icon" id="juneCalendarRefreshBtn" title="Refresh" aria-label="Refresh calendar">↻</button>
+          <button type="button" class="jc-icon" id="juneCalendarEditBtn" title="Calendar link settings" aria-label="Calendar link settings">⚙</button>
         </div>
-        <div id="juneInternalCalendarEvents" class="june-calendar-events" aria-live="polite">
-          <div class="june-calendar-empty">Ask June to add your first internal schedule entry.</div>
-        </div>
-        <p class="june-safety-note">Outlook and private ICS feeds remain separate and read-only. This schedule belongs to Ironlog only.</p>
-      </section>
-      <section class="dash-card full-width june-calendar-card" id="juneCalendarCard" hidden aria-labelledby="juneCalendarTitle">
-        <div class="june-calendar-head">
-          <div>
-            <p class="june-eyebrow">PRIVATE CALENDAR</p>
-            <h3 id="juneCalendarTitle">My calendar</h3>
-            <p id="juneCalendarState" class="muted small">Add a private ICS link to see your upcoming meetings in Ironlog.</p>
-          </div>
-          <div class="june-actions">
-            <button id="juneCalendarEditBtn" type="button" class="btn btn-secondary btn-sm">Add calendar link</button>
-            <button id="juneCalendarRefreshBtn" type="button" class="btn btn-secondary btn-sm" hidden>Refresh calendar</button>
-          </div>
-        </div>
-        <form id="juneCalendarForm" class="june-calendar-form" hidden>
+        <div class="jc-legend" id="jcLegend"></div>
+        <form id="juneCalendarForm" class="june-calendar-form jc-form" hidden>
+          <span class="muted small" id="juneCalendarTitle">My calendar</span>
           <label>Calendar name
             <input id="juneCalendarName" type="text" maxlength="120" value="My calendar" placeholder="My calendar" />
           </label>
-          <label class="june-calendar-url">Private ICS link
+          <label class="june-calendar-url">Private ICS link (in Outlook: Settings → Calendar → Shared calendars → Publish a calendar → ICS)
             <input id="juneCalendarUrl" type="url" autocomplete="off" inputmode="url" placeholder="https://…/calendar.ics" required />
           </label>
           <div class="june-calendar-form-actions">
@@ -475,12 +469,12 @@
             <button id="juneCalendarCancelBtn" type="button" class="btn btn-secondary btn-sm">Cancel</button>
             <button id="juneCalendarRemoveBtn" type="button" class="btn btn-secondary btn-sm" hidden>Remove link</button>
           </div>
+          <p id="juneCalendarState" class="muted small">Add a private ICS link to see your upcoming meetings in Ironlog.</p>
         </form>
-        <div id="juneCalendarEvents" class="june-calendar-events" aria-live="polite">
-          <div class="june-calendar-empty">Your upcoming calendar events will appear here.</div>
-        </div>
-        <p class="june-safety-note">Your ICS link is encrypted on the server and never shown back in Ironlog. June can brief you on the calendar; she cannot change it.</p>
+        <div class="jc-body" id="jcBody"></div>
+        <div class="jc-pop" id="jcPop" hidden></div>
       </section>
+      </div>
       <div class="mywork-grid" id="myWorkGrid" aria-live="polite"></div>
     </section>
 
@@ -7950,7 +7944,8 @@
   <script src="./app/tasks.js?v=90"></script>
   <script src="./app/collab-inbox.js?v=1"></script>
   <script src="./app/june-avatar.js?v=1"></script>
-  <script src="./app/june.js?v=14"></script>
+  <script src="./app/june-calendar.js?v=1"></script>
+  <script src="./app/june.js?v=15"></script>
   <script src="./app/finance.js?v=89"></script>
   <script src="./app/enterprise.js?v=89"></script>
   <script src="./app/workshop-docs.js?v=89"></script>
