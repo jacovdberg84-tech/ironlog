@@ -8498,6 +8498,11 @@ body.uc-qr-locked #ucAsset {
 .june-transcript-message { padding: 8px 10px; border: 1px solid var(--line); background: var(--card-soft); border-radius: 2px 9px 9px 9px; white-space: pre-wrap; }
 .june-transcript-user .june-transcript-message { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); background: color-mix(in srgb, var(--accent) 7%, var(--card)); }
 .june-transcript-empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+.june-draft-downloads { display: grid; gap: 8px; margin: 0 20px 12px; }
+.june-draft-download { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 10px; background: color-mix(in srgb, var(--accent) 6%, var(--card)); }
+.june-draft-download strong { display: block; font-size: 12px; }
+.june-draft-download span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+.june-draft-download button { flex: 0 0 auto; }
 .june-safety-note { margin: 0; padding: 10px 20px 14px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); }
 .june-calendar-card { margin: 0 0 14px; border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line)); }
 .june-calendar-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 20px 12px; }

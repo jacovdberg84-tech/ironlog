@@ -4,6 +4,7 @@
 // conversation. June's private Ironlog tools all route through this gateway.
 import crypto from "node:crypto";
 import { db } from "../db/client.js";
+import { buildJuneMaintenanceSchedule, buildJuneMaintenanceScheduleWorkbook } from "../utils/juneMaintenanceSchedule.js";
 import { getRoles, getSiteCode, getUser } from "../utils/request.js";
 import {
   beginOutlookAuthorization,
@@ -36,11 +37,14 @@ const LIVE_VOICE = "gleam";
 const LIVE_SESSION_TIMEOUT_MS = 50_000;
 const LIVE_TICKET_TTL_MS = 3 * 60_000;
 const LIVE_TICKET_LIMIT = 24;
+const SCHEDULE_REPORT_TTL_MS = 15 * 60_000;
+const SCHEDULE_REPORT_LIMIT = 36;
 // A reverse proxy can replace 5xx application responses with its own generic
 // error page. Keep an upstream Live failure in the 4xx range so the authenticated
 // admin receives Ironlog's useful, safe error message instead.
 const LIVE_UPSTREAM_FAILURE_STATUS = 424;
 const liveSessionTickets = new Map();
+const maintenanceScheduleReports = new Map();
 let lastLiveAttempt = null;
 
 const JUNE_LIVE_INSTRUCTIONS = [
@@ -52,6 +56,7 @@ const JUNE_LIVE_INSTRUCTIONS = [
   "Never tease during safety matters, incidents, injuries, financial or people-sensitive topics, frustration, or urgent operational decisions. In those cases be steady, respectful, and direct.",
   "Keep normal replies to one or two short sentences. For troubleshooting, give one concrete next step and wait for the answer.",
   "Use the backend whenever the user asks about their calendar, email, weather, Ironlog, Borris, tasks, KPIs, equipment, or a draft.",
+  "When the administrator asks for a maintenance schedule for named equipment, prepare the review-only schedule through the backend. Once it reports an Excel file is ready, say it is ready to review and download on screen; never read an internal report identifier aloud.",
   "Never claim that a calendar or email account is connected unless the tool result says it is.",
   "Do not say that a task, work order, requisition, service plan, report, or external message has been created. June only prepares review-only drafts.",
   "If a tool reports that approval is required, clearly say what the administrator must review next.",
@@ -67,6 +72,7 @@ const JUNE_BACKEND_INSTRUCTIONS = [
   "For weather requests, use web search when it will improve the answer. Keep the final findings concise and operational.",
   "For calendar or email requests, first call the relevant connector function. If it is not connected, explain the connection requirement without pretending to access data.",
   "For engineering questions, use June's Borris engineering tool and identify uncertainty or missing source data.",
+  "For a maintenance schedule request, use the dedicated schedule-draft tool. Its meter and service data are factual Ironlog data; describe forecast dates as planning estimates, never as completed work.",
 ].join(" ");
 
 const TOOL_DEFINITIONS = [
@@ -119,6 +125,25 @@ const TOOL_DEFINITIONS = [
         due_date: { type: "string", description: "Optional YYYY-MM-DD date." },
       },
       required: ["title"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "june_draft_maintenance_schedule",
+    description: "Prepare a review-only maintenance schedule and authenticated Excel download for selected Ironlog equipment. It uses actual meter readings and configured service intervals; it never creates work orders or changes maintenance records.",
+    parameters: {
+      type: "object",
+      properties: {
+        asset_codes: {
+          type: "array",
+          items: { type: "string" },
+          description: "Fleet numbers to include, for example GS04AM, G01AM, and F500AM.",
+        },
+        horizon_days: { type: "number", description: "Planning horizon in days. Use 30 unless the administrator asks for another period." },
+        as_of: { type: "string", description: "Optional YYYY-MM-DD date for the meter and schedule snapshot." },
+      },
+      required: ["asset_codes"],
       additionalProperties: false,
     },
   },
@@ -207,7 +232,7 @@ function connectorStatus(context = {}) {
       detail: outlook.detail,
     },
     weather: { state: "ready", detail: "June can use live web lookup for weather questions." },
-    ironlog: { state: "connected", detail: "Read-only operational facts and review-only drafts are available." },
+    ironlog: { state: "connected", detail: "Read-only operational facts, review-only drafts, and maintenance schedule exports are available." },
     borris: { state: "connected", detail: "Asset, PM, and breakdown context is available for engineering analysis." },
   };
 }
@@ -407,6 +432,71 @@ function buildTaskDraft(args, user) {
   };
 }
 
+function cleanupMaintenanceScheduleReports(now = Date.now()) {
+  for (const [id, report] of maintenanceScheduleReports) {
+    if (Number(report?.expires_at || 0) <= now) maintenanceScheduleReports.delete(id);
+  }
+}
+
+function keepMaintenanceScheduleReport(owner, schedule) {
+  cleanupMaintenanceScheduleReports();
+  if (maintenanceScheduleReports.size >= SCHEDULE_REPORT_LIMIT) {
+    const oldest = [...maintenanceScheduleReports.entries()]
+      .sort((a, b) => Number(a[1]?.created_at || 0) - Number(b[1]?.created_at || 0))[0];
+    if (oldest) maintenanceScheduleReports.delete(oldest[0]);
+  }
+  const reportId = crypto.randomUUID();
+  maintenanceScheduleReports.set(reportId, {
+    owner,
+    schedule,
+    created_at: Date.now(),
+    expires_at: Date.now() + SCHEDULE_REPORT_TTL_MS,
+  });
+  return reportId;
+}
+
+function maintenanceScheduleFilename(schedule = {}) {
+  const asOf = isDate(schedule.as_of) ? schedule.as_of : todayYmd();
+  return `IRONLOG_June_Maintenance_Schedule_${asOf}.xlsx`;
+}
+
+function buildMaintenanceScheduleDraft(args, context) {
+  const codes = Array.isArray(args.asset_codes) ? args.asset_codes : [args.asset_codes];
+  const schedule = buildJuneMaintenanceSchedule({
+    assetCodes: codes,
+    asOf: isDate(args.as_of) ? String(args.as_of) : todayYmd(),
+    horizonDays: args.horizon_days,
+    dbConn: db,
+  });
+  const reportId = keepMaintenanceScheduleReport(context.owner, schedule);
+  const rows = schedule.rows.map((row) => ({
+    asset_code: row.asset_code,
+    equipment: row.asset_name,
+    next_service: row.service_name,
+    current_meter: row.current_meter,
+    meter_unit: row.meter_unit,
+    remaining: row.remaining,
+    forecast_due_date: row.forecast_due_date,
+    status: row.schedule_status,
+  }));
+  return {
+    state: "review_only",
+    type: "maintenance_schedule",
+    as_of: schedule.as_of,
+    horizon_days: schedule.horizon_days,
+    summary: schedule.summary,
+    missing_asset_codes: schedule.missing_asset_codes,
+    schedule: rows,
+    download: {
+      report_id: reportId,
+      filename: maintenanceScheduleFilename(schedule),
+      label: "Download maintenance schedule (Excel)",
+      expires_in_minutes: Math.round(SCHEDULE_REPORT_TTL_MS / 60_000),
+    },
+    next_step: "Review the Excel schedule before creating any work orders, service records, or requisitions.",
+  };
+}
+
 async function executeGatewayTool(name, args, context) {
   const tool = safeText(name, 80);
   const safeArgs = args && typeof args === "object" && !Array.isArray(args) ? args : {};
@@ -420,6 +510,7 @@ async function executeGatewayTool(name, args, context) {
     return getBorrisEngineeringBrief(safeArgs.asset_code, isDate(safeArgs.as_of) ? String(safeArgs.as_of) : todayYmd());
   }
   if (tool === "june_draft_task") return buildTaskDraft(safeArgs, context.user);
+  if (tool === "june_draft_maintenance_schedule") return buildMaintenanceScheduleDraft(safeArgs, context);
   if (tool === "june_calendar_overview") {
     return getIcsCalendarStatus(context).state === "connected"
       ? getIcsCalendarOverview(context)
@@ -744,6 +835,29 @@ export default async function juneRoutes(app) {
     return { ok: true, state: "ready", ...ticket.result };
   });
 
+  // A schedule report is generated by June, but it stays inside Ironlog's
+  // normal authenticated download flow. The opaque report id is short-lived
+  // and bound to the same administrator who asked June to prepare it.
+  app.get("/maintenance-schedule/:reportId.xlsx", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    cleanupMaintenanceScheduleReports();
+    const reportId = safeText(req.params?.reportId, 100);
+    const report = maintenanceScheduleReports.get(reportId);
+    if (!report || report.owner !== safetyIdentifier(req)) {
+      return reply.code(404).send({ ok: false, error: "This June maintenance schedule has expired. Ask June to prepare it again." });
+    }
+    try {
+      const workbook = await buildJuneMaintenanceScheduleWorkbook(report.schedule);
+      return reply
+        .header("Content-Disposition", `attachment; filename=${maintenanceScheduleFilename(report.schedule)}`)
+        .type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .send(workbook);
+    } catch (error) {
+      req.log.warn({ error: safeText(error?.message || error, 350) }, "June maintenance schedule export failed");
+      return reply.code(500).send({ ok: false, error: "June could not prepare the Excel schedule. Please try again." });
+    }
+  });
+
   // This gateway is the only executor for private June functions. Its tool set
   // intentionally contains no write operation: live conversations can inform
   // and draft, but a person approves every operational change in Ironlog.
@@ -755,6 +869,7 @@ export default async function juneRoutes(app) {
       const result = await executeGatewayTool(name, args, {
         siteCode: getSiteCode(req),
         user: getUser(req),
+        owner: safetyIdentifier(req),
       });
       return { ok: true, tool: name, result };
     } catch (error) {

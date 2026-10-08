@@ -296,6 +296,42 @@ function juneClearTranscript() {
   if (host) host.innerHTML = "";
 }
 
+function juneRenderMaintenanceScheduleDownload(result) {
+  const download = result?.download;
+  const reportId = String(download?.report_id || "").trim();
+  const host = qs("juneDraftDownloads");
+  if (!host || !reportId || String(result?.type || "") !== "maintenance_schedule") return;
+  const summary = result?.summary || {};
+  const selected = Number(summary.selected_assets || 0);
+  const overdue = Number(summary.overdue || 0);
+  const horizon = Number(result?.horizon_days || 30);
+  const expires = Math.max(1, Number(download?.expires_in_minutes || 15));
+  const card = document.createElement("div");
+  card.className = "june-draft-download";
+  const detail = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = "Draft maintenance schedule ready";
+  const note = document.createElement("span");
+  note.textContent = `${selected} asset${selected === 1 ? "" : "s"} · ${horizon}-day view${overdue ? ` · ${overdue} overdue` : ""} · review-only · available for ${expires} minutes`;
+  detail.append(title, note);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn btn-secondary btn-sm";
+  button.textContent = String(download?.label || "Download Excel schedule");
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    const filename = String(download?.filename || "IRONLOG_June_Maintenance_Schedule.xlsx");
+    try {
+      await downloadAuthedFile(`${API}/api/june/maintenance-schedule/${encodeURIComponent(reportId)}.xlsx`, filename);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  card.append(detail, button);
+  host.replaceChildren(card);
+  host.hidden = false;
+}
+
 function juneSetConnected(connected) {
   const start = qs("juneStartBtn");
   const stop = qs("juneStopBtn");
@@ -606,6 +642,19 @@ async function juneRunTool(item) {
       body: JSON.stringify({ name, arguments: args }),
     });
     output = data?.result || { error: "June received no result from the gateway." };
+    if (name === "june_draft_maintenance_schedule") {
+      juneRenderMaintenanceScheduleDownload(output);
+      // The opaque report id is only for the authenticated browser download.
+      // June needs to know that the file is ready, never the identifier itself.
+      output = {
+        ...output,
+        download: output?.download ? {
+          available: true,
+          label: output.download.label,
+          expires_in_minutes: output.download.expires_in_minutes,
+        } : null,
+      };
+    }
   } catch (error) {
     output = { error: `June could not complete ${name}: ${error?.message || String(error)}` };
   }
