@@ -13,6 +13,7 @@ import { validateAgainstMdmPolicy, validatePartGovernanceOptional } from "../../
 import { writeAudit } from "../../utils/audit.js";
 import { autoCategorizePart } from "../../utils/stockCategory.js";
 import { stockInfo } from "../../utils/techPortal.js";
+import { partByBarcode } from "../../utils/partBarcodes.js";
 
 const DUPLICATE_DAYS = 7;
 
@@ -66,6 +67,11 @@ export default function registerDeliveryRoutes(app, ctx) {
       ORDER BY CASE WHEN UPPER(part_code) = UPPER(?) THEN 0 WHEN UPPER(part_code) LIKE UPPER(?) THEN 1 ELSE 2 END, part_code
       LIMIT 12
     `).all(like, like, q, `${q}%`);
+    // A box barcode typed or scanned into the search finds its linked part.
+    const viaBarcode = partByBarcode(db, q);
+    if (viaBarcode && !rows.some((r) => r.id === viaBarcode.id)) {
+      rows.unshift(db.prepare(`SELECT id, part_code, part_name, unit_cost, COALESCE(min_stock, 0) AS min_stock FROM parts WHERE id = ?`).get(viaBarcode.id));
+    }
     const stock = stockInfo(db, rows.map((r) => r.id));
     return {
       ok: true,

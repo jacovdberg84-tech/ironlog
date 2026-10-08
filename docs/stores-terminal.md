@@ -30,6 +30,15 @@ The terminal reads whatever it is given, on any screen:
 | Machine QR or code | Opens Issue with that machine's open job | Picks that machine's job | — |
 | Work order number (`WO 123`) | Opens Issue for that job | Picks the job | — |
 
+### Supplier barcodes on the boxes
+
+Boxes arrive with the maker's barcode (EAN/UPC on filters, oils, bearings…). Link each one to its IronLog part once:
+
+- **Scan it anywhere** on the terminal while a storeman is signed in. An unknown barcode opens *New barcode*: search the part, tap it. The scan then carries on (added to the issue or delivery, or stock shown).
+- **Or from Find stock**: open the part, tap **＋ Link a box barcode**, scan the box.
+
+After that, anyone scanning that box gets the part. A part can have several barcodes (different brands or pack sizes); each barcode belongs to one part, and moving it to another part asks first. Wrong links are removed with ✕ under *Box barcodes* on Find stock. Technicians who scan an unlinked barcode are told to ask the storeman. Linked barcodes also work in the Stock Control part search.
+
 **USB or Bluetooth barcode scanner:** plug it in, no setup. It types like a keyboard and ends with Enter; the terminal picks it up on any screen. Set the scanner to send Enter (CR) after each code (the default on most scanners).
 
 **Phone as the scanner (until the scanner arrives):**
@@ -76,7 +85,7 @@ Open Notepad, scan a part label: the code should appear followed by a new line. 
 ## For IT
 
 - Pages: `web/stores-terminal.html` / `.js` / `.css`, phone page `web/store-scanner.html`.
-- API: `api/routes/stock/terminal.routes.js` under `/api/stock/terminal/*` (home, work-orders, requests, lookup, issue). Receive and count reuse `/api/stock/deliveries` and `/api/stock/cycle-count`.
+- API: `api/routes/stock/terminal.routes.js` under `/api/stock/terminal/*` (home, work-orders, requests, lookup, issue, barcodes). Box barcodes live in `part_barcodes` (`api/utils/partBarcodes.js`). Receive and count reuse `/api/stock/deliveries` and `/api/stock/cycle-count`.
 - PIN sign-in: `GET /api/auth/pin/roster?terminal=stores` also lists stores staff; `POST /api/auth/pin/login` accepts `storeman`, `stores` and `workshop_admin` besides technicians.
 - Phone relay: `POST /api/stock/terminal/scan` and `GET /api/stock/terminal/scans` are public. The terminal makes a random 128-bit key and shows it only in the pairing QR; scans are held in memory for two minutes and only codes pass through. A server restart drops waiting scans, nothing else.
 - Bundled libraries (MIT): `web/vendor/qrcode-generator-1.4.4.js` (pairing QR, made on the terminal) and `web/vendor/zxing-browser-0.1.5.min.js` (camera reading where the browser has no BarcodeDetector).

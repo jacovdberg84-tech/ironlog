@@ -13,6 +13,7 @@ import { getRoles } from "../../utils/request.js";
 import { technicianMatchesUser } from "../../utils/technicianIdentity.js";
 import { jobLine, stockInfo } from "../../utils/techPortal.js";
 import { workshopWaitingOnParts } from "../../utils/partsWaiting.js";
+import { barcodesForPart, ensurePartBarcodeSchema, linkBarcode, normalizeBarcode, partByBarcode, unlinkBarcode } from "../../utils/partBarcodes.js";
 
 export const STORES_ROLES = ["admin", "supervisor", "stores", "storeman", "workshop_admin", "plant_manager", "site_manager"];
 const TERMINAL_ROLES = [...STORES_ROLES, "artisan"];
@@ -66,6 +67,9 @@ export function lookupCode(database, raw) {
   }
   const p = part(code);
   if (p) return out("part", p);
+  // A maker's barcode on the box, linked to the part by the stores.
+  const byBarcode = partByBarcode(database, code);
+  if (byBarcode) return out("part", { ...byBarcode, via_barcode: normalizeBarcode(code) });
   const a = asset(code);
   if (a) return out("asset", a);
   const wn = /^(?:WO\s*#?\s*)?(\d{1,7})$/i.exec(code);
@@ -75,6 +79,7 @@ export function lookupCode(database, raw) {
 
 export default function registerTerminalRoutes(app, ctx) {
   const { getOnHand, getPartByCode, insertAlloc, insertMove, requireRoles } = ctx;
+  ensurePartBarcodeSchema(db);
 
   /** Open work orders this person may collect parts for (storemen: all). */
   function openWorkOrders(req, q = "") {
@@ -145,7 +150,7 @@ export default function registerTerminalRoutes(app, ctx) {
     const hit = lookupCode(db, req.query?.code);
     if (hit.kind === "part") {
       const s = stockInfo(db, [hit.id]).get(hit.id) || { on_hand: 0, bin: null };
-      return { ok: true, ...hit, on_hand: s.on_hand, bin: s.bin };
+      return { ok: true, ...hit, on_hand: s.on_hand, bin: s.bin, barcodes: barcodesForPart(db, hit.id).map((b) => b.barcode) };
     }
     if (hit.kind === "work_order") {
       const w = openWorkOrders(req).find((x) => x.id === hit.id);
@@ -223,6 +228,40 @@ export default function registerTerminalRoutes(app, ctx) {
     });
     const a = db.prepare(`SELECT asset_code FROM assets WHERE id = ?`).get(assetId);
     return { ok: true, work_order_id: wo ? wo.id : null, asset_code: a?.asset_code || null, lines: issued };
+  });
+
+  // POST /api/stock/terminal/barcodes { barcode, part_code, replace? } — link a box barcode to a part.
+  app.post("/terminal/barcodes", async (req, reply) => {
+    if (!requireRoles(req, reply, STORES_ROLES)) return;
+    const body = req.body || {};
+    const part = db.prepare(`SELECT id, part_code, part_name FROM parts WHERE UPPER(part_code) = UPPER(?)`).get(String(body.part_code || "").trim());
+    if (!part) return reply.code(404).send({ ok: false, error: "Choose the part" });
+    let res;
+    try {
+      res = linkBarcode(db, { barcode: body.barcode, part, user: userOf(req) || null, replace: body.replace === true });
+    } catch (err) {
+      return reply.code(err.status || 400).send({ ok: false, error: err.message, linked_to: err.linked_to });
+    }
+    if (!res.already) {
+      writeAudit(db, req, {
+        module: "stock",
+        action: "barcode_link",
+        entity_type: "part",
+        entity_id: part.part_code,
+        payload: { barcode: res.barcode, moved_from: res.moved_from || undefined },
+      });
+    }
+    return { ok: true, barcode: res.barcode, part_code: part.part_code, part_name: part.part_name, moved_from: res.moved_from || null };
+  });
+
+  // DELETE /api/stock/terminal/barcodes/:barcode — unlink a wrongly linked barcode.
+  app.delete("/terminal/barcodes/:barcode", async (req, reply) => {
+    if (!requireRoles(req, reply, STORES_ROLES)) return;
+    const code = normalizeBarcode(req.params.barcode);
+    const owner = partByBarcode(db, code);
+    if (!unlinkBarcode(db, code)) return reply.code(404).send({ ok: false, error: "That barcode is not linked" });
+    writeAudit(db, req, { module: "stock", action: "barcode_unlink", entity_type: "part", entity_id: owner?.part_code || "", payload: { barcode: code } });
+    return { ok: true };
   });
 
   // ---------------------------------------------------------------- phone as scanner
