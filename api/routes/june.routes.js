@@ -4,6 +4,7 @@
 // conversation. June's private Ironlog tools all route through this gateway.
 import crypto from "node:crypto";
 import { db } from "../db/client.js";
+import { getAssetHoursInfoAsOf } from "../utils/assetMeterHours.js";
 import { buildJuneMaintenanceSchedule, buildJuneMaintenanceScheduleWorkbook } from "../utils/juneMaintenanceSchedule.js";
 import { getRoles, getSiteCode, getUser } from "../utils/request.js";
 import {
@@ -68,6 +69,7 @@ const JUNE_LIVE_INSTRUCTIONS = [
   "Never tease during safety matters, incidents, injuries, financial or people-sensitive topics, frustration, or urgent operational decisions. In those cases be steady, respectful, and direct.",
   "Keep normal replies to one or two short sentences. For troubleshooting, give one concrete next step and wait for the answer.",
   "Use the backend whenever the user asks about their calendar, email, weather, Ironlog, Borris, tasks, KPIs, equipment, or a draft.",
+  "For stores questions—stock on hand, shortages, a part lookup, or items on order—use the Stores briefing tool. It is read-only: never promise that stock was issued, ordered, received, or adjusted.",
   "When the administrator asks for a maintenance schedule for named equipment, prepare the review-only schedule through the backend. Once it reports an Excel file is ready, say it is ready to review and download on screen; never read an internal report identifier aloud.",
   "Ironlog has its own private internal calendar. Outlook and ICS are read-only external sources. For an internal calendar create, move, update, or cancel request, use the preparation tool, repeat the exact change, and tell Jaco to press the on-screen Confirm button. Never claim it was changed until Ironlog reports that confirmation succeeded.",
   "Never claim that a calendar or email account is connected unless the tool result says it is.",
@@ -85,6 +87,7 @@ const JUNE_BACKEND_INSTRUCTIONS = [
   "For weather requests, use web search when it will improve the answer. Keep the final findings concise and operational.",
   "For calendar or email requests, first call the relevant connector function. If it is not connected, explain the connection requirement without pretending to access data.",
   "For engineering questions, use June's Borris engineering tool and identify uncertainty or missing source data.",
+  "For stores questions, use the dedicated read-only Stores tool. Report the on-hand quantity, minimum, shortage, and open-order status exactly as returned; do not invent a receipt date or stock allocation.",
   "For a maintenance schedule request, use the dedicated schedule-draft tool. Its meter and service data are factual Ironlog data; describe forecast dates as planning estimates, never as completed work.",
   "For internal Ironlog calendar changes, prepare a precise proposal only. Do not create, move, or cancel an entry yourself; the authenticated administrator must use the confirmation card in Ironlog. External Outlook and ICS calendars stay read-only.",
 ].join(" ");
@@ -123,6 +126,20 @@ const TOOL_DEFINITIONS = [
         as_of: { type: "string", description: "Optional YYYY-MM-DD date." },
       },
       required: ["asset_code"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "june_get_stores_brief",
+    description: "Get read-only Ironlog Stores facts: stock on hand, below-minimum items, matching parts, and open part orders. Use this for stock, spares, shortages, or parts-on-order questions.",
+    parameters: {
+      type: "object",
+      properties: {
+        scope: { type: "string", enum: ["summary", "low_stock", "on_order", "part_lookup"] },
+        query: { type: "string", description: "Optional part code, part description, asset code, or work-order reference to look up." },
+      },
+      required: [],
       additionalProperties: false,
     },
   },
@@ -289,6 +306,7 @@ function connectorStatus(context = {}) {
     weather: { state: "ready", detail: "June can use live web lookup for weather questions." },
     ironlog: { state: "connected", detail: "Read-only operational facts, review-only drafts, and maintenance schedule exports are available." },
     borris: { state: "connected", detail: "Asset, PM, and breakdown context is available for engineering analysis." },
+    stores: { state: "connected", detail: "Read-only stock, shortages, and parts-on-order facts are available." },
   };
 }
 
@@ -335,29 +353,29 @@ function getTaskBrief({ siteCode, user, scope }) {
 function getPmDueRows(asOf) {
   return safeRows(`
     SELECT
+      mp.asset_id,
       a.asset_code,
       a.asset_name,
       mp.service_name,
       mp.interval_hours,
-      mp.last_service_hours,
-      COALESCE((
-        SELECT SUM(dh.hours_run)
-        FROM daily_hours dh
-        WHERE dh.asset_id = mp.asset_id
-          AND dh.is_used = 1
-          AND dh.hours_run > 0
-          AND dh.work_date <= ?
-      ), 0) AS current_hours
+      mp.last_service_hours
     FROM maintenance_plans mp
     JOIN assets a ON a.id = mp.asset_id
     WHERE mp.active = 1
-  `, [asOf]).map((row) => {
+  `).map((row) => {
+    // A cumulative sum of production hours is not an hour meter. Use the
+    // same trusted daily-closing meter logic as Borris and Maintenance.
+    const meter = getAssetHoursInfoAsOf(row.asset_id, asOf, db);
+    const currentHours = Number(meter.hours || 0);
     const due = Number(row.last_service_hours || 0) + Number(row.interval_hours || 0);
-    const remaining = due - Number(row.current_hours || 0);
+    const remaining = due - currentHours;
     return {
       asset_code: safeText(row.asset_code, 40),
       asset_name: safeText(row.asset_name, 120),
       service_name: safeText(row.service_name || "Service", 120),
+      current_hours: number(currentHours),
+      meter_source: safeText(meter.source || "unknown", 32),
+      meter_date: meter.latest_work_date || null,
       next_due_hours: number(due),
       remaining_hours: number(remaining),
       status: remaining < 0 ? "overdue" : remaining <= 50 ? "due_soon" : "planned",
@@ -419,11 +437,10 @@ function getBorrisEngineeringBrief(assetCode, asOf) {
     LIMIT 1
   `, [code]);
   if (!asset) return { found: false, asset_code: code, message: `No Ironlog asset found for ${code}.` };
-  const runHours = Number(safeRow(`
-    SELECT COALESCE(SUM(hours_run), 0) AS hours
-    FROM daily_hours
-    WHERE asset_id = ? AND is_used = 1 AND hours_run > 0 AND work_date <= ?
-  `, [asset.id, asOf])?.hours || 0);
+  // Keep June's engineering brief on the same trusted meter source as Borris.
+  // In particular, never describe summed daily run-hours as the machine meter.
+  const meter = getAssetHoursInfoAsOf(asset.id, asOf, db);
+  const currentMeter = Number(meter.hours || 0);
   const openBreakdowns = safeRows(`
     SELECT component, description, breakdown_date, COALESCE(critical, 0) AS critical,
       COALESCE(downtime_total_hours, 0) AS downtime_hours, parts_status, ets_repair_date
@@ -452,7 +469,7 @@ function getBorrisEngineeringBrief(assetCode, asOf) {
       service_name: safeText(row.service_name || "Service", 120),
       interval_hours: number(row.interval_hours),
       next_due_hours: number(due),
-      remaining_hours: number(due - runHours),
+      remaining_hours: number(due - currentMeter),
     };
   });
   return {
@@ -463,11 +480,153 @@ function getBorrisEngineeringBrief(assetCode, asOf) {
       asset_code: safeText(asset.asset_code, 40),
       asset_name: safeText(asset.asset_name, 120),
       category: safeText(asset.category, 80) || null,
-      accumulated_run_hours: number(runHours),
+      current_meter: number(currentMeter),
+      meter_source: safeText(meter.source || "unknown", 32),
+      meter_date: meter.latest_work_date || null,
     },
     open_breakdowns: openBreakdowns,
     service_plans: servicePlans,
     note: "This is factual Ironlog context for June's Borris-style analysis. Confirm diagnoses against the OEM manual and technician findings.",
+  };
+}
+
+function storesScope(value) {
+  const scope = safeText(value, 32).toLowerCase();
+  return ["summary", "low_stock", "on_order", "part_lookup"].includes(scope) ? scope : "summary";
+}
+
+// June's Stores access is deliberately read-only. This is direct database
+// access rather than a browser/API relay so the live tool gets a compact,
+// factual answer while normal Stores permissions remain untouched.
+function getStoresBrief({ siteCode, scope, query }) {
+  const selectedScope = storesScope(scope);
+  const search = safeText(query, 120).toUpperCase();
+  const like = `%${search}%`;
+  const partWhere = search ? "WHERE UPPER(TRIM(p.part_code)) LIKE ? OR UPPER(TRIM(p.part_name)) LIKE ?" : "";
+  const partParams = search ? [like, like] : [];
+  const partRows = safeRows(`
+    SELECT
+      p.part_code,
+      p.part_name,
+      COALESCE(p.min_stock, 0) AS min_stock,
+      COALESCE(p.critical, 0) AS critical,
+      COALESCE(p.unit_cost, 0) AS unit_cost,
+      COALESCE(SUM(sm.quantity), 0) AS on_hand
+    FROM parts p
+    LEFT JOIN stock_movements sm ON sm.part_id = p.id
+    ${partWhere}
+    GROUP BY p.id
+    ORDER BY p.critical DESC, p.part_code ASC
+    LIMIT 30
+  `, partParams).map((row) => {
+    const onHand = number(row.on_hand, 0, 2);
+    const minStock = number(row.min_stock, 0, 2);
+    return {
+      part_code: safeText(row.part_code, 80),
+      part_name: safeText(row.part_name, 180),
+      on_hand: onHand,
+      min_stock: minStock,
+      shortage: number(Math.max(0, minStock - onHand), 0, 2),
+      below_min: onHand < minStock,
+      critical: Boolean(Number(row.critical || 0)),
+      unit_cost: number(row.unit_cost, 0, 2),
+    };
+  });
+  const lowStockRows = safeRows(`
+    SELECT
+      p.part_code,
+      p.part_name,
+      COALESCE(p.min_stock, 0) AS min_stock,
+      COALESCE(p.critical, 0) AS critical,
+      COALESCE(SUM(sm.quantity), 0) AS on_hand
+    FROM parts p
+    LEFT JOIN stock_movements sm ON sm.part_id = p.id
+    GROUP BY p.id
+    HAVING COALESCE(SUM(sm.quantity), 0) < COALESCE(p.min_stock, 0)
+    ORDER BY p.critical DESC, (COALESCE(p.min_stock, 0) - COALESCE(SUM(sm.quantity), 0)) DESC, p.part_code ASC
+    LIMIT 20
+  `).map((row) => {
+    const onHand = number(row.on_hand, 0, 2);
+    const minStock = number(row.min_stock, 0, 2);
+    return {
+      part_code: safeText(row.part_code, 80),
+      part_name: safeText(row.part_name, 180),
+      on_hand: onHand,
+      min_stock: minStock,
+      shortage: number(Math.max(0, minStock - onHand), 0, 2),
+      critical: Boolean(Number(row.critical || 0)),
+    };
+  });
+  const partSummary = safeRow(`
+    SELECT
+      COUNT(*) AS total_parts,
+      COALESCE(SUM(CASE WHEN balances.on_hand < balances.min_stock THEN 1 ELSE 0 END), 0) AS below_min,
+      COALESCE(SUM(CASE WHEN balances.on_hand < balances.min_stock AND balances.critical = 1 THEN 1 ELSE 0 END), 0) AS critical_below_min
+    FROM (
+      SELECT p.id, COALESCE(p.min_stock, 0) AS min_stock, COALESCE(p.critical, 0) AS critical, COALESCE(SUM(sm.quantity), 0) AS on_hand
+      FROM parts p
+      LEFT JOIN stock_movements sm ON sm.part_id = p.id
+      GROUP BY p.id
+    ) balances
+  `) || {};
+  const orderRows = safeRows(`
+    SELECT
+      o.id,
+      o.part_code,
+      o.part_name,
+      o.qty,
+      o.unit_cost,
+      o.currency,
+      o.status,
+      o.order_date,
+      o.expected_arrival_date,
+      o.current_location,
+      o.supplier_name,
+      o.po_number,
+      o.requisition_number
+    FROM stores_part_orders o
+    WHERE LOWER(TRIM(COALESCE(o.status, 'on_order'))) NOT IN ('arrived', 'cancelled')
+      AND LOWER(TRIM(COALESCE(o.site_code, 'main'))) = ?
+      AND (
+        ? = ''
+        OR UPPER(COALESCE(o.part_code, '')) LIKE ?
+        OR UPPER(COALESCE(o.part_name, '')) LIKE ?
+        OR UPPER(COALESCE(o.po_number, '')) LIKE ?
+        OR UPPER(COALESCE(o.requisition_number, '')) LIKE ?
+      )
+    ORDER BY COALESCE(o.expected_arrival_date, '9999-12-31') ASC, o.order_date DESC, o.id DESC
+    LIMIT 20
+  `, [safeText(siteCode, 160).toLowerCase() || "main", search, like, like, like, like]).map((row) => ({
+    id: Number(row.id || 0),
+    part_code: safeText(row.part_code, 80) || null,
+    part_name: safeText(row.part_name, 180),
+    qty: number(row.qty, 0, 2),
+    unit_cost: number(row.unit_cost, 0, 2),
+    currency: safeText(row.currency || "USD", 12),
+    status: safeText(row.status || "on_order", 40),
+    order_date: safeText(row.order_date, 10) || null,
+    expected_arrival_date: safeText(row.expected_arrival_date, 10) || null,
+    current_location: safeText(row.current_location, 120) || null,
+    supplier_name: safeText(row.supplier_name, 120) || null,
+    po_number: safeText(row.po_number, 80) || null,
+    requisition_number: safeText(row.requisition_number, 80) || null,
+  }));
+
+  return {
+    review_only: true,
+    scope: selectedScope,
+    query: search || null,
+    summary: {
+      total_parts: Number(partSummary.total_parts || 0),
+      below_min: Number(partSummary.below_min || 0),
+      critical_below_min: Number(partSummary.critical_below_min || 0),
+      matching_parts: partRows.length,
+      open_part_orders: orderRows.length,
+    },
+    matching_parts: selectedScope === "low_stock" ? [] : partRows,
+    low_stock: selectedScope === "part_lookup" ? partRows.filter((row) => row.below_min) : lowStockRows,
+    parts_on_order: selectedScope === "low_stock" ? [] : orderRows,
+    note: "Stores data is read-only for June. Confirm actual issue, receipt, allocation, and supplier ETAs with Stores before acting.",
   };
 }
 
@@ -676,6 +835,9 @@ async function executeGatewayTool(name, args, context) {
   }
   if (tool === "june_borris_engineering_brief") {
     return getBorrisEngineeringBrief(safeArgs.asset_code, isDate(safeArgs.as_of) ? String(safeArgs.as_of) : todayYmd());
+  }
+  if (tool === "june_get_stores_brief") {
+    return getStoresBrief({ siteCode: context.siteCode, scope: safeArgs.scope, query: safeArgs.query });
   }
   if (tool === "june_draft_task") return buildTaskDraft(safeArgs, context.user);
   if (tool === "june_draft_maintenance_schedule") return buildMaintenanceScheduleDraft(safeArgs, context);
