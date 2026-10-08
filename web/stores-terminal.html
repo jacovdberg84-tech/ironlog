@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#0b1220" />
+  <title>IRONLOG Stores Terminal</title>
+  <link rel="stylesheet" href="./stores-terminal.css?v=1" />
+</head>
+<body>
+  <div class="st-app">
+    <header class="st-top">
+      <div class="st-brand"><div class="mark">IL</div><span data-t="Stores">Stores</span></div>
+      <div class="st-clock" id="stClock"></div>
+      <div class="lang" role="group" aria-label="Language"><button type="button" data-lang="en">EN</button> <button type="button" data-lang="pt">PT</button></div>
+      <div class="who hidden" id="stWho"><b id="stWhoName"></b><span class="muted" id="stWhoRole"></span></div>
+      <button type="button" class="btn ghost sm hidden" id="stSignOut" data-t="Sign out">Sign out</button>
+    </header>
+    <main class="st-main" id="stMain"></main>
+    <footer class="st-foot">
+      <span class="scan-dot" id="stScanDot"></span>
+      <span id="stScanText" data-t="Scanner ready: scan a part label, machine or work order">Scanner ready: scan a part label, machine or work order</span>
+      <span class="grow"></span>
+      <button type="button" class="btn ghost sm" id="stPairBtn" data-t="📱 Phone scanner">📱 Phone scanner</button>
+    </footer>
+  </div>
+  <div id="stOverlay" class="st-overlay hidden"></div>
+  <div id="stToast" class="st-toast"></div>
+  <div id="stIdle" class="st-idle hidden"></div>
+
+  <script src="./vendor/qrcode-generator-1.4.4.js"></script>
+  <script src="./auth-shared.js?v=5"></script>
+  <script src="./stores-terminal.js?v=1"></script>
+</body>
+</html>
