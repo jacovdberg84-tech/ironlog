@@ -41,6 +41,7 @@ import {
 } from "../utils/juneAvatar.js";
 import { makeJuneLiveAnswerBrowserCompatible } from "../utils/juneLiveSdp.js";
 import { clearJuneMemory, juneMemoryInstructions, recentJuneTurns, saveJuneTurns } from "../utils/juneMemory.js";
+import { JUNE_REPORT_KEYS, buildJuneCostReport, buildJuneKpiReport, prepareJuneReportFile } from "../utils/juneReports.js";
 import { BRIEFING_LIVE_INSTRUCTIONS, buildDailyBriefing, briefingSite, siteToday } from "../utils/juneDailyBriefing.js";
 
 const OPENAI_LIVE_URL = "https://api.openai.com/v1/live/sessions";
@@ -75,6 +76,8 @@ const JUNE_LIVE_INSTRUCTIONS = [
   "Use the backend whenever the user asks about their calendar, email, weather, Ironlog, Borris, tasks, KPIs, equipment, or a draft.",
   "When Jaco asks for his daily briefing, the morning rundown, or to be brought up to speed, delegate to the backend's daily briefing tool plus a web search for recent security incidents near site, then brief him in about a minute: breakdowns, today's calendar, weather, security.",
   "When Jaco asks about a specific work order (for example 'WO 349'), delegate to the work order tool: it returns the facts and also opens that work order in a pop-up on his screen. Tell him it is on screen, then give the short version.",
+  "For costs, spend, budgets, cost per machine or cost per hour, delegate to the costing report tool. For availability, utilisation, downtime or breakdown trends, delegate to the KPI report tool. Discuss and deliberate with Jaco: say what moved, why it likely moved, what you would check next, and where the data is thin. Quote money in US dollars, rounded sensibly; never invent a number the tools did not return.",
+  "When Jaco wants a report file (monthly report, cost Excel, KPI pack, machine history and so on), prepare it with the report file tool and tell him the button to open it is on screen.",
   "For stores questions—stock on hand, shortages, a part lookup, or items on order—use the Stores briefing tool. It is read-only: never promise that stock was issued, ordered, received, or adjusted.",
   "When the administrator asks for a maintenance schedule for named equipment, prepare the review-only schedule through the backend. Once it reports an Excel file is ready, say it is ready to review and download on screen; never read an internal report identifier aloud.",
   "Ironlog has its own private internal calendar. Outlook and ICS are read-only external sources. For an internal calendar create, move, update, or cancel request, use the preparation tool, repeat the exact change, and tell Jaco to press the on-screen Confirm button. Never claim it was changed until Ironlog reports that confirmation succeeded.",
@@ -95,6 +98,7 @@ const JUNE_BACKEND_INSTRUCTIONS = [
   "For calendar or email requests, first call the relevant connector function. If it is not connected, explain the connection requirement without pretending to access data.",
   "For engineering questions, use June's Borris engineering tool and identify uncertainty or missing source data.",
   "For a question about one work order, call june_open_work_order with its number; it also opens the work order on the administrator's screen.",
+  "For cost questions use june_cost_report; for availability, utilisation, downtime and breakdown trends use june_kpi_report. Both compare with the previous period: explain the biggest movers, separate real cost from rate assumptions, flag month-to-date comparisons, and suggest what to check next. For a report file use june_prepare_report_file.",
   "For stores questions, use the dedicated read-only Stores tool. Report the on-hand quantity, minimum, shortage, and open-order status exactly as returned; do not invent a receipt date or stock allocation.",
   "For a maintenance schedule request, use the dedicated schedule-draft tool. Its meter and service data are factual Ironlog data; describe forecast dates as planning estimates, never as completed work.",
   "For internal Ironlog calendar changes, prepare a precise proposal only. Do not create, move, or cancel an entry yourself; the authenticated administrator must use the confirmation card in Ironlog. External Outlook and ICS calendars stay read-only.",
@@ -194,6 +198,58 @@ const TOOL_DEFINITIONS = [
       type: "object",
       properties: { work_order_id: { type: "number", description: "The work order number, for example 349 for WO#349." } },
       required: ["work_order_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "june_cost_report",
+    description: "Maintenance and operating costs for a month or date range, compared with the previous period: totals by cost type (parts, labour, fuel, lube, downtime, plant hire), by equipment type, the most expensive machines with cost per run hour, biggest increases, and budget for the month. Same numbers as Reports → Cost Monthly. Filter to one machine or an equipment type when asked.",
+    parameters: {
+      type: "object",
+      properties: {
+        month: { type: "string", description: "YYYY-MM. Leave out for this month so far." },
+        from_date: { type: "string", description: "Optional YYYY-MM-DD start, with to_date, instead of a month." },
+        to_date: { type: "string", description: "Optional YYYY-MM-DD end." },
+        asset_code: { type: "string", description: "Optional fleet number, for example A303AM." },
+        category: { type: "string", description: "Optional equipment type, for example ADT or excavator." },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "june_kpi_report",
+    description: "Fleet availability, utilisation, downtime and breakdowns for a month or date range, compared with the previous period: fleet totals, by equipment type, lowest-availability and most-downtime machines, and repeat breakdowns. Same engine as the Asset KPI dashboard.",
+    parameters: {
+      type: "object",
+      properties: {
+        month: { type: "string", description: "YYYY-MM. Leave out for this month so far." },
+        from_date: { type: "string", description: "Optional YYYY-MM-DD start, with to_date, instead of a month." },
+        to_date: { type: "string", description: "Optional YYYY-MM-DD end." },
+        asset_codes: { type: "array", items: { type: "string" }, description: "Optional fleet numbers to limit the report to." },
+        category: { type: "string", description: "Optional equipment type, for example ADT." },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "june_prepare_report_file",
+    description: "Prepare one of Ironlog's report files and put an Open button on the administrator's screen. Reports: cost_monthly_xlsx, maintenance_cost_by_equipment_pdf, maintenance_cost_by_equipment_xlsx, monthly_pdf, weekly_pdf, daily_pdf, executive_kpi_pack_xlsx, gm_budget_meeting_docx, asset_history_pdf.",
+    parameters: {
+      type: "object",
+      properties: {
+        report: { type: "string", enum: JUNE_REPORT_KEYS },
+        month: { type: "string", description: "YYYY-MM for monthly reports. Defaults to last month." },
+        from_date: { type: "string", description: "YYYY-MM-DD start, for weekly or a custom range." },
+        to_date: { type: "string", description: "YYYY-MM-DD end." },
+        date: { type: "string", description: "YYYY-MM-DD for the daily report." },
+        asset_code: { type: "string", description: "Fleet number for machine history." },
+      },
+      required: ["report"],
       additionalProperties: false,
     },
   },
@@ -962,6 +1018,9 @@ async function executeGatewayTool(name, args, context) {
   if (tool === "june_calendar_overview") return getJuneCalendarOverview(context);
   if (tool === "june_daily_briefing") return getJuneDailyBriefing(context);
   if (tool === "june_open_work_order") return getWorkOrderForJune(safeArgs.work_order_id);
+  if (tool === "june_cost_report") return buildJuneCostReport(safeArgs, { siteCode: context.siteCode, today: siteToday(briefingSite().timezone) });
+  if (tool === "june_kpi_report") return buildJuneKpiReport(safeArgs, { siteCode: context.siteCode, today: siteToday(briefingSite().timezone) });
+  if (tool === "june_prepare_report_file") return prepareJuneReportFile(safeArgs, { today: siteToday(briefingSite().timezone) });
   if (tool === "june_list_internal_calendar_events") return {
     source: "internal_ironlog",
     events: listInternalCalendarEvents(context, { fromDate: safeArgs.from_date, toDate: safeArgs.to_date, limit: 24 }),

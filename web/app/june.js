@@ -382,6 +382,36 @@ function juneClearTranscript() {
   if (host) host.innerHTML = "";
 }
 
+/** June prepared a report file: show an Open button (a tap is needed to open a tab). */
+function juneRenderReportFile(result) {
+  const host = qs("juneDraftDownloads");
+  const url = String(result?.url || "");
+  if (!host || !result?.ready || !url.startsWith("/api/reports/")) return;
+  const card = document.createElement("div");
+  card.className = "june-draft-download";
+  const detail = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = String(result.label || "Report ready");
+  const note = document.createElement("span");
+  note.textContent = [result.asset_code, result.period].filter(Boolean).join(" · ");
+  detail.append(title, note);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn btn-secondary btn-sm";
+  button.textContent = result.download ? "Download" : "Open";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await openAuthedReport(`${API}${url}`, { download: Boolean(result.download), filename: String(result.filename || "ironlog-report") });
+    } finally {
+      button.disabled = false;
+    }
+  });
+  card.append(detail, button);
+  host.replaceChildren(card);
+  host.hidden = false;
+}
+
 function juneRenderMaintenanceScheduleDownload(result) {
   const download = result?.download;
   const reportId = String(download?.report_id || "").trim();
@@ -863,6 +893,11 @@ async function juneRunTool(item) {
           expires_in_minutes: output.download.expires_in_minutes,
         } : null,
       };
+    }
+    if (name === "june_prepare_report_file") {
+      juneRenderReportFile(output);
+      // June only needs to know the file is ready, not the link.
+      if (output?.ready) output = { ready: true, label: output.label, period: output.period, next_step: output.next_step };
     }
     if (name === "june_open_work_order" && output?.found && output.work_order?.id) {
       if (typeof openWorkOrderPopup === "function") openWorkOrderPopup(output.work_order.id);
