@@ -8792,3 +8792,20 @@ body.login-locked .ci { display: none; }
 .june-row [hidden], .jc-form[hidden] { display: none !important; }
 .june-memory-row { margin: 0 18px 8px; text-align: center; font-size: 0.8rem; }
 .june-link { border: 0; background: transparent; color: var(--accent); cursor: pointer; font-size: 0.8rem; font-weight: 600; padding: 0 2px; }
+
+/* ---------- Work order pop-up (main app) ---------- */
+.wo-popup-overlay { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 24px; background: rgba(15, 23, 42, 0.55); }
+.wo-popup-overlay[hidden] { display: none; }
+.wo-popup-dialog { display: flex; flex-direction: column; width: min(900px, 100%); height: min(88vh, 1000px); overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); box-shadow: 0 24px 60px rgba(8, 24, 42, 0.35); }
+.wo-popup-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--card); }
+.wo-popup-actions { display: flex; align-items: center; gap: 12px; }
+.wo-popup-full { font-size: 0.86rem; }
+.wo-popup-x { min-width: 36px; padding: 6px 10px; }
+.wo-popup-frame { flex: 1; width: 100%; border: 0; background: var(--bg); }
+body.wo-popup-open { overflow: hidden; }
+@media (max-width: 760px) { .wo-popup-overlay { padding: 0; } .wo-popup-dialog { height: 100%; border-radius: 0; } }
+/* Inside the pop-up the Work Orders page shows only the job's detail panel. */
+body.wo-popup { overflow: hidden; }
+body.wo-popup .wo-drawer { width: 100vw; border-left: 0; box-shadow: none; transition: none; }
+body.wo-popup .wo-drawer-backdrop { display: none !important; }
+body.wo-popup .wo-drawer-head { display: none; }

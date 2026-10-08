@@ -419,7 +419,17 @@ function openWoDrawer() {
   document.getElementById("woDrawer")?.setAttribute("aria-hidden", "false");
 }
 
+// ?popup=1: the page runs inside the main app's work order pop-up and shows
+// only this job's detail panel. Closing it closes the pop-up.
+const WO_POPUP_MODE = (() => {
+  try { return new URLSearchParams(window.location.search).get("popup") === "1"; } catch { return false; }
+})();
+
 function closeWoDrawer() {
+  if (WO_POPUP_MODE) {
+    try { window.parent?.postMessage({ type: "ironlog:wo-popup-close" }, window.location.origin); } catch {}
+    return;
+  }
   document.getElementById("woDrawer")?.classList.remove("is-open");
   document.getElementById("woDrawerBackdrop")?.classList.remove("is-open");
   document.getElementById("woDrawer")?.setAttribute("aria-hidden", "true");
@@ -2047,6 +2057,12 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("woClearFiltersBtn")?.addEventListener("click", clearDateAndTypeFilters);
   const requested = getRequestedWorkOrderId();
   if (requested && searchEl) searchEl.value = String(requested);
+  if (WO_POPUP_MODE) {
+    document.body.classList.add("wo-popup");
+    // Open the job straight away, whatever its status or the board filters.
+    requestedWoOpened = true;
+    if (requested) loadWorkOrderDetail(requested).catch(() => {});
+  }
   if (closeConfirmBtn) closeConfirmBtn.addEventListener("click", submitCloseWorkOrder);
   if (closeCancelBtn) closeCancelBtn.addEventListener("click", closeCloseModal);
   document.getElementById("woAssignConfirmBtn")?.addEventListener("click", () => submitAssignWorkOrder());
