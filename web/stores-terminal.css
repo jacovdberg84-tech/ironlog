@@ -118,6 +118,7 @@ button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulat
 .st-tile.t-find { background: linear-gradient(135deg, #7c3aed, #5b21b6); }
 .st-tile.t-requests { background: linear-gradient(135deg, #ea580c, #9a3412); }
 .st-tile.t-count { background: linear-gradient(135deg, #0891b2, #155e75); }
+.st-tile.t-library { background: linear-gradient(135deg, #b45309, #78350f); }
 .st-tile:active { transform: scale(0.985); }
 
 /* ---------------------------------------------------------------- work screens */
@@ -136,7 +137,7 @@ button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulat
 .st-search input:focus, .st-field input:focus { outline: none; border-color: var(--accent); }
 .st-field { display: block; margin-bottom: 12px; }
 .st-field span { display: block; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
-.st-list { display: grid; gap: 10px; }
+.st-list { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
 .st-item {
   width: 100%; text-align: left; border: 2px solid var(--line); background: var(--panel-2); border-radius: 14px;
   padding: 14px 16px; min-height: 72px; display: flex; align-items: center; gap: 14px;
@@ -201,3 +202,12 @@ button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulat
 .st-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .st-chip { min-height: 48px; border-radius: 999px; border: 2px solid var(--line); background: var(--panel-2); padding: 0 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .st-chip span { color: #fca5a5; margin-left: 6px; }
+
+/* Workshop library */
+.st-chip.on { background: var(--accent); border-color: var(--accent); }
+.st-item .ic-doc { font-size: 1.8rem; }
+.st-answer { white-space: pre-wrap; background: var(--bg); border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; line-height: 1.45; max-height: 40vh; overflow-y: auto; user-select: text; }
+.st-doc-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.st-pdf { height: calc(100vh - 260px); min-height: 360px; border-radius: var(--radius); overflow: hidden; background: #fff; }
+.st-pdf .st-empty, .st-pdf .st-msg { background: var(--panel); height: 100%; margin: 0; }
+.st-pdf iframe { width: 100%; height: 100%; border: 0; display: block; }

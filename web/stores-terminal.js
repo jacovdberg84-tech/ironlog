@@ -16,6 +16,7 @@
   const IDLE_TECH_MS = 90 * 1000;
   const IDLE_STORES_MS = 10 * 60 * 1000;
   const IDLE_WARN_MS = 15 * 1000;
+  const IDLE_MANUAL_MS = 20 * 60 * 1000;
   const DONE_RETURN_MS = 10 * 1000;
 
   // ------------------------------------------------------------- language
@@ -127,6 +128,28 @@
     "or type it here": "ou escreva aqui",
     "Remove barcode {barcode}?": "Remover o código {barcode}?",
     "Remove": "Remover",
+    "Workshop library": "Biblioteca da oficina",
+    "Manuals, bulletins and fixes": "Manuais, boletins e soluções",
+    "Manuals": "Manuais",
+    "Search: machine, model or manual": "Procurar: máquina, modelo ou manual",
+    "All": "Todos",
+    "Workshop Manual": "Manual de oficina",
+    "Service Manual": "Manual de serviço",
+    "Parts Manual": "Catálogo de peças",
+    "OEM Bulletin": "Boletim do fabricante",
+    "Technical Document": "Documento técnico",
+    "Workshop Fix": "Solução da oficina",
+    "No manuals found": "Nenhum manual encontrado",
+    "Ask the manuals": "Pergunte aos manuais",
+    "Ask about a fault code, torque, procedure or part. The answer points to the manual pages: always check the page before working.": "Pergunte sobre um código de avaria, binário, procedimento ou peça. A resposta indica as páginas do manual: confirme sempre a página antes de trabalhar.",
+    "e.g. B30D fault code 2121": "ex. B30D código de avaria 2121",
+    "Ask": "Perguntar",
+    "Searching the manuals…": "A procurar nos manuais…",
+    "page {n}": "página {n}",
+    "Opening the manual… large manuals take a moment.": "A abrir o manual… manuais grandes demoram um pouco.",
+    "Could not open the manual": "Não foi possível abrir o manual",
+    "Close the manual first": "Feche primeiro o manual",
+    "rev {r}": "rev {r}",
     "🖨 Label": "🖨 Etiqueta",
     "Print labels for {code}": "Imprimir etiquetas para {code}",
     "How many labels?": "Quantas etiquetas?",
@@ -389,7 +412,8 @@
     try { await A.fetchJson(`${API}/api/auth/logout`, { method: "POST" }); } catch { /* already gone */ }
     A.clearSession();
     st.me = null;
-    st.home = st.issue = st.recv = st.find = st.count = st.requests = null;
+    st.home = st.issue = st.recv = st.find = st.count = st.requests = st.lib = null;
+    forgetManuals();
     st.rosterFilter = "";
     $("stIdle").classList.add("hidden");
     if (!quiet) {
@@ -404,6 +428,8 @@
     $("stIdle").classList.add("hidden");
   }
   function idleLimit() {
+    // Touches inside the PDF viewer do not reach the page: allow time to read.
+    if (st.screen === "manual") return IDLE_MANUAL_MS;
     return st.me?.stores ? IDLE_STORES_MS : IDLE_TECH_MS;
   }
   setInterval(() => {
@@ -450,10 +476,12 @@
         tile("requests", "t-requests", "🔧", T("Workshop requests"), T("{n} ready in stock", { n: h.requests_in_stock || 0 }), h.requests_waiting || ""),
         tile("find", "t-find", "🔎", T("Find stock"), T("How many and where")),
         tile("count", "t-count", "🔢", T("Count stock"), T("Shelf count for one item")),
+        tile("library", "t-library", "📚", T("Workshop library"), T("Manuals, bulletins and fixes")),
       ]
       : [
         tile("issue", "t-issue", "📤", T("Collect parts"), T("{n} open jobs", { n: h.my_jobs || 0 })),
         tile("find", "t-find", "🔎", T("Find stock"), T("How many and where")),
+        tile("library", "t-library", "📚", T("Workshop library"), T("Manuals, bulletins and fixes")),
       ];
     main.innerHTML = `
       <div class="st-hello">${esc(T("Hello, {name}", { name: st.me.label }))}</div>
@@ -1168,6 +1196,167 @@
     });
   }
 
+  // ------------------------------------------------------------- workshop library
+  const DOC_TYPES = ["Workshop Manual", "Service Manual", "Parts Manual", "OEM Bulletin", "Technical Document", "Workshop Fix"];
+  const pdfCache = new Map(); // document id → blob URL of the last few manuals opened
+
+  function forgetManuals() {
+    for (const url of pdfCache.values()) URL.revokeObjectURL(url);
+    pdfCache.clear();
+  }
+
+  function startLibrary() {
+    st.lib = st.lib || { q: "", type: "", docs: null, question: "", answer: null };
+    renderLibrary();
+  }
+
+  function renderLibrary() {
+    st.screen = "library";
+    const s = st.lib;
+    main.innerHTML = `
+      ${header(T("Workshop library"))}
+      <div class="st-cols">
+        <section class="st-panel">
+          <h3>${esc(T("Manuals"))}</h3>
+          <div class="st-search"><input id="lbQ" type="search" placeholder="${esc(T("Search: machine, model or manual"))}" value="${esc(s.q)}" autocomplete="off" /></div>
+          <div class="st-chips" id="lbTypes">
+            ${["", ...DOC_TYPES].map((t) => `<button type="button" class="st-chip ${s.type === t ? "on" : ""}" data-type="${esc(t)}">${esc(t ? T(t) : T("All"))}</button>`).join("")}
+          </div>
+          <div class="st-list" id="lbDocs"><div class="st-empty">…</div></div>
+        </section>
+        <section class="st-panel">
+          <h3>${esc(T("Ask the manuals"))}</h3>
+          <p class="muted">${esc(T("Ask about a fault code, torque, procedure or part. The answer points to the manual pages: always check the page before working."))}</p>
+          <div class="st-search"><input id="lbAsk" type="search" placeholder="${esc(T("e.g. B30D fault code 2121"))}" value="${esc(s.question)}" autocomplete="off" /><button type="button" class="btn primary" id="lbAskGo">${esc(T("Ask"))}</button></div>
+          <div id="lbAnswer"></div>
+        </section>
+      </div>`;
+    let t = null;
+    $("lbQ").addEventListener("input", (e) => { s.q = e.target.value; clearTimeout(t); t = setTimeout(loadLibrary, 280); });
+    $("lbTypes").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-type]");
+      if (!b) return;
+      s.type = b.dataset.type;
+      $("lbTypes").querySelectorAll("[data-type]").forEach((x) => x.classList.toggle("on", x === b));
+      renderLibraryDocs();
+    });
+    $("lbDocs").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-doc]");
+      const d = b && (s.docs || []).find((x) => x.id === b.dataset.doc);
+      if (d) openManual(d, 1);
+    });
+    $("lbAsk").addEventListener("input", (e) => { s.question = e.target.value; });
+    $("lbAsk").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); askManuals(); } });
+    $("lbAskGo").addEventListener("click", askManuals);
+    $("lbAnswer").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-src]");
+      const src = b && (s.answer?.sources || [])[Number(b.dataset.src)];
+      if (!src) return;
+      const doc = (s.docs || []).find((x) => x.id === src.document_id) || { id: src.document_id, title: src.title };
+      openManual(doc, src.page);
+    });
+    renderAnswer();
+    loadLibrary();
+  }
+
+  async function loadLibrary() {
+    const s = st.lib;
+    try {
+      const data = await api(`/workshop/documents?q=${encodeURIComponent(s.q || "")}`);
+      s.docs = data.documents || [];
+    } catch (e) {
+      if ($("lbDocs")) $("lbDocs").innerHTML = `<div class="st-msg bad">${esc(errText(e))}</div>`;
+      return;
+    }
+    renderLibraryDocs();
+  }
+
+  function renderLibraryDocs() {
+    const s = st.lib;
+    const box = $("lbDocs");
+    if (!box || !s.docs) return;
+    const rows = s.docs.filter((d) => !s.type || d.doc_type === s.type);
+    box.innerHTML = rows.length
+      ? rows.map((d) => `
+        <button type="button" class="st-item" data-doc="${esc(d.id)}">
+          <span class="ic-doc">📄</span>
+          <span class="main"><b>${esc(d.title)}</b>
+            <small>${esc(T(d.doc_type))}${d.manufacturer ? ` · ${esc(d.manufacturer)}` : ""}${d.model ? ` · ${esc(d.model)}` : ""}${d.revision ? ` · ${esc(T("rev {r}", { r: d.revision }))}` : ""}</small>
+            ${d.applicability ? `<small>${esc(d.applicability)}</small>` : ""}
+          </span>
+        </button>`).join("")
+      : `<div class="st-empty">${esc(T("No manuals found"))}</div>`;
+  }
+
+  async function askManuals() {
+    const s = st.lib;
+    const q = String($("lbAsk")?.value || "").trim();
+    if (!q) return;
+    s.question = q;
+    s.answer = { loading: true };
+    renderAnswer();
+    $("lbAskGo").disabled = true;
+    try {
+      s.answer = await post("/workshop/ask", { question: q });
+    } catch (e) {
+      s.answer = { error: errText(e) };
+    }
+    if ($("lbAskGo")) $("lbAskGo").disabled = false;
+    renderAnswer();
+  }
+
+  function renderAnswer() {
+    const box = $("lbAnswer");
+    const a = st.lib?.answer;
+    if (!box) return;
+    if (!a) { box.innerHTML = ""; return; }
+    if (a.loading) { box.innerHTML = `<div class="st-empty">${esc(T("Searching the manuals…"))}</div>`; return; }
+    if (a.error) { box.innerHTML = `<div class="st-msg bad">${esc(a.error)}</div>`; return; }
+    // The answer text; the sources are shown as cards that open the page.
+    const text = String(a.short_answer || "").split("\n\nSources (PDF page numbers):")[0];
+    const sources = a.sources || [];
+    box.innerHTML = `
+      <div class="st-answer">${esc(text)}</div>
+      <div class="st-list">${sources.map((src, i) => `
+        <button type="button" class="st-item" data-src="${i}">
+          <span class="tag">${esc(src.citation)}</span>
+          <span class="main"><b>${esc(src.title)} · ${esc(T("page {n}", { n: src.page }))}</b><small>${esc(src.excerpt || "")}</small></span>
+        </button>`).join("")}</div>`;
+  }
+
+  async function openManual(doc, page = 1) {
+    st.screen = "manual";
+    main.innerHTML = `
+      <div class="st-head">
+        <button type="button" class="btn ghost back" id="mnBack">← ${esc(T("Workshop library"))}</button>
+        <h2 class="st-doc-title">${esc(doc.title || "")}</h2>
+        <span class="grow"></span>
+        ${page > 1 ? `<span class="muted">${esc(T("page {n}", { n: page }))}</span>` : ""}
+      </div>
+      <div class="st-pdf" id="mnBox"><div class="st-empty">${esc(T("Opening the manual… large manuals take a moment."))}</div></div>`;
+    $("mnBack").onclick = () => renderLibrary();
+    let url = pdfCache.get(doc.id);
+    try {
+      if (!url) {
+        const res = await fetch(`${API}/api/workshop/documents/${encodeURIComponent(doc.id)}/file?inline=1`, { headers: A.authHeaders() });
+        if (res.status === 401) { signOut(); return; }
+        if (!res.ok) throw new Error(T("Could not open the manual"));
+        url = URL.createObjectURL(new Blob([await res.blob()], { type: "application/pdf" }));
+        pdfCache.set(doc.id, url);
+        while (pdfCache.size > 3) {
+          const [oldId, oldUrl] = pdfCache.entries().next().value;
+          URL.revokeObjectURL(oldUrl);
+          pdfCache.delete(oldId);
+        }
+      }
+    } catch (e) {
+      if ($("mnBox")) $("mnBox").innerHTML = `<div class="st-msg bad">${esc(errText(e))}</div>`;
+      return;
+    }
+    if (st.screen !== "manual" || !$("mnBox")) return;
+    $("mnBox").innerHTML = `<iframe title="${esc(doc.title || "Manual")}" src="${url}#page=${Math.max(1, Number(page) || 1)}"></iframe>`;
+  }
+
   // ------------------------------------------------------------- scans
   /**
    * A code from the barcode scanner, the phone, or Enter in a search box.
@@ -1179,6 +1368,7 @@
     touch();
     if (!st.me) { toast(T("Sign in first"), "bad"); beep(false); return false; }
     if (st.captureScan) { st.captureScan(code); return true; }
+    if (st.screen === "manual") { toast(T("Close the manual first")); return false; }
     if (overlayOpen()) return false;
     let hit;
     try {
@@ -1357,6 +1547,7 @@
       else if (to === "find") startFind();
       else if (to === "requests") renderRequests();
       else if (to === "count") startCount();
+      else if (to === "library") startLibrary();
       return;
     }
     const person = e.target.closest("[data-user]");
@@ -1376,6 +1567,8 @@
     else if (st.screen === "find") renderFind();
     else if (st.screen === "requests") renderRequests();
     else if (st.screen === "count") renderCount();
+    else if (st.screen === "library") renderLibrary();
+    else if (st.screen === "manual") renderLibrary();
     else renderHome();
   }));
 
