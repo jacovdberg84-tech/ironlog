@@ -189,7 +189,7 @@ select.tp-input { width: auto; flex: 1; }
 .tp-toast.ok { border-color: var(--success); }
 .tp-toast.bad { border-color: var(--danger); }
 
-.tp-tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: repeat(5, 1fr); background: rgba(15, 23, 42, 0.97); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
+.tp-tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: repeat(6, 1fr); background: rgba(15, 23, 42, 0.97); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
 .tp-tab { background: none; border: 0; color: var(--muted); padding: 8px 4px 10px; font-size: 0.8rem; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 58px; }
 .tp-tab span { font-size: 1.3rem; line-height: 1; }
 .tp-tab.on { color: var(--ink); font-weight: 700; }
@@ -235,3 +235,15 @@ select.tp-input { width: auto; flex: 1; }
 .tp-result.ok.on { background: #15803d; border-color: #15803d; color: #fff; }
 .tp-result.waiting.on { background: #b45309; border-color: #b45309; color: #fff; }
 .tp-result.bad.on { background: #b91c1c; border-color: #b91c1c; color: #fff; }
+
+/* Manuals (Workshop library) */
+.tp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 12px; }
+.tp-chip-btn { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 8px 12px; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+.tp-chip-btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tp-answer { white-space: pre-wrap; background: var(--bg); border-radius: 10px; padding: 10px 12px; margin: 10px 0; line-height: 1.45; font-size: 0.92rem; max-height: 45vh; overflow-y: auto; }
+.tp-doc-title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.tp-pdfbar { display: flex; gap: 6px; margin: 8px 0; position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 4px 0; }
+.tp-pdfbar .tp-btn { min-width: 44px; margin: 0; }
+.tp-pdf { overflow: auto; background: #525659; border-radius: 10px; min-height: 50vh; -webkit-overflow-scrolling: touch; }
+.tp-pdf canvas { display: block; margin: 0 auto; background: #fff; }
+.tp-pdf .tp-empty, .tp-pdf .tp-error { margin: 0; }

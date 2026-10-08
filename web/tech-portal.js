@@ -274,14 +274,14 @@
     if (name === "job") url.searchParams.set("wo", params.id);
     if (name === "asset") url.searchParams.set("asset", params.code);
     if (name === "inspectForm") url.searchParams.set("inspect", params.code);
-    if (["shift", "week", "inspect"].includes(name)) url.searchParams.set("tab", name);
+    if (["shift", "week", "inspect", "manuals"].includes(name)) url.searchParams.set("tab", name);
     history.replaceState(null, "", url);
     render();
     window.scrollTo(0, 0);
   }
 
   function setTabs() {
-    const tab = { job: "today", inspectForm: "inspect", asset: "scan", available: "today" }[view.name] || view.name;
+    const tab = { job: "today", inspectForm: "inspect", asset: "scan", available: "today", manual: "manuals" }[view.name] || view.name;
     document.querySelectorAll(".tp-tab").forEach((b) => b.classList.toggle("on", b.dataset.go === tab));
   }
 
@@ -301,10 +301,198 @@
       else if (view.name === "available") await renderAvailable(main);
       else if (view.name === "inspect") await renderInspect(main);
       else if (view.name === "inspectForm") await renderInspectForm(main);
+      else if (view.name === "manuals") await renderManuals(main);
+      else if (view.name === "manual") await renderManual(main);
     } catch (e) {
       main.innerHTML = `<div class="tp-card tp-error">${esc(e.message || e)}</div><button class="tp-btn" data-go="today">${esc(T("Back to Today"))}</button>`;
     }
     renderSyncBar();
+  }
+
+  // ------------------------------------------------------------ Manuals (Workshop library)
+  // Manuals, bulletins and workshop fixes uploaded in IronLog's Workshop Library.
+  // PDFs are drawn with pdf.js so they read the same on every phone.
+  const DOC_TYPES = ["Workshop Manual", "Service Manual", "Parts Manual", "OEM Bulletin", "Technical Document", "Workshop Fix"];
+  const PDFJS = "./vendor/pdfjs-3.11.174/";
+  const lib = { q: "", type: "", docs: null, question: "", answer: null };
+  const viewer = { id: null, pdf: null, page: 1, pages: 0, zoom: 1, task: null };
+  let pdfjsLoading = null;
+
+  function loadPdfJs() {
+    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+    pdfjsLoading = pdfjsLoading || new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = `${PDFJS}pdf.min.js`;
+      s.onload = () => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = `${PDFJS}pdf.worker.min.js`;
+        resolve(window.pdfjsLib);
+      };
+      s.onerror = () => { pdfjsLoading = null; reject(new Error(T("Could not open the manual. Check the signal and try again."))); };
+      document.head.appendChild(s);
+    });
+    return pdfjsLoading;
+  }
+
+  async function renderManuals(main) {
+    main.innerHTML = `
+      <h2 class="tp-title">${esc(T("Workshop library"))}</h2>
+      <div class="tp-card">
+        <h3 class="tp-h">${esc(T("Ask the manuals"))}</h3>
+        <p class="tp-muted">${esc(T("Fault code, torque, procedure or part. The answer shows the manual pages: always check the page before working."))}</p>
+        <div class="tp-row">
+          <input id="tpLibAsk" class="tp-input grow" type="search" placeholder="${esc(T("e.g. B30D fault code 2121"))}" value="${esc(lib.question)}" autocomplete="off" />
+          <button type="button" class="tp-btn primary" data-act="libAsk">${esc(T("Ask"))}</button>
+        </div>
+        <div id="tpLibAnswer"></div>
+      </div>
+      <h3 class="tp-h">${esc(T("Manuals"))}</h3>
+      <input id="tpLibQ" class="tp-input" type="search" placeholder="${esc(T("Search: machine, model or manual"))}" value="${esc(lib.q)}" autocomplete="off" />
+      <div class="tp-chips" id="tpLibTypes">
+        ${["", ...DOC_TYPES].map((t) => `<button type="button" class="tp-chip-btn ${lib.type === t ? "on" : ""}" data-lib-type="${esc(t)}">${esc(t ? T(t) : T("All"))}</button>`).join("")}
+      </div>
+      <div id="tpLibDocs"><div class="tp-empty">${esc(T("Loading…"))}</div></div>`;
+    let timer = null;
+    qs("tpLibQ").addEventListener("input", (e) => { lib.q = e.target.value; clearTimeout(timer); timer = setTimeout(() => loadManuals().catch(showLibError), 280); });
+    qs("tpLibAsk").addEventListener("input", (e) => { lib.question = e.target.value; });
+    qs("tpLibAsk").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); askManuals(); } });
+    renderManualAnswer();
+    await loadManuals();
+  }
+
+  function showLibError(e) {
+    const box = qs("tpLibDocs");
+    if (box) box.innerHTML = `<div class="tp-card tp-error">${esc(e.message || e)}</div>`;
+  }
+
+  async function loadManuals() {
+    const data = await A.fetchJson(`${A.API}/api/workshop/documents?q=${encodeURIComponent(lib.q || "")}`);
+    lib.docs = data.documents || [];
+    renderManualList();
+  }
+
+  function renderManualList() {
+    const box = qs("tpLibDocs");
+    if (!box || !lib.docs) return;
+    const rows = lib.docs.filter((d) => !lib.type || d.doc_type === lib.type);
+    box.innerHTML = rows.length
+      ? rows.map((d) => `
+        <button type="button" class="tp-job" data-manual="${esc(d.id)}">
+          <div class="tp-job-top"><span class="tp-asset">📄 ${esc(d.title)}</span></div>
+          <div class="tp-job-meta">
+            <span>${esc(T(d.doc_type))}</span>
+            ${d.manufacturer ? `<span>${esc(d.manufacturer)}</span>` : ""}
+            ${d.model ? `<span>${esc(d.model)}</span>` : ""}
+            ${d.revision ? `<span>${esc(T("rev {r}", { r: d.revision }))}</span>` : ""}
+          </div>
+          ${d.applicability ? `<div class="tp-job-line">${esc(d.applicability)}</div>` : ""}
+        </button>`).join("")
+      : `<div class="tp-empty">${esc(T("No manuals found"))}</div>`;
+  }
+
+  async function askManuals() {
+    const q = String(qs("tpLibAsk")?.value || "").trim();
+    if (!q) return;
+    lib.question = q;
+    lib.answer = { loading: true };
+    renderManualAnswer();
+    try {
+      lib.answer = await A.fetchJson(`${A.API}/api/workshop/ask`, { method: "POST", body: JSON.stringify({ question: q }) });
+    } catch (e) {
+      lib.answer = { error: e.message || String(e) };
+    }
+    renderManualAnswer();
+  }
+
+  function renderManualAnswer() {
+    const box = qs("tpLibAnswer");
+    const a = lib.answer;
+    if (!box) return;
+    if (!a) { box.innerHTML = ""; return; }
+    if (a.loading) { box.innerHTML = `<div class="tp-empty">${esc(T("Searching the manuals…"))}</div>`; return; }
+    if (a.error) { box.innerHTML = `<div class="tp-card tp-error">${esc(a.error)}</div>`; return; }
+    const text = String(a.short_answer || "").split("\n\nSources (PDF page numbers):")[0];
+    box.innerHTML = `
+      <div class="tp-answer">${esc(text)}</div>
+      ${(a.sources || []).map((src, i) => `
+        <button type="button" class="tp-job" data-src="${i}">
+          <div class="tp-job-top"><span class="tp-asset">${esc(src.citation)} · ${esc(src.title)}</span><span class="tp-chip idle">${esc(T("page {n}", { n: src.page }))}</span></div>
+          <div class="tp-job-line">${esc(src.excerpt || "")}</div>
+        </button>`).join("")}`;
+  }
+
+  async function renderManual(main) {
+    main.innerHTML = `
+      <div class="tp-jobhead"><button type="button" class="tp-back" data-go="manuals">‹ ${esc(T("Manuals"))}</button>
+        <div class="tp-doc-title">${esc(view.title || "")}</div></div>
+      <div class="tp-pdfbar">
+        <button type="button" class="tp-btn sm" data-act="pdfPrev" aria-label="Previous page">‹</button>
+        <button type="button" class="tp-btn sm grow" data-act="pdfGoto" id="tpPdfPage">…</button>
+        <button type="button" class="tp-btn sm" data-act="pdfNext" aria-label="Next page">›</button>
+        <button type="button" class="tp-btn sm" data-act="pdfZoomOut" aria-label="Zoom out">−</button>
+        <button type="button" class="tp-btn sm" data-act="pdfZoomIn" aria-label="Zoom in">+</button>
+      </div>
+      <div class="tp-pdf" id="tpPdf"><div class="tp-empty">${esc(T("Opening the manual… large manuals take a moment."))}</div></div>`;
+    try {
+      if (viewer.id !== view.id || !viewer.pdf) {
+        const pdfjs = await loadPdfJs();
+        const res = await fetch(`${A.API}/api/workshop/documents/${encodeURIComponent(view.id)}/file?inline=1`, { headers: A.authHeaders() });
+        if (!res.ok) throw new Error(T("Could not open the manual. Check the signal and try again."));
+        const data = new Uint8Array(await res.arrayBuffer());
+        if (viewer.pdf) viewer.pdf.destroy();
+        viewer.pdf = await pdfjs.getDocument({ data }).promise;
+        viewer.id = view.id;
+        viewer.pages = viewer.pdf.numPages;
+        viewer.zoom = 1;
+      }
+      viewer.page = Math.min(Math.max(1, Number(view.page) || 1), viewer.pages);
+      await drawPage();
+    } catch (e) {
+      const box = qs("tpPdf");
+      if (box) box.innerHTML = `<div class="tp-card tp-error">${esc(e.message || e)}</div>`;
+    }
+  }
+
+  async function drawPage() {
+    const box = qs("tpPdf");
+    if (!box || !viewer.pdf) return;
+    view.page = viewer.page;
+    qs("tpPdfPage").textContent = T("Page {n} of {total}", { n: viewer.page, total: viewer.pages });
+    const page = await viewer.pdf.getPage(viewer.page);
+    const width = Math.max(240, box.clientWidth - 2) * viewer.zoom;
+    const scale = width / page.getViewport({ scale: 1 }).width;
+    const vp = page.getViewport({ scale });
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.floor(vp.width * dpr);
+    canvas.height = Math.floor(vp.height * dpr);
+    canvas.style.width = `${Math.floor(vp.width)}px`;
+    canvas.style.height = `${Math.floor(vp.height)}px`;
+    if (viewer.task) { try { viewer.task.cancel(); } catch { /* finished */ } }
+    viewer.task = page.render({ canvasContext: canvas.getContext("2d"), viewport: vp, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null });
+    try {
+      await viewer.task.promise;
+    } catch (e) {
+      if (e?.name === "RenderingCancelledException") return;
+      throw e;
+    }
+    if (!qs("tpPdf")) return;
+    box.innerHTML = "";
+    box.appendChild(canvas);
+    box.scrollTop = 0;
+  }
+
+  async function pdfAction(act) {
+    if (!viewer.pdf) return;
+    if (act === "pdfPrev" && viewer.page > 1) viewer.page -= 1;
+    else if (act === "pdfNext" && viewer.page < viewer.pages) viewer.page += 1;
+    else if (act === "pdfZoomIn") viewer.zoom = Math.min(viewer.zoom * 1.5, 4);
+    else if (act === "pdfZoomOut") viewer.zoom = Math.max(viewer.zoom / 1.5, 1);
+    else if (act === "pdfGoto") {
+      const n = Number(prompt(T("Go to page (1–{total})", { total: viewer.pages }), String(viewer.page)));
+      if (!Number.isFinite(n) || n < 1 || n > viewer.pages) return;
+      viewer.page = Math.round(n);
+    } else return;
+    await drawPage();
   }
 
   // ------------------------------------------------------------ Today
@@ -1028,6 +1216,22 @@
       saveDraft();
       return render();
     }
+    const libType = e.target.closest("[data-lib-type]");
+    if (libType) {
+      lib.type = libType.dataset.libType;
+      document.querySelectorAll("[data-lib-type]").forEach((b) => b.classList.toggle("on", b === libType));
+      return renderManualList();
+    }
+    const manualBtn = e.target.closest("[data-manual]");
+    if (manualBtn) {
+      const d = (lib.docs || []).find((x) => x.id === manualBtn.dataset.manual);
+      return go("manual", { id: manualBtn.dataset.manual, title: d?.title || "", page: 1 });
+    }
+    const srcBtn = e.target.closest("[data-src]");
+    if (srcBtn && lib.answer?.sources) {
+      const src = lib.answer.sources[Number(srcBtn.dataset.src)];
+      if (src) return go("manual", { id: src.document_id, title: src.title, page: src.page });
+    }
     const t = e.target.closest("[data-go],[data-open],[data-action],[data-act],[data-tab],[data-asset],[data-quick],[data-idea]");
     if (!t) return;
     const cached = view.name === "job" ? cacheGet(`wo:${view.id}`)?.data : null;
@@ -1052,6 +1256,8 @@
       if (t.dataset.action && !t.dataset.act) return askAction(view.id, t.dataset.action, cached);
       const act = t.dataset.act;
       if (act === "closeSheet") return closeSheet();
+      if (act === "libAsk") return askManuals();
+      if (act && act.startsWith("pdf")) return pdfAction(act);
       if (act === "sync") return syncQueue();
       if (act === "dropRefused") {
         setQueue(queue().filter((x) => !x.error));
@@ -1392,7 +1598,7 @@
     if (p.get("wo")) view = { name: "job", id: Number(p.get("wo")) };
     else if (p.get("asset")) view = { name: "asset", code: p.get("asset").toUpperCase() };
     else if (p.get("inspect")) view = { name: "inspectForm", code: p.get("inspect").toUpperCase() };
-    else if (["shift", "week", "inspect"].includes(p.get("tab"))) view = { name: p.get("tab") };
+    else if (["shift", "week", "inspect", "manuals"].includes(p.get("tab"))) view = { name: p.get("tab") };
     registerWorker();
     render();
     syncQueue();
