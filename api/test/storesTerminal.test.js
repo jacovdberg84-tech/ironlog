@@ -193,3 +193,41 @@ test("a supplier's box barcode is linked to a part once and then found by a scan
     await app3.close();
   }
 });
+
+test("own part labels: the print list and the parts that need a label", async () => {
+  const app4 = Fastify({ logger: false });
+  await app4.register(stockRoutes, { prefix: "/api/stock" });
+  await app4.ready();
+  const req = async (headers, method, url, payload) => {
+    const res = await app4.inject({ method, url: `/api/stock${url}`, headers, payload });
+    return { code: res.statusCode, body: res.json() };
+  };
+  try {
+    assert.equal((await req(as("ana", "artisan"), "GET", "/labels/queue")).code, 403);
+    assert.equal((await req(STORES, "POST", "/labels/queue", { part_code: "nope" })).code, 404);
+    assert.equal((await req(STORES, "POST", "/labels/queue", { part_code: "FLT-01", copies: 0 })).code, 400);
+    await req(STORES, "POST", "/labels/queue", { part_code: "flt-01", copies: 2 });
+    const added = await req(STORES, "POST", "/labels/queue", { part_code: "FLT-01", copies: 3 });
+    assert.equal(added.body.in_list, 1, "the same part adds copies, not a second line");
+    assert.equal((await req(STORES, "POST", "/labels/queue", { parts: [{ part_code: "MLFPT6001" }] })).body.added, 1);
+    let q = (await req(STORES, "GET", "/labels/queue")).body.rows;
+    assert.deepEqual(q.map((r) => [r.part_code, r.copies]), [["FLT-01", 5], ["MLFPT6001", 1]]);
+    assert.equal(q[0].part_name, "Oil filter");
+    await req(STORES, "PUT", `/labels/queue/${q[1].queue_id}`, { copies: 4 });
+    await req(STORES, "DELETE", `/labels/queue/${q[0].queue_id}`);
+    q = (await req(STORES, "GET", "/labels/queue")).body.rows;
+    assert.deepEqual(q.map((r) => [r.part_code, r.copies]), [["MLFPT6001", 4]]);
+    assert.equal((await req(STORES, "DELETE", "/labels/queue")).body.cleared, 1);
+
+    // In stock and no box barcode: both test parts, until one gets a barcode.
+    const before = (await req(STORES, "GET", "/labels/parts?set=no_barcode")).body.rows.map((r) => r.part_code);
+    assert.ok(before.includes("FLT-01"));
+    await req(STORES, "POST", "/terminal/barcodes", { barcode: "6001111111111", part_code: "FLT-01" });
+    const after = (await req(STORES, "GET", "/labels/parts?set=no_barcode")).body.rows.map((r) => r.part_code);
+    assert.ok(!after.includes("FLT-01"));
+    assert.ok((await req(STORES, "GET", "/labels/parts?set=received&days=7")).body.rows.length >= 1);
+    assert.equal((await req(STORES, "GET", "/labels/parts")).code, 400);
+  } finally {
+    await app4.close();
+  }
+});

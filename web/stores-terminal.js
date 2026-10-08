@@ -127,6 +127,12 @@
     "or type it here": "ou escreva aqui",
     "Remove barcode {barcode}?": "Remover o código {barcode}?",
     "Remove": "Remover",
+    "🖨 Label": "🖨 Etiqueta",
+    "Print labels for {code}": "Imprimir etiquetas para {code}",
+    "How many labels?": "Quantas etiquetas?",
+    "Add to the print list": "Adicionar à lista de impressão",
+    "Print here": "Imprimir aqui",
+    "Added to the print list ({n} parts waiting). Print them in Stock Control → Setup → Part labels.": "Adicionado à lista ({n} peças em espera). Imprima em Controlo de Stock → Configuração → Etiquetas.",
   };
   let lang = (() => { try { return localStorage.getItem(LANG_KEY) || "en"; } catch { return "en"; } })();
   function T(s, vars) {
@@ -886,13 +892,62 @@
         ${Number(p.min_stock) > 0 ? `<p class="muted">${esc(T("Minimum"))}: ${fmtQty(p.min_stock)}</p>` : ""}
       </div>
       ${Number(p.on_hand) > 0 ? `<button type="button" class="btn primary huge" id="fsIssue">${esc(st.me.stores ? T("Issue this part") : T("Collect parts"))}</button>` : ""}
-      ${st.me.stores ? `<div class="st-barcodes" id="fsBarcodes"></div>` : ""}`;
+      ${st.me.stores ? `<button type="button" class="btn ghost" style="width:100%;margin-top:12px" id="fsLabel">${esc(T("🖨 Label"))}</button><div class="st-barcodes" id="fsBarcodes"></div>` : ""}`;
     $("fsIssue")?.addEventListener("click", () => {
       const lines = [];
       addLine(lines, p);
       startIssue({ lines });
     });
     if (st.me.stores) renderPartBarcodes(p);
+    $("fsLabel")?.addEventListener("click", () => labelSheet(p));
+  }
+
+  /** IronLog's own label for a part: add to the office print list, or print from here. */
+  function labelSheet(part) {
+    let copies = 1;
+    const o = overlay(`
+      <div class="st-sheet">
+        <h2>${esc(T("Print labels for {code}", { code: part.part_code }))}</h2>
+        <p class="muted">${esc(part.part_name || "")}${part.bin ? ` · ${esc(T("Bin"))} ${esc(part.bin)}` : ""}</p>
+        <p style="font-weight:600">${esc(T("How many labels?"))}</p>
+        <div class="st-step" style="justify-content:center">
+          <button type="button" data-lb="minus">−</button><span class="n" id="lbN">1</span><button type="button" data-lb="plus">+</button>
+        </div>
+        <div class="st-error" id="lbErr"></div>
+        <div class="row"><button type="button" class="btn primary" data-lb="queue">${esc(T("Add to the print list"))}</button></div>
+        <div class="row">
+          <button type="button" class="btn ghost" data-lb="cancel">${esc(T("Cancel"))}</button>
+          ${window.IronlogPartLabels ? `<button type="button" class="btn ghost" data-lb="print">${esc(T("Print here"))}</button>` : ""}
+        </div>
+      </div>`);
+    o.onclick = async (e) => {
+      const b = e.target.closest("[data-lb]");
+      if (!b) return;
+      const k = b.dataset.lb;
+      if (k === "cancel") return closeOverlay();
+      if (k === "minus" || k === "plus") {
+        copies = Math.max(1, Math.min(100, copies + (k === "plus" ? 1 : -1)));
+        $("lbN").textContent = String(copies);
+        return;
+      }
+      if (k === "print") {
+        try {
+          window.IronlogPartLabels.print([{ ...part, copies }], { site: A.getSessionSite() });
+          closeOverlay();
+        } catch (err) { $("lbErr").textContent = errText(err); }
+        return;
+      }
+      b.disabled = true;
+      try {
+        const res = await post("/stock/labels/queue", { part_code: part.part_code, copies });
+        closeOverlay();
+        beep(true);
+        toast(T("Added to the print list ({n} parts waiting). Print them in Stock Control → Setup → Part labels.", { n: res.in_list }), "ok");
+      } catch (err) {
+        $("lbErr").textContent = errText(err);
+        b.disabled = false;
+      }
+    };
   }
 
   // ------------------------------------------------------------- box barcodes

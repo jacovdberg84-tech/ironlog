@@ -2106,6 +2106,37 @@
           </div>
         </div>
 
+        <!-- Part labels: IronLog's own barcode labels -->
+        <div data-stock-tab="setup" class="dash-card full-width" id="partLabelsCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: #f1f5f9; color: #0f172a;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5v14M7 5v14M10 5v14M14 5v14M17 5v14M20 5v14"></path></svg>
+              </div>
+              <div>
+                <h3>Part labels</h3>
+                <p class="muted small">Print IronLog's own barcode labels for parts that come without one. Each label has the part code as a barcode (any scanner) and a QR (phones), with the name and bin. The stores terminal adds to this list too.</p>
+              </div>
+            </div>
+          </div>
+          <div class="pl-row">
+            <div class="pl-search">
+              <input id="plFind" type="search" placeholder="Add a part: code or name" autocomplete="off" />
+              <div class="dlv-hits" id="plHits" hidden></div>
+            </div>
+            <button type="button" class="btn btn-secondary" id="plAddNoBarcode">＋ All in stock without a box barcode</button>
+            <button type="button" class="btn btn-secondary" id="plAddReceived">＋ Received in the last 7 days</button>
+          </div>
+          <div id="plList" class="dlv-table-wrap"></div>
+          <div class="pl-row">
+            <div class="form-field"><label for="plLayout">Labels</label><select id="plLayout"></select></div>
+            <div class="form-field" id="plSkipBox"><label for="plSkip">Start at label no.</label><input id="plSkip" type="number" min="1" value="1" style="max-width:90px" /></div>
+            <button type="button" class="btn btn-primary" id="plPrint">Print labels</button>
+            <button type="button" class="btn btn-secondary" id="plClear">Clear the list</button>
+          </div>
+          <div id="plMsg" class="dlv-msg" role="status" aria-live="polite"></div>
+        </div>
+
         <!-- Store QR — field terminal -->
         <div data-stock-tab="setup" class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
@@ -8020,6 +8051,10 @@
   <script src="./app/inventory.js?v=92"></script>
   <script src="./app/stock-receive.js?v=2"></script>
   <script src="./app/lube-model.js?v=2"></script>
+  <script src="./vendor/jsbarcode-code128-3.11.6.min.js"></script>
+  <script src="./vendor/qrcode-generator-1.4.4.js"></script>
+  <script src="./part-labels.js?v=1"></script>
+  <script src="./app/stock-labels.js?v=1"></script>
   <script src="./app/procurement.js?v=89"></script>
   <script src="./app/site-ops.js?v=89"></script>
   <script src="./app/daily-input.js?v=89"></script>
