@@ -548,7 +548,7 @@ function renderBoSlipPhotosPreview() {
   prev.innerHTML = "";
   boSlipPicturesPayload.forEach((p, idx) => {
     const wrap = document.createElement("div");
-    wrap.style.cssText = "position:relative;border:1px solid #cbd5e1;border-radius:6px;padding:4px;background:#f8fafc;";
+    wrap.style.cssText = "position:relative;border:1px solid var(--bd-cbd5e1);border-radius:6px;padding:4px;background:var(--bg-f8fafc);";
     const img = document.createElement("img");
     img.src = `data:${p.mime};base64,${p.data_base64}`;
     img.alt = "";

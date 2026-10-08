@@ -14,7 +14,8 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=wo-popup-1" />
+  <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+  <link rel="stylesheet" href="./styles.css?v=dark-2" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -927,7 +928,7 @@
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef2f2; color: #dc2626;">
+              <div class="dash-card-icon" style="background: var(--bg-fef2f2); color: var(--tx-dc2626);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
               </div>
               <div>
@@ -948,7 +949,7 @@
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+              <div class="dash-card-icon" style="background: var(--bg-f0fdf4); color: #16a34a;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
               </div>
               <div>
@@ -1510,7 +1511,7 @@
         <div class="dash-card full-width" id="assetFleetCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #1d4ed8;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-1d4ed8);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"></path></svg>
               </div>
               <div>
@@ -1553,7 +1554,7 @@
         <div id="assetPlantHireCard" class="dash-card collapsible collapsed full-width" data-collapsed="true">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef3c7; color: #b45309;">
+              <div class="dash-card-icon" style="background: var(--bg-fef3c7); color: var(--tx-b45309);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"></path></svg>
               </div>
               <div>
@@ -1590,7 +1591,7 @@
               </div>
             </div>
             <p class="muted small" id="plantHireBudgetStatus">—</p>
-            <hr style="margin: 16px 0; border: none; border-top: 1px solid var(--border, #e5e7eb);" />
+            <hr style="margin: 16px 0; border: none; border-top: 1px solid var(--border, var(--bd-e5e7eb));" />
             <p class="muted small">Selected fleet card: <strong id="plantHireAssetLabel">—</strong> (click a fleet card above, or pick below)</p>
             <div class="form-row">
               <div class="form-field">
@@ -1687,7 +1688,7 @@
         <div class="dash-card collapsible full-width hidden" id="assetSiteCostCard" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #f0fdf4; color: #15803d;">
+              <div class="dash-card-icon" style="background: var(--bg-f0fdf4); color: var(--tx-15803d);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18M9 21V9"></path></svg>
               </div>
               <div>
@@ -1865,7 +1866,7 @@
         <div class="dash-card full-width">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eef2ff; color: #4338ca;">
+              <div class="dash-card-icon" style="background: var(--bg-eef2ff); color: var(--tx-4338ca);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
               </div>
               <div>
@@ -1885,7 +1886,7 @@
         <div id="workshopLibraryConfigCard" class="dash-card collapsible full-width hidden" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-2563eb);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
               </div>
               <div>
@@ -1954,7 +1955,7 @@
         <div class="dash-card full-width">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+              <div class="dash-card-icon" style="background: var(--bg-fef3c7); color: #d97706;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
               </div>
               <div>
@@ -1980,7 +1981,7 @@
         <div data-stock-tab="receive" class="dash-card full-width" id="deliveryCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+              <div class="dash-card-icon" style="background: var(--bg-f0fdf4); color: #16a34a;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
               </div>
               <div>
@@ -2026,7 +2027,7 @@
         <div data-stock-tab="reports" class="dash-card full-width" id="lubeModelCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fefce8; color: #a16207;">
+              <div class="dash-card-icon" style="background: var(--bg-fefce8); color: var(--tx-a16207);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path></svg>
               </div>
               <div>
@@ -2057,7 +2058,7 @@
         <div data-stock-tab="reports" class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-2563eb);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"></path><path d="M7 16V9"></path><path d="M12 16V5"></path><path d="M17 16v-4"></path></svg>
               </div>
               <div>
@@ -2097,7 +2098,7 @@
         <div data-stock-tab="setup" class="dash-card full-width" id="partLabelsCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #f1f5f9; color: #0f172a;">
+              <div class="dash-card-icon" style="background: var(--bg-f1f5f9); color: var(--tx-0f172a);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5v14M7 5v14M10 5v14M14 5v14M17 5v14M20 5v14"></path></svg>
               </div>
               <div>
@@ -2128,7 +2129,7 @@
         <div data-stock-tab="setup" class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #ecfdf5; color: #059669;">
+              <div class="dash-card-icon" style="background: var(--bg-ecfdf5); color: #059669;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><path d="M14 14h7v7h-7z"></path></svg>
               </div>
               <div>
@@ -2171,7 +2172,7 @@
         <div data-stock-tab="onhand" class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-2563eb);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
               </div>
               <div>
@@ -2253,7 +2254,7 @@
         <div data-stock-tab="reports" class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #f0fdf4; color: #15803d;">
+              <div class="dash-card-icon" style="background: var(--bg-f0fdf4); color: var(--tx-15803d);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
               </div>
               <div>
@@ -2314,7 +2315,7 @@
         <div data-stock-tab="requests" class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fdf4ff; color: #9333ea;">
+              <div class="dash-card-icon" style="background: var(--bg-fdf4ff); color: #9333ea;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
               </div>
               <div>
@@ -2561,7 +2562,7 @@
         <div data-stock-tab="counts" class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+              <div class="dash-card-icon" style="background: var(--bg-f0fdf4); color: #16a34a;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
               </div>
               <div>
@@ -2645,7 +2646,7 @@
         <div data-stock-tab="counts" class="dash-card collapsible" data-collapsed="false" id="reverseReceiptCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fff7ed; color: #ea580c;">
+              <div class="dash-card-icon" style="background: var(--bg-fff7ed); color: #ea580c;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
               </div>
               <div>
@@ -2678,7 +2679,7 @@
         <div data-stock-tab="counts" class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef2f2; color: #dc2626;">
+              <div class="dash-card-icon" style="background: var(--bg-fef2f2); color: var(--tx-dc2626);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
               </div>
               <div>
@@ -2740,7 +2741,7 @@
         <div data-stock-tab="setup" class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #e0e7ff; color: #4338ca;">
+              <div class="dash-card-icon" style="background: var(--bg-e0e7ff); color: var(--tx-4338ca);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
               </div>
               <div>
@@ -2798,7 +2799,7 @@
         <div data-stock-tab="setup" class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background:#ecfeff; color:#0e7490;">
+              <div class="dash-card-icon" style="background:var(--bg-ecfeff); color:#0e7490;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M8 8h8M8 12h8M8 16h5"></path></svg>
               </div>
               <div>
@@ -2884,7 +2885,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background:#eff6ff; color:#1d4ed8;">
+              <div class="dash-card-icon" style="background:var(--bg-eff6ff); color:var(--tx-1d4ed8);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
               </div>
               <div>
@@ -2911,7 +2912,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background:#fdf4ff; color:#9333ea;">
+              <div class="dash-card-icon" style="background:var(--bg-fdf4ff); color:#9333ea;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line></svg>
               </div>
               <div>
@@ -2955,7 +2956,7 @@
                 <button id="ptPartsExportXlsx" type="button" class="btn btn-secondary">Management Excel</button>
               </div>
             </div>
-            <div class="form-row" style="align-items:end; margin-top:12px; padding:12px; border:1px solid var(--border, #dbe5f0); border-radius:10px; background:#f8fafc;">
+            <div class="form-row" style="align-items:end; margin-top:12px; padding:12px; border:1px solid var(--border, #dbe5f0); border-radius:10px; background:var(--bg-f8fafc);">
               <div class="form-field" style="flex:1.5; min-width:260px;">
                 <label>Weekly supplier warehouse update</label>
                 <input id="ptWarehouseFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="w-full" />
@@ -3049,7 +3050,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background:#fff7ed; color:#c2410c;">
+              <div class="dash-card-icon" style="background:var(--bg-fff7ed); color:var(--tx-c2410c);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
               </div>
               <div>
@@ -3525,10 +3526,10 @@
               <div class="fuel-equip-filter-row">
                 <label class="fuel-equip-filter-label">Equipment filter</label>
                 <div class="fuel-equip-filter-actions">
-                  <select id="fuelEquipTypeFilter" class="btn btn-secondary btn-sm" style="height:28px;padding:0 8px;font-size:13px;border-radius:6px;border:1px solid #d1d5db;background:#fff;cursor:pointer;" title="Select all equipment of a type">
+                  <select id="fuelEquipTypeFilter" class="btn btn-secondary btn-sm" style="height:28px;padding:0 8px;font-size:13px;border-radius:6px;border:1px solid var(--bd-d1d5db);background:var(--bg-fff);cursor:pointer;" title="Select all equipment of a type">
                     <option value="">Filter by type…</option>
                   </select>
-                  <select id="fuelEquipViewMode" class="btn btn-secondary btn-sm" style="height:28px;padding:0 8px;font-size:13px;border-radius:6px;border:1px solid #d1d5db;background:#fff;cursor:pointer;" title="Chart view mode">
+                  <select id="fuelEquipViewMode" class="btn btn-secondary btn-sm" style="height:28px;padding:0 8px;font-size:13px;border-radius:6px;border:1px solid var(--bd-d1d5db);background:var(--bg-fff);cursor:pointer;" title="Chart view mode">
                     <option value="individual">Individual units</option>
                     <option value="type">Average by type</option>
                   </select>
@@ -3742,7 +3743,7 @@
         <div class="dash-card full-width">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef2f2; color: #dc2626;">
+              <div class="dash-card-icon" style="background: var(--bg-fef2f2); color: var(--tx-dc2626);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
               </div>
               <div>
@@ -3820,7 +3821,7 @@
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+              <div class="dash-card-icon" style="background: var(--bg-fef3c7); color: #d97706;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
               </div>
               <div>
@@ -3865,7 +3866,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-2563eb);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
               </div>
               <div>
@@ -3944,7 +3945,7 @@
         <div class="dash-card full-width">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+              <div class="dash-card-icon" style="background: var(--bg-fef3c7); color: #d97706;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
               </div>
               <div>
@@ -3985,7 +3986,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-2563eb);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
               </div>
               <div>
@@ -4043,7 +4044,7 @@
         <div class="dash-card full-width">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #e0e7ff; color: #4338ca;">
+              <div class="dash-card-icon" style="background: var(--bg-e0e7ff); color: var(--tx-4338ca);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
               </div>
               <div>
@@ -4132,7 +4133,7 @@
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+              <div class="dash-card-icon" style="background: var(--bg-fef3c7); color: #d97706;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
               </div>
               <div>
@@ -4190,7 +4191,7 @@
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-2563eb);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
               </div>
               <div>
@@ -4215,7 +4216,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+              <div class="dash-card-icon" style="background: var(--bg-f0fdf4); color: #16a34a;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
               </div>
               <div>
@@ -4319,7 +4320,7 @@
         <div class="dash-card full-width">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+              <div class="dash-card-icon" style="background: var(--bg-fef3c7); color: #d97706;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 20h20M5 20V10l7-7 7 7v10M9 20v-6h6v6"></path></svg>
               </div>
               <div>
@@ -4439,7 +4440,7 @@
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-2563eb);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
               </div>
               <div>
@@ -4481,7 +4482,7 @@
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef2f2; color: #dc2626;">
+              <div class="dash-card-icon" style="background: var(--bg-fef2f2); color: var(--tx-dc2626);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
               </div>
               <div>
@@ -4534,7 +4535,7 @@
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+              <div class="dash-card-icon" style="background: var(--bg-f0fdf4); color: #16a34a;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
               </div>
               <div>
@@ -4686,7 +4687,7 @@
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+              <div class="dash-card-icon" style="background: var(--bg-fef3c7); color: #d97706;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
               </div>
               <div>
@@ -4753,7 +4754,7 @@
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-2563eb);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
               </div>
               <div>
@@ -4798,7 +4799,7 @@
         <div class="dash-card full-width">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-2563eb);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
               </div>
               <div>
@@ -4881,7 +4882,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+              <div class="dash-card-icon" style="background: var(--bg-f0fdf4); color: #16a34a;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
               </div>
               <div>
@@ -4970,7 +4971,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef2f2; color: #dc2626;">
+              <div class="dash-card-icon" style="background: var(--bg-fef2f2); color: var(--tx-dc2626);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
               </div>
               <div>
@@ -5009,7 +5010,7 @@
                 </button>
               </div>
             </div>
-            <hr style="margin: 16px 0; border: none; border-top: 1px solid #e5e7eb;">
+            <hr style="margin: 16px 0; border: none; border-top: 1px solid var(--bd-e5e7eb);">
             <div class="form-row">
               <div class="form-field">
                 <label>Exception Type</label>
@@ -5089,7 +5090,7 @@
         <div class="dash-card full-width">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef2f2; color: #dc2626;">
+              <div class="dash-card-icon" style="background: var(--bg-fef2f2); color: var(--tx-dc2626);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
               </div>
               <div>
@@ -5136,7 +5137,7 @@
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-2563eb);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
               </div>
               <div>
@@ -5196,7 +5197,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+              <div class="dash-card-icon" style="background: var(--bg-fef3c7); color: #d97706;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
               </div>
               <div>
@@ -5238,7 +5239,7 @@
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-2563eb);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
               </div>
               <div>
@@ -5306,7 +5307,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+              <div class="dash-card-icon" style="background: var(--bg-f0fdf4); color: #16a34a;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
               </div>
               <div>
@@ -5332,7 +5333,7 @@
         <div class="dash-card full-width">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-2563eb);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
               </div>
               <div>
@@ -5387,7 +5388,7 @@
         <div class="dash-card full-width" id="clHistoryCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef3c7; color: #b45309;">
+              <div class="dash-card-icon" style="background: var(--bg-fef3c7); color: var(--tx-b45309);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
               </div>
               <div>
@@ -5436,7 +5437,7 @@
         <div id="clFormPanel" class="dash-card full-width hidden">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+              <div class="dash-card-icon" style="background: var(--bg-f0fdf4); color: #16a34a;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
               </div>
               <div>
@@ -5592,7 +5593,7 @@
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+              <div class="dash-card-icon" style="background: var(--bg-fef3c7); color: #d97706;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
               </div>
               <div>
@@ -5630,7 +5631,7 @@
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+              <div class="dash-card-icon" style="background: var(--bg-f0fdf4); color: #16a34a;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
               </div>
               <div>
@@ -5784,7 +5785,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false" id="adminOfflineQueueCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fff7ed; color: #c2410c;">
+              <div class="dash-card-icon" style="background: var(--bg-fff7ed); color: var(--tx-c2410c);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
               </div>
               <div>
@@ -5812,7 +5813,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false" id="adminCostSetupCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #ecfdf5; color: #059669;">
+              <div class="dash-card-icon" style="background: var(--bg-ecfdf5); color: #059669;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
               </div>
               <div>
@@ -5871,7 +5872,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="true" id="adminAssetQrCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-2563eb);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
               </div>
               <div>
@@ -5929,7 +5930,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="true" id="adminTelematicsCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-2563eb);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4"></path><path d="M12 18v4"></path><path d="M4.93 4.93l2.83 2.83"></path><path d="M16.24 16.24l2.83 2.83"></path><path d="M2 12h4"></path><path d="M18 12h4"></path><path d="M4.93 19.07l2.83-2.83"></path><path d="M16.24 7.76l2.83-2.83"></path></svg>
               </div>
               <div>
@@ -5988,7 +5989,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="true" id="adminCartrackCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #ecfdf5; color: #047857;">
+              <div class="dash-card-icon" style="background: var(--bg-ecfdf5); color: var(--tx-047857);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
               </div>
               <div>
@@ -6054,7 +6055,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="true" id="adminUnitechCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fff7ed; color: #ea580c;">
+              <div class="dash-card-icon" style="background: var(--bg-fff7ed); color: #ea580c;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
               </div>
               <div>
@@ -6096,7 +6097,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="true" id="adminGpsVehicleLinksCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-2563eb);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13" rx="2"></rect><path d="M16 8h4l3 5v3h-7V8z"></path><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
               </div>
               <div>
@@ -6150,7 +6151,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="true" id="adminSafetyCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef2f2; color: #dc2626;">
+              <div class="dash-card-icon" style="background: var(--bg-fef2f2); color: var(--tx-dc2626);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
               </div>
               <div>
@@ -6311,7 +6312,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="true">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #faf5ff; color: #7c3aed;">
+              <div class="dash-card-icon" style="background: var(--bg-faf5ff); color: #7c3aed;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
               </div>
               <div>
@@ -6328,7 +6329,7 @@
           </div>
           <div class="report-card-body">
             <pre class="output" id="mdmSummaryOut" style="max-height:72px;overflow:auto"></pre>
-            <div style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb">
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--bd-e5e7eb)">
               <p class="muted small" style="margin:0 0 8px">Required fields (policy) — applies to this site. Checked fields must be present on <b>new assets</b> and on <b>new parts</b> created via stock intake (<code>create_if_missing</code>).</p>
               <div class="form-row" style="align-items:flex-end">
                 <div class="form-field" style="flex:1;min-width:220px">
@@ -6377,7 +6378,7 @@
                 <tbody id="mdmDeptTbody"></tbody>
               </table>
             </div>
-            <hr style="margin:12px 0;border:none;border-top:1px solid #e5e7eb" />
+            <hr style="margin:12px 0;border:none;border-top:1px solid var(--bd-e5e7eb)" />
             <div class="form-row">
               <div class="form-field">
                 <label>Cost center — code</label>
@@ -6402,7 +6403,7 @@
                 <tbody id="mdmCcTbody"></tbody>
               </table>
             </div>
-            <hr style="margin:12px 0;border:none;border-top:1px solid #e5e7eb" />
+            <hr style="margin:12px 0;border:none;border-top:1px solid var(--bd-e5e7eb)" />
             <div class="form-row">
               <div class="form-field">
                 <label>Supplier — code</label>
@@ -6435,7 +6436,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #2563eb;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-2563eb);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg>
               </div>
               <div>
@@ -6479,7 +6480,7 @@
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #f0fdf4; color: #16a34a;">
+              <div class="dash-card-icon" style="background: var(--bg-f0fdf4); color: #16a34a;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>
               </div>
               <div>
@@ -6571,7 +6572,7 @@
         <div class="dash-card collapsible" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #fef3c7; color: #d97706;">
+              <div class="dash-card-icon" style="background: var(--bg-fef3c7); color: #d97706;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
               </div>
               <div>
@@ -6608,7 +6609,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #1d4ed8;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-1d4ed8);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
               </div>
               <div>
@@ -6673,7 +6674,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #ecfeff; color: #0891b2;">
+              <div class="dash-card-icon" style="background: var(--bg-ecfeff); color: #0891b2;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"></path><path d="m22 6-10 7L2 6"></path></svg>
               </div>
               <div>
@@ -6751,7 +6752,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false" id="adminPushNotifyCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eef2ff; color: #4338ca;">
+              <div class="dash-card-icon" style="background: var(--bg-eef2ff); color: var(--tx-4338ca);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
               </div>
               <div>
@@ -6849,7 +6850,7 @@
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
             <div class="dash-card-title">
-              <div class="dash-card-icon" style="background: #eff6ff; color: #1d4ed8;">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-1d4ed8);">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                   <polyline points="7 10 12 15 17 10"></polyline>
@@ -7921,7 +7922,7 @@
   <script src="./app/inspections.js?v=90"></script>
   <script src="./app/ui-helpers.js?v=89"></script>
   <script src="./app/telematics.js?v=91"></script>
-  <script src="./app/dashboard.js?v=89"></script>
+  <script src="./app/dashboard.js?v=90"></script>
   <script src="./app/borris.js?v=91"></script>
   <script src="./app/fuel-lube.js?v=90"></script>
   <script src="./app/stock.js?v=93"></script>
@@ -7929,7 +7930,7 @@
   <script src="./app/tabs.js?v=89"></script>
   <script src="./app/uploads.js?v=89"></script>
   <script src="./app/reports.js?v=89"></script>
-  <script src="./app/breakdowns.js?v=89"></script>
+  <script src="./app/breakdowns.js?v=90"></script>
   <script src="./app/inventory.js?v=92"></script>
   <script src="./app/stock-receive.js?v=2"></script>
   <script src="./app/lube-model.js?v=2"></script>
