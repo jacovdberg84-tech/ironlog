@@ -8561,3 +8561,10 @@ body.uc-qr-locked #ucAsset {
 .lm-parts { margin-top: 12px; }
 .lm-parts summary { cursor: pointer; font-weight: 600; }
 .lm-missing td { background: rgba(245, 158, 11, 0.12); }
+
+/* Part labels */
+.pl-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 8px 0; }
+.pl-search { position: relative; flex: 1; min-width: 240px; }
+.pl-search input { width: 100%; }
+.pl-search .dlv-hits { position: absolute; left: 0; right: 0; top: 100%; z-index: 20; }
+.pl-copies { max-width: 70px; }

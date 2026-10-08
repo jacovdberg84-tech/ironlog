@@ -39,6 +39,15 @@ Boxes arrive with the maker's barcode (EAN/UPC on filters, oils, bearings…). L
 
 After that, anyone scanning that box gets the part. A part can have several barcodes (different brands or pack sizes); each barcode belongs to one part, and moving it to another part asks first. Wrong links are removed with ✕ under *Box barcodes* on Find stock. Technicians who scan an unlinked barcode are told to ask the storeman. Linked barcodes also work in the Stock Control part search.
 
+### IronLog's own labels (parts without a barcode)
+
+For parts that come without a maker's barcode, print IronLog's label. It carries the part code as a **Code 128 barcode** (any scanner reads it) and a **QR** (phones), with the name and bin. No linking needed: the barcode *is* the part code.
+
+- **Office PC:** Stock Control → **Setup** → **Part labels**. Add parts by search, or in one go: *All in stock without a box barcode* / *Received in the last 7 days*. Set the number of labels per part, choose the label size, **Print labels**. Clear the list once they printed correctly.
+- **Terminal:** Find stock → part → **🖨 Label** → choose how many → *Add to the print list* (printed from the office PC), or *Print here* if a printer is connected to the terminal.
+- **Sizes:** A4 sheets with 21 (63.5 × 38.1 mm, Avery L7160/J8160), 24 (70 × 37 mm) or 14 (99.1 × 38.1 mm, L7163) labels; label printers 62 × 29 mm (Brother DK-11209), 50 × 25 mm or 100 × 50 mm (Zebra). For a part-used A4 sheet set *Start at label no.*
+- Print at **100 % / actual size** (turn off "fit to page"). For a label printer, choose its label size as the paper size in the printer settings. Use durable (polyester) labels in the workshop if possible.
+
 **USB or Bluetooth barcode scanner:** plug it in, no setup. It types like a keyboard and ends with Enter; the terminal picks it up on any screen. Set the scanner to send Enter (CR) after each code (the default on most scanners).
 
 **Phone as the scanner (until the scanner arrives):**
@@ -88,4 +97,5 @@ Open Notepad, scan a part label: the code should appear followed by a new line. 
 - API: `api/routes/stock/terminal.routes.js` under `/api/stock/terminal/*` (home, work-orders, requests, lookup, issue, barcodes). Box barcodes live in `part_barcodes` (`api/utils/partBarcodes.js`). Receive and count reuse `/api/stock/deliveries` and `/api/stock/cycle-count`.
 - PIN sign-in: `GET /api/auth/pin/roster?terminal=stores` also lists stores staff; `POST /api/auth/pin/login` accepts `storeman`, `stores` and `workshop_admin` besides technicians.
 - Phone relay: `POST /api/stock/terminal/scan` and `GET /api/stock/terminal/scans` are public. The terminal makes a random 128-bit key and shows it only in the pairing QR; scans are held in memory for two minutes and only codes pass through. A server restart drops waiting scans, nothing else.
-- Bundled libraries (MIT): `web/vendor/qrcode-generator-1.4.4.js` (pairing QR, made on the terminal) and `web/vendor/zxing-browser-0.1.5.min.js` (camera reading where the browser has no BarcodeDetector).
+- Labels: `web/part-labels.js` (shared printer), `web/app/stock-labels.js` (Stock Control card), `api/routes/stock/labels.routes.js` (`/api/stock/labels/queue`, `/api/stock/labels/parts`), table `part_label_queue`.
+- Bundled libraries (MIT): `web/vendor/qrcode-generator-1.4.4.js` (pairing and label QR), `web/vendor/jsbarcode-code128-3.11.6.min.js` (label barcodes) and `web/vendor/zxing-browser-0.1.5.min.js` (camera reading where the browser has no BarcodeDetector).
