@@ -41,6 +41,7 @@ import {
 } from "../utils/juneAvatar.js";
 import { makeJuneLiveAnswerBrowserCompatible } from "../utils/juneLiveSdp.js";
 import { clearJuneMemory, juneMemoryInstructions, recentJuneTurns, saveJuneTurns } from "../utils/juneMemory.js";
+import { BRIEFING_LIVE_INSTRUCTIONS, buildDailyBriefing, briefingSite, siteToday } from "../utils/juneDailyBriefing.js";
 
 const OPENAI_LIVE_URL = "https://api.openai.com/v1/live/sessions";
 const LIVE_MODEL = "gpt-live-1";
@@ -72,6 +73,7 @@ const JUNE_LIVE_INSTRUCTIONS = [
   "You remember earlier conversations when a memory recap is included below. Greet Jaco naturally and pick up open threads without making him repeat himself.",
   "Keep normal replies to one or two short sentences. For troubleshooting, give one concrete next step and wait for the answer.",
   "Use the backend whenever the user asks about their calendar, email, weather, Ironlog, Borris, tasks, KPIs, equipment, or a draft.",
+  "When Jaco asks for his daily briefing, the morning rundown, or to be brought up to speed, delegate to the backend's daily briefing tool plus a web search for recent security incidents near site, then brief him in about a minute: breakdowns, today's calendar, weather, security.",
   "For stores questions—stock on hand, shortages, a part lookup, or items on order—use the Stores briefing tool. It is read-only: never promise that stock was issued, ordered, received, or adjusted.",
   "When the administrator asks for a maintenance schedule for named equipment, prepare the review-only schedule through the backend. Once it reports an Excel file is ready, say it is ready to review and download on screen; never read an internal report identifier aloud.",
   "Ironlog has its own private internal calendar. Outlook and ICS are read-only external sources. For an internal calendar create, move, update, or cancel request, use the preparation tool, repeat the exact change, and tell Jaco to press the on-screen Confirm button. Never claim it was changed until Ironlog reports that confirmation succeeded.",
@@ -88,6 +90,7 @@ const JUNE_BACKEND_INSTRUCTIONS = [
   "Use the available tools for current business facts instead of inventing values.",
   "Private Ironlog functions are read-only or review-only draft functions. Never imply that a record was created, a requisition was issued, or a message was sent.",
   "For weather requests, use web search when it will improve the answer. Keep the final findings concise and operational.",
+  "For a daily briefing, call june_daily_briefing first. If its weather is unavailable, web search today's weather for the site. Always web search recent security incidents near the places in its security_check, following its rules: only the last 7 days, with place, date and source, and say plainly when nothing recent is found.",
   "For calendar or email requests, first call the relevant connector function. If it is not connected, explain the connection requirement without pretending to access data.",
   "For engineering questions, use June's Borris engineering tool and identify uncertainty or missing source data.",
   "For stores questions, use the dedicated read-only Stores tool. Report the on-hand quantity, minimum, shortage, and open-order status exactly as returned; do not invent a receipt date or stock allocation.",
@@ -180,6 +183,12 @@ const TOOL_DEFINITIONS = [
       required: ["asset_codes"],
       additionalProperties: false,
     },
+  },
+  {
+    type: "function",
+    name: "june_daily_briefing",
+    description: "Get everything for Jaco's daily briefing in one call: open breakdowns (critical first), overdue PM, today's calendar (Ironlog and the connected Outlook/ICS calendar), today's weather at site, and what to web search for recent security incidents near site.",
+    parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
   },
   {
     type: "function",
@@ -827,6 +836,49 @@ async function getJuneCalendarOverview(context) {
   };
 }
 
+/** Today's entries from the Ironlog calendar and the connected external one. */
+function icsEventIsOn(event, today, tz) {
+  const local = (iso) => siteToday(tz, new Date(iso));
+  if (event.all_day) {
+    const first = String(event.start_date || event.start_at || "").slice(0, 10);
+    const last = new Date(Date.parse(event.end_at || event.start_at) - 1).toISOString().slice(0, 10);
+    return first <= today && today <= (last < first ? first : last);
+  }
+  const end = Date.parse(event.end_at || event.start_at);
+  return local(event.start_at) <= today && local(new Date(Math.max(Date.parse(event.start_at), end - 1)).toISOString()) >= today;
+}
+
+// ICS times are UTC; June should read them out in site time.
+function icsLocalTimes(event, tz) {
+  if (event.all_day) return event;
+  const hm = (iso) => new Date(iso).toLocaleTimeString("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false });
+  return { ...event, local_start: hm(event.start_at), local_end: hm(event.end_at || event.start_at), time_zone: tz };
+}
+
+async function getJuneCalendarToday(context, today, tz) {
+  const internal = listInternalCalendarEvents(context, { fromDate: today, toDate: today, limit: 24 });
+  const ics = getIcsCalendarStatus(context);
+  let external;
+  if (ics.state === "connected") {
+    // The ICS range is in UTC days; fetch a day either side and keep what falls on today at site.
+    const day = (offset) => new Date(Date.parse(`${today}T00:00:00Z`) + offset * 86_400_000).toISOString().slice(0, 10);
+    const data = await getIcsCalendarEvents(context, { from: day(-1), to: day(1) });
+    external = { source: "private_ics", name: data.name || null, events: (data.events || []).filter((e) => icsEventIsOn(e, today, tz)).map((e) => icsLocalTimes(e, tz)), error: data.error || null };
+  } else {
+    external = { source: "outlook", ...(await getOutlookCalendarOverview(context)) };
+  }
+  return { date: today, ironlog_schedule: internal, external_calendar: external };
+}
+
+function getJuneDailyBriefing(context) {
+  const site = briefingSite();
+  return buildDailyBriefing({
+    site,
+    ironlogBrief: (today) => getIronlogBrief(today),
+    calendarToday: (today) => getJuneCalendarToday(context, today, site.timezone),
+  });
+}
+
 async function executeGatewayTool(name, args, context) {
   const tool = safeText(name, 80);
   const safeArgs = args && typeof args === "object" && !Array.isArray(args) ? args : {};
@@ -845,6 +897,7 @@ async function executeGatewayTool(name, args, context) {
   if (tool === "june_draft_task") return buildTaskDraft(safeArgs, context.user);
   if (tool === "june_draft_maintenance_schedule") return buildMaintenanceScheduleDraft(safeArgs, context);
   if (tool === "june_calendar_overview") return getJuneCalendarOverview(context);
+  if (tool === "june_daily_briefing") return getJuneDailyBriefing(context);
   if (tool === "june_list_internal_calendar_events") return {
     source: "internal_ironlog",
     events: listInternalCalendarEvents(context, { fromDate: safeArgs.from_date, toDate: safeArgs.to_date, limit: 24 }),
@@ -1194,10 +1247,12 @@ export default async function juneRoutes(app) {
     const owner = safetyIdentifier(req);
     const context = { siteCode: getSiteCode(req), user: getUser(req) };
     const memory = juneMemoryInstructions(context, { name: memoryName(getUser(req)) });
+    // The Daily briefing button starts June with the briefing as her opener.
+    const briefing = req.body?.briefing === true ? BRIEFING_LIVE_INSTRUCTIONS : "";
     const payload = {
       session: {
         model: LIVE_MODEL,
-        instructions: memory ? `${JUNE_LIVE_INSTRUCTIONS}\n\n${memory}` : JUNE_LIVE_INSTRUCTIONS,
+        instructions: [JUNE_LIVE_INSTRUCTIONS, memory, briefing].filter(Boolean).join("\n\n"),
         audio: { output: { voice: LIVE_VOICE } },
         store: false,
         delegation: {
