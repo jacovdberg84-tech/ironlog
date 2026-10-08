@@ -74,6 +74,7 @@ const JUNE_LIVE_INSTRUCTIONS = [
   "Keep normal replies to one or two short sentences. For troubleshooting, give one concrete next step and wait for the answer.",
   "Use the backend whenever the user asks about their calendar, email, weather, Ironlog, Borris, tasks, KPIs, equipment, or a draft.",
   "When Jaco asks for his daily briefing, the morning rundown, or to be brought up to speed, delegate to the backend's daily briefing tool plus a web search for recent security incidents near site, then brief him in about a minute: breakdowns, today's calendar, weather, security.",
+  "When Jaco asks about a specific work order (for example 'WO 349'), delegate to the work order tool: it returns the facts and also opens that work order in a pop-up on his screen. Tell him it is on screen, then give the short version.",
   "For stores questions—stock on hand, shortages, a part lookup, or items on order—use the Stores briefing tool. It is read-only: never promise that stock was issued, ordered, received, or adjusted.",
   "When the administrator asks for a maintenance schedule for named equipment, prepare the review-only schedule through the backend. Once it reports an Excel file is ready, say it is ready to review and download on screen; never read an internal report identifier aloud.",
   "Ironlog has its own private internal calendar. Outlook and ICS are read-only external sources. For an internal calendar create, move, update, or cancel request, use the preparation tool, repeat the exact change, and tell Jaco to press the on-screen Confirm button. Never claim it was changed until Ironlog reports that confirmation succeeded.",
@@ -93,6 +94,7 @@ const JUNE_BACKEND_INSTRUCTIONS = [
   "For a daily briefing, call june_daily_briefing first. If its weather is unavailable, web search today's weather for the site. Always web search recent security incidents near the places in its security_check, following its rules: only the last 7 days, with place, date and source, and say plainly when nothing recent is found.",
   "For calendar or email requests, first call the relevant connector function. If it is not connected, explain the connection requirement without pretending to access data.",
   "For engineering questions, use June's Borris engineering tool and identify uncertainty or missing source data.",
+  "For a question about one work order, call june_open_work_order with its number; it also opens the work order on the administrator's screen.",
   "For stores questions, use the dedicated read-only Stores tool. Report the on-hand quantity, minimum, shortage, and open-order status exactly as returned; do not invent a receipt date or stock allocation.",
   "For a maintenance schedule request, use the dedicated schedule-draft tool. Its meter and service data are factual Ironlog data; describe forecast dates as planning estimates, never as completed work.",
   "For internal Ironlog calendar changes, prepare a precise proposal only. Do not create, move, or cancel an entry yourself; the authenticated administrator must use the confirmation card in Ironlog. External Outlook and ICS calendars stay read-only.",
@@ -181,6 +183,17 @@ const TOOL_DEFINITIONS = [
         as_of: { type: "string", description: "Optional YYYY-MM-DD date for the meter and schedule snapshot." },
       },
       required: ["asset_codes"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "june_open_work_order",
+    description: "Look up one Ironlog work order by number and open it in a pop-up on the administrator's screen. Returns the asset, status, job, technician, progress and parts requests.",
+    parameters: {
+      type: "object",
+      properties: { work_order_id: { type: "number", description: "The work order number, for example 349 for WO#349." } },
+      required: ["work_order_id"],
       additionalProperties: false,
     },
   },
@@ -879,6 +892,56 @@ function getJuneDailyBriefing(context) {
   });
 }
 
+/** One work order for June; the browser opens it in a pop-up when found. */
+function getWorkOrderForJune(id) {
+  const woId = Math.trunc(Number(id));
+  if (!Number.isFinite(woId) || woId <= 0) return { found: false, error: "Give the work order number, for example 349." };
+  const row = safeRow(`
+    SELECT w.id, w.status, w.source, w.opened_at, w.due_date, w.priority, w.job_description, w.assigned_artisan_name,
+      w.repair_progress, w.repair_progress_at, w.completion_notes, w.completed_at, w.closed_at,
+      a.asset_code, a.asset_name
+    FROM work_orders w
+    LEFT JOIN assets a ON a.id = w.asset_id
+    WHERE w.id = ?
+  `, [woId]);
+  if (!row) return { found: false, work_order_id: woId, error: `There is no work order #${woId} in Ironlog.` };
+  const parts = safeRows(`
+    SELECT part_code, part_name, qty, status, urgency
+    FROM maintenance_parts_requests
+    WHERE work_order_id = ?
+    ORDER BY id DESC
+    LIMIT 12
+  `, [woId]).map((p) => ({
+    part_code: safeText(p.part_code, 60) || null,
+    part_name: safeText(p.part_name, 140),
+    qty: number(p.qty),
+    status: safeText(p.status, 30),
+    urgency: safeText(p.urgency, 20),
+  }));
+  return {
+    found: true,
+    shown_on_screen: true,
+    work_order: {
+      id: Number(row.id),
+      asset_code: safeText(row.asset_code, 40) || null,
+      asset_name: safeText(row.asset_name, 120) || null,
+      status: safeText(row.status, 30),
+      source: safeText(row.source, 40) || null,
+      opened_at: safeText(row.opened_at, 19) || null,
+      due_date: safeText(row.due_date, 10) || null,
+      priority: safeText(row.priority, 20) || null,
+      job: safeText(row.job_description, 600) || null,
+      technician: safeText(row.assigned_artisan_name, 80) || null,
+      progress: safeText(row.repair_progress, 600) || null,
+      progress_at: safeText(row.repair_progress_at, 19) || null,
+      completion_notes: safeText(row.completion_notes, 600) || null,
+      completed_at: safeText(row.completed_at, 19) || null,
+      closed_at: safeText(row.closed_at, 19) || null,
+    },
+    parts_requests: parts,
+  };
+}
+
 async function executeGatewayTool(name, args, context) {
   const tool = safeText(name, 80);
   const safeArgs = args && typeof args === "object" && !Array.isArray(args) ? args : {};
@@ -898,6 +961,7 @@ async function executeGatewayTool(name, args, context) {
   if (tool === "june_draft_maintenance_schedule") return buildMaintenanceScheduleDraft(safeArgs, context);
   if (tool === "june_calendar_overview") return getJuneCalendarOverview(context);
   if (tool === "june_daily_briefing") return getJuneDailyBriefing(context);
+  if (tool === "june_open_work_order") return getWorkOrderForJune(safeArgs.work_order_id);
   if (tool === "june_list_internal_calendar_events") return {
     source: "internal_ironlog",
     events: listInternalCalendarEvents(context, { fromDate: safeArgs.from_date, toDate: safeArgs.to_date, limit: 24 }),

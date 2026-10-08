@@ -864,6 +864,9 @@ async function juneRunTool(item) {
         } : null,
       };
     }
+    if (name === "june_open_work_order" && output?.found && output.work_order?.id) {
+      if (typeof openWorkOrderPopup === "function") openWorkOrderPopup(output.work_order.id);
+    }
     if (name === "june_prepare_internal_calendar_change") {
       juneRenderCalendarApproval(output);
       // The opaque approval token belongs solely to the authenticated browser.
