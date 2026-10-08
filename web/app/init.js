@@ -25,6 +25,7 @@ async function init() {
   });
   initReportsHub();
   initTasks();
+  initCollabInbox();
   initJune();
   initTelematicsFaultBanner();
   initCartrackSpeedFloat();

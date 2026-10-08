@@ -247,3 +247,19 @@ select.tp-input { width: auto; flex: 1; }
 .tp-pdf { overflow: auto; background: #525659; border-radius: 10px; min-height: 50vh; -webkit-overflow-scrolling: touch; }
 .tp-pdf canvas { display: block; margin: 0 auto; background: #fff; }
 .tp-pdf .tp-empty, .tp-pdf .tp-error { margin: 0; }
+
+/* Tasks & messages */
+.tp-taskcard { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 10px 0; cursor: pointer; font: inherit; }
+.tp-taskcard.new { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.tp-taskcard-ic { font-size: 1.5rem; }
+.tp-badge { background: var(--accent); color: #fff; border-radius: 999px; padding: 4px 10px; font-weight: 700; font-size: 0.85rem; white-space: nowrap; }
+.tp-inbox { border-color: var(--accent); }
+.tp-desc { white-space: pre-wrap; margin: 10px 0; line-height: 1.45; }
+.tp-at { color: #93c5fd; }
+.tp-thread { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.tp-msg { align-self: flex-start; max-width: 88%; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; line-height: 1.4; word-wrap: break-word; }
+.tp-msg.mine { align-self: flex-end; background: rgba(59, 130, 246, 0.18); border-color: rgba(59, 130, 246, 0.4); }
+.tp-msg-head { font-size: 0.78rem; color: var(--muted); margin-bottom: 2px; }
+.tp-msg-head b { color: var(--ink); }
+.tp-reply { margin-bottom: 20px; }
+.tp-form-err { color: #fca5a5; font-weight: 600; min-height: 1em; margin: 6px 0; }
