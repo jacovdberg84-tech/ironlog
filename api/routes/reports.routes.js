@@ -27,7 +27,7 @@ import registerOperationsExportsRoutes from "./reports/operations-exports.routes
 import registerPresentationsRoutes from "./reports/presentations.routes.js";
 import registerPeriodReportsRoutes from "./reports/period-reports.routes.js";
 import { serviceCostSourceLabel } from "../utils/serviceCostSource.js";
-import { DONE_WORK_ORDER_STATUSES, isWorkOrderDone, breakdownNextStep, downtimeCell, draftWeeklyFindings, workOrderBlockerCell, workOrderOwnerCell, workOrderProgressCell } from "../utils/weeklyForumFindings.js";
+import { DONE_WORK_ORDER_STATUSES, isWorkOrderDone, breakdownNextStep, downtimeCell, draftWeeklyFindings, isProductionAsset, issuedToEquipmentSql, workOrderBlockerCell, workOrderOwnerCell, workOrderProgressCell } from "../utils/weeklyForumFindings.js";
 
 const __dirnameReports = path.dirname(fileURLToPath(import.meta.url));
 const doneStatusSql = DONE_WORK_ORDER_STATUSES.map((s) => `'${s}'`).join(", ");
@@ -4082,7 +4082,9 @@ export default async function reportsRoutes(app) {
         utilization: scheduled > 0 ? (run / scheduled) * 100 : 0,
       };
     });
-    const categoryRows = [...assetPerformance.reduce((map, row) => {
+    // Equipment KPIs (rankings, low use) cover production equipment only.
+    const productionPerformance = assetPerformance.filter((row) => isProductionAsset(row));
+    const categoryRows = [...productionPerformance.reduce((map, row) => {
       const key = String(row.category || "Uncategorised");
       const current = map.get(key) || { category: key, scheduled: 0, run: 0, downtime: 0, count: 0 };
       current.scheduled += Number(row.scheduled_hours || 0);
@@ -4096,8 +4098,8 @@ export default async function reportsRoutes(app) {
       availability: row.scheduled > 0 ? ((row.scheduled - Math.min(row.downtime, row.scheduled)) / row.scheduled) * 100 : 0,
       utilization: row.scheduled > 0 ? (Math.min(row.run, row.scheduled) / row.scheduled) * 100 : 0,
     })).sort((a, b) => b.utilization - a.utilization);
-    const rankedAssets = [...assetPerformance].sort((a, b) => b.utilization - a.utilization);
-    const lowUseAssets = [...assetPerformance]
+    const rankedAssets = [...productionPerformance].sort((a, b) => b.utilization - a.utilization);
+    const lowUseAssets = [...productionPerformance]
       .filter((row) => Number(row.scheduled_hours || 0) > 0)
       .sort((a, b) => a.utilization - b.utilization)
       .slice(0, 8);
@@ -4129,7 +4131,7 @@ export default async function reportsRoutes(app) {
         ${woCol("assigned_artisan_name")} AS assigned_artisan_name,
         ${woCol("due_date")} AS due_date,
         ${woCol("repair_progress")} AS repair_progress,
-        a.asset_code, a.asset_name,
+        a.asset_code, a.asset_name, a.category,
         b.description AS breakdown_description, b.component AS breakdown_component,
         b.parts_status, b.ets_repair_date,
         mp.service_name,
@@ -4157,8 +4159,10 @@ export default async function reportsRoutes(app) {
       ORDER BY
         CASE WHEN LOWER(COALESCE(w.status, 'open')) IN (${doneStatusSql}) THEN 1 ELSE 0 END,
         DATE(w.opened_at) DESC, w.id DESC
-      LIMIT 12
+      LIMIT 60
     `).all(period.end, period.start, period.end);
+    // The repair status slide lists production equipment only.
+    const productionWorkOrders = workOrderRows.filter((r) => isProductionAsset(r)).slice(0, 12);
 
     const defaults = costDefaults();
     const laborRate = Number(defaults.labor_cost_per_hour_default || 0);
@@ -4169,6 +4173,7 @@ export default async function reportsRoutes(app) {
             FROM stock_movements sm
             JOIN parts p ON p.id = sm.part_id
             WHERE sm.movement_type = 'out'
+              AND ${issuedToEquipmentSql("sm")}
               AND DATE(sm.created_at) BETWEEN ? AND ?
           `).get(range.start, range.end)?.value || 0)
         : 0;
@@ -4222,6 +4227,75 @@ export default async function reportsRoutes(app) {
         `).all(period.end, period.start)
       : [];
 
+    // Parts ordered: order lines placed in the range (cancelled lines left out), in USD.
+    const partsOrdered = (range) => {
+      if (!hasTable("stores_part_orders")) return 0;
+      const rate = (key, fallback) => {
+        const v = hasTable("cost_settings") ? Number(db.prepare(`SELECT value FROM cost_settings WHERE key = ?`).get(key)?.value) : NaN;
+        return Number.isFinite(v) && v > 0 ? v : fallback;
+      };
+      return Number(db.prepare(`
+        SELECT COALESCE(SUM(COALESCE(o.qty, 0) * COALESCE(o.unit_cost, 0) /
+          CASE UPPER(COALESCE(o.currency, 'USD')) WHEN 'ZAR' THEN ? WHEN 'MZN' THEN ? ELSE 1 END), 0) AS value
+        FROM stores_part_orders o
+        WHERE DATE(o.order_date) BETWEEN ? AND ?
+          AND LOWER(COALESCE(o.status, '')) <> 'cancelled'
+          AND LOWER(COALESCE(o.site_code, 'main')) = LOWER(?)
+      `).get(rate("zar_per_usd", 18.5), rate("mzn_per_usd", 64), range.start, range.end, String(site_code || "main"))?.value || 0);
+    };
+    // Month costing: the last full month and the current month to the end of the selected week.
+    const endMonth = String(period.end).slice(0, 7);
+    const monthStart = (ym) => `${ym}-01`;
+    const monthEnd = (ym) => {
+      const [y, m] = ym.split("-").map(Number);
+      return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+    };
+    const prevMonth = (() => {
+      const [y, m] = endMonth.split("-").map(Number);
+      const d = new Date(Date.UTC(y, m - 2, 1));
+      return d.toISOString().slice(0, 7);
+    })();
+    const monthName = (ym) => new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${ym}-15T12:00:00Z`));
+    const monthCosting = [
+      { label: monthName(prevMonth), range: { start: monthStart(prevMonth), end: monthEnd(prevMonth) } },
+      { label: `${monthName(endMonth).split(" ")[0]} to date`, range: { start: monthStart(endMonth), end: period.end } },
+    ].map((m) => {
+      const c = rangeCosts(m.range);
+      return { ...m, partsIssued: c.partsIssued, labour: c.internalLabor, total: c.partsIssued + c.internalLabor, partsOrdered: partsOrdered(m.range) };
+    });
+
+    // Equipment away from site for repairs: off-site repair records not yet returned
+    // (or returned inside the selected week), plus open breakdowns noted as off site.
+    const offsiteRows = [];
+    if (hasTable("breakdown_offsite_repairs")) {
+      offsiteRows.push(...db.prepare(`
+        SELECT o.breakdown_id, a.asset_code, a.asset_name, o.repair_status, o.sent_date, o.expected_return_date, o.actual_return_date,
+          COALESCE(NULLIF(TRIM(o.current_location), ''), NULLIF(TRIM(o.vendor), '')) AS place,
+          o.vendor, COALESCE(NULLIF(TRIM(o.repair_reason), ''), NULLIF(TRIM(o.notes), ''), b.description, b.component) AS reason
+        FROM breakdown_offsite_repairs o
+        JOIN assets a ON a.id = o.asset_id
+        LEFT JOIN breakdowns b ON b.id = o.breakdown_id
+        WHERE LOWER(COALESCE(o.site_code, 'main')) = LOWER(?)
+          AND DATE(o.sent_date) <= ?
+          AND (LOWER(COALESCE(o.repair_status, '')) <> 'returned' OR DATE(COALESCE(o.actual_return_date, o.updated_at)) BETWEEN ? AND ?)
+        ORDER BY CASE WHEN LOWER(COALESCE(o.repair_status, '')) = 'returned' THEN 1 ELSE 0 END, o.sent_date ASC
+      `).all(String(site_code || "main"), period.end, period.start, period.end));
+    }
+    if (hasTable("breakdowns")) {
+      const noted = db.prepare(`
+        SELECT b.id AS breakdown_id, a.asset_code, a.asset_name, b.status AS repair_status, b.breakdown_date AS sent_date,
+          b.ets_repair_date AS expected_return_date, NULL AS actual_return_date, NULL AS place, NULL AS vendor,
+          TRIM(COALESCE(b.component, '') || ' ' || COALESCE(b.description, '')) AS reason,
+          COALESCE(b.parts_status, '') AS parts_status
+        FROM breakdowns b
+        JOIN assets a ON a.id = b.asset_id
+        WHERE UPPER(TRIM(COALESCE(b.status, 'OPEN'))) <> 'CLOSED'
+      `).all().filter((r) => /off.?site|south africa|\bRSA\b|external repair|sent (away|out) for repair/i.test(`${r.reason} ${r.parts_status}`));
+      for (const r of noted) {
+        if (!offsiteRows.some((o) => (o.breakdown_id && o.breakdown_id === r.breakdown_id) || o.asset_code === r.asset_code)) offsiteRows.push({ ...r, repair_status: "off site (breakdown notes)" });
+      }
+    }
+
     const pptx = new PptxGenJS();
     pptx.layout = "LAYOUT_WIDE";
     pptx.author = "IRONLOG";
@@ -4229,36 +4303,39 @@ export default async function reportsRoutes(app) {
     pptx.title = `Weekly Maintenance Forum - ${label}`;
     pptx.company = "AML";
     pptx.lang = "en-ZA";
-    const navy = "122F45";
-    const teal = "168A91";
-    const blue = "125D82";
-    const pale = "EAF2F4";
-    const stripe = "F3F7F8";
-    const line = "CBD8DE";
-    const text = "122F45";
-    const muted = "53697A";
+    // Black and CAT yellow. Yellow is for bars, rules and header text on black;
+    // body text stays dark for readability on the projector.
+    const navy = "1A1A1A";
+    const teal = "FFCD11";
+    const blue = "3A3A3A";
+    const accentText = "3A3A3A";
+    const pale = "F5F4EE";
+    const stripe = "FAF9F4";
+    const line = "D9D6C8";
+    const text = "1A1A1A";
+    const muted = "5C5C5C";
     const headingFont = "Aptos Display";
     const bodyFont = "Aptos";
     const headerPeriod = `${dateLabel(period.start, period.end).toUpperCase()}  •  CURRENT WEEK`;
     const tableHeader = (...labels) => labels.map((value) => ({
       text: value,
-      options: { bold: true, color: "FFFFFF", fill: { color: navy }, fontFace: bodyFont },
+      options: { bold: true, color: teal, fill: { color: navy }, fontFace: bodyFont },
     }));
+    const TOTAL_SLIDES = 11;
     const tableOptions = { border: { pt: 0.5, color: line }, color: text, fontFace: bodyFont, margin: 0.06 };
-    const addChrome = (slide, title, detail, page) => {
+    const addChrome = (slide, title, page) => {
       slide.background = { color: "FFFFFF" };
       slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.333, h: 0.74, line: { color: navy, transparency: 100 }, fill: { color: navy } });
       slide.addText("AML  /  WEEKLY MAINTENANCE", { x: 0.34, y: 0.17, w: 4.9, h: 0.22, fontFace: headingFont, fontSize: 12, bold: true, color: "FFFFFF" });
-      slide.addText(headerPeriod, { x: 8.1, y: 0.18, w: 4.86, h: 0.18, fontFace: bodyFont, fontSize: 8.8, color: "D2E7ED", align: "right" });
+      slide.addText(headerPeriod, { x: 8.1, y: 0.18, w: 4.86, h: 0.18, fontFace: bodyFont, fontSize: 8.8, color: teal, align: "right" });
       slide.addText(title, { x: 0.38, y: 0.96, w: 9.95, h: 0.4, fontFace: headingFont, fontSize: 22, bold: true, color: navy });
-      slide.addText(detail, { x: 0.4, y: 1.4, w: 11.5, h: 0.18, fontFace: bodyFont, fontSize: 8, color: muted });
-      slide.addShape(pptx.ShapeType.line, { x: 0.38, y: 1.68, w: 12.55, h: 0, line: { color: teal, pt: 1.15 } });
+      slide.addShape(pptx.ShapeType.line, { x: 0.38, y: 1.6, w: 12.55, h: 0, line: { color: teal, pt: 2 } });
       slide.addShape(pptx.ShapeType.line, { x: 0.38, y: 7.1, w: 12.55, h: 0, line: { color: line, pt: 0.5 } });
-      slide.addText(`IRONLOG • ${String(site_code || "main").toUpperCase()} SITE`, { x: 0.4, y: 7.16, w: 5.5, h: 0.15, fontFace: bodyFont, fontSize: 7.3, color: muted });
-      slide.addText(`${page} / 9`, { x: 12.2, y: 7.16, w: 0.7, h: 0.15, fontFace: bodyFont, fontSize: 7.3, bold: true, color: muted, align: "right" });
+      slide.addText(`${page} / ${TOTAL_SLIDES}`, { x: 12.2, y: 7.16, w: 0.7, h: 0.15, fontFace: bodyFont, fontSize: 7.3, bold: true, color: muted, align: "right" });
     };
     const addKpiTile = (slide, x, labelText, valueText, note) => {
       slide.addShape(pptx.ShapeType.rect, { x, y: 1.95, w: 2.95, h: 1.2, line: { color: line, pt: 0.6 }, fill: { color: pale } });
+      slide.addShape(pptx.ShapeType.rect, { x, y: 1.95, w: 0.07, h: 1.2, line: { color: teal, transparency: 100 }, fill: { color: teal } });
       slide.addText(labelText.toUpperCase(), { x: x + 0.16, y: 2.14, w: 2.6, h: 0.14, fontFace: bodyFont, fontSize: 7.4, bold: true, color: muted });
       slide.addText(valueText, { x: x + 0.16, y: 2.42, w: 2.6, h: 0.34, fontFace: headingFont, fontSize: 21, bold: true, color: navy });
       slide.addText(note, { x: x + 0.16, y: 2.89, w: 2.6, h: 0.12, fontFace: bodyFont, fontSize: 6.8, color: muted });
@@ -4268,25 +4345,22 @@ export default async function reportsRoutes(app) {
     s1.background = { color: "FFFFFF" };
     s1.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.333, h: 0.74, line: { color: navy, transparency: 100 }, fill: { color: navy } });
     s1.addText("AML  /  WEEKLY MAINTENANCE", { x: 0.34, y: 0.17, w: 5.2, h: 0.22, fontFace: headingFont, fontSize: 12, bold: true, color: "FFFFFF" });
-    s1.addText(headerPeriod, { x: 8.1, y: 0.18, w: 4.86, h: 0.18, fontFace: bodyFont, fontSize: 8.8, color: "D2E7ED", align: "right" });
+    s1.addText(headerPeriod, { x: 8.1, y: 0.18, w: 4.86, h: 0.18, fontFace: bodyFont, fontSize: 8.8, color: teal, align: "right" });
     s1.addText("Mechanical performance", { x: 0.38, y: 0.96, w: 8.4, h: 0.4, fontFace: headingFont, fontSize: 22, bold: true, color: navy });
     s1.addText("LIVE IRONLOG DATA  •  Weekly maintenance review", { x: 0.4, y: 1.4, w: 6.5, h: 0.16, fontFace: bodyFont, fontSize: 8, color: muted });
-    s1.addShape(pptx.ShapeType.line, { x: 0.38, y: 1.68, w: 12.55, h: 0, line: { color: teal, pt: 1.15 } });
+    s1.addShape(pptx.ShapeType.line, { x: 0.38, y: 1.68, w: 12.55, h: 0, line: { color: teal, pt: 2 } });
     s1.addText("Weekly maintenance review", { x: 0.5, y: 2.0, w: 6.5, h: 0.45, fontFace: headingFont, fontSize: 28, bold: true, color: navy });
     s1.addText(`Selected week: ${dateLabel(period.start, period.end)}`, { x: 0.52, y: 2.72, w: 5.4, h: 0.22, fontFace: bodyFont, fontSize: 12, color: blue });
     s1.addText(`Previous week: ${dateLabel(previousPeriod.start, previousPeriod.end)}`, { x: 0.52, y: 3.06, w: 5.4, h: 0.22, fontFace: bodyFont, fontSize: 11, color: muted });
-    s1.addShape(pptx.ShapeType.rect, { x: 7.25, y: 1.98, w: 5.2, h: 2.28, line: { color: line, pt: 0.65 }, fill: { color: pale } });
-    s1.addText("Reporting scope", { x: 7.55, y: 2.26, w: 3.8, h: 0.2, fontFace: headingFont, fontSize: 12, bold: true, color: navy });
-    s1.addText("Operational plant and equipment. Parked, standby and LDV units are excluded from fleet availability and utilization.", { x: 7.55, y: 2.68, w: 4.4, h: 0.62, fontFace: bodyFont, fontSize: 10, color: muted, breakLine: false });
-    s1.addText("Mechanical downtime  •  Work orders  •  Cost movement  •  Parts risks  •  Next week plan", { x: 0.52, y: 4.04, w: 11.2, h: 0.22, fontFace: bodyFont, fontSize: 10, bold: true, color: teal });
+    s1.addText("Mechanical downtime  •  Work orders  •  Off-site repairs  •  Cost movement  •  Upcoming maintenance  •  Month costing", { x: 0.52, y: 4.04, w: 11.6, h: 0.22, fontFace: bodyFont, fontSize: 10, bold: true, color: accentText });
     s1.addShape(pptx.ShapeType.rect, { x: 0.5, y: 4.65, w: 12.0, h: 1.1, line: { color: line, pt: 0.65 }, fill: { color: stripe } });
+    s1.addShape(pptx.ShapeType.rect, { x: 0.5, y: 4.65, w: 0.09, h: 1.1, line: { color: teal, transparency: 100 }, fill: { color: teal } });
     s1.addText(`Availability ${pct(selectedKpis.availability)}   |   Utilization ${pct(selectedKpis.utilization)}   |   ${num(selectedKpis.downtime)} mechanical downtime hours   |   ${selectedKpis.assetsDown} assets down`, { x: 0.78, y: 5.01, w: 11.4, h: 0.28, fontFace: headingFont, fontSize: 16, bold: true, color: navy, align: "center" });
     s1.addShape(pptx.ShapeType.line, { x: 0.38, y: 7.1, w: 12.55, h: 0, line: { color: line, pt: 0.5 } });
-    s1.addText("IRONLOG • Weekly Forum", { x: 0.4, y: 7.16, w: 4.0, h: 0.15, fontFace: bodyFont, fontSize: 7.3, color: muted });
-    s1.addText("1 / 9", { x: 12.2, y: 7.16, w: 0.7, h: 0.15, fontFace: bodyFont, fontSize: 7.3, bold: true, color: muted, align: "right" });
+    s1.addText(`1 / ${TOTAL_SLIDES}`, { x: 12.2, y: 7.16, w: 0.7, h: 0.15, fontFace: bodyFont, fontSize: 7.3, bold: true, color: muted, align: "right" });
 
     const s2 = pptx.addSlide();
-    addChrome(s2, "Weekly maintenance at a glance", "Live period figures with management commentary entered in Weekly review inputs.", 2);
+    addChrome(s2, "Weekly maintenance at a glance", 2);
     addKpiTile(s2, 0.42, "Fleet availability", pct(selectedKpis.availability), `Previous: ${pct(previousKpis.availability)}`);
     addKpiTile(s2, 3.54, "Mechanical downtime", `${num(selectedKpis.downtime)} h`, `Previous: ${num(previousKpis.downtime)} h`);
     addKpiTile(s2, 6.66, "Assets down", String(selectedKpis.assetsDown), `Previous: ${previousKpis.assetsDown}`);
@@ -4296,80 +4370,87 @@ export default async function reportsRoutes(app) {
     const drafted = draftWeeklyFindings({ selectedKpis, previousKpis, breakdownRows, workOrderRows, selectedCosts, previousCosts, money });
     const reviewRows = ["Downtime", "Repairs", "Costs"].map((area) => {
       const row = reviewByArea.get(area);
-      if (row) return [area, compact(row.weekly_finding, 70), `${compact(row.action_owner, 42)}${row.due_date ? ` • ${row.due_date}` : ""}`];
-      return [area, compact(`${drafted[area].finding} (IronLog draft)`, 110), compact(drafted[area].action, 42)];
+      if (row) return [area, compact(row.weekly_finding, 190)];
+      return [area, compact(drafted[area].finding, 190)];
     });
-    s2.addTable([tableHeader("Area", "Weekly finding", "Action / owner"), ...reviewRows], { x: 0.42, y: 3.92, w: 12.0, h: 2.12, fontSize: 9.2, rowH: 0.48, ...tableOptions });
+    s2.addTable([tableHeader("Area", "Weekly finding"), ...reviewRows], { x: 0.42, y: 3.92, w: 12.0, h: 2.12, colW: [1.6, 10.4], fontSize: 10, rowH: 0.52, ...tableOptions });
 
     const s3 = pptx.addSlide();
-    addChrome(s3, "KPI hours and downtime", "Selected-week operational hours and mechanical downtime only.", 3);
+    addChrome(s3, "KPI hours and downtime", 3);
     s3.addText("Scheduled, run and downtime hours", { x: 0.48, y: 1.95, w: 6.2, h: 0.2, fontFace: headingFont, fontSize: 12, bold: true, color: navy });
     s3.addChart(pptx.ChartType.bar, [
       { name: "Scheduled", labels: dailyKpiRows.map((r) => String(r.day_key || "").slice(5)), values: dailyKpiRows.map((r) => num(r.scheduled_hours)) },
       { name: "Run", labels: dailyKpiRows.map((r) => String(r.day_key || "").slice(5)), values: dailyKpiRows.map((r) => num(r.run_hours)) },
       { name: "Downtime", labels: dailyKpiRows.map((r) => String(r.day_key || "").slice(5)), values: dailyKpiRows.map((r) => num(r.downtime_hours)) },
-    ], { x: 0.42, y: 2.24, w: 7.15, h: 3.75, catAxisLabelRotate: -45, showLegend: true, legendPos: "b", chartColors: ["168A91", "125D82", "C2410C"], showTitle: false });
+    ], { x: 0.42, y: 2.24, w: 7.15, h: 3.75, catAxisLabelRotate: -45, showLegend: true, legendPos: "b", chartColors: ["FFCD11", "3A3A3A", "C2410C"], showTitle: false });
     s3.addShape(pptx.ShapeType.rect, { x: 8.05, y: 2.2, w: 4.28, h: 3.45, line: { color: line, pt: 0.65 }, fill: { color: pale } });
     s3.addText("Weekly KPI rules", { x: 8.32, y: 2.5, w: 3.5, h: 0.2, fontFace: headingFont, fontSize: 13, bold: true, color: navy });
     s3.addText("Availability = available hours ÷ scheduled hours\n\nUtilization = run hours ÷ scheduled hours\n\nShow downtime inside the selected week only. Parked, standby and LDV units are excluded.", { x: 8.32, y: 3.0, w: 3.45, h: 1.7, fontFace: bodyFont, fontSize: 10, color: text, breakLine: false });
-    s3.addText(`Week totals: ${num(selectedKpis.scheduled)} scheduled h  •  ${num(selectedKpis.run)} run h  •  ${num(selectedKpis.downtime)} downtime h`, { x: 0.6, y: 6.35, w: 11.6, h: 0.2, fontFace: bodyFont, fontSize: 10, bold: true, color: teal, align: "center" });
+    s3.addText(`Week totals: ${num(selectedKpis.scheduled)} scheduled h  •  ${num(selectedKpis.run)} run h  •  ${num(selectedKpis.downtime)} downtime h`, { x: 0.6, y: 6.35, w: 11.6, h: 0.2, fontFace: bodyFont, fontSize: 10, bold: true, color: accentText, align: "center" });
 
     const s4 = pptx.addSlide();
-    addChrome(s4, "Top and lowest equipment by category", "Ranked using assets with scheduled hours in the selected week.", 4);
+    addChrome(s4, "Top and lowest production equipment by category", 4);
     s4.addText("Availability and utilization by category", { x: 0.48, y: 1.95, w: 6.2, h: 0.2, fontFace: headingFont, fontSize: 12, bold: true, color: navy });
     s4.addChart(pptx.ChartType.bar, [
       { name: "Availability %", labels: categoryRows.slice(0, 8).map((r) => compact(r.category, 16)), values: categoryRows.slice(0, 8).map((r) => num(r.availability)) },
       { name: "Utilization %", labels: categoryRows.slice(0, 8).map((r) => compact(r.category, 16)), values: categoryRows.slice(0, 8).map((r) => num(r.utilization)) },
-    ], { x: 0.42, y: 2.24, w: 7.25, h: 3.95, catAxisLabelRotate: -40, showLegend: true, legendPos: "b", valAxisMinVal: 0, valAxisMaxVal: 100, chartColors: ["168A91", "125D82"] });
+    ], { x: 0.42, y: 2.24, w: 7.25, h: 3.95, catAxisLabelRotate: -40, showLegend: true, legendPos: "b", valAxisMinVal: 0, valAxisMaxVal: 100, chartColors: ["FFCD11", "3A3A3A"] });
     const topRows = rankedAssets.slice(0, 3).map((r) => [`Top • ${r.asset_code}`, compact(r.asset_name, 24), pct(r.utilization)]);
     const bottomRows = [...rankedAssets].filter((r) => r.run_hours > 0 || r.downtime_hours > 0).sort((a, b) => a.utilization - b.utilization).slice(0, 3).map((r) => [`Low • ${r.asset_code}`, compact(r.asset_name, 24), pct(r.utilization)]);
     s4.addText("Top / lowest asset watch", { x: 8.05, y: 1.95, w: 3.9, h: 0.2, fontFace: headingFont, fontSize: 12, bold: true, color: navy });
     s4.addTable([tableHeader("Rank", "Asset", "Util %"), ...topRows, ...bottomRows], { x: 8.02, y: 2.24, w: 4.3, h: 3.95, fontSize: 8.6, rowH: 0.43, ...tableOptions });
 
     const s5 = pptx.addSlide();
-    addChrome(s5, "Equipment with low use", "Lowest utilization first. Review operational cause before treating low use as a maintenance issue.", 5);
-    const lowUseRows = lowUseAssets.length ? lowUseAssets.map((r) => {
-      const reason = r.downtime_hours > 0 ? `${num(r.downtime_hours)} h mechanical downtime` : r.run_hours <= 0 ? "No run hours entered" : "Low use — confirm operational reason";
-      return [r.asset_code, compact(r.asset_name, 28), compact(r.category, 18), `${num(r.run_hours)} / ${num(r.scheduled_hours)} h`, pct(r.utilization), reason];
-    }) : [["—", "No eligible assets with recorded scheduled hours", "—", "—", "—", "—"]];
-    s5.addText("Rank equipment by utilization, lowest first", { x: 0.48, y: 1.95, w: 6.2, h: 0.2, fontFace: headingFont, fontSize: 12, bold: true, color: navy });
-    s5.addTable([tableHeader("Asset", "Equipment", "Category", "Run / scheduled", "Utilization", "Explain low use"), ...lowUseRows], { x: 0.42, y: 2.24, w: 12.0, h: 3.85, fontSize: 8.8, rowH: 0.42, ...tableOptions });
-    s5.addText("Planned standby remains outside fleet KPI rates; this table exposes idle capacity and missing-hour entries for management review.", { x: 0.55, y: 6.38, w: 11.7, h: 0.22, fontFace: bodyFont, fontSize: 9.5, color: teal, align: "center" });
+    addChrome(s5, "Production equipment with low use", 5);
+    const lowUseRows = lowUseAssets.length
+      ? lowUseAssets.map((r) => [r.asset_code, compact(r.asset_name, 34), compact(r.category, 22), `${num(r.run_hours)} / ${num(r.scheduled_hours)} h`, pct(r.utilization)])
+      : [["—", "No production equipment with recorded scheduled hours", "—", "—", "—"]];
+    s5.addText("Utilization, lowest first", { x: 0.48, y: 1.95, w: 6.2, h: 0.2, fontFace: headingFont, fontSize: 12, bold: true, color: navy });
+    s5.addTable([tableHeader("Asset", "Equipment", "Category", "Run / scheduled", "Utilization"), ...lowUseRows], { x: 0.42, y: 2.24, w: 12.0, h: 3.85, colW: [1.6, 4.4, 2.8, 1.8, 1.4], fontSize: 9.4, rowH: 0.42, ...tableOptions });
 
     const s6 = pptx.addSlide();
-    addChrome(s6, "Equipment down during selected week", "Every mechanical downtime event is allocated to the date range, including repairs that began earlier.", 6);
+    addChrome(s6, "Equipment down during selected week", 6);
     const downRows = breakdownRows.length ? breakdownRows.map((r) => [
-      `${r.asset_code} • ${compact(r.asset_name, 18)}`,
+      `${r.asset_code} • ${compact(r.asset_name, 22)}`,
       r.start_date === r.end_date ? String(r.start_date || "—") : `${r.start_date || "—"} → ${r.end_date || "—"}`,
       downtimeCell(r),
-      compact([r.component, r.description].filter(Boolean).join(" • "), 38) || "—",
+      compact([r.component, r.description].filter(Boolean).join(" • "), 60) || "—",
       String(r.status || "OPEN").toUpperCase(),
-      compact(breakdownNextStep(r), 34),
-    ]) : [["—", "—", "0 h", "No mechanical downtime recorded", "—", "—"]];
-    s6.addTable([tableHeader("Asset", "Date / window", "Hours down", "Fault / component", "Status", "Return / next step"), ...downRows], { x: 0.38, y: 2.05, w: 12.45, h: 4.15, fontSize: 8.5, rowH: 0.42, ...tableOptions });
-    s6.addText("For each event: downtime start/end, component, cause, work order and return target. Week boundary hours stay inside the selected period.", { x: 0.5, y: 6.45, w: 12.0, h: 0.16, fontFace: bodyFont, fontSize: 8.5, color: muted, align: "center" });
+    ]) : [["—", "—", "0 h", "No mechanical downtime recorded", "—"]];
+    s6.addTable([tableHeader("Asset", "Date / window", "Hours down", "Fault / component", "Status"), ...downRows], { x: 0.38, y: 2.05, w: 12.45, h: 4.15, colW: [2.9, 2.2, 1.9, 4.35, 1.1], fontSize: 8.8, rowH: 0.42, ...tableOptions });
 
     const s7 = pptx.addSlide();
-    addChrome(s7, "Mechanical work and repair status", "Open repair work is carried forward; completed work appears when it closed in the selected week.", 7);
-    const workRows = workOrderRows.length ? workOrderRows.map((r) => {
+    addChrome(s7, "Mechanical work and repair status", 7);
+    const workRows = productionWorkOrders.length ? productionWorkOrders.map((r) => {
       const description = String(r.source || "").toLowerCase() === "service" ? r.service_name : r.breakdown_description;
       return [
         `WO-${r.id} • ${r.asset_code}`,
-        compact(description || `${r.source || "Work order"} activity`, 42),
-        compact(workOrderProgressCell(r), 30),
-        compact(workOrderBlockerCell(r), 28),
-        compact(workOrderOwnerCell(r), 32),
+        compact(description || `${r.source || "Work order"} activity`, 56),
+        compact(workOrderProgressCell(r), 38),
+        compact(workOrderBlockerCell(r), 36),
       ];
-    }) : [["—", "No breakdown or service work orders in scope", "—", "—", "—"]];
-    s7.addTable([tableHeader("Work order / asset", "Mechanical work", "Progress", "Blocker / parts", "Owner / due"), ...workRows], { x: 0.38, y: 2.05, w: 12.45, h: 3.35, fontSize: 8.5, rowH: 0.4, ...tableOptions });
-    const offsiteRows = breakdownRows.filter((r) => /off.?site|external|supplier|contractor/i.test(`${r.parts_status || ""} ${r.description || ""}`)).slice(0, 2);
-    s7.addText("Offsite repair watch", { x: 0.48, y: 5.76, w: 3.3, h: 0.2, fontFace: headingFont, fontSize: 12, bold: true, color: navy });
-    s7.addText(offsiteRows.length ? offsiteRows.map((r) => `${r.asset_code} • ${compact(r.description, 72)}${r.ets_repair_date ? ` • Return ${r.ets_repair_date}` : ""}`).join("\n") : "No offsite repair records are currently flagged. Use the parts / return target on a breakdown to bring it into this watch.", { x: 0.48, y: 6.05, w: 11.75, h: 0.45, fontFace: bodyFont, fontSize: 9.5, color: muted, breakLine: false });
+    }) : [["—", "No breakdown or service work orders on production equipment", "—", "—"]];
+    s7.addTable([tableHeader("Work order / asset", "Mechanical work", "Progress", "Blocker / parts"), ...workRows], { x: 0.38, y: 2.0, w: 12.45, h: 4.6, colW: [2.3, 4.45, 2.9, 2.8], fontSize: 8.8, rowH: 0.38, ...tableOptions });
+
+    const sOff = pptx.addSlide();
+    addChrome(sOff, "Equipment off site for repairs", 8);
+    const today = period.end;
+    const daysBetween = (a, b) => Math.max(0, Math.round((new Date(`${String(b).slice(0, 10)}T12:00:00Z`) - new Date(`${String(a).slice(0, 10)}T12:00:00Z`)) / msPerDay));
+    const statusText = (s) => String(s || "").replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+    const offRows = offsiteRows.length ? offsiteRows.slice(0, 10).map((r) => [
+      `${r.asset_code} • ${compact(r.asset_name, 22)}`,
+      compact(r.reason || "—", 52),
+      compact(r.place || r.vendor || "—", 26),
+      r.sent_date ? `${String(r.sent_date).slice(0, 10)} • ${daysBetween(r.sent_date, r.actual_return_date || today)} days` : "—",
+      compact(statusText(r.repair_status), 22),
+      r.actual_return_date ? `Returned ${String(r.actual_return_date).slice(0, 10)}` : (r.expected_return_date ? String(r.expected_return_date).slice(0, 10) : "Not set"),
+    ]) : [["—", "No equipment is off site for repairs", "—", "—", "—", "—"]];
+    sOff.addTable([tableHeader("Equipment", "Repair", "Where", "Sent / days away", "Status", "Expected back"), ...offRows], { x: 0.38, y: 2.0, w: 12.45, h: 4.4, colW: [2.6, 3.7, 1.95, 1.75, 1.2, 1.25], fontSize: 9, rowH: 0.42, ...tableOptions });
 
     const s8 = pptx.addSlide();
-    addChrome(s8, "Maintenance cost against previous week", "Same cost basis for both weeks. Change = selected week − previous week.", 8);
+    addChrome(s8, "Maintenance cost against previous week", 9);
     const costs = [
-      ["Parts issued", selectedCosts.partsIssued, previousCosts.partsIssued, "Store issues in selected period"],
+      ["Parts issued", selectedCosts.partsIssued, previousCosts.partsIssued, "Parts and lubes issued to machines and work orders"],
       ["Internal labour", selectedCosts.internalLabor, previousCosts.internalLabor, `Labour hours on work orders (planned hours where none booked) × ${money(laborRate)}/h`],
       ["External repairs", selectedCosts.externalRepairs, previousCosts.externalRepairs, "Recorded external repair costs"],
       ["Total maintenance", selectedCosts.total, previousCosts.total, "Parts issued + internal labour"],
@@ -4380,11 +4461,9 @@ export default async function reportsRoutes(app) {
     });
     s8.addText(`Current: ${dateLabel(period.start, period.end)}     Previous: ${dateLabel(previousPeriod.start, previousPeriod.end)}`, { x: 0.48, y: 1.92, w: 11.2, h: 0.2, fontFace: bodyFont, fontSize: 10, bold: true, color: blue });
     s8.addTable([tableHeader("Cost category", "Previous week", "Selected week", "Change", "Reason / reference"), ...costRows], { x: 0.42, y: 2.28, w: 12.0, h: 2.75, fontSize: 9.3, rowH: 0.5, ...tableOptions });
-    s8.addShape(pptx.ShapeType.rect, { x: 0.42, y: 5.42, w: 12.0, h: 0.75, line: { color: line, pt: 0.6 }, fill: { color: pale } });
-    s8.addText("Cost rule: count each store issue and labour charge once. Pending invoices and non-recorded external repairs stay out of the total until captured in Ironlog.", { x: 0.65, y: 5.69, w: 11.55, h: 0.18, fontFace: bodyFont, fontSize: 9.3, color: muted, align: "center" });
 
     const s9 = pptx.addSlide();
-    addChrome(s9, "Next week maintenance plan and decisions", "Open repairs, near-due services and unresolved Weekly Forum actions.", 9);
+    addChrome(s9, "Upcoming maintenance", 10);
     const plannedRows = [
       ...breakdownRows.filter((r) => String(r.status || "").toLowerCase() !== "closed").slice(0, 3).map((r, index) => {
         const wo = workOrderRows.find((w) => String(w.source || "").toLowerCase() === "breakdown" && Number(w.reference_id) === Number(r.id));
@@ -4416,7 +4495,23 @@ export default async function reportsRoutes(app) {
       ? actionRows.map((r) => `${compact(r.department, 14)}: ${compact(r.action_item, 64)} — ${compact(r.owner_name, 24)}${r.due_date ? ` (${r.due_date})` : ""}`).join("\n")
       : "No unresolved actions in the selected weekly range. Add actions in the Action Tracker so they carry into the next forum pack.";
     s9.addText(decisionText, { x: 0.48, y: 5.38, w: 11.7, h: 0.85, fontFace: bodyFont, fontSize: 9.3, color: muted, breakLine: false });
-    s9.addText("Carry unresolved decisions into the next weekly pack with an owner and due date.", { x: 0.52, y: 6.5, w: 11.5, h: 0.16, fontFace: bodyFont, fontSize: 8.8, color: teal, align: "center" });
+
+    // Month costing: last full month and the current month so far.
+    const sMonth = pptx.addSlide();
+    addChrome(sMonth, `${monthCosting[0].label} costing`, 11);
+    const monthRows = [
+      ["Parts issued", ...monthCosting.map((m) => money(m.partsIssued))],
+      ["Labour", ...monthCosting.map((m) => money(m.labour))],
+      [{ text: "Total maintenance cost", options: { bold: true, fill: { color: pale } } }, ...monthCosting.map((m) => ({ text: money(m.total), options: { bold: true, fill: { color: pale } } }))],
+      ["Parts ordered", ...monthCosting.map((m) => money(m.partsOrdered))],
+    ];
+    sMonth.addTable([tableHeader("", ...monthCosting.map((m) => m.label)), ...monthRows], { x: 0.42, y: 2.0, w: 6.2, h: 2.6, colW: [2.6, 1.8, 1.8], fontSize: 12, rowH: 0.52, align: "left", ...tableOptions });
+    sMonth.addChart(pptx.ChartType.bar, monthCosting.map((m) => ({
+      name: m.label,
+      labels: ["Parts issued", "Labour", "Parts ordered"],
+      values: [Math.round(m.partsIssued), Math.round(m.labour), Math.round(m.partsOrdered)],
+    })), { x: 6.95, y: 1.9, w: 6.0, h: 4.4, barGrouping: "clustered", showLegend: true, legendPos: "b", chartColors: ["1A1A1A", "FFCD11"], valAxisLabelFormatCode: "$#,##0", showValue: true, dataLabelFormatCode: "$#,##0", dataLabelFontSize: 8, catAxisLabelFontSize: 10 });
+    sMonth.addText("Total maintenance cost = parts issued + labour. Parts ordered is shown on its own: ordered parts are charged when they are issued.", { x: 0.42, y: 4.85, w: 6.2, h: 0.5, fontFace: bodyFont, fontSize: 9.5, color: muted, breakLine: false });
 
     const buffer = await pptx.write({ outputType: "nodebuffer" });
     return Buffer.from(buffer);

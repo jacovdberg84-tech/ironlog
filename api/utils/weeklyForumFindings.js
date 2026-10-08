@@ -126,3 +126,27 @@ export function draftWeeklyFindings({ selectedKpis = {}, previousKpis = {}, brea
   };
   return { Downtime: downtime, Repairs: repairs, Costs: costs };
 }
+
+// Production equipment for the forum's equipment KPIs. Support equipment —
+// generators, welding machines, compressors and light vehicles (LDVs) — is
+// left out of the rankings, low-use list and repair status.
+const SUPPORT_EQUIPMENT = /generat|gen\s?set|weld|compress|\bldv\b|light (delivery )?vehicle|hilux|bakkie/i;
+const SUPPORT_CODE = /^(GS|GEN|WM|CPR|COMP)\d|^V\d{2}AM$|^LDV/i;
+
+export function isProductionAsset({ category, asset_name, asset_code } = {}) {
+  if (SUPPORT_CODE.test(String(asset_code || "").trim())) return false;
+  return !SUPPORT_EQUIPMENT.test(`${category || ""} ${asset_name || ""}`);
+}
+
+/**
+ * Stock-out movements that are parts issued to a machine or job. Corrections
+ * booked as stock-out (for example removing oil captured twice) are not issues
+ * and must not be charged as maintenance cost.
+ */
+export function issuedToEquipmentSql(sm = "sm") {
+  return `(
+    ${sm}.reference LIKE 'work_order:%'
+    OR ${sm}.reference LIKE 'asset:%'
+    OR ${sm}.reference LIKE 'lube_issue:%'
+  )`;
+}
