@@ -57,6 +57,7 @@ function juneLemonSliceFail(error) {
     juneLemonSlice = { ...juneLemonSlice, warned: true, enabled: false };
     juneAvatarNote(`Animated avatar off: ${error?.message || String(error)} Voice still works.`);
   }
+  juneLemonSliceDirectVoice(juneLemonSlice);
   juneLemonSliceClearVideo();
 }
 
@@ -107,9 +108,10 @@ function juneLemonSliceQueue(path, body = {}) {
   return state.queue;
 }
 
-function juneLemonSliceFlushAudio() {
+function juneLemonSliceFlushAudio({ force = false } = {}) {
   const state = juneLemonSlice;
   if (!state?.enabled || !state.pending.length) return;
+  if (state.audioInFlight && !force) return;
   const length = state.pending.reduce((total, chunk) => total + chunk.length, 0);
   const combined = new Int16Array(length);
   let offset = 0;
@@ -118,7 +120,13 @@ function juneLemonSliceFlushAudio() {
     offset += chunk.length;
   }
   state.pending = [];
-  juneLemonSliceQueue("audio", { audio: juneLemonSliceBase64(combined) });
+  state.audioInFlight = true;
+  juneLemonSliceQueue("audio", { audio: juneLemonSliceBase64(combined) }).finally(() => {
+    if (juneLemonSlice !== state) return;
+    state.audioInFlight = false;
+    const waiting = state.pending.reduce((total, chunk) => total + chunk.length, 0);
+    if (waiting >= 800) juneLemonSliceFlushAudio();
+  });
 }
 
 function juneLemonSliceStartAudio(stream) {
@@ -127,7 +135,7 @@ function juneLemonSliceStartAudio(stream) {
   try {
     const context = new AudioContext();
     const source = context.createMediaStreamSource(stream);
-    const processor = context.createScriptProcessor(4096, 1, 1);
+    const processor = context.createScriptProcessor(2048, 1, 1);
     const silence = context.createGain();
     silence.gain.value = 0;
     processor.onaudioprocess = (event) => {
@@ -136,7 +144,9 @@ function juneLemonSliceStartAudio(stream) {
       const pcm = juneLemonSliceResample(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate);
       active.pending.push(pcm);
       const pendingSamples = active.pending.reduce((total, chunk) => total + chunk.length, 0);
-      if (pendingSamples >= 4_000) juneLemonSliceFlushAudio();
+      // ~100 ms chunks, as LemonSlice recommends; while one is on its way the
+      // next ones are gathered and sent together, so the backlog never grows.
+      if (pendingSamples >= 1_600) juneLemonSliceFlushAudio();
     };
     source.connect(processor);
     processor.connect(silence);
@@ -153,7 +163,7 @@ function juneLemonSliceStartAudio(stream) {
 
 function juneLemonSliceCommitResponse() {
   if (!juneLemonSlice?.enabled) return;
-  juneLemonSliceFlushAudio();
+  juneLemonSliceFlushAudio({ force: true });
   juneLemonSliceQueue("end-turn");
 }
 
@@ -194,7 +204,11 @@ async function juneStartLemonSliceAvatar(generation) {
     room.on(livekit.RoomEvent.TrackSubscribed, (track) => {
       const kind = String(track?.kind || "").toLowerCase();
       if (kind === "audio") {
+        // The avatar's own audio is in step with its lips. It replaces the
+        // direct voice once the video is showing (juneLemonSliceUseAvatarVoice).
+        juneLemonSlice.avatarAudio = track;
         try { track.setVolume?.(0); } catch {}
+        juneLemonSliceUseAvatarVoice();
         return;
       }
       if (kind !== "video") return;
@@ -205,6 +219,8 @@ async function juneStartLemonSliceAvatar(generation) {
       video.hidden = false;
       avatar.dataset.renderer = "lemonslice";
       video.play().catch(() => {});
+      juneLemonSlice.videoShown = true;
+      juneLemonSliceUseAvatarVoice();
     });
     room.on(livekit.RoomEvent.Disconnected, () => {
       if (juneLemonSlice?.id === session.id) juneLemonSliceFail(new Error("June's visual stream closed."));
@@ -216,6 +232,31 @@ async function juneStartLemonSliceAvatar(generation) {
     juneLemonSliceFail(error);
     return false;
   }
+}
+
+/** Hear June through the avatar (lips and voice in step) instead of the direct stream. */
+function juneLemonSliceUseAvatarVoice() {
+  const state = juneLemonSlice;
+  if (!state?.enabled || !state.videoShown || !state.avatarAudio || state.avatarVoiceOn) return;
+  try {
+    const el = state.avatarAudio.attach();
+    el.hidden = true;
+    document.body.appendChild(el);
+    state.avatarAudioEl = el;
+    state.avatarAudio.setVolume?.(1);
+    el.play?.().catch(() => {});
+    if (juneAudio) juneAudio.muted = true;
+    state.avatarVoiceOn = true;
+  } catch {
+    if (juneAudio) juneAudio.muted = false;
+  }
+}
+
+/** Back to the direct voice (avatar stopped or failed). */
+function juneLemonSliceDirectVoice(state) {
+  if (juneAudio) juneAudio.muted = false;
+  try { state?.avatarAudio?.detach?.(); } catch {}
+  try { state?.avatarAudioEl?.remove(); } catch {}
 }
 
 function juneStopLemonSliceAvatar() {
@@ -230,6 +271,7 @@ function juneStopLemonSliceAvatar() {
   try { state.silence?.disconnect(); } catch {}
   try { state.audioContext?.close(); } catch {}
   try { state.room?.disconnect(); } catch {}
+  juneLemonSliceDirectVoice(state);
   juneLemonSliceClearVideo();
   if (state.id) {
     fetch(`${API}/api/june/avatar/session/${encodeURIComponent(state.id)}/stop`, {
@@ -281,6 +323,39 @@ function juneSetState(message, tone = "neutral") {
   el.dataset.tone = tone;
   const visual = tone === "live" ? "listening" : tone === "working" ? "thinking" : "idle";
   juneSetAvatarState(visual);
+}
+
+// ---- Memory: the conversation is saved so the next session can pick it up.
+const juneMem = { user: "", june: "", sawSessionOutput: false, buf: [], timer: null };
+
+function juneMemAdd(role, text) {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  if (!t) return;
+  juneMem.buf.push({ role, text: t });
+  clearTimeout(juneMem.timer);
+  juneMem.timer = setTimeout(() => juneMemSend(), 1500);
+}
+function juneMemFlushUser() { if (juneMem.user.trim()) juneMemAdd("user", juneMem.user); juneMem.user = ""; }
+function juneMemFlushJune() { if (juneMem.june.trim()) juneMemAdd("june", juneMem.june); juneMem.june = ""; }
+function juneMemSend({ final = false } = {}) {
+  clearTimeout(juneMem.timer);
+  if (!juneMem.buf.length) return;
+  const turns = juneMem.buf.splice(0, juneMem.buf.length);
+  fetch(`${API}/api/june/memory/turns`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ turns }),
+    keepalive: final,
+  }).catch(() => {});
+}
+async function juneForgetMemory() {
+  if (!confirm("Clear June's memory of your past conversations?")) return;
+  try {
+    await juneApiJson(`${API}/api/june/memory/clear`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: "{}" });
+    juneSetState("June has forgotten your past conversations.", "ready");
+  } catch (error) {
+    juneSetState(`June could not clear her memory: ${error?.message || error}`, "warning");
+  }
 }
 
 function juneAppendTranscript(speaker, content, kind = "assistant") {
@@ -757,6 +832,8 @@ async function juneRunTool(item) {
   juneProcessedCalls.add(callId);
   let args = {};
   try { args = JSON.parse(String(item?.arguments || "{}")); } catch {}
+  juneMemFlushUser();
+  juneMemAdd("tool", `${name} ${JSON.stringify(args).slice(0, 200)}`);
   juneSetState("June is checking Ironlog…", "working");
   let output;
   try {
@@ -811,6 +888,10 @@ function juneNestedLiveEvent(envelope) {
   const type = String(event.type || "");
   if (type === "response.output_text.delta" || type === "response.output_audio_transcript.delta") {
     juneAppendTranscript("June", event.delta, "assistant");
+    if (!juneMem.sawSessionOutput) {
+      juneMemFlushUser();
+      juneMem.june += String(event.delta || "");
+    }
   }
   if (type === "response.created" || type === "response.output_item.added") {
     juneSetAvatarState("thinking");
@@ -818,9 +899,11 @@ function juneNestedLiveEvent(envelope) {
   if (type === "response.output_audio.delta") juneSetAvatarState("speaking");
   if (type === "response.done") {
     juneLemonSliceCommitResponse();
+    juneMemFlushJune();
     return;
   }
   if (type === "input_audio_buffer.speech_started") {
+    juneMemFlushJune();
     juneLemonSliceInterrupt();
     juneSetState("June is listening.", "live");
     return;
@@ -845,6 +928,7 @@ function juneHandleLiveMessage(message) {
     return;
   }
   if (type === "input_audio_buffer.speech_started") {
+    juneMemFlushJune();
     juneLemonSliceInterrupt();
     juneSetState("June is listening.", "live");
     return;
@@ -854,11 +938,16 @@ function juneHandleLiveMessage(message) {
     return;
   }
   if (type === "session.input_transcript.delta") {
+    juneMemFlushJune();
+    juneMem.user += String(event.delta || "");
     juneAppendTranscript("You", event.delta, "user");
     juneSetAvatarState("listening");
     return;
   }
   if (type === "session.output_transcript.delta") {
+    juneMem.sawSessionOutput = true;
+    juneMemFlushUser();
+    juneMem.june += String(event.delta || "");
     juneAppendTranscript("June", event.delta, "assistant");
     return;
   }
@@ -948,6 +1037,10 @@ async function juneStartLive() {
 
 function juneStopLive({ silent = false } = {}) {
   juneLiveGeneration += 1;
+  juneMemFlushUser();
+  juneMemFlushJune();
+  juneMemSend({ final: true });
+  juneMem.sawSessionOutput = false;
   juneSendEvent({ type: "session.close", event_id: juneClientEventId("june-close") });
   try { juneDataChannel?.close(); } catch {}
   try { junePeerConnection?.close(); } catch {}
@@ -977,6 +1070,7 @@ function initJune() {
 function wireJuneControls() {
   qs("juneStartBtn")?.addEventListener("click", () => juneStartLive());
   qs("juneStopBtn")?.addEventListener("click", () => juneStopLive());
+  qs("juneForgetBtn")?.addEventListener("click", () => juneForgetMemory());
   qs("juneRefreshBtn")?.addEventListener("click", () => loadJuneStatus());
   qs("juneConnectOutlookBtn")?.addEventListener("click", () => juneConnectOutlook());
   qs("juneDisconnectOutlookBtn")?.addEventListener("click", () => juneDisconnectOutlook());

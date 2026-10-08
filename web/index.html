@@ -14,7 +14,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="./styles.css?v=june-cal-1" />
+  <link rel="stylesheet" href="./styles.css?v=june-mem-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -435,6 +435,7 @@
         <div id="juneCalendarApproval" class="june-calendar-approval" hidden aria-live="polite"></div>
         <p class="june-safety-note">June can look up facts and prepare review-only task or maintenance-schedule drafts. She will never create Ironlog records, send email, or book meetings without a separate approval flow.</p>
         <p class="june-avatar-note" id="juneAvatarNote" hidden></p>
+        <div class="june-memory-row"><span class="muted small">June remembers your last two weeks of conversations.</span> <button type="button" class="june-link" id="juneForgetBtn">Forget past chats</button></div>
         <div class="june-status-line june-conversation-bar"><span class="june-live-dot" aria-hidden="true"></span><span id="juneLiveState" aria-live="polite">Checking June…</span></div>
       </section>
       <section class="dash-card june-cal" id="juneCalendarCard" hidden aria-labelledby="jcTitle">
@@ -7945,7 +7946,7 @@
   <script src="./app/collab-inbox.js?v=1"></script>
   <script src="./app/june-avatar.js?v=1"></script>
   <script src="./app/june-calendar.js?v=1"></script>
-  <script src="./app/june.js?v=15"></script>
+  <script src="./app/june.js?v=16"></script>
   <script src="./app/finance.js?v=89"></script>
   <script src="./app/enterprise.js?v=89"></script>
   <script src="./app/workshop-docs.js?v=89"></script>

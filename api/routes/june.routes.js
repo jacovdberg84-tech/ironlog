@@ -40,6 +40,7 @@ import {
   stopJuneAvatar,
 } from "../utils/juneAvatar.js";
 import { makeJuneLiveAnswerBrowserCompatible } from "../utils/juneLiveSdp.js";
+import { clearJuneMemory, juneMemoryInstructions, recentJuneTurns, saveJuneTurns } from "../utils/juneMemory.js";
 
 const OPENAI_LIVE_URL = "https://api.openai.com/v1/live/sessions";
 const LIVE_MODEL = "gpt-live-1";
@@ -62,11 +63,13 @@ let lastLiveAttempt = null;
 
 const JUNE_LIVE_INSTRUCTIONS = [
   "You are June, the private executive assistant for the Ironlog administrator.",
-  "Jaco prefers direct answers, not corporate politeness. Speak with sharp, calm confidence; be practical, decisive, and concise.",
-  "You know Jaco is capable and impatient with filler. Use dry wit, a little friendly bite, and the occasional earned tease; call out vague asks, impossible timing, or an overloaded day. Do not become rude, insulting, or performatively sarcastic.",
+  "Personality: you are friendly, warm and playful, with a quick sense of humour. You enjoy the banter of a busy mining workshop and sound like a trusted colleague, not a call-centre bot. Jaco prefers direct answers, not corporate politeness: be practical, decisive and concise.",
+  "Workshop language is fine. You may swear casually where it fits naturally, the way people talk on a workshop floor (for example 'damn', 'bloody', 'hell', 'shit', 'crap', 'bugger', 'what a pain in the arse'). Use it for colour, not in every sentence. Never swear at or about a person as an insult, never use slurs or sexual language, and never put swear words into drafts, emails or documents.",
+  "Tease Jaco now and then when it is earned, laugh with him, celebrate wins, and call out vague asks, impossible timing or an overloaded day with a grin. Do not become rude, insulting, or performatively sarcastic.",
   "You may point out when Jaco is overloading his day or piling unrelated requests together. Say what should be prioritised, then move on.",
   "If a request contradicts verified facts, challenge it clearly: state the conflict, give the evidence you have, and recommend the sensible next step.",
-  "Never tease during safety matters, incidents, injuries, financial or people-sensitive topics, frustration, or urgent operational decisions. In those cases be steady, respectful, and direct.",
+  "Never tease or swear during safety matters, incidents, injuries, financial or people-sensitive topics, real frustration, or urgent operational decisions. In those cases drop the jokes and be steady, respectful, and direct.",
+  "You remember earlier conversations when a memory recap is included below. Greet Jaco naturally and pick up open threads without making him repeat himself.",
   "Keep normal replies to one or two short sentences. For troubleshooting, give one concrete next step and wait for the answer.",
   "Use the backend whenever the user asks about their calendar, email, weather, Ironlog, Borris, tasks, KPIs, equipment, or a draft.",
   "For stores questions—stock on hand, shortages, a part lookup, or items on order—use the Stores briefing tool. It is read-only: never promise that stock was issued, ordered, received, or adjusted.",
@@ -867,6 +870,17 @@ function liveBackendModel() {
   return safeText(process.env.JUNE_BACKEND_MODEL || "gpt-5.6-terra", 100);
 }
 
+/** First name for June's memory recap ("Jaco"), from the user record. */
+function memoryName(username) {
+  try {
+    const row = db.prepare(`SELECT full_name FROM users WHERE LOWER(username) = LOWER(?)`).get(String(username || ""));
+    const first = String(row?.full_name || "").trim().split(/\s+/)[0];
+    return first || String(username || "the administrator");
+  } catch {
+    return String(username || "the administrator");
+  }
+}
+
 function safetyIdentifier(req) {
   const value = `${getUser(req)}:${getSiteCode(req)}`.toLowerCase();
   return crypto.createHash("sha256").update(value).digest("hex").slice(0, 48);
@@ -1144,6 +1158,22 @@ export default async function juneRoutes(app) {
   // ticket. The OpenAI call happens in the background, avoiding proxy timeouts
   // while GPT-Live allocates the WebRTC session. The SDP answer remains bound
   // to the authenticated administrator who created the ticket.
+  // June's memory of recent conversations (saved by the browser, recapped at session start).
+  app.post("/memory/turns", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    const saved = saveJuneTurns({ siteCode: getSiteCode(req), user: getUser(req) }, req.body?.turns);
+    return { ok: true, saved };
+  });
+  app.get("/memory", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    const turns = recentJuneTurns({ siteCode: getSiteCode(req), user: getUser(req) });
+    return { ok: true, turns, count: turns.length };
+  });
+  app.post("/memory/clear", async (req, reply) => {
+    if (!requireJuneAdmin(req, reply)) return;
+    return { ok: true, cleared: clearJuneMemory({ siteCode: getSiteCode(req), user: getUser(req) }) };
+  });
+
   app.post("/live/session", async (req, reply) => {
     if (!requireJuneAdmin(req, reply)) return;
     // SDP is line-oriented and must be forwarded exactly as the browser
@@ -1162,10 +1192,12 @@ export default async function juneRoutes(app) {
       return reply.code(429).send({ ok: false, error: "June is starting several sessions. Please retry in a moment." });
     }
     const owner = safetyIdentifier(req);
+    const context = { siteCode: getSiteCode(req), user: getUser(req) };
+    const memory = juneMemoryInstructions(context, { name: memoryName(getUser(req)) });
     const payload = {
       session: {
         model: LIVE_MODEL,
-        instructions: JUNE_LIVE_INSTRUCTIONS,
+        instructions: memory ? `${JUNE_LIVE_INSTRUCTIONS}\n\n${memory}` : JUNE_LIVE_INSTRUCTIONS,
         audio: { output: { voice: LIVE_VOICE } },
         store: false,
         delegation: {
