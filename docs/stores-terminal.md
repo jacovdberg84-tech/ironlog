@@ -13,6 +13,7 @@ Stock Control also links to it ("Stores terminal ↗" next to the tabs).
 | Storeman (`storeman` / `stores`), plant admin (`workshop_admin`), admin, supervisor | Name tile + PIN | Issue parts, Receive delivery, Workshop requests, Find stock, Count stock |
 | Technician (`artisan`) | Name tile + PIN | Collect parts for **their own** open work orders (lead or helper), Find stock |
 
+- Everyone signed in also gets **📚 Workshop library**: search the manuals (filter by type), read a manual full screen, or **Ask the manuals** a question. Each answer lists the manual pages it came from; tap one to open the manual at that page. Manuals are uploaded and indexed in the main app's Workshop Library as before. While a manual is open the idle sign-out waits 20 minutes, since touches inside the PDF viewer are not seen by the page.
 - Set each person's 4–6 digit PIN in **User Admin**. Only people with a PIN appear on the terminal.
 - Technicians are signed out after 90 seconds without a touch and straight after collecting. Storemen are signed out after 10 minutes. A yellow bar counts down the last 15 seconds.
 - Every issue is written to the work order (or machine) under the signed-in person's name, the same as an issue from Stock Control. Issuing a workshop request marks that request received.

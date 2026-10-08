@@ -25,6 +25,7 @@ test('internal library uploads, searches, downloads and rejects invalid files wi
   assert.equal(listed.json().documents[0].revision,'6.3');
   assert.equal((await app.inject('/api/workshop/documents?q=no-match')).json().documents.length,0);
   const download=await app.inject('/api/workshop/documents/'+id+'/file');assert.equal(download.body,pdf);assert.match(download.headers['content-disposition'],/^attachment/);
+  const inline=await app.inject('/api/workshop/documents/'+id+'/file?inline=1');assert.equal(inline.body,pdf);assert.match(inline.headers['content-disposition'],/^inline/);
   assert.equal((await app.inject('/api/workshop/documents/nonexistent/file')).statusCode,404);
   assert.equal((await app.inject({method:'POST',url:'/api/workshop/documents',...payload('<script>bad</script>')})).statusCode,400);
   assert.equal((await app.inject({method:'POST',url:'/api/workshop/documents',...payload(pdf,'manual.exe')})).statusCode,400);

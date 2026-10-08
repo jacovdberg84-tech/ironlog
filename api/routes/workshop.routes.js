@@ -90,7 +90,8 @@ export default async function workshopRoutes(app, options = {}) {
     const file = path.join(root,row.id + '.pdf');
     try { await fsp.access(file); } catch { return reply.code(404).send({error:'Document file unavailable'}); }
     return reply.header('Cache-Control','no-store').header('X-Content-Type-Options','nosniff')
-      .header('Content-Disposition',"attachment; filename*=UTF-8''" + encodeURIComponent(row.filename))
+      // ?inline=1 shows the PDF in the browser's viewer (the stores terminal reads manuals on screen).
+      .header('Content-Disposition',(req.query?.inline==='1'?'inline':'attachment')+"; filename*=UTF-8''" + encodeURIComponent(row.filename))
       .type('application/pdf').send(fs.createReadStream(file));
   });
 }
