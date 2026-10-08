@@ -13,6 +13,8 @@ let juneRemoteAudioStream = null;
 let juneLemonSlice = null;
 let juneLiveGeneration = 0;
 let juneLiveKitLoadPromise = null;
+// Set by the Daily briefing button: June opens the conversation with the briefing.
+let juneBriefingPending = false;
 
 function juneLemonSliceEnabled() {
   return Boolean(juneAvatarConfig?.configured);
@@ -537,8 +539,17 @@ function juneCalendarToolOutputForLive(result) {
 function juneSetConnected(connected) {
   const start = qs("juneStartBtn");
   const stop = qs("juneStopBtn");
+  const briefing = qs("juneBriefingBtn");
   if (start) start.hidden = Boolean(connected);
+  if (briefing) briefing.hidden = Boolean(connected);
   if (stop) stop.hidden = !connected;
+}
+
+function juneSetStartDisabled(disabled) {
+  for (const id of ["juneStartBtn", "juneBriefingBtn"]) {
+    const btn = qs(id);
+    if (btn) btn.disabled = Boolean(disabled);
+  }
 }
 
 function juneRenderConnectors(connectors) {
@@ -615,12 +626,10 @@ async function loadJuneStatus({ quiet = false } = {}) {
     juneRenderIcsCalendar(data?.ics_calendar || null);
     if (!data?.live_ready) {
       juneSetState("June Live needs the server OpenAI configuration.", "warning");
-      const start = qs("juneStartBtn");
-      if (start) start.disabled = true;
+      juneSetStartDisabled(true);
       return;
     }
-    const start = qs("juneStartBtn");
-    if (start) start.disabled = false;
+    juneSetStartDisabled(false);
     const lastAttempt = data?.last_live_attempt;
     if (!junePeerConnection && lastAttempt?.state === "failed") {
       const detail = String(lastAttempt?.message || "June's last live session could not start.").trim();
@@ -807,11 +816,11 @@ function juneDelay(milliseconds) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
-async function juneCreateLiveSession(sdp) {
+async function juneCreateLiveSession(sdp, { briefing = false } = {}) {
   const started = await juneApiJson(`${API}/api/june/live/session`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ sdp }),
+    body: JSON.stringify(briefing ? { sdp, briefing: true } : { sdp }),
   });
   if (!started?.ticket || started?.state !== "pending") return started;
   const ticket = encodeURIComponent(String(started.ticket));
@@ -923,6 +932,14 @@ function juneHandleLiveMessage(message) {
   try { event = JSON.parse(message?.data || "{}"); } catch { return; }
   const type = String(event?.type || "");
   if (type === "session.started") {
+    if (juneBriefingPending) {
+      // Ask June to speak first; her instructions for this session say to open with the briefing.
+      juneBriefingPending = false;
+      juneSendEvent({ type: "response.create", event_id: juneClientEventId("june-briefing") });
+      juneMemAdd("user", "Daily briefing, please.");
+      juneSetState("June is pulling your briefing together…", "working");
+      return;
+    }
     juneSetState("June is ready — start talking.", "ready");
     juneAppendTranscript("June", "June online. What are we taking on first?", "assistant");
     return;
@@ -963,15 +980,15 @@ function juneHandleLiveMessage(message) {
   juneNestedLiveEvent(event);
 }
 
-async function juneStartLive() {
+async function juneStartLive({ briefing = false } = {}) {
   if (!juneIsAdmin()) return;
   if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection) {
     juneSetState("This browser does not support the microphone connection June needs.", "warning");
     return;
   }
-  const start = qs("juneStartBtn");
   const liveGeneration = ++juneLiveGeneration;
-  if (start) start.disabled = true;
+  juneBriefingPending = Boolean(briefing);
+  juneSetStartDisabled(true);
   juneClearTranscript();
   juneSetState("Requesting microphone access…", "working");
   try {
@@ -1020,7 +1037,7 @@ async function juneStartLive() {
     if (typeof sdp !== "string" || !sdp.startsWith("v=0") || !sdp.includes("m=audio")) {
       throw new Error("June could not create a valid WebRTC offer in this browser. Please retry after refreshing Ironlog.");
     }
-    const response = await juneCreateLiveSession(sdp);
+    const response = await juneCreateLiveSession(sdp, { briefing });
     await junePeerConnection.setRemoteDescription({ type: "answer", sdp: response.sdp });
     // A visual failure (or a slow visual provider) is non-fatal: never make
     // Jaco wait for June's already-working voice, intelligence, and tools.
@@ -1031,7 +1048,7 @@ async function juneStartLive() {
     juneStopLive({ silent: true });
     juneSetState(`June could not start: ${error?.message || String(error)}`, "warning");
   } finally {
-    if (start && !junePeerConnection) start.disabled = false;
+    if (!junePeerConnection) juneSetStartDisabled(false);
   }
 }
 
@@ -1058,6 +1075,7 @@ function juneStopLive({ silent = false } = {}) {
   juneAudio = null;
   juneRemoteAudioStream = null;
   juneProcessedCalls = new Set();
+  juneBriefingPending = false;
   juneSetConnected(false);
   if (!silent) juneSetState("June is ready when you are.", "ready");
 }
@@ -1069,6 +1087,7 @@ function initJune() {
 
 function wireJuneControls() {
   qs("juneStartBtn")?.addEventListener("click", () => juneStartLive());
+  qs("juneBriefingBtn")?.addEventListener("click", () => juneStartLive({ briefing: true }));
   qs("juneStopBtn")?.addEventListener("click", () => juneStopLive());
   qs("juneForgetBtn")?.addEventListener("click", () => juneForgetMemory());
   qs("juneRefreshBtn")?.addEventListener("click", () => loadJuneStatus());
