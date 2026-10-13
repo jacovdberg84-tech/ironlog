@@ -1241,6 +1241,7 @@ function updateCartrackSpeedFloat(data) {
 }
 
 async function refreshCartrackSpeedFloat({ refresh = true } = {}) {
+  if (!qs("cartrackSpeedFloat")) return;
   const allowed = getEffectiveAllowedTabs();
   if (!allowed.includes("cartrack") && !allowed.includes("dash")) return;
   try {

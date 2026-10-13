@@ -63,7 +63,8 @@ test("June prepares an internal calendar change and only creates it after browse
       arguments: {
         action: "create",
         title: "Weekly maintenance forum",
-        event_date: "2026-10-12",
+        // A few days ahead, so it is always an upcoming entry.
+        event_date: new Date(Date.now() + 4 * 86_400_000).toISOString().slice(0, 10),
         start_time: "08:00",
         end_time: "09:00",
         category: "meeting",

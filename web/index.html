@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=dark-2" />
+  <link rel="stylesheet" href="./styles.css?v=fab-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -136,29 +136,6 @@
     </div>
   </div>
 
-  <!-- Cartrack live GPS speed floater — visible on every tab when fleet is configured -->
-  <div id="cartrackSpeedFloat" class="cartrack-speed-float is-collapsed hidden" aria-live="polite">
-    <button type="button" id="cartrackSpeedFloatTab" class="cartrack-speed-float-tab" title="Live GPS speeds">
-      <span class="cartrack-speed-float-tab-icon" aria-hidden="true">📍</span>
-      <span class="cartrack-speed-float-tab-label">GPS</span>
-      <span id="cartrackSpeedFloatBadge" class="cartrack-speed-float-badge">0</span>
-    </button>
-    <div class="cartrack-speed-float-panel">
-      <div class="cartrack-speed-float-head">
-        <div>
-          <strong>Live GPS speeds</strong>
-          <div id="cartrackSpeedFloatUpdated" class="muted mini">—</div>
-        </div>
-        <div class="cartrack-speed-float-actions">
-          <button type="button" id="cartrackSpeedFloatRefreshBtn" class="btn btn-secondary btn-sm">Refresh</button>
-          <button type="button" id="cartrackSpeedFloatMapBtn" class="btn btn-primary btn-sm">Map</button>
-          <button type="button" id="cartrackSpeedFloatMinBtn" class="cartrack-speed-float-min" aria-label="Minimize">−</button>
-        </div>
-      </div>
-      <div id="cartrackSpeedFloatList" class="cartrack-speed-float-list"></div>
-      <p class="cartrack-speed-float-foot muted mini">Cartrack + Unitech GPS — Unitech Afungi site max 60 km/h</p>
-    </div>
-  </div>
 
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-content">
@@ -7879,31 +7856,6 @@
     IRONLOG — truthful data. Production-driven KPIs.
   </footer>
 
-  <button type="button" id="ironmindHelpFab" class="ironmind-help-fab" title="Help using IRONLOG" aria-label="Help using IRONLOG">
-    <span class="ironmind-help-fab-icon" aria-hidden="true">?</span>
-  </button>
-  <div id="ironmindHelpModal" class="ironmind-help-modal-wrap" aria-hidden="true">
-    <div id="ironmindHelpBackdrop" class="ironmind-help-backdrop"></div>
-    <div class="ironmind-help-modal" role="dialog" aria-modal="true" aria-labelledby="ironmindHelpTitle">
-      <div class="ironmind-help-modal-head">
-        <div>
-          <h3 id="ironmindHelpTitle">IRONLOG help</h3>
-          <p class="muted small" id="ironmindHelpOpener">Need help?</p>
-          <p class="muted small">Section: <span id="ironmindHelpContextLabel">—</span></p>
-        </div>
-        <button type="button" id="ironmindHelpClose" class="btn btn-secondary btn-sm">Close</button>
-      </div>
-      <p class="muted small" style="margin: 0 0 10px;">
-        Ask how to use buttons and flows on this screen. For fleet analysis and downtime insight, open the <strong>Borris</strong> tab.
-      </p>
-      <textarea id="ironmindHelpInput" rows="4" class="w-full" placeholder="What would you like to do here? (Ctrl+Enter to send)"></textarea>
-      <div class="ironmind-help-actions">
-        <button type="button" id="ironmindHelpSend" class="btn btn-primary btn-sm">Ask</button>
-        <button type="button" id="ironmindHelpClear" class="btn btn-secondary btn-sm">Clear chat</button>
-      </div>
-      <pre class="ironmind-help-answer" id="ironmindHelpAnswer"></pre>
-    </div>
-  </div>
 
   <datalist id="assetCodeOptions"></datalist>
   <datalist id="costCenterOptions"></datalist>
@@ -7921,7 +7873,7 @@
   <script src="./app/admin.js?v=91"></script>
   <script src="./app/inspections.js?v=90"></script>
   <script src="./app/ui-helpers.js?v=89"></script>
-  <script src="./app/telematics.js?v=91"></script>
+  <script src="./app/telematics.js?v=92"></script>
   <script src="./app/dashboard.js?v=90"></script>
   <script src="./app/borris.js?v=91"></script>
   <script src="./app/fuel-lube.js?v=90"></script>
