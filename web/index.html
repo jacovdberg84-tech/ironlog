@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=dev-1" />
+  <link rel="stylesheet" href="./styles.css?v=dev-2" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -7466,54 +7466,97 @@
       </div>
     </section>
 
-    <!-- DEVELOPER CODING AGENT -->
+    <!-- DEVELOPER: CLAUDE AS IRONLOG'S CODER -->
     <section class="panel" id="tab-developer">
       <div class="card stack-12">
         <div class="section-head-row">
           <div>
             <h3>Developer</h3>
             <p class="muted" id="devIntro">
-              The coding agent for IronLog. Borris answers fleet questions and June handles the day.
-              This agent reads the app, writes the change in a sandbox, and waits for you before anything is merged.
+              Ask Claude for a change to IronLog. Claude writes it on GitHub and opens it for review.
+              Nothing reaches the live site until you merge the pull request; the normal deploy does the rest.
             </p>
           </div>
           <button type="button" id="devRefreshBtn">Refresh</button>
         </div>
-        <p class="muted" id="devAgentStatus">Checking the coder…</p>
+
+        <div class="dev-setup" id="devSetup" hidden>
+          <strong>Setup</strong>
+          <ul class="dev-checklist" id="devChecklist"></ul>
+        </div>
+
         <div class="dev-layout">
           <div class="dev-compose">
-            <h4>New coding job</h4>
+            <h4>New request</h4>
             <label>
               Title
-              <input id="devTitle" placeholder="Short name for the change" />
+              <input id="devTitle" maxlength="120" placeholder="e.g. Add a fuel-cost column to the Daily Log" />
             </label>
             <label>
-              What should the coder change?
-              <textarea id="devRequest" rows="7" placeholder="Describe the screen, the behaviour, and what must stay the same."></textarea>
+              What should Claude change?
+              <textarea id="devRequest" rows="7" placeholder="Which screen, what it should do, who uses it, and what must stay the same."></textarea>
             </label>
-            <label>
-              Priority
-              <select id="devPriority">
-                <option value="low">Low</option>
-                <option value="medium" selected>Medium</option>
-                <option value="high">High</option>
-                <option value="urgent">Urgent</option>
-              </select>
-            </label>
-            <button type="button" class="btn-primary" id="devCreateBtn">Plan this change</button>
-            <p id="devMsg" class="muted"></p>
-            <h4>Jobs</h4>
-            <div class="list" id="devJobList"></div>
+            <div class="dev-row">
+              <label>
+                Priority
+                <select id="devPriority">
+                  <option value="low">Low</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </label>
+              <fieldset class="dev-models">
+                <legend>Claude model</legend>
+                <label class="dev-model"><input type="radio" name="devModel" value="opus" checked /> <span><b>Opus</b><small>Bigger or trickier jobs</small></span></label>
+                <label class="dev-model"><input type="radio" name="devModel" value="sonnet" /> <span><b>Sonnet</b><small>Quick, small changes</small></span></label>
+              </fieldset>
+            </div>
+            <button type="button" class="btn-primary" id="devCreateBtn">Send to Claude</button>
+            <p id="devMsg" class="muted" aria-live="polite"></p>
+            <h4>Requests</h4>
+            <div class="dev-jobs" id="devJobList"></div>
           </div>
-          <div class="dev-detail">
-            <h4 id="devDetailTitle">No job open</h4>
-            <p class="muted" id="devDetailMeta"></p>
-            <div class="row" id="devActions"></div>
-            <label id="devRejectWrap" hidden>
-              Reason to stop
-              <input id="devRejectReason" placeholder="Why this change should stop" />
-            </label>
-            <pre class="output dev-preview" id="devPreview">Open a job to see the plan and the code diff.</pre>
+
+          <div class="dev-detail" id="devDetail">
+            <div class="dev-empty" id="devEmpty">
+              <strong>How it works</strong>
+              <ol>
+                <li>You send a request. It becomes a GitHub issue for Claude.</li>
+                <li>Claude reads the code, makes the change on its own branch and runs the tests.</li>
+                <li>You open the pull request here and review it on GitHub.</li>
+                <li>Merge it and the normal deploy puts it live. This tab follows every step.</li>
+              </ol>
+            </div>
+            <div id="devView" hidden>
+              <div class="dev-view-head">
+                <div>
+                  <h4 id="devDetailTitle"></h4>
+                  <p class="muted" id="devDetailMeta"></p>
+                </div>
+                <span class="dev-chip" id="devDetailChip"></span>
+              </div>
+              <ol class="dev-steps" id="devSteps"></ol>
+              <div class="dev-links" id="devLinks"></div>
+              <div class="row" id="devActions"></div>
+              <div class="dev-note-wrap">
+                <strong>Claude's latest note</strong>
+                <pre class="dev-note" id="devNote"></pre>
+              </div>
+              <div id="devFiles"></div>
+              <label class="dev-reply">
+                Reply to Claude
+                <textarea id="devReplyText" rows="3" placeholder="Answer a question, ask for a change, or say what to fix."></textarea>
+              </label>
+              <div class="row">
+                <button type="button" id="devReplyBtn">Send reply</button>
+                <button type="button" id="devCloseBtn">Close request</button>
+              </div>
+              <details class="dev-request-text">
+                <summary>Original request</summary>
+                <pre id="devRequestText"></pre>
+              </details>
+            </div>
           </div>
         </div>
       </div>
@@ -7952,7 +7995,7 @@
   <script src="./app/site-ops.js?v=89"></script>
   <script src="./app/daily-input.js?v=89"></script>
   <script src="./app/assets.js?v=89"></script>
-  <script src="./app/developer.js?v=1"></script>
+  <script src="./app/developer.js?v=2"></script>
   <script src="./app/init.js?v=92"></script>
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=90"></script>
