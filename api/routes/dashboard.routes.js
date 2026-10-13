@@ -608,8 +608,10 @@ export default async function dashboardRoutes(app) {
     const downtimeOnlyIds = Array.from(downtimeByAsset.keys())
       .map((id) => Number(id || 0))
       .filter((id) => id > 0 && !assetIdsInHours.has(id));
+    // A day marked standby in Daily Input is not downtime: an open breakdown
+    // must not impute a full day for it. Only explicitly logged downtime counts.
     const openBreakdownOnlyIds = Array.from(openBreakdownAssets).filter(
-      (id) => id > 0 && !assetIdsInHours.has(id)
+      (id) => id > 0 && !assetIdsInHours.has(id) && !dailyStandbyIds.has(id)
     );
     const includeIds = Array.from(new Set([...downtimeOnlyIds, ...openBreakdownOnlyIds, ...missingFleetIds]));
     if (includeIds.length) {
@@ -632,6 +634,8 @@ export default async function dashboardRoutes(app) {
 
         const scheduled = Math.max(0, Number(scheduledFallback || 0));
         const loggedDownRaw = Math.max(0, Number(downtimeByAsset.get(assetId) || 0));
+        const onStandby = dailyStandbyIds.has(assetId);
+        if (onStandby && loggedDownRaw <= 0) continue;
         const loggedDown = loggedDownRaw > 0
           ? loggedDownRaw
           : (openBreakdownAssets.has(assetId) ? scheduled : 0);
