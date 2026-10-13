@@ -120,7 +120,7 @@ export function securityCheck(site, today) {
  * The briefing tool result. Breakdowns and calendar are passed in from the
  * routes (they own those helpers); weather is fetched here.
  */
-export async function buildDailyBriefing({ site = briefingSite(), now = new Date(), ironlogBrief, calendarToday, fetchImpl } = {}) {
+export async function buildDailyBriefing({ site = briefingSite(), now = new Date(), ironlogBrief, calendarToday, developer, fetchImpl } = {}) {
   const today = siteToday(site.timezone, now);
   const [brief, calendar, weather] = await Promise.all([
     Promise.resolve().then(() => ironlogBrief(today)).catch((e) => ({ error: String(e?.message || e) })),
@@ -128,6 +128,9 @@ export async function buildDailyBriefing({ site = briefingSite(), now = new Date
     getSiteWeather(site, fetchImpl ? { fetchImpl } : {}),
   ]);
   const breakdowns = Array.isArray(brief?.open_breakdowns) ? brief.open_breakdowns : [];
+  // Changes Claude has ready for review, or is working on (Developer Centre).
+  let dev = null;
+  try { dev = developer ? developer() : null; } catch { dev = null; }
   return {
     review_only: true,
     date: today,
@@ -144,11 +147,13 @@ export async function buildDailyBriefing({ site = briefingSite(), now = new Date
       next_step: `Use web search for today's weather in ${site.name}, ${site.country}.`,
     },
     security_check: securityCheck(site, today),
+    ...(dev ? { developer: dev } : {}),
     order: [
       "Breakdowns: count, critical ones first, what is waiting on parts, anything down a long time.",
       "Today's calendar: meetings and reminders in time order.",
       `Weather in ${site.name} today.`,
       "Security: recent incidents near site, or that nothing recent was found.",
+      ...(dev ? ["Developer Centre: in one line, changes from Claude waiting for review, and what Claude is still working on."] : []),
       "Finish by asking what to tackle first.",
     ],
   };

@@ -41,6 +41,7 @@ import {
 } from "../utils/juneAvatar.js";
 import { makeJuneLiveAnswerBrowserCompatible } from "../utils/juneLiveSdp.js";
 import { clearJuneMemory, juneMemoryInstructions, recentJuneTurns, saveJuneTurns } from "../utils/juneMemory.js";
+import { developerBriefing, developerStatusForJune, openDeveloperRequest, prepareDeveloperReply, prepareDeveloperRequest } from "../utils/juneDeveloper.js";
 import { JUNE_REPORT_KEYS, buildJuneCostReport, buildJuneKpiReport, prepareJuneReportFile } from "../utils/juneReports.js";
 import { BRIEFING_LIVE_INSTRUCTIONS, buildDailyBriefing, briefingSite, siteToday } from "../utils/juneDailyBriefing.js";
 
@@ -77,6 +78,7 @@ const JUNE_LIVE_INSTRUCTIONS = [
   "When Jaco asks for his daily briefing, the morning rundown, or to be brought up to speed, delegate to the backend's daily briefing tool plus a web search for recent security incidents near site, then brief him in about a minute: breakdowns, today's calendar, weather, security.",
   "When Jaco asks about a specific work order (for example 'WO 349'), delegate to the work order tool: it returns the facts and also opens that work order in a pop-up on his screen. Tell him it is on screen, then give the short version.",
   "For costs, spend, budgets, cost per machine or cost per hour, delegate to the costing report tool. For availability, utilisation, downtime or breakdown trends, delegate to the KPI report tool. Discuss and deliberate with Jaco: say what moved, why it likely moved, what you would check next, and where the data is thin. Quote money in US dollars, rounded sensibly; never invent a number the tools did not return.",
+  "Claude is IronLog's coder, in the Developer Centre (Admin → Developer). When Jaco asks what Claude is working on, delegate to the developer status tool. When he asks Claude for a change, or wants to reply to Claude, delegate to the prepare tools: they put an editable card on screen, and Jaco presses Send himself. Never say a request or reply was sent; say it is on screen to check and send. Changes are reviewed and merged on GitHub by Jaco, never by June.",
   "When Jaco wants a report file (monthly report, cost Excel, KPI pack, machine history and so on), prepare it with the report file tool and tell him the button to open it is on screen.",
   "For stores questions—stock on hand, shortages, a part lookup, or items on order—use the Stores briefing tool. It is read-only: never promise that stock was issued, ordered, received, or adjusted.",
   "When the administrator asks for a maintenance schedule for named equipment, prepare the review-only schedule through the backend. Once it reports an Excel file is ready, say it is ready to review and download on screen; never read an internal report identifier aloud.",
@@ -97,6 +99,7 @@ const JUNE_BACKEND_INSTRUCTIONS = [
   "For a daily briefing, call june_daily_briefing first. If its weather is unavailable, web search today's weather for the site. Always web search recent security incidents near the places in its security_check, following its rules: only the last 7 days, with place, date and source, and say plainly when nothing recent is found.",
   "For calendar or email requests, first call the relevant connector function. If it is not connected, explain the connection requirement without pretending to access data.",
   "For engineering questions, use June's Borris engineering tool and identify uncertainty or missing source data.",
+  "For the Developer Centre: june_developer_status lists Claude's requests (refresh it before answering). To ask Claude for a change, write a clear title and a request_text that names the screen, who uses it, what it should do and what must stay the same, then call june_prepare_developer_request. Use model sonnet for small tweaks and opus for anything touching money, stock, permissions or outside data. To answer or redirect Claude, call june_prepare_developer_reply. These only prepare an editable card; nothing is sent until Jaco presses Send.",
   "For a question about one work order, call june_open_work_order with its number; it also opens the work order on the administrator's screen.",
   "For cost questions use june_cost_report; for availability, utilisation, downtime and breakdown trends use june_kpi_report. Both compare with the previous period: explain the biggest movers, separate real cost from rate assumptions, flag month-to-date comparisons, and suggest what to check next. For a report file use june_prepare_report_file.",
   "For stores questions, use the dedicated read-only Stores tool. Report the on-hand quantity, minimum, shortage, and open-order status exactly as returned; do not invent a receipt date or stock allocation.",
@@ -187,6 +190,53 @@ const TOOL_DEFINITIONS = [
         as_of: { type: "string", description: "Optional YYYY-MM-DD date for the meter and schedule snapshot." },
       },
       required: ["asset_codes"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "june_developer_status",
+    description: "What Claude (IronLog's coder in the Developer Centre) is working on: recent requests with their status, what is waiting for the administrator's review, and Claude's latest note on each.",
+    parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
+  },
+  {
+    type: "function",
+    name: "june_prepare_developer_request",
+    description: "Prepare a new change request for Claude and show it on screen as an editable card. The administrator edits it and presses Send; this tool never sends anything.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Short name for the change, under 120 characters." },
+        request_text: { type: "string", description: "What Claude should change: the screen, who uses it, what it should do, and what must stay the same." },
+        priority: { type: "string", enum: ["low", "medium", "high", "urgent"] },
+        model: { type: "string", enum: ["opus", "sonnet"], description: "sonnet for small tweaks, opus for bigger or riskier work." },
+      },
+      required: ["title", "request_text"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "june_prepare_developer_reply",
+    description: "Prepare a reply to Claude on an existing Developer Centre request and show it on screen as an editable card. The administrator presses Send; this tool never sends anything.",
+    parameters: {
+      type: "object",
+      properties: {
+        request: { type: "string", description: "Which request: its issue number (e.g. 61) or words from its title. Leave empty for the latest unfinished one." },
+        message: { type: "string", description: "What Claude should do next." },
+      },
+      required: ["message"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "june_open_developer_request",
+    description: "Open one Developer Centre request on the administrator's screen.",
+    parameters: {
+      type: "object",
+      properties: { request: { type: "string", description: "Issue number or words from the title." } },
+      required: ["request"],
       additionalProperties: false,
     },
   },
@@ -945,6 +995,7 @@ function getJuneDailyBriefing(context) {
     site,
     ironlogBrief: (today) => getIronlogBrief(today),
     calendarToday: (today) => getJuneCalendarToday(context, today, site.timezone),
+    developer: () => developerBriefing(context),
   });
 }
 
@@ -1018,6 +1069,10 @@ async function executeGatewayTool(name, args, context) {
   if (tool === "june_calendar_overview") return getJuneCalendarOverview(context);
   if (tool === "june_daily_briefing") return getJuneDailyBriefing(context);
   if (tool === "june_open_work_order") return getWorkOrderForJune(safeArgs.work_order_id);
+  if (tool === "june_developer_status") return developerStatusForJune(context);
+  if (tool === "june_prepare_developer_request") return prepareDeveloperRequest(safeArgs);
+  if (tool === "june_prepare_developer_reply") return prepareDeveloperReply(context, safeArgs);
+  if (tool === "june_open_developer_request") return openDeveloperRequest(context, safeArgs);
   if (tool === "june_cost_report") return buildJuneCostReport(safeArgs, { siteCode: context.siteCode, today: siteToday(briefingSite().timezone) });
   if (tool === "june_kpi_report") return buildJuneKpiReport(safeArgs, { siteCode: context.siteCode, today: siteToday(briefingSite().timezone) });
   if (tool === "june_prepare_report_file") return prepareJuneReportFile(safeArgs, { today: siteToday(briefingSite().timezone) });
