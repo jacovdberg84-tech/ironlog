@@ -103,6 +103,88 @@ function devLink(url, text) {
   return url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(text)} ↗</a>` : "";
 }
 
+// Claude's notes are GitHub markdown. The common parts are shown formatted;
+// the text is escaped first, so HTML in a note is shown as text, never run.
+function devInline(text) {
+  const kept = [];
+  const keep = (html) => `\u0000${kept.push(html) - 1}\u0000`;
+  let s = escapeHtml(text)
+    .replace(/`([^`]+)`/g, (_, c) => keep(`<code>${c}</code>`))
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => keep(`<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`))
+    .replace(/https?:\/\/(?:(?!&quot;|&lt;|&gt;)[^\s\u0000])+/g, (url) => {
+      const tail = url.match(/[.,;:!?)\]']+$/)?.[0] || "";
+      const href = url.slice(0, url.length - tail.length);
+      return keep(`<a href="${href}" target="_blank" rel="noopener noreferrer">${href}</a>`) + tail;
+    });
+  s = s
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/__(.+?)__/g, "<strong>$1</strong>")
+    .replace(/~~(.+?)~~/g, "<del>$1</del>")
+    .replace(/(^|[^*\w])\*(?![\s*])([^*]+?)\*(?!\w)/g, "$1<em>$2</em>");
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => kept[Number(i)]);
+}
+
+function devMarkdown(md) {
+  const out = [];
+  let para = [];
+  let list = null;
+  let code = null;
+  const flushPara = () => {
+    if (para.length) out.push(`<p>${para.map(devInline).join("<br>")}</p>`);
+    para = [];
+  };
+  const closeList = () => {
+    if (list) out.push(`</${list}>`);
+    list = null;
+  };
+  const lines = String(md || "").replace(/\u0000/g, "").replace(/\r\n?/g, "\n").split("\n");
+  for (const line of lines) {
+    if (code) {
+      if (/^\s*```/.test(line)) {
+        out.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`);
+        code = null;
+      } else code.push(line);
+      continue;
+    }
+    let m;
+    if (/^\s*```/.test(line)) {
+      flushPara(); closeList();
+      code = [];
+    } else if (!line.trim()) {
+      flushPara(); closeList();
+    } else if ((m = line.match(/^\s{0,3}(#{1,6})\s+(.*?)[\s#]*$/))) {
+      flushPara(); closeList();
+      const tag = m[1].length <= 2 ? "h4" : m[1].length === 3 ? "h5" : "h6";
+      out.push(`<${tag}>${devInline(m[2])}</${tag}>`);
+    } else if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      flushPara(); closeList();
+      out.push("<hr>");
+    } else if ((m = line.match(/^\s*>\s?(.*)$/))) {
+      flushPara(); closeList();
+      out.push(`<blockquote>${devInline(m[1])}</blockquote>`);
+    } else if ((m = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/))) {
+      flushPara();
+      const type = /\d/.test(m[2]) ? "ol" : "ul";
+      if (list !== type) { closeList(); out.push(`<${type}>`); list = type; }
+      const sub = m[1].length >= 2 ? " dev-md-sub" : "";
+      const task = m[3].match(/^\[([ xX])\]\s*(.*)$/);
+      if (task) {
+        const done = task[1] !== " ";
+        out.push(`<li class="dev-md-task${sub}"><span class="dev-md-box${done ? " done" : ""}" role="img" aria-label="${done ? "Done" : "Not done"}">${done ? "✓" : ""}</span><span>${devInline(task[2])}</span></li>`);
+      } else {
+        out.push(`<li${sub ? ` class="${sub.trim()}"` : ""}>${devInline(m[3])}</li>`);
+      }
+    } else {
+      closeList();
+      para.push(line.trim());
+    }
+  }
+  if (code) out.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`);
+  flushPara();
+  closeList();
+  return out.join("");
+}
+
 function renderDeveloperDetail(job) {
   const view = qs("devView");
   const empty = qs("devEmpty");
@@ -153,8 +235,8 @@ function renderDeveloperDetail(job) {
     deploy_failed: "The merge went through but the deploy failed. Open the deploy run for the details.",
     failed: d.refresh_error ? `GitHub said: ${d.refresh_error}` : "This request could not be sent to GitHub.",
   };
-  qs("devNote").textContent = d.claude_note || hints[job.status] || "No note from Claude yet.";
-  if (hints[job.status] && d.claude_note) qs("devNote").textContent = `${hints[job.status]}\n\n${d.claude_note}`;
+  const hint = hints[job.status] ? `<p class="dev-note-hint">${escapeHtml(hints[job.status])}</p>` : "";
+  qs("devNote").innerHTML = hint + (d.claude_note ? devMarkdown(d.claude_note) : hint ? "" : `<p class="muted">No note from Claude yet.</p>`);
 
   const files = d.changes?.files || [];
   qs("devFiles").innerHTML = files.length
