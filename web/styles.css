@@ -2817,6 +2817,12 @@ body {
   font-size: 13px;
 }
 
+/* The date box needs room for the whole date (day, month and year) */
+.icon-btn-label input[type="date"] {
+  width: auto;
+  min-width: 118px;
+}
+
 /* Settings dropdown */
 .dropdown-menu {
   position: relative;
