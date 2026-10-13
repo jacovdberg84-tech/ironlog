@@ -9082,3 +9082,16 @@ body.wo-popup .wo-drawer-head { display: none; }
   #tab-developer .dev-layout { grid-template-columns: 1fr; }
   #tab-developer .dev-row { grid-template-columns: 1fr; }
 }
+
+/* ---------- June: editable cards for the Developer Centre ---------- */
+.june-dev-card { display: grid; gap: 8px; padding: 12px; border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--accent) 6%, var(--card)); text-align: left; }
+.june-dev-head strong { display: block; font-size: 13px; }
+.june-dev-head span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+.june-dev-card label { display: grid; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ink); }
+.june-dev-card input, .june-dev-card textarea, .june-dev-card select { width: 100%; font-weight: 400; font-size: 13px; }
+.june-dev-card textarea { resize: vertical; min-height: 64px; font-family: inherit; line-height: 1.4; }
+.june-dev-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.june-dev-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.june-dev-status { margin: 0; font-size: 12px; color: var(--muted); }
+.june-dev-status:empty { display: none; }
+.june-dev-status.error { color: var(--danger); }

@@ -214,6 +214,22 @@ export async function inspectRequest(client, { repo, issueNumber }) {
   };
 }
 
+/** Ask GitHub where a stored request stands and save the answer. */
+export async function refreshDeveloperRow({ dbConn = defaultDb, row, gh, repo }) {
+  if (!row?.issue_number) return row;
+  try {
+    const detail = await inspectRequest(gh, { repo, issueNumber: row.issue_number });
+    dbConn.prepare(`UPDATE developer_requests SET status = ?, status_json = ?, checked_at = datetime('now') WHERE id = ?`)
+      .run(detail.status, JSON.stringify(detail), row.id);
+  } catch (err) {
+    let previous = {};
+    try { previous = row.status_json ? JSON.parse(row.status_json) : {}; } catch { previous = {}; }
+    dbConn.prepare(`UPDATE developer_requests SET status_json = ?, checked_at = datetime('now') WHERE id = ?`)
+      .run(JSON.stringify({ ...previous, refresh_error: String(err.message || err).slice(0, 300) }), row.id);
+  }
+  return dbConn.prepare(`SELECT * FROM developer_requests WHERE id = ?`).get(row.id);
+}
+
 export const STATUS_TEXT = {
   sending: "Sending to GitHub",
   waiting: "Waiting for Claude to start",

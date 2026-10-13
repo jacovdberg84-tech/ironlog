@@ -11,6 +11,7 @@ import {
   githubClient,
   githubSettings,
   inspectRequest,
+  refreshDeveloperRow,
   validateRequest,
 } from "../utils/developerClaude.js";
 
@@ -52,19 +53,7 @@ export default async function developerRoutes(app, opts = {}) {
   };
   const rowById = (id, site) => db.prepare(`SELECT * FROM developer_requests WHERE id = ? AND site_code = ?`).get(id, site);
 
-  async function refresh(row, gh, repo) {
-    if (!row.issue_number) return row;
-    try {
-      const detail = await inspectRequest(gh, { repo, issueNumber: row.issue_number });
-      db.prepare(`UPDATE developer_requests SET status = ?, status_json = ?, checked_at = datetime('now') WHERE id = ?`)
-        .run(detail.status, JSON.stringify(detail), row.id);
-    } catch (err) {
-      const previous = row.status_json ? JSON.parse(row.status_json) : {};
-      db.prepare(`UPDATE developer_requests SET status_json = ?, checked_at = datetime('now') WHERE id = ?`)
-        .run(JSON.stringify({ ...previous, refresh_error: String(err.message || err).slice(0, 300) }), row.id);
-    }
-    return db.prepare(`SELECT * FROM developer_requests WHERE id = ?`).get(row.id);
-  }
+  const refresh = (row, gh, repo) => refreshDeveloperRow({ dbConn: db, row, gh, repo });
 
   // What is set up, so the tab can show a checklist instead of failing later.
   app.get("/status", async (req, reply) => {

@@ -382,6 +382,113 @@ function juneClearTranscript() {
   if (host) host.innerHTML = "";
 }
 
+/** Small DOM helper for June's cards: text is always set as text, never as HTML. */
+function juneEl(tag, props = {}, children = []) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "text") el.textContent = v;
+    else if (k === "className") el.className = v;
+    else el.setAttribute(k, v);
+  }
+  for (const c of children) if (c) el.append(c);
+  return el;
+}
+
+/**
+ * June prepared a request or a reply for Claude (Developer Centre). Show it as
+ * an editable card; only the administrator's Send goes to /api/developer.
+ */
+function juneRenderDeveloperDraft(result) {
+  const host = qs("juneDraftDownloads");
+  const draft = result?.draft;
+  if (!host || !result?.ready || !draft) return;
+  const isReply = result.kind === "developer_reply";
+  const card = juneEl("div", { className: "june-dev-card" });
+  const head = juneEl("div", { className: "june-dev-head" }, [
+    juneEl("strong", { text: isReply ? `Reply to Claude · ${draft.title}` : "New request for Claude" }),
+    juneEl("span", { text: "Prepared by June. Check it, edit if needed, then send." }),
+  ]);
+  const fields = [];
+  let titleInput = null;
+  let prioritySelect = null;
+  let modelSelect = null;
+  if (!isReply) {
+    titleInput = juneEl("input", { type: "text", maxlength: "120", "aria-label": "Title" });
+    titleInput.value = draft.title || "";
+    fields.push(juneEl("label", {}, [juneEl("span", { text: "Title" }), titleInput]));
+  }
+  const textArea = juneEl("textarea", { rows: isReply ? "3" : "5", "aria-label": isReply ? "Reply" : "What should Claude change?" });
+  textArea.value = isReply ? draft.message || "" : draft.request_text || "";
+  fields.push(juneEl("label", {}, [juneEl("span", { text: isReply ? "Reply" : "What should Claude change?" }), textArea]));
+  if (!isReply) {
+    prioritySelect = juneEl("select", { "aria-label": "Priority" });
+    for (const p of ["low", "medium", "high", "urgent"]) {
+      const o = juneEl("option", { value: p, text: p[0].toUpperCase() + p.slice(1) });
+      if (p === draft.priority) o.selected = true;
+      prioritySelect.append(o);
+    }
+    modelSelect = juneEl("select", { "aria-label": "Claude model" });
+    for (const [v, label] of [["opus", "Opus"], ["sonnet", "Sonnet"]]) {
+      const o = juneEl("option", { value: v, text: label });
+      if (v === draft.model) o.selected = true;
+      modelSelect.append(o);
+    }
+    fields.push(juneEl("div", { className: "june-dev-row" }, [
+      juneEl("label", {}, [juneEl("span", { text: "Priority" }), prioritySelect]),
+      juneEl("label", {}, [juneEl("span", { text: "Model" }), modelSelect]),
+    ]));
+  }
+  const status = juneEl("p", { className: "june-dev-status", "aria-live": "polite" });
+  const send = juneEl("button", { type: "button", className: "btn btn-primary btn-sm", text: isReply ? "Send reply" : "Send to Claude" });
+  const discard = juneEl("button", { type: "button", className: "btn btn-secondary btn-sm", text: "Discard" });
+  const actions = juneEl("div", { className: "june-dev-actions" }, [send, discard]);
+  discard.addEventListener("click", () => {
+    card.remove();
+    if (!host.children.length) host.hidden = true;
+  });
+  send.addEventListener("click", async () => {
+    send.disabled = true;
+    status.className = "june-dev-status";
+    status.textContent = "Sending…";
+    try {
+      let res;
+      if (isReply) {
+        res = await fetchJson(`${API}/api/developer/requests/${Number(draft.request_id)}/reply`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: textArea.value }),
+        });
+      } else {
+        res = await fetchJson(`${API}/api/developer/requests`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: titleInput.value, request_text: textArea.value, priority: prioritySelect.value, model: modelSelect.value }),
+        });
+      }
+      for (const el of [titleInput, textArea, prioritySelect, modelSelect]) if (el) el.disabled = true;
+      const id = Number(res?.row?.id || draft.request_id || 0);
+      status.textContent = isReply ? "Reply sent. Claude will pick it up shortly." : `Sent to Claude as issue #${res?.row?.issue_number}.`;
+      const follow = juneEl("button", { type: "button", className: "btn btn-secondary btn-sm", text: "Follow it in Developer" });
+      follow.addEventListener("click", () => juneShowDeveloperRequest(id));
+      actions.replaceChildren(follow);
+    } catch (err) {
+      send.disabled = false;
+      status.className = "june-dev-status error";
+      status.textContent = err?.message || String(err);
+    }
+  });
+  card.append(head, ...fields, actions, status);
+  host.replaceChildren(card);
+  host.hidden = false;
+  (titleInput || textArea).focus({ preventScroll: true });
+}
+
+/** Switch to the Developer tab with one request open. */
+function juneShowDeveloperRequest(id) {
+  if (typeof switchTab === "function") switchTab("developer");
+  if (id && typeof openDeveloperJob === "function") setTimeout(() => openDeveloperJob(id).catch(() => {}), 300);
+}
+
 /** June prepared a report file: show an Open button (a tap is needed to open a tab). */
 function juneRenderReportFile(result) {
   const host = qs("juneDraftDownloads");
@@ -893,6 +1000,12 @@ async function juneRunTool(item) {
           expires_in_minutes: output.download.expires_in_minutes,
         } : null,
       };
+    }
+    if (name === "june_prepare_developer_request" || name === "june_prepare_developer_reply") {
+      juneRenderDeveloperDraft(output);
+    }
+    if (name === "june_open_developer_request" && output?.found) {
+      juneShowDeveloperRequest(output.request?.request_id);
     }
     if (name === "june_prepare_report_file") {
       juneRenderReportFile(output);
