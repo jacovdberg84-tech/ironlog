@@ -9,6 +9,7 @@ let developerJobs = [];
 let developerSelectedId = 0;
 let developerBusy = false;
 let developerTimer = null;
+let developerSetupOpen = false;
 
 const DEV_ACTIVE = new Set(["sending", "waiting", "working", "code_ready", "in_review", "checks_running", "checks_failing", "merged", "deploying", "needs_you"]);
 const DEV_TONE = {
@@ -58,27 +59,49 @@ function devAgo(ts) {
   return new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
-async function loadDeveloperSetup() {
+// Builds the setup checklist from the /status answer. "ready" means GitHub is
+// connected and Claude's workflow is in the repository.
+function developerSetupState(data) {
+  const items = [];
+  items.push(data.github_configured
+    ? { ok: data.checks?.repo?.ok !== false, text: data.checks?.repo?.ok === false ? `GitHub key is set but GitHub refused it: ${data.checks.repo.error}` : `Connected to GitHub (${data.repo})` }
+    : { ok: false, text: "Connect GitHub: add a repository secret IRONLOG_GITHUB_TOKEN (a fine-grained token for the IronLog repo with Issues and Pull requests read/write; Contents, Actions and Checks read). The next deploy passes it to the server." });
+  if (data.github_configured && data.checks?.repo?.ok) {
+    items.push(data.checks?.workflow?.ok
+      ? { ok: true, text: "Claude's GitHub workflow is in the repository" }
+      : { ok: false, text: data.checks?.workflow?.error || "Claude's GitHub workflow is missing" });
+  }
+  items.push({ ok: null, text: "Give Claude a key on GitHub: install the Claude GitHub app on the repository, then add CLAUDE_CODE_OAUTH_TOKEN (your Claude subscription) or ANTHROPIC_API_KEY (pay as you go) as a repository secret." });
+  return { items, ready: items.every((i) => i.ok !== false) };
+}
+
+// When everything is ready the orange box shrinks to one green line; clicking it opens the checklist.
+function showDeveloperSetup(ready) {
   const box = qs("devSetup");
+  const line = qs("devReady");
+  if (line) {
+    line.hidden = !ready;
+    line.setAttribute("aria-expanded", String(developerSetupOpen));
+  }
+  if (box) box.hidden = ready && !developerSetupOpen;
+}
+
+function toggleDeveloperSetup() {
+  developerSetupOpen = !developerSetupOpen;
+  showDeveloperSetup(!qs("devReady")?.hidden);
+}
+
+async function loadDeveloperSetup() {
   const list = qs("devChecklist");
-  if (!box || !list) return;
+  if (!qs("devSetup") || !list) return;
   try {
     const data = await developerRequest("/status");
-    const items = [];
-    items.push(data.github_configured
-      ? { ok: data.checks?.repo?.ok !== false, text: data.checks?.repo?.ok === false ? `GitHub key is set but GitHub refused it: ${data.checks.repo.error}` : `Connected to GitHub (${data.repo})` }
-      : { ok: false, text: "Connect GitHub: add a repository secret IRONLOG_GITHUB_TOKEN (a fine-grained token for the IronLog repo with Issues and Pull requests read/write; Contents, Actions and Checks read). The next deploy passes it to the server." });
-    if (data.github_configured && data.checks?.repo?.ok) {
-      items.push(data.checks?.workflow?.ok
-        ? { ok: true, text: "Claude's GitHub workflow is in the repository" }
-        : { ok: false, text: data.checks?.workflow?.error || "Claude's GitHub workflow is missing" });
-    }
-    items.push({ ok: null, text: "Give Claude a key on GitHub: install the Claude GitHub app on the repository, then add CLAUDE_CODE_OAUTH_TOKEN (your Claude subscription) or ANTHROPIC_API_KEY (pay as you go) as a repository secret." });
+    const { items, ready } = developerSetupState(data);
     list.innerHTML = items.map((i) => `<li class="${i.ok === true ? "ok" : i.ok === false ? "todo" : "info"}">${i.ok === true ? "✓" : i.ok === false ? "•" : "ℹ"} ${escapeHtml(i.text)}</li>`).join("");
-    box.hidden = items.every((i) => i.ok !== false) && developerJobs.length > 0;
+    showDeveloperSetup(ready);
   } catch (err) {
     list.innerHTML = `<li class="todo">• ${escapeHtml(err.message || String(err))}</li>`;
-    box.hidden = false;
+    showDeveloperSetup(false);
   }
 }
 
@@ -290,6 +313,7 @@ function initDeveloperTab() {
   window.__developerTabReady = true;
   qs("devCreateBtn")?.addEventListener("click", () => createDeveloperJob());
   qs("devRefreshBtn")?.addEventListener("click", () => refreshDeveloperTab());
+  qs("devReady")?.addEventListener("click", () => toggleDeveloperSetup());
   qs("devJobList")?.addEventListener("click", (event) => {
     const button = event.target?.closest?.("[data-dev-open]");
     if (button) openDeveloperJob(button.getAttribute("data-dev-open")).catch((err) => developerMsg(err.message || String(err), true));
