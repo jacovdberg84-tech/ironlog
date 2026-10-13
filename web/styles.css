@@ -9018,6 +9018,8 @@ body.wo-popup .wo-drawer-head { display: none; }
 #tab-developer .dev-model span { display: flex; flex-direction: column; line-height: 1.25; }
 #tab-developer .dev-model small { color: var(--muted); font-size: 0.78rem; }
 #tab-developer .dev-setup { padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--warn) 8%, var(--card)); }
+#tab-developer .dev-ready { display: block; width: 100%; text-align: left; padding: 8px 14px; border: 1px solid color-mix(in srgb, var(--success) 45%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--success) 10%, var(--card)); color: var(--success); font-weight: 600; font-size: 0.9rem; cursor: pointer; }
+#tab-developer .dev-ready[hidden] { display: none; }
 #tab-developer .dev-checklist { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 0.9rem; }
 #tab-developer .dev-checklist li.ok { color: var(--success); }
 #tab-developer .dev-checklist li.info { color: var(--muted); }
