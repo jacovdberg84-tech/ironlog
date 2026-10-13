@@ -1,9 +1,10 @@
-// IRONLOG/api/routes/reports/operations-exports.routes.js — Daily, GM, cost and maintenance-cost Excel exports, rain days.
+// IRONLOG/api/routes/reports/operations-exports.routes.js — Daily, GM, cost and maintenance-cost Excel exports, fuel cost PDF, rain days.
 // Registered by routes/reports.routes.js; shared helpers arrive through ctx.
 import ExcelJS from "exceljs";
 import fs from "node:fs";
 import path from "node:path";
 import { buildAmlWeeklyCheckSheet } from "../../utils/amlWeeklyCheckSheet.js";
+import { buildFuelCostPdf, buildFuelCostReport } from "../../utils/fuelCostReport.js";
 import { buildPdfBuffer, kvGrid, sectionTitle, table, tryDrawLogo } from "../../utils/pdfGenerator.js";
 import { db } from "../../db/client.js";
 import { isDate } from "../../utils/request.js";
@@ -1281,6 +1282,27 @@ export default function registerOperationsExportsRoutes(app, ctx) {
     reply
       .header("Content-Type", "application/pdf")
       .header("Content-Disposition", `${download ? "attachment" : "inline"}; filename="AML_Maintenance_Cost_By_Equipment_${label}.pdf"`)
+      .send(pdf);
+  });
+
+  // GET /api/reports/fuel-cost.pdf?month=YYYY-MM&download=1
+  // GET /api/reports/fuel-cost.pdf?start=YYYY-MM-DD&end=YYYY-MM-DD&download=1
+  app.get("/fuel-cost.pdf", async (req, reply) => {
+    const resolved = resolveMaintenancePeriod(req);
+    if (!resolved) {
+      return reply.code(400).send({ error: "Provide month=YYYY-MM or start/end=YYYY-MM-DD" });
+    }
+    const { period, label } = resolved;
+    if (period.start > period.end) {
+      return reply.code(400).send({ error: "The From date must be on or before the To date" });
+    }
+    const download = String(req.query?.download || "").trim() === "1";
+    const report = buildFuelCostReport(db, period, costDefaults());
+    const pdf = await buildFuelCostPdf(report, { logoPath: path.join(process.cwd(), "branding", "logo.png") });
+
+    reply
+      .header("Content-Type", "application/pdf")
+      .header("Content-Disposition", `${download ? "attachment" : "inline"}; filename="AML_Fuel_Cost_${label}.pdf"`)
       .send(pdf);
   });
 }

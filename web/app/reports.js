@@ -191,6 +191,100 @@ async function openMaintenanceCostByEquipmentPdf(download = false) {
   }
 }
 
+// Fuel cost PDF: month wins; otherwise a From/To range. Preview stays inside the Reports tab.
+let fuelCostPdfBlobUrl = "";
+let fuelCostPdfShownQuery = "";
+
+function fuelCostPdfQuery() {
+  const month = (qs("fuelCostMonth")?.value || "").trim();
+  const start = (qs("fuelCostStart")?.value || "").trim();
+  const end = (qs("fuelCostEnd")?.value || "").trim();
+  if (month) return `month=${encodeURIComponent(month)}`;
+  if (!start || !end) {
+    alert("Select a month, or a From and To date first.");
+    return null;
+  }
+  if (start > end) {
+    alert("The From date must be on or before the To date.");
+    return null;
+  }
+  return `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
+}
+
+async function loadFuelCostPdfPreview(q) {
+  const wrap = qs("fuelCostPdfPreview");
+  const frame = qs("fuelCostPdfFrame");
+  if (!wrap || !frame) return false;
+  setStatus("Preparing Fuel Cost PDF…");
+  const res = await fetch(`${API}/api/reports/fuel-cost.pdf?${q}`, { headers: authHeaders() });
+  const blob = await res.blob();
+  if (!res.ok) {
+    if (res.status === 401 && LOGIN_GATE_ENABLED) {
+      promptSignInAgain();
+      throw new Error("Your sign-in has ended. Please sign in again, then repeat this step.");
+    }
+    let msg = await blob.text().catch(() => "");
+    try {
+      const j = JSON.parse(msg);
+      msg = j.error || j.message || msg;
+    } catch {}
+    throw new Error(msg || `Request failed (${res.status})`);
+  }
+  if (fuelCostPdfBlobUrl) URL.revokeObjectURL(fuelCostPdfBlobUrl);
+  fuelCostPdfBlobUrl = URL.createObjectURL(blob);
+  fuelCostPdfShownQuery = q;
+  const loaded = new Promise((resolve) => frame.addEventListener("load", resolve, { once: true }));
+  frame.src = fuelCostPdfBlobUrl;
+  setText("fuelCostPdfLabel", q.startsWith("month=")
+    ? `Fuel cost for ${decodeURIComponent(q.slice(6))}`
+    : `Fuel cost ${(qs("fuelCostStart")?.value || "")} to ${(qs("fuelCostEnd")?.value || "")}`);
+  wrap.hidden = false;
+  await Promise.race([loaded, new Promise((resolve) => setTimeout(resolve, 4000))]);
+  setStatus("Fuel Cost PDF ready.");
+  return true;
+}
+
+async function previewFuelCostPdf() {
+  const q = fuelCostPdfQuery();
+  if (!q) return;
+  try { await loadFuelCostPdfPreview(q); } catch (err) { alert(`Could not open Fuel Cost PDF: ${err.message || err}`); }
+}
+
+function downloadFuelCostPdf() {
+  const q = fuelCostPdfQuery();
+  if (!q) return;
+  downloadAuthedFile(`${API}/api/reports/fuel-cost.pdf?${q}&download=1`, "fuel-cost.pdf");
+}
+
+async function printFuelCostPdf() {
+  const q = fuelCostPdfQuery();
+  if (!q) return;
+  try {
+    if (q !== fuelCostPdfShownQuery || !fuelCostPdfBlobUrl) await loadFuelCostPdfPreview(q);
+  } catch (err) {
+    alert(`Could not print Fuel Cost PDF: ${err.message || err}`);
+    return;
+  }
+  try {
+    const win = qs("fuelCostPdfFrame").contentWindow;
+    win.focus();
+    win.print();
+  } catch {
+    // Some browsers (mostly phones) cannot print an embedded PDF; open it so the viewer's own print button works.
+    window.open(fuelCostPdfBlobUrl, "_blank");
+  }
+}
+
+function closeFuelCostPdfPreview() {
+  const wrap = qs("fuelCostPdfPreview");
+  const frame = qs("fuelCostPdfFrame");
+  if (frame) frame.removeAttribute("src");
+  if (wrap) wrap.hidden = true;
+  if (fuelCostPdfBlobUrl) URL.revokeObjectURL(fuelCostPdfBlobUrl);
+  fuelCostPdfBlobUrl = "";
+  fuelCostPdfShownQuery = "";
+}
+
 function downloadMaintenanceExecutivePptx() {
   const month = (qs("costMonth")?.value || "").trim();
   const start = (qs("maintCostStart")?.value || "").trim();
@@ -532,6 +626,10 @@ function wireReportControls() {
   qs("downloadMaintenanceCostByEquipmentXlsx")?.addEventListener("click", downloadMaintenanceCostByEquipmentXlsx);
   qs("openMaintenanceCostByEquipmentPdf")?.addEventListener("click", () => openMaintenanceCostByEquipmentPdf(false));
   qs("downloadMaintenanceCostByEquipmentPdf")?.addEventListener("click", () => openMaintenanceCostByEquipmentPdf(true));
+  qs("previewFuelCostPdf")?.addEventListener("click", previewFuelCostPdf);
+  qs("downloadFuelCostPdf")?.addEventListener("click", downloadFuelCostPdf);
+  qs("printFuelCostPdf")?.addEventListener("click", printFuelCostPdf);
+  qs("closeFuelCostPdf")?.addEventListener("click", closeFuelCostPdfPreview);
   qs("downloadMaintenanceExecutivePptx")?.addEventListener("click", downloadMaintenanceExecutivePptx);
   qs("downloadGMUpcomingCostsPptx")?.addEventListener("click", downloadGMUpcomingCostsPptx);
   qs("downloadGMBudgetMeetingDocx")?.addEventListener("click", downloadGMBudgetMeetingDocx);

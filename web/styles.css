@@ -4893,6 +4893,27 @@ body.sidebar-collapsed .main-content {
   width: 100%;
 }
 
+.fuel-cost-preview {
+  margin-top: 12px;
+}
+
+.fuel-cost-preview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.fuel-cost-preview iframe {
+  width: 100%;
+  height: 70vh;
+  min-height: 420px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}
+
 /* Responsive reports */
 @media (max-width: 768px) {
   .reports-grid {
