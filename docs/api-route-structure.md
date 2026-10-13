@@ -31,7 +31,7 @@ A helper only one feature file uses can simply live in that file.
 
 - `fuel-lube.routes.js`: Lube and fuel reports (benchmark, reconciliation, machine history)
 - `inspections.routes.js`: Inspection, damage report and legal compliance reports
-- `operations-exports.routes.js`: Daily, GM, cost and maintenance-cost Excel exports, rain days
+- `operations-exports.routes.js`: Daily, GM, cost and maintenance-cost Excel exports, fuel cost PDF, rain days
 - `period-reports.routes.js`: Daily, weekly, monthly, operations and executive pack reports
 - `presentations.routes.js`: Maintenance master, executive and GM presentations and documents
 - `settings.routes.js`: Custom report builder, SMTP and PDF settings, report subscriptions

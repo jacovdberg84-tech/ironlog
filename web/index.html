@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=june-dev-2" />
+  <link rel="stylesheet" href="./styles.css?v=fuel-cost-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -7045,6 +7045,50 @@
           </div>
         </div>
 
+        <!-- Fuel Cost Report -->
+        <div class="report-card collapsible report-card-wide" data-report-category="management operations" data-collapsed="false">
+          <div class="report-card-header">
+            <div class="report-card-title">
+              <div class="report-card-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18"></path><line x1="3" y1="22" x2="15" y2="22"></line><rect x="6" y="5" width="6" height="5"></rect><path d="M15 9h2a2 2 0 0 1 2 2v6a1.5 1.5 0 0 0 3 0V8l-3-3"></path></svg>
+              </div>
+              <div>
+                <h3>Fuel Cost Report</h3>
+                <p class="muted small">Fuel cost per machine and category (USD) — same figures as the Monthly Cost Excel</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <div class="report-form">
+              <label class="chk">Month
+                <input id="fuelCostMonth" type="month" />
+              </label>
+              <label class="chk">or From
+                <input id="fuelCostStart" type="date" />
+              </label>
+              <label class="chk">To
+                <input id="fuelCostEnd" type="date" />
+              </label>
+            </div>
+            <p class="muted small">Pick a month, or clear the month and choose a From / To date range.</p>
+            <div class="report-actions">
+              <button id="previewFuelCostPdf" class="btn btn-primary">Preview PDF</button>
+              <button id="downloadFuelCostPdf" class="btn btn-secondary">Download PDF</button>
+              <button id="printFuelCostPdf" class="btn btn-secondary">Print</button>
+            </div>
+            <div id="fuelCostPdfPreview" class="fuel-cost-preview" hidden>
+              <div class="fuel-cost-preview-bar">
+                <span id="fuelCostPdfLabel" class="muted small"></span>
+                <button id="closeFuelCostPdf" class="btn btn-secondary">Close preview</button>
+              </div>
+              <iframe id="fuelCostPdfFrame" title="Fuel cost PDF preview"></iframe>
+            </div>
+          </div>
+        </div>
+
         <!-- Equipment Hours Report -->
         <div class="report-card collapsible report-card-wide" data-report-category="operations maintenance" data-collapsed="false">
           <div class="report-card-header">
@@ -7983,7 +8027,7 @@
   <script src="./app/compliance.js?v=89r"></script>
   <script src="./app/tabs.js?v=90"></script>
   <script src="./app/uploads.js?v=89"></script>
-  <script src="./app/reports.js?v=89"></script>
+  <script src="./app/reports.js?v=90"></script>
   <script src="./app/breakdowns.js?v=90"></script>
   <script src="./app/inventory.js?v=92"></script>
   <script src="./app/stock-receive.js?v=2"></script>
