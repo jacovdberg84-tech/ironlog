@@ -121,13 +121,12 @@ export function validateRequest(input = {}) {
 
 const isClaude = (user) => /claude/i.test(String(user?.login || "")) && (user?.type === "Bot" || /\[bot\]$/.test(String(user?.login || "")));
 
-/** Plain text from Claude's markdown/HTML comment, for the IronLog view. */
+/** Claude's comment with the HTML removed; the markdown is kept for the IronLog view to format. */
 export function plainComment(body, max = 4000) {
   return String(body || "")
     .replace(/<img[^>]*>/gi, "")
     .replace(/<\/?(details|summary|br|p|div|span|sub|sup)[^>]*>/gi, "\n")
     .replace(/<[^>]+>/g, "")
-    .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, "$1")
     .replace(/\n{3,}/g, "\n\n")
     .trim()
     .slice(0, max);
