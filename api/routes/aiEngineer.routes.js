@@ -6,6 +6,8 @@ import { spawnSync } from "node:child_process";
 import { runAgent } from "../utils/aiEngineer/orchestrator.js";
 import { chooseTargetFiles } from "../utils/aiEngineer/heuristics.js";
 import { buildProposalMarkdown } from "../utils/aiEngineer/agents/planner.js";
+import { ALLOWED_PATH_PREFIXES, CODER_MAX_TOOL_ROUNDS, CODER_MODEL, PLANNER_MODEL } from "../utils/aiEngineer/config.js";
+import { isOpenAiCompatibleConfigured } from "../utils/llmChat.js";
 import { getSiteCode, getRoles } from "../utils/request.js";
 
 const ALLOWED_ROLES = new Set([
@@ -702,8 +704,29 @@ function executeGuardedPipeline({ requestRow, startedBy, planDetails = null }) {
   };
 }
 
+export function developerAgentStatus() {
+  const hasOpenAiKey = Boolean(String(process.env.OPENAI_API_KEY || "").trim());
+  const compatible = isOpenAiCompatibleConfigured();
+  return {
+    ok: true,
+    agent: "coder",
+    name: "IronLog Coder",
+    coder_model: CODER_MODEL,
+    planner_model: PLANNER_MODEL,
+    coder_ready: hasOpenAiKey || compatible,
+    tool_loop_ready: hasOpenAiKey,
+    max_tool_rounds: CODER_MAX_TOOL_ROUNDS,
+    sandbox: ALLOWED_PATH_PREFIXES,
+  };
+}
+
 export default async function aiEngineerRoutes(app) {
   ensureTables();
+
+  app.get("/status", async (req, reply) => {
+    if (!requireRole(req, reply)) return;
+    return reply.send(developerAgentStatus());
+  });
 
   app.get("/requests", async (req, reply) => {
     if (!requireRole(req, reply)) return;

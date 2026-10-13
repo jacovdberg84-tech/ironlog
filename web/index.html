@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=fab-1" />
+  <link rel="stylesheet" href="./styles.css?v=dev-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -288,6 +288,10 @@
 
       <div class="nav-section" data-nav-section="admin">
         <div class="nav-section-title">Admin</div>
+        <a href="#" class="nav-item" data-tab="developer" title="Coding agent for IronLog changes">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+          <span>Developer</span>
+        </a>
         <a href="#" class="nav-item" data-tab="uploads" title="Bulk import data from CSV files">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
           <span>CSV Uploads</span>
@@ -348,6 +352,7 @@
           <option value="docs">AI Documents</option>
         </optgroup>
         <optgroup label="Admin">
+          <option value="developer">Developer</option>
           <option value="uploads">CSV Uploads</option>
           <option value="audit">Audit Trail</option>
           <option value="admin">Users & Access</option>
@@ -7461,6 +7466,59 @@
       </div>
     </section>
 
+    <!-- DEVELOPER CODING AGENT -->
+    <section class="panel" id="tab-developer">
+      <div class="card stack-12">
+        <div class="section-head-row">
+          <div>
+            <h3>Developer</h3>
+            <p class="muted" id="devIntro">
+              The coding agent for IronLog. Borris answers fleet questions and June handles the day.
+              This agent reads the app, writes the change in a sandbox, and waits for you before anything is merged.
+            </p>
+          </div>
+          <button type="button" id="devRefreshBtn">Refresh</button>
+        </div>
+        <p class="muted" id="devAgentStatus">Checking the coder…</p>
+        <div class="dev-layout">
+          <div class="dev-compose">
+            <h4>New coding job</h4>
+            <label>
+              Title
+              <input id="devTitle" placeholder="Short name for the change" />
+            </label>
+            <label>
+              What should the coder change?
+              <textarea id="devRequest" rows="7" placeholder="Describe the screen, the behaviour, and what must stay the same."></textarea>
+            </label>
+            <label>
+              Priority
+              <select id="devPriority">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </label>
+            <button type="button" class="btn-primary" id="devCreateBtn">Plan this change</button>
+            <p id="devMsg" class="muted"></p>
+            <h4>Jobs</h4>
+            <div class="list" id="devJobList"></div>
+          </div>
+          <div class="dev-detail">
+            <h4 id="devDetailTitle">No job open</h4>
+            <p class="muted" id="devDetailMeta"></p>
+            <div class="row" id="devActions"></div>
+            <label id="devRejectWrap" hidden>
+              Reason to stop
+              <input id="devRejectReason" placeholder="Why this change should stop" />
+            </label>
+            <pre class="output dev-preview" id="devPreview">Open a job to see the plan and the code diff.</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- AI DOCUMENTS -->
     <section class="panel" id="tab-docs">
       <div class="card stack-12">
@@ -7869,7 +7927,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=2"></script>
   <!-- Main app, split by feature. Order matters: files share one global scope. -->
-  <script src="./app/core.js?v=93"></script>
+  <script src="./app/core.js?v=94"></script>
   <script src="./app/admin.js?v=91"></script>
   <script src="./app/inspections.js?v=90"></script>
   <script src="./app/ui-helpers.js?v=89"></script>
@@ -7879,7 +7937,7 @@
   <script src="./app/fuel-lube.js?v=90"></script>
   <script src="./app/stock.js?v=93"></script>
   <script src="./app/compliance.js?v=89r"></script>
-  <script src="./app/tabs.js?v=89"></script>
+  <script src="./app/tabs.js?v=90"></script>
   <script src="./app/uploads.js?v=89"></script>
   <script src="./app/reports.js?v=89"></script>
   <script src="./app/breakdowns.js?v=90"></script>
@@ -7894,7 +7952,8 @@
   <script src="./app/site-ops.js?v=89"></script>
   <script src="./app/daily-input.js?v=89"></script>
   <script src="./app/assets.js?v=89"></script>
-  <script src="./app/init.js?v=91"></script>
+  <script src="./app/developer.js?v=1"></script>
+  <script src="./app/init.js?v=92"></script>
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=90"></script>
   <script src="./app/collab-inbox.js?v=1"></script>

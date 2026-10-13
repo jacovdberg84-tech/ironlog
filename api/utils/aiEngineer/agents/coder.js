@@ -28,7 +28,23 @@ function dispatchTool(registry, name, args) {
   }
 }
 
-async function runCoderToolLoop({ requestRow, worktreePath, targetFiles }) {
+function planBrief(planDetails) {
+  if (!planDetails) return "";
+  const steps = Array.isArray(planDetails.implementation_steps) ? planDetails.implementation_steps : [];
+  const criteria = Array.isArray(planDetails.acceptance_criteria) ? planDetails.acceptance_criteria : [];
+  const lines = ["APPROVED PLAN:"];
+  if (steps.length) {
+    lines.push("Implementation steps:");
+    for (const step of steps) lines.push(`- ${step}`);
+  }
+  if (criteria.length) {
+    lines.push("Acceptance criteria:");
+    for (const item of criteria) lines.push(`- ${item}`);
+  }
+  return lines.length > 1 ? `${lines.join("\n")}\n` : "";
+}
+
+async function runCoderToolLoop({ requestRow, worktreePath, targetFiles, planDetails = null }) {
   const client = getOpenAIClient();
   if (!client) {
     return { ok: false, error: "OPENAI_API_KEY required for coder tool loop.", model: CODER_MODEL };
@@ -49,7 +65,8 @@ async function runCoderToolLoop({ requestRow, worktreePath, targetFiles }) {
     `TITLE: ${String(requestRow?.title || "")}`,
     `REQUEST: ${String(requestRow?.request_text || "")}`,
     "",
-    "Produce a valid unified diff via git_apply_check.",
+    planBrief(planDetails),
+    "Read and search the sandbox before editing. Produce a valid unified diff via git_apply_check.",
   ].join("\n");
 
   const messages = [
@@ -132,7 +149,7 @@ async function runCoderToolLoop({ requestRow, worktreePath, targetFiles }) {
   };
 }
 
-async function runCoderSingleShot({ requestRow, worktreePath, targetFiles }) {
+async function runCoderSingleShot({ requestRow, worktreePath, targetFiles, planDetails = null }) {
   const registry = createToolRegistry({ repoRoot: worktreePath, worktreePath });
   const fileBodies = targetFiles
     .map((rel) => {
@@ -156,6 +173,7 @@ async function runCoderSingleShot({ requestRow, worktreePath, targetFiles }) {
     `TITLE: ${String(requestRow?.title || "")}`,
     `REQUEST: ${String(requestRow?.request_text || "")}`,
     "",
+    planBrief(planDetails),
     "TARGET FILES:",
     ...targetFiles.map((f) => `- ${f}`),
     "",
@@ -221,10 +239,10 @@ export async function runCoderAgent({ requestRow, worktreePath, targetFiles, pla
   }
 
   if (getOpenAIClient()) {
-    const result = await runCoderToolLoop({ requestRow, worktreePath, targetFiles: files });
+    const result = await runCoderToolLoop({ requestRow, worktreePath, targetFiles: files, planDetails });
     if (result.ok) return result;
     if (isOpenAiCompatibleConfigured()) {
-      const fallback = await runCoderSingleShot({ requestRow, worktreePath, targetFiles: files });
+      const fallback = await runCoderSingleShot({ requestRow, worktreePath, targetFiles: files, planDetails });
       if (fallback.ok) {
         return {
           ...fallback,
@@ -243,5 +261,5 @@ export async function runCoderAgent({ requestRow, worktreePath, targetFiles, pla
     };
   }
 
-  return runCoderSingleShot({ requestRow, worktreePath, targetFiles: files });
+  return runCoderSingleShot({ requestRow, worktreePath, targetFiles: files, planDetails });
 }

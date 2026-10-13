@@ -9004,3 +9004,59 @@ body.wo-popup .wo-drawer-head { display: none; }
 /* Plain links keep the browser's dark blue otherwise. */
 [data-theme="dark"] a:not([class]), [data-theme="dark"] a:not([class]) strong { color: var(--accent); }
 [data-theme="dark"] #tab-cartrack .cartrack-map-status { background: rgba(15, 23, 42, 0.88); color: var(--ink); }
+
+/* ---------- Developer coding agent ---------- */
+#tab-developer .dev-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+#tab-developer .dev-compose,
+#tab-developer .dev-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#tab-developer .dev-compose label,
+#tab-developer .dev-detail label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 600;
+}
+#tab-developer .dev-compose input,
+#tab-developer .dev-compose textarea,
+#tab-developer .dev-compose select,
+#tab-developer .dev-detail input {
+  width: 100%;
+  font-weight: 400;
+}
+#tab-developer .dev-preview {
+  max-height: 560px;
+  min-height: 220px;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+}
+#tab-developer .dev-job {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  margin-bottom: 8px;
+}
+#tab-developer .dev-job.active {
+  border-color: var(--accent);
+}
+#tab-developer .dev-job small {
+  color: var(--muted);
+  font-weight: 400;
+}
+@media (max-width: 980px) {
+  #tab-developer .dev-layout {
+    grid-template-columns: 1fr;
+  }
+}

@@ -8,6 +8,7 @@ async function init() {
   initSidebar();
   initDashboardActionHub();
   initTabs();
+  initDeveloperTab();
   initWorkshopLibraryTab();
   initIronmindHelpUi();
   initSectionCollapseToggles();

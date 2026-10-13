@@ -17,7 +17,7 @@ export const CODER_MODEL =
   String(process.env.AI_ENGINEER_MODEL || "").trim() ||
   "gpt-4o";
 
-export const CODER_MAX_TOOL_ROUNDS = Number(process.env.AI_ENGINEER_CODER_MAX_ROUNDS || 10);
+export const CODER_MAX_TOOL_ROUNDS = Number(process.env.AI_ENGINEER_CODER_MAX_ROUNDS || 16);
 
 export function isAllowedRelativePath(relPath) {
   const p = String(relPath || "").replace(/\\/g, "/").replace(/^\/+/, "");

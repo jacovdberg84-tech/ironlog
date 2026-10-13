@@ -34,6 +34,7 @@ const PRODUCTION_SITE_TABS = [
   "parts-tracking",
   "reports",
   "ironmind",
+  "developer",
 ];
 const PRODUCTION_NAV_ENABLED = true;
 /** Dashboard cards hidden during production UI cleanup (remove class `hidden` in index.html to restore). */
@@ -1048,6 +1049,7 @@ function getEffectiveAllowedTabs() {
   }
   // "admin" is not an assignable section in the multiselect; always allow the User admin tab for these roles
   if (roles.includes("admin") && !list.includes("admin")) list = [...list, "admin"];
+  if (roles.includes("admin") && !list.includes("developer")) list = [...list, "developer"];
   // My Work is the home screen for every signed-in user; keep it first so it is the landing tab.
   list = ["mywork", ...list.filter((t) => t !== "mywork")];
   return list;
@@ -1095,7 +1097,7 @@ function applyRoleVisibility() {
   const tabSelect = qs("tabSelect");
   if (tabSelect) {
     Array.from(tabSelect.options).forEach((opt) => {
-      if (opt.value === "admin") {
+      if (opt.value === "admin" || opt.value === "developer") {
         opt.hidden = !roles.includes("admin");
         return;
       }
@@ -1113,7 +1115,7 @@ function applyRoleVisibility() {
       const tab = item.dataset.tab;
       const navKey = item.dataset.nav || tab;
       if (!navKey) return;
-      if (tab === "admin") {
+      if (tab === "admin" || tab === "developer") {
         item.style.display = roles.includes("admin") ? "" : "none";
         return;
       }
@@ -1230,6 +1232,8 @@ function initGlobalSearch() {
         "checklists": "vehicle",
         "prestart": "vehicle",
         "admin": "admin",
+        "developer": "developer",
+        "coder": "developer",
         "ai": "docs",
         "ironmind": "ironmind"
       };

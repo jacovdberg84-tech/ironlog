@@ -46,6 +46,9 @@ function switchTab(key) {
     renderOfflineQueueAdminPanel();
     ensureAdminTabOptions().catch(() => {});
   }
+  if (k === "developer" && typeof refreshDeveloperTab === "function") {
+    refreshDeveloperTab();
+  }
   if (k === "telematics") {
     loadTelematicsTab().catch(() => {});
   }
@@ -105,6 +108,7 @@ const IRONLOG_HELP_OPENERS = {
   telematics: "Need help with telematics units and faults?",
   cartrack: "Need help with live Cartrack fleet tracking?",
   admin: "Need help with user admin?",
+  developer: "Need help with the Developer coding agent?",
   docs: "Need help with AI documents?",
   ironmind:
     "Borris analyses fleet data here — use this Help button only for how to use IRONLOG screens.",
