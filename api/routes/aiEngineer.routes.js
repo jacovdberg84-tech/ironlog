@@ -1031,6 +1031,15 @@ export default async function aiEngineerRoutes(app) {
 
   app.post("/requests/:id/merge", async (req, reply) => {
     if (!requireRole(req, reply)) return;
+    // Merging on the server commits straight onto the live checkout. The
+    // deploy then fails its `git pull --ff-only` because the server no longer
+    // matches GitHub. Changes now go through a pull request (Developer tab).
+    if (process.env.AI_ENGINEER_ALLOW_SERVER_MERGE !== "1") {
+      return reply.code(410).send({
+        ok: false,
+        error: "Merging on the server is switched off. Use the Developer tab: Claude opens a pull request, you review and merge it on GitHub, and the normal deploy updates the server.",
+      });
+    }
     const siteCode = getSiteCode(req);
     const user = getUserName(req);
     const id = Number(req.params?.id || 0);

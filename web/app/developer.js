@@ -1,9 +1,33 @@
-// IRONLOG/web/app/developer.js — Developer tab coding agent.
+// IRONLOG/web/app/developer.js — Developer tab: requests to Claude.
 // Part of the main app; index.html loads these files in order and they share one global scope.
+//
+// A request becomes a GitHub issue for Claude (see api/utils/developerClaude.js).
+// This tab follows each one through: Claude working → code ready → pull
+// request → checks → merged → live, and lets the admin reply to Claude.
 
 let developerJobs = [];
 let developerSelectedId = 0;
 let developerBusy = false;
+let developerTimer = null;
+
+const DEV_ACTIVE = new Set(["sending", "waiting", "working", "code_ready", "in_review", "checks_running", "checks_failing", "merged", "deploying", "needs_you"]);
+const DEV_TONE = {
+  waiting: "info", working: "info", sending: "info", checks_running: "info", deploying: "info", merged: "info",
+  code_ready: "ready", in_review: "ready", needs_you: "warn",
+  deployed: "good",
+  not_started: "bad", checks_failing: "bad", deploy_failed: "bad", failed: "bad",
+  closed: "muted",
+};
+// The pipeline shown for every request, and the status that completes each step.
+const DEV_STEPS = [
+  { key: "sent", label: "Sent", done: () => true },
+  { key: "working", label: "Claude working", done: (d) => Boolean(d?.claude_note || d?.branch) },
+  { key: "code", label: "Code ready", done: (d) => Boolean(d?.branch) },
+  { key: "pr", label: "Pull request", done: (d) => Boolean(d?.pull_request) },
+  { key: "checks", label: "Checks", done: (d) => d?.checks?.state === "passing" || Boolean(d?.pull_request?.merged_at) },
+  { key: "merged", label: "Merged", done: (d) => Boolean(d?.pull_request?.merged_at) },
+  { key: "live", label: "Live", done: (d) => d?.deploy?.conclusion === "success" },
+];
 
 function developerMsg(text, isError = false) {
   const el = qs("devMsg");
@@ -12,39 +36,49 @@ function developerMsg(text, isError = false) {
   el.textContent = String(text || "");
 }
 
-function developerStatusLabel(status) {
-  const labels = {
-    draft: "Draft",
-    planned: "Plan ready",
-    approved: "Approved",
-    executed: "Sandbox ready",
-    patch_ready: "Code ready",
-    patch_applied: "Applied in sandbox",
-    merged: "Merged",
-    rejected: "Stopped",
-  };
-  const key = String(status || "draft").toLowerCase();
-  return labels[key] || key;
-}
-
 async function developerRequest(path, opts = {}) {
-  return fetchJson(`${API}/api/ai-engineer${path}`, opts);
+  return fetchJson(`${API}/api/developer${path}`, opts);
 }
 
-async function loadDeveloperAgentStatus() {
-  const el = qs("devAgentStatus");
-  if (!el) return;
+function developerPostJson(path, body) {
+  return developerRequest(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+function devAgo(ts) {
+  const t = Date.parse(String(ts || "").replace(" ", "T") + (String(ts || "").includes("T") ? "" : "Z"));
+  if (!Number.isFinite(t)) return "";
+  const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  if (m < 1440) return `${Math.round(m / 60)} h ago`;
+  return new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+async function loadDeveloperSetup() {
+  const box = qs("devSetup");
+  const list = qs("devChecklist");
+  if (!box || !list) return;
   try {
     const data = await developerRequest("/status");
-    const model = data.coder_model || "coder";
-    const rounds = Number(data.max_tool_rounds || 0);
-    if (data.coder_ready) {
-      el.textContent = `Coder ready on ${model}. It can read and search the app, then write a diff (${rounds} tool steps). Live files change only after you merge.`;
-    } else {
-      el.textContent = "The coder is not configured. Set OPENAI_API_KEY, or an OpenAI-compatible LLM base URL, on the server.";
+    const items = [];
+    items.push(data.github_configured
+      ? { ok: data.checks?.repo?.ok !== false, text: data.checks?.repo?.ok === false ? `GitHub key is set but GitHub refused it: ${data.checks.repo.error}` : `Connected to GitHub (${data.repo})` }
+      : { ok: false, text: "Connect GitHub: add a repository secret IRONLOG_GITHUB_TOKEN (a fine-grained token for the IronLog repo with Issues and Pull requests read/write; Contents, Actions and Checks read). The next deploy passes it to the server." });
+    if (data.github_configured && data.checks?.repo?.ok) {
+      items.push(data.checks?.workflow?.ok
+        ? { ok: true, text: "Claude's GitHub workflow is in the repository" }
+        : { ok: false, text: data.checks?.workflow?.error || "Claude's GitHub workflow is missing" });
     }
+    items.push({ ok: null, text: "Give Claude a key on GitHub: install the Claude GitHub app on the repository, then add CLAUDE_CODE_OAUTH_TOKEN (your Claude subscription) or ANTHROPIC_API_KEY (pay as you go) as a repository secret." });
+    list.innerHTML = items.map((i) => `<li class="${i.ok === true ? "ok" : i.ok === false ? "todo" : "info"}">${i.ok === true ? "✓" : i.ok === false ? "•" : "ℹ"} ${escapeHtml(i.text)}</li>`).join("");
+    box.hidden = items.every((i) => i.ok !== false) && developerJobs.length > 0;
   } catch (err) {
-    el.textContent = `Coder status unavailable: ${err.message || err}`;
+    list.innerHTML = `<li class="todo">• ${escapeHtml(err.message || String(err))}</li>`;
+    box.hidden = false;
   }
 }
 
@@ -52,231 +86,218 @@ function renderDeveloperJobs() {
   const list = qs("devJobList");
   if (!list) return;
   if (!developerJobs.length) {
-    list.innerHTML = `<p class="muted">No coding jobs yet.</p>`;
+    list.innerHTML = `<p class="muted">No requests yet. Your first one will show up here.</p>`;
     return;
   }
   list.innerHTML = developerJobs.map((job) => {
     const id = Number(job.id || 0);
     const active = id === developerSelectedId ? " active" : "";
     return `<button type="button" class="dev-job${active}" data-dev-open="${id}">
-      <strong>#${id} ${escapeHtml(job.title || "Untitled")}</strong>
-      <small>${escapeHtml(developerStatusLabel(job.status))} · ${escapeHtml(job.priority || "medium")}</small>
+      <span class="dev-job-top"><strong>${escapeHtml(job.title || "Untitled")}</strong><span class="dev-chip tone-${DEV_TONE[job.status] || "info"}">${escapeHtml(job.status_text || job.status)}</span></span>
+      <small>${job.issue_number ? `#${job.issue_number} · ` : ""}${escapeHtml(job.model_label || "")} · ${escapeHtml(job.priority || "medium")} · ${escapeHtml(devAgo(job.created_at))}</small>
     </button>`;
   }).join("");
 }
 
-function pickDeveloperRun(runs) {
-  const order = ["merge", "apply_patch", "generate_patch", "execute", "plan"];
-  for (const runType of order) {
-    const hit = runs.find((run) => String(run?.run_type || "") === runType && run?.details);
-    if (hit) return hit;
-  }
-  return runs[0] || null;
+function devLink(url, text) {
+  return url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(text)} ↗</a>` : "";
 }
 
-function renderDeveloperPreview(row, runs) {
-  const run = pickDeveloperRun(runs);
-  const details = run?.details || {};
-  const proposal = details.proposal || {};
-  const lines = [
-    `Job #${Number(row?.id || 0)} · ${developerStatusLabel(row?.status)}`,
-    `Priority: ${row?.priority || "-"}`,
-    `Asked by: ${row?.requested_by || "-"}`,
-    row?.approved_by ? `Approved by: ${row.approved_by}` : "",
-    row?.rejection_reason ? `Stopped: ${row.rejection_reason}` : "",
-    "",
-    String(row?.request_text || ""),
-    "",
-    run ? `Latest step: ${run.run_type} (${run.status})` : "No steps yet.",
-    run?.summary ? String(run.summary) : "",
-    "",
-  ];
-  const files = proposal.target_files || details.target_files || [];
-  if (files.length) {
-    lines.push("Files:");
-    for (const file of files) lines.push(`- ${file}`);
-    lines.push("");
+function renderDeveloperDetail(job) {
+  const view = qs("devView");
+  const empty = qs("devEmpty");
+  if (!view || !job) return;
+  empty.hidden = true;
+  view.hidden = false;
+  const d = job.detail || {};
+  qs("devDetailTitle").textContent = job.title || "Request";
+  qs("devDetailMeta").textContent = [
+    job.issue_number ? `Issue #${job.issue_number}` : null,
+    job.model_label,
+    `asked by ${job.created_by}`,
+    job.checked_at ? `checked ${devAgo(job.checked_at)}` : null,
+  ].filter(Boolean).join(" · ");
+  const chip = qs("devDetailChip");
+  chip.className = `dev-chip tone-${DEV_TONE[job.status] || "info"}`;
+  chip.textContent = job.status_text || job.status;
+
+  const failedAt = job.status === "checks_failing" ? "checks" : job.status === "deploy_failed" ? "live" : null;
+  let current = true;
+  qs("devSteps").innerHTML = DEV_STEPS.map((step) => {
+    const done = job.status !== "failed" && step.done(d);
+    const cls = failedAt === step.key ? "bad" : done ? "done" : current ? "now" : "";
+    if (!done) current = false;
+    return `<li class="${cls}"><span></span>${escapeHtml(step.label)}</li>`;
+  }).join("");
+
+  qs("devLinks").innerHTML = [
+    devLink(job.issue_url, "Issue"),
+    devLink(d.branch?.url, "Claude's branch"),
+    devLink(d.pull_request?.url, `Pull request #${d.pull_request?.number || ""}`),
+    devLink(d.deploy?.url, "Deploy run"),
+  ].filter(Boolean).join("");
+
+  const actions = [];
+  if (job.status === "code_ready" && !d.pull_request) {
+    actions.push(`<button type="button" class="btn-primary" data-dev-action="open-pr">Open pull request for review</button>`);
   }
-  const steps = details.implementation_steps || proposal.implementation_steps || [];
-  if (steps.length) {
-    lines.push("Plan:");
-    for (const step of steps) lines.push(`- ${step}`);
-    lines.push("");
+  if (d.pull_request && !d.pull_request.merged_at && d.pull_request.state === "open") {
+    actions.push(`<a class="btn btn-primary" href="${escapeHtml(d.pull_request.url)}/files" target="_blank" rel="noopener">Review &amp; merge on GitHub ↗</a>`);
   }
-  const criteria = details.acceptance_criteria || proposal.acceptance_criteria || [];
-  if (criteria.length) {
-    lines.push("Done when:");
-    for (const item of criteria) lines.push(`- ${item}`);
-    lines.push("");
-  }
-  const markdown = details.markdown_preview || proposal.markdown_preview;
-  if (markdown) {
-    lines.push(String(markdown));
-    lines.push("");
-  }
-  const diff = details.diff_preview || proposal.diff_preview;
-  if (diff) {
-    lines.push("Diff:");
-    lines.push(String(diff));
-    lines.push("");
-  } else if (details.raw_preview) {
-    lines.push("Coder output:");
-    lines.push(String(details.raw_preview));
-    lines.push("");
-  }
-  if (Array.isArray(details.tool_trace) && details.tool_trace.length) {
-    lines.push("Tools used:");
-    for (const trace of details.tool_trace.slice(-12)) lines.push(`- ${trace.tool}`);
-  }
-  return lines.filter((line, index, all) => line !== "" || all[index - 1] !== "").join("\n").trim();
+  qs("devActions").innerHTML = actions.join(" ");
+
+  const hints = {
+    waiting: "Claude has the request and should start within a minute or two.",
+    not_started: "Claude has not picked this up. Check the setup list above: the Claude GitHub app, its key, and the workflow file.",
+    checks_failing: `These checks failed: ${(d.checks?.failed || []).join(", ") || "see the pull request"}. Reply below and ask Claude to fix them.`,
+    deploy_failed: "The merge went through but the deploy failed. Open the deploy run for the details.",
+    failed: d.refresh_error ? `GitHub said: ${d.refresh_error}` : "This request could not be sent to GitHub.",
+  };
+  qs("devNote").textContent = d.claude_note || hints[job.status] || "No note from Claude yet.";
+  if (hints[job.status] && d.claude_note) qs("devNote").textContent = `${hints[job.status]}\n\n${d.claude_note}`;
+
+  const files = d.changes?.files || [];
+  qs("devFiles").innerHTML = files.length
+    ? `<details class="dev-files" open><summary>${files.length} file${files.length === 1 ? "" : "s"} changed${d.changes.commits ? ` · ${d.changes.commits} commit${d.changes.commits === 1 ? "" : "s"}` : ""}</summary><ul>${
+      files.map((f) => `<li><code>${escapeHtml(f.file)}</code> <span class="dev-add">+${Number(f.added || 0)}</span> <span class="dev-del">−${Number(f.removed || 0)}</span></li>`).join("")
+    }</ul></details>`
+    : "";
+  const finished = ["deployed", "closed", "failed"].includes(job.status);
+  qs("devReplyText").disabled = finished || !job.issue_number;
+  qs("devReplyBtn").disabled = finished || !job.issue_number;
+  qs("devCloseBtn").hidden = finished || Boolean(d.pull_request?.merged_at);
+  qs("devRequestText").textContent = job.request_text || "";
 }
 
-function renderDeveloperActions(row) {
-  const actions = qs("devActions");
-  const rejectWrap = qs("devRejectWrap");
-  if (!actions) return;
-  const status = String(row?.status || "").toLowerCase();
-  const id = Number(row?.id || 0);
-  const buttons = [];
-  if (status === "draft") buttons.push(`<button type="button" data-dev-action="plan" data-dev-id="${id}">Plan</button>`);
-  if (["planned", "draft"].includes(status)) buttons.push(`<button type="button" class="btn-primary" data-dev-action="approve" data-dev-id="${id}">Approve plan</button>`);
-  if (["approved", "executed"].includes(status)) buttons.push(`<button type="button" class="btn-primary" data-dev-action="code" data-dev-id="${id}">Write the code</button>`);
-  if (["patch_ready", "patch_applied", "merged"].includes(status)) buttons.push(`<button type="button" data-dev-action="apply-patch" data-dev-id="${id}" ${status === "merged" ? "disabled" : ""}>Apply in sandbox</button>`);
-  if (status === "patch_applied") buttons.push(`<button type="button" class="btn-primary" data-dev-action="merge" data-dev-id="${id}">Merge into IronLog</button>`);
-  if (status && status !== "merged" && status !== "rejected") buttons.push(`<button type="button" data-dev-action="reject" data-dev-id="${id}">Stop this job</button>`);
-  actions.innerHTML = buttons.join(" ");
-  if (rejectWrap) rejectWrap.hidden = !id || status === "merged" || status === "rejected";
-}
-
-async function openDeveloperJob(id) {
+async function openDeveloperJob(id, { refresh = true } = {}) {
   const jobId = Number(id || 0);
   if (!jobId) return;
   developerSelectedId = jobId;
   renderDeveloperJobs();
-  const title = qs("devDetailTitle");
-  const meta = qs("devDetailMeta");
-  const preview = qs("devPreview");
-  if (preview) preview.textContent = "Loading job…";
-  const data = await developerRequest(`/requests/${jobId}`);
-  const row = data.row || {};
-  const runs = Array.isArray(data.runs) ? data.runs : [];
-  if (title) title.textContent = `#${jobId} ${row.title || "Coding job"}`;
-  if (meta) meta.textContent = developerStatusLabel(row.status);
-  if (preview) preview.textContent = renderDeveloperPreview(row, runs);
-  renderDeveloperActions(row);
+  const cached = developerJobs.find((j) => Number(j.id) === jobId);
+  if (cached) renderDeveloperDetail(cached);
+  const data = await developerRequest(`/requests/${jobId}${refresh ? "" : "?refresh=0"}`);
+  if (data?.row) {
+    developerJobs = developerJobs.map((j) => (Number(j.id) === jobId ? data.row : j));
+    renderDeveloperJobs();
+    if (developerSelectedId === jobId) renderDeveloperDetail(data.row);
+  }
 }
 
-async function loadDeveloperJobs() {
-  const data = await developerRequest("/requests");
-  developerJobs = Array.isArray(data.rows) ? data.rows : [];
+async function loadDeveloperJobs({ refresh = false } = {}) {
+  const data = refresh ? await developerPostJson("/requests/refresh", {}).catch(() => developerRequest("/requests")) : await developerRequest("/requests");
+  developerJobs = Array.isArray(data?.rows) ? data.rows : developerJobs;
   renderDeveloperJobs();
-  if (developerSelectedId && developerJobs.some((job) => Number(job.id) === developerSelectedId)) {
-    await openDeveloperJob(developerSelectedId);
-  }
+  const selected = developerJobs.find((j) => Number(j.id) === developerSelectedId);
+  if (selected) renderDeveloperDetail(selected);
 }
 
-async function developerPost(id, action, payload) {
-  return developerRequest(`/requests/${id}/${action}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload || {}),
-  });
-}
-
-async function runDeveloperAction(id, action) {
-  if (developerBusy) return;
-  const jobId = Number(id || 0);
-  if (!jobId) return;
-  developerBusy = true;
-  developerSelectedId = jobId;
-  try {
-    if (action === "code") {
-      developerMsg("Preparing the sandbox, then the coder will write the change. This can take a few minutes.");
-      const prepared = await developerPost(jobId, "execute");
-      if (prepared?.ok === false) throw new Error(prepared?.run?.summary || prepared?.error || "Sandbox setup failed");
-      const coded = await developerPost(jobId, "generate-patch");
-      if (coded?.ok === false) throw new Error(coded?.run?.summary || coded?.error || "The coder did not produce a diff");
-      developerMsg(`Job #${jobId}: code is ready to review.`);
-    } else if (action === "merge") {
-      developerMsg("Merging the sandbox change into IronLog…");
-      const merged = await developerPost(jobId, "merge", { confirm: true });
-      if (merged?.ok === false) throw new Error(merged?.run?.summary || merged?.error || "Merge failed");
-      developerMsg(`Job #${jobId} is merged.`);
-    } else if (action === "reject") {
-      const reason = String(qs("devRejectReason")?.value || "").trim();
-      if (!reason) {
-        developerMsg("Add a reason before stopping this job.", true);
-        return;
-      }
-      await developerPost(jobId, "reject", { reason });
-      developerMsg(`Job #${jobId} stopped.`);
-    } else {
-      developerMsg(`Running ${action}…`);
-      const result = await developerPost(jobId, action);
-      if (result?.ok === false) throw new Error(result?.run?.summary || result?.error || `${action} failed`);
-      developerMsg(`Job #${jobId}: ${action} complete.`);
-    }
-    await loadDeveloperJobs();
-  } catch (err) {
-    developerMsg(err.message || String(err), true);
-    await openDeveloperJob(jobId).catch(() => {});
-  } finally {
-    developerBusy = false;
-  }
+function devSelectedModel() {
+  return document.querySelector('#tab-developer input[name="devModel"]:checked')?.value || "opus";
 }
 
 async function createDeveloperJob() {
   if (developerBusy) return;
   const title = String(qs("devTitle")?.value || "").trim();
-  const requestText = String(qs("devRequest")?.value || "").trim();
-  const priority = String(qs("devPriority")?.value || "medium").trim().toLowerCase();
-  if (!title) return developerMsg("Title is required.", true);
-  if (!requestText) return developerMsg("Describe the change first.", true);
+  const request = String(qs("devRequest")?.value || "").trim();
+  if (!title) return developerMsg("Give the change a short title.", true);
+  if (request.length < 10) return developerMsg("Describe the change in a sentence or two.", true);
   developerBusy = true;
-  developerMsg("Saving the job and asking the planner…");
+  qs("devCreateBtn").disabled = true;
+  developerMsg("Sending to Claude…");
   try {
-    const created = await developerRequest("/requests", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, request_text: requestText, priority }),
+    const res = await developerPostJson("/requests", {
+      title,
+      request_text: request,
+      priority: qs("devPriority")?.value || "medium",
+      model: devSelectedModel(),
     });
-    const id = Number(created?.row?.id || 0);
-    if (!id) throw new Error("The job was not created.");
-    developerSelectedId = id;
-    const planned = await developerPost(id, "plan");
-    if (planned?.ok === false) throw new Error(planned?.run?.summary || planned?.error || "Planning failed");
-    if (qs("devRequest")) qs("devRequest").value = "";
-    developerMsg(`Job #${id} is planned. Approve it before the coder writes code.`);
+    qs("devTitle").value = "";
+    qs("devRequest").value = "";
+    developerSelectedId = Number(res?.row?.id || 0);
+    developerMsg(`Sent. Claude is on it as issue #${res?.row?.issue_number}. This tab updates by itself.`);
     await loadDeveloperJobs();
+    startDeveloperPolling();
   } catch (err) {
     developerMsg(err.message || String(err), true);
     await loadDeveloperJobs().catch(() => {});
   } finally {
     developerBusy = false;
+    qs("devCreateBtn").disabled = false;
   }
 }
 
+async function developerAction(action) {
+  const id = developerSelectedId;
+  if (!id || developerBusy) return;
+  developerBusy = true;
+  try {
+    if (action === "open-pr") {
+      developerMsg("Opening the pull request…");
+      await developerPostJson(`/requests/${id}/open-pr`, {});
+      developerMsg("Pull request opened. Review it on GitHub, then merge to put it live.");
+    } else if (action === "reply") {
+      const message = String(qs("devReplyText")?.value || "").trim();
+      if (message.length < 3) return developerMsg("Write a message for Claude first.", true);
+      developerMsg("Sending your reply to Claude…");
+      await developerPostJson(`/requests/${id}/reply`, { message });
+      qs("devReplyText").value = "";
+      developerMsg("Reply sent. Claude will pick it up shortly.");
+      startDeveloperPolling();
+    } else if (action === "close") {
+      const reason = prompt("Close this request? Claude will stop working on it.\n\nReason (optional):", "");
+      if (reason === null) return;
+      await developerPostJson(`/requests/${id}/close`, { reason });
+      developerMsg("Request closed.");
+    }
+    await openDeveloperJob(id, { refresh: false });
+    await loadDeveloperJobs();
+  } catch (err) {
+    developerMsg(err.message || String(err), true);
+  } finally {
+    developerBusy = false;
+  }
+}
+
+function developerTabVisible() {
+  return !document.hidden && qs("tab-developer")?.classList.contains("show");
+}
+
+function startDeveloperPolling() {
+  clearInterval(developerTimer);
+  developerTimer = setInterval(() => {
+    if (!developerTabVisible()) return;
+    if (!developerJobs.some((j) => DEV_ACTIVE.has(j.status))) return clearInterval(developerTimer);
+    loadDeveloperJobs({ refresh: true }).catch(() => {});
+  }, 30000);
+}
+
 function refreshDeveloperTab() {
-  loadDeveloperAgentStatus().catch(() => {});
-  loadDeveloperJobs().catch((err) => developerMsg(err.message || String(err), true));
+  loadDeveloperJobs({ refresh: true })
+    .then(() => {
+      loadDeveloperSetup();
+      if (!developerSelectedId && developerJobs[0]) openDeveloperJob(developerJobs[0].id, { refresh: false }).catch(() => {});
+      startDeveloperPolling();
+    })
+    .catch((err) => {
+      developerMsg(err.message || String(err), true);
+      loadDeveloperSetup();
+    });
 }
 
 function initDeveloperTab() {
   if (window.__developerTabReady) return;
   window.__developerTabReady = true;
-  qs("devCreateBtn")?.addEventListener("click", () => {
-    createDeveloperJob().catch((err) => developerMsg(err.message || String(err), true));
-  });
+  qs("devCreateBtn")?.addEventListener("click", () => createDeveloperJob());
   qs("devRefreshBtn")?.addEventListener("click", () => refreshDeveloperTab());
   qs("devJobList")?.addEventListener("click", (event) => {
     const button = event.target?.closest?.("[data-dev-open]");
-    if (!button) return;
-    openDeveloperJob(button.getAttribute("data-dev-open")).catch((err) => developerMsg(err.message || String(err), true));
+    if (button) openDeveloperJob(button.getAttribute("data-dev-open")).catch((err) => developerMsg(err.message || String(err), true));
   });
   qs("devActions")?.addEventListener("click", (event) => {
     const button = event.target?.closest?.("[data-dev-action]");
-    if (!button || button.disabled) return;
-    runDeveloperAction(button.getAttribute("data-dev-id"), button.getAttribute("data-dev-action"))
-      .catch((err) => developerMsg(err.message || String(err), true));
+    if (button && !button.disabled) developerAction(button.getAttribute("data-dev-action"));
   });
+  qs("devReplyBtn")?.addEventListener("click", () => developerAction("reply"));
+  qs("devCloseBtn")?.addEventListener("click", () => developerAction("close"));
 }

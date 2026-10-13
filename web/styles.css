@@ -9005,58 +9005,58 @@ body.wo-popup .wo-drawer-head { display: none; }
 [data-theme="dark"] a:not([class]), [data-theme="dark"] a:not([class]) strong { color: var(--accent); }
 [data-theme="dark"] #tab-cartrack .cartrack-map-status { background: rgba(15, 23, 42, 0.88); color: var(--ink); }
 
-/* ---------- Developer coding agent ---------- */
-#tab-developer .dev-layout {
-  display: grid;
-  grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-}
-#tab-developer .dev-compose,
-#tab-developer .dev-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-#tab-developer .dev-compose label,
-#tab-developer .dev-detail label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-weight: 600;
-}
-#tab-developer .dev-compose input,
-#tab-developer .dev-compose textarea,
-#tab-developer .dev-compose select,
-#tab-developer .dev-detail input {
-  width: 100%;
-  font-weight: 400;
-}
-#tab-developer .dev-preview {
-  max-height: 560px;
-  min-height: 220px;
-  white-space: pre-wrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.82rem;
-}
-#tab-developer .dev-job {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  width: 100%;
-  text-align: left;
-  margin-bottom: 8px;
-}
-#tab-developer .dev-job.active {
-  border-color: var(--accent);
-}
-#tab-developer .dev-job small {
-  color: var(--muted);
-  font-weight: 400;
-}
+/* ---------- Developer: requests to Claude ---------- */
+#tab-developer .dev-layout { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 18px; align-items: start; }
+#tab-developer .dev-compose, #tab-developer .dev-detail { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+#tab-developer .dev-compose label, #tab-developer .dev-reply { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
+#tab-developer .dev-compose input:not([type="radio"]), #tab-developer .dev-compose textarea, #tab-developer .dev-compose select, #tab-developer .dev-reply textarea { width: 100%; font-weight: 400; }
+#tab-developer .dev-row { display: grid; grid-template-columns: 130px 1fr; gap: 10px; align-items: start; }
+#tab-developer .dev-models { display: flex; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
+#tab-developer .dev-models legend { font-weight: 600; margin-bottom: 6px; padding: 0; }
+#tab-developer label.dev-model { flex: 1; flex-direction: row; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card-soft); cursor: pointer; font-weight: 400; }
+#tab-developer label.dev-model:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--card)); }
+#tab-developer .dev-model span { display: flex; flex-direction: column; line-height: 1.25; }
+#tab-developer .dev-model small { color: var(--muted); font-size: 0.78rem; }
+#tab-developer .dev-setup { padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--warn) 8%, var(--card)); }
+#tab-developer .dev-checklist { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 0.9rem; }
+#tab-developer .dev-checklist li.ok { color: var(--success); }
+#tab-developer .dev-checklist li.info { color: var(--muted); }
+#tab-developer .dev-jobs { display: grid; gap: 8px; max-height: 460px; overflow-y: auto; }
+#tab-developer .dev-job { display: flex; flex-direction: column; align-items: stretch; gap: 4px; width: 100%; text-align: left; padding: 10px 12px; border-radius: 10px; }
+#tab-developer .dev-job.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+#tab-developer .dev-job-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+#tab-developer .dev-job small { color: var(--muted); font-weight: 400; }
+#tab-developer .dev-chip { flex: 0 0 auto; padding: 2px 9px; border-radius: 999px; font-size: 0.74rem; font-weight: 700; white-space: nowrap; background: color-mix(in srgb, var(--accent) 14%, var(--card)); color: var(--accent); }
+#tab-developer .dev-chip.tone-ready { background: color-mix(in srgb, #7c3aed 16%, var(--card)); color: color-mix(in srgb, #7c3aed 80%, var(--ink)); }
+#tab-developer .dev-chip.tone-warn { background: color-mix(in srgb, var(--warn) 18%, var(--card)); color: var(--warn); }
+#tab-developer .dev-chip.tone-good { background: color-mix(in srgb, var(--success) 16%, var(--card)); color: var(--success); }
+#tab-developer .dev-chip.tone-bad { background: color-mix(in srgb, var(--danger) 15%, var(--card)); color: var(--danger); }
+#tab-developer .dev-chip.tone-muted { background: var(--card-soft); color: var(--muted); }
+#tab-developer .dev-empty { padding: 18px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); }
+#tab-developer .dev-empty ol { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 4px; }
+#tab-developer .dev-view-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+#tab-developer .dev-view-head h4 { margin: 0 0 2px; font-size: 1.1rem; }
+#tab-developer .dev-view-head p { margin: 0; }
+#tab-developer .dev-steps { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 2px; padding: 0; list-style: none; counter-reset: devstep; }
+#tab-developer .dev-steps li { display: flex; align-items: center; gap: 6px; padding: 5px 10px 5px 6px; border-radius: 999px; background: var(--card-soft); color: var(--muted); font-size: 0.8rem; font-weight: 600; }
+#tab-developer .dev-steps li span { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line); background: var(--card); }
+#tab-developer .dev-steps li.done { color: var(--success); }
+#tab-developer .dev-steps li.done span { border-color: var(--success); background: var(--success); }
+#tab-developer .dev-steps li.now { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
+#tab-developer .dev-steps li.now span { border-color: var(--accent); animation: dev-pulse 1.6s ease-in-out infinite; }
+#tab-developer .dev-steps li.bad { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--card)); }
+#tab-developer .dev-steps li.bad span { border-color: var(--danger); background: var(--danger); }
+@keyframes dev-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 40%, transparent); } 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent); } }
+#tab-developer .dev-links { display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.9rem; }
+#tab-developer .dev-links:empty, #tab-developer #devActions:empty { display: none; }
+#tab-developer .dev-note-wrap { display: grid; gap: 6px; }
+#tab-developer .dev-note { margin: 0; max-height: 360px; overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card-soft); color: var(--ink); white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 0.9rem; line-height: 1.45; }
+#tab-developer .dev-files summary, #tab-developer .dev-request-text summary { cursor: pointer; font-weight: 600; }
+#tab-developer .dev-files ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 3px; font-size: 0.86rem; }
+#tab-developer .dev-add { color: var(--success); }
+#tab-developer .dev-del { color: var(--danger); }
+#tab-developer .dev-request-text pre { white-space: pre-wrap; font-family: inherit; color: var(--muted); }
 @media (max-width: 980px) {
-  #tab-developer .dev-layout {
-    grid-template-columns: 1fr;
-  }
+  #tab-developer .dev-layout { grid-template-columns: 1fr; }
+  #tab-developer .dev-row { grid-template-columns: 1fr; }
 }

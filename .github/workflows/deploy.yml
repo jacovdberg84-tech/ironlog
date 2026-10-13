@@ -19,6 +19,7 @@ jobs:
       LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}
       LIVEKIT_API_KEY: ${{ secrets.LIVEKIT_API_KEY }}
       LIVEKIT_API_SECRET: ${{ secrets.LIVEKIT_API_SECRET }}
+      IRONLOG_GITHUB_TOKEN: ${{ secrets.IRONLOG_GITHUB_TOKEN }}
 
     steps:
       - name: Deploy over SSH
@@ -32,7 +33,7 @@ jobs:
           # appleboy/ssh-action only forwards named workflow variables to the
           # remote shell. Without this, the private Actions secret never reaches
           # api/.env and Borris silently uses its deterministic fallback.
-          envs: OPENAI_API_KEY,JUNE_OUTLOOK_CLIENT_ID,JUNE_OUTLOOK_CLIENT_SECRET,JUNE_OUTLOOK_TENANT_ID,LEMONSLICE_API_KEY,LIVEKIT_URL,LIVEKIT_API_KEY,LIVEKIT_API_SECRET
+          envs: OPENAI_API_KEY,JUNE_OUTLOOK_CLIENT_ID,JUNE_OUTLOOK_CLIENT_SECRET,JUNE_OUTLOOK_TENANT_ID,LEMONSLICE_API_KEY,LIVEKIT_URL,LIVEKIT_API_KEY,LIVEKIT_API_SECRET,IRONLOG_GITHUB_TOKEN
           script_stop: true
           script: |
             set -e
@@ -98,6 +99,19 @@ jobs:
               env_tmp="$(mktemp)"
               grep -v -E '^(LEMONSLICE_API_KEY|LIVEKIT_URL|LIVEKIT_API_KEY|LIVEKIT_API_SECRET)=' "$env_file" > "$env_tmp" || true
               printf '\nLEMONSLICE_API_KEY=%s\nLIVEKIT_URL=%s\nLIVEKIT_API_KEY=%s\nLIVEKIT_API_SECRET=%s\n' "$LEMONSLICE_API_KEY" "$LIVEKIT_URL" "$LIVEKIT_API_KEY" "$LIVEKIT_API_SECRET" >> "$env_tmp"
+              mv "$env_tmp" "$env_file"
+              chmod 600 "$env_file"
+            fi
+            # The Developer tab sends requests to Claude as GitHub issues. Only
+            # replace the token when the secret is set, so a normal deploy never
+            # disconnects it.
+            if [ -n "${IRONLOG_GITHUB_TOKEN:-}" ]; then
+              env_file="/data/ironlog/api/.env"
+              touch "$env_file"
+              chmod 600 "$env_file"
+              env_tmp="$(mktemp)"
+              grep -v -E '^IRONLOG_GITHUB_TOKEN=' "$env_file" > "$env_tmp" || true
+              printf '\nIRONLOG_GITHUB_TOKEN=%s\n' "$IRONLOG_GITHUB_TOKEN" >> "$env_tmp"
               mv "$env_tmp" "$env_file"
               chmod 600 "$env_file"
             fi
