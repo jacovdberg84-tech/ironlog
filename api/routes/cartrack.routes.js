@@ -16,7 +16,8 @@ import {
   cartrackApiGet,
   enrichCartrackLiveRow,
 } from "../utils/cartrack.js";
-import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
+import { buildPdfBuffer, kvGrid, sectionTitle, table } from "../utils/pdfGenerator.js";
+import { buildFleetSecurityReport, writeFleetSecurityPdf } from "../utils/fleetSecurityReport.js";
 import {
   getUnitechPublicSettings,
   syncUnitechFleetStatus,
@@ -38,6 +39,8 @@ function mergeGpsFleet({ cartrackRows, unitechRows, speedRegs }) {
   const unitechFleet = unitechRows.map((v) => enrichUnitechLiveRow(v, speedRegs));
   return [...cartrackFleet, ...unitechFleet];
 }
+
+export const SECURITY_REPORT_ROLES = ["admin", "supervisor", "plant_manager", "site_manager", "workshop_admin"];
 
 function requireRoles(req, reply, allowed) {
   if (!getRoles(req).some((r) => allowed.includes(r))) {
@@ -277,6 +280,34 @@ export default async function cartrackRoutes(app) {
       }, { title: "Cartrack Speeding Report", layout: "landscape" });
       reply.header("Content-Type", "application/pdf");
       reply.header("Content-Disposition", `inline; filename="cartrack_speeding_${date}.pdf"`);
+      return reply.send(pdf);
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: String(err.message || err) });
+    }
+  });
+
+  // Security report for site security: tracking unit per vehicle and the
+  // security issues the trackers recorded. ?from&to (YYYY-MM-DD), optional
+  // night_start/night_end hours (default 19 to 5) and notes; format=json for the data.
+  app.get("/security-report.pdf", async (req, reply) => {
+    if (!requireRoles(req, reply, SECURITY_REPORT_ROLES)) return;
+    const from = String(req.query?.from || "").trim();
+    const to = String(req.query?.to || from).trim();
+    if (!isDate(from) || !isDate(to) || from > to) return reply.code(400).send({ ok: false, error: "Choose a from and to date (from before to)." });
+    const hour = (v, d) => (String(v ?? "").trim() !== "" && Number.isInteger(Number(v)) && Number(v) >= 0 && Number(v) <= 23 ? Number(v) : d);
+    const report = buildFleetSecurityReport(db, {
+      from,
+      to,
+      nightStart: hour(req.query?.night_start, 19),
+      nightEnd: hour(req.query?.night_end, 5),
+      notes: String(req.query?.notes || ""),
+    });
+    if (String(req.query?.format || "") === "json") return reply.send({ ok: true, report });
+    try {
+      const pdf = await buildPdfBuffer((doc) => writeFleetSecurityPdf(doc, report, { sectionTitle, table, kvGrid }), { title: "Fleet Security Report", subtitle: `Tracking units and security issues, ${from} to ${to}` });
+      reply.header("Content-Type", "application/pdf");
+      reply.header("Content-Disposition", `inline; filename="fleet_security_${from}_${to}.pdf"`);
       return reply.send(pdf);
     } catch (err) {
       req.log.error(err);
