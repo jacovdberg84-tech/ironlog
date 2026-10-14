@@ -43,6 +43,7 @@ import registerInspectionsRoutes from "./maintenance/inspections.routes.js";
 import registerPrestartChecksRoutes from "./maintenance/prestart-checks.routes.js";
 import registerPartsRequestsRoutes from "./maintenance/parts-requests.routes.js";
 import registerMechanicLaborRoutes from "./maintenance/mechanic-labor.routes.js";
+import registerCareMaintenanceRoutes from "./maintenance/care-maintenance.routes.js";
 import { ensureStockCategorySchema, oilPartSql as oilCategorySql } from "../utils/stockCategory.js";
 
 function isMonth(s) {
@@ -5292,4 +5293,5 @@ export default async function maintenanceRoutes(app) {
   registerPrestartChecksRoutes(app, ctx);
   registerPartsRequestsRoutes(app, ctx);
   registerMechanicLaborRoutes(app, ctx);
+  registerCareMaintenanceRoutes(app, ctx);
 }

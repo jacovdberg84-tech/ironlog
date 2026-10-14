@@ -64,4 +64,5 @@ The main IronLog screen (`web/index.html`) used to load one 22,000-line `web/app
 | `mechanics-cost.js` | Mechanics cost and timesheets | 696 |
 | `ai-engineer.js` | AI engineer requests | 248 |
 | `rsg-profiles.js` | RSG service kit profiles | 274 |
+| `care-maintenance.js` | Care & maintenance plans: per-machine work, parts, hours and cost against the estimate | 386 |
 | `init.js` | Dark mode and page start-up wiring | 886 |

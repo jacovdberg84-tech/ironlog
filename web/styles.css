@@ -9132,3 +9132,38 @@ body.wo-popup .wo-drawer-head { display: none; }
 .wo-combine-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .wo-combined-note { margin: 12px 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card-soft); color: var(--muted); font-size: 0.9rem; }
 .wo-combined-note .link-btn { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; }
+
+/* Care & maintenance plans (maintenance.html) */
+.cm-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.cm-plan-bar { gap: 8px; flex-wrap: wrap; align-items: center; }
+.cm-plan-bar select { min-width: 240px; }
+.cm-new-plan, .cm-add, .cm-filter { gap: 10px; flex-wrap: wrap; align-items: flex-end; margin: 10px 0; }
+.cm-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin: 12px 0; }
+.cm-tile { background: var(--bg-f9fafb); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.cm-tile-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.cm-tile-value { font-size: 20px; font-weight: 700; color: var(--ink); margin: 4px 0; }
+.cm-tile-sub { font-size: 12px; color: var(--muted); }
+.cm-table-wrap { overflow-x: auto; }
+.cm-table { width: 100%; border-collapse: collapse; }
+.cm-table th, .cm-table td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; text-align: left; }
+.cm-table .cm-scope { max-width: 280px; }
+.cm-row-open td { background: var(--bg-f9fafb); }
+.cm-editor-row > td { background: var(--bg-f9fafb); padding: 4px 12px 16px; }
+.cm-bar { height: 6px; background: var(--bg-f3f4f6); border-radius: 3px; margin-top: 4px; overflow: hidden; min-width: 90px; }
+.cm-bar span { display: block; height: 100%; background: var(--accent-fill, var(--accent)); }
+.cm-bar-over span { background: var(--tx-991b1b); }
+.cm-editor h4 { margin: 14px 0 6px; }
+.cm-editor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.cm-editor-grid label { display: flex; flex-direction: column; gap: 4px; }
+.cm-editor-grid .cm-wide { grid-column: 1 / -1; }
+.cm-parts-table { width: 100%; border-collapse: collapse; }
+.cm-parts-table th, .cm-parts-table td { padding: 4px 6px; text-align: left; border-bottom: 1px solid var(--line); }
+.cm-parts-table input { width: 100%; min-width: 70px; }
+.cm-parts-table .cm-p-desc { min-width: 200px; }
+.cm-editor-foot { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.cm-actions { gap: 8px; flex-wrap: wrap; align-items: center; }
+#careMaintenanceSection .link-btn { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: left; }
+#careMaintenanceSection .cm-remove { color: var(--tx-991b1b); text-decoration: underline; }
+@media (max-width: 700px) {
+  .cm-plan-bar select { min-width: 0; width: 100%; }
+}

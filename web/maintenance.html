@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:," />
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=wo-combine-1" />
+  <link rel="stylesheet" href="./styles.css?v=cm-plan-1" />
 </head>
 <body class="page-shell has-sidebar">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -84,6 +84,10 @@
         <a href="#" class="nav-item" data-section="work-orders">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
           <span>Work Orders</span>
+        </a>
+        <a href="#" class="nav-item" data-section="care-maintenance">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+          <span>Care &amp; Maintenance</span>
         </a>
         <a href="#" class="nav-item" data-section="parts-to-order">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
@@ -1423,6 +1427,59 @@
       </div>
     </div>
 
+    <!-- Care & Maintenance Section -->
+    <div id="careMaintenanceSection" class="maint-section" style="display:none;">
+      <div class="card stack-24">
+        <div class="cm-head">
+          <div>
+            <h3 style="margin:0;">Care &amp; Maintenance</h3>
+            <p class="muted" style="margin:4px 0 0;">Plan every machine for the C&amp;M period: the work it needs, the parts and the repair hours. Give a machine a work order when work starts, and the time and parts used show here next to the estimate.</p>
+          </div>
+          <div class="row cm-plan-bar">
+            <select id="cmPlanSelect" aria-label="Plan"></select>
+            <button id="cmNewPlanBtn" type="button" class="btn-secondary cm-edit-only">New plan</button>
+            <button id="cmExportBtn" type="button" class="btn-secondary">Download for Excel</button>
+            <button id="cmClosePlanBtn" type="button" class="btn-secondary cm-edit-only">Close plan</button>
+          </div>
+        </div>
+        <div id="cmNewPlanForm" class="row cm-new-plan hidden">
+          <label>Plan name<input id="cmNewName" placeholder="C&amp;M November 2026" /></label>
+          <label>Starts<input id="cmNewStart" type="date" /></label>
+          <label>Ends<input id="cmNewEnd" type="date" /></label>
+          <label>Labour rate (USD/h)<input id="cmNewRate" type="number" min="0" step="0.5" placeholder="Workshop rate" class="w-140" /></label>
+          <button id="cmCreatePlanBtn" type="button" class="btn-primary">Create plan</button>
+        </div>
+        <div id="cmMsg" class="muted" role="status"></div>
+        <p id="cmEmpty" class="muted hidden">No care &amp; maintenance plans yet. Press <strong>New plan</strong> to start one.</p>
+        <div id="cmPlanBody" class="hidden">
+          <div id="cmPlanInfo" class="muted small"></div>
+          <div id="cmTiles" class="cm-tiles"></div>
+          <div class="row cm-add cm-edit-only">
+            <label>Type<select id="cmCategory" class="w-140"></select></label>
+            <label>Machine<select id="cmAssetSelect" class="w-200"></select></label>
+            <button id="cmAddMachineBtn" type="button" class="btn-secondary">Add machine</button>
+            <button id="cmAddAllBtn" type="button" class="btn-secondary">Add all</button>
+          </div>
+          <div class="row cm-filter">
+            <label>Show<select id="cmStatusFilter" class="w-200">
+              <option value="">All machines</option>
+              <option value="not_started">Not started</option>
+              <option value="waiting_parts">Waiting for parts</option>
+              <option value="in_progress">In progress</option>
+              <option value="done">Done - ready to run</option>
+              <option value="parked">Parked (preserved)</option>
+            </select></label>
+          </div>
+          <div class="table-wrap cm-table-wrap">
+            <table class="cm-table">
+              <thead><tr><th>Machine</th><th>Work to do</th><th>Status</th><th>Hours used / planned</th><th style="text-align:right;">Planned cost</th><th style="text-align:right;">Spent</th><th>Parts</th><th>Work order</th></tr></thead>
+              <tbody id="cmMachinesBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Parts to Order Section -->
     <div id="partsToOrderSection" class="maint-section" style="display:none;">
       <div class="card stack-24">
@@ -2360,12 +2417,12 @@
   <script src="./tyre-inspection-qr.js?v=1"></script>
   <script src="./session.js?v=1"></script>
   <!-- Maintenance page, split by feature. Order matters: files share one global scope. -->
-  <script src="./maintenance/core.js?v=63"></script>
+  <script src="./maintenance/core.js?v=64"></script>
   <script src="./maintenance/service-templates.js?v=66"></script>
   <script src="./maintenance/plans.js?v=64"></script>
   <script src="./maintenance/insights.js?v=64"></script>
   <script src="./maintenance/report-builder.js?v=63"></script>
-  <script src="./maintenance/views.js?v=63"></script>
+  <script src="./maintenance/views.js?v=64"></script>
   <script src="./maintenance/histogram.js?v=63"></script>
   <script src="./maintenance/sync.js?v=63"></script>
   <script src="./maintenance/tyres.js?v=63"></script>
@@ -2377,6 +2434,7 @@
   <script src="./maintenance/mechanics-cost.js?v=63"></script>
   <script src="./maintenance/ai-engineer.js?v=63"></script>
   <script src="./maintenance/rsg-profiles.js?v=63"></script>
+  <script src="./maintenance/care-maintenance.js?v=1"></script>
   <script src="./maintenance/init.js?v=63"></script>
 </body>
 </html>
