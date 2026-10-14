@@ -61,6 +61,8 @@ export function jobLine(w) {
   const lines = String(w.job_description || "").split("\n").map((l) => l.replace(/^-\s*/, "").trim()).filter(Boolean);
   if (source === "prestart" && lines.length > 1) return `Pre-start: ${lines.slice(1).join("; ")}`;
   if (source === "artisan_inspection" && lines.length > 1) return `Inspection: ${lines.slice(1).join("; ")}`;
+  // Care & maintenance: the first line names the plan, the next is the work to do.
+  if (source === "care_maintenance") return lines.length > 1 && lines[1] !== "Parts planned:" ? `C&M: ${lines[1]}` : "Care & maintenance";
   return lines[lines.length - 1] || "Repair";
 }
 

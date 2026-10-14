@@ -130,6 +130,7 @@ function sourceLabel(source, wo = null) {
   if (s === "manual") return "Manual repair";
   if (s === "prestart") return "Pre-start fault";
   if (s === "artisan_inspection") return "Inspection fault";
+  if (s === "care_maintenance") return "Care & maintenance";
   return s || "Unknown";
 }
 
@@ -359,6 +360,8 @@ function woJobLine(wo) {
   const lines = String(wo.job_description || "").split("\n").map((l) => l.replace(/^-\s*/, "").trim()).filter(Boolean);
   if (source === "prestart" && lines.length > 1) return `Pre-start: ${lines.slice(1).join("; ")}`;
   if (source === "artisan_inspection" && lines.length > 1) return `Inspection: ${lines.slice(1).join("; ")}`;
+  // Care & maintenance: the first line names the plan, the next is the work to do.
+  if (source === "care_maintenance") return lines.length > 1 && lines[1] !== "Parts planned:" ? `C&M: ${lines[1]}` : "Care & maintenance";
   if (lines.length) return lines[lines.length - 1];
   return sourceLabel(wo.source, wo);
 }

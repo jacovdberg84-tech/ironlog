@@ -64,6 +64,7 @@ function setTopView(view, section = "") {
   const hist = document.getElementById("histogramSection");
   const sync = document.getElementById("syncAdminSection");
   const pto = document.getElementById("partsToOrderSection");
+  const cm = document.getElementById("careMaintenanceSection");
   const mc = document.getElementById("mechanicsCostSection");
   const st = document.getElementById("serviceTemplatesSection");
   const planSection = document.querySelector("section.panel.page-section");
@@ -83,6 +84,7 @@ function setTopView(view, section = "") {
   if (hist) hist.style.display = "none";
   if (sync) sync.style.display = "none";
   if (pto) pto.style.display = "none";
+  if (cm) cm.style.display = "none";
   if (mc) mc.style.display = "none";
   if (st) st.style.display = "none";
   if (planSection) planSection.style.display = "none";
@@ -127,6 +129,9 @@ function setTopView(view, section = "") {
       break;
     case "pto":
       if (pto) pto.style.display = "block";
+      break;
+    case "cm":
+      if (cm) cm.style.display = "block";
       break;
     case "mc":
       if (mc) mc.style.display = "block";
@@ -184,6 +189,9 @@ function setTopView(view, section = "") {
           break;
         case "pto":
           isActive = navSection === "parts-to-order";
+          break;
+        case "cm":
+          isActive = navSection === "care-maintenance";
           break;
         case "mc":
           isActive = navSection === "mechanics-cost";

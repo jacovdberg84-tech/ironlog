@@ -116,6 +116,7 @@ function viewForSection(section) {
     "histogram": "hist",
     "sync-admin": "sync",
     "parts-to-order": "pto",
+    "care-maintenance": "cm",
   };
   return viewMap[String(section || "").trim()] || "";
 }
@@ -171,6 +172,7 @@ function scrollToSection(section) {
           "mc": "mechanicsCostSection",
           "templates": "serviceTemplatesSection",
           "pto": "partsToOrderSection",
+          "cm": "careMaintenanceSection",
         };
         targetEl = document.getElementById(sectionMap[targetView]);
       }
@@ -231,6 +233,9 @@ function refreshTopViewData(view) {
       break;
     case "pto":
       initPartsToOrderSection().catch(() => {});
+      break;
+    case "cm":
+      initCareMaintenanceSection().catch(() => {});
       break;
     case "mc":
       initMechanicsCostSection().catch(() => {});
