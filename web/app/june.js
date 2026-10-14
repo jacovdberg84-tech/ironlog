@@ -478,9 +478,123 @@ function juneRenderDeveloperDraft(result) {
     }
   });
   card.append(head, ...fields, actions, status);
+  juneShowCard(card);
+  (titleInput || textArea).focus({ preventScroll: true });
+}
+
+/** Put a card in June's card area and bring it into view. */
+function juneShowCard(card) {
+  const host = qs("juneDraftDownloads");
+  if (!host) return;
   host.replaceChildren(card);
   host.hidden = false;
-  (titleInput || textArea).focus({ preventScroll: true });
+  try { card.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch { /* old browsers */ }
+}
+
+/** June drafted a task: an editable card; only the administrator's Create task saves it. */
+async function juneRenderTaskDraft(result) {
+  if (!result || result.state !== "review_only" || !result.title) return;
+  const card = juneEl("div", { className: "june-dev-card june-task-card" });
+  const head = juneEl("div", { className: "june-dev-head" }, [
+    juneEl("strong", { text: "New task" }),
+    juneEl("span", { text: result.assignee_not_found
+      ? `Prepared by June. I couldn't match "${result.assignee_not_found}" to a user, so pick who it's for.`
+      : "Prepared by June. Check it, edit if needed, then create it." }),
+  ]);
+  const titleInput = juneEl("input", { type: "text", maxlength: "180", "aria-label": "Title" });
+  titleInput.value = result.title || "";
+  const desc = juneEl("textarea", { rows: "3", "aria-label": "Details" });
+  desc.value = result.description || "";
+  const priority = juneEl("select", { "aria-label": "Priority" });
+  for (const p of ["low", "medium", "high"]) {
+    const o = juneEl("option", { value: p, text: p[0].toUpperCase() + p.slice(1) });
+    if (p === result.priority) o.selected = true;
+    priority.append(o);
+  }
+  const due = juneEl("input", { type: "date", "aria-label": "Due date" });
+  due.value = result.due_date || "";
+  const who = juneEl("select", { "aria-label": "Assigned to" });
+  const fillPeople = () => {
+    const people = Array.isArray(window.teamMembers) && window.teamMembers.length
+      ? window.teamMembers
+      : (typeof teamMembers !== "undefined" && Array.isArray(teamMembers) ? teamMembers : []);
+    who.replaceChildren(juneEl("option", { value: "", text: "Nobody yet" }));
+    const wanted = String(result.proposed_assignee || "").toLowerCase();
+    let found = false;
+    for (const m of [...people].sort((a, b) => String(a.full_name || a.username).localeCompare(String(b.full_name || b.username)))) {
+      const o = juneEl("option", { value: m.username, text: m.full_name || m.username });
+      if (String(m.username).toLowerCase() === wanted) { o.selected = true; found = true; }
+      who.append(o);
+    }
+    if (wanted && !found) {
+      const o = juneEl("option", { value: result.proposed_assignee, text: result.proposed_assignee });
+      o.selected = true;
+      who.append(o);
+    }
+  };
+  fillPeople();
+  if (typeof loadTeamMembers === "function" && (typeof teamMembers === "undefined" || !teamMembers.length)) {
+    loadTeamMembers().then(fillPeople).catch(() => {});
+  }
+  const status = juneEl("p", { className: "june-dev-status", "aria-live": "polite" });
+  const create = juneEl("button", { type: "button", className: "btn btn-primary btn-sm", text: "Create task" });
+  const discard = juneEl("button", { type: "button", className: "btn btn-secondary btn-sm", text: "Discard" });
+  const actions = juneEl("div", { className: "june-dev-actions" }, [create, discard]);
+  discard.addEventListener("click", () => {
+    card.remove();
+    const host = qs("juneDraftDownloads");
+    if (host && !host.children.length) host.hidden = true;
+  });
+  create.addEventListener("click", async () => {
+    if (!titleInput.value.trim()) {
+      status.className = "june-dev-status error";
+      status.textContent = "Give the task a title.";
+      return;
+    }
+    create.disabled = true;
+    status.className = "june-dev-status";
+    status.textContent = "Creating…";
+    try {
+      const res = await fetchJson(`${API}/api/tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: titleInput.value.trim(),
+          description: desc.value.trim() || null,
+          priority: priority.value,
+          due_date: due.value || null,
+          assigned_to: who.value || null,
+        }),
+      });
+      for (const el of [titleInput, desc, priority, due, who]) el.disabled = true;
+      const id = Number(res?.task?.id || 0);
+      status.textContent = `Task #${id} created${who.value ? ` for ${who.options[who.selectedIndex]?.text || who.value}` : ""}.`;
+      const open = juneEl("button", { type: "button", className: "btn btn-secondary btn-sm", text: "Open in Tasks" });
+      open.addEventListener("click", () => {
+        if (typeof switchTab === "function") switchTab("tasks");
+        if (id && typeof showTask === "function") setTimeout(() => showTask(id), 300);
+      });
+      actions.replaceChildren(open);
+    } catch (err) {
+      create.disabled = false;
+      status.className = "june-dev-status error";
+      status.textContent = err?.message || String(err);
+    }
+  });
+  card.append(
+    head,
+    juneEl("label", {}, [juneEl("span", { text: "Title" }), titleInput]),
+    juneEl("label", {}, [juneEl("span", { text: "Details" }), desc]),
+    juneEl("div", { className: "june-dev-row" }, [
+      juneEl("label", {}, [juneEl("span", { text: "Priority" }), priority]),
+      juneEl("label", {}, [juneEl("span", { text: "Due" }), due]),
+    ]),
+    juneEl("label", {}, [juneEl("span", { text: "Assigned to" }), who]),
+    actions,
+    status,
+  );
+  juneShowCard(card);
+  titleInput.focus({ preventScroll: true });
 }
 
 /** Switch to the Developer tab with one request open. */
@@ -515,8 +629,7 @@ function juneRenderReportFile(result) {
     }
   });
   card.append(detail, button);
-  host.replaceChildren(card);
-  host.hidden = false;
+  juneShowCard(card);
 }
 
 function juneRenderMaintenanceScheduleDownload(result) {
@@ -551,8 +664,7 @@ function juneRenderMaintenanceScheduleDownload(result) {
     }
   });
   card.append(detail, button);
-  host.replaceChildren(card);
-  host.hidden = false;
+  juneShowCard(card);
 }
 
 function juneCalendarEventWhen(event) {
@@ -658,6 +770,7 @@ function juneRenderCalendarApproval(result) {
   card.append(copy, actions);
   host.replaceChildren(card);
   host.hidden = false;
+  try { card.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch { /* old browsers */ }
 }
 
 function juneCalendarToolOutputForLive(result) {
@@ -1000,6 +1113,9 @@ async function juneRunTool(item) {
           expires_in_minutes: output.download.expires_in_minutes,
         } : null,
       };
+    }
+    if (name === "june_draft_task") {
+      juneRenderTaskDraft(output).catch(() => {});
     }
     if (name === "june_prepare_developer_request" || name === "june_prepare_developer_reply") {
       juneRenderDeveloperDraft(output);

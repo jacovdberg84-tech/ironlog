@@ -5,6 +5,7 @@
 import crypto from "node:crypto";
 import { db } from "../db/client.js";
 import { getAssetHoursInfoAsOf } from "../utils/assetMeterHours.js";
+import { resolveUser } from "../utils/taskCollab.js";
 import { buildJuneMaintenanceSchedule, buildJuneMaintenanceScheduleWorkbook } from "../utils/juneMaintenanceSchedule.js";
 import { getRoles, getSiteCode, getUser } from "../utils/request.js";
 import {
@@ -84,7 +85,7 @@ const JUNE_LIVE_INSTRUCTIONS = [
   "When the administrator asks for a maintenance schedule for named equipment, prepare the review-only schedule through the backend. Once it reports an Excel file is ready, say it is ready to review and download on screen; never read an internal report identifier aloud.",
   "Ironlog has its own private internal calendar. Outlook and ICS are read-only external sources. For an internal calendar create, move, update, or cancel request, use the preparation tool, repeat the exact change, and tell Jaco to press the on-screen Confirm button. Never claim it was changed until Ironlog reports that confirmation succeeded.",
   "Never claim that a calendar or email account is connected unless the tool result says it is.",
-  "Do not say that a task, work order, requisition, service plan, report, or external message has been created. June only prepares review-only drafts.",
+  "Do not say that a task, work order, requisition, service plan, report, or external message has been created. June only prepares review-only drafts. A task draft appears on screen as an editable card: tell Jaco it is on screen to check, and that he presses Create task.",
   "If a tool reports that approval is required, clearly say what the administrator must review next.",
   "Backchannel policy: use minimal, natural acknowledgements without talking over Jaco.",
   "Interruption policy: if interrupted, stop speaking and listen to the administrator's correction.",
@@ -161,7 +162,7 @@ const TOOL_DEFINITIONS = [
   {
     type: "function",
     name: "june_draft_task",
-    description: "Prepare a review-only Ironlog task draft. This does not create a task.",
+    description: "Prepare an Ironlog task and show it on screen as an editable card. The administrator checks it and presses Create task; this tool never creates anything.",
     parameters: {
       type: "object",
       properties: {
@@ -169,6 +170,7 @@ const TOOL_DEFINITIONS = [
         description: { type: "string" },
         priority: { type: "string", enum: ["high", "medium", "low"] },
         due_date: { type: "string", description: "Optional YYYY-MM-DD date." },
+        assignee: { type: "string", description: "Optional: who should do it, by username or name. Leave out to assign it to the administrator." },
       },
       required: ["title"],
       additionalProperties: false,
@@ -761,19 +763,39 @@ function getStoresBrief({ siteCode, scope, query }) {
   };
 }
 
+/** A spoken name to an active username: exact username, full name, or a first name only one person has. */
+function matchUserByName(name) {
+  const direct = resolveUser(db, name);
+  if (direct) return direct;
+  const key = String(name || "").trim().toLowerCase();
+  let rows = [];
+  try { rows = db.prepare(`SELECT username, full_name FROM users WHERE COALESCE(active, 1) = 1`).all(); } catch { return null; }
+  const full = rows.filter((r) => String(r.full_name || "").trim().toLowerCase() === key);
+  if (full.length === 1) return full[0].username;
+  const first = rows.filter((r) => String(r.full_name || "").trim().toLowerCase().split(/\s+/)[0] === key);
+  return first.length === 1 ? first[0].username : null;
+}
+
 function buildTaskDraft(args, user) {
   const priority = ["high", "medium", "low"].includes(String(args.priority || "").toLowerCase())
     ? String(args.priority).toLowerCase()
     : "medium";
+  const title = safeText(args.title, 180);
+  if (!title) return { state: "error", error: "The task needs a title." };
+  // Match a spoken name ("Jose", "Maria Stores") to a user; else leave it for the card's picker.
+  const named = safeText(args.assignee, 80);
+  const assignee = named ? matchUserByName(named) : user;
   return {
     state: "review_only",
     type: "task",
-    title: safeText(args.title, 180),
+    title,
     description: safeText(args.description, 1200) || null,
     priority,
     due_date: isDate(args.due_date) ? String(args.due_date) : null,
-    proposed_assignee: user,
-    next_step: "Review the draft, then create it manually in the Ironlog Tasks panel.",
+    proposed_assignee: assignee,
+    assignee_not_found: named && !assignee ? named : undefined,
+    shown_on_screen: true,
+    next_step: "The task is on screen as an editable card. The administrator can change it, then press Create task. Nothing has been created yet.",
   };
 }
 
