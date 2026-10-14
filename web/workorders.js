@@ -759,6 +759,9 @@ function renderDetail(payload) {
       </div>
       <span class="wo-status-label ${statusClass(status)} wo-detail-status">${status.replace(/_/g, " ")}</span>
     </div>
+    ${wo.merged_into_id ? `<div class="wo-combined-note">Combined into <button type="button" class="link-btn" data-open-wo="${Number(wo.merged_into_id)}">WO #${Number(wo.merged_into_id)}</button>. Its faults, parts and time are on that work order now.</div>` : ""}
+    ${String(wo.source) === "prestart" && !["completed", "approved", "closed"].includes(status) && sessionIsWorkshopLead()
+      ? `<div class="wo-combine" id="woCombine" data-wo-id="${wo.id}" hidden></div>` : ""}
 
     <div class="wo-detail-workflow">
       ${workflowStepsHtml(wo)}
@@ -855,7 +858,8 @@ function updateKpiStrip(rows) {
     (r) => String(r.status || "").toLowerCase() === "approved" && isTodayStamp(r.closed_at || r.opened_at)
   ).length;
   const closedToday = list.filter(
-    (r) => String(r.status || "").toLowerCase() === "closed" && isTodayStamp(r.closed_at)
+    // Pre-start jobs combined into another are not real closures.
+    (r) => String(r.status || "").toLowerCase() === "closed" && isTodayStamp(r.closed_at) && !r.merged_into_id
   ).length;
 
   strip.innerHTML = `
@@ -1151,6 +1155,7 @@ async function loadWorkOrderDetail(id) {
     lastWorkOrderDetail = data;
     detailEl.innerHTML = renderDetail(data);
     loadWorkOrderHelpers(woId).catch(() => {});
+    loadCombinePanel(woId).catch(() => {});
     loadMachineNotice(woId).catch(() => {});
     const title = document.getElementById("woDrawerTitle");
     if (title) title.textContent = `WO #${woId} • ${data.work_order?.asset_code || ""}`;
@@ -1185,6 +1190,50 @@ async function loadWorkOrderDetail(id) {
     console.error("Load work order detail error:", err);
     detailEl.innerHTML = `<div class="message-error">${err.message}</div>`;
   }
+}
+
+// A machine with several open pre-start work orders: offer to combine them into one.
+async function loadCombinePanel(woId) {
+  const el = document.getElementById("woCombine");
+  if (!el) return;
+  let p;
+  try {
+    p = await fetchJson(`${API}/workorders/${woId}/combine-preview`, { headers: authHeaders() });
+  } catch {
+    el.hidden = true; // only one open pre-start job on this machine
+    return;
+  }
+  const n = p.combine.length;
+  const keep = p.keep;
+  const row = (w) => `<li><strong>WO #${w.id}</strong> · ${escapeHtml(String(w.status || "open").replace(/_/g, " "))} · opened ${escapeHtml(String(w.opened_at || "-").slice(0, 10))}${w.technician ? ` · ${escapeHtml(w.technician)}` : ""}${w.parts_requests ? ` · ${w.parts_requests} part request${w.parts_requests === 1 ? "" : "s"}` : ""}<br><span class="muted small">${escapeHtml(w.summary || "")}</span></li>`;
+  el.innerHTML = `
+    <div>
+      <strong>${escapeHtml(p.asset_code || "This machine")} has ${n + 1} open pre-start work orders</strong>
+      <p class="muted small">Combine them into one job: keep <strong>WO #${keep.id}</strong> (${escapeHtml(String(keep.status || "open").replace(/_/g, " "))}${keep.technician ? `, ${escapeHtml(keep.technician)}` : ""}) and fold in the other ${n}.
+      Their faults, parts requests, stock issued, time, photos and helpers move onto WO #${keep.id}; the others close as “Combined into WO #${keep.id}”.</p>
+      <details><summary>Show the ${n} to combine</summary><ul class="wo-combine-list">${p.combine.map(row).join("")}</ul></details>
+    </div>
+    <div class="wo-combine-actions"><button type="button" class="btn-primary" id="woCombineBtn">Combine into WO #${keep.id}</button><span class="muted small" id="woCombineMsg"></span></div>`;
+  el.hidden = false;
+  document.getElementById("woCombineBtn")?.addEventListener("click", async (evt) => {
+    const btn = evt.currentTarget;
+    if (!confirm(`Combine ${n + 1} pre-start work orders on ${p.asset_code || "this machine"} into WO #${keep.id}?\n\nThe other ${n} will be closed as “Combined into WO #${keep.id}”.`)) return;
+    btn.disabled = true;
+    const msg = document.getElementById("woCombineMsg");
+    if (msg) msg.textContent = "Combining…";
+    try {
+      const res = await fetchJson(`${API}/workorders/${woId}/combine`, {
+        method: "POST",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ confirm: true }),
+      });
+      await fetchWorkOrders();
+      await loadWorkOrderDetail(res.keep_id);
+    } catch (err) {
+      btn.disabled = false;
+      if (msg) msg.textContent = err.message || String(err);
+    }
+  });
 }
 
 async function issueToWorkOrder() {
@@ -2185,6 +2234,11 @@ document.addEventListener("DOMContentLoaded", () => {
     detailEl.addEventListener("click", (evt) => {
       const target = evt.target;
       if (!(target instanceof HTMLElement)) return;
+      const openWo = target.getAttribute("data-open-wo");
+      if (openWo) {
+        loadWorkOrderDetail(Number(openWo)).catch(() => {});
+        return;
+      }
       const issueId = target.getAttribute("data-wo-issue-id");
       const assignId = target.getAttribute("data-assign-id");
       const completeId = target.getAttribute("data-complete-id");

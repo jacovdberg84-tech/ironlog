@@ -8,6 +8,7 @@ import { holdsAnyRole } from "../utils/request.js";
 import registerBoardRoutes from "./workorders/board.routes.js";
 import registerSchedulingRoutes from "./workorders/scheduling.routes.js";
 import registerCloseoutRoutes from "./workorders/closeout.routes.js";
+import registerCombineRoutes from "./workorders/combine.routes.js";
 import { repairBreakdownWorkOrderLinks } from "../utils/workOrderSync.js";
 import { writeAudit } from "../utils/audit.js";
 
@@ -142,6 +143,8 @@ export default async function workOrderRoutes(app) {
   // Backward-compatible schema upgrades for WO completion/sign-off.
   ensureColumn("work_orders", "completion_notes", "completion_notes TEXT");
   ensureColumn("work_orders", "job_description", "job_description TEXT");
+  // Set when a pre-start job is combined into another (see workorders/combine.routes.js).
+  ensureColumn("work_orders", "merged_into_id", "merged_into_id INTEGER");
   ensureColumn("work_orders", "artisan_name", "artisan_name TEXT");
   ensureColumn("work_orders", "artisan_signed_at", "artisan_signed_at TEXT");
   ensureColumn("work_orders", "supervisor_name", "supervisor_name TEXT");
@@ -457,6 +460,7 @@ export default async function workOrderRoutes(app) {
   registerBoardRoutes(app, ctx);
   registerSchedulingRoutes(app, ctx);
   registerCloseoutRoutes(app, ctx);
+  registerCombineRoutes(app, ctx);
 
   // Breakdowns and their work orders used to drift apart (finishing one left the
   // other open). Bring existing records back in step; later changes stay in step.

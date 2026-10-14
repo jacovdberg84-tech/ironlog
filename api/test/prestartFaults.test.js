@@ -70,3 +70,27 @@ test("resubmitting with no faults closes an untouched work order only", () => {
   assert.equal(d.prepare("SELECT status FROM work_orders WHERE id = 2").get().status, "in_progress");
   assert.equal(syncPrestartFaultWorkOrder(d, { assetId: 4, checkId: 11, checkDate: "2026-10-01", faults: [] }), null);
 });
+
+test("a second day's faults join the machine's open pre-start job instead of a new one", () => {
+  const d = db();
+  const brakes = prestartFaultList(checklist, { brakes_ok: "soft pedal" });
+  const day1 = syncPrestartFaultWorkOrder(d, { assetId: 4, checkId: 20, checkDate: "2026-10-01", operator: "Sipho", faults: brakes });
+  const day2 = syncPrestartFaultWorkOrder(d, { assetId: 4, checkId: 21, checkDate: "2026-10-02", operator: "Joao", faults: brakes });
+  assert.deepEqual(day2, { work_order_id: day1.work_order_id, created: false, closed: false, added: true });
+  assert.equal(d.prepare("SELECT COUNT(*) n FROM work_orders").get().n, 1);
+  const desc = d.prepare("SELECT job_description FROM work_orders WHERE id = ?").get(day1.work_order_id).job_description;
+  assert.match(desc, /^Pre-start faults reported by Sipho on 2026-10-01:/);
+  assert.match(desc, /Also reported by Joao on 2026-10-02:\n- Brakes: soft pedal \(again\)\n- Tyres \(again\)/);
+  assert.match(faultMessage(brakes, day2), /work order #1 \(added to the open pre-start job\)/);
+
+  // Day 2's check resubmitted clean: the shared job stays open, with a note.
+  assert.equal(syncPrestartFaultWorkOrder(d, { assetId: 4, checkId: 21, checkDate: "2026-10-02", operator: "Joao", faults: [] }), null);
+  const wo = d.prepare("SELECT status, job_description FROM work_orders WHERE id = 1").get();
+  assert.equal(wo.status, "open");
+  assert.match(wo.job_description, /Re-checked by Joao on 2026-10-02: no faults on this pre-start\./);
+
+  // Another machine still gets its own job; a finished job means the next fault opens a new one.
+  assert.equal(syncPrestartFaultWorkOrder(d, { assetId: 5, checkId: 22, checkDate: "2026-10-02", faults: brakes }).created, true);
+  d.prepare("UPDATE work_orders SET status = 'completed' WHERE id = 1").run();
+  assert.equal(syncPrestartFaultWorkOrder(d, { assetId: 4, checkId: 23, checkDate: "2026-10-03", faults: brakes }).created, true);
+});

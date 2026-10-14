@@ -67,6 +67,7 @@ export default function registerBoardRoutes(app, ctx) {
         w.due_date,
         w.priority,
         w.job_description,
+        w.merged_into_id,
         b.description AS breakdown_description,
         b.component AS breakdown_component,
         b.critical AS breakdown_critical,

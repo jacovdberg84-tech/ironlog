@@ -9122,3 +9122,13 @@ body.wo-popup .wo-drawer-head { display: none; }
 .june-dev-status { margin: 0; font-size: 12px; color: var(--muted); }
 .june-dev-status:empty { display: none; }
 .june-dev-status.error { color: var(--danger); }
+
+/* ---------- Work orders: combine a machine's pre-start jobs ---------- */
+.wo-combine { display: grid; gap: 10px; margin: 12px 0; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--warn) 8%, var(--card)); }
+.wo-combine[hidden] { display: none; }
+.wo-combine p { margin: 4px 0 0; }
+.wo-combine summary { cursor: pointer; font-size: 0.86rem; font-weight: 600; margin-top: 6px; }
+.wo-combine-list { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 6px; font-size: 0.86rem; }
+.wo-combine-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.wo-combined-note { margin: 12px 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card-soft); color: var(--muted); font-size: 0.9rem; }
+.wo-combined-note .link-btn { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; }
