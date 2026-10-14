@@ -13,5 +13,8 @@ test("top bar date box is wide enough to show the whole date", () => {
 });
 
 test("index.html loads a fresh styles.css version", () => {
-  assert.match(html, /styles\.css\?v=date-card-1/);
+  // Any version newer than the one before the date-box fix; later changes bump it again.
+  const version = html.match(/styles\.css\?v=([\w.-]+)/)?.[1];
+  assert.ok(version, "styles.css needs a ?v= version");
+  assert.notEqual(version, "fuel-cost-1", "bump the styles.css version so browsers get the date-box fix");
 });

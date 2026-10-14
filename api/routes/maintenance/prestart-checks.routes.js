@@ -447,7 +447,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
         recordAck(db, { noticeId: req.body.notice_ack, assetId: asset.id, checkKind: "ldv", checkId, operator: inspector_name });
       }
       const faultWo = syncPrestartFaultWorkOrder(db, {
-        assetId: Number(asset.id), checkId, siteCode: site_code, checkDate: check_date, operator: inspector_name, faults,
+        assetId: Number(asset.id), checkId, checkKind: "ldv", siteCode: site_code, checkDate: check_date, operator: inspector_name, faults,
       });
       translateFaultCommentsLater(req, faultWo, faults);
       if (faults.length && faultWo && !faultWo.closed) {
@@ -857,7 +857,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
         recordAck(db, { noticeId: req.body.notice_ack, assetId: asset.id, checkKind: "machine", checkId, operator: inspector_name });
       }
       const faultWo = syncPrestartFaultWorkOrder(db, {
-        assetId: Number(asset.id), checkId, siteCode: site_code, checkDate: check_date, operator: inspector_name, faults,
+        assetId: Number(asset.id), checkId, checkKind: "machine", siteCode: site_code, checkDate: check_date, operator: inspector_name, faults,
       });
       translateFaultCommentsLater(req, faultWo, faults);
       if (faults.length && faultWo && !faultWo.closed) {
