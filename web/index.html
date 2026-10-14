@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=cm-plan-1" />
+  <link rel="stylesheet" href="./styles.css?v=fleet-sec-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -1474,6 +1474,24 @@
           <button type="button" id="cartrackTrackMorningPdfBtn" class="btn btn-secondary btn-sm">Speeding PDF</button>
         </div>
         <div id="cartrackTrackSpeedingEventsHost" class="cartrack-speeding-events-host"></div>
+      </details>
+      <details id="cartrackSecurityReportPanel" class="cartrack-speeding-events-panel cartrack-track-speeding-panel cartrack-security-report">
+        <summary class="cartrack-speeding-events-summary">Security report (PDF)</summary>
+        <p class="muted small">For site security: the tracking unit on each vehicle (Cartrack or Unitech), trackers that stopped reporting or lost power, tracker alerts (tamper, panic, power cut, towing, zones), vehicles moving at night and speeding.</p>
+        <div class="cartrack-security-form">
+          <label class="muted mini">From<input type="date" id="cartrackSecFrom" /></label>
+          <label class="muted mini">To<input type="date" id="cartrackSecTo" /></label>
+          <label class="muted mini">Night from<select id="cartrackSecNightStart"></select></label>
+          <label class="muted mini">Night until<select id="cartrackSecNightEnd"></select></label>
+          <label class="checkbox-label mini"><input type="checkbox" id="cartrackSecSync" checked /> <span>Fetch the latest alerts from Cartrack first</span></label>
+        </div>
+        <label class="muted mini cartrack-security-notes">Other incidents or notes for security (optional)
+          <textarea id="cartrackSecNotes" rows="3" maxlength="3000" placeholder="Example: 12 Oct, V05AM stoned near Mute, windscreen broken, driver unhurt."></textarea>
+        </label>
+        <div class="cartrack-speed-report-toolbar">
+          <button type="button" id="cartrackSecPdfBtn" class="btn-primary btn-sm">Open security report PDF</button>
+          <span id="cartrackSecStatus" class="muted small" role="status"></span>
+        </div>
       </details>
       <p class="muted small">Positions sync from Cartrack API. Configure credentials in <b>User Admin → Cartrack</b>. Open in Cartrack Fleetweb for full history and playback.</p>
     </section>
@@ -8019,7 +8037,7 @@
   <script src="./app/admin.js?v=91"></script>
   <script src="./app/inspections.js?v=90"></script>
   <script src="./app/ui-helpers.js?v=89"></script>
-  <script src="./app/telematics.js?v=92"></script>
+  <script src="./app/telematics.js?v=93"></script>
   <script src="./app/dashboard.js?v=90"></script>
   <script src="./app/borris.js?v=91"></script>
   <script src="./app/fuel-lube.js?v=90"></script>

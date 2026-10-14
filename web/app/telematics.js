@@ -453,6 +453,85 @@ async function openCartrackMorningPdf(date) {
   }
 }
 
+/** Fleet Track → Security report: tracking unit per vehicle and security issues, as a PDF. */
+function wireCartrackSecurityReport() {
+  const from = qs("cartrackSecFrom");
+  const to = qs("cartrackSecTo");
+  if (!from || !to || from.dataset.wired) return;
+  from.dataset.wired = "1";
+  const today = todayLocalYmd();
+  const weekAgo = new Date(`${today}T12:00:00`);
+  weekAgo.setDate(weekAgo.getDate() - 6);
+  to.value = today;
+  from.value = weekAgo.toISOString().slice(0, 10);
+  const hours = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, "0")}:00</option>`).join("");
+  qs("cartrackSecNightStart").innerHTML = hours;
+  qs("cartrackSecNightEnd").innerHTML = hours;
+  qs("cartrackSecNightStart").value = "19";
+  qs("cartrackSecNightEnd").value = "5";
+  const status = (text) => { const el = qs("cartrackSecStatus"); if (el) el.textContent = text; };
+  qs("cartrackSecPdfBtn")?.addEventListener("click", async () => {
+    const f = from.value;
+    const t = to.value;
+    if (!f || !t || f > t) return status("Choose a From date on or before the To date.");
+    const btn = qs("cartrackSecPdfBtn");
+    btn.disabled = true;
+    // Open the tab now, while handling the click, so it isn't blocked after the Cartrack fetch.
+    const win = window.open("", "_blank");
+    if (win) {
+      win.opener = null;
+      win.document.title = "Security report";
+      win.document.body.textContent = "Preparing the security report…";
+    }
+    try {
+      const days = Math.round((Date.parse(t) - Date.parse(f)) / 86400000) + 1;
+      if (qs("cartrackSecSync")?.checked) {
+        if (days > 31) {
+          status("Longer than a month: using the alerts already in IronLog.");
+        } else {
+          status(`Fetching the latest from Cartrack (${days} day${days === 1 ? "" : "s"})…`);
+          // Best effort: the report still opens with what IronLog has if Cartrack can't be reached.
+          await fetch(`${API}/api/cartrack/sync`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...authHeaders() },
+            body: JSON.stringify({ start_date: f, end_date: t }),
+          }).catch(() => null);
+        }
+      }
+      status("Building the report…");
+      const params = new URLSearchParams({
+        from: f,
+        to: t,
+        night_start: qs("cartrackSecNightStart").value,
+        night_end: qs("cartrackSecNightEnd").value,
+        notes: qs("cartrackSecNotes")?.value || "",
+        _: String(Date.now()),
+      });
+      const res = await fetch(`${API}/api/cartrack/security-report.pdf?${params}`, { headers: authHeaders() });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || (res.status === 403 ? "Only managers and plant admin can open this report." : `Request failed (${res.status})`));
+      }
+      const url = URL.createObjectURL(await res.blob());
+      if (win && !win.closed) {
+        win.location.replace(url);
+      } else {
+        const a = Object.assign(document.createElement("a"), { href: url, download: `fleet_security_${f}_${t}.pdf` });
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 120000);
+      status("Report opened.");
+    } catch (e) {
+      if (win && !win.closed) win.close();
+      status(`Could not open the report: ${e.message || e}`);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
 async function emailCartrackMorningReport(date) {
   const reportDate = syncCartrackSpeedReportDateInputs(date);
   setStatus(`Sending speeding report for ${reportDate}…`);
@@ -1322,6 +1401,7 @@ function wireTelematicsControls() {
   qs("cartrackTrackMorningPdfBtn")?.addEventListener("click", () =>
     openCartrackMorningPdf().catch((e) => setStatus(String(e.message || e)))
   );
+  wireCartrackSecurityReport();
   const onCartrackSpeedReportDateChange = (e) => {
     const d = syncCartrackSpeedReportDateInputs(e.target?.value);
     loadCartrackSpeedingEvents(d, { useCache: d === todayLocalYmd() }).catch(() => {});

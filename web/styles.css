@@ -9167,3 +9167,10 @@ body.wo-popup .wo-drawer-head { display: none; }
 @media (max-width: 700px) {
   .cm-plan-bar select { min-width: 0; width: 100%; }
 }
+
+/* Fleet Track: security report panel */
+.cartrack-security-report > p { margin: 8px 0; }
+.cartrack-security-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 8px 0; }
+.cartrack-security-form label:not(.checkbox-label) { display: flex; flex-direction: column; gap: 4px; }
+.cartrack-security-notes { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.cartrack-security-notes textarea { width: 100%; max-width: 720px; }
