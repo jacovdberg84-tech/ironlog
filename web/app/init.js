@@ -192,6 +192,7 @@ function loadStartupData() {
     loadSmtpSettings().catch(() => {});
     loadPushNotificationSettings().catch(() => {});
     loadPdfReportSettings().catch(() => {});
+    loadCompanyProfile().catch(() => {});
     loadBackupFiles().catch(() => {});
   }
   loadCodePickers().catch(() => {});

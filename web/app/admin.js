@@ -1405,8 +1405,43 @@ async function executeBackupRestoreNow() {
   setStatus("Restore execute requested. Reconnect after restart.");
 }
 
+/** Admin → Company profile: details used on report headers and June's site. */
+async function loadCompanyProfile() {
+  const card = qs("companyProfileCard");
+  if (!card) return;
+  const data = await fetchJson(`${API}/api/company/profile`);
+  const p = data?.profile || {};
+  card.querySelectorAll("[data-cp]").forEach((el) => { el.value = String(p[el.dataset.cp] ?? ""); });
+  const list = qs("cpTimezoneList");
+  if (list && !list.children.length && typeof Intl.supportedValuesOf === "function") {
+    list.innerHTML = Intl.supportedValuesOf("timeZone").map((z) => `<option value="${escapeHtml(z)}"></option>`).join("");
+  }
+  const out = qs("companyProfileResult");
+  if (out) out.textContent = p.header_prefix ? `Report headers show "${p.header_prefix} · IronLog".` : "Report headers show \"IronLog\" until a short name or company name is set.";
+}
+
+async function saveCompanyProfile() {
+  const card = qs("companyProfileCard");
+  const out = qs("companyProfileResult");
+  const body = {};
+  card.querySelectorAll("[data-cp]").forEach((el) => { body[el.dataset.cp] = el.value; });
+  try {
+    await fetchJson(`${API}/api/company/profile`, { method: "PUT", body: JSON.stringify(body) });
+    await loadCompanyProfile();
+    if (out) out.textContent = `Saved. ${out.textContent}`;
+  } catch (e) {
+    if (out) out.textContent = `Not saved: ${e.message || e}`;
+  }
+}
+
 /** Start-up: User admin, SMTP, push, PDF settings and backup controls. Called once from init() in init.js. */
 function wireAdminControls() {
+  qs("loadCompanyProfileBtn")?.addEventListener("click", () =>
+    loadCompanyProfile().catch((e) => setStatus("Company profile error: " + e.message))
+  );
+  qs("saveCompanyProfileBtn")?.addEventListener("click", () =>
+    saveCompanyProfile().catch((e) => setStatus("Company profile error: " + e.message))
+  );
   qs("loadAdminUsersBtn")?.addEventListener("click", () =>
     loadAdminUsers().catch((e) => setStatus("Admin users error: " + e.message))
   );

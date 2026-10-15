@@ -6,6 +6,7 @@ import path from "node:path";
 import ExcelJS from "exceljs";
 import { ensurePageSpace, pdfBodyBottom, pdfBodyTop, table } from "../utils/pdfGenerator.js";
 import { getPdfReportBranding, getReportSetting } from "../utils/reportSettings.js";
+import { getCompanyProfile } from "../utils/companyProfile.js";
 import { ensureAuditTable } from "../utils/audit.js";
 import {
   buildReliabilityIncidentsForAssets,
@@ -3289,7 +3290,7 @@ export default async function maintenanceRoutes(app) {
     const site_code = String(siteCode || "main").trim().toLowerCase() || "main";
     const branding = getPdfReportBranding(db);
     const project = String(getReportSetting(db, "tyre_survey_project", branding.site_code || site_code)).trim().toUpperCase();
-    const country = String(getReportSetting(db, "tyre_survey_country", "Mozambique")).trim() || "Mozambique";
+    const country = String(getReportSetting(db, "tyre_survey_country", getCompanyProfile(db).country)).trim() || getCompanyProfile(db).country || "";
 
     const rows = db.prepare(`
       SELECT

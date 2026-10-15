@@ -3,6 +3,7 @@
 // project API key: it only receives the SDP answer for a short-lived WebRTC
 // conversation. June's private Ironlog tools all route through this gateway.
 import crypto from "node:crypto";
+import { briefingSiteFromProfile, getCompanyProfile } from "../utils/companyProfile.js";
 import { db } from "../db/client.js";
 import { getAssetHoursInfoAsOf } from "../utils/assetMeterHours.js";
 import { resolveUser } from "../utils/taskCollab.js";
@@ -371,6 +372,11 @@ const TOOL_DEFINITIONS = [
   // the Ironlog functions above.
   { type: "web_search" },
 ];
+
+/** June's briefing site: server settings, else the company profile's location. */
+function companyBriefingSite() {
+  return briefingSite(process.env, briefingSiteFromProfile(getCompanyProfile(db)));
+}
 
 function isDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
@@ -1012,7 +1018,7 @@ async function getJuneCalendarToday(context, today, tz) {
 }
 
 function getJuneDailyBriefing(context) {
-  const site = briefingSite();
+  const site = companyBriefingSite();
   return buildDailyBriefing({
     site,
     ironlogBrief: (today) => getIronlogBrief(today),
@@ -1095,9 +1101,9 @@ async function executeGatewayTool(name, args, context) {
   if (tool === "june_prepare_developer_request") return prepareDeveloperRequest(safeArgs);
   if (tool === "june_prepare_developer_reply") return prepareDeveloperReply(context, safeArgs);
   if (tool === "june_open_developer_request") return openDeveloperRequest(context, safeArgs);
-  if (tool === "june_cost_report") return buildJuneCostReport(safeArgs, { siteCode: context.siteCode, today: siteToday(briefingSite().timezone) });
-  if (tool === "june_kpi_report") return buildJuneKpiReport(safeArgs, { siteCode: context.siteCode, today: siteToday(briefingSite().timezone) });
-  if (tool === "june_prepare_report_file") return prepareJuneReportFile(safeArgs, { today: siteToday(briefingSite().timezone) });
+  if (tool === "june_cost_report") return buildJuneCostReport(safeArgs, { siteCode: context.siteCode, today: siteToday(companyBriefingSite().timezone) });
+  if (tool === "june_kpi_report") return buildJuneKpiReport(safeArgs, { siteCode: context.siteCode, today: siteToday(companyBriefingSite().timezone) });
+  if (tool === "june_prepare_report_file") return prepareJuneReportFile(safeArgs, { today: siteToday(companyBriefingSite().timezone) });
   if (tool === "june_list_internal_calendar_events") return {
     source: "internal_ironlog",
     events: listInternalCalendarEvents(context, { fromDate: safeArgs.from_date, toDate: safeArgs.to_date, limit: 24 }),
