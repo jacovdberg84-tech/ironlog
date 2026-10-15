@@ -1,0 +1,46 @@
+name: Publish a company instance (Cloudflare route)
+
+# The "ironlog" Cloudflare Tunnel is locally managed, so its routes live in
+# cloudflared's config file on the server, not in the dashboard. This adds
+# one web address -> local port rule (deploy/tunnel-route.sh): it saves a copy
+# of the file first, has cloudflared check the new file, and puts the copy
+# back if the check or the restart fails. AML's own route is never changed.
+# cloudflared restarts once, so IronLog may pause for a few seconds.
+# Run it by hand from the Actions tab and type ADD-ROUTE to confirm.
+on:
+  workflow_dispatch:
+    inputs:
+      web_address:
+        description: "Web address"
+        required: true
+        default: "pilot.ironlogafrica.com"
+      port:
+        description: "Instance port (3100-3199)"
+        required: true
+        default: "3101"
+      confirm:
+        description: "Type ADD-ROUTE to run"
+        required: true
+
+jobs:
+  route:
+    if: ${{ github.event.inputs.confirm == 'ADD-ROUTE' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ROUTE_HOST: ${{ github.event.inputs.web_address }}
+      ROUTE_PORT: ${{ github.event.inputs.port }}
+    steps:
+      - name: Add the route over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
+          port: ${{ secrets.SERVER_PORT }}
+          envs: ROUTE_HOST,ROUTE_PORT
+          script: |
+            set -e
+            bash /data/ironlog/deploy/tunnel-route.sh add "$ROUTE_HOST" "$ROUTE_PORT"
+            echo "== AML still answering"; curl -fsS http://127.0.0.1:3001/health > /dev/null && echo "AML IronLog OK"

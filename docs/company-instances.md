@@ -11,7 +11,7 @@ company gets its own **instance**: the same code, but its own data, started by
 | Database, uploads, backups | `api/db`, `api/uploads` | `db/ironlog.db`, `data/`, `db/backups/` |
 | Secrets folder | `api/secrets` (licence signing key) | `secrets/` (empty; licence issuing is off) |
 | PM2 name, port | `ironlog-api`, 0.0.0.0:3001 | `ironlog-<name>`, 127.0.0.1:31xx |
-| Web address | ironlog.ironlogafrica.com | Cloudflare Tunnel route, e.g. pilot.ironlogafrica.com → `http://localhost:3101` |
+| Web address | ironlog.ironlogafrica.com | Rule in cloudflared's config file, e.g. pilot.ironlogafrica.com → `http://localhost:3101` |
 
 What keeps them apart:
 - `api/loadEnv.js`: with `IRONLOG_ENV_FILE` set, inherited IronLog settings (AI keys,
@@ -26,10 +26,13 @@ What keeps them apart:
   that instance's `instance.env` and run the workflow again to restart it.
 
 ## Creating one
-1. Cloudflare → Zero Trust → Networks → Tunnels → `ironlog` → **Routes** → Add route →
-   Published application: subdomain, `ironlogafrica.com`, service `HTTP`, `localhost:<port>`.
-2. GitHub → Actions → **Create or update a company instance** → Run workflow with the
+1. GitHub → Actions → **Create or update a company instance** → Run workflow with the
    name, port, time zone, web address and first administrator; type `CREATE-INSTANCE`.
+2. GitHub → Actions → **Publish a company instance (Cloudflare route)** with the web
+   address and port; type `ADD-ROUTE`. The `ironlog` tunnel is locally managed, so its
+   routes are in cloudflared's config file on the server, not the Cloudflare dashboard
+   (`deploy/tunnel-route.sh` adds the rule above the catch-all, checks the file, and
+   puts the saved copy back if anything fails).
 3. The log shows a one-time setup code (valid 48 hours). The administrator signs in
    with the username, the code in "Setup code (first-time only)" and a new password.
    Running the workflow again before then gives a fresh code.
