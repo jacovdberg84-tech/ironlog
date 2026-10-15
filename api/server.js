@@ -16,6 +16,7 @@ import alertsRoutes from "./routes/alerts.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import authRoutes from "./routes/auth.routes.js";
 import companyRoutes from "./routes/company.routes.js";
+import licenceRoutes, { licenceHook } from "./routes/licence.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
 import legalRoutes from "./routes/legal.routes.js";
 import approvalsRoutes from "./routes/approvals.routes.js";
@@ -63,6 +64,8 @@ export function buildServer() {
   app.register(cors, { origin: true });
 
   app.addHook("onRequest", ironlogAuthHook);
+  // After sign-in, so the site is known: licence modules and read-only mode.
+  app.addHook("onRequest", licenceHook);
 
   // Health check
   app.get("/health", async () => {
@@ -88,6 +91,7 @@ app.register(dashboardRoutes, { prefix: "/api/dashboard" });
   app.register(unitechRoutes, { prefix: "/api/unitech" });
 app.register(authRoutes, { prefix: "/api/auth" });
 app.register(companyRoutes, { prefix: "/api/company" });
+app.register(licenceRoutes, { prefix: "/api/licence" });
 app.register(notificationsRoutes, { prefix: "/api/notifications" });
 app.register(aiEngineerRoutes, { prefix: "/api/ai-engineer" });
 app.register(developerRoutes, { prefix: "/api/developer" });

@@ -32,6 +32,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Sidebar navigation
   initMaintSidebar();
+  applyCareMaintenanceLicence();
   // Fallback delegated handler: ensures section switching always works
   // even if direct listeners are interrupted by future sidebar markup edits.
   document.addEventListener("click", (evt) => {

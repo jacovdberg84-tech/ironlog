@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=backups-1" />
+  <link rel="stylesheet" href="./styles.css?v=licence-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -6605,6 +6605,44 @@
           </div>
         </div>
 
+        <!-- Licence Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false" id="licenceCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-1d4ed8);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+              </div>
+              <div>
+                <h3>Licence</h3>
+                <p class="muted small">What this IronLog licence includes for each site, when it ends, and how many machines each site uses against its band.</p>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="refreshLicenceBtn" class="btn btn-secondary btn-sm">Refresh</button>
+              <button class="report-card-toggle" aria-label="Toggle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+              </button>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <div id="licenceSummary" role="status">Loading…</div>
+            <h4 class="backup-health-h">Modules for this site</h4>
+            <div id="licenceModules" class="licence-modules"></div>
+            <h4 class="backup-health-h">Usage</h4>
+            <div class="table-wrap"><table class="backup-runs-table"><thead><tr><th>Site</th><th>Package</th><th>Active machines</th><th>Machines licensed</th></tr></thead><tbody id="licenceUsageBody"></tbody></table></div>
+            <p class="muted small" id="licenceUsers"></p>
+            <div class="row" style="gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px;">
+              <button type="button" id="licenceUsageCsvBtn" class="btn btn-secondary">Download usage report</button>
+            </div>
+            <h4 class="backup-health-h">Enter a licence key</h4>
+            <textarea id="licenceKeyInput" rows="3" class="w-full" placeholder="Paste the licence key from IronLog here (it starts with IRONLOG1.)" spellcheck="false"></textarea>
+            <div class="row" style="gap:8px; align-items:center; margin-top:8px;">
+              <button type="button" id="licenceInstallBtn" class="btn-primary">Install licence</button>
+              <span id="licenceResult" class="muted small" role="status"></span>
+            </div>
+          </div>
+        </div>
+
         <!-- Company Profile Card -->
         <div class="dash-card collapsible full-width" data-collapsed="false" id="companyProfileCard">
           <div class="dash-card-header">
@@ -7046,7 +7084,7 @@
         </div>
 
         <!-- AML Weekly Check Sheet -->
-        <div class="report-card collapsible" data-report-category="operations management" data-collapsed="false">
+        <div class="report-card collapsible" data-report-category="operations management" data-collapsed="false" data-licence-module="aml_reports">
           <div class="report-card-header">
             <div class="report-card-title">
               <div class="report-card-icon">
@@ -8134,8 +8172,8 @@
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=2"></script>
   <!-- Main app, split by feature. Order matters: files share one global scope. -->
-  <script src="./app/core.js?v=95"></script>
-  <script src="./app/admin.js?v=93"></script>
+  <script src="./app/core.js?v=96"></script>
+  <script src="./app/admin.js?v=94"></script>
   <script src="./app/inspections.js?v=90"></script>
   <script src="./app/ui-helpers.js?v=89"></script>
   <script src="./app/telematics.js?v=94"></script>
@@ -8160,7 +8198,7 @@
   <script src="./app/daily-input.js?v=89"></script>
   <script src="./app/assets.js?v=89"></script>
   <script src="./app/developer.js?v=3"></script>
-  <script src="./app/init.js?v=94"></script>
+  <script src="./app/init.js?v=95"></script>
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=90"></script>
   <script src="./app/collab-inbox.js?v=1"></script>

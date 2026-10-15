@@ -1050,9 +1050,69 @@ function getEffectiveAllowedTabs() {
   // "admin" is not an assignable section in the multiselect; always allow the User admin tab for these roles
   if (roles.includes("admin") && !list.includes("admin")) list = [...list, "admin"];
   if (roles.includes("admin") && !list.includes("developer")) list = [...list, "developer"];
+  // Screens of add-on modules outside this site's licence are hidden (the server refuses them too).
+  const unlicensed = licenceHiddenTabs();
+  if (unlicensed.size) list = list.filter((t) => !unlicensed.has(t));
   // My Work is the home screen for every signed-in user; keep it first so it is the landing tab.
   list = ["mywork", ...list.filter((t) => t !== "mywork")];
   return list;
+}
+
+// ---- Licence: which add-on modules this site has, and warnings to show (api/routes/licence.routes.js).
+let LICENCE_STATE = null;
+let licenceLoadedFor = "";
+let licenceLoading = false;
+
+function licenceHiddenTabs() {
+  const s = LICENCE_STATE;
+  if (!s || !s.module_tabs) return new Set();
+  const on = new Set(s.modules || []);
+  return new Set(Object.entries(s.module_tabs).filter(([m]) => !on.has(m)).flatMap(([, tabs]) => tabs));
+}
+
+function licenceModuleOn(module) {
+  return !LICENCE_STATE || (LICENCE_STATE.modules || []).includes(module);
+}
+
+function renderLicenceBanner() {
+  const s = LICENCE_STATE;
+  let el = qs("licenceBanner");
+  const isAdmin = getSessionRoles().includes("admin");
+  // Everyone sees grace and read-only; trial and renewal reminders are for administrators.
+  const show = s && (s.warnings || []).length && (["grace", "read_only"].includes(s.mode) || isAdmin);
+  if (!show) {
+    if (el) el.hidden = true;
+    return;
+  }
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "licenceBanner";
+    el.setAttribute("role", "status");
+    qs("mainContent")?.prepend(el);
+  }
+  el.className = `licence-banner ${s.mode === "read_only" ? "is-blocked" : s.mode === "grace" ? "is-warn" : "is-info"}`;
+  el.textContent = s.warnings.join(" ");
+  el.hidden = false;
+}
+
+/** Loads this site's licence once per sign-in and site, then re-applies screen visibility. */
+function ensureLicenceState() {
+  const key = `${getSessionSite()}|${getAuthToken() || ""}`;
+  if (licenceLoading || licenceLoadedFor === key) return;
+  if (LOGIN_GATE_ENABLED && !getAuthToken()) return;
+  licenceLoading = true;
+  fetch(`${API}/api/licence/state`, { headers: new Headers(authHeaders()) })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      licenceLoadedFor = key;
+      if (!data?.ok) return;
+      LICENCE_STATE = data;
+      document.querySelectorAll("[data-licence-module]").forEach((el) => { el.classList.toggle("hidden", !licenceModuleOn(el.dataset.licenceModule)); });
+      renderLicenceBanner();
+      applyRoleVisibility();
+    })
+    .catch(() => {})
+    .finally(() => { licenceLoading = false; });
 }
 
 /** Puts the sections a role uses most straight after Home. */
@@ -1087,6 +1147,7 @@ function orderNavSectionsForRoles(sidebar, roles) {
 function applyRoleVisibility() {
   const role = getSessionRole();
   const roles = getSessionRoles();
+  ensureLicenceState();
   renderSessionRolesBadge();
   if (typeof syncJuneVisibility === "function") syncJuneVisibility();
   const allowedList = getEffectiveAllowedTabs();
