@@ -34,4 +34,16 @@ jobs:
             done
             echo "== certificates"; command -v certbot && (sudo -n certbot certificates 2>/dev/null || certbot certificates 2>/dev/null) | grep -E 'Certificate Name|Domains|Expiry' || echo "certbot not found or not permitted"
             echo "== ironlog folders"; ls -la /data 2>/dev/null
+            echo "== what uses the disk (largest folders)"
+            du -xh --max-depth=1 / 2>/dev/null | sort -rh | head -12
+            du -xh --max-depth=2 /data /root /home /var /usr/share/ollama 2>/dev/null | sort -rh | head -25
+            echo "-- database backups on this server"
+            for d in /data/ironlog/api/db/backups /data/ironlog/api/backups /data/backups; do
+              [ -d "$d" ] || continue
+              echo "$d: $(find "$d" -maxdepth 1 -type f | wc -l) files, $(du -sh "$d" | cut -f1)"
+              ls -t "$d" | head -2; echo "..."; ls -t "$d" | tail -2
+            done
+            echo "-- pm2 logs"; du -sh ~/.pm2/logs 2>/dev/null
+            echo "-- ollama models"; du -sh /usr/share/ollama/.ollama/models ~/.ollama/models 2>/dev/null
+            echo "-- journal"; journalctl --disk-usage 2>/dev/null || true
             echo "== whoami"; whoami; id -nG
