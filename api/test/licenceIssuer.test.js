@@ -105,3 +105,16 @@ test("the owner sets up a signing key once, edits packages and prices, and issue
   const actions = db.prepare(`SELECT action FROM audit_logs WHERE module = 'licence_issuer' ORDER BY id`).all().map((a) => a.action);
   assert.deepEqual(actions, ["signing_key_created", "package_save", "prices_save", "issue", "signing_key_downloaded"]);
 });
+
+test("a customer server (IRONLOG_LICENCE_ISSUER=0) has no issuer and trusts no local key", async () => {
+  const iss = await import("../utils/licenceIssuer.js");
+  process.env.IRONLOG_LICENCE_ISSUER = "0";
+  try {
+    assert.equal(iss.isIssuer("bj.vandenberg", ["admin"]), false, "even a user with the owner's name");
+    assert.equal(iss.createSigningKey().ok, false);
+    assert.deepEqual(iss.localPublicKeys(), []);
+  } finally {
+    delete process.env.IRONLOG_LICENCE_ISSUER;
+  }
+  assert.equal(iss.isIssuer("bj.vandenberg", ["admin"]), true);
+});

@@ -6,6 +6,7 @@
 // work order, tagged with the work order number.
 
 import { LABOUR_STATES, STATE_LABELS, localDay, segmentHours } from "./techActivity.js";
+import { siteClock } from "./siteTime.js";
 
 function clip(seg, from, to) {
   const start = from && seg.start < from ? from : seg.start;
@@ -13,9 +14,9 @@ function clip(seg, from, to) {
   return end > start ? { ...seg, start, end } : null;
 }
 
-/** Local clock time (UTC+2) as HH:MM. */
+/** Local clock time at site as HH:MM. */
 export function localClock(iso) {
-  return new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Maputo", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
+  return siteClock(iso);
 }
 
 function sourceCategory(source) {

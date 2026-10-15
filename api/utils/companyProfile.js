@@ -44,7 +44,8 @@ export const LEGACY_PROFILE = {
   nearby: "Palma, Afungi, Mocímboa da Praia, Nangade, Muidumbe, Mueda, Macomia, Quionga",
 };
 
-const NEUTRAL_PROFILE = { currency: "USD", timezone: "UTC" };
+// A new company starts in the time zone its server was set up with (IRONLOG_TIMEZONE), else UTC.
+const neutralProfile = () => ({ currency: "USD", timezone: process.env.IRONLOG_TIMEZONE || "UTC" });
 const VERSION_KEY = "company_profile_version";
 
 const keyOf = (field) => (field === "company_name" || field === "site_name" ? `pdf_${field}` : `company_${field}`);
@@ -61,7 +62,7 @@ function hasData(db) {
 export function ensureCompanyProfile(db) {
   ensureReportSettingsSchema(db);
   if (getReportSetting(db, VERSION_KEY)) return;
-  const seed = hasData(db) ? LEGACY_PROFILE : NEUTRAL_PROFILE;
+  const seed = hasData(db) ? LEGACY_PROFILE : neutralProfile();
   for (const [field, value] of Object.entries(seed)) {
     if (!getReportSetting(db, keyOf(field))) setReportSetting(db, keyOf(field), value);
   }

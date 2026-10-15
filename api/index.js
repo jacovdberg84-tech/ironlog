@@ -1,10 +1,10 @@
 // IRONLOG/api/index.js
+import "./loadEnv.js"; // settings before anything else reads them
 import { buildServer } from "./server.js";
 import { runHybridPhase1Migration } from "./db/hybridPhase1.js";
 import { runHybridPhase2Migration } from "./db/hybridPhase2.js";
 import "./db/migrate.js"; // Run schema migration first
 
-import dotenv from "dotenv";
 import fastifyStatic from "@fastify/static";
 import path from "path";
 import fs from "fs";
@@ -21,10 +21,8 @@ import { sendPushToRoles } from "./utils/pushNotify.js";
 import { db } from "./db/client.js";
 import { bootstrapSmtpFromEnv } from "./utils/mail.js";
 
-// Load api/.env first, then cwd .env for any missing keys (override off by default).
-const __dirnameApi = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.join(__dirnameApi, ".env") });
-dotenv.config({ path: path.join(process.cwd(), ".env") });
+// Settings are read by ./loadEnv.js (imported before everything else): api/.env,
+// or only an instance's own file when IRONLOG_ENV_FILE is set.
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 const HOST = process.env.HOST || "0.0.0.0";
