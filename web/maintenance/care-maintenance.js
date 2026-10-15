@@ -384,3 +384,14 @@ function wireCareMaintenance() {
     tr.querySelector(".cm-p-total").textContent = cmMoney(total);
   });
 }
+
+/** Hides Care & Maintenance from the menu when this site's licence does not include it. */
+async function applyCareMaintenanceLicence() {
+  try {
+    const res = await fetch(`${API}/licence/state`);
+    if (!res.ok) return;
+    const s = await res.json();
+    const on = (s.modules || []).includes("care_maintenance");
+    document.querySelectorAll('.nav-item[data-section="care-maintenance"]').forEach((el) => { el.style.display = on ? "" : "none"; });
+  } catch {}
+}

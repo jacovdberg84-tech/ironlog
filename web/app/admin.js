@@ -1548,9 +1548,68 @@ function wireBackupHealth() {
   }));
 }
 
+/** Admin → Licence: modules per site, end date, usage against the bands, and installing a key. */
+const LICENCE_MODE_TEXT = {
+  legacy: "Existing installation: everything is switched on. No licence key installed yet.",
+  trial: "Trial: everything is switched on until the trial ends.",
+  licensed: "Licensed.",
+  grace: "Licence ended: in the grace period.",
+  read_only: "Licence ended: IronLog is read-only.",
+};
+
+async function loadLicenceCard() {
+  if (!qs("licenceCard")) return;
+  const s = await fetchJson(`${API}/api/licence/state`);
+  const facts = [
+    ["Status", LICENCE_MODE_TEXT[s.mode] || s.mode],
+    s.licensee ? ["Licensed to", s.licensee] : null,
+    s.package ? ["Package", s.package] : null,
+    s.expires_at ? [s.mode === "trial" ? "Trial ends" : "Licence ends", `${s.expires_at}${s.days_left != null && s.days_left >= 0 ? ` (${s.days_left} days)` : ""}`] : null,
+    s.read_only_from && s.mode !== "legacy" ? ["Read-only from", s.read_only_from] : null,
+  ].filter(Boolean);
+  const warn = (s.warnings || []).map((w) => `<li>${escapeHtml(w)}</li>`).join("");
+  qs("licenceSummary").innerHTML = `
+    <div class="backup-health-state ${["grace", "read_only"].includes(s.mode) ? "is-warn" : "is-ok"}">${escapeHtml(LICENCE_MODE_TEXT[s.mode] || s.mode)}</div>
+    ${warn ? `<ul class="backup-health-warnings">${warn}</ul>` : ""}
+    <dl class="backup-health-grid">${facts.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd></div>`).join("")}</dl>`;
+  const on = new Set(s.modules || []);
+  qs("licenceModules").innerHTML = `<span class="pill pill-green">Core: machines, work orders, maintenance, inspections, technician portal</span>` +
+    Object.entries(s.module_labels || {}).map(([k, label]) => `<span class="pill ${on.has(k) ? "pill-green" : "pill-gray"}">${on.has(k) ? "" : "Not included: "}${escapeHtml(label)}</span>`).join("");
+  const u = await fetchJson(`${API}/api/licence/usage`);
+  qs("licenceUsageBody").innerHTML = (u.sites || []).map((r) => `<tr>
+      <td>${escapeHtml(r.site_code)}</td><td>${escapeHtml(r.package || "—")}</td>
+      <td>${r.active_assets}${r.over_band ? ' <span class="pill pill-orange">over band</span>' : ""}</td><td>${r.asset_limit ?? "No limit"}</td></tr>`).join("")
+    || `<tr><td colspan="4" class="muted">No machines yet.</td></tr>`;
+  qs("licenceUsers").textContent = `${u.active_users} active user${u.active_users === 1 ? "" : "s"}.`;
+}
+
+function wireLicenceCard() {
+  qs("refreshLicenceBtn")?.addEventListener("click", () => loadLicenceCard().catch((e) => setStatus("Licence error: " + e.message)));
+  qs("licenceUsageCsvBtn")?.addEventListener("click", () =>
+    downloadAuthedFile(`${API}/api/licence/usage.csv`, "ironlog-usage.csv").catch((e) => setStatus("Usage report error: " + e.message))
+  );
+  qs("licenceInstallBtn")?.addEventListener("click", async () => {
+    const out = qs("licenceResult");
+    const key = String(qs("licenceKeyInput")?.value || "").trim();
+    if (!key) { if (out) out.textContent = "Paste the licence key first."; return; }
+    try {
+      const r = await fetchJson(`${API}/api/licence/install`, { method: "POST", body: JSON.stringify({ key }) });
+      qs("licenceKeyInput").value = "";
+      if (out) out.textContent = `Licence installed for ${r.state?.licensee || "this company"}, ending ${r.state?.expires_at || "—"}.`;
+      LICENCE_STATE = null;
+      licenceLoadedFor = "";
+      applyRoleVisibility();
+      await loadLicenceCard();
+    } catch (e) {
+      if (out) out.textContent = `Not installed: ${e.message || e}`;
+    }
+  });
+}
+
 /** Start-up: User admin, SMTP, push, PDF settings and backup controls. Called once from init() in init.js. */
 function wireAdminControls() {
   wireBackupHealth();
+  wireLicenceCard();
   qs("loadCompanyProfileBtn")?.addEventListener("click", () =>
     loadCompanyProfile().catch((e) => setStatus("Company profile error: " + e.message))
   );
