@@ -14,6 +14,11 @@ import { runCartrackAutoScheduler } from "./utils/cartrack.js";
 import { runUnitechAutoScheduler } from "./utils/unitech.js";
 import { runFamsAutoScheduler } from "./utils/famsFuel.js";
 import { startDbAutoBackup } from "./db/autoBackup.js";
+import { startBackupScheduler } from "./utils/autoBackup.js";
+import { getCompanyProfile } from "./utils/companyProfile.js";
+import { backupDirPath } from "./routes/backups.routes.js";
+import { sendPushToRoles } from "./utils/pushNotify.js";
+import { db } from "./db/client.js";
 import { bootstrapSmtpFromEnv } from "./utils/mail.js";
 
 // Load api/.env first, then cwd .env for any missing keys (override off by default).
@@ -112,6 +117,14 @@ try {
   const stopDbAutoBackup = startDbAutoBackup(app.log);
   process.once("SIGINT", stopDbAutoBackup);
   process.once("SIGTERM", stopDbAutoBackup);
+  // Nightly off-site backup and monthly restore test; failures alert the administrators.
+  startBackupScheduler({
+    db,
+    backupDir: backupDirPath(),
+    profile: () => getCompanyProfile(db),
+    notify: (message) => sendPushToRoles({ roles: ["admin"], kind: "backup_failed", title: "IronLog backup problem", body: message, data: { screen: "admin" } }),
+    log: app.log,
+  });
   bootstrapSmtpFromEnv({ log: app.log });
   await runIronmindAutoScheduler(app.log);
   runCartrackAutoScheduler(app.log);

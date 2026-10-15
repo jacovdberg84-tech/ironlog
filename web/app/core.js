@@ -1553,11 +1553,9 @@ function initReportCardCollapsible() {
     };
     
     header.addEventListener("click", (e) => {
-      if (e.target.closest(".report-card-toggle")) {
-        toggleCollapse();
-      } else {
-        toggleCollapse();
-      }
+      // A Refresh (or other) button in the header does its own job, not fold the card.
+      if (e.target.closest("button, a, input, select, label") && !e.target.closest(".report-card-toggle")) return;
+      toggleCollapse();
     });
     
     toggle.addEventListener("click", (e) => {

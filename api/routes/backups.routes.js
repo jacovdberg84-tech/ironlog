@@ -4,6 +4,8 @@ import path from "node:path";
 import { exec } from "node:child_process";
 import { db, dbPathResolved } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
+import { backupBusy, backupStatus, getBackupSettings, runBackup, runRestoreTest, saveBackupSettings, startInBackground, webdavClient } from "../utils/autoBackup.js";
+import { getCompanyProfile } from "../utils/companyProfile.js";
 
 function requestRoles(req) {
   const fromMany = String(req.headers["x-user-roles"] || "")
@@ -38,7 +40,7 @@ function nowStamp() {
   return `${yyyy}${mm}${dd}_${hh}${mi}${ss}`;
 }
 
-function backupDirPath() {
+export function backupDirPath() {
   if (process.env.IRONLOG_DB_BACKUP_DIR) return path.resolve(process.env.IRONLOG_DB_BACKUP_DIR);
   return path.join(path.dirname(dbPathResolved), "backups");
 }
@@ -90,6 +92,19 @@ function restartCommand() {
   return String(process.env.IRONLOG_RESTART_COMMAND || "").trim();
 }
 
+function requireAdminOnly(req, reply) {
+  if (!requestRoles(req).includes("admin")) {
+    reply.code(403).send({ ok: false, error: "Only an administrator can change backup settings." });
+    return false;
+  }
+  return true;
+}
+
+const companyFolderName = () => {
+  const p = getCompanyProfile(db);
+  return p.short_name || p.company_name;
+};
+
 export default async function backupsRoutes(app) {
   ensureAuditTable(db);
   db.prepare(`
@@ -104,6 +119,66 @@ export default async function backupsRoutes(app) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `).run();
+
+  // Automatic and off-site backups (utils/autoBackup.js).
+  app.get("/status", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    return { ok: true, running: backupBusy(), ...backupStatus(db, { dbPath: dbPathResolved, backupDir: backupDirPath() }) };
+  });
+
+  app.put("/settings", async (req, reply) => {
+    if (!requireAdminOnly(req, reply)) return;
+    const r = saveBackupSettings(db, req.body || {}, String(req.headers["x-user-name"] || ""));
+    if (!r.ok) return reply.code(400).send(r);
+    const { webdav_password, ...logged } = req.body || {};
+    writeAudit(db, req, { module: "backups", action: "settings_update", entity_type: "backup_settings", entity_id: "1", payload: { ...logged, password_changed: Boolean(webdav_password) } });
+    return r;
+  });
+
+  // Checks the storage login without saving it (or with the saved one when no password is given).
+  app.post("/test-connection", async (req, reply) => {
+    if (!requireAdminOnly(req, reply)) return;
+    const b = req.body || {};
+    try {
+      let client;
+      if (b.webdav_url && b.webdav_user && b.webdav_password) {
+        client = webdavClient({ url: String(b.webdav_url).trim(), user: String(b.webdav_user).trim(), password: String(b.webdav_password) });
+      } else {
+        const s = getBackupSettings(db);
+        if (!s.offsite_configured) return reply.code(400).send({ ok: false, error: "Enter the storage address, username and password first." });
+        const { decryptJuneConnectorSecret } = await import("../utils/juneOutlook.js");
+        const row = db.prepare(`SELECT webdav_password_enc FROM backup_settings WHERE id = 1`).get();
+        client = webdavClient({ url: s.webdav_url, user: s.webdav_user, password: decryptJuneConnectorSecret(row.webdav_password_enc) || "" });
+      }
+      await client.test();
+      return { ok: true, message: "Connected to the storage." };
+    } catch (e) {
+      return reply.code(424).send({ ok: false, error: `Could not connect: ${e.message || e}` });
+    }
+  });
+
+  // Both start in the background and answer at once; the result shows under Recent runs.
+  app.post("/run-now", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const by = String(req.headers["x-user-name"] || "");
+    const started = startInBackground(async () => {
+      const run = await runBackup(db, { kind: "manual", by, backupDir: backupDirPath(), companyName: companyFolderName() });
+      writeAudit(db, req, { module: "backups", action: "run_now", entity_type: "backup_run", entity_id: String(run.id), payload: { status: run.status, offsite: run.offsite } });
+    }, req.log);
+    if (!started) return reply.code(409).send({ ok: false, error: "A backup or restore test is already running. Try again in a few minutes." });
+    return reply.code(202).send({ ok: true, started: true });
+  });
+
+  app.post("/restore-test", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const by = String(req.headers["x-user-name"] || "");
+    const started = startInBackground(async () => {
+      const run = await runRestoreTest(db, { by, companyName: companyFolderName() });
+      writeAudit(db, req, { module: "backups", action: "restore_test", entity_type: "backup_run", entity_id: String(run.id), payload: { status: run.status } });
+    }, req.log);
+    if (!started) return reply.code(409).send({ ok: false, error: "A backup or restore test is already running. Try again in a few minutes." });
+    return reply.code(202).send({ ok: true, started: true });
+  });
 
   app.get("/list", async (req, reply) => {
     if (!requireAdmin(req, reply)) return;

@@ -9174,3 +9174,17 @@ body.wo-popup .wo-drawer-head { display: none; }
 .cartrack-security-form label:not(.checkbox-label) { display: flex; flex-direction: column; gap: 4px; }
 .cartrack-security-notes { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
 .cartrack-security-notes textarea { width: 100%; max-width: 720px; }
+
+/* Admin: off-site backups and system health */
+.backup-health { margin-bottom: 12px; }
+.backup-health-state { font-weight: 700; padding: 8px 12px; border-radius: 8px; margin-bottom: 8px; }
+.backup-health-state.is-ok { background: var(--bg-f0fdf4); color: var(--tx-166534); border: 1px solid var(--bd-86efac); }
+.backup-health-state.is-warn { background: var(--bg-fffbeb); color: var(--tx-92400e); border: 1px solid var(--bd-fcd34d); }
+.backup-health-warnings { margin: 0 0 8px 18px; color: var(--ink); }
+.backup-health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; margin: 0; }
+.backup-health-grid div { background: var(--bg-f9fafb); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.backup-health-grid dt { font-size: 12px; color: var(--muted); }
+.backup-health-grid dd { margin: 2px 0 0; font-weight: 600; color: var(--ink); }
+.backup-health-h { margin: 16px 0 8px; }
+.backup-runs-table { width: 100%; border-collapse: collapse; }
+.backup-runs-table th, .backup-runs-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; font-size: 13px; }
