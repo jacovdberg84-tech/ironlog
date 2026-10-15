@@ -1,0 +1,50 @@
+name: Server disk clean-up
+
+# Frees disk space on the live server. Run by hand from the Actions tab, and
+# type FREE-DISK-SPACE to confirm. It:
+#   - keeps the newest 24 change-triggered database copies in api/db/backups
+#     (files named ironlog_YYYYMMDD_HHMMSS.db) and deletes older ones; other
+#     files there (nightly ironlog_auto_*, named copies) are not touched;
+#   - shrinks the system journal to 300 MB;
+#   - empties PM2's old log files and the npm download cache.
+# It never touches the live database, uploads or the off-site backups.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type FREE-DISK-SPACE to run"
+        required: true
+
+jobs:
+  cleanup:
+    if: ${{ github.event.inputs.confirm == 'FREE-DISK-SPACE' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Free disk space over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            set -u
+            echo "== before"; df -h /
+            # Older change-triggered copies: keep the newest 24. Literal folder, Node instead of shell deletes.
+            node -e '
+              const fs = require("fs"), path = require("path");
+              const dir = "/data/ironlog/api/db/backups";
+              if (!fs.existsSync(dir)) { console.log("no backup folder"); process.exit(0); }
+              const re = /^ironlog_[0-9]{8}_[0-9]{6}[.]db$/;
+              const copies = fs.readdirSync(dir).filter((n) => re.test(n)).sort().reverse();
+              const old = copies.slice(24);
+              for (const n of old) fs.unlinkSync(path.join(dir, n));
+              console.log("change-triggered copies: " + copies.length + ", deleted " + old.length + ", kept " + (copies.length - old.length));
+              console.log("other files kept: " + fs.readdirSync(dir).filter((n) => !re.test(n)).join(", "));
+            '
+            journalctl --vacuum-size=300M 2>/dev/null || sudo -n journalctl --vacuum-size=300M 2>/dev/null || echo "journal: not permitted"
+            pm2 flush >/dev/null 2>&1 && echo "pm2 logs emptied" || true
+            npm cache clean --force >/dev/null 2>&1 && echo "npm cache cleared" || true
+            echo "== after"; df -h /

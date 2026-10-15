@@ -60,8 +60,12 @@ export function startDbAutoBackup(logger = console) {
     ? path.resolve(process.env.IRONLOG_DB_BACKUP_DIR)
     : path.join(path.dirname(dbPathResolved), "backups");
   const pollMs = Number(process.env.IRONLOG_DB_BACKUP_POLL_MS || 5000);
-  const debounceMs = Number(process.env.IRONLOG_DB_BACKUP_DEBOUNCE_MS || 10000);
-  const keepCount = Number(process.env.IRONLOG_DB_BACKUP_KEEP || 336);
+  // At most one copy every 15 minutes, the newest 24 kept (about 6 working hours).
+  // Each copy is the whole database, so copying every 10 s and keeping 336 filled
+  // the server's disk while covering only ~5 hours. Longer history is the nightly
+  // off-site backup (utils/autoBackup.js).
+  const debounceMs = Number(process.env.IRONLOG_DB_BACKUP_DEBOUNCE_MS || 15 * 60 * 1000);
+  const keepCount = Number(process.env.IRONLOG_DB_BACKUP_KEEP || 24);
 
   fs.mkdirSync(backupDir, { recursive: true });
 
