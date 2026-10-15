@@ -20,7 +20,13 @@ const DEFAULT_SECRETS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url
 const KEY_FILE = "licence-signing.pem";
 const secretsDir = () => process.env.IRONLOG_SECRETS_DIR || DEFAULT_SECRETS_DIR;
 
+/** Customer servers run with IRONLOG_LICENCE_ISSUER=0: no issuer there, and no trust in a local key. */
+export function issuerEnabled(env = process.env) {
+  return String(env.IRONLOG_LICENCE_ISSUER ?? "").trim() !== "0";
+}
+
 export function isIssuer(username, roles = []) {
+  if (!issuerEnabled()) return false;
   const extra = String(process.env.IRONLOG_LICENCE_ISSUERS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
   const u = String(username || "").trim().toLowerCase();
   return Boolean(u) && roles.includes("admin") && [...ISSUER_USERNAMES, ...extra].includes(u);
@@ -105,6 +111,7 @@ export function publicKeyOf(privateKey) {
 
 /** Makes the signing key once. Refuses to replace an existing one: keys already issued would stop working. */
 export function createSigningKey() {
+  if (!issuerEnabled()) return { ok: false, error: "Licences are not issued from this server." };
   if (loadSigningKey()) return { ok: false, error: "This server already has a signing key. Replacing it would make every licence already issued stop working." };
   const { privateKey } = crypto.generateKeyPairSync("ed25519");
   fs.mkdirSync(secretsDir(), { recursive: true, mode: 0o700 });
@@ -114,6 +121,7 @@ export function createSigningKey() {
 
 /** The public key of this server's signing key, so it trusts its own licences. */
 export function localPublicKeys() {
+  if (!issuerEnabled()) return [];
   const k = loadSigningKey();
   return k ? [publicKeyOf(k)] : [];
 }

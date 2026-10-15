@@ -16,6 +16,9 @@ import alertsRoutes from "./routes/alerts.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import authRoutes from "./routes/auth.routes.js";
 import companyRoutes from "./routes/company.routes.js";
+import { getCompanyProfile } from "./utils/companyProfile.js";
+import { setSiteTimeZoneProvider } from "./utils/siteTime.js";
+import { db } from "./db/client.js";
 import licenceRoutes, { licenceHook } from "./routes/licence.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
 import legalRoutes from "./routes/legal.routes.js";
@@ -63,6 +66,8 @@ export function buildServer() {
 
   app.register(cors, { origin: true });
 
+  // Site days and clock times follow the company's time zone (Admin → Company profile).
+  setSiteTimeZoneProvider(() => getCompanyProfile(db).timezone);
   app.addHook("onRequest", ironlogAuthHook);
   // After sign-in, so the site is known: licence modules and read-only mode.
   app.addHook("onRequest", licenceHook);

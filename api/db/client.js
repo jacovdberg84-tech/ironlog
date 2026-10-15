@@ -1,13 +1,8 @@
 // IRONLOG/api/db/client.js (SQLite)
 import Database from "better-sqlite3";
-import dotenv from "dotenv";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirnameDb = path.dirname(fileURLToPath(import.meta.url));
-// Load api/.env even when Node cwd is the repo root (migrate imports this early).
-dotenv.config({ path: path.join(__dirnameDb, "..", ".env") });
-dotenv.config();
+// Settings first (api/.env, or an instance's own file): migrate imports this early.
+import "../loadEnv.js";
 
 const dbPath = process.env.DB_PATH || "./db/ironlog.db";
 export const dbPathResolved = path.resolve(path.normalize(dbPath));

@@ -8,6 +8,8 @@
 // Work order status itself stays in work_orders and only changes through the
 // normal status route.
 
+import { siteDay, siteDayStartIso } from "./siteTime.js";
+
 export const TECH_ACTIONS = ["start", "pause", "resume", "waiting_parts", "waiting_ops", "testing", "complete"];
 export const LABOUR_STATES = new Set(["active", "testing"]);
 export const RUNNING_STATES = new Set(["active", "testing"]);
@@ -190,12 +192,12 @@ export function eventTime(clientAt, now = new Date()) {
   return new Date(t).toISOString();
 }
 
-/** Local calendar day (Mozambique / South Africa, UTC+2) for an ISO time. */
+/** Local calendar day at site (the company's time zone) for an ISO time. */
 export function localDay(iso = new Date().toISOString()) {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Maputo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+  return siteDay(iso);
 }
 
-/** Start of a local day as ISO (UTC+2, no daylight saving). */
+/** Start of a local day at site as ISO. */
 export function localDayStartIso(day) {
-  return new Date(`${day}T00:00:00+02:00`).toISOString();
+  return siteDayStartIso(day);
 }

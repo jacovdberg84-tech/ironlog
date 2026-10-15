@@ -10,13 +10,13 @@
 // Everything is read from the tables the Fleet Track sync already fills;
 // nothing is stored here.
 import { enrichCartrackLiveRow } from "./cartrack.js";
+import { siteStamp, siteWallTimeMs } from "./siteTime.js";
 
 // Cartrack event names that point to a security problem rather than driving.
 export const SECURITY_EVENT_RE = /tamper|panic|sos|duress|power|disconnect|unplug|tow|jam|unauthori[sz]ed|no.?go|geo.?fence|zone|impact|accident|crash|theft|stolen|immobili[sz]|alarm|door|hijack|gps (?:lost|antenna)|antenna/i;
 // Road and site vehicles, as opposed to plant (excavators, dozers…), for the "no tracker" list.
 export const VEHICLE_CATEGORY_RE = /\b(ldv|light|vehicle|bakkie|pick.?up|bus|truck|lorry|van|car|ambulance|tanker|tipper|lowbed|horse)\b/i;
 
-const SITE_OFFSET = "+02:00"; // Africa/Maputo, no daylight saving
 
 function hasTable(db, name) {
   return Boolean(db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(name));
@@ -28,13 +28,10 @@ export function trackerTimeMs(value, { utc = false } = {}) {
   if (!s) return NaN;
   if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) return Date.parse(s);
   const iso = s.replace(" ", "T");
-  return Date.parse(`${iso.length === 16 ? `${iso}:00` : iso}${utc ? "Z" : SITE_OFFSET}`);
-}
-
-/** Site-time "YYYY-MM-DD HH:MM" for a millisecond time. */
-function siteStamp(ms) {
-  if (!Number.isFinite(ms)) return "—";
-  return new Date(ms + 2 * 3600000).toISOString().replace("T", " ").slice(0, 16);
+  const full = iso.length === 16 ? `${iso}:00` : iso;
+  if (utc) return Date.parse(`${full}Z`);
+  const m = full.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/);
+  return m ? siteWallTimeMs(m[1], m[2]) : NaN;
 }
 
 function reportingState(hoursSince) {

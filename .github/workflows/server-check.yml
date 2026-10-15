@@ -1,0 +1,37 @@
+name: Server check (read-only)
+
+# Prints how the live server is set up (web server, certificates, running
+# IronLog processes, disk, ports) so customer instances can be added safely.
+# Changes nothing. Run it by hand from the Actions tab.
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect the server over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            echo "== system"; uname -sr; uptime; nproc; free -h | head -2
+            echo "== disk"; df -h / /data 2>/dev/null
+            echo "== node and pm2"; node -v; pm2 -v; pm2 ls --no-color 2>/dev/null || true
+            echo "== listening ports"; (ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null) | awk 'NR==1 || /LISTEN/' | head -30
+            echo "== web server"
+            for b in nginx caddy apache2 httpd; do command -v "$b" >/dev/null 2>&1 && echo "found: $b"; done
+            nginx -v 2>&1 || true
+            for d in /etc/nginx/sites-enabled /etc/nginx/conf.d; do
+              [ -d "$d" ] || continue
+              echo "-- $d"; ls -l "$d"
+              grep -HnE '^\s*(server_name|listen|proxy_pass|root)\b' "$d"/* 2>/dev/null || true
+            done
+            echo "== certificates"; command -v certbot && (sudo -n certbot certificates 2>/dev/null || certbot certificates 2>/dev/null) | grep -E 'Certificate Name|Domains|Expiry' || echo "certbot not found or not permitted"
+            echo "== ironlog folders"; ls -la /data 2>/dev/null
+            echo "== whoami"; whoami; id -nG
