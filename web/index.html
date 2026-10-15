@@ -396,7 +396,7 @@
           </div>
           <div class="june-actions">
             <button id="juneStartBtn" type="button" class="btn btn-primary">Start talking</button>
-            <button id="juneBriefingBtn" type="button" class="btn btn-secondary" title="June opens with your breakdowns, today's calendar, the Palma weather and any recent security incidents nearby">Daily briefing</button>
+            <button id="juneBriefingBtn" type="button" class="btn btn-secondary" title="June opens with your breakdowns, today's calendar, the site weather and any recent security incidents nearby">Daily briefing</button>
             <button id="juneStopBtn" type="button" class="btn btn-secondary" hidden>End conversation</button>
           </div>
         </div>
@@ -577,7 +577,7 @@
           <div class="dash-card" id="cartrackFleetCard">
             <div class="dash-card-header">
               <h3>Cartrack Fleet</h3>
-              <span class="dash-card-badge" id="cartrackFleetBadge">Mozambique</span>
+              <span class="dash-card-badge" id="cartrackFleetBadge">Live GPS</span>
             </div>
             <div class="kpi-pills" id="cartrackKpiPills" style="margin-bottom:8px;">
               <span class="kpi-pill kpi-pill-blue"><strong>Tracked:</strong> <span id="cartrackKpiTotal">0</span></span>
@@ -608,7 +608,7 @@
               </summary>
               <div id="cartrackSpeedingEventsHost" class="cartrack-speeding-events-host"></div>
             </details>
-            <p class="muted small" id="cartrackFleetHint">Dashboard shows vehicles in use by default (ignition on or moving). Full fleet on Fleet Track. Unitech Afungi max 60 km/h.</p>
+            <p class="muted small" id="cartrackFleetHint">Dashboard shows vehicles in use by default (ignition on or moving). Full fleet on Fleet Track. Unitech site vehicles max 60 km/h.</p>
           </div>
 
           <div class="dash-card" id="telematicsFleetCard">
@@ -1429,7 +1429,7 @@
       <div class="section-header">
         <div class="section-header-left">
           <h2>Fleet Track</h2>
-          <p class="muted">Live GPS — Cartrack road fleet + Unitech Afungi site (orange markers). Auto-refresh every 45 seconds.</p>
+          <p class="muted">Live GPS — Cartrack road fleet + Unitech site vehicles (orange markers). Auto-refresh every 45 seconds.</p>
         </div>
         <div class="section-header-right cartrack-track-toolbar">
           <label class="cartrack-auto-refresh">
@@ -5985,7 +5985,7 @@
           </div>
         </div>
 
-        <!-- Cartrack GPS (Mozambique) -->
+        <!-- Cartrack GPS -->
         <div class="dash-card collapsible full-width" data-collapsed="true" id="adminCartrackCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
@@ -5993,7 +5993,7 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
               </div>
               <div>
-                <h3>Cartrack GPS (Mozambique)</h3>
+                <h3>Cartrack GPS</h3>
                 <p class="muted small">Fleet API credentials, morning speeding report time, and email recipients.</p>
               </div>
             </div>
@@ -6059,8 +6059,8 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
               </div>
               <div>
-                <h3>Unitech Moz — Afungi KML feed</h3>
-                <p class="muted small">GpsGate KML URL for site vehicles inside Afungi. Shown on Fleet Track with orange markers. Site speed limit: <strong>60 km/h</strong> (speeding above 60).</p>
+                <h3>Unitech (GpsGate) site KML feed</h3>
+                <p class="muted small">GpsGate KML URL for vehicles on site. Shown on Fleet Track with orange markers. Site speed limit: <strong>60 km/h</strong> (speeding above 60).</p>
               </div>
             </div>
             <button class="report-card-toggle" aria-label="Toggle">
@@ -6130,7 +6130,7 @@
               </div>
               <div class="form-field" style="flex:2 1 220px;">
                 <label>Notes (optional)</label>
-                <input id="gpsLinkNotes" class="w-full" placeholder="Afungi site pickup" />
+                <input id="gpsLinkNotes" class="w-full" placeholder="e.g. Site pickup" />
               </div>
             </div>
             <div class="action-buttons">
@@ -6602,6 +6602,59 @@
               </div>
             </div>
             <pre class="output" id="chPwdResult"></pre>
+          </div>
+        </div>
+
+        <!-- Company Profile Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false" id="companyProfileCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-1d4ed8);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"></path><path d="M5 21V7l7-4 7 4v14"></path><path d="M9 21v-6h6v6"></path></svg>
+              </div>
+              <div>
+                <h3>Company profile</h3>
+                <p class="muted small">Your company's details. They appear on report headers and tell June where your site is. Company name, site name and logo are under PDF Report Branding below.</p>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="loadCompanyProfileBtn" class="btn btn-secondary btn-sm">Refresh</button>
+              <button class="report-card-toggle" aria-label="Toggle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+              </button>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <div class="form-row">
+              <div class="form-field"><label for="cpShortName">Short name on report headers</label><input id="cpShortName" data-cp="short_name" class="w-full" maxlength="24" placeholder="e.g. AML" /></div>
+              <div class="form-field"><label for="cpRegistration">Company registration number</label><input id="cpRegistration" data-cp="registration_no" class="w-full" maxlength="60" /></div>
+            </div>
+            <div class="form-row">
+              <div class="form-field"><label for="cpAddress">Address</label><input id="cpAddress" data-cp="address" class="w-full" maxlength="300" /></div>
+            </div>
+            <div class="form-row">
+              <div class="form-field"><label for="cpPhone">Phone</label><input id="cpPhone" data-cp="phone" class="w-full" maxlength="60" /></div>
+              <div class="form-field"><label for="cpEmail">Email</label><input id="cpEmail" data-cp="email" type="email" class="w-full" maxlength="120" /></div>
+              <div class="form-field"><label for="cpWebsite">Website</label><input id="cpWebsite" data-cp="website" class="w-full" maxlength="120" /></div>
+            </div>
+            <div class="form-row">
+              <div class="form-field"><label for="cpCurrency">Currency</label><input id="cpCurrency" data-cp="currency" class="w-full" maxlength="3" placeholder="USD" /></div>
+              <div class="form-field"><label for="cpTimezone">Time zone</label><input id="cpTimezone" data-cp="timezone" class="w-full" list="cpTimezoneList" maxlength="60" placeholder="Africa/Maputo" /></div>
+              <div class="form-field"><label for="cpCountry">Country</label><input id="cpCountry" data-cp="country" class="w-full" maxlength="60" /></div>
+            </div>
+            <datalist id="cpTimezoneList"></datalist>
+            <div class="form-row">
+              <div class="form-field"><label for="cpLocation">Site location (for June's weather and security news)</label><input id="cpLocation" data-cp="location" class="w-full" maxlength="120" placeholder="e.g. Palma, Cabo Delgado" /></div>
+              <div class="form-field"><label for="cpLatitude">Latitude</label><input id="cpLatitude" data-cp="latitude" class="w-full" inputmode="decimal" maxlength="20" placeholder="-10.7768" /></div>
+              <div class="form-field"><label for="cpLongitude">Longitude</label><input id="cpLongitude" data-cp="longitude" class="w-full" inputmode="decimal" maxlength="20" placeholder="40.4764" /></div>
+            </div>
+            <div class="form-row">
+              <div class="form-field"><label for="cpNearby">Nearby towns to watch for security news (comma separated)</label><input id="cpNearby" data-cp="nearby" class="w-full" maxlength="400" /></div>
+            </div>
+            <div class="row" style="gap:8px; align-items:center;">
+              <button type="button" id="saveCompanyProfileBtn" class="btn-primary">Save company profile</button>
+              <span id="companyProfileResult" class="muted small" role="status"></span>
+            </div>
           </div>
         </div>
 
@@ -8034,10 +8087,10 @@
   <script src="./store-mobile.js?v=2"></script>
   <!-- Main app, split by feature. Order matters: files share one global scope. -->
   <script src="./app/core.js?v=94"></script>
-  <script src="./app/admin.js?v=91"></script>
+  <script src="./app/admin.js?v=92"></script>
   <script src="./app/inspections.js?v=90"></script>
   <script src="./app/ui-helpers.js?v=89"></script>
-  <script src="./app/telematics.js?v=93"></script>
+  <script src="./app/telematics.js?v=94"></script>
   <script src="./app/dashboard.js?v=90"></script>
   <script src="./app/borris.js?v=91"></script>
   <script src="./app/fuel-lube.js?v=90"></script>
@@ -8059,7 +8112,7 @@
   <script src="./app/daily-input.js?v=89"></script>
   <script src="./app/assets.js?v=89"></script>
   <script src="./app/developer.js?v=3"></script>
-  <script src="./app/init.js?v=92"></script>
+  <script src="./app/init.js?v=93"></script>
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=90"></script>
   <script src="./app/collab-inbox.js?v=1"></script>

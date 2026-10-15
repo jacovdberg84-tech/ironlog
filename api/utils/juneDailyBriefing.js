@@ -19,17 +19,21 @@ const DEFAULT_SITE = {
 
 const WEATHER_TIMEOUT_MS = 6_000;
 
-/** The briefing site; override with JUNE_BRIEFING_* settings on the server. */
-export function briefingSite(env = process.env) {
-  const num = (v, fallback) => (Number.isFinite(Number(v)) && String(v).trim() !== "" ? Number(v) : fallback);
+/**
+ * The briefing site: JUNE_BRIEFING_* server settings first, then `base` (the
+ * company profile's location, passed in by the routes), then the original
+ * Palma defaults when no profile is given.
+ */
+export function briefingSite(env = process.env, base = DEFAULT_SITE) {
+  const num = (v, fallback) => (Number.isFinite(Number(v)) && String(v ?? "").trim() !== "" ? Number(v) : fallback);
   const nearby = String(env.JUNE_BRIEFING_NEARBY || "").split(",").map((s) => s.trim()).filter(Boolean);
   return {
-    name: String(env.JUNE_BRIEFING_LOCATION || DEFAULT_SITE.name).trim(),
-    country: String(env.JUNE_BRIEFING_COUNTRY || DEFAULT_SITE.country).trim(),
-    latitude: num(env.JUNE_BRIEFING_LAT, DEFAULT_SITE.latitude),
-    longitude: num(env.JUNE_BRIEFING_LON, DEFAULT_SITE.longitude),
-    timezone: String(env.JUNE_BRIEFING_TZ || DEFAULT_SITE.timezone).trim(),
-    nearby: nearby.length ? nearby : DEFAULT_SITE.nearby,
+    name: String(env.JUNE_BRIEFING_LOCATION || base.name || "").trim(),
+    country: String(env.JUNE_BRIEFING_COUNTRY || base.country || "").trim(),
+    latitude: num(env.JUNE_BRIEFING_LAT, base.latitude ?? null),
+    longitude: num(env.JUNE_BRIEFING_LON, base.longitude ?? null),
+    timezone: String(env.JUNE_BRIEFING_TZ || base.timezone || "UTC").trim(),
+    nearby: nearby.length ? nearby : base.nearby || [],
   };
 }
 
@@ -65,6 +69,9 @@ export async function getSiteWeather(site, { fetchImpl = globalThis.fetch, timeo
     wind_speed_unit: "kmh",
   });
   if (typeof fetchImpl !== "function") return { available: false, reason: "This server cannot make web requests." };
+  if (!Number.isFinite(site.latitude) || !Number.isFinite(site.longitude)) {
+    return { available: false, reason: "The site location is not set. Add it under Admin → Company profile." };
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -106,7 +113,7 @@ export async function getSiteWeather(site, { fetchImpl = globalThis.fetch, timeo
 export function securityCheck(site, today) {
   return {
     method: "web_search",
-    search_for: `Recent insurgent attacks or security incidents near ${site.nearby.join(", ")} (${site.name}, ${site.country}) in the last 7 days before ${today}.`,
+    search_for: `Recent insurgent attacks or security incidents near ${site.nearby.length ? site.nearby.join(", ") : site.name || "the site"}${site.name ? ` (${[site.name, site.country].filter(Boolean).join(", ")})` : ""} in the last 7 days before ${today}.`,
     rules: [
       "Only report incidents dated within the last 7 days, near the listed places.",
       "Give the place, the date and the source for each one; keep it to the facts reported.",

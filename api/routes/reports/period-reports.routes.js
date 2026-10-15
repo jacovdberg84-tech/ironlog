@@ -6,7 +6,7 @@ import { PRESTART_DEDUCTION_HOURS, listDailyPrestarts } from "../../utils/presta
 import { buildPdfBuffer, ensurePageSpace, kvGrid, sectionTitle, table, tryDrawLogo } from "../../utils/pdfGenerator.js";
 import { buildSpeedingReportPdfContent, getCartrackSpeedAlertKmh, listCartrackEventsFromDb, summarizeSpeedingEvents } from "../../utils/cartrack.js";
 import { db } from "../../db/client.js";
-import { getPdfReportBranding } from "../../utils/reportSettings.js";
+import { getCompanyProfile, reportBanner } from "../../utils/companyProfile.js";
 import { isDate } from "../../utils/request.js";
 import { listPlannedMaintenanceForDate } from "../../utils/shortBreakdowns.js";
 import { capDowntime, downtimeCapForRun } from "../../utils/downtimeCap.js";
@@ -662,12 +662,11 @@ export default function registerPeriodReportsRoutes(app, ctx) {
       alert: /OVERDUE|required/i.test(row.tracking),
     }));
     const managementActionRows = [...downtimeActionRows, ...offsiteActionRows].slice(0, 5);
-    let dailyPdfSiteName = "Quionga, Mozambique";
-    try {
-      dailyPdfSiteName = String(getPdfReportBranding(db).site_name || dailyPdfSiteName).trim();
-    } catch {
-      // The report remains available when branding settings have not been initialized.
-    }
+    // The site named on the daily PDF: the company's site name, else its location.
+    const dailyPdfCompany = getCompanyProfile(db);
+    const dailyPdfSiteName = String(
+      dailyPdfCompany.site_name || [dailyPdfCompany.location, dailyPdfCompany.country].filter(Boolean).join(", ")
+    ).trim();
 
     const dailyPdfPageLabels = ["MANAGEMENT OVERVIEW"];
     const pdf = await buildPdfBuffer(
@@ -1117,8 +1116,8 @@ export default function registerPeriodReportsRoutes(app, ctx) {
       },
       {
         title: "IRONLOG",
-        managementTitle: "AML / DAILY OPERATIONS",
-        subtitle: `Operating date ${dailyPdfLongDate(opsDay)} | Issued ${dailyPdfLongDate(date)} | ${dailyPdfSiteName}`,
+        managementTitle: reportBanner(dailyPdfCompany, "Daily operations"),
+        subtitle: [`Operating date ${dailyPdfLongDate(opsDay)}`, `Issued ${dailyPdfLongDate(date)}`, dailyPdfSiteName].filter(Boolean).join(" | "),
         pageLabel: ({ pageIndex }) => dailyPdfPageLabels[pageIndex] || "OPERATIONS DETAIL",
         sourceText: `Operating day ${opsDay}`,
         headerStyle: "management",

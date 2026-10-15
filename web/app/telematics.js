@@ -295,7 +295,7 @@ async function loadCartrackFleet() {
       const parts = [];
       if (data.configured) {
         parts.push(`GPS connected (${data.base_url || "MZ"})`);
-        if (ut) parts.push(`${ut} Unitech Afungi`);
+        if (ut) parts.push(`${ut} Unitech site`);
         parts.push(`Last sync: ${s.last_sync || "—"}`);
       } else {
         parts.push("GPS not configured — add credentials in User Admin → GPS fleet.");

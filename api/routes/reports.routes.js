@@ -15,6 +15,7 @@ import { getMachinePrestartTemplate } from "../utils/machinePrestartTemplates.js
 import { resolvePdfImage } from "../utils/imagePdf.js";
 import { resolveStorageAbs as resolveStorageAbsUtil, getDataRoot, normalizeStorageRel } from "../utils/storagePaths.js";
 import { getPdfBrandingLogoDir } from "../utils/reportSettings.js";
+import { getCompanyProfile, reportBanner, reportTitle } from "../utils/companyProfile.js";
 import { prestartDeductionForProductionFleet, PRESTART_DEDUCTION_HOURS } from "../utils/prestartDaily.js";
 import { shiftDateYmd } from "../utils/shortBreakdowns.js";
 import { isDate } from "../utils/request.js";
@@ -1036,7 +1037,7 @@ function buildDailyExecutiveSummarySheet(wb, p) {
 
   ws.mergeCells("B1:D2");
   const title = ws.getCell("B1");
-  title.value = "AML · IRONLOG — Daily operations report";
+  title.value = reportTitle(getCompanyProfile(db), "Daily operations report");
   title.font = { size: 18, bold: true, color: { argb: "FF0F172A" } };
   title.alignment = { vertical: "middle", wrapText: true };
 
@@ -1281,7 +1282,7 @@ function buildGmWeeklyExecutiveSheet(wb, p) {
 
   ws.mergeCells("B1:D2");
   const title = ws.getCell("B1");
-  title.value = "AML · IRONLOG — GM Weekly (Maintenance & Engineering)";
+  title.value = reportTitle(getCompanyProfile(db), "GM Weekly (Maintenance & Engineering)");
   title.font = { size: 18, bold: true, color: { argb: "FF0F172A" } };
   title.alignment = { vertical: "middle", wrapText: true };
 
@@ -4301,7 +4302,8 @@ export default async function reportsRoutes(app) {
     pptx.author = "IRONLOG";
     pptx.subject = "Weekly maintenance forum";
     pptx.title = `Weekly Maintenance Forum - ${label}`;
-    pptx.company = "AML";
+    const company = getCompanyProfile(db);
+    pptx.company = company.company_name || company.header_prefix || "IronLog";
     pptx.lang = "en-ZA";
     // Black and CAT yellow. Yellow is for bars, rules and header text on black;
     // body text stays dark for readability on the projector.
@@ -4326,7 +4328,7 @@ export default async function reportsRoutes(app) {
     const addChrome = (slide, title, page) => {
       slide.background = { color: "FFFFFF" };
       slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.333, h: 0.74, line: { color: navy, transparency: 100 }, fill: { color: navy } });
-      slide.addText("AML  /  WEEKLY MAINTENANCE", { x: 0.34, y: 0.17, w: 4.9, h: 0.22, fontFace: headingFont, fontSize: 12, bold: true, color: "FFFFFF" });
+      slide.addText(reportBanner(company, "Weekly maintenance").replace(" / ", "  /  "), { x: 0.34, y: 0.17, w: 4.9, h: 0.22, fontFace: headingFont, fontSize: 12, bold: true, color: "FFFFFF" });
       slide.addText(headerPeriod, { x: 8.1, y: 0.18, w: 4.86, h: 0.18, fontFace: bodyFont, fontSize: 8.8, color: teal, align: "right" });
       slide.addText(title, { x: 0.38, y: 0.96, w: 9.95, h: 0.4, fontFace: headingFont, fontSize: 22, bold: true, color: navy });
       slide.addShape(pptx.ShapeType.line, { x: 0.38, y: 1.6, w: 12.55, h: 0, line: { color: teal, pt: 2 } });
@@ -4344,7 +4346,7 @@ export default async function reportsRoutes(app) {
     const s1 = pptx.addSlide();
     s1.background = { color: "FFFFFF" };
     s1.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.333, h: 0.74, line: { color: navy, transparency: 100 }, fill: { color: navy } });
-    s1.addText("AML  /  WEEKLY MAINTENANCE", { x: 0.34, y: 0.17, w: 5.2, h: 0.22, fontFace: headingFont, fontSize: 12, bold: true, color: "FFFFFF" });
+    s1.addText(reportBanner(company, "Weekly maintenance").replace(" / ", "  /  "), { x: 0.34, y: 0.17, w: 5.2, h: 0.22, fontFace: headingFont, fontSize: 12, bold: true, color: "FFFFFF" });
     s1.addText(headerPeriod, { x: 8.1, y: 0.18, w: 4.86, h: 0.18, fontFace: bodyFont, fontSize: 8.8, color: teal, align: "right" });
     s1.addText("Mechanical performance", { x: 0.38, y: 0.96, w: 8.4, h: 0.4, fontFace: headingFont, fontSize: 22, bold: true, color: navy });
     s1.addText("LIVE IRONLOG DATA  •  Weekly maintenance review", { x: 0.4, y: 1.4, w: 6.5, h: 0.16, fontFace: bodyFont, fontSize: 8, color: muted });
