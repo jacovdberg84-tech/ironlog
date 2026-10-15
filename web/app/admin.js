@@ -1610,6 +1610,7 @@ function wireLicenceCard() {
 function wireAdminControls() {
   wireBackupHealth();
   wireLicenceCard();
+  wireLicenceIssuer();
   qs("loadCompanyProfileBtn")?.addEventListener("click", () =>
     loadCompanyProfile().catch((e) => setStatus("Company profile error: " + e.message))
   );

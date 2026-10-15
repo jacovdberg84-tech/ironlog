@@ -9196,3 +9196,8 @@ body.wo-popup .wo-drawer-head { display: none; }
 .licence-banner.is-blocked { background: var(--bg-fef2f2); color: var(--tx-991b1b); border-color: var(--bd-fca5a5); }
 .licence-modules { display: flex; flex-wrap: wrap; gap: 6px; }
 #licenceKeyInput { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.li-package, .li-site { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: var(--bg-f9fafb); }
+.li-mods { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0 8px; }
+.li-price { width: 100px; }
+#liIssuedKey, #liPublicKey { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+#licenceIssuerCard .link-btn { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; }
