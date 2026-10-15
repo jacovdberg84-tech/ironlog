@@ -195,7 +195,10 @@ function loadStartupData() {
     loadCompanyProfile().catch(() => {});
     loadBackupFiles().catch(() => {});
     loadBackupHealth().catch(() => {});
-    if (getSessionRoles().includes("admin")) loadLicenceCard().catch(() => {});
+    if (getSessionRoles().includes("admin")) {
+      loadLicenceCard().catch(() => {});
+      loadLicenceIssuer().catch(() => {});
+    }
   }
   loadCodePickers().catch(() => {});
   populateThresholdInputs();

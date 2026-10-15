@@ -17,6 +17,7 @@ The main IronLog screen (`web/index.html`) used to load one 22,000-line `web/app
 |---|---|---|
 | `core.js` | Config, session, auth, fetch helpers, navigation and role visibility, login | 1877 |
 | `admin.js` | Users & Access, safety/telematics admin, master data, SMTP, push, PDF settings, backups | 1584 |
+| `licence-issuer.js` | Admin → Issue licences (IronLog owner only): signing key, packages, bands, prices, issuing | 181 |
 | `inspections.js` | Checklist hub, LDV/machine checklists, vehicle check photos | 1369 |
 | `ui-helpers.js` | Toasts, status, formatting helpers, thresholds, offline queues | 663 |
 | `telematics.js` | Telematics, Cartrack fleet/map/speeding, GPS links, Unitech | 1371 |

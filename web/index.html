@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=licence-1" />
+  <link rel="stylesheet" href="./styles.css?v=licence-2" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -6643,6 +6643,64 @@
           </div>
         </div>
 
+        <!-- Licence Issuer Card (the IronLog owner only) -->
+        <div class="dash-card collapsible full-width hidden" data-collapsed="false" id="licenceIssuerCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-1d4ed8);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"></circle><path d="M10.85 12.15 19 4"></path><path d="m18 5 2 2"></path><path d="m15 8 2 2"></path></svg>
+              </div>
+              <div>
+                <h3>Issue licences (IronLog owner)</h3>
+                <p class="muted small">Packages, machine bands and prices are yours to set. Issuing signs a licence key for a customer; only you see this card.</p>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="refreshLicenceIssuerBtn" class="btn btn-secondary btn-sm">Refresh</button>
+              <button class="report-card-toggle" aria-label="Toggle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+              </button>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <h4 class="backup-health-h">Signing key</h4>
+            <div id="liKeyState">Loading…</div>
+            <div id="liIssueSection" class="hidden">
+              <h4 class="backup-health-h">Issue a licence</h4>
+              <div class="form-row">
+                <div class="form-field"><label for="liLicensee">Customer company</label><input id="liLicensee" class="w-full" placeholder="e.g. Pilot Mining Lda" /></div>
+                <div class="form-field"><label for="liExpires">Licence ends</label><input id="liExpires" type="date" class="w-full" /></div>
+                <div class="form-field"><label for="liGrace">Grace days after the end</label><input id="liGrace" type="number" min="0" max="365" value="30" class="w-full" /></div>
+              </div>
+              <div id="liSites"></div>
+              <div class="row" style="gap:8px; margin:8px 0; flex-wrap:wrap;">
+                <button type="button" id="liAddSiteBtn" class="btn btn-secondary btn-sm">+ Add site</button>
+                <button type="button" id="liIssueBtn" class="btn-primary">Issue licence</button>
+              </div>
+              <div id="liIssuedBox" class="hidden">
+                <p id="liQuote" class="small"></p>
+                <textarea id="liIssuedKey" rows="3" class="w-full" readonly spellcheck="false"></textarea>
+                <button type="button" id="liCopyKeyBtn" class="btn btn-secondary btn-sm" style="margin-top:6px;">Copy licence key</button>
+              </div>
+              <h4 class="backup-health-h">Licences issued</h4>
+              <div class="table-wrap"><table class="backup-runs-table"><thead><tr><th>Licence</th><th>Customer</th><th>Ends</th><th>Sites</th><th>Monthly</th><th>Issued (UTC)</th><th></th></tr></thead><tbody id="liIssuedBody"></tbody></table></div>
+              <h4 class="backup-health-h">Packages</h4>
+              <div id="liPackages"></div>
+              <button type="button" id="liAddPackageBtn" class="btn btn-secondary btn-sm">+ Add package</button>
+              <h4 class="backup-health-h">Machine bands</h4>
+              <div id="liBands"></div>
+              <button type="button" id="liAddBandBtn" class="btn btn-secondary btn-sm">+ Add band</button>
+              <h4 class="backup-health-h">Prices (optional, for quotes only; never sent to customers)</h4>
+              <div class="table-wrap" id="liPrices"></div>
+              <div class="row" style="gap:8px; align-items:center; margin-top:8px;">
+                <label class="muted small" for="liCurrency">Currency</label><input id="liCurrency" class="w-100" maxlength="3" value="USD" />
+                <button type="button" id="liSavePricesBtn" class="btn btn-secondary btn-sm">Save prices</button>
+              </div>
+            </div>
+            <p id="liResult" class="muted small" role="status" style="margin-top:8px;"></p>
+          </div>
+        </div>
+
         <!-- Company Profile Card -->
         <div class="dash-card collapsible full-width" data-collapsed="false" id="companyProfileCard">
           <div class="dash-card-header">
@@ -8173,7 +8231,8 @@
   <script src="./store-mobile.js?v=2"></script>
   <!-- Main app, split by feature. Order matters: files share one global scope. -->
   <script src="./app/core.js?v=96"></script>
-  <script src="./app/admin.js?v=94"></script>
+  <script src="./app/admin.js?v=95"></script>
+  <script src="./app/licence-issuer.js?v=1"></script>
   <script src="./app/inspections.js?v=90"></script>
   <script src="./app/ui-helpers.js?v=89"></script>
   <script src="./app/telematics.js?v=94"></script>
@@ -8198,7 +8257,7 @@
   <script src="./app/daily-input.js?v=89"></script>
   <script src="./app/assets.js?v=89"></script>
   <script src="./app/developer.js?v=3"></script>
-  <script src="./app/init.js?v=95"></script>
+  <script src="./app/init.js?v=96"></script>
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=90"></script>
   <script src="./app/collab-inbox.js?v=1"></script>
