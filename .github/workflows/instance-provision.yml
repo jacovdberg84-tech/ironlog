@@ -1,0 +1,65 @@
+name: Create or update a company instance
+
+# Sets up another company's IronLog on the live server, kept apart from AML
+# (deploy/ironlog-instance.sh): its own folder, database, backups, secrets and
+# settings, started by PM2 on 127.0.0.1 only. Safe to run again: settings and
+# secrets are never replaced, and an administrator is only added while the
+# instance has none who can sign in. AML's own IronLog is not touched.
+# Run it by hand from the Actions tab and type CREATE-INSTANCE to confirm.
+# The one-time setup code for the first administrator is shown in the log.
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "Instance name (lower case, e.g. pilot)"
+        required: true
+        default: "pilot"
+      port:
+        description: "Local port, 3100-3199 (must match the Cloudflare route)"
+        required: true
+        default: "3101"
+      timezone:
+        description: "Site time zone"
+        required: true
+        default: "Africa/Maputo"
+      web_address:
+        description: "Web address"
+        required: true
+        default: "pilot.ironlogafrica.com"
+      admin_username:
+        description: "First administrator's username (leave empty to skip)"
+        required: false
+      admin_full_name:
+        description: "First administrator's full name"
+        required: false
+      confirm:
+        description: "Type CREATE-INSTANCE to run"
+        required: true
+
+jobs:
+  provision:
+    if: ${{ github.event.inputs.confirm == 'CREATE-INSTANCE' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      INSTANCE_NAME: ${{ github.event.inputs.name }}
+      INSTANCE_PORT: ${{ github.event.inputs.port }}
+      INSTANCE_TZ: ${{ github.event.inputs.timezone }}
+      INSTANCE_HOST: ${{ github.event.inputs.web_address }}
+      INSTANCE_ADMIN: ${{ github.event.inputs.admin_username }}
+      INSTANCE_ADMIN_NAME: ${{ github.event.inputs.admin_full_name }}
+    steps:
+      - name: Set up the instance over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
+          port: ${{ secrets.SERVER_PORT }}
+          envs: INSTANCE_NAME,INSTANCE_PORT,INSTANCE_TZ,INSTANCE_HOST,INSTANCE_ADMIN,INSTANCE_ADMIN_NAME
+          script: |
+            set -e
+            bash /data/ironlog/deploy/ironlog-instance.sh provision "$INSTANCE_NAME" "$INSTANCE_PORT" "$INSTANCE_TZ" "$INSTANCE_HOST" "$INSTANCE_ADMIN" "$INSTANCE_ADMIN_NAME"
+            echo "== instances"; bash /data/ironlog/deploy/ironlog-instance.sh list
+            echo "== AML still answering"; curl -fsS http://127.0.0.1:3001/health > /dev/null && echo "AML IronLog OK"
