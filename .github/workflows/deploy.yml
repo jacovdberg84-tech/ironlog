@@ -119,13 +119,22 @@ jobs:
             npm ci
             pm2 restart ironlog-api --update-env
             pm2 save
+            healthy=0
             for i in 1 2 3 4 5 6; do
               if curl -fsS "http://127.0.0.1:3001/health" > /dev/null; then
                 echo "Health check passed."
-                exit 0
+                healthy=1
+                break
               fi
               echo "Health check not ready (attempt $i/6), retrying..."
               sleep 5
             done
-            echo "Health check failed after restart."
-            exit 1
+            if [ "$healthy" != "1" ]; then
+              echo "Health check failed after restart."
+              exit 1
+            fi
+            # Other companies' instances (deploy/ironlog-instance.sh) run the
+            # same code: restart them too. They start with a clean environment,
+            # so this deploy's AML keys never reach them. A problem there is
+            # reported but does not fail AML's deploy.
+            bash /data/ironlog/deploy/ironlog-instance.sh restart-all || echo "Warning: a company instance did not come back; check pm2 logs."
