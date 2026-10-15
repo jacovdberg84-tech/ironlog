@@ -194,6 +194,7 @@ function loadStartupData() {
     loadPdfReportSettings().catch(() => {});
     loadCompanyProfile().catch(() => {});
     loadBackupFiles().catch(() => {});
+    loadBackupHealth().catch(() => {});
   }
   loadCodePickers().catch(() => {});
   populateThresholdInputs();

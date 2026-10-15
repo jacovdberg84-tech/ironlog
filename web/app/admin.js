@@ -1434,8 +1434,123 @@ async function saveCompanyProfile() {
   }
 }
 
+/** Admin → Off-site backups and system health (api/utils/autoBackup.js). */
+const BK_KIND = { nightly: "Nightly", manual: "Manual", restore_test: "Restore test" };
+const bkSize = (b) => (b == null ? "—" : b > 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${(b / 1e6).toFixed(1)} MB`);
+const bkWhen = (t) => (t ? String(t).slice(0, 16) : "—");
+
+async function loadBackupHealth() {
+  const card = qs("offsiteBackupCard");
+  if (!card) return;
+  const data = await fetchJson(`${API}/api/admin/backups/status`);
+  const s = data.settings || {};
+  const hour = qs("bkHour");
+  if (hour && !hour.options.length) hour.innerHTML = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, "0")}:00</option>`).join("");
+  qs("bkUrl").value = s.webdav_url || "";
+  qs("bkUser").value = s.webdav_user || "";
+  qs("bkPassword").value = "";
+  qs("bkPassword").placeholder = s.has_password ? "Saved. Leave blank to keep it" : "Storage password";
+  qs("bkFolder").value = s.remote_folder || "";
+  hour.value = String(s.run_hour ?? 2);
+  qs("bkKeepDays").value = String(s.keep_remote_days ?? 30);
+  qs("bkEnabled").checked = s.enabled !== false;
+  qs("bkFiles").checked = s.include_files !== false;
+  const lb = data.last_good_backup;
+  const lo = data.last_offsite;
+  const lr = data.last_restore_test;
+  const srv = data.server || {};
+  const lines = [
+    ["Last good backup", lb ? `${bkWhen(lb.finished_at)} UTC, ${bkSize(lb.db_bytes)}` : "None yet"],
+    ["Last off-site copy", lo ? `${bkWhen(lo.finished_at)} UTC` : s.offsite_configured ? "None yet" : "Storage not set up"],
+    ["Last restore test", lr ? `${bkWhen(lr.finished_at)} UTC, ${lr.status === "ok" ? "passed" : "failed"}` : "None yet"],
+    ["Database size", bkSize(srv.db_bytes)],
+    ["Disk free", srv.disk ? `${srv.disk.free_gb} GB of ${srv.disk.total_gb} GB` : "—"],
+    ["Server running for", `${srv.uptime_hours ?? "—"} h`],
+  ];
+  if (srv.files_waiting) lines.push(["Files waiting to go off-site", String(srv.files_waiting)]);
+  const warn = (data.warnings || []).map((w) => `<li>${escapeHtml(w)}</li>`).join("");
+  qs("backupHealthSummary").innerHTML = `
+    <div class="backup-health-state ${data.ok ? "is-ok" : "is-warn"}">${data.ok ? "All good: backups are running and copied off-site." : "Needs attention"}</div>
+    ${warn ? `<ul class="backup-health-warnings">${warn}</ul>` : ""}
+    <dl class="backup-health-grid">${lines.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd></div>`).join("")}</dl>`;
+  qs("bkRunsBody").innerHTML = (data.recent || []).map((r) => `<tr>
+      <td>${escapeHtml(bkWhen(r.started_at))}</td><td>${escapeHtml(BK_KIND[r.kind] || r.kind)}</td>
+      <td><span class="pill ${r.status === "ok" ? "pill-green" : r.status === "failed" ? "pill-red" : "pill-gray"}">${escapeHtml(r.status === "ok" ? "OK" : r.status === "failed" ? "Failed" : "Running")}</span></td>
+      <td>${escapeHtml(bkSize(r.db_bytes))}</td><td>${escapeHtml(r.offsite || "—")}</td>
+      <td>${r.files_uploaded || 0}${r.files_pending ? ` (+${r.files_pending} next run)` : ""}</td><td>${escapeHtml(r.error || "")}</td></tr>`).join("")
+    || `<tr><td colspan="7" class="muted">No runs yet.</td></tr>`;
+}
+
+/** Waits (up to 10 minutes) for the job just started to finish; returns its run, or null. */
+async function waitForBackupRun(kinds) {
+  for (let i = 0; i < 120; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const st = await fetchJson(`${API}/api/admin/backups/status`).catch(() => null);
+    if (st && !st.running) return (st.recent || []).find((r) => kinds.includes(r.kind)) || null;
+  }
+  return null;
+}
+
+function backupSettingsBody() {
+  return {
+    webdav_url: qs("bkUrl").value,
+    webdav_user: qs("bkUser").value,
+    webdav_password: qs("bkPassword").value,
+    remote_folder: qs("bkFolder").value,
+    run_hour: Number(qs("bkHour").value),
+    keep_remote_days: Number(qs("bkKeepDays").value),
+    enabled: qs("bkEnabled").checked,
+    include_files: qs("bkFiles").checked,
+  };
+}
+
+async function backupAction(btnId, label, fn) {
+  const btn = qs(btnId);
+  const out = qs("bkResult");
+  btn.disabled = true;
+  if (out) out.textContent = label;
+  try {
+    const msg = await fn();
+    if (out) out.textContent = msg;
+  } catch (e) {
+    if (out) out.textContent = e.message || String(e);
+  } finally {
+    btn.disabled = false;
+    loadBackupHealth().catch(() => {});
+  }
+}
+
+function wireBackupHealth() {
+  qs("refreshBackupHealthBtn")?.addEventListener("click", () => loadBackupHealth().catch((e) => setStatus("Backup status error: " + e.message)));
+  qs("bkSaveBtn")?.addEventListener("click", () => backupAction("bkSaveBtn", "Saving…", async () => {
+    await fetchJson(`${API}/api/admin/backups/settings`, { method: "PUT", body: JSON.stringify(backupSettingsBody()) });
+    return "Saved.";
+  }));
+  qs("bkTestBtn")?.addEventListener("click", () => backupAction("bkTestBtn", "Connecting…", async () => {
+    const b = backupSettingsBody();
+    const r = await fetchJson(`${API}/api/admin/backups/test-connection`, { method: "POST", body: JSON.stringify(b.webdav_password ? b : {}) });
+    return r.message || "Connected.";
+  }));
+  qs("bkRunBtn")?.addEventListener("click", () => backupAction("bkRunBtn", "Backing up… the first time can take several minutes.", async () => {
+    await fetchJson(`${API}/api/admin/backups/run-now`, { method: "POST", body: "{}" });
+    const run = await waitForBackupRun(["manual"]);
+    if (!run) return "Still running. The result will appear under Recent runs.";
+    if (run.status !== "ok") return `Backup failed: ${run.error || "unknown problem"}`;
+    return run.offsite === "uploaded"
+      ? `Done: copy checked and sent off-site${run.files_uploaded ? `, plus ${run.files_uploaded} files` : ""}${run.files_pending ? ` (${run.files_pending} more go tonight)` : ""}.`
+      : "Done: copy checked and kept on this server (off-site storage not set up).";
+  }));
+  qs("bkRestoreTestBtn")?.addEventListener("click", () => backupAction("bkRestoreTestBtn", "Downloading the newest off-site copy…", async () => {
+    await fetchJson(`${API}/api/admin/backups/restore-test`, { method: "POST", body: "{}" });
+    const run = await waitForBackupRun(["restore_test"]);
+    if (!run) return "Still running. The result will appear under Recent runs.";
+    return run.status === "ok" ? "Restore test passed: the newest off-site copy opens and is complete." : `Restore test failed: ${run.error || "unknown problem"}`;
+  }));
+}
+
 /** Start-up: User admin, SMTP, push, PDF settings and backup controls. Called once from init() in init.js. */
 function wireAdminControls() {
+  wireBackupHealth();
   qs("loadCompanyProfileBtn")?.addEventListener("click", () =>
     loadCompanyProfile().catch((e) => setStatus("Company profile error: " + e.message))
   );

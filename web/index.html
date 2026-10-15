@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=fleet-sec-1" />
+  <link rel="stylesheet" href="./styles.css?v=backups-1" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -6899,6 +6899,54 @@
           </div>
         </div>
 
+        <!-- Off-site Backups + Health Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false" id="offsiteBackupCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-1d4ed8);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path><polyline points="12 13 12 17"></polyline><polyline points="10 15 12 13 14 15"></polyline></svg>
+              </div>
+              <div>
+                <h3>Off-site backups and system health</h3>
+                <p class="muted small">Every night IronLog checks a copy of the database and sends it, with new photos and documents, to your off-site storage. Once a month it downloads the newest copy to prove it can be restored.</p>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="refreshBackupHealthBtn" class="btn btn-secondary btn-sm">Refresh</button>
+              <button class="report-card-toggle" aria-label="Toggle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+              </button>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <div id="backupHealthSummary" class="backup-health" role="status">Loading…</div>
+            <h4 class="backup-health-h">Off-site storage (WebDAV, e.g. Hetzner Storage Box)</h4>
+            <div class="form-row">
+              <div class="form-field"><label for="bkUrl">Storage address</label><input id="bkUrl" class="w-full" placeholder="https://u123456.your-storagebox.de" autocomplete="off" /></div>
+              <div class="form-field"><label for="bkUser">Username</label><input id="bkUser" class="w-full" placeholder="u123456" autocomplete="off" /></div>
+              <div class="form-field"><label for="bkPassword">Password</label><input id="bkPassword" type="password" class="w-full" autocomplete="new-password" placeholder="Leave blank to keep the saved one" /></div>
+            </div>
+            <div class="form-row">
+              <div class="form-field"><label for="bkFolder">Folder on the storage</label><input id="bkFolder" class="w-full" placeholder="ironlog/aml" /></div>
+              <div class="form-field"><label for="bkHour">Nightly backup at (site time)</label><select id="bkHour" class="w-full"></select></div>
+              <div class="form-field"><label for="bkKeepDays">Keep off-site copies for (days)</label><input id="bkKeepDays" type="number" min="7" max="3650" class="w-full" /></div>
+            </div>
+            <div class="form-row">
+              <label class="checkbox-label"><input type="checkbox" id="bkEnabled" /> <span>Run the nightly backup</span></label>
+              <label class="checkbox-label"><input type="checkbox" id="bkFiles" /> <span>Include uploaded photos and documents</span></label>
+            </div>
+            <div class="row" style="gap:8px; flex-wrap:wrap; align-items:center;">
+              <button type="button" id="bkSaveBtn" class="btn-primary">Save</button>
+              <button type="button" id="bkTestBtn" class="btn btn-secondary">Test connection</button>
+              <button type="button" id="bkRunBtn" class="btn btn-secondary">Back up now</button>
+              <button type="button" id="bkRestoreTestBtn" class="btn btn-secondary">Run restore test</button>
+              <span id="bkResult" class="muted small" role="status"></span>
+            </div>
+            <h4 class="backup-health-h">Recent runs</h4>
+            <div class="table-wrap"><table class="backup-runs-table"><thead><tr><th>Started (UTC)</th><th>Type</th><th>Result</th><th>Size</th><th>Off-site</th><th>Files sent</th><th>Problem</th></tr></thead><tbody id="bkRunsBody"></tbody></table></div>
+          </div>
+        </div>
+
         <!-- Backup + Restore Card -->
         <div class="dash-card collapsible full-width" data-collapsed="false">
           <div class="dash-card-header">
@@ -8086,8 +8134,8 @@
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=2"></script>
   <!-- Main app, split by feature. Order matters: files share one global scope. -->
-  <script src="./app/core.js?v=94"></script>
-  <script src="./app/admin.js?v=92"></script>
+  <script src="./app/core.js?v=95"></script>
+  <script src="./app/admin.js?v=93"></script>
   <script src="./app/inspections.js?v=90"></script>
   <script src="./app/ui-helpers.js?v=89"></script>
   <script src="./app/telematics.js?v=94"></script>
@@ -8112,7 +8160,7 @@
   <script src="./app/daily-input.js?v=89"></script>
   <script src="./app/assets.js?v=89"></script>
   <script src="./app/developer.js?v=3"></script>
-  <script src="./app/init.js?v=93"></script>
+  <script src="./app/init.js?v=94"></script>
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=90"></script>
   <script src="./app/collab-inbox.js?v=1"></script>
