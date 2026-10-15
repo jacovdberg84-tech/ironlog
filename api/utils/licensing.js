@@ -56,7 +56,10 @@ export function ensureLicenceTables(db) {
 }
 
 /** Public keys the vendor signs with: built in, plus IRONLOG_LICENCE_PUBLIC_KEYS (comma-separated, base64 SPKI). */
-export const BUILT_IN_PUBLIC_KEYS = [];
+export const BUILT_IN_PUBLIC_KEYS = [
+  // IronLog licence signing key, set up on the issuing server on 2026-10-15.
+  "MCowBQYDK2VwAyEAEfynEM7DjNmIXX66VEBcCQQb3EL+rHjpxorB2N3LJTM=",
+];
 export function vendorPublicKeys(env = process.env) {
   const extra = String(env.IRONLOG_LICENCE_PUBLIC_KEYS || "").split(",").map((s) => s.trim()).filter(Boolean);
   return [...BUILT_IN_PUBLIC_KEYS, ...extra];

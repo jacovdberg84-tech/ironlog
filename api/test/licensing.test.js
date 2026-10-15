@@ -124,3 +124,10 @@ test("usage counts active machines per site against the band and flags overruns"
   assert.match(u.warnings[0], /Site main has 3 active machines; the licence covers 2/);
   assert.equal(u.sites.find((s) => s.site_code === "north").over_band, false);
 });
+
+test("the built-in vendor key is a valid Ed25519 public key, and a key it did not sign is refused", () => {
+  assert.equal(lic.BUILT_IN_PUBLIC_KEYS.length, 1);
+  const k = crypto.createPublicKey({ key: Buffer.from(lic.BUILT_IN_PUBLIC_KEYS[0], "base64"), format: "der", type: "spki" });
+  assert.equal(k.asymmetricKeyType, "ed25519");
+  assert.equal(lic.verifyLicence(lic.signLicence(sample, privateKey), lic.BUILT_IN_PUBLIC_KEYS).ok, false, "only the owner's signing key passes");
+});
