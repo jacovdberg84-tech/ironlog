@@ -123,6 +123,7 @@ export default async function dispatchRoutes(app) {
   });
 
   app.post("/trips/:id/status", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "valid trip id required" });
     const next = String(req.body?.status || "").trim().toLowerCase();
@@ -148,6 +149,7 @@ export default async function dispatchRoutes(app) {
   });
 
   app.post("/trips/:id/pod", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "valid trip id required" });
     const pod_ref = String(req.body?.pod_ref || "").trim();

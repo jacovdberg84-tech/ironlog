@@ -145,6 +145,7 @@ export default function registerPurchaseOrdersRoutes(app, ctx) {
   });
 
   app.post("/purchase-orders/:id/approve", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     if (!requireRoles(req, reply, ["admin", "supervisor", "procurement"])) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
@@ -162,6 +163,7 @@ export default function registerPurchaseOrdersRoutes(app, ctx) {
   });
 
   app.post("/purchase-orders/:id/send", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     if (!requireRoles(req, reply, ["admin", "supervisor", "procurement"])) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
@@ -181,6 +183,7 @@ export default function registerPurchaseOrdersRoutes(app, ctx) {
   });
 
   app.post("/purchase-orders/:id/receive", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     if (!requireRoles(req, reply, ["admin", "supervisor", "stores", "procurement"])) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
@@ -271,6 +274,7 @@ export default function registerPurchaseOrdersRoutes(app, ctx) {
   });
 
   app.post("/purchase-orders/:id/invoices", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     if (!requireRoles(req, reply, ["admin", "supervisor", "procurement", "stores"])) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
@@ -335,6 +339,7 @@ export default function registerPurchaseOrdersRoutes(app, ctx) {
   });
 
   app.post("/purchase-orders/:id/three-way-match", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     if (!requireRoles(req, reply, ["admin", "supervisor", "procurement", "stores"])) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });

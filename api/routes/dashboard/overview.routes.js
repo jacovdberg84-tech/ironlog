@@ -3,6 +3,7 @@
 import { PRESTART_DEDUCTION_HOURS } from "../../utils/prestartDaily.js";
 import { db } from "../../db/client.js";
 import { writeAudit } from "../../utils/audit.js";
+import { andAssetSite, andSite } from "../../utils/sites.js";
 
 export default function registerOverviewRoutes(app, ctx) {
   const {
@@ -631,13 +632,13 @@ export default function registerOverviewRoutes(app, ctx) {
         SELECT COALESCE(SUM(fl.liters * COALESCE(fl.unit_cost_per_liter, a.fuel_cost_per_liter, ?)), 0) AS v
         FROM fuel_logs fl
         JOIN assets a ON a.id = fl.asset_id
-        WHERE fl.log_date BETWEEN ? AND ?
+        WHERE fl.log_date BETWEEN ? AND ?${andAssetSite("fl.asset_id", req)}
       `).get(settings.fuel_cost_per_liter_default, r.start, r.end);
 
       const lube = db.prepare(`
         SELECT COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS v
         FROM oil_logs ol
-        WHERE ol.log_date BETWEEN ? AND ?
+        WHERE ol.log_date BETWEEN ? AND ?${andAssetSite("ol.asset_id", req)}
       `).get(settings.lube_cost_per_qty_default, r.start, r.end);
 
       const parts = db.prepare(`
@@ -653,7 +654,7 @@ export default function registerOverviewRoutes(app, ctx) {
           COALESCE(SUM(COALESCE(w.labor_hours, 0)), 0) AS hrs,
           COALESCE(SUM(COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, ?)), 0) AS v
         FROM work_orders w
-        WHERE DATE(COALESCE(w.completed_at, w.closed_at)) BETWEEN ? AND ?
+        WHERE DATE(COALESCE(w.completed_at, w.closed_at)) BETWEEN ? AND ?${andAssetSite("w.asset_id", req)}
           AND w.status IN ('completed', 'approved', 'closed')
       `).get(settings.labor_cost_per_hour_default, r.start, r.end);
 
@@ -662,13 +663,13 @@ export default function registerOverviewRoutes(app, ctx) {
         FROM breakdown_downtime_logs l
         JOIN breakdowns b ON b.id = l.breakdown_id
         JOIN assets a ON a.id = b.asset_id
-        WHERE l.log_date BETWEEN ? AND ?
+        WHERE l.log_date BETWEEN ? AND ?${andSite("a", req)}
       `).get(settings.downtime_cost_per_hour_default, r.start, r.end);
 
       const run = db.prepare(`
         SELECT COALESCE(SUM(hours_run), 0) AS h
         FROM daily_hours
-        WHERE work_date BETWEEN ? AND ?
+        WHERE work_date BETWEEN ? AND ?${andAssetSite("asset_id", req)}
           AND is_used = 1
           AND hours_run > 0
       `).get(r.start, r.end);
@@ -739,14 +740,14 @@ export default function registerOverviewRoutes(app, ctx) {
     const failuresRow = db.prepare(`
       SELECT COUNT(*) AS n
       FROM breakdowns
-      WHERE breakdown_date BETWEEN ? AND ?
+      WHERE breakdown_date BETWEEN ? AND ?${andAssetSite("asset_id", req)}
     `).get(start, end);
     const failure_count = Number(failuresRow?.n || 0);
 
     const runRow = db.prepare(`
       SELECT COALESCE(SUM(hours_run), 0) AS run_hours
       FROM daily_hours
-      WHERE work_date BETWEEN ? AND ?
+      WHERE work_date BETWEEN ? AND ?${andAssetSite("asset_id", req)}
         AND is_used = 1
         AND hours_run > 0
     `).get(start, end);
@@ -757,14 +758,14 @@ export default function registerOverviewRoutes(app, ctx) {
       const dtRow = db.prepare(`
         SELECT COALESCE(SUM(downtime_total_hours), 0) AS dt
         FROM breakdowns
-        WHERE breakdown_date BETWEEN ? AND ?
+        WHERE breakdown_date BETWEEN ? AND ?${andAssetSite("asset_id", req)}
       `).get(start, end);
       downtime_hours = Number(dtRow?.dt || 0);
     } else if (hasColumn("breakdowns", "downtime_hours")) {
       const dtRow = db.prepare(`
         SELECT COALESCE(SUM(downtime_hours), 0) AS dt
         FROM breakdowns
-        WHERE breakdown_date BETWEEN ? AND ?
+        WHERE breakdown_date BETWEEN ? AND ?${andAssetSite("asset_id", req)}
       `).get(start, end);
       downtime_hours = Number(dtRow?.dt || 0);
     }
@@ -806,14 +807,14 @@ export default function registerOverviewRoutes(app, ctx) {
       const failuresRow = db.prepare(`
         SELECT COUNT(*) AS n
         FROM breakdowns
-        WHERE breakdown_date BETWEEN ? AND ?
+        WHERE breakdown_date BETWEEN ? AND ?${andAssetSite("asset_id", req)}
       `).get(start, end);
       const failure_count = Number(failuresRow?.n || 0);
 
       const runRow = db.prepare(`
         SELECT COALESCE(SUM(hours_run), 0) AS run_hours
         FROM daily_hours
-        WHERE work_date BETWEEN ? AND ?
+        WHERE work_date BETWEEN ? AND ?${andAssetSite("asset_id", req)}
           AND is_used = 1
           AND hours_run > 0
       `).get(start, end);
@@ -824,14 +825,14 @@ export default function registerOverviewRoutes(app, ctx) {
         const dtRow = db.prepare(`
           SELECT COALESCE(SUM(downtime_total_hours), 0) AS dt
           FROM breakdowns
-          WHERE breakdown_date BETWEEN ? AND ?
+          WHERE breakdown_date BETWEEN ? AND ?${andAssetSite("asset_id", req)}
         `).get(start, end);
         downtime_hours = Number(dtRow?.dt || 0);
       } else if (hasColumn("breakdowns", "downtime_hours")) {
         const dtRow = db.prepare(`
           SELECT COALESCE(SUM(downtime_hours), 0) AS dt
           FROM breakdowns
-          WHERE breakdown_date BETWEEN ? AND ?
+          WHERE breakdown_date BETWEEN ? AND ?${andAssetSite("asset_id", req)}
         `).get(start, end);
         downtime_hours = Number(dtRow?.dt || 0);
       }

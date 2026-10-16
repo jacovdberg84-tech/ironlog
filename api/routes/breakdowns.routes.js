@@ -2,6 +2,7 @@
 import { db } from "../db/client.js";
 import { notifyBreakdownCreated } from "../utils/pushNotify.js";
 import { closeWorkOrdersForClosedBreakdown } from "../utils/workOrderSync.js";
+import { ensureAssetSiteColumn, requestSite, requireRequestSite, siteSql } from "../utils/sites.js";
 
 /** Parse YYYY-MM-DDTHH:mm (no timezone) as local wall time. */
 function parseLocalDateTime(s) {
@@ -55,6 +56,7 @@ function toSqliteWallDatetime(s) {
 }
 
 export default async function breakdownRoutes(app) {
+  ensureAssetSiteColumn(db);
   const tryAddColumn = (sql) => {
     try {
       db.prepare(sql).run();
@@ -86,7 +88,7 @@ export default async function breakdownRoutes(app) {
 `);
 
   const getAssetByCode = db.prepare(`
-    SELECT id, asset_code, asset_name
+    SELECT id, asset_code, asset_name, site_code
     FROM assets
     WHERE asset_code = ?
   `);
@@ -140,6 +142,7 @@ export default async function breakdownRoutes(app) {
     LEFT JOIN work_orders wo ON wo.id = b.primary_work_order_id
     WHERE UPPER(TRIM(b.status)) = 'OPEN'
       AND (wo.status IS NULL OR wo.status NOT IN ('completed','approved','closed'))
+      AND ${siteSql("a.site_code")} = ?
     ORDER BY b.id DESC
     LIMIT 500
   `);
@@ -174,6 +177,7 @@ export default async function breakdownRoutes(app) {
     LEFT JOIN work_orders wo ON wo.id = b.primary_work_order_id
     WHERE UPPER(TRIM(b.status)) = 'OPEN'
       AND (wo.status IS NULL OR wo.status NOT IN ('completed','approved','closed'))
+      AND ${siteSql("a.site_code")} = ?
     ORDER BY b.id DESC
     LIMIT 500
   `);
@@ -445,8 +449,8 @@ export default async function breakdownRoutes(app) {
     const start = String(req.query?.start || "").trim();
     const end = String(req.query?.end || "").trim();
     const isYmd = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
-    const where = [];
-    const params = [];
+    const where = [`${siteSql("a.site_code")} = ?`];
+    const params = [requestSite(req)];
     if (isYmd(start)) { where.push("b.breakdown_date >= ?"); params.push(start); }
     if (isYmd(end)) { where.push("b.breakdown_date <= ?"); params.push(end); }
     const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
@@ -497,6 +501,7 @@ export default async function breakdownRoutes(app) {
 
     const asset = getAssetByCode.get(asset_code);
     if (!asset) return reply.code(404).send({ error: "Asset not found" });
+    if (!requireRequestSite(req, reply, asset.site_code, "Asset")) return;
 
     const open = getOpenBreakdownByAssetId.get(asset.id);
     return { ok: true, breakdown: open || null };
@@ -509,8 +514,8 @@ export default async function breakdownRoutes(app) {
   app.get("/open-all", async (req, reply) => {
     const date = String(req.query?.date || "").trim();
     const rows = isDate(date)
-      ? listOpenBreakdownsAllForDate.all(date)
-      : listOpenBreakdownsAll.all();
+      ? listOpenBreakdownsAllForDate.all(date, requestSite(req))
+      : listOpenBreakdownsAll.all(requestSite(req));
     return { ok: true, rows: rows.map((r) => ({ ...r })) };
   });
 
@@ -548,6 +553,7 @@ export default async function breakdownRoutes(app) {
   // Keeps the Daily Log as the one place to update an open incident and its WO.
   // ---------------------------
   app.post("/:id/daily-progress", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const breakdownId = Number(req.params.id);
     if (!Number.isInteger(breakdownId) || breakdownId <= 0) {
       return reply.code(400).send({ error: "Invalid breakdown id" });
@@ -624,6 +630,7 @@ export default async function breakdownRoutes(app) {
   // The expected return date also becomes the repair work order's due date.
   // ---------------------------
   app.patch("/:id/details", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: "Invalid breakdown id" });
     const current = db.prepare(`SELECT id, status FROM breakdowns WHERE id = ?`).get(id);
@@ -1103,6 +1110,7 @@ export default async function breakdownRoutes(app) {
 
   // Create WO for a specific component line (ONLY ONCE)
   app.post("/:id/components/:componentId/create-wo", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const breakdown_id = Number(req.params.id);
     const component_id = Number(req.params.componentId);
 

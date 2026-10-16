@@ -3,6 +3,7 @@
 import ExcelJS from "exceljs";
 import { AlignmentType, BorderStyle, Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import { db } from "../../db/client.js";
+import { andAssetSite, andSite } from "../../utils/sites.js";
 
 export default function registerAssetKpiRoutes(app, ctx) {
   const { buildAssetKpiRange, hasColumn, siteCodeFromReq, todayYYYYMMDD } = ctx;
@@ -50,7 +51,7 @@ export default function registerAssetKpiRoutes(app, ctx) {
       const assets = db.prepare(`
         SELECT id AS asset_id, asset_code, asset_name
         FROM assets
-        WHERE UPPER(asset_code) IN (${marks})
+        WHERE UPPER(asset_code) IN (${marks})${andSite(null, req)}
           AND COALESCE(active, 1) = 1
       `).all(...codes);
       const hasVehicleChecks = Boolean(
@@ -82,7 +83,7 @@ export default function registerAssetKpiRoutes(app, ctx) {
         JOIN (
           SELECT asset_id, MAX(id) AS max_id
           FROM vehicle_ldv_checks
-          WHERE check_date = ?
+          WHERE check_date = ?${andAssetSite("asset_id", req)}
             ${hasCheckMode ? "AND COALESCE(check_mode, 'ldv_general') = 'prestart'" : ""}
           GROUP BY asset_id
         ) m ON m.asset_id = v.asset_id AND m.max_id = v.id

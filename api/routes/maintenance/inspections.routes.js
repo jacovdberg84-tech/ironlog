@@ -363,6 +363,7 @@ export default function registerInspectionsRoutes(app, ctx) {
   });
 
   app.delete("/inspections/:id", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     try {
       const inspectionId = Number(req.params?.id || 0);
       if (!inspectionId) return reply.code(400).send({ ok: false, error: "Invalid inspection id" });
@@ -850,6 +851,7 @@ export default function registerInspectionsRoutes(app, ctx) {
   });
 
   app.get("/undercarriage-inspections/:id.pdf", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     try {
       const id = Number(req.params?.id || 0);
       if (!id) return reply.code(400).send({ ok: false, error: "invalid id" });
