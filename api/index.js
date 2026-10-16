@@ -20,6 +20,8 @@ import { backupDirPath } from "./routes/backups.routes.js";
 import { sendPushToRoles } from "./utils/pushNotify.js";
 import { db } from "./db/client.js";
 import { bootstrapSmtpFromEnv } from "./utils/mail.js";
+import { repairSiteDataOnce } from "./utils/sites.js";
+import { ensureAuditTable, writeAudit } from "./utils/audit.js";
 
 // Settings are read by ./loadEnv.js (imported before everything else): api/.env,
 // or only an instance's own file when IRONLOG_ENV_FILE is set.
@@ -112,6 +114,18 @@ async function listenWithFallback() {
 
 try {
   const effectivePort = await listenWithFallback();
+  // One-time tidy-up of site codes (utils/sites.js): copies the database first, audits every change.
+  try {
+    ensureAuditTable(db);
+    const system = { headers: { "x-user-name": "system", "x-user-role": "system" } };
+    await repairSiteDataOnce(db, {
+      backupDir: backupDirPath(),
+      audit: (entry) => writeAudit(db, system, { module: "sites", ...entry }),
+      log: app.log,
+    });
+  } catch (err) {
+    app.log.warn?.(`[sites] tidy-up skipped: ${err?.message || err}`);
+  }
   const stopDbAutoBackup = startDbAutoBackup(app.log);
   process.once("SIGINT", stopDbAutoBackup);
   process.once("SIGTERM", stopDbAutoBackup);

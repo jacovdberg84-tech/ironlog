@@ -2,6 +2,7 @@
 import { db } from "../db/client.js";
 export { isAuthRequired } from "./config.js";
 import { isAuthRequired, isPublicAuthRequest } from "./config.js";
+import { unwrapSiteList } from "../utils/sites.js";
 
 function resolveSession(token) {
   try {
@@ -45,16 +46,9 @@ function getPermissionsForRoles(rolesIn) {
 
 function parseAllowedLocations(raw) {
   if (!raw) return null;
-  try {
-    const arr = typeof raw === "string" ? JSON.parse(raw) : raw;
-    if (!Array.isArray(arr)) return null;
-    const out = arr
-      .map((x) => String(x || "").trim().toLowerCase())
-      .filter(Boolean);
-    return out.length ? Array.from(new Set(out)) : null;
-  } catch {
-    return null;
-  }
+  // Lists saved as text ('["workshop"]') are opened up (utils/sites.js).
+  const out = unwrapSiteList(raw);
+  return out.length ? out : null;
 }
 
 const VALID_ROLES = [

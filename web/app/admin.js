@@ -101,6 +101,13 @@ async function loadAdminUsers() {
         });
       }
     });
+    // The company's real sites (api/utils/sites.js), not whatever was typed on other users.
+    try {
+      const siteData = await fetchJson(`${API}/api/auth/sites`);
+      knownLocations.clear();
+      (siteData.sites || []).forEach((s) => knownLocations.add(s));
+      if (qs("adminSitesHint")) qs("adminSitesHint").textContent = `Sites this person may use, comma separated. Leave empty for all sites. Sites: ${(siteData.sites || []).join(", ")}. Screens are chosen under Sections, not here.`;
+    } catch {}
     const locList = qs("adminAllowedLocationsList");
     if (locList) {
       locList.innerHTML = "";

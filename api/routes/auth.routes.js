@@ -3,6 +3,7 @@ import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { isAuthRequired } from "../auth/hook.js";
 import { ensureMicrosoftSignInTables, setUserMicrosoftEmail } from "../utils/microsoftSignIn.js";
+import { checkAllowedLocations, defaultSite, knownSites, unwrapSiteList } from "../utils/sites.js";
 
 export const VALID_ROLES = [
   "admin",
@@ -134,21 +135,8 @@ function parseAllowedTabs(raw) {
 
 function parseAllowedLocations(raw) {
   if (raw == null || raw === "") return null;
-  let arr = [];
-  if (Array.isArray(raw)) {
-    arr = raw;
-  } else {
-    const text = String(raw).trim();
-    try {
-      const parsed = JSON.parse(text);
-      arr = Array.isArray(parsed) ? parsed : text.split(",");
-    } catch {
-      arr = text.split(",");
-    }
-  }
-  const out = Array.from(new Set(
-    arr.map((x) => String(x || "").trim().toLowerCase()).filter(Boolean)
-  ));
+  // Lists saved as text ('["workshop"]') are opened up (utils/sites.js).
+  const out = unwrapSiteList(raw);
   return out.length ? out : null;
 }
 
@@ -369,6 +357,9 @@ export default async function authRoutes(app) {
       microsoft_linked: Boolean(row.ms_oid),
     };
   }
+
+  // GET /api/auth/sites — the company's sites (Allowed Locations pick-list, site switcher)
+  app.get("/sites", async () => ({ ok: true, sites: knownSites(db), default_site: defaultSite() }));
 
   // GET /api/auth/tabs — section keys + roles (for admin UI; not sensitive)
   app.get("/tabs", async () => ({
@@ -662,9 +653,12 @@ export default async function authRoutes(app) {
     const active = body.active === 0 || body.active === false ? 0 : 1;
     const password = String(body.password || "").trim();
     const issueSetup = body.issue_setup_code === true || !password;
-    const allowedLocParsed = Object.prototype.hasOwnProperty.call(body, "allowed_locations")
-      ? parseAllowedLocations(body.allowed_locations)
-      : null;
+    // Only real sites; a screen name typed here would hide every site's records from the person.
+    const siteCheck = Object.prototype.hasOwnProperty.call(body, "allowed_locations")
+      ? checkAllowedLocations(db, body.allowed_locations)
+      : { ok: true, sites: null };
+    if (!siteCheck.ok) return reply.code(400).send({ error: siteCheck.error });
+    const allowedLocParsed = siteCheck.sites;
     const allowedLocStored = allowedLocParsed ? JSON.stringify(allowedLocParsed) : null;
 
     if (!username) return reply.code(400).send({ error: "username is required" });
