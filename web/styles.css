@@ -9105,6 +9105,13 @@ body.wo-popup .wo-drawer-head { display: none; }
 #tab-developer .dev-add { color: var(--success); }
 #tab-developer .dev-del { color: var(--danger); }
 #tab-developer .dev-request-text pre { white-space: pre-wrap; font-family: inherit; color: var(--muted); }
+#tab-developer .dev-upload { display: grid; gap: 6px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; background: var(--card-soft); }
+#tab-developer .dev-upload.drag { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
+#tab-developer .dev-upload-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+#tab-developer .dev-upload-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 0.86rem; }
+#tab-developer .dev-upload-list:empty { display: none; }
+#tab-developer .dev-upload-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); overflow-wrap: anywhere; }
+#tab-developer .dev-upload-list button { flex: 0 0 auto; padding: 2px 8px; font-size: 0.8rem; }
 @media (max-width: 980px) {
   #tab-developer .dev-layout { grid-template-columns: 1fr; }
   #tab-developer .dev-row { grid-template-columns: 1fr; }

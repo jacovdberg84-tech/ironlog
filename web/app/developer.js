@@ -10,6 +10,12 @@ let developerSelectedId = 0;
 let developerBusy = false;
 let developerTimer = null;
 let developerSetupOpen = false;
+// Documents waiting to go with the next request: { name, size, data_base64 }.
+let developerUploads = [];
+
+const DEV_UPLOAD_MAX_FILES = 5;
+const DEV_UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
+const DEV_UPLOAD_TYPES = ["txt", "md", "csv", "tsv", "json", "log", "xml", "html", "htm", "css", "js", "mjs", "cjs", "ts", "sql", "yml", "yaml", "ini", "docx", "xlsx"];
 
 const DEV_ACTIVE = new Set(["sending", "waiting", "working", "code_ready", "in_review", "checks_running", "checks_failing", "merged", "deploying", "needs_you"]);
 const DEV_TONE = {
@@ -272,6 +278,12 @@ function renderDeveloperDetail(job) {
   qs("devReplyBtn").disabled = finished || !job.issue_number;
   qs("devCloseBtn").hidden = finished || Boolean(d.pull_request?.merged_at);
   qs("devRequestText").textContent = job.request_text || "";
+  const docs = Array.isArray(job.attachments) ? job.attachments : [];
+  const docsLine = qs("devRequestDocs");
+  if (docsLine) {
+    docsLine.hidden = !docs.length;
+    docsLine.textContent = docs.length ? `Documents sent: ${docs.join(", ")}` : "";
+  }
 }
 
 async function openDeveloperJob(id, { refresh = true } = {}) {
@@ -297,6 +309,46 @@ async function loadDeveloperJobs({ refresh = false } = {}) {
   if (selected) renderDeveloperDetail(selected);
 }
 
+function devFileSize(bytes) {
+  const n = Number(bytes || 0);
+  return n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+}
+
+function renderDeveloperUploads() {
+  const list = qs("devUploadList");
+  if (!list) return;
+  list.innerHTML = developerUploads.map((f, i) => `<li><span>📄 ${escapeHtml(f.name)} <small class="muted">${escapeHtml(devFileSize(f.size))}</small></span><button type="button" data-dev-remove-upload="${i}" aria-label="Remove ${escapeHtml(f.name)}">Remove</button></li>`).join("");
+}
+
+function devReadFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || "").replace(/^data:[^,]*,/, ""));
+    reader.onerror = () => reject(new Error(`${file.name} could not be read.`));
+    reader.readAsDataURL(file);
+  });
+}
+
+// Checks each file here first so a wrong file is caught before anything is sent.
+async function addDeveloperUploads(fileList) {
+  const problems = [];
+  for (const file of Array.from(fileList || [])) {
+    const type = String(file.name || "").toLowerCase().split(".").pop();
+    if (developerUploads.length >= DEV_UPLOAD_MAX_FILES) { problems.push(`Only ${DEV_UPLOAD_MAX_FILES} documents can go with one request.`); break; }
+    if (!DEV_UPLOAD_TYPES.includes(type)) { problems.push(`${file.name}: use a Word (.docx), Excel (.xlsx) or text file. For a PDF or picture, copy the text into the request.`); continue; }
+    if (file.size > DEV_UPLOAD_MAX_BYTES) { problems.push(`${file.name} is bigger than 5 MB.`); continue; }
+    if (developerUploads.some((f) => f.name === file.name && f.size === file.size)) continue;
+    try {
+      developerUploads.push({ name: file.name, size: file.size, data_base64: await devReadFile(file) });
+    } catch (err) {
+      problems.push(err.message || String(err));
+    }
+  }
+  renderDeveloperUploads();
+  if (problems.length) developerMsg(problems.join(" "), true);
+  else if (developerUploads.length) developerMsg(`${developerUploads.length} document${developerUploads.length === 1 ? "" : "s"} ready to send with the request.`);
+}
+
 function devSelectedModel() {
   return document.querySelector('#tab-developer input[name="devModel"]:checked')?.value || "opus";
 }
@@ -316,9 +368,12 @@ async function createDeveloperJob() {
       request_text: request,
       priority: qs("devPriority")?.value || "medium",
       model: devSelectedModel(),
+      attachments: developerUploads.map(({ name, data_base64 }) => ({ name, data_base64 })),
     });
     qs("devTitle").value = "";
     qs("devRequest").value = "";
+    developerUploads = [];
+    renderDeveloperUploads();
     developerSelectedId = Number(res?.row?.id || 0);
     developerMsg(`Sent. Claude is on it as issue #${res?.row?.issue_number}. This tab updates by itself.`);
     await loadDeveloperJobs();
@@ -394,6 +449,26 @@ function initDeveloperTab() {
   if (window.__developerTabReady) return;
   window.__developerTabReady = true;
   qs("devCreateBtn")?.addEventListener("click", () => createDeveloperJob());
+  qs("devUploadBtn")?.addEventListener("click", () => qs("devUploadInput")?.click());
+  qs("devUploadInput")?.addEventListener("change", async (event) => {
+    await addDeveloperUploads(event.target.files);
+    event.target.value = "";
+  });
+  qs("devUploadList")?.addEventListener("click", (event) => {
+    const button = event.target?.closest?.("[data-dev-remove-upload]");
+    if (!button) return;
+    developerUploads.splice(Number(button.getAttribute("data-dev-remove-upload")), 1);
+    renderDeveloperUploads();
+  });
+  // Files can also be dragged onto the Documents box.
+  const dropZone = document.querySelector("#tab-developer .dev-upload");
+  dropZone?.addEventListener("dragover", (event) => { event.preventDefault(); dropZone.classList.add("drag"); });
+  dropZone?.addEventListener("dragleave", () => dropZone.classList.remove("drag"));
+  dropZone?.addEventListener("drop", (event) => {
+    event.preventDefault();
+    dropZone.classList.remove("drag");
+    addDeveloperUploads(event.dataTransfer?.files);
+  });
   qs("devRefreshBtn")?.addEventListener("click", () => refreshDeveloperTab());
   qs("devReady")?.addEventListener("click", () => toggleDeveloperSetup());
   qs("devJobList")?.addEventListener("click", (event) => {

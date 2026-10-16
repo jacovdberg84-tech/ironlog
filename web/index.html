@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=ms-2" />
+  <link rel="stylesheet" href="./styles.css?v=ms-3" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -7809,6 +7809,16 @@
               What should Claude change?
               <textarea id="devRequest" rows="7" placeholder="Which screen, what it should do, who uses it, and what must stay the same."></textarea>
             </label>
+            <div class="dev-upload">
+              <div class="dev-upload-head">
+                <strong>Documents</strong>
+                <button type="button" id="devUploadBtn">📎 Upload documents</button>
+              </div>
+              <input type="file" id="devUploadInput" multiple hidden
+                accept=".txt,.md,.csv,.tsv,.json,.log,.xml,.html,.htm,.css,.js,.mjs,.cjs,.ts,.sql,.yml,.yaml,.ini,.docx,.xlsx" />
+              <small class="muted">Optional. Up to 5 Word, Excel or text files that show the change you want. Claude reads them with the request.</small>
+              <ul class="dev-upload-list" id="devUploadList"></ul>
+            </div>
             <div class="dev-row">
               <label>
                 Priority
@@ -7868,6 +7878,7 @@
               <details class="dev-request-text">
                 <summary>Original request</summary>
                 <pre id="devRequestText"></pre>
+                <p class="muted" id="devRequestDocs" hidden></p>
               </details>
             </div>
           </div>
@@ -8317,7 +8328,7 @@
   <script src="./app/site-ops.js?v=89"></script>
   <script src="./app/daily-input.js?v=89"></script>
   <script src="./app/assets.js?v=89"></script>
-  <script src="./app/developer.js?v=3"></script>
+  <script src="./app/developer.js?v=4"></script>
   <script src="./app/init.js?v=97"></script>
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=90"></script>
