@@ -114,6 +114,18 @@ function downloadCostMonthlyXlsx() {
   downloadAuthedFile(`${API}/api/reports/cost-monthly.xlsx?month=${encodeURIComponent(month)}`, `fleet-cost-${month}.xlsx`);
 }
 
+function downloadBudgetSpendXlsx() {
+  const month = (qs("costMonth")?.value || "").trim();
+  if (!month) {
+    alert("Select a cost month first.");
+    return;
+  }
+  downloadAuthedFile(
+    `${API}/api/reports/budget-vs-spend.xlsx?month=${encodeURIComponent(month)}`,
+    `IRONLOG_Budget_vs_Spend_${month}.xlsx`,
+  );
+}
+
 function monthlyFleetCostPdfUrl(download = false) {
   const month = (qs("costMonth")?.value || "").trim();
   if (!month) return null;
@@ -620,6 +632,7 @@ function wireReportControls() {
   qs("openDailyXlsx")?.addEventListener("click", openDailyXlsx);
   qs("openGmWeeklyXlsx")?.addEventListener("click", openGmWeeklyXlsx);
   qs("downloadCostMonthlyXlsx")?.addEventListener("click", downloadCostMonthlyXlsx);
+  qs("downloadBudgetSpendXlsx")?.addEventListener("click", downloadBudgetSpendXlsx);
   qs("openMonthlyFleetCostPdf")?.addEventListener("click", openMonthlyFleetCostPdf);
   qs("downloadMonthlyFleetCostPdf")?.addEventListener("click", downloadMonthlyFleetCostPdf);
   qs("downloadMtdOpeningHoursXlsx")?.addEventListener("click", downloadMtdOpeningHoursXlsx);

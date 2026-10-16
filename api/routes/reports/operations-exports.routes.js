@@ -9,6 +9,8 @@ import { buildPdfBuffer, kvGrid, sectionTitle, table, tryDrawLogo } from "../../
 import { db } from "../../db/client.js";
 import { isDate } from "../../utils/request.js";
 import { oilPartSql } from "../../utils/stockCategory.js";
+import { buildMonthlyBudgetSpend } from "../../utils/monthlyBudgetSpend.js";
+import { buildMonthlyBudgetSpendWorkbook } from "../../utils/monthlyBudgetSpendWorkbook.js";
 
 export default function registerOperationsExportsRoutes(app, ctx) {
   const {
@@ -594,6 +596,33 @@ export default function registerOperationsExportsRoutes(app, ctx) {
       .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
       .header("Content-Disposition", `attachment; filename="IRONLOG_GM_Weekly_ME_MTD_${safeMtdStart}_${safeEnd}.xlsx"`)
       .send(Buffer.from(buffer));
+  });
+
+  // =========================
+  // MONTHLY BUDGET VS SPEND XLSX
+  // =========================
+  // GET /api/reports/budget-vs-spend.xlsx?month=YYYY-MM
+  app.get("/budget-vs-spend.xlsx", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const month = String(req.query?.month || "").trim();
+    if (!isMonth(month)) {
+      return reply.code(400).send({ ok: false, error: "month (YYYY-MM) required" });
+    }
+
+    try {
+      const siteCode = String(req.headers["x-site-code"] || req.query?.site_code || "main").trim().toLowerCase() || "main";
+      const report = buildMonthlyBudgetSpend(db, { month, siteCode });
+      const workbook = await buildMonthlyBudgetSpendWorkbook(report);
+      const buffer = await workbook.xlsx.writeBuffer();
+      reply
+        .header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header("Content-Disposition", `attachment; filename="IRONLOG_Budget_vs_Spend_${month}.xlsx"`)
+        .send(Buffer.from(buffer));
+    } catch (error) {
+      req.log.error(error, "Monthly Budget vs Spend export failed");
+      return reply.code(500).send({ ok: false, error: error?.message || "Could not generate the Budget vs Spend export" });
+    }
   });
 
   // =========================
