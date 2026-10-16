@@ -9,6 +9,7 @@ import { db } from "../../db/client.js";
 import { buildArtisanInspectionPdf, getArtisanInspection } from "../../utils/artisanInspection.js";
 import { isDate } from "../../utils/request.js";
 import { verifyRecordToken } from "../../utils/signedLinks.js";
+import { andSite } from "../../utils/sites.js";
 
 export default function registerInspectionsRoutes(app, ctx) {
   const {
@@ -210,7 +211,7 @@ export default function registerInspectionsRoutes(app, ctx) {
       return reply.code(400).send({ error: "start and end (YYYY-MM-DD) required" });
     }
 
-    const where = ["v.check_date >= ?", "v.check_date <= ?"];
+    const where = ["v.check_date >= ?", "v.check_date <= ?", `1${andSite("a", req)}`];
     const params = [start, end];
     if (assetId > 0) {
       where.push("v.asset_id = ?");
@@ -370,7 +371,7 @@ export default function registerInspectionsRoutes(app, ctx) {
 
     let asset = null;
     if (assetId > 0) {
-      asset = db.prepare(`SELECT id, asset_code, asset_name, category FROM assets WHERE id = ?`).get(assetId);
+      asset = db.prepare(`SELECT id, asset_code, asset_name, category FROM assets WHERE id = ?${andSite(null, req)}`).get(assetId);
     }
 
     const safeDate = isDate(date) ? date : "";
@@ -822,7 +823,7 @@ export default function registerInspectionsRoutes(app, ctx) {
     const photoCaptionCol = pickExistingColumn("manager_inspection_photos", ["caption", "note", "notes", "description"], "caption");
     const photoCreatedCol = pickExistingColumn("manager_inspection_photos", ["created_at", "uploaded_at", "created_on"], "created_at");
 
-    const where = ["mi.inspection_date >= ?", "mi.inspection_date <= ?"];
+    const where = ["mi.inspection_date >= ?", "mi.inspection_date <= ?", `1${andSite("a", req)}`];
     const params = [start, end];
     if (assetId > 0) {
       where.push("mi.asset_id = ?");
@@ -1249,7 +1250,7 @@ export default function registerInspectionsRoutes(app, ctx) {
     const drPhotoCaptionCol = pickExistingColumn("manager_damage_report_photos", ["caption", "note", "notes", "description"], "caption");
     const drPhotoCreatedCol = pickExistingColumn("manager_damage_report_photos", ["created_at", "uploaded_at", "created_on"], "created_at");
 
-    const where = ["dr.report_date >= ?", "dr.report_date <= ?"];
+    const where = ["dr.report_date >= ?", "dr.report_date <= ?", `1${andSite("a", req)}`];
     const params = [start, end];
     if (assetId > 0) {
       where.push("dr.asset_id = ?");
@@ -1439,7 +1440,7 @@ export default function registerInspectionsRoutes(app, ctx) {
     const drInspectorCol = pickExistingColumn("manager_damage_reports", ["inspector_name", "inspector", "manager_name"], "inspector_name");
     const drPhotoReportCol = pickExistingColumn("manager_damage_report_photos", ["damage_report_id", "manager_damage_report_id", "report_id"], "damage_report_id");
 
-    const where = ["dr.report_date >= ?", "dr.report_date <= ?"];
+    const where = ["dr.report_date >= ?", "dr.report_date <= ?", `1${andSite("a", req)}`];
     const params = [start, end];
     if (assetId > 0) {
       where.push("dr.asset_id = ?");

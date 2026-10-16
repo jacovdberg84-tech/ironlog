@@ -155,6 +155,7 @@ export default function registerLubeRoutes(app, ctx) {
   // POST /api/stock/lube-log
   // Body: { asset_code, log_date, oil_type?, quantity }
   app.post("/lube-log", async (req, reply) => {
+    // site: the machine, work order, plan or trip in the body is checked by the site guard (utils/siteGuard.js).
     if (!requireRoles(req, reply, ["admin", "supervisor", "artisan", "operator"])) return;
     const body = req.body || {};
     const asset_code = String(body.asset_code || "").trim();
@@ -205,6 +206,7 @@ export default function registerLubeRoutes(app, ctx) {
   // POST /api/stock/lube-issue
   // Body: { part_code, quantity, asset_code?, log_date?, oil_type?, notes?, location_code? }
   app.post("/lube-issue", async (req, reply) => {
+    // site: the machine, work order, plan or trip in the body is checked by the site guard (utils/siteGuard.js).
     if (!requireRoles(req, reply, ["admin", "supervisor", "stores", "artisan", "operator"])) return;
     const body = req.body || {};
     const part_code = String(body.part_code || "").trim();

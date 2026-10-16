@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { db } from "../../db/client.js";
 import { notifyWorkOrderAssigned } from "../../utils/pushNotify.js";
 import { writeAudit } from "../../utils/audit.js";
+import { andAssetSite, andSite } from "../../utils/sites.js";
 
 export default function registerSchedulingRoutes(app, ctx) {
   const {
@@ -73,7 +74,7 @@ export default function registerSchedulingRoutes(app, ctx) {
     const assigned = db.prepare(`
       SELECT DISTINCT assigned_artisan_name AS name
       FROM work_orders
-      WHERE TRIM(COALESCE(assigned_artisan_name, '')) <> ''
+      WHERE TRIM(COALESCE(assigned_artisan_name, '')) <> ''${andAssetSite("asset_id", req)}
       ORDER BY assigned_artisan_name ASC
       LIMIT 200
     `).all();
@@ -262,7 +263,7 @@ export default function registerSchedulingRoutes(app, ctx) {
     return { ok: true, config: { overdue_hours, level1_role, level2_role, level3_role } };
   });
 
-  app.get("/schedule/escalations", async () => {
+  app.get("/schedule/escalations", async (req) => {
     const rows = db.prepare(`
       SELECT
         e.id, e.work_order_id, e.threshold_hours, e.chain_level, e.status, e.created_at, e.detail_json,
@@ -271,6 +272,7 @@ export default function registerSchedulingRoutes(app, ctx) {
       FROM work_order_escalations e
       LEFT JOIN work_orders w ON w.id = e.work_order_id
       LEFT JOIN assets a ON a.id = w.asset_id
+      WHERE 1${andSite("a", req)}
       ORDER BY e.id DESC
       LIMIT 200
     `).all().map((r) => {
@@ -470,7 +472,7 @@ export default function registerSchedulingRoutes(app, ctx) {
     const loadRows = db.prepare(`
       SELECT assigned_artisan_name, COUNT(*) AS c
       FROM work_orders
-      WHERE status IN ('open','assigned','in_progress')
+      WHERE status IN ('open','assigned','in_progress')${andAssetSite("asset_id", req)}
         AND assigned_artisan_name IS NOT NULL
         AND TRIM(assigned_artisan_name) <> ''
       GROUP BY assigned_artisan_name
@@ -480,7 +482,7 @@ export default function registerSchedulingRoutes(app, ctx) {
     const candidates = db.prepare(`
       SELECT id, required_skill, location_code, shift, assigned_artisan_name
       FROM work_orders
-      WHERE status IN ('open','assigned')
+      WHERE status IN ('open','assigned')${andAssetSite("asset_id", req)}
       ORDER BY id ASC
       LIMIT 300
     `).all();
@@ -525,7 +527,7 @@ export default function registerSchedulingRoutes(app, ctx) {
     const rows = db.prepare(`
       SELECT id, status, opened_at, due_date, assigned_artisan_name, priority
       FROM work_orders
-      WHERE status IN ('open','assigned','in_progress','completed','approved')
+      WHERE status IN ('open','assigned','in_progress','completed','approved')${andAssetSite("asset_id", req)}
       ORDER BY id DESC
       LIMIT 500
     `).all();

@@ -6,6 +6,7 @@ import { buildWeeklyMaintenancePlan } from "../../utils/weeklyMaintenancePlan.js
 import { db } from "../../db/client.js";
 import { getPdfReportBranding } from "../../utils/reportSettings.js";
 import { isDate } from "../../utils/request.js";
+import { andSite } from "../../utils/sites.js";
 
 export default function registerWeeklyRoutes(app, ctx) {
   const {
@@ -37,7 +38,7 @@ export default function registerWeeklyRoutes(app, ctx) {
       const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Johannesburg', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
       const plans = db.prepare(`SELECT mp.*, mp.id AS plan_id, a.asset_code, a.asset_name, a.category
         FROM maintenance_plans mp JOIN assets a ON a.id=mp.asset_id
-        WHERE mp.active=1 AND a.active=1 AND a.is_standby=0 AND a.archived=0`).all();
+        WHERE mp.active=1 AND a.active=1 AND a.is_standby=0 AND a.archived=0${andSite("a", req)}`).all();
       const due = buildDueListFromPlans(plans, id => getAssetCurrentHours(id), 50);
       const usageQuery = db.prepare(`SELECT SUM(day_run) AS total_run, COUNT(*) AS day_count,
         SUM(CASE WHEN day_run < 0 OR day_run > 24 THEN 1 ELSE 0 END) AS invalid_days
@@ -228,7 +229,7 @@ export default function registerWeeklyRoutes(app, ctx) {
           ROUND(SUM(CASE WHEN dh.work_date >= ? THEN COALESCE(dh.hours_run, 0) ELSE 0 END), 1) AS recent_hours
         FROM assets a
         INNER JOIN daily_hours dh ON dh.asset_id = a.id
-        WHERE COALESCE(a.active, 1) = 1
+        WHERE COALESCE(a.active, 1) = 1${andSite("a", req)}
           AND COALESCE(a.archived, 0) = 0
           AND COALESCE(a.is_standby, 0) = 0
           AND dh.work_date >= ?
@@ -273,7 +274,7 @@ export default function registerWeeklyRoutes(app, ctx) {
     }
   });
 
-  app.get("/weekly-inspections/assets", async (_req, reply) => {
+  app.get("/weekly-inspections/assets", async (req, reply) => {
     try {
       const rows = db.prepare(`
         SELECT
@@ -287,7 +288,7 @@ export default function registerWeeklyRoutes(app, ctx) {
           a.asset_name
         FROM weekly_inspection_assets wia
         JOIN assets a ON a.id = wia.asset_id
-        WHERE COALESCE(wia.active, 1) = 1
+        WHERE COALESCE(wia.active, 1) = 1${andSite("a", req)}
         ORDER BY COALESCE(wia.sort_order, 0), a.asset_code ASC
       `).all();
       return reply.send({ ok: true, assets: rows });
@@ -298,6 +299,7 @@ export default function registerWeeklyRoutes(app, ctx) {
   });
 
   app.post("/weekly-inspections/assets", async (req, reply) => {
+    // site: the machine, work order, plan or trip in the body is checked by the site guard (utils/siteGuard.js).
     try {
       const asset_id = Number(req.body?.asset_id || 0);
       const notes = String(req.body?.notes || "").trim();

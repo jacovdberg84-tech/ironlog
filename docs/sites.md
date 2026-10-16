@@ -31,7 +31,17 @@ own database, so companies never share records; sites split one company's work.
   inspection its machine's site.
 - **Guard test.** `api/test/siteScope.test.js` fails when a route reads or changes site
   records without choosing a site. Handlers that did so when it was added are listed
-  in `api/test/siteScopeBaseline.json`; that list may only shrink. A handler that needs
+  in `api/test/siteScopeBaseline.json`; that list was emptied in October 2026, so every
+  route now chooses a site, has the record guard, or says why it needs neither. A handler that needs
   no filter says why in a `// site:` comment (a person's own records, or a record
   number the record guard checks). `api/test/siteIsolation.test.js` signs in a person
   limited to one of two sites and checks lists, record numbers and changes.
+
+## Deliberately company-wide
+- **Stock** (parts, stores, bins, stock levels): stores are not split by site yet.
+- **Finance journals and integration exports**, **service templates**, and a
+  person's **own** shifts, week and task inbox.
+- **QR pre-start forms**: an operator scans one machine's code without signing in,
+  so the machine code picks the machine on any site.
+- **Uploads** only match machines on the chosen site; new machines from the machine
+  upload are created on that site.

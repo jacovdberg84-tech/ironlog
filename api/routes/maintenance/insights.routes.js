@@ -6,6 +6,7 @@ import { buildReliabilityExecutiveWorkbook } from "../../utils/reliabilityExecut
 import { db } from "../../db/client.js";
 import { isDate } from "../../utils/request.js";
 import { serviceCostSourceLabel } from "../../utils/serviceCostSource.js";
+import { andAssetSite, andSite } from "../../utils/sites.js";
 
 export default function registerInsightsRoutes(app, ctx) {
   const {
@@ -185,7 +186,7 @@ export default function registerInsightsRoutes(app, ctx) {
           a.asset_name
         FROM maintenance_plans mp
         JOIN assets a ON a.id = mp.asset_id
-        WHERE mp.active = 1
+        WHERE mp.active = 1${andSite("a", req)}
           AND a.active = 1
       `).all();
       const atRiskPlans = plans
@@ -214,7 +215,7 @@ export default function registerInsightsRoutes(app, ctx) {
       const managerInspections = db.prepare(`
         SELECT asset_id, checklist_json, ${hasChecklistDetailJson ? "checklist_detail_json" : "NULL AS checklist_detail_json"}
         FROM manager_inspections
-        WHERE inspection_date BETWEEN ? AND ?
+        WHERE inspection_date BETWEEN ? AND ?${andAssetSite("asset_id", req)}
       `).all(startDate, endDate);
       const failByAsset = new Map();
       const parseChecklistFailCount = (rawChecklist) => {
@@ -272,7 +273,7 @@ export default function registerInsightsRoutes(app, ctx) {
               COUNT(fl.id) AS fills
             FROM assets a
             JOIN fuel_logs fl ON fl.asset_id = a.id
-            WHERE fl.log_date BETWEEN ? AND ?
+            WHERE fl.log_date BETWEEN ? AND ?${andSite("a", req)}
               AND a.active = 1
             GROUP BY a.id
             HAVING fills >= 2 AND hours_run > 0 AND baseline_lph > 0
@@ -417,7 +418,7 @@ export default function registerInsightsRoutes(app, ctx) {
           ${woHasClosedAt ? "closed_at" : "NULL AS closed_at"},
           ${woHasSupervisorDecisionAt ? "supervisor_decision_at" : "NULL AS supervisor_decision_at"}
         FROM work_orders
-        WHERE source = 'service'
+        WHERE source = 'service'${andAssetSite("asset_id", req)}
           AND DATE(COALESCE(${woDateBasis}, '1970-01-01')) BETWEEN DATE(?) AND DATE(?)
       `).all(startDate, endDate);
       const hoursBetween = (a, b) => {
@@ -497,7 +498,7 @@ export default function registerInsightsRoutes(app, ctx) {
       const activeAssets = db.prepare(`
         SELECT id, asset_code, asset_name
         FROM assets
-        WHERE COALESCE(active, 1) = 1
+        WHERE COALESCE(active, 1) = 1${andSite(null, req)}
           AND COALESCE(archived, 0) = 0
       `).all();
 
@@ -540,7 +541,7 @@ export default function registerInsightsRoutes(app, ctx) {
             COALESCE(SUM(COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, ?)), 0) AS wo_labor_cost
           FROM work_orders w
           JOIN assets a ON a.id = w.asset_id
-          WHERE LOWER(COALESCE(w.source, '')) = 'service'
+          WHERE LOWER(COALESCE(w.source, '')) = 'service'${andSite("a", req)}
             AND DATE(COALESCE(w.completed_at, w.closed_at, w.opened_at, w.updated_at)) BETWEEN DATE(?) AND DATE(?)
             AND (
               w.status IN ('completed', 'approved', 'closed')
@@ -792,7 +793,7 @@ export default function registerInsightsRoutes(app, ctx) {
       const activeAssets = db.prepare(`
         SELECT id, asset_code, asset_name
         FROM assets
-        WHERE COALESCE(active, 1) = 1
+        WHERE COALESCE(active, 1) = 1${andSite(null, req)}
       `).all();
 
       const missingMeterReadings = activeAssets
@@ -821,9 +822,10 @@ export default function registerInsightsRoutes(app, ctx) {
               w.closed_at
             FROM work_orders w
             LEFT JOIN assets a ON a.id = w.asset_id
-            WHERE
+            WHERE (
               (LOWER(COALESCE(w.status, '')) IN ('completed','approved','closed') AND w.completed_at IS NULL)
               OR (LOWER(COALESCE(w.status, '')) = 'closed' AND w.closed_at IS NULL)
+            )${andSite("a", req)}
             ORDER BY w.id DESC
             LIMIT 100
           `).all()
@@ -841,7 +843,7 @@ export default function registerInsightsRoutes(app, ctx) {
               mp.interval_hours
             FROM maintenance_plans mp
             JOIN assets a ON a.id = mp.asset_id
-            WHERE COALESCE(mp.active, 1) = 1
+            WHERE COALESCE(mp.active, 1) = 1${andSite("a", req)}
           `).all()
             .map((p) => {
               const current = Number(getAssetCurrentHoursInfo(Number(p.asset_id || 0)).hours || 0);
@@ -865,7 +867,7 @@ export default function registerInsightsRoutes(app, ctx) {
               COUNT(*) AS duplicate_count
             FROM fuel_logs fl
             LEFT JOIN assets a ON a.id = fl.asset_id
-            WHERE fl.log_date BETWEEN ? AND ?
+            WHERE fl.log_date BETWEEN ? AND ?${andSite("a", req)}
             GROUP BY fl.asset_id, fl.log_date, ROUND(COALESCE(fl.liters, 0), 2)
             HAVING COUNT(*) >= 2
             ORDER BY duplicate_count DESC, fl.log_date DESC
@@ -889,7 +891,7 @@ export default function registerInsightsRoutes(app, ctx) {
               ) AS avg_liters
             FROM fuel_logs fl
             LEFT JOIN assets a ON a.id = fl.asset_id
-            WHERE fl.log_date BETWEEN ? AND ?
+            WHERE fl.log_date BETWEEN ? AND ?${andSite("a", req)}
             ORDER BY fl.log_date DESC
           `).all(startDate, endDate, startDate, endDate)
             .map((r) => {

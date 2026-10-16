@@ -162,6 +162,7 @@ export default function registerTerminalRoutes(app, ctx) {
   // POST /api/stock/terminal/issue { work_order_id | asset_code, lines: [{ part_code, quantity, request_id? }] }
   // All lines are issued together or none.
   app.post("/terminal/issue", async (req, reply) => {
+    // site: the machine, work order, plan or trip in the body is checked by the site guard (utils/siteGuard.js).
     if (!requireRoles(req, reply, TERMINAL_ROLES)) return;
     const body = req.body || {};
     const me = userOf(req) || null;

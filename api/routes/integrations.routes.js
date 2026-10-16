@@ -163,6 +163,7 @@ export default async function integrationsRoutes(app) {
   /* --------- ENQUEUE + RUN JOBS --------- */
 
   app.post("/jobs/enqueue", async (req, reply) => {
+    // site: company-wide finance export jobs (finance and admin roles).
     if (!requireRoles(req, reply, ["admin", "supervisor", "executive", "finance", "procurement"])) return;
     const connection_code = normalizeCode(req.body?.connection_code);
     const connector_key = String(req.body?.connector_key || "").trim();

@@ -14,6 +14,7 @@ import { writeAudit } from "../../utils/audit.js";
 import { autoCategorizePart } from "../../utils/stockCategory.js";
 import { stockInfo } from "../../utils/techPortal.js";
 import { partByBarcode } from "../../utils/partBarcodes.js";
+import { andSite } from "../../utils/sites.js";
 
 const DUPLICATE_DAYS = 7;
 
@@ -92,7 +93,7 @@ export default function registerDeliveryRoutes(app, ctx) {
     const days = Math.min(365, Math.max(1, Number(req.query?.days || 30)));
     const rows = db.prepare(`
       SELECT * FROM stock_deliveries
-      WHERE datetime(created_at) >= datetime('now', ?)
+      WHERE datetime(created_at) >= datetime('now', ?)${andSite(null, req)}
       ORDER BY id DESC LIMIT 100
     `).all(`-${days} days`);
     const lines = db.prepare(`

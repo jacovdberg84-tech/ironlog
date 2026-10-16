@@ -16,6 +16,7 @@ export default function registerJournalsRoutes(app, ctx) {
   } = ctx;
 
   app.post("/journals/build", async (req, reply) => {
+    // site: company-wide finance journal (finance roles).
     if (!requireRoles(req, reply, ["admin", "supervisor", "procurement", "stores"])) return;
     const start = String(req.body?.start || "").trim();
     const end = String(req.body?.end || "").trim();

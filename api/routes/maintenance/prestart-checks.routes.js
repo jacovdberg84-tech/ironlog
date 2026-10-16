@@ -14,6 +14,7 @@ import { aiChatText, isAiConfigured } from "../../utils/ironmind.js";
 import { translateText } from "../../utils/translate.js";
 import { listDailyPrestarts, prestartDeductionForProductionFleet } from "../../utils/prestartDaily.js";
 import { normalizeUploadedPhoto } from "../../utils/imagePdf.js";
+import { andSite } from "../../utils/sites.js";
 
 export default function registerPrestartChecksRoutes(app, ctx) {
   // Portuguese fault comments get an English copy on the work order, after the
@@ -62,7 +63,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
       const checkModeFilter = String(req.query?.check_mode || "").trim().toLowerCase();
       const assetCodeFilter = String(req.query?.asset_code || "").trim().toUpperCase();
       const params = [];
-      const where = [];
+      const where = [`1${andSite("a", req)}`];
       if (checkIdFilter > 0) {
         where.push("v.id = ?");
         params.push(checkIdFilter);
@@ -165,7 +166,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
       const assets = db.prepare(`
         SELECT id, asset_code, asset_name, category
         FROM assets
-        WHERE archived = 0
+        WHERE archived = 0${andSite(null, req)}
         ORDER BY asset_code ASC
       `).all();
 
@@ -240,7 +241,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
                a.asset_code, a.asset_name
         FROM vehicle_ldv_checks v
         JOIN assets a ON a.id = v.asset_id
-        WHERE v.check_date = ?
+        WHERE v.check_date = ?${andSite("a", req)}
           AND TRIM(COALESCE(v.notes, '')) != ''
         ORDER BY datetime(COALESCE(v.updated_at, v.check_date)) DESC, v.id DESC
       `).all(check_date);
@@ -273,6 +274,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
   });
 
   app.get("/vehicle-ldv-checks/prestart-context", async (req, reply) => {
+    // site: public QR form: an operator scans one machine's code without signing in, so the machine code picks the machine on any site.
     try {
       const asset_code = String(req.query?.asset_code || "").trim().toUpperCase();
       const check_date = String(req.query?.check_date || "").trim() || new Date().toISOString().slice(0, 10);
@@ -672,6 +674,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
   });
 
   app.get("/machine-prestart/context", async (req, reply) => {
+    // site: public QR form: an operator scans one machine's code without signing in, so the machine code picks the machine on any site.
     try {
       const asset_code = String(req.query?.asset_code || "").trim().toUpperCase();
       const check_date = String(req.query?.check_date || "").trim() || new Date().toISOString().slice(0, 10);
@@ -1169,7 +1172,7 @@ export default function registerPrestartChecksRoutes(app, ctx) {
       const pendingInvestigationRaw = String(req.query?.pending_investigation || "").trim();
       const hseReportAvailableRaw = String(req.query?.hse_report_available || "").trim();
       const params = [];
-      const where = [];
+      const where = [`1${andSite("a", req)}`];
       if (assetId > 0) {
         where.push("dr.asset_id = ?");
         params.push(assetId);
