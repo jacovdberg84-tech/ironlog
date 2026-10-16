@@ -21,7 +21,7 @@ import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import Database from "better-sqlite3";
 import { decryptJuneConnectorSecret, encryptJuneConnectorSecret } from "./juneOutlook.js";
-import { diskHealth, ironlogUsage } from "./diskHealth.js";
+import { ironlogUsage, serverDisks } from "./diskHealth.js";
 import { getDataRoot } from "./storagePaths.js";
 
 export const FILE_FOLDERS = ["uploads", "workshop-files", "branding"];
@@ -396,8 +396,9 @@ export function backupStatus(db, { now = new Date(), dbPath = "", backupDir = ""
   else if (hoursSince(lastOffsite?.finished_at, now) > 26) warnings.push("Nothing has been copied off-site in the last 26 hours.");
   if (settings.offsite_configured && (!lastRestore || hoursSince(lastRestore.finished_at, now) > 32 * 24)) warnings.push("No restore test in the last month.");
   else if (lastRestore?.status === "failed") warnings.push(`The last restore test failed: ${lastRestore.error}`);
-  const disk = diskHealth(path.dirname(dbPath || "."));
-  if (disk?.message) warnings.push(disk.message);
+  const disks = serverDisks({ dbPath, backupDir });
+  const disk = disks[0] || null;
+  for (const d of disks) if (d.message) warnings.push(d.message);
   let dbBytes = null;
   try { dbBytes = fs.statSync(dbPath).size; } catch {}
   const parse = (r) => (r ? { ...r, check_result: r.check_result ? JSON.parse(r.check_result) : null } : null);
@@ -415,6 +416,7 @@ export function backupStatus(db, { now = new Date(), dbPath = "", backupDir = ""
       node: process.version,
       db_bytes: dbBytes,
       disk,
+      disks,
       usage: ironlogUsage({ dbPath, backupDir, dataDir: getDataRoot() }),
       backup_dir: backupDir,
       files_waiting: settings.include_files ? filesToSync(db).length : 0,

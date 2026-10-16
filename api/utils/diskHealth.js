@@ -12,29 +12,51 @@ export const DISK_LIMITS = { warn_pct: 10, warn_gb: 5, critical_pct: 5, critical
 
 const gb = (bytes) => Number((bytes / 1e9).toFixed(1));
 
-/** Disk level from statfs numbers: { free_gb, total_gb, used_pct, level, message }. */
-export function diskLevel({ bavail, blocks, bsize }) {
+/** Disk level from statfs numbers: { name, free_gb, total_gb, used_pct, level, message }. */
+export function diskLevel({ bavail, blocks, bsize }, name = "Server disk") {
   const free = bavail * bsize;
   const total = blocks * bsize;
   const freePct = total > 0 ? (free / total) * 100 : 0;
-  const out = { free_gb: gb(free), total_gb: gb(total), used_pct: total > 0 ? Math.round(100 - freePct) : null, level: "ok", message: "" };
+  const out = { name, free_gb: gb(free), total_gb: gb(total), used_pct: total > 0 ? Math.round(100 - freePct) : null, level: "ok", message: "" };
+  const backups = name !== "Server disk";
   if (free < DISK_LIMITS.critical_gb * 1e9 || freePct < DISK_LIMITS.critical_pct) {
     out.level = "critical";
-    out.message = `Server disk almost full: only ${out.free_gb} GB free (${out.used_pct}% used). IronLog may stop saving work. Free up space now (Admin → Off-site backups shows what is using it).`;
+    out.message = backups
+      ? `${name} almost full: only ${out.free_gb} GB free (${out.used_pct}% used). New database copies will stop until space is freed; IronLog keeps working.`
+      : `${name} almost full: only ${out.free_gb} GB free (${out.used_pct}% used). IronLog may stop saving work. Free up space now (Admin → Off-site backups shows what is using it).`;
   } else if (free < DISK_LIMITS.warn_gb * 1e9 || freePct < DISK_LIMITS.warn_pct) {
     out.level = "warn";
-    out.message = `Server disk is getting full: ${out.free_gb} GB free (${out.used_pct}% used). Plan a clean-up soon.`;
+    out.message = `${name} is getting full: ${out.free_gb} GB free (${out.used_pct}% used). Plan a clean-up soon.`;
   }
   return out;
 }
 
 /** Disk holding `dir`, or null when it cannot be read. */
-export function diskHealth(dir = ".", statfs = fs.statfsSync) {
+export function diskHealth(dir = ".", statfs = fs.statfsSync, name = "Server disk") {
   try {
-    return diskLevel(statfs(path.resolve(dir)));
+    return diskLevel(statfs(path.resolve(dir)), name);
   } catch {
     return null;
   }
+}
+
+/** The server disk, plus the backup volume when database copies are kept on a separate disk. */
+export function serverDisks({ dbPath = "", backupDir = "" } = {}, { statfs = fs.statfsSync, stat = fs.statSync } = {}) {
+  const dbDir = path.dirname(dbPath || ".");
+  const disks = [diskHealth(dbDir, statfs)].filter(Boolean);
+  try {
+    if (backupDir && stat(backupDir).dev !== stat(dbDir).dev) {
+      const vol = diskHealth(backupDir, statfs, "Backup volume");
+      if (vol) disks.push(vol);
+    }
+  } catch {}
+  return disks;
+}
+
+const RANK = { ok: 0, warn: 1, critical: 2 };
+/** The disk most in need of attention (the server disk when all are fine). */
+export function worstDisk(disks = []) {
+  return disks.reduce((worst, d) => (!worst || RANK[d.level] > RANK[worst.level] ? d : worst), null);
 }
 
 /** Total size and file count under a folder; stops counting after `maxFiles` (then `partial` is true). */

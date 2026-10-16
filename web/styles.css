@@ -9190,8 +9190,9 @@ body.wo-popup .wo-drawer-head { display: none; }
 .disk-gauge-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; color: var(--ink); }
 .disk-gauge-bar { height: 10px; margin: 8px 0 4px; border-radius: 999px; background: var(--bg-f3f4f6); border: 1px solid var(--line); overflow: hidden; }
 .disk-gauge-bar span { display: block; height: 100%; border-radius: 999px; background: var(--tx-166534); }
-.disk-gauge.is-warn .disk-gauge-bar span { background: var(--tx-92400e); }
-.disk-gauge.is-critical .disk-gauge-bar span { background: var(--tx-991b1b); }
+.disk-gauge-one + .disk-gauge-one { margin-top: 10px; }
+.disk-gauge-one.is-warn .disk-gauge-bar span { background: var(--tx-92400e); }
+.disk-gauge-one.is-critical .disk-gauge-bar span { background: var(--tx-991b1b); }
 .disk-gauge-note { margin: 0; font-size: 12px; }
 .disk-usage-h { margin: 10px 0 4px; font-size: 12px; font-weight: 700; color: var(--muted); }
 .disk-usage { list-style: none; margin: 0; padding: 0; }
