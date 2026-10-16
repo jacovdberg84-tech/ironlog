@@ -114,6 +114,115 @@ function downloadCostMonthlyXlsx() {
   downloadAuthedFile(`${API}/api/reports/cost-monthly.xlsx?month=${encodeURIComponent(month)}`, `fleet-cost-${month}.xlsx`);
 }
 
+function downloadBudgetSpendXlsx() {
+  const month = (qs("costMonth")?.value || "").trim();
+  if (!month) {
+    alert("Select a cost month first.");
+    return;
+  }
+  downloadAuthedFile(
+    `${API}/api/reports/budget-vs-spend.xlsx?month=${encodeURIComponent(month)}`,
+    `IRONLOG_Departmental_Costing_${month}.xlsx`,
+  );
+}
+
+function departmentalCostingMonth() {
+  return String(qs("costMonth")?.value || "").trim();
+}
+
+function renderDepartmentalCostingInputs(rows = []) {
+  const host = qs("departmentalCostInputList");
+  if (!host) return;
+  if (!rows.length) {
+    host.innerHTML = `<span class="muted">No manual departmental entries for this month. The export will use live plant hire, labour, lube and stores records only.</span>`;
+    return;
+  }
+  host.innerHTML = `
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead><tr><th>Type</th><th>Asset</th><th>Description</th><th>Reference</th><th>Amount</th><th></th></tr></thead>
+        <tbody>
+          ${rows.map((row) => `
+            <tr>
+              <td>${escapeHtml(row.input_type?.label || row.entry_type || "Entry")}</td>
+              <td>${escapeHtml(row.asset_code || "—")}</td>
+              <td>${escapeHtml(row.description || "—")}</td>
+              <td>${escapeHtml(row.reference || "—")}</td>
+              <td>$${Number(row.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+              <td><button class="btn btn-small btn-ghost" type="button" data-remove-departmental-cost="${Number(row.id)}">Remove</button></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+async function loadDepartmentalCostingInputs({ silent = false } = {}) {
+  const month = departmentalCostingMonth();
+  const status = qs("departmentalCostInputStatus");
+  if (!month) {
+    if (status) status.textContent = "Select a Cost Month to view departmental entries.";
+    return;
+  }
+  if (!silent && status) status.textContent = "Loading departmental entries…";
+  try {
+    const data = await fetchJson(`${API}/api/reports/departmental-costing-inputs?month=${encodeURIComponent(month)}`);
+    renderDepartmentalCostingInputs(data.rows || []);
+    if (status) status.textContent = `${Number(data.rows?.length || 0)} manual departmental entr${Number(data.rows?.length || 0) === 1 ? "y" : "ies"} for ${month}.`;
+  } catch (error) {
+    if (status) status.textContent = `Could not load departmental entries: ${error.message || error}`;
+  }
+}
+
+async function saveDepartmentalCostingInput() {
+  const month = departmentalCostingMonth();
+  const entry_type = String(qs("departmentalCostType")?.value || "").trim();
+  const amount = Number(qs("departmentalCostAmount")?.value);
+  const description = String(qs("departmentalCostDescription")?.value || "").trim();
+  const status = qs("departmentalCostInputStatus");
+  if (!month) return alert("Select a Cost Month first.");
+  if (!entry_type) return alert("Select the departmental entry type.");
+  if (!Number.isFinite(amount) || amount === 0) return alert("Enter a non-zero USD amount.");
+  if (!description) return alert("Add a brief description so the management report stays auditable.");
+  if (status) status.textContent = "Saving departmental entry…";
+  try {
+    await fetchJson(`${API}/api/reports/departmental-costing-inputs`, {
+      method: "POST",
+      body: JSON.stringify({
+        month,
+        entry_type,
+        asset_code: String(qs("departmentalCostAsset")?.value || "").trim() || null,
+        amount,
+        reference: String(qs("departmentalCostReference")?.value || "").trim() || null,
+        description,
+      }),
+    });
+    ["departmentalCostAsset", "departmentalCostAmount", "departmentalCostReference", "departmentalCostDescription"].forEach((id) => {
+      if (qs(id)) qs(id).value = "";
+    });
+    await loadDepartmentalCostingInputs({ silent: true });
+    if (status) status.textContent = "Departmental entry saved. It will appear in the next export.";
+    setStatus("Departmental costing entry saved.");
+  } catch (error) {
+    if (status) status.textContent = `Could not save departmental entry: ${error.message || error}`;
+  }
+}
+
+async function removeDepartmentalCostingInput(id) {
+  if (!Number.isInteger(Number(id)) || Number(id) <= 0) return;
+  if (!confirm("Remove this manual departmental entry? It will no longer be included in the monthly costing report.")) return;
+  const status = qs("departmentalCostInputStatus");
+  if (status) status.textContent = "Removing departmental entry…";
+  try {
+    await fetchJson(`${API}/api/reports/departmental-costing-inputs/${Number(id)}`, { method: "DELETE" });
+    await loadDepartmentalCostingInputs({ silent: true });
+    if (status) status.textContent = "Departmental entry removed.";
+    setStatus("Departmental costing entry removed.");
+  } catch (error) {
+    if (status) status.textContent = `Could not remove departmental entry: ${error.message || error}`;
+  }
+}
+
 function monthlyFleetCostPdfUrl(download = false) {
   const month = (qs("costMonth")?.value || "").trim();
   if (!month) return null;
@@ -620,6 +729,20 @@ function wireReportControls() {
   qs("openDailyXlsx")?.addEventListener("click", openDailyXlsx);
   qs("openGmWeeklyXlsx")?.addEventListener("click", openGmWeeklyXlsx);
   qs("downloadCostMonthlyXlsx")?.addEventListener("click", downloadCostMonthlyXlsx);
+  qs("downloadBudgetSpendXlsx")?.addEventListener("click", downloadBudgetSpendXlsx);
+  qs("saveDepartmentalCostInput")?.addEventListener("click", () => {
+    saveDepartmentalCostingInput().catch((error) => setStatus(`Departmental costing entry error: ${error.message || error}`));
+  });
+  qs("departmentalCostInputList")?.addEventListener("click", (event) => {
+    const button = event.target?.closest?.("[data-remove-departmental-cost]");
+    if (!button) return;
+    removeDepartmentalCostingInput(Number(button.dataset.removeDepartmentalCost))
+      .catch((error) => setStatus(`Departmental costing entry error: ${error.message || error}`));
+  });
+  qs("costMonth")?.addEventListener("change", () => {
+    loadDepartmentalCostingInputs().catch((error) => setStatus(`Departmental costing entry error: ${error.message || error}`));
+  });
+  queueMicrotask(() => loadDepartmentalCostingInputs({ silent: true }).catch(() => {}));
   qs("openMonthlyFleetCostPdf")?.addEventListener("click", openMonthlyFleetCostPdf);
   qs("downloadMonthlyFleetCostPdf")?.addEventListener("click", downloadMonthlyFleetCostPdf);
   qs("downloadMtdOpeningHoursXlsx")?.addEventListener("click", downloadMtdOpeningHoursXlsx);
