@@ -44,7 +44,7 @@ A helper only one feature file uses can simply live in that file.
 - `inspections.routes.js`: Manager, tyre, undercarriage and artisan inspections
 - `mechanic-labor.routes.js`: Mechanic labour entries, settings and timesheets
 - `parts-requests.routes.js`: Workshop parts requests and RFQ PDF
-- `care-maintenance.routes.js`: Care & maintenance plans (per-machine work, parts, hours; estimate against what work orders used)
+- `care-maintenance.routes.js`: Care & maintenance plans (per-machine work, parts, hours; estimate against what work orders used; Excel and PDF printouts)
 - `plans.routes.js`: Maintenance plans, services due, service history and backfill
 - `prestart-checks.routes.js`: LDV and machine pre-start checks, checklist hub and damage reports
 - `service-templates.routes.js`: Service templates, service planner and service estimates

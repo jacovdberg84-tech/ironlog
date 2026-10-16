@@ -3,6 +3,7 @@ import fs from "node:fs";
 import PDFDocument from "pdfkit";
 import { db } from "../db/client.js";
 import { getPdfReportBranding, resolvePdfCompanyLogoAbs } from "./reportSettings.js";
+import { getCompanyProfile } from "./companyProfile.js";
 
 const DEFAULT_MARGINS = { top: 72, bottom: 52, left: 70, right: 70 };
 const BRAND = {
@@ -44,13 +45,18 @@ export function pdfBodyBottom(doc) {
   return footerY - 24;
 }
 
-function nowStamp() {
-  // stable, readable timestamp in report footer
-  const d = new Date();
+/** "YYYY-MM-DD HH:mm" in the site's time zone (Admin > Company profile), for report footers. */
+export function nowStamp(timezone = "", now = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(
-    d.getMinutes()
-  )}`;
+  if (timezone) {
+    try {
+      const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+        timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+      }).formatToParts(now).map((x) => [x.type, x.value]));
+      return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
+    } catch {}
+  }
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
 /**
@@ -247,15 +253,16 @@ export function drawHeaderFooter(doc, opts = {}) {
 
   doc.fillOpacity(1).fillColor(BRAND.muted).font("Helvetica").fontSize(8);
 
-  doc.text(`Generated: ${nowStamp()}`, left, footerY, {
+  doc.text(`Generated: ${nowStamp(opts.timezone)}${opts.timezone ? ` (${opts.timezone})` : ""}`, left, footerY, {
     width: (right - left) * 0.6,
     align: "left",
     lineBreak: false,
   });
 
   if (showPageNumbers) {
-    const pageNo = doc.page?.number || 1; // pdfkit page number exists on recent versions
-    doc.text(`Page ${pageNo}`, left, footerY, { width: right - left, align: "right", lineBreak: false });
+    const pageNo = Number(opts.pageIndex || 0) + 1;
+    const label = opts.pageCount ? `Page ${pageNo} of ${opts.pageCount}` : `Page ${pageNo}`;
+    doc.text(label, left, footerY, { width: right - left, align: "right", lineBreak: false });
   }
 
   doc.restore();
@@ -297,6 +304,13 @@ export function buildPdfBuffer(buildFn, opts = {}) {
       branding = { company_name: "", site_name: "" };
     }
 
+    let timezone = String(opts.timezone || "").trim();
+    if (!timezone) {
+      try {
+        timezone = getCompanyProfile(opts.db || db).timezone || "";
+      } catch {}
+    }
+
     const companyName = String(opts.companyName || branding.company_name || "").trim();
     const siteName = String(opts.siteName || branding.site_name || "").trim();
 
@@ -327,6 +341,7 @@ export function buildPdfBuffer(buildFn, opts = {}) {
       managementTitle: opts.managementTitle,
       pageLabel: opts.pageLabel,
       sourceText: opts.sourceText,
+      timezone,
     };
 
     buildFn(doc);
