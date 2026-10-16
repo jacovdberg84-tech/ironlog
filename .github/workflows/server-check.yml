@@ -22,6 +22,9 @@ jobs:
           script: |
             echo "== system"; uname -sr; uptime; nproc; free -h | head -2
             echo "== disk"; df -h / /data 2>/dev/null
+            echo "-- all disks and volumes"; df -hT -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null
+            lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT 2>/dev/null
+            echo "-- volume mounts in fstab"; grep -E 'HC_Volume|/mnt/' /etc/fstab 2>/dev/null || echo "none"
             echo "== node and pm2"; node -v; pm2 -v; pm2 ls --no-color 2>/dev/null || true
             echo "== listening ports"; (ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null) | awk 'NR==1 || /LISTEN/' | head -30
             echo "== web server"
