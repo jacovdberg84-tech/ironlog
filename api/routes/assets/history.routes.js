@@ -8,7 +8,7 @@ export default function registerHistoryRoutes(app, ctx) {
   const { getAssetByCode, getAssetById } = ctx;
 
   // ------------------------------------------------------------
-  // Hour meter snapshot (e.g. InspectPro Manager)
+  // Hour meter snapshot for one machine
   // GET /api/assets/:asset_id_or_asset_code/hours
   // Resolves numeric segment as asset id first, then asset_code.
   // ------------------------------------------------------------

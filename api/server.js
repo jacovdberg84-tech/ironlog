@@ -38,7 +38,6 @@ import qualityRoutes from "./routes/quality.routes.js";
 import syncRoutes from "./routes/sync.routes.js";
 import docsRoutes from "./routes/docs.routes.js";
 import ironmindRoutes from "./routes/ironmind.routes.js";
-import inspectproRoutes from "./routes/inspectpro.routes.js";
 import breakdownOpsRoutes from "./routes/breakdownOps.routes.js";
 import tasksRoutes from "./routes/tasks.routes.js";
 import myWorkRoutes from "./routes/myWork.routes.js";
@@ -62,7 +61,7 @@ export function buildServer() {
     // In packaged Electron (Windows GUI), stdout/stderr can be unavailable.
     // Disable Fastify/Pino console logger there to avoid EBADF write crashes.
     logger: isDesktopRuntime ? false : true,
-    // Ops slip reports + InspectPro Manager may send many base64 photos in one JSON body.
+    // Ops slip reports may send many base64 photos in one JSON body.
     bodyLimit: 40 * 1024 * 1024,
   });
 
@@ -126,9 +125,6 @@ app.register(oemRoutes, { prefix: '/api/oem' });
 app.register(workshopRoutes, { prefix: '/api/workshop' });
 app.register(docsRoutes, { prefix: "/api/docs" });
 app.register(ironmindRoutes, { prefix: "/api/ironmind" });
-app.register(inspectproRoutes, { prefix: "/api/integrations/inspectpro" });
-  // Same InspectPro ingest + pull routes under /api/manager/* for clients using that base path.
-  app.register(inspectproRoutes, { prefix: "/api/manager" });
   app.register(tasksRoutes, { prefix: "/api" });
   app.register(myWorkRoutes, { prefix: "/api/my-work" });
   app.register(translateRoutes, { prefix: "/api/translate" });

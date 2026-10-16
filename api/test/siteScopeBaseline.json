@@ -2,8 +2,6 @@
   "GET assetHistory.routes.js /:asset_code/history",
   "GET executive.routes.js /evidence-packs/:id",
   "GET finance.routes.js /kpis/definitions/:code",
-  "GET inspectpro.routes.js /pull/assets",
-  "GET inspectpro.routes.js /pull/recent",
   "GET ironmind.routes.js /rsg/preview.pdf",
   "GET maintenance/insights.routes.js /governance/signals",
   "GET maintenance/insights.routes.js /insights",

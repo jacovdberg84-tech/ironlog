@@ -89,7 +89,7 @@ export default async function qualityRoutes(app) {
     }));
 
     const approvalsPending = db.prepare(`
-      SELECT id, module, action, requester, created_at
+      SELECT id, module, action, requested_by AS requester, created_at
       FROM approval_requests
       WHERE status = 'pending'
       ORDER BY id DESC

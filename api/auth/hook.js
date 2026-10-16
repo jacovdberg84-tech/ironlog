@@ -132,25 +132,9 @@ function parseRoles(raw, fallbackRole = "operator") {
   return out.length ? out : ["operator"];
 }
 
-function inspectproApiKeyMatches(req) {
-  const required = String(process.env.INSPECTPRO_INGEST_KEY || "").trim();
-  if (!required) return false;
-  const provided = String(req.headers["x-inspectpro-key"] || "").trim();
-  return provided === required;
-}
-
 export async function ironlogAuthHook(req, reply) {
   const url = req.url.split("?")[0];
   if (!url.startsWith("/api/")) return;
-
-  // InspectPro Manager: API key on X-InspectPro-Key (same as ingest routes).
-  // Allows POST/GET under these prefixes when IRONLOG_AUTH_REQUIRED is enabled.
-  if (
-    inspectproApiKeyMatches(req) &&
-    (url.startsWith("/api/integrations/inspectpro/") || url.startsWith("/api/manager/"))
-  ) {
-    return;
-  }
 
   if (isPublicAuthRequest(url, req.method)) return;
   if (url === "/api/notifications/config" && req.method === "GET") return;

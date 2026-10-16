@@ -55,7 +55,7 @@ The main IronLog screen (`web/index.html`) used to load one 22,000-line `web/app
 | `report-builder.js` | Custom report builder and report subscriptions | 471 |
 | `views.js` | Maintenance hub modes and top-level views | 201 |
 | `histogram.js` | Maintenance histogram events | 189 |
-| `sync.js` | InspectPro sync administration | 222 |
+| `sync.js` | Offline sync administration | 222 |
 | `tyres.js` | Tyre inspections | 447 |
 | `weekly-inspections.js` | Weekly inspection calendar and roster | 680 |
 | `inspections.js` | Manager, damage and artisan inspections | 913 |
