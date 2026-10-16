@@ -6528,9 +6528,9 @@
               </div>
               <div class="form-field">
                 <label>Allowed Locations</label>
-                <input id="adminAllowedLocations" class="w-full" list="adminAllowedLocationsList" placeholder="e.g. main,workshop" />
+                <input id="adminAllowedLocations" class="w-full" list="adminAllowedLocationsList" placeholder="Empty = all sites" />
                 <datalist id="adminAllowedLocationsList"></datalist>
-                <p class="muted small" style="margin-top:6px">Comma-separated site codes. Executive access is restricted to these sites.</p>
+                <p class="muted small" id="adminSitesHint" style="margin-top:6px">Sites this person may use, comma separated. Leave empty for all sites. Screens are chosen under Sections, not here.</p>
               </div>
             </div>
             <div class="form-row">
@@ -8292,7 +8292,7 @@
   <script src="./store-mobile.js?v=2"></script>
   <!-- Main app, split by feature. Order matters: files share one global scope. -->
   <script src="./app/core.js?v=98"></script>
-  <script src="./app/admin.js?v=98"></script>
+  <script src="./app/admin.js?v=99"></script>
   <script src="./app/licence-issuer.js?v=1"></script>
   <script src="./app/inspections.js?v=90"></script>
   <script src="./app/ui-helpers.js?v=89"></script>
