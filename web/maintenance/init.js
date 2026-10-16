@@ -50,7 +50,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const generateBtn = document.getElementById("generateBtn");
   const savePlanBtn = document.getElementById("savePlanBtn");
   const saveBackfillBtn = document.getElementById("saveBackfillBtn");
-  const inspectproRefreshStatusBtn = document.getElementById("inspectproRefreshStatusBtn");
   const backfillBody = document.getElementById("backfillBody");
   const plansList = document.getElementById("plansList");
   const useLiveEl = document.getElementById("planUseLiveForLastService");
@@ -84,11 +83,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (saveBackfillBtn) {
     saveBackfillBtn.addEventListener("click", saveBackfillHistory);
-  }
-  if (inspectproRefreshStatusBtn) {
-    inspectproRefreshStatusBtn.addEventListener("click", () => {
-      loadInspectproStatus().catch(() => {});
-    });
   }
   document.getElementById("refreshBackfillListBtn")?.addEventListener("click", () => {
     loadBackfillHistory().catch((err) => alert(err.message || err));
@@ -161,12 +155,6 @@ document.addEventListener("DOMContentLoaded", () => {
   loadDue();
   loadHistory();
   loadBackfillHistory();
-  if (!document.getElementById("inspectproStatusCard")?.classList.contains("hidden")) {
-    loadInspectproStatus();
-    setInterval(() => {
-      loadInspectproStatus().catch(() => {});
-    }, 20000);
-  }
   const miDate = document.getElementById("miDate");
   const aiDate = document.getElementById("aiDate");
   const aiFormNo = document.getElementById("aiFormNumber");

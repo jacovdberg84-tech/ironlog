@@ -1338,7 +1338,7 @@ export default async function ironmindRoutes(app) {
       title: "Breakdowns",
       hints: [
         "Log and manage breakdown incidents, downtime, and related workflows.",
-        "Photos and ops slips may link to InspectPro depending on configuration.",
+        "Photos are attached to ops slips, inspections and work orders.",
       ],
     },
   };

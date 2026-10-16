@@ -47,7 +47,6 @@ function applyMaintenanceHubMode(mode) {
   showCard("serviceScheduleCard", cfg.serviceSchedule);
   showCard("dueServicesCard", cfg.due);
   showCard("maintenanceInsightsCard", cfg.insights);
-  showCard("inspectproStatusCard", false);
   showCard("rsgProfilesCard", false);
 }
 

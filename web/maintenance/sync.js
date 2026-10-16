@@ -1,4 +1,4 @@
-// IRONLOG/web/maintenance/sync.js — InspectPro sync administration.
+// IRONLOG/web/maintenance/sync.js — offline sync administration (sync outbox, pull, apply).
 // Part of maintenance.html; the page loads these files in order and they share one global scope.
 
 function syncSetMsg(text, isError = false) {
