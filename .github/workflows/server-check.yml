@@ -49,4 +49,16 @@ jobs:
             echo "-- pm2 logs"; du -sh ~/.pm2/logs 2>/dev/null
             echo "-- ollama models"; du -sh /usr/share/ollama/.ollama/models ~/.ollama/models 2>/dev/null
             echo "-- journal"; journalctl --disk-usage 2>/dev/null || true
+            echo "== site codes in use (read-only counts, AML then each instance)"
+            for db in /data/ironlog/api/db/ironlog.db /data/ironlog-instances/*/db/ironlog.db; do
+              [ -f "$db" ] || continue
+              echo "-- $db"
+              (cd /data/ironlog/api && node -e '
+                const D = require("better-sqlite3"); const d = new D(process.argv[1], { readonly: true, fileMustExist: true });
+                const tabs = ["assets","work_orders","breakdowns","daily_hours","fuel_logs","oil_logs","stock_deliveries","procurement_purchase_orders","tech_shifts","manager_inspections","vehicle_ldv_checks"];
+                for (const t of tabs) { try { const rows = d.prepare(`SELECT COALESCE(NULLIF(TRIM(site_code), ?), ?) AS s, COUNT(*) AS n FROM ${t} GROUP BY 1 ORDER BY 2 DESC`).all("", "(blank)"); console.log(t.padEnd(30), rows.map((r) => r.s + "=" + r.n).join("  ")); } catch (e) { console.log(t.padEnd(30), "- " + e.message); } }
+                try { const u = d.prepare(`SELECT COUNT(*) AS n, SUM(CASE WHEN allowed_locations IS NOT NULL AND allowed_locations NOT IN (?, ?, ?) THEN 1 ELSE 0 END) AS limited FROM users WHERE COALESCE(active,1) = 1`).get("", "[]", "null"); console.log("users".padEnd(30), "active=" + u.n, " limited to some sites=" + u.limited); } catch {}
+                try { console.log("site_profiles".padEnd(30), d.prepare(`SELECT GROUP_CONCAT(site_code, ?) AS s FROM site_profiles`).get(", ").s || "(none)"); } catch {}
+              ' "$db") || echo "could not read"
+            done
             echo "== whoami"; whoami; id -nG
