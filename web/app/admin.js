@@ -115,7 +115,7 @@ async function loadAdminUsers() {
       const tr = document.createElement("tr");
       const rolesText = Array.isArray(r.roles) && r.roles.length ? r.roles.join(", ") : String(r.role || "operator");
       const locText = Array.isArray(r.allowed_locations) && r.allowed_locations.length ? r.allowed_locations.join(", ") : "all";
-      tr.innerHTML = `<td>${escapeHtml(r.username)}</td><td>${escapeHtml(r.full_name || "")}</td><td>${escapeHtml(r.department || "")}</td><td>${escapeHtml(rolesText)}</td><td>${escapeHtml(locText)}</td><td>${r.active ? "yes" : "no"}</td><td>${r.has_password ? "yes" : "no"}</td><td>${r.has_pin ? "yes" : "no"}</td>`;
+      tr.innerHTML = `<td>${escapeHtml(r.username)}</td><td>${escapeHtml(r.full_name || "")}</td><td>${escapeHtml(r.department || "")}</td><td>${escapeHtml(rolesText)}</td><td>${escapeHtml(locText)}</td><td>${r.active ? "yes" : "no"}</td><td>${r.has_password ? "yes" : "no"}</td><td>${r.has_pin ? "yes" : "no"}</td><td>${r.microsoft_email ? `${escapeHtml(r.microsoft_email)} <span class="pill ${r.microsoft_linked ? "pill-green" : "pill-gray"}">${r.microsoft_linked ? "Linked" : "Invited"}</span>` : ""}</td>`;
       tr.style.cursor = "pointer";
       tr.addEventListener("click", () => {
         if (qs("adminUsername")) qs("adminUsername").value = r.username;
@@ -131,6 +131,12 @@ async function loadAdminUsers() {
           Array.from(rolesSel.options).forEach((o) => {
             o.selected = selectedRoles.includes(o.value);
           });
+        }
+        if (qs("adminMsEmail")) qs("adminMsEmail").value = r.microsoft_email || "";
+        if (qs("adminMsEmailNote")) {
+          qs("adminMsEmailNote").textContent = r.microsoft_linked
+            ? "Linked: this person has signed in with Microsoft. Changing the email unlinks their account."
+            : r.microsoft_email ? "Invited: they can sign in with Microsoft using this work email." : "Invites this person to sign in with Microsoft. Leave empty for no Microsoft sign-in.";
         }
         if (qs("adminPassword")) qs("adminPassword").value = "";
         if (qs("adminPin")) qs("adminPin").value = "";
@@ -211,6 +217,7 @@ async function saveAdminUser() {
     allowed_locations: allowedLocationsRaw || null,
     issue_setup_code: issueSetup,
   };
+  if (qs("adminMsEmail") && !qs("adminMsEmail").closest(".hidden")) body.microsoft_email = String(qs("adminMsEmail").value || "").trim();
   if (password) body.password = password;
   if (clearPin) body.pin = "";
   else if (pin) {
@@ -1405,6 +1412,67 @@ async function executeBackupRestoreNow() {
   setStatus("Restore execute requested. Reconnect after restart.");
 }
 
+/** Admin → Microsoft sign-in (api/routes/microsoftSignin.routes.js). */
+async function loadMsSignin() {
+  const card = qs("msSigninCard");
+  if (!card || card.classList.contains("hidden")) return;
+  const data = await fetchJson(`${API}/api/sso/microsoft/settings`);
+  const s = data.settings || {};
+  qs("msTenantId").value = s.tenant_id || "";
+  qs("msClientId").value = s.client_id || "";
+  qs("msClientSecret").value = "";
+  qs("msClientSecret").placeholder = s.has_secret ? "Saved. Leave blank to keep it" : "Paste the secret's Value";
+  qs("msSecretExpires").value = s.secret_expires_on || "";
+  qs("msEnabled").checked = Boolean(s.enabled);
+  qs("msRedirectUri").textContent = data.redirect_uri || "";
+  const days = data.secret_days_left;
+  const state = !s.configured
+    ? ["is-off", "Not set up yet. Follow the steps below with your IT administrator."]
+    : !s.enabled
+      ? ["is-off", "Set up but switched off: only the Test sign-in works."]
+      : ["is-ok", `Switched on. ${data.invited} invited, ${data.linked} already signed in with Microsoft.`];
+  const warn = days != null && days <= 30
+    ? `<div class="ms-signin-warn">${days < 0 ? "The client secret has run out: Microsoft sign-in stops working. Create a new secret in Entra and save it here." : `The client secret runs out in ${days} days. Create a new one in Entra and save it here before then.`}</div>`
+    : "";
+  qs("msSigninState").innerHTML = `<div class="ms-signin-pill ${state[0]}">${escapeHtml(state[1])}</div>${warn}`;
+}
+
+async function saveMsSignin() {
+  const out = qs("msSigninResult");
+  try {
+    await fetchJson(`${API}/api/sso/microsoft/settings`, {
+      method: "PUT",
+      body: JSON.stringify({
+        tenant_id: qs("msTenantId").value,
+        client_id: qs("msClientId").value,
+        client_secret: qs("msClientSecret").value,
+        secret_expires_on: qs("msSecretExpires").value,
+        enabled: qs("msEnabled").checked,
+      }),
+    });
+    await loadMsSignin();
+    if (out) out.textContent = "Saved.";
+  } catch (e) {
+    if (out) out.textContent = `Not saved: ${e.message || e}`;
+  }
+}
+
+function wireMsSignin() {
+  qs("msSigninRefreshBtn")?.addEventListener("click", () => loadMsSignin().catch((e) => setStatus("Microsoft sign-in error: " + e.message)));
+  qs("msSaveBtn")?.addEventListener("click", () => saveMsSignin());
+  // Opens Microsoft in a new tab; the result page there says whether it worked. Nobody is signed in.
+  qs("msTestBtn")?.addEventListener("click", () => window.open(`${API}/api/sso/microsoft/start?test=1`, "_blank", "noopener"));
+  qs("msCopyRedirectBtn")?.addEventListener("click", async () => {
+    const text = qs("msRedirectUri")?.textContent || "";
+    try {
+      await navigator.clipboard.writeText(text);
+      qs("msCopyRedirectBtn").textContent = "Copied";
+    } catch {
+      window.prompt("Copy this address:", text);
+    }
+  });
+}
+
 /** Admin → Company profile: details used on report headers and June's site. */
 async function loadCompanyProfile() {
   const card = qs("companyProfileCard");
@@ -1633,6 +1701,7 @@ function wireLicenceCard() {
 /** Start-up: User admin, SMTP, push, PDF settings and backup controls. Called once from init() in init.js. */
 function wireAdminControls() {
   wireBackupHealth();
+  wireMsSignin();
   wireLicenceCard();
   wireLicenceIssuer();
   qs("loadCompanyProfileBtn")?.addEventListener("click", () =>

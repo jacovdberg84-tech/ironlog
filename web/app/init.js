@@ -4,6 +4,7 @@
 async function init() {
   await disableLegacyServiceWorkers();
   await loadAuthConfig();
+  await completeMicrosoftSignIn();
   await tryInitialSession();
   initSidebar();
   initDashboardActionHub();
@@ -198,6 +199,7 @@ function loadStartupData() {
     if (getSessionRoles().includes("admin")) {
       loadLicenceCard().catch(() => {});
       loadLicenceIssuer().catch(() => {});
+      loadMsSignin().catch(() => {});
     }
   }
   loadCodePickers().catch(() => {});

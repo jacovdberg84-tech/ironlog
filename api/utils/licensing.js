@@ -31,6 +31,7 @@ export const MODULES = {
   care_maintenance: { label: "Care and maintenance planning", api: ["/api/maintenance/cm"], tabs: [] },
   developer: { label: "Developer Centre", api: ["/api/developer"], tabs: ["developer"] },
   aml_reports: { label: "AML customer reports", api: ["/api/reports/aml-weekly-check-sheet"], tabs: [] },
+  microsoft_signin: { label: "Sign in with Microsoft 365", api: ["/api/sso/microsoft"], tabs: [] },
 };
 export const ALL_MODULES = Object.keys(MODULES);
 

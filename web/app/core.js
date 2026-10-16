@@ -1991,8 +1991,79 @@ async function logoutAuth() {
   await tryInitialSession();
 }
 
+// ---- Sign in with Microsoft (api/routes/microsoftSignin.routes.js). Microsoft sends people back
+// to this page with a one-time handoff code (or an error code) in the address.
+const MS_SIGNIN_ERRORS = {
+  not_invited: "This Microsoft account has not been invited to IronLog. Ask your IronLog administrator to add your work email to your user. · Esta conta Microsoft não foi convidada para o IronLog. Peça ao administrador.",
+  inactive: "Your IronLog user is switched off. Ask your IronLog administrator. · O seu utilizador IronLog está desativado. Fale com o administrador.",
+  wrong_tenant: "This Microsoft account belongs to a different company. Use your work account for this company. · Esta conta Microsoft pertence a outra empresa.",
+  not_enabled: "Microsoft sign-in is not switched on for this company. · O início de sessão Microsoft não está ativo.",
+  expired: "The sign-in took too long or was already used. Please try again. · O início de sessão expirou. Tente de novo.",
+  replayed: "The sign-in took too long or was already used. Please try again. · O início de sessão expirou. Tente de novo.",
+};
+const MS_SIGNIN_FALLBACK = "Microsoft sign-in did not work. Please try again, or use your IronLog username. · Não foi possível entrar com a Microsoft. Tente de novo ou use o seu utilizador IronLog.";
+
+/** Called before the session check: turns a handoff code into a session, or keeps the error to show. */
+async function completeMicrosoftSignIn() {
+  let params;
+  try {
+    params = new URLSearchParams(window.location.search);
+  } catch {
+    return;
+  }
+  const handoff = params.get("ms_handoff");
+  const error = params.get("ms_error");
+  if (!handoff && !error) return;
+  params.delete("ms_handoff");
+  params.delete("ms_error");
+  const rest = params.toString();
+  history.replaceState(null, "", `${window.location.pathname}${rest ? `?${rest}` : ""}${window.location.hash}`);
+  if (error) {
+    showMicrosoftSignInError(MS_SIGNIN_ERRORS[error] || MS_SIGNIN_FALLBACK);
+    return;
+  }
+  try {
+    const res = await fetch(`${API}/api/sso/microsoft/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handoff }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.token) setAuthToken(data.token, true);
+    else showMicrosoftSignInError(MS_SIGNIN_ERRORS[data.error] || MS_SIGNIN_FALLBACK);
+  } catch {
+    showMicrosoftSignInError(MS_SIGNIN_FALLBACK);
+  }
+}
+
+function showMicrosoftSignInError(message) {
+  const el = qs("msSigninError");
+  if (!el) return;
+  el.textContent = message;
+  el.hidden = false;
+  if (qs("msSigninBox")) qs("msSigninBox").hidden = false;
+}
+
+/** Shows the button when this company has Microsoft sign-in switched on (and licensed). */
+async function loadMicrosoftSignInButton() {
+  const box = qs("msSigninBox");
+  if (!box) return;
+  try {
+    const res = await fetch(`${API}/api/sso/microsoft/config`);
+    const data = res.ok ? await res.json() : null;
+    const on = Boolean(data?.enabled);
+    qs("msSigninBtn").hidden = !on;
+    box.querySelector(".ms-signin-or").hidden = !on;
+    if (on) box.hidden = false;
+  } catch {}
+}
+
 /** Start-up: Login form controls. Called once from init() in init.js. */
 function wireLoginControls() {
+  qs("msSigninBtn")?.addEventListener("click", () => {
+    window.location.href = `${API}/api/sso/microsoft/start`;
+  });
+  loadMicrosoftSignInButton();
   qs("loginSubmit")?.addEventListener("click", () => submitLoginForm());
   qs("loginPassword")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") submitLoginForm();
