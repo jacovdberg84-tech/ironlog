@@ -71,8 +71,18 @@ export function ensureIssuerTables(db) {
   if (!db.prepare(`SELECT 1 FROM licence_packages LIMIT 1`).get()) {
     const add = db.prepare(`INSERT INTO licence_packages (name, description, modules_json, sort) VALUES (?, ?, ?, ?)`);
     add.run("Core", "Machines, work orders, breakdowns, maintenance, inspections, technician portal", "[]", 1);
-    add.run("Professional", "Core plus stores, fuel, finance and care and maintenance planning", JSON.stringify(["stores", "fuel", "finance", "care_maintenance"]), 2);
+    add.run("Professional", "Core plus stores, fuel, finance, care and maintenance planning and Microsoft 365 sign-in", JSON.stringify(["stores", "fuel", "finance", "care_maintenance", "microsoft_signin"]), 2);
     add.run("Enterprise", "Everything, including fleet tracking and the AI assistants", JSON.stringify(ALL_MODULES.filter((m) => m !== "aml_reports")), 3);
+  }
+  // Added after the first catalogues were made (October 2026): Microsoft sign-in joins
+  // Professional and Enterprise once; the owner can take it out again and it stays out.
+  db.exec(`CREATE TABLE IF NOT EXISTS licence_catalogue_steps (step TEXT PRIMARY KEY, done_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+  if (!db.prepare(`SELECT 1 FROM licence_catalogue_steps WHERE step = 'microsoft_signin'`).get()) {
+    for (const p of db.prepare(`SELECT id, modules_json FROM licence_packages WHERE name IN ('Professional', 'Enterprise')`).all()) {
+      const mods = JSON.parse(p.modules_json || "[]");
+      if (!mods.includes("microsoft_signin")) db.prepare(`UPDATE licence_packages SET modules_json = ? WHERE id = ?`).run(JSON.stringify([...mods, "microsoft_signin"]), p.id);
+    }
+    db.prepare(`INSERT INTO licence_catalogue_steps (step) VALUES ('microsoft_signin')`).run();
   }
   if (!db.prepare(`SELECT 1 FROM licence_bands LIMIT 1`).get()) {
     const add = db.prepare(`INSERT INTO licence_bands (label, max_assets, sort) VALUES (?, ?, ?)`);

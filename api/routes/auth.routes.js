@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { isAuthRequired } from "../auth/hook.js";
+import { ensureMicrosoftSignInTables, setUserMicrosoftEmail } from "../utils/microsoftSignIn.js";
 
 export const VALID_ROLES = [
   "admin",
@@ -231,6 +232,8 @@ export default async function authRoutes(app) {
   if (!hasColumn("users", "pin_hash")) {
     db.prepare(`ALTER TABLE users ADD COLUMN pin_hash TEXT`).run();
   }
+  // Microsoft sign-in: the invited work email and the linked Microsoft account.
+  ensureMicrosoftSignInTables(db);
 
   db.prepare(`
     CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -286,7 +289,7 @@ export default async function authRoutes(app) {
 
   const getByUsername = db.prepare(`
     SELECT id, username, full_name, role, active, created_at, password_hash, department, allowed_tabs, roles_json,
-      allowed_locations, setup_code_hash, setup_code_expires_at, pin_hash
+      allowed_locations, setup_code_hash, setup_code_expires_at, pin_hash, ms_email, ms_oid
     FROM users
     WHERE username = ?
   `);
@@ -362,6 +365,8 @@ export default async function authRoutes(app) {
       allowed_locations: parseAllowedLocations(row.allowed_locations),
       has_password: Boolean(row.password_hash && String(row.password_hash).length > 0),
       has_pin: Boolean(row.pin_hash && String(row.pin_hash).length > 0),
+      microsoft_email: row.ms_email || null,
+      microsoft_linked: Boolean(row.ms_oid),
     };
   }
 
@@ -510,7 +515,8 @@ export default async function authRoutes(app) {
     if (token) {
       const row = db.prepare(`
         SELECT u.id, u.username, u.full_name, u.role, u.active, u.created_at, u.password_hash, u.department,
-          u.allowed_tabs, u.roles_json, u.allowed_locations, u.setup_code_hash, u.setup_code_expires_at, u.pin_hash
+          u.allowed_tabs, u.roles_json, u.allowed_locations, u.setup_code_hash, u.setup_code_expires_at, u.pin_hash,
+          u.ms_email, u.ms_oid
         FROM auth_sessions s
         JOIN users u ON u.id = s.user_id
         WHERE s.token = ?
@@ -613,7 +619,7 @@ export default async function authRoutes(app) {
       .prepare(
         `
       SELECT id, username, full_name, role, active, created_at, department, allowed_tabs, roles_json,
-        allowed_locations,
+        allowed_locations, ms_email, ms_oid,
         CASE WHEN password_hash IS NOT NULL AND length(trim(password_hash)) > 0 THEN 1 ELSE 0 END AS has_password,
         CASE WHEN pin_hash IS NOT NULL AND length(trim(pin_hash)) > 0 THEN 1 ELSE 0 END AS has_pin
       FROM users
@@ -634,6 +640,8 @@ export default async function authRoutes(app) {
         allowed_locations: parseAllowedLocations(r.allowed_locations),
         has_password: Number(r.has_password) === 1,
         has_pin: Number(r.has_pin) === 1,
+        microsoft_email: r.ms_email || null,
+        microsoft_linked: Boolean(r.ms_oid),
       }));
     return { ok: true, rows };
   });
@@ -660,6 +668,13 @@ export default async function authRoutes(app) {
     const allowedLocStored = allowedLocParsed ? JSON.stringify(allowedLocParsed) : null;
 
     if (!username) return reply.code(400).send({ error: "username is required" });
+    const hasMsEmail = Object.prototype.hasOwnProperty.call(body, "microsoft_email");
+    const msEmail = String(body.microsoft_email || "").trim().toLowerCase();
+    if (hasMsEmail && msEmail) {
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(msEmail)) return reply.code(400).send({ error: "Microsoft account must be a work email address, like name@company.com." });
+      const taken = db.prepare(`SELECT username FROM users WHERE LOWER(TRIM(ms_email)) = ? AND username <> ?`).get(msEmail, username);
+      if (taken) return reply.code(400).send({ error: `${msEmail} is already the Microsoft account of ${taken.username}.` });
+    }
     if (!roles.length) {
       return reply.code(400).send({ error: `roles must contain at least one of: ${VALID_ROLES.join(", ")}` });
     }
@@ -696,6 +711,11 @@ export default async function authRoutes(app) {
     if (password) {
       const h = hashPassword(password);
       db.prepare(`UPDATE users SET password_hash = ?, setup_code_hash = NULL, setup_code_expires_at = NULL WHERE username = ?`).run(h, username);
+    }
+
+    if (hasMsEmail) {
+      const ms = setUserMicrosoftEmail(db, username, msEmail);
+      if (!ms.ok) return reply.code(400).send({ error: ms.error });
     }
 
     if (Object.prototype.hasOwnProperty.call(body, "pin")) {

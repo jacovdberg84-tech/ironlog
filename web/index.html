@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=disk-2" />
+  <link rel="stylesheet" href="./styles.css?v=ms-2" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -6467,6 +6467,7 @@
                     <th align="left">Active</th>
                     <th align="left">Password set</th>
                     <th align="left">PIN set</th>
+                    <th align="left">Microsoft</th>
                   </tr>
                 </thead>
                 <tbody id="adminUsersTbody"></tbody>
@@ -6513,6 +6514,11 @@
               <div class="form-field">
                 <label>Display Name</label>
                 <input id="adminFullName" class="w-full" placeholder="Display name" />
+              </div>
+              <div class="form-field" data-licence-module="microsoft_signin">
+                <label for="adminMsEmail">Microsoft account (work email)</label>
+                <input id="adminMsEmail" class="w-full" type="email" placeholder="name@company.com" autocomplete="off" />
+                <p class="muted small" id="adminMsEmailNote" style="margin-top:6px">Invites this person to sign in with Microsoft. Leave empty for no Microsoft sign-in.</p>
               </div>
             </div>
             <div class="form-row">
@@ -6702,6 +6708,53 @@
         </div>
 
         <!-- Company Profile Card -->
+        <div class="dash-card collapsible full-width" data-collapsed="false" id="msSigninCard" data-licence-module="microsoft_signin">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-1d4ed8);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8"></rect><rect x="13" y="3" width="8" height="8"></rect><rect x="3" y="13" width="8" height="8"></rect><rect x="13" y="13" width="8" height="8"></rect></svg>
+              </div>
+              <div>
+                <h3>Microsoft sign-in</h3>
+                <p class="muted small">Lets your staff sign in with their Microsoft 365 work account. Only people you invite (their work email on their user below) can get in, and only from your own company's Microsoft directory.</p>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="msSigninRefreshBtn" class="btn btn-secondary btn-sm">Refresh</button>
+              <button class="report-card-toggle" aria-label="Toggle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+              </button>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <div id="msSigninState" class="ms-signin-state" role="status">Loading…</div>
+            <details class="ms-signin-steps">
+              <summary>Set-up steps for your IT administrator (about 15 minutes)</summary>
+              <ol>
+                <li>In the Microsoft Entra admin centre open <strong>App registrations → New registration</strong>. Name: <em>IronLog</em>. Who can sign in: <em>Accounts in this organisational directory only</em>.</li>
+                <li>Redirect address, type <strong>Web</strong>: <code id="msRedirectUri">…</code> <button type="button" id="msCopyRedirectBtn" class="btn btn-secondary btn-sm">Copy</button></li>
+                <li>Under <strong>Certificates &amp; secrets</strong> create a client secret valid for 24 months. Copy its <strong>Value</strong> (not the Secret ID).</li>
+                <li>Leave the permissions as they are (sign-in and read your profile). IronLog does not read mail, files or calendars.</li>
+                <li>Copy the <strong>Directory (tenant) ID</strong> and <strong>Application (client) ID</strong> from the app's overview page into the boxes below, save, then press <strong>Test sign-in</strong>.</li>
+              </ol>
+            </details>
+            <div class="form-row">
+              <div class="form-field"><label for="msTenantId">Directory (tenant) ID</label><input id="msTenantId" class="w-full" placeholder="1a2b3c4d-1234-5678-9abc-1234567890ab" autocomplete="off" spellcheck="false" /></div>
+              <div class="form-field"><label for="msClientId">Application (client) ID</label><input id="msClientId" class="w-full" placeholder="1a2b3c4d-1234-5678-9abc-1234567890ab" autocomplete="off" spellcheck="false" /></div>
+            </div>
+            <div class="form-row">
+              <div class="form-field"><label for="msClientSecret">Client secret (value)</label><input id="msClientSecret" type="password" class="w-full" autocomplete="new-password" /></div>
+              <div class="form-field"><label for="msSecretExpires">Secret runs out on</label><input id="msSecretExpires" type="date" class="w-full" /></div>
+            </div>
+            <label class="checkbox-label"><input id="msEnabled" type="checkbox" /> Switched on: show "Sign in with Microsoft" on the sign-in page</label>
+            <div class="action-buttons" style="margin-top:10px">
+              <button id="msSaveBtn" class="btn btn-primary btn-sm">Save</button>
+              <button id="msTestBtn" class="btn btn-secondary btn-sm">Test sign-in</button>
+            </div>
+            <p id="msSigninResult" class="muted small" role="status"></p>
+          </div>
+        </div>
+
         <div class="dash-card collapsible full-width" data-collapsed="false" id="companyProfileCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
@@ -8192,6 +8245,14 @@
   <div id="loginOverlay" class="login-overlay" style="display:none" aria-hidden="true">
     <div class="login-card card stack-12">
       <h2 style="margin-top:0">Sign in to IRONLOG</h2>
+      <div id="msSigninBox" class="ms-signin-box" hidden>
+        <button type="button" id="msSigninBtn" class="ms-signin-btn">
+          <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
+          <span>Sign in with Microsoft <span class="ms-signin-pt">Entrar com a Microsoft</span></span>
+        </button>
+        <p id="msSigninError" class="ms-signin-error" role="alert" hidden></p>
+        <div class="ms-signin-or"><span>or use your IronLog username · ou use o seu utilizador IronLog</span></div>
+      </div>
       <label>Username
         <input id="loginUsername" class="minw-260" style="width:100%;max-width:320px" autocomplete="username" />
       </label>
@@ -8230,8 +8291,8 @@
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=2"></script>
   <!-- Main app, split by feature. Order matters: files share one global scope. -->
-  <script src="./app/core.js?v=97"></script>
-  <script src="./app/admin.js?v=97"></script>
+  <script src="./app/core.js?v=98"></script>
+  <script src="./app/admin.js?v=98"></script>
   <script src="./app/licence-issuer.js?v=1"></script>
   <script src="./app/inspections.js?v=90"></script>
   <script src="./app/ui-helpers.js?v=89"></script>
@@ -8257,7 +8318,7 @@
   <script src="./app/daily-input.js?v=89"></script>
   <script src="./app/assets.js?v=89"></script>
   <script src="./app/developer.js?v=3"></script>
-  <script src="./app/init.js?v=96"></script>
+  <script src="./app/init.js?v=97"></script>
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=90"></script>
   <script src="./app/collab-inbox.js?v=1"></script>

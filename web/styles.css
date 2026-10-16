@@ -9212,3 +9212,19 @@ body.wo-popup .wo-drawer-head { display: none; }
 .li-price { width: 100px; }
 #liIssuedKey, #liPublicKey { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 #licenceIssuerCard .link-btn { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; }
+
+/* Microsoft sign-in: login button and Admin card */
+.ms-signin-box { display: grid; gap: 10px; }
+.ms-signin-btn { display: inline-flex; align-items: center; gap: 10px; justify-content: center; width: 100%; max-width: 320px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font-weight: 600; cursor: pointer; }
+.ms-signin-btn:hover { border-color: var(--tx-1d4ed8); }
+.ms-signin-pt { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
+.ms-signin-error { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--bg-fef2f2); color: var(--tx-991b1b); border: 1px solid var(--bd-fca5a5); font-size: 13px; max-width: 320px; }
+.ms-signin-or { font-size: 12px; color: var(--muted); max-width: 320px; }
+.ms-signin-state { margin-bottom: 10px; }
+.ms-signin-pill { font-weight: 700; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); color: var(--ink); background: var(--bg-f9fafb); }
+.ms-signin-pill.is-ok { background: var(--bg-f0fdf4); color: var(--tx-166534); border-color: var(--bd-86efac); }
+.ms-signin-warn { margin-top: 8px; padding: 8px 12px; border-radius: 8px; background: var(--bg-fffbeb); color: var(--tx-92400e); border: 1px solid var(--bd-fcd34d); }
+.ms-signin-steps { margin: 0 0 12px; color: var(--ink); }
+.ms-signin-steps summary { cursor: pointer; font-weight: 600; }
+.ms-signin-steps ol { margin: 8px 0 0 18px; display: grid; gap: 6px; }
+.ms-signin-steps code { word-break: break-all; background: var(--bg-f3f4f6); padding: 1px 4px; border-radius: 4px; }
