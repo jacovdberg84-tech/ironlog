@@ -7,6 +7,12 @@ import { listHireAssetsRegister, normalizeHireBillingMode } from "../../utils/pl
 import { normalizeCostCenterCode, normalizeSiteCode } from "../../utils/costAllocation.js";
 import { validateAgainstMdmPolicy, validateAssetGovernanceOptional } from "../../utils/masterdataGovernance.js";
 import { andSite } from "../../utils/sites.js";
+import { requireAnyRole } from "../../utils/request.js";
+import { ASSET_DETAIL_FIELDS, assetDetailsOf, readAssetDetails } from "../../utils/assetDetails.js";
+
+// Plant admin, foremen, managers and the plant clerk add and change machines; everyone else looks.
+export const ASSET_EDIT_ROLES = ["admin", "supervisor", "workshop_admin", "plant_manager", "site_manager", "plant_clerk"];
+const DETAIL_COLS = Object.keys(ASSET_DETAIL_FIELDS);
 
 export default function registerRegisterRoutes(app, ctx) {
   const { buildMachineStatus, getAssetByCode, hasTable, insertAsset, siteCodeFromReq } = ctx;
@@ -25,7 +31,7 @@ export default function registerRegisterRoutes(app, ctx) {
         active, is_standby,
         archived, archive_reason, archived_at,
         department_code, cost_center_code, site_code, data_owner_username,
-        created_at
+        created_at, ${DETAIL_COLS.join(", ")}
       FROM assets
       WHERE (? = 1 OR archived = 0)
       ORDER BY asset_code ASC
@@ -50,7 +56,7 @@ export default function registerRegisterRoutes(app, ctx) {
       SELECT
         id, asset_code, asset_name, category,
         active, is_standby,
-        archived, archive_reason
+        archived, archive_reason, ${DETAIL_COLS.join(", ")}
       FROM assets
       WHERE (? = 1 OR archived = 0)${andSite(null, req)}
       ORDER BY asset_code ASC
@@ -79,6 +85,7 @@ export default function registerRegisterRoutes(app, ctx) {
         current_hours: Number(Number(meter.hours || 0).toFixed(1)),
         status: buildMachineStatus(a.id),
         fuel_liters_30d: Number(Number(fuelRow?.liters_30d || 0).toFixed(1)),
+        ...assetDetailsOf(a),
       };
     });
 
@@ -120,7 +127,8 @@ export default function registerRegisterRoutes(app, ctx) {
         active,
         is_standby,
         archived,
-        archive_reason
+        archive_reason,
+        ${DETAIL_COLS.join(", ")}
       FROM assets
       WHERE (? = 1 OR COALESCE(archived, 0) = 0)
       ORDER BY asset_code ASC
@@ -171,6 +179,7 @@ export default function registerRegisterRoutes(app, ctx) {
       { header: "Standby", key: "is_standby", width: 10 },
       { header: "Archived", key: "archived", width: 10 },
       { header: "Archive Reason", key: "archive_reason", width: 24 },
+      ...Object.entries(ASSET_DETAIL_FIELDS).map(([key, f]) => ({ header: f.label, key, width: f.type === "text" ? 18 : 14 })),
     ];
     ws.getRow(1).font = { bold: true };
     ws.views = [{ state: "frozen", ySplit: 1 }];
@@ -187,6 +196,7 @@ export default function registerRegisterRoutes(app, ctx) {
         is_standby: Number(r.is_standby) ? "Yes" : "No",
         archived: Number(r.archived) ? "Yes" : "No",
         archive_reason: r.archive_reason || "",
+        ...Object.fromEntries(DETAIL_COLS.map((c) => [c, r[c] ?? ""])),
       });
     }
 
@@ -212,6 +222,7 @@ export default function registerRegisterRoutes(app, ctx) {
 
   // POST /api/assets
   app.post("/", async (req, reply) => {
+    if (!requireAnyRole(req, reply, ASSET_EDIT_ROLES)) return;
     const body = req.body || {};
     const asset_code = String(body.asset_code || "").trim();
     const asset_name = String(body.asset_name || "").trim();
@@ -239,6 +250,8 @@ export default function registerRegisterRoutes(app, ctx) {
     if (!asset_code || !asset_name) {
       return reply.code(400).send({ error: "asset_code and asset_name are required" });
     }
+    const details = readAssetDetails(body);
+    if (!details.ok) return reply.code(400).send({ error: details.errors.join(" "), errors: details.errors });
 
     const policyBody = {
       department_code,
@@ -271,7 +284,12 @@ export default function registerRegisterRoutes(app, ctx) {
         site_code,
         data_owner_username
       );
-      return reply.code(201).send({ ok: true, id: Number(r.lastInsertRowid) });
+      const id = Number(r.lastInsertRowid);
+      const cols = Object.keys(details.values);
+      if (cols.length) {
+        db.prepare(`UPDATE assets SET ${cols.map((c) => `${c} = ?`).join(", ")} WHERE id = ?`).run(...cols.map((c) => details.values[c]), id);
+      }
+      return reply.code(201).send({ ok: true, id });
     } catch (e) {
       return reply.code(400).send({ error: e.message || String(e) });
     }
@@ -279,6 +297,7 @@ export default function registerRegisterRoutes(app, ctx) {
 
   // POST /api/assets/:asset_code/archive  { archived: true/false, reason? }
   app.post("/:asset_code/archive", async (req, reply) => {
+    if (!requireAnyRole(req, reply, ASSET_EDIT_ROLES)) return;
     const asset_code = String(req.params.asset_code || "").trim();
     const body = req.body || {};
 
@@ -305,8 +324,10 @@ export default function registerRegisterRoutes(app, ctx) {
     return { ok: true };
   });
 
-  // PATCH /api/assets/:asset_code  { active?, is_standby?, site_code?, cost_center_code?, department_code?, category?, asset_name? }
+  // PATCH /api/assets/:asset_code  { active?, is_standby?, site_code?, cost_center_code?, department_code?, category?, asset_name?,
+  //   make?, model?, serial_number?, year_built?, purchase_date?, purchase_price_usd?, warranty_end? }
   app.patch("/:asset_code", async (req, reply) => {
+    if (!requireAnyRole(req, reply, ASSET_EDIT_ROLES)) return;
     const asset_code = String(req.params.asset_code || "").trim();
     const body = req.body || {};
 
@@ -372,6 +393,18 @@ export default function registerRegisterRoutes(app, ctx) {
       args.push(v);
     }
 
+    const details = readAssetDetails(body);
+    if (!details.ok) return reply.code(400).send({ error: details.errors.join(" "), errors: details.errors });
+    // The warranty is checked against the purchase date already saved when only one of them changes.
+    const saved = db.prepare(`SELECT purchase_date, warranty_end FROM assets WHERE asset_code = ?`).get(asset_code) || {};
+    const purchase = "purchase_date" in details.values ? details.values.purchase_date : saved.purchase_date;
+    const warrantyEnd = "warranty_end" in details.values ? details.values.warranty_end : saved.warranty_end;
+    if (purchase && warrantyEnd && warrantyEnd < purchase) return reply.code(400).send({ error: "Warranty ends before the purchase date." });
+    for (const [col, value] of Object.entries(details.values)) {
+      sets.push(`${col} = ?`);
+      args.push(value);
+    }
+
     if (body.cost_center_code !== undefined || body.department_code !== undefined) {
       const gov = validateAssetGovernanceOptional(siteCodeFromReq(req), {
         department_code: body.department_code !== undefined
@@ -395,7 +428,7 @@ export default function registerRegisterRoutes(app, ctx) {
     const updated = db.prepare(`
       SELECT id, asset_code, asset_name, category, active, is_standby, archived,
              department_code, cost_center_code, site_code, data_owner_username, created_at,
-             hire_billing_mode, hire_rate_per_hour, hire_fixed_monthly
+             hire_billing_mode, hire_rate_per_hour, hire_fixed_monthly, ${DETAIL_COLS.join(", ")}
       FROM assets WHERE asset_code = ?
     `).get(asset_code);
     return {
