@@ -200,6 +200,7 @@ export default async function executiveRoutes(app) {
   });
 
   app.get("/evidence-packs/:id", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
     const row = db.prepare(`SELECT * FROM compliance_evidence_packs WHERE id = ?`).get(id);

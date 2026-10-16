@@ -28,6 +28,7 @@ await app.register((await import("../routes/auth.routes.js")).default, { prefix:
 await app.register((await import("../routes/breakdowns.routes.js")).default, { prefix: "/api/breakdowns" });
 await app.register((await import("../routes/hours.routes.js")).default, { prefix: "/api/hours" });
 await app.register((await import("../routes/workorders.routes.js")).default, { prefix: "/api/workorders" });
+await app.register((await import("../routes/maintenance.routes.js")).default, { prefix: "/api/maintenance" });
 await app.ready();
 globalThis.setInterval = realSetInterval;
 process.on("exit", () => {
@@ -47,6 +48,9 @@ const wo = (assetId) => db.prepare(`INSERT INTO work_orders (asset_id, source, s
 const woNorth = wo(north);
 const woSouth = wo(south);
 for (const id of [north, south]) db.prepare(`INSERT INTO daily_hours (asset_id, work_date, hours_run, is_used) VALUES (?, '2026-10-16', 8, 1)`).run(id);
+const plan = (assetId) => db.prepare(`INSERT INTO maintenance_plans (asset_id, service_name, interval_hours, last_service_hours, active) VALUES (?, '250h service', 5, 0, 1)`).run(assetId).lastInsertRowid;
+plan(north);
+const planSouth = plan(south);
 
 const session = (username, role, allowed) => {
   db.prepare(`INSERT INTO users (username, role, roles_json, active, allowed_locations) VALUES (?, ?, ?, 1, ?)`).run(username, role, JSON.stringify([role]), allowed ? JSON.stringify(allowed) : null);
@@ -81,6 +85,12 @@ test("a person limited to north never sees, opens or changes south's records", a
   assert.equal(db.prepare(`SELECT status FROM work_orders WHERE id = ?`).get(woSouth).status, "open", "south work order untouched");
   assert.equal((await call(nina, "POST", "/api/hours", { body: { asset_code: "S1", work_date: "2026-10-17", hours_run: 5 } })).statusCode, 404, "enter hours for a south machine");
   assert.equal((await call(nina, "GET", "/api/breakdowns/open?asset_code=S1")).statusCode, 404);
+  const due = (await call(nina, "GET", "/api/maintenance/due")).json();
+  const dueCodes = [...new Set((due.due || []).map((r) => r.asset_code))];
+  assert.deepEqual(dueCodes, ["N1"], "maintenance due list");
+  assert.equal((await call(nina, "PUT", `/api/maintenance/plans/${planSouth}`, { body: { service_name: "changed", interval_hours: 500 } })).statusCode, 404, "edit a south maintenance plan");
+  assert.equal(db.prepare(`SELECT service_name FROM maintenance_plans WHERE id = ?`).get(planSouth).service_name, "250h service");
+  assert.equal((await call(nina, "POST", "/api/maintenance/plans", { body: { asset_id: south, service_name: "x", interval_hours: 100 } })).statusCode, 404, "add a plan to a south machine");
   assert.equal((await call(nina, "GET", "/api/breakdowns", { site: "south" })).statusCode, 403, "switching to south is refused");
   assert.deepEqual((await call(nina, "GET", "/api/breakdowns", { site: '["workshop"]' })).json().map((b) => b.asset_code), ["N1"], "an old garbled site in the browser falls back to her own site");
 });

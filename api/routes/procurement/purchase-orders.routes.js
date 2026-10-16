@@ -2,6 +2,7 @@
 // Registered by routes/procurement.routes.js; shared helpers arrive through ctx.
 import { db } from "../../db/client.js";
 import { getSiteCode, getUser } from "../../utils/request.js";
+import { andSite } from "../../utils/sites.js";
 
 export default function registerPurchaseOrdersRoutes(app, ctx) {
   const {
@@ -438,7 +439,7 @@ export default function registerPurchaseOrdersRoutes(app, ctx) {
         po.po_number
       FROM procurement_match_exceptions e
       LEFT JOIN procurement_purchase_orders po ON po.id = e.po_id
-      WHERE LOWER(e.status) = ?
+      WHERE LOWER(e.status) = ?${andSite("po", req)}
       ORDER BY e.id DESC
       LIMIT 500
     `).all(status).map((r) => ({

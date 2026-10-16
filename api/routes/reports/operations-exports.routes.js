@@ -9,6 +9,7 @@ import { buildPdfBuffer, kvGrid, sectionTitle, table, tryDrawLogo } from "../../
 import { db } from "../../db/client.js";
 import { isDate } from "../../utils/request.js";
 import { oilPartSql } from "../../utils/stockCategory.js";
+import { andSite } from "../../utils/sites.js";
 import { buildMonthlyBudgetSpend } from "../../utils/monthlyBudgetSpend.js";
 import { buildMonthlyBudgetSpendBuffer } from "../../utils/monthlyBudgetSpendWorkbook.js";
 import {
@@ -109,7 +110,7 @@ export default function registerOperationsExportsRoutes(app, ctx) {
         dh.hours_run
       FROM daily_hours dh
       JOIN assets a ON a.id = dh.asset_id
-      WHERE dh.work_date = ?
+      WHERE dh.work_date = ?${andSite("a", req)}
       ORDER BY a.asset_code
     `).all(date);
 
@@ -117,7 +118,7 @@ export default function registerOperationsExportsRoutes(app, ctx) {
       SELECT a.asset_code, a.asset_name, fl.liters, fl.source
       FROM fuel_logs fl
       JOIN assets a ON a.id = fl.asset_id
-      WHERE fl.log_date = ?
+      WHERE fl.log_date = ?${andSite("a", req)}
       ORDER BY a.asset_code
     `).all(date);
 
@@ -125,7 +126,7 @@ export default function registerOperationsExportsRoutes(app, ctx) {
       SELECT a.asset_code, a.asset_name, ol.oil_type, ol.quantity
       FROM oil_logs ol
       JOIN assets a ON a.id = ol.asset_id
-      WHERE ol.log_date = ?
+      WHERE ol.log_date = ?${andSite("a", req)}
       ORDER BY a.asset_code
     `).all(date);
 
@@ -158,7 +159,7 @@ export default function registerOperationsExportsRoutes(app, ctx) {
         ), 0) AS logged_days
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
-      WHERE ${breakdownDateExpr} <= ?
+      WHERE ${breakdownDateExpr} <= ?${andSite("a", req)}
         AND (
           ${hasBreakdownEndAt ? "b.end_at IS NULL OR DATE(b.end_at) >= ?" : "1 = 1"}
           OR ${breakdownStatusExpr} IN ('open', 'in_progress')
@@ -195,7 +196,7 @@ export default function registerOperationsExportsRoutes(app, ctx) {
         ) AS current_hours
       FROM maintenance_plans mp
       JOIN assets a ON a.id = mp.asset_id
-      WHERE mp.active = 1
+      WHERE mp.active = 1${andSite("a", req)}
         AND a.active = 1
         AND a.is_standby = 0
       ORDER BY a.asset_code
@@ -349,7 +350,7 @@ export default function registerOperationsExportsRoutes(app, ctx) {
         dh.hours_run
       FROM daily_hours dh
       JOIN assets a ON a.id = dh.asset_id
-      WHERE dh.work_date BETWEEN ? AND ?
+      WHERE dh.work_date BETWEEN ? AND ?${andSite("a", req)}
       ORDER BY a.asset_code ASC, dh.work_date ASC
     `).all(start, end);
 

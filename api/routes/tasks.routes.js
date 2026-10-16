@@ -255,6 +255,7 @@ export default async function tasksRoutes(app) {
 
   // GET /api/collab/inbox?limit=30
   app.get("/collab/inbox", async (req, reply) => {
+    // site: a person's own task inbox.
     const me = requestUser(req);
     if (!me) return reply.code(401).send({ error: "Sign in first" });
     const limit = Math.min(100, Math.max(1, Number(req.query?.limit) || 30));

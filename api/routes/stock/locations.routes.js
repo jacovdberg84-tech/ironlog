@@ -113,6 +113,7 @@ export default function registerLocationsRoutes(app, ctx) {
   // Inventory depth by part/location/bin
   // GET /api/stock/depth?part_code=&location_code=&bin_code=
   app.get("/depth", async (req, reply) => {
+    // site: stock (parts, stores, bins) is held company-wide; stores are not split by site.
     const part_code = String(req.query?.part_code || "").trim();
     const location_code = String(req.query?.location_code || "").trim().toUpperCase();
     const bin_code = String(req.query?.bin_code || "").trim().toUpperCase();

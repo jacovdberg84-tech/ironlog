@@ -167,6 +167,7 @@ export default async function dispatchRoutes(app) {
   });
 
   app.post("/exceptions", async (req, reply) => {
+    // site: the machine, work order, plan or trip in the body is checked by the site guard (utils/siteGuard.js).
     const trip_id = Number(req.body?.trip_id || 0);
     if (!Number.isFinite(trip_id) || trip_id <= 0) return reply.code(400).send({ error: "trip_id is required" });
     const exception_type = String(req.body?.exception_type || "").trim().toLowerCase();

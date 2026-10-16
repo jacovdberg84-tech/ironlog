@@ -63,6 +63,7 @@ export default function registerCostSettingsRoutes(app, ctx) {
   // POST /api/dashboard/cost/asset-rates
   // Body: { asset_code, fuel_cost_per_liter?, downtime_cost_per_hour?, utilization_mode?, km_per_hour_factor? }
   app.post("/cost/asset-rates", async (req, reply) => {
+    // site: the machine, work order, plan or trip in the body is checked by the site guard (utils/siteGuard.js).
     if (!requireRoles(req, reply, ["admin", "supervisor", "workshop_admin", "stores"])) return;
     const body = req.body || {};
     const asset_code = String(body.asset_code || "").trim();

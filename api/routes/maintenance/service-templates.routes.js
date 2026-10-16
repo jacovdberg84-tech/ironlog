@@ -53,6 +53,7 @@ export default function registerServiceTemplatesRoutes(app, ctx) {
   });
 
   app.post("/service-templates", async (req, reply) => {
+    // site: service templates are company-wide; a machine in the body is checked by the site guard.
     if (!requireMaintenancePermission(req, reply, "maintenance.templates.manage")) return;
     try {
       const body = req.body || {};
@@ -174,6 +175,7 @@ export default function registerServiceTemplatesRoutes(app, ctx) {
   });
 
   app.post("/service-templates/:id/assignments", async (req, reply) => {
+    // site: the machine, work order, plan or trip in the body is checked by the site guard (utils/siteGuard.js).
     if (!requireMaintenancePermission(req, reply, "maintenance.templates.manage")) return;
     const templateId = Number(req.params?.id || 0);
     const template = db.prepare(`SELECT id FROM service_templates WHERE id = ?`).get(templateId);
@@ -249,6 +251,7 @@ export default function registerServiceTemplatesRoutes(app, ctx) {
   });
 
   app.post("/service-estimates", async (req, reply) => {
+    // site: the machine, work order, plan or trip in the body is checked by the site guard (utils/siteGuard.js).
     if (!requireMaintenancePermission(req, reply, "maintenance.estimates.create")) return;
     try {
       const body = req.body || {};
@@ -342,6 +345,7 @@ export default function registerServiceTemplatesRoutes(app, ctx) {
   });
 
   app.post("/service-estimates/:id/convert", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     if (!requireMaintenancePermission(req, reply, "maintenance.estimates.convert")) return;
     try {
       const id = Number(req.params?.id || 0);

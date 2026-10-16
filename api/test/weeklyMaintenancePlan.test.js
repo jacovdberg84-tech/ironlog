@@ -57,7 +57,8 @@ test('weekly route selects the next rotating service and returns a draft without
    app:{get:(path,fn)=>{assert.equal(path,'/weekly-plan');handler=fn;}},
    db:{prepare:sql=>{reads++; if(sql.includes('FROM maintenance_plans'))return {all:()=>plans}; if(sql.includes('SUM(day_run)'))return {get:()=>({total_run:140,day_count:14,invalid_days:0})};throw Error('unexpected query');}},
    buildDueListFromPlans,getAssetCurrentHours:()=>499,getAssetCurrentHoursInfo:()=>({source:'daily_closing'}),meterUnitForAsset:()=> 'hours',
-   buildUpcomingServiceCostForecasts:(_db,rows)=>rows.map(r=>({...r,forecast:{}})),buildWeeklyMaintenancePlan:build
+   buildUpcomingServiceCostForecasts:(_db,rows)=>rows.map(r=>({...r,forecast:{}})),buildWeeklyMaintenancePlan:build,
+   andSite:()=>'' // site filter (utils/sites.js); this test has one site
  });
  vm.runInContext(route,context);
  const reply={send:value=>value,code:()=>{throw Error('unexpected error');}};

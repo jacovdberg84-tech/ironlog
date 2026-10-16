@@ -10,6 +10,7 @@ import { getCompanyProfile, reportBanner } from "../../utils/companyProfile.js";
 import { isDate } from "../../utils/request.js";
 import { listPlannedMaintenanceForDate } from "../../utils/shortBreakdowns.js";
 import { capDowntime, downtimeCapForRun } from "../../utils/downtimeCap.js";
+import { andAssetSite, andSite } from "../../utils/sites.js";
 
 export default function registerPeriodReportsRoutes(app, ctx) {
   const {
@@ -1172,7 +1173,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         ), 0) AS logged_days_in_range
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
-      WHERE b.breakdown_date BETWEEN ? AND ?
+      WHERE b.breakdown_date BETWEEN ? AND ?${andSite("a", req)}
       ORDER BY downtime_hours DESC
       LIMIT 25
     `).all(start, end, start, end).map((r) => ({
@@ -1199,7 +1200,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         ), 0) AS current_hours
       FROM maintenance_plans mp
       JOIN assets a ON a.id = mp.asset_id
-      WHERE mp.active = 1
+      WHERE mp.active = 1${andSite("a", req)}
         AND a.active = 1
         AND a.is_standby = 0
     `).all(end).map(r => {
@@ -1248,13 +1249,13 @@ export default function registerPeriodReportsRoutes(app, ctx) {
       SELECT COALESCE(SUM(fl.liters * COALESCE(fl.unit_cost_per_liter, a.fuel_cost_per_liter, ?)), 0) AS value
       FROM fuel_logs fl
       JOIN assets a ON a.id = fl.asset_id
-      WHERE fl.log_date BETWEEN ? AND ?
+      WHERE fl.log_date BETWEEN ? AND ?${andSite("a", req)}
     `).get(defaults.fuel_cost_per_liter_default, start, end);
 
     const lubeCostRow = db.prepare(`
       SELECT COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS value
       FROM oil_logs ol
-      WHERE ol.log_date BETWEEN ? AND ?
+      WHERE ol.log_date BETWEEN ? AND ?${andAssetSite("ol.asset_id", req)}
     `).get(defaults.lube_cost_per_qty_default, start, end);
 
     const smCols = db.prepare(`PRAGMA table_info(stock_movements)`).all();
@@ -1273,7 +1274,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         COALESCE(SUM(COALESCE(w.labor_hours, 0)), 0) AS labor_hours,
         COALESCE(SUM(COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, ?)), 0) AS labor_cost
       FROM work_orders w
-      WHERE DATE(COALESCE(w.completed_at, w.closed_at)) BETWEEN ? AND ?
+      WHERE DATE(COALESCE(w.completed_at, w.closed_at)) BETWEEN ? AND ?${andAssetSite("w.asset_id", req)}
         AND w.status IN ('completed', 'approved', 'closed')
     `).get(defaults.labor_cost_per_hour_default, start, end);
 
@@ -1282,7 +1283,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
       FROM breakdown_downtime_logs l
       JOIN breakdowns b ON b.id = l.breakdown_id
       JOIN assets a ON a.id = b.asset_id
-      WHERE l.log_date BETWEEN ? AND ?
+      WHERE l.log_date BETWEEN ? AND ?${andSite("a", req)}
     `).get(defaults.downtime_cost_per_hour_default, start, end);
 
     const totalCost = Number(
@@ -1678,7 +1679,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         op_date, tonnes_moved, product_type, product_produced, trucks_loaded, weighbridge_amount,
         trucks_delivered, product_delivered, client_delivered_to, notes
       FROM operations_logs
-      WHERE op_date BETWEEN ? AND ?
+      WHERE op_date BETWEEN ? AND ?${andSite(null, req)}
       ORDER BY op_date ASC, id ASC
       LIMIT 1000
     `).all(start, end);
@@ -1701,7 +1702,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         IFNULL(SUM(product_produced), 0) AS product_produced,
         IFNULL(SUM(product_delivered), 0) AS product_delivered
       FROM operations_logs
-      WHERE op_date BETWEEN ? AND ?
+      WHERE op_date BETWEEN ? AND ?${andSite(null, req)}
       GROUP BY COALESCE(NULLIF(TRIM(product_type), ''), 'Unspecified')
       ORDER BY tonnes_moved DESC
       LIMIT 100
@@ -1714,7 +1715,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         IFNULL(SUM(trucks_delivered), 0) AS trucks_delivered,
         IFNULL(SUM(product_delivered), 0) AS product_delivered
       FROM operations_logs
-      WHERE op_date BETWEEN ? AND ?
+      WHERE op_date BETWEEN ? AND ?${andSite(null, req)}
       GROUP BY COALESCE(NULLIF(TRIM(client_delivered_to), ''), 'Unspecified')
       ORDER BY product_delivered DESC
       LIMIT 100
@@ -1726,7 +1727,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         COALESCE(SUM(COALESCE(fl.hours_run, 0)), 0) AS run_hours_ref,
         COUNT(*) AS entries
       FROM fuel_logs fl
-      WHERE fl.log_date BETWEEN ? AND ?
+      WHERE fl.log_date BETWEEN ? AND ?${andAssetSite("fl.asset_id", req)}
     `).get(start, end);
 
     const oilUsageSummary = db.prepare(`
@@ -1734,7 +1735,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         COALESCE(SUM(ol.quantity), 0) AS oil_qty,
         COUNT(*) AS entries
       FROM oil_logs ol
-      WHERE ol.log_date BETWEEN ? AND ?
+      WHERE ol.log_date BETWEEN ? AND ?${andAssetSite("ol.asset_id", req)}
     `).get(start, end);
 
     const fuelUsageByAsset = db.prepare(`
@@ -1746,7 +1747,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         COUNT(*) AS entries
       FROM fuel_logs fl
       JOIN assets a ON a.id = fl.asset_id
-      WHERE fl.log_date BETWEEN ? AND ?
+      WHERE fl.log_date BETWEEN ? AND ?${andAssetSite("fl.asset_id", req)}
       GROUP BY a.id
       ORDER BY fuel_liters DESC
       LIMIT 25
@@ -1760,7 +1761,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         COUNT(*) AS entries
       FROM oil_logs ol
       JOIN assets a ON a.id = ol.asset_id
-      WHERE ol.log_date BETWEEN ? AND ?
+      WHERE ol.log_date BETWEEN ? AND ?${andAssetSite("ol.asset_id", req)}
       GROUP BY a.id
       ORDER BY oil_qty DESC
       LIMIT 25
@@ -1927,7 +1928,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         op_date, tonnes_moved, product_type, product_produced, trucks_loaded, weighbridge_amount,
         trucks_delivered, product_delivered, client_delivered_to, notes
       FROM operations_logs
-      WHERE op_date BETWEEN ? AND ?
+      WHERE op_date BETWEEN ? AND ?${andSite(null, req)}
       ORDER BY op_date ASC, id ASC
       LIMIT 5000
     `).all(start, end);
@@ -1943,7 +1944,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         IFNULL(SUM(trucks_delivered), 0) AS trucks_delivered,
         IFNULL(SUM(product_delivered), 0) AS product_delivered
       FROM operations_logs
-      WHERE op_date BETWEEN ? AND ?
+      WHERE op_date BETWEEN ? AND ?${andSite(null, req)}
       GROUP BY op_date
       ORDER BY op_date ASC
     `).all(start, end);
@@ -1956,7 +1957,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         IFNULL(SUM(product_produced), 0) AS product_produced,
         IFNULL(SUM(product_delivered), 0) AS product_delivered
       FROM operations_logs
-      WHERE op_date BETWEEN ? AND ?
+      WHERE op_date BETWEEN ? AND ?${andSite(null, req)}
       GROUP BY COALESCE(NULLIF(TRIM(product_type), ''), 'Unspecified')
       ORDER BY tonnes_moved DESC
     `).all(start, end);
@@ -1968,7 +1969,7 @@ export default function registerPeriodReportsRoutes(app, ctx) {
         IFNULL(SUM(trucks_delivered), 0) AS trucks_delivered,
         IFNULL(SUM(product_delivered), 0) AS product_delivered
       FROM operations_logs
-      WHERE op_date BETWEEN ? AND ?
+      WHERE op_date BETWEEN ? AND ?${andSite(null, req)}
       GROUP BY COALESCE(NULLIF(TRIM(client_delivered_to), ''), 'Unspecified')
       ORDER BY product_delivered DESC
     `).all(start, end);

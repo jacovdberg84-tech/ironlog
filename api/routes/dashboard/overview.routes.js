@@ -855,6 +855,7 @@ export default function registerOverviewRoutes(app, ctx) {
 
   // POST /api/dashboard/workorders/:id/nudge
   app.post("/workorders/:id/nudge", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     if (!requireRoles(req, reply, ["admin", "supervisor", "artisan"])) return;
     const id = Number(req.params?.id || 0);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "valid work order id required" });

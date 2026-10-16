@@ -5,6 +5,7 @@ import { normalizeMdmCode, validateAgainstMdmPolicy, validatePartGovernanceOptio
 import { writeAudit } from "../../utils/audit.js";
 import { autoCategorizePart } from "../../utils/stockCategory.js";
 import { REVERSAL_ACTION, recentReceipts, reversibleReceipt } from "../../utils/stockReversal.js";
+import { andSite } from "../../utils/sites.js";
 
 export default function registerMovementsRoutes(app, ctx) {
   const {
@@ -379,7 +380,8 @@ export default function registerMovementsRoutes(app, ctx) {
     const start = String(req.query?.start || "").trim();
     const end = String(req.query?.end || "").trim();
 
-    const where = [];
+    // Parts issued to this site's machines.
+    const where = [`1${andSite("a", req)}`];
     const params = [];
     if (asset_code) {
       where.push("a.asset_code = ?");

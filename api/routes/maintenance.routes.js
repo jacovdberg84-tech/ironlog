@@ -46,6 +46,7 @@ import registerPartsRequestsRoutes from "./maintenance/parts-requests.routes.js"
 import registerMechanicLaborRoutes from "./maintenance/mechanic-labor.routes.js";
 import registerCareMaintenanceRoutes from "./maintenance/care-maintenance.routes.js";
 import { ensureStockCategorySchema, oilPartSql as oilCategorySql } from "../utils/stockCategory.js";
+import { ensureAssetSiteColumn } from "../utils/sites.js";
 
 function isMonth(s) {
   return /^\d{4}-\d{2}$/.test(String(s || "").trim());
@@ -1521,6 +1522,7 @@ function buildInsightsBreakdownLaborIncidents(dbConn, startDate, endDate, opts =
 
 export default async function maintenanceRoutes(app) {
   ensureAuditTable(db);
+  ensureAssetSiteColumn(db);
   // These tables store reusable service definitions and cost snapshots. They
   // deliberately do not create stock movements; issuing remains a workshop/stores action.
   ensureServiceTemplateSchema(db);

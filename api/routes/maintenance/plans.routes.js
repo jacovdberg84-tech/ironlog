@@ -8,6 +8,7 @@ import { db } from "../../db/client.js";
 import { enrichDueRowsWithEstimates } from "../../utils/maintenanceEstimates.js";
 import { isDate } from "../../utils/request.js";
 import { writeAudit } from "../../utils/audit.js";
+import { andAssetSite, andSite } from "../../utils/sites.js";
 
 export default function registerPlansRoutes(app, ctx) {
   const {
@@ -177,6 +178,7 @@ export default function registerPlansRoutes(app, ctx) {
   // POST /api/maintenance/plans
   // =====================================================
   app.post("/plans", async (req, reply) => {
+    // site: the machine, work order, plan or trip in the body is checked by the site guard (utils/siteGuard.js).
     try {
       const asset_id = Number(req.body?.asset_id || 0);
       const service_name = String(req.body?.service_name || "").trim();
@@ -251,6 +253,7 @@ export default function registerPlansRoutes(app, ctx) {
   // PUT /api/maintenance/plans/:id
   // =====================================================
   app.put("/plans/:id", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     try {
       const id = Number(req.params?.id || 0);
       if (!id) {
@@ -437,6 +440,7 @@ export default function registerPlansRoutes(app, ctx) {
   // POST /api/maintenance/plans/:id/rebase-last-service
   // =====================================================
   app.post("/plans/:id/rebase-last-service", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     try {
       const idFromPath = Number(req.params?.id || 0);
       const idFromBody = Number(req.body?.plan_id || 0);
@@ -611,7 +615,7 @@ export default function registerPlansRoutes(app, ctx) {
               ), 0) AS current_hours
             FROM maintenance_plans mp
             JOIN assets a ON a.id = mp.asset_id
-            WHERE mp.active = 1
+            WHERE mp.active = 1${andSite("a", req)}
               AND a.active = 1
               AND a.is_standby = 0
               AND a.archived = 0
@@ -637,7 +641,7 @@ export default function registerPlansRoutes(app, ctx) {
               ), 0) AS current_hours
             FROM maintenance_plans mp
             JOIN assets a ON a.id = mp.asset_id
-            WHERE mp.active = 1
+            WHERE mp.active = 1${andSite("a", req)}
               AND a.active = 1
               AND a.is_standby = 0
               AND a.archived = 0
@@ -697,7 +701,7 @@ export default function registerPlansRoutes(app, ctx) {
           a.category
         FROM maintenance_plans mp
         JOIN assets a ON a.id = mp.asset_id
-        WHERE mp.active = 1
+        WHERE mp.active = 1${andSite("a", req)}
           AND a.active = 1
           AND a.is_standby = 0
           AND a.archived = 0
@@ -709,7 +713,7 @@ export default function registerPlansRoutes(app, ctx) {
           DATE(COALESCE(w.closed_at, w.completed_at)) AS last_serviced_date,
           COALESCE(w.closed_at, w.completed_at) AS last_serviced_at
         FROM work_orders w
-        WHERE w.source = 'service'
+        WHERE w.source = 'service'${andAssetSite("w.asset_id", req)}
           AND w.reference_id = ?
           AND w.status IN ('completed', 'approved', 'closed')
         ORDER BY COALESCE(w.closed_at, w.completed_at) DESC
@@ -749,7 +753,7 @@ export default function registerPlansRoutes(app, ctx) {
           DATE(COALESCE(w.closed_at, w.completed_at)) AS last_serviced_date,
           COALESCE(w.closed_at, w.completed_at) AS last_serviced_at
         FROM work_orders w
-        WHERE w.source = 'service'
+        WHERE w.source = 'service'${andAssetSite("w.asset_id", req)}
           AND w.asset_id = ?
           AND w.status IN ('completed', 'approved', 'closed')
         ORDER BY COALESCE(w.closed_at, w.completed_at) DESC
@@ -889,6 +893,7 @@ export default function registerPlansRoutes(app, ctx) {
   // Body: { asset_id, service_name, service_date, service_hours?, notes?, update_plan_last_hours?, plan_id? }
   // =====================================================
   app.post("/history/backfill", async (req, reply) => {
+    // site: the machine, work order, plan or trip in the body is checked by the site guard (utils/siteGuard.js).
     try {
       const body = req.body || {};
       const assetId = Number(body.asset_id || 0);
@@ -1014,13 +1019,13 @@ export default function registerPlansRoutes(app, ctx) {
       const assetCode = String(req.query?.asset_code || "").trim();
       if (!assetId && assetCode) {
         const a = db.prepare(`
-          SELECT id FROM assets WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?)) LIMIT 1
+          SELECT id FROM assets WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?))${andSite(null, req)} LIMIT 1
         `).get(assetCode);
         assetId = Number(a?.id || 0);
       }
       const limit = Math.max(1, Math.min(500, Number(req.query?.limit || 200)));
       const includeWorkOrders = String(req.query?.include_work_orders || "1").trim() !== "0";
-      const where = assetId > 0 ? "WHERE h.asset_id = ?" : "";
+      const where = `WHERE 1${andSite("a", req)}` + (assetId > 0 ? " AND h.asset_id = ?" : "");
       const backfillRows = db.prepare(`
         SELECT
           h.id,
@@ -1064,7 +1069,7 @@ export default function registerPlansRoutes(app, ctx) {
           LEFT JOIN maintenance_plans mp ON mp.id = w.reference_id
           WHERE LOWER(COALESCE(w.source, '')) = 'service'
             AND LOWER(COALESCE(w.status, '')) IN ('completed', 'approved', 'closed')
-            ${woWhere}
+            ${woWhere}${andSite("a", req)}
           ORDER BY COALESCE(w.closed_at, w.completed_at) DESC, w.id DESC
           LIMIT ?
         `).all(...(assetId > 0 ? [assetId, limit] : [limit]));
@@ -1182,7 +1187,7 @@ export default function registerPlansRoutes(app, ctx) {
               ), 0) AS current_hours
             FROM maintenance_plans mp
             JOIN assets a ON a.id = mp.asset_id
-            WHERE mp.active = 1
+            WHERE mp.active = 1${andSite("a", req)}
               AND a.active = 1
               AND a.is_standby = 0
               AND a.archived = 0
@@ -1206,7 +1211,7 @@ export default function registerPlansRoutes(app, ctx) {
               ), 0) AS current_hours
             FROM maintenance_plans mp
             JOIN assets a ON a.id = mp.asset_id
-            WHERE mp.active = 1
+            WHERE mp.active = 1${andSite("a", req)}
               AND a.active = 1
               AND a.is_standby = 0
               AND a.archived = 0
@@ -1398,7 +1403,7 @@ export default function registerPlansRoutes(app, ctx) {
               ), 0) AS current_hours
             FROM maintenance_plans mp
             JOIN assets a ON a.id = mp.asset_id
-            WHERE mp.active = 1
+            WHERE mp.active = 1${andSite("a", req)}
               AND a.active = 1
               AND a.is_standby = 0
               AND a.archived = 0
@@ -1415,7 +1420,7 @@ export default function registerPlansRoutes(app, ctx) {
               a.asset_name
             FROM maintenance_plans mp
             JOIN assets a ON a.id = mp.asset_id
-            WHERE mp.active = 1
+            WHERE mp.active = 1${andSite("a", req)}
               AND a.active = 1
               AND a.is_standby = 0
               AND a.archived = 0

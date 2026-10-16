@@ -12,6 +12,7 @@ import {
 import { buildScheduledDowntimeCost } from "../utils/downtimeCosting.js";
 import { getMonthlyBudgetRow, getOperatingBudgetAmount, upsertMonthlyBudget } from "../utils/monthlyBudget.js";
 import { getRole, getUser } from "../utils/request.js";
+import { andAssetSite, andSite } from "../utils/sites.js";
 
 function getRoles(req) {
   const many = String(req.headers["x-user-roles"] || "")
@@ -645,7 +646,7 @@ export default async function financeRoutes(app) {
     let downtimeRows = [];
     const scheduledDowntime = buildScheduledDowntimeCost(db, period, {
       defaultScheduledHours: 10,
-      downtimeRateDefault,
+      downtimeRateDefault: downtimeDefault,
     });
     downtimeRows = scheduledDowntime.financeRows;
 
@@ -1226,7 +1227,7 @@ export default async function financeRoutes(app) {
       JOIN assets a ON a.id = dh.asset_id
       WHERE dh.log_date BETWEEN DATE(?) AND DATE(?)
         AND dh.hours_run > 0
-        AND a.is_standby = 0
+        AND a.is_standby = 0${andSite("a", req)}
       GROUP BY dh.log_date
     `).all(start, end);
     const run_hours = dhRows.reduce((s, r) => s + Number(r.run_hours || 0), 0);
@@ -1234,11 +1235,12 @@ export default async function financeRoutes(app) {
     const downtimeRow = db.prepare(`
       SELECT COALESCE(SUM(hours_down), 0) AS h
       FROM breakdown_downtime_logs WHERE log_date BETWEEN DATE(?) AND DATE(?)
+        AND breakdown_id IN (SELECT id FROM breakdowns WHERE 1${andAssetSite("asset_id", req)})
     `).get(start, end);
     const downtime_hours = Number(downtimeRow?.h || 0);
     const breakdownCountRow = db.prepare(`
       SELECT COUNT(*) AS c FROM breakdowns
-      WHERE DATE(COALESCE(reported_at, created_at, updated_at)) BETWEEN DATE(?) AND DATE(?)
+      WHERE DATE(COALESCE(reported_at, created_at, updated_at)) BETWEEN DATE(?) AND DATE(?)${andAssetSite("asset_id", req)}
     `).get(start, end);
     const breakdowns = Number(breakdownCountRow?.c || 0);
     const availability = available_hours > 0 ? ((available_hours - downtime_hours) / available_hours) * 100 : null;

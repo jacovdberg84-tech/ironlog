@@ -27,6 +27,7 @@ import {
 import { db } from "../db/client.js";
 import { getPlanningSnapshot, isPlanningQuestion } from "../utils/costingGaps.js";
 import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
+import { andAssetSite, andSite } from "../utils/sites.js";
 
 function toBool(v) {
   const s = String(v || "").trim().toLowerCase();
@@ -1705,11 +1706,12 @@ export default async function ironmindRoutes(app) {
           SELECT COALESCE(SUM(l.hours_down), 0) AS h
           FROM breakdown_downtime_logs l
           WHERE l.log_date BETWEEN ? AND ?
+            AND l.breakdown_id IN (SELECT id FROM breakdowns WHERE 1${andAssetSite("asset_id", req)})
         `).get(start, end)?.h || 0);
         const openBreakdowns = Number(db.prepare(`
           SELECT COUNT(*) AS c
           FROM breakdowns
-          WHERE status = 'OPEN'
+          WHERE status = 'OPEN'${andAssetSite("asset_id", req)}
         `).get()?.c || 0);
         const overdueRows = overduePmRows();
         const topDownRows = db.prepare(`
@@ -1720,6 +1722,7 @@ export default async function ironmindRoutes(app) {
           JOIN breakdowns b ON b.id = l.breakdown_id
           JOIN assets a ON a.id = b.asset_id
           WHERE l.log_date BETWEEN ? AND ?
+            AND l.breakdown_id IN (SELECT id FROM breakdowns WHERE 1${andAssetSite("asset_id", req)})
           GROUP BY a.asset_code
           ORDER BY downtime_hours DESC, a.asset_code ASC
           LIMIT 3
@@ -1771,7 +1774,7 @@ export default async function ironmindRoutes(app) {
         LEFT JOIN breakdown_downtime_logs l
           ON l.breakdown_id = b.id
          AND l.log_date BETWEEN ? AND ?
-        WHERE UPPER(a.asset_code) = UPPER(?)
+        WHERE UPPER(a.asset_code) = UPPER(?)${andSite("a", req)}
       `).get(start, end, assetCode);
       if (!row?.asset_code) {
         const broad = buildFleetSnapshotText();
@@ -1784,14 +1787,14 @@ export default async function ironmindRoutes(app) {
         SELECT COUNT(*) AS c
         FROM breakdowns b
         JOIN assets a ON a.id = b.asset_id
-        WHERE UPPER(a.asset_code) = UPPER(?)
+        WHERE UPPER(a.asset_code) = UPPER(?)${andSite("a", req)}
           AND b.breakdown_date BETWEEN ? AND ?
       `).get(assetCode, start, end);
       const openBreakdown = db.prepare(`
         SELECT b.id, b.breakdown_date
         FROM breakdowns b
         JOIN assets a ON a.id = b.asset_id
-        WHERE UPPER(a.asset_code) = UPPER(?)
+        WHERE UPPER(a.asset_code) = UPPER(?)${andSite("a", req)}
           AND b.status = 'OPEN'
         ORDER BY b.id DESC
         LIMIT 1
@@ -1811,7 +1814,7 @@ export default async function ironmindRoutes(app) {
             COALESCE(a.baseline_fuel_l_per_hour, 0) AS baseline_lph
           FROM assets a
           LEFT JOIN fuel_logs fl ON fl.asset_id = a.id AND fl.log_date BETWEEN ? AND ?
-          WHERE UPPER(a.asset_code) = UPPER(?)
+          WHERE UPPER(a.asset_code) = UPPER(?)${andSite("a", req)}
           GROUP BY a.id
         `).get(start, end, assetCode);
         if (!fuelRow) {
@@ -1852,7 +1855,7 @@ export default async function ironmindRoutes(app) {
           FROM breakdown_downtime_logs l
           JOIN breakdowns b ON b.id = l.breakdown_id
           JOIN assets a ON a.id = b.asset_id
-          WHERE UPPER(a.asset_code) = UPPER(?)
+          WHERE UPPER(a.asset_code) = UPPER(?)${andSite("a", req)}
             AND l.log_date BETWEEN ? AND ?
         `).get(assetCode, start, end);
         const incidents = Number(recurring?.incidents || 0);
@@ -1880,7 +1883,7 @@ export default async function ironmindRoutes(app) {
           SELECT mp.service_name, mp.interval_hours, mp.last_service_hours
           FROM maintenance_plans mp
           JOIN assets a ON a.id = mp.asset_id
-          WHERE UPPER(a.asset_code) = UPPER(?)
+          WHERE UPPER(a.asset_code) = UPPER(?)${andSite("a", req)}
             AND mp.active = 1
         `).all(assetCode).map((plan) => {
           const nextDue = Number(plan.last_service_hours || 0) + Number(plan.interval_hours || 0);
@@ -2152,6 +2155,7 @@ export default async function ironmindRoutes(app) {
   // POST /api/ironmind/rsg/plan
   // Body: { asset_code?, equipment_name?, service_hours? }
   app.post("/rsg/plan", async (req, reply) => {
+    // site: the machine, work order, plan or trip in the body is checked by the site guard (utils/siteGuard.js).
     try {
       const body = req.body || {};
       const serviceHours = Math.max(250, Number(body.service_hours || 2000));
@@ -2191,6 +2195,7 @@ export default async function ironmindRoutes(app) {
   // POST /api/ironmind/rsg/create-wo
   // Body: { asset_code, service_hours?, equipment_name? }
   app.post("/rsg/create-wo", async (req, reply) => {
+    // site: the machine, work order, plan or trip in the body is checked by the site guard (utils/siteGuard.js).
     try {
       const body = req.body || {};
       const assetCode = String(body.asset_code || "").trim().toUpperCase();
@@ -2255,7 +2260,7 @@ export default async function ironmindRoutes(app) {
       const download = String(req.query?.download || "").trim() === "1";
       if (!assetCodeIn) return reply.code(400).send({ ok: false, error: "asset_code is required" });
 
-      const asset = db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE UPPER(asset_code)=UPPER(?) LIMIT 1`).get(assetCodeIn);
+      const asset = db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE UPPER(asset_code)=UPPER(?)${andSite(null, req)} LIMIT 1`).get(assetCodeIn);
       if (!asset) return reply.code(404).send({ ok: false, error: `asset not found: ${assetCodeIn}` });
 
       const rsg = await buildRsgPlan({

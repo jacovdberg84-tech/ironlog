@@ -41,34 +41,49 @@ export const RECORD_RULES = [
   [/^\/stock\/part-orders\/(\d+)(?:\/|$)/, "stores_part_orders", "id"],
   [/^\/tasks\/(\d+)(?:\/|$)/, "tasks", "id"],
   [/^\/projects\/(\d+)$/, "projects", "id"],
+  [/^\/dashboard\/workorders\/(\d+)\//, "work_orders", "id"],
+  [/^\/maintenance\/plans\/(\d+)(?:\/|$)/, "maintenance_plans", "id"],
+  [/^\/maintenance\/service-estimates\/(\d+)(?:\/|$)/, "service_estimates", "id"],
+  [/^\/maintenance\/history\/backfill\/(\d+)$/, "maintenance_service_history", "id"],
+  [/^\/maintenance\/weekly-inspections\/assets\/(\d+)$/, "weekly_inspection_assets", "id"],
+  [/^\/maintenance\/histogram\/events\/(\d+)$/, "maintenance_histogram_events", "id"],
+  [/^\/executive\/evidence-packs\/(\d+)$/, "compliance_evidence_packs", "id"],
 ];
 
-const hasSiteColumn = new Map();
-function siteColumn(db, table) {
-  if (!hasSiteColumn.has(table)) {
+const columnCache = new Map();
+function hasColumn(db, table, column) {
+  const key = `${table}.${column}`;
+  if (!columnCache.has(key)) {
     let ok = false;
     try {
-      ok = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === "site_code");
+      ok = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
     } catch {}
-    hasSiteColumn.set(table, ok);
+    columnCache.set(key, ok);
   }
-  return hasSiteColumn.get(table);
+  return columnCache.get(key);
 }
 
 const norm = (s) => String(s ?? "").trim().toLowerCase() || defaultSite();
 
-/** Site of one record (null when there is no such record or the table has no site). */
+/**
+ * Site of one record (null when there is no such record or no way to tell). A record without
+ * its own site (a maintenance plan, a service estimate) is on its machine's site.
+ */
 export function recordSite(db, table, column, value) {
-  if (!siteColumn(db, table)) return null;
   try {
-    const row = db.prepare(`SELECT site_code FROM ${table} WHERE ${column} = ? COLLATE NOCASE LIMIT 1`).get(value);
-    return row ? norm(row.site_code) : null;
-  } catch {
-    return null;
-  }
+    if (hasColumn(db, table, "site_code")) {
+      const row = db.prepare(`SELECT site_code FROM ${table} WHERE ${column} = ? COLLATE NOCASE LIMIT 1`).get(value);
+      return row ? norm(row.site_code) : null;
+    }
+    if (hasColumn(db, table, "asset_id")) {
+      const row = db.prepare(`SELECT a.site_code FROM ${table} t JOIN assets a ON a.id = t.asset_id WHERE t.${column} = ? COLLATE NOCASE LIMIT 1`).get(value);
+      return row ? norm(row.site_code) : null;
+    }
+  } catch {}
+  return null;
 }
 
-/** Records a request names: by address, and machines, work orders and breakdowns named in the body. */
+/** Records a request names: by address, and machines, work orders, breakdowns, plans and trips named in the body. */
 export function namedRecords(path, body) {
   const out = [];
   const rel = String(path || "").replace(/^\/api/, "");
@@ -84,6 +99,8 @@ export function namedRecords(path, body) {
   if (b && typeof b.asset_code === "string" && b.asset_code.trim()) out.push({ table: "assets", column: "asset_code", value: b.asset_code.trim() });
   if (b && Number.isFinite(Number(b.work_order_id)) && Number(b.work_order_id) > 0) out.push({ table: "work_orders", column: "id", value: Number(b.work_order_id) });
   if (b && Number.isFinite(Number(b.breakdown_id)) && Number(b.breakdown_id) > 0) out.push({ table: "breakdowns", column: "id", value: Number(b.breakdown_id) });
+  if (b && Number.isFinite(Number(b.plan_id)) && Number(b.plan_id) > 0) out.push({ table: "maintenance_plans", column: "id", value: Number(b.plan_id) });
+  if (b && Number.isFinite(Number(b.trip_id)) && Number(b.trip_id) > 0) out.push({ table: "dispatch_trips", column: "id", value: Number(b.trip_id) });
   return out;
 }
 

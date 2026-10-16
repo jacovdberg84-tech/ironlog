@@ -14,6 +14,7 @@ import { getMonthlyBudgetRow, getOperatingBudgetAmount } from "../../utils/month
 import { summarizeFuelBenchmarkRows } from "../../utils/fuelRunFromLogs.js";
 import { assetConsumption, consumptionNote, ensureFuelBenchmarkSchema, sortBenchmarkRows } from "../../utils/fuelConsumption.js";
 import { isDate } from "../../utils/request.js";
+import { andAssetSite, andSite } from "../../utils/sites.js";
 
 export default function registerFuelLubeRoutes(app, ctx) {
   const {
@@ -52,7 +53,7 @@ export default function registerFuelLubeRoutes(app, ctx) {
         COUNT(*) AS entries
       FROM oil_logs ol
       JOIN assets a ON a.id = ol.asset_id
-      WHERE ol.log_date BETWEEN ? AND ?
+      WHERE ol.log_date BETWEEN ? AND ?${andSite("a", req)}
       GROUP BY a.id
       ORDER BY qty_total DESC, a.asset_code ASC
       LIMIT 400
@@ -78,7 +79,7 @@ export default function registerFuelLubeRoutes(app, ctx) {
       FROM oil_logs ol
       JOIN assets a ON a.id = ol.asset_id
       LEFT JOIN parts p ON UPPER(TRIM(p.part_code)) = UPPER(TRIM(COALESCE(ol.oil_type, '')))
-      WHERE ol.log_date BETWEEN ? AND ?
+      WHERE ol.log_date BETWEEN ? AND ?${andSite("a", req)}
       GROUP BY a.id, part_number, p.part_name
       ORDER BY a.asset_code ASC, qty_total DESC, part_number ASC
       LIMIT 1200
@@ -98,7 +99,7 @@ export default function registerFuelLubeRoutes(app, ctx) {
         COUNT(*) AS entries,
         COUNT(DISTINCT asset_id) AS assets
       FROM oil_logs
-      WHERE log_date BETWEEN ? AND ?
+      WHERE log_date BETWEEN ? AND ?${andAssetSite("asset_id", req)}
     `).get(lubeUnitFallback, start, end);
 
     const logoPath = path.join(process.cwd(), "branding", "logo.png");
@@ -1219,7 +1220,7 @@ export default function registerFuelLubeRoutes(app, ctx) {
         a.fuel_benchmark_set_at,
         ${sqlFuelMetricModeExpr("a")} AS metric_mode
       FROM assets a
-      WHERE a.asset_code = ?
+      WHERE a.asset_code = ?${andSite("a", req)}
     `).get(assetCode);
     if (!asset) return reply.code(404).send({ error: `asset not found: ${assetCode}` });
 

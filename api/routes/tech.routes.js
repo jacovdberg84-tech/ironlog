@@ -586,6 +586,7 @@ export default async function techRoutes(app) {
 
   // Findings (also used from the asset view without a work order).
   app.post("/findings", async (req, reply) => {
+    // site: the machine, work order, plan or trip in the body is checked by the site guard (utils/siteGuard.js).
     const result = await once(req, "finding", async () => {
       const text = String(req.body?.text || "").trim().slice(0, 2000);
       if (!text) return { ok: false, status: 400, error: "Write what you found." };
@@ -776,6 +777,7 @@ export default async function techRoutes(app) {
   const SHIFT_FIELDS = ["findings", "unplanned", "safety", "outstanding", "handover", "next_shift"];
 
   app.put("/shift", async (req, reply) => {
+    // site: a technician's own open shift.
     const me = userOf(req);
     const shift = openShift(me);
     if (!shift) return reply.code(404).send({ ok: false, error: "No open shift. Start your shift first." });
@@ -856,6 +858,7 @@ export default async function techRoutes(app) {
 
   // ---------------------------------------------------------------- My week
   app.get("/week", async (req) => {
+    // site: a technician's own week, on every site they worked.
     const me = userOf(req);
     const today = localDay();
     const days = [];
@@ -990,9 +993,10 @@ export default async function techRoutes(app) {
     }
     const inspCid = String(req.query?.inspection_client_id || "").trim();
     const insp = inspCid
-      ? db.prepare(`SELECT id FROM artisan_inspections WHERE client_id = ?`).get(inspCid)
-      : db.prepare(`SELECT id FROM artisan_inspections WHERE id = ?`).get(Number(req.query?.inspection_id || 0));
+      ? db.prepare(`SELECT id, site_code FROM artisan_inspections WHERE client_id = ?`).get(inspCid)
+      : db.prepare(`SELECT id, site_code FROM artisan_inspections WHERE id = ?`).get(Number(req.query?.inspection_id || 0));
     if (!insp) return reply.code(404).send({ ok: false, error: "Inspection not found for this photo" });
+    if (!requireRequestSite(req, reply, insp.site_code, "Inspection")) return;
     const part = await req.file();
     if (!part) return reply.code(400).send({ ok: false, error: "Attach a photo" });
     let buf;

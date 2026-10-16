@@ -14,8 +14,10 @@ import {
   asDateYYYYMMDD
 } from "../utils/csvImporter.js";
 import { holdsAnyRole } from "../utils/request.js";
+import { ensureAssetSiteColumn, requestSite, siteSql } from "../utils/sites.js";
 
 export default async function uploadRoutes(app) {
+  ensureAssetSiteColumn(db);
   // enable file uploads
   await app.register(multipart, {
     limits: { fileSize: 20 * 1024 * 1024 } // 20MB
@@ -69,14 +71,15 @@ export default async function uploadRoutes(app) {
   }
 
   // Helper prepared statements (after schema checks/column additions).
-  const getAssetIdByCode = db.prepare(`SELECT id FROM assets WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?))`);
-  const getAssetForHoursImport = db.prepare(`SELECT id, COALESCE(is_standby, 0) AS is_standby FROM assets WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?))`);
+  // Machines on the site the upload is for (the second value is requestSite(req)).
+  const getAssetIdByCode = db.prepare(`SELECT id FROM assets WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?)) AND ${siteSql("site_code")} = ?`);
+  const getAssetForHoursImport = db.prepare(`SELECT id, COALESCE(is_standby, 0) AS is_standby FROM assets WHERE UPPER(TRIM(asset_code)) = UPPER(TRIM(?)) AND ${siteSql("site_code")} = ?`);
   const getAssetForFuelImport = db.prepare(`
     SELECT
       a.id,
       ${sqlFuelMetricModeExpr("a")} AS metric_mode
     FROM assets a
-    WHERE UPPER(TRIM(a.asset_code)) = UPPER(TRIM(?))
+    WHERE UPPER(TRIM(a.asset_code)) = UPPER(TRIM(?)) AND ${siteSql("a.site_code")} = ?
   `);
   const getPartIdByCode = db.prepare(`SELECT id, unit_cost FROM parts WHERE part_code = ?`);
   const getWorkOrderById = db.prepare(`SELECT id, asset_id FROM work_orders WHERE id = ?`);
@@ -113,8 +116,8 @@ export default async function uploadRoutes(app) {
     requireHeaders(rows, ["asset_code", "asset_name", "category"]);
 
     const insert = db.prepare(`
-      INSERT INTO assets (asset_code, asset_name, category, is_standby, active)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO assets (asset_code, asset_name, category, is_standby, active, site_code)
+      VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(asset_code) DO UPDATE SET
         asset_name = excluded.asset_name,
         category = excluded.category,
@@ -131,7 +134,7 @@ export default async function uploadRoutes(app) {
         const active = asBool01(r.active, 1);
 
         if (!code || !name || !cat) continue;
-        insert.run(code, name, cat, standby, active);
+        insert.run(code, name, cat, standby, active, requestSite(req));
       }
     });
 
@@ -227,7 +230,7 @@ export default async function uploadRoutes(app) {
 
       for (const r of rows) {
         const assetCode = String(r.asset_code).trim();
-        const asset = getAssetIdByCode.get(assetCode);
+        const asset = getAssetIdByCode.get(assetCode, requestSite(req));
         if (!asset) continue;
 
         const date = asDateYYYYMMDD(r.work_date);
@@ -404,7 +407,7 @@ export default async function uploadRoutes(app) {
     for (let c = 1; c < header.length; c++) {
       const code = header[c];
       if (!code) continue;
-      const asset = getAssetForHoursImport.get(code);
+      const asset = getAssetForHoursImport.get(code, requestSite(req));
       if (!asset) { unknownCodes.push(code); continue; }
       assetCols.push({
         index: c,
@@ -716,7 +719,7 @@ export default async function uploadRoutes(app) {
 
       for (const r of rows) {
         const assetCode = String(pick(r, ["asset_code", "AssetCode", "ASSET_CODE", "Registration", "registration", "Reg", "reg"]) || "").trim();
-        const asset = getAssetForFuelImport.get(assetCode);
+        const asset = getAssetForFuelImport.get(assetCode, requestSite(req));
         if (!asset) continue;
 
         const date = asDateYYYYMMDD(toDateOnly(pick(r, ["log_date", "LogDate", "Date", "date"])));
@@ -831,7 +834,7 @@ export default async function uploadRoutes(app) {
     const tx = db.transaction(() => {
       for (const r of rows) {
         const assetCode = String(r.asset_code).trim();
-        const asset = getAssetIdByCode.get(assetCode);
+        const asset = getAssetIdByCode.get(assetCode, requestSite(req));
         if (!asset) continue;
 
         const date = asDateYYYYMMDD(r.log_date);
@@ -1020,7 +1023,7 @@ export default async function uploadRoutes(app) {
 
         let assetId = 0;
         if (assetCode) {
-          const asset = getAssetIdByCode.get(assetCode);
+          const asset = getAssetIdByCode.get(assetCode, requestSite(req));
           if (!asset) {
             skipped++;
             continue;
@@ -1107,7 +1110,7 @@ export default async function uploadRoutes(app) {
           continue;
         }
 
-        const asset = getAssetIdByCode.get(code);
+        const asset = getAssetIdByCode.get(code, requestSite(req));
         if (!asset) {
           skipped++;
           continue;
