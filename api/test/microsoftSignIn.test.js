@@ -107,7 +107,7 @@ test("only invited, active people get in; the Microsoft account is linked on fir
   assert.deepEqual([first.username, first.linked_now], ["ana", true]);
   const renamed = ms.matchUser(d, { ...claims, email: "ana.costa@pilotmining.co.mz" });
   assert.equal(renamed.username, "ana", "linked by Microsoft account ID, so a new email still works");
-  assert.equal(renamed.linked_now, undefined);
+  assert.equal(renamed.linked_now, false);
   const stranger = (() => { try { ms.matchUser(d, { tid: TENANT, oid: "oid-x", email: "ana.silva@pilotmining.co.mz" }); } catch (e) { return e.code; } })();
   assert.equal(stranger, "not_invited", "another account using the same email is refused once linked");
   d.prepare(`UPDATE users SET active = 0 WHERE username = 'ana'`).run();
