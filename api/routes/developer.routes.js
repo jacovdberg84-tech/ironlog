@@ -14,6 +14,7 @@ import {
   refreshDeveloperRow,
   validateRequest,
 } from "../utils/developerClaude.js";
+import { readAttachments } from "../utils/developerAttachments.js";
 
 const FINISHED = new Set(["deployed", "closed", "failed"]);
 
@@ -26,6 +27,8 @@ function requireAdmin(req, reply) {
 function publicRow(row) {
   let detail = null;
   try { detail = row.status_json ? JSON.parse(row.status_json) : null; } catch { detail = null; }
+  let attachments = [];
+  try { attachments = row.attachments_json ? JSON.parse(row.attachments_json) : []; } catch { attachments = []; }
   return {
     id: row.id,
     title: row.title,
@@ -40,6 +43,7 @@ function publicRow(row) {
     status: row.status,
     status_text: STATUS_TEXT[row.status] || row.status,
     checked_at: row.checked_at,
+    attachments,
     detail,
   };
 }
@@ -108,16 +112,19 @@ export default async function developerRoutes(app, opts = {}) {
     if (!requireAdmin(req, reply)) return;
     const input = validateRequest(req.body || {});
     if (input.error) return reply.code(400).send({ ok: false, error: input.error });
+    const docs = await readAttachments(req.body?.attachments);
+    if (docs.error) return reply.code(400).send({ ok: false, error: docs.error });
     const { s, gh } = client();
     if (!gh) return reply.code(409).send({ ok: false, error: "GitHub is not connected on the server yet. See the setup checklist." });
     const site = getSiteCode(req);
     const createdBy = getUser(req) || "admin";
+    const attachmentNames = docs.attachments.map((d) => d.name);
     const id = Number(db.prepare(`
-      INSERT INTO developer_requests (site_code, title, request_text, priority, model, created_by)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(site, input.title, input.request_text, input.priority, input.model, createdBy).lastInsertRowid);
+      INSERT INTO developer_requests (site_code, title, request_text, priority, model, created_by, attachments_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(site, input.title, input.request_text, input.priority, input.model, createdBy, attachmentNames.length ? JSON.stringify(attachmentNames) : null).lastInsertRowid);
     try {
-      const issue = await gh.post(`/repos/{repo}/issues`, buildIssue({ ...input, created_by: createdBy }));
+      const issue = await gh.post(`/repos/{repo}/issues`, buildIssue({ ...input, created_by: createdBy, attachments: docs.attachments }));
       db.prepare(`UPDATE developer_requests SET issue_number = ?, issue_url = ?, status = 'waiting', checked_at = datetime('now') WHERE id = ?`)
         .run(issue.number, issue.html_url, id);
     } catch (err) {

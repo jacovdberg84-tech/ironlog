@@ -12,6 +12,7 @@
 //                          Contents: read, Actions: read, Checks: read)
 //   IRONLOG_GITHUB_REPO   owner/name, default jacovdberg84-tech/ironlog
 import { db as defaultDb } from "../db/client.js";
+import { attachmentsMarkdown } from "./developerAttachments.js";
 
 export const DEFAULT_REPO = "jacovdberg84-tech/ironlog";
 export const MODELS = {
@@ -46,6 +47,11 @@ export function ensureDeveloperTables(dbConn = defaultDb) {
     );
     CREATE INDEX IF NOT EXISTS idx_developer_requests_issue ON developer_requests(issue_number);
   `);
+  // Names of the documents sent with a request; their text lives in the GitHub issue.
+  const cols = dbConn.prepare(`PRAGMA table_info(developer_requests)`).all();
+  if (!cols.some((c) => c.name === "attachments_json")) {
+    dbConn.exec(`ALTER TABLE developer_requests ADD COLUMN attachments_json TEXT`);
+  }
 }
 
 /** A small GitHub REST client; fetch is injectable for tests. */
@@ -83,7 +89,7 @@ function clean(value, max) {
 }
 
 /** The GitHub issue Claude works from. */
-export function buildIssue({ title, request_text, priority, model, created_by }) {
+export function buildIssue({ title, request_text, priority, model, created_by, attachments = [] }) {
   const body = [
     "@claude",
     "",
@@ -101,6 +107,7 @@ export function buildIssue({ title, request_text, priority, model, created_by })
     "- Run `npm test` in api/ before you finish and say whether it passed.",
     "- When you are done, summarise in plain language what changed and anything that still needs a person to check.",
     "- If something is unclear, ask in this issue instead of guessing.",
+    ...(attachments.length ? ["", attachmentsMarkdown(attachments)] : []),
   ].join("\n");
   return {
     title: `[IronLog] ${title}`,

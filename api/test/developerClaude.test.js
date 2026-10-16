@@ -146,6 +146,22 @@ test("a request travels from IronLog to Claude and back to a live deploy", async
   assert.equal(r.status_text, "Live");
 });
 
+test("uploaded documents go to Claude in the issue and are listed on the request", async () => {
+  const doc = { name: "change-spec.txt", data_base64: Buffer.from("Move the Save button to the top.").toString("base64") };
+  const res = await call("POST", "/requests", { title: "Save button", request_text: "Follow the attached spec for the stores screen.", attachments: [doc] });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.json().row.attachments, ["change-spec.txt"]);
+  const issue = gh.calls.filter((c) => c.method === "POST" && c.path === "/issues").pop();
+  assert.match(issue.body.body, /## Attached documents/);
+  assert.match(issue.body.body, /Move the Save button to the top\./);
+
+  const before = gh.calls.length;
+  const bad = await call("POST", "/requests", { title: "PDF", request_text: "Follow the attached PDF please.", attachments: [{ name: "spec.pdf", data_base64: "JVBERg==" }] });
+  assert.equal(bad.statusCode, 400);
+  assert.match(bad.json().error, /cannot be sent to Claude/);
+  assert.equal(gh.calls.length, before, "nothing is sent to GitHub when a document is refused");
+});
+
 test("closing a request closes its issue", async () => {
   const row = (await call("POST", "/requests", { title: "Not needed", request_text: "Change the login page colour." })).json().row;
   const closed = (await call("POST", `/requests/${row.id}/close`, { reason: "Changed my mind" })).json().row;
