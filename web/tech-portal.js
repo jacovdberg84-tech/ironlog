@@ -1001,6 +1001,17 @@
     return res;
   }
 
+  /** Breakdown job: what failed and how, picked from the company's lists (the foreman confirms them). */
+  function failurePickers(f) {
+    const name = (o) => (lang() === "pt" && o.label_pt) || o.label_en;
+    const opts = (list, picked) => `<option value="">${esc(T("Not sure"))}</option>${(list || []).map((o) => `<option value="${esc(o.code)}"${o.code === picked ? " selected" : ""}>${esc(name(o))}</option>`).join("")}`;
+    return `<label class="tp-label">${esc(T("What failed (component)"))}</label>
+        <select id="tpFailComp" class="tp-input" style="width:100%;max-width:100%">${opts(f.components, f.component)}</select>
+        <label class="tp-label">${esc(T("Problem seen"))}</label>
+        <select id="tpFailProb" class="tp-input" style="width:100%;max-width:100%">${opts(f.problems, f.problem)}</select>
+        <p class="tp-muted small">${esc(T("Optional. Your foreman checks it and adds the cause."))}</p>`;
+  }
+
   function askAction(woId, action, d) {
     if (action === "complete") {
       const lead = d?.me?.role !== "helper";
@@ -1009,7 +1020,8 @@
         ${lead ? `<label class="tp-label">${esc(T("What was done"))} <b>${esc(T("(required)"))}</b></label>
         <textarea id="tpDone" class="tp-input" rows="4" placeholder="${esc(T("e.g. Replaced hydraulic hose and clamp, tested under load, no leaks"))}"></textarea>
         <label class="tp-label">${esc(T("Labour hours (leave empty to use the job timer: {h})", { h: hrs(d?.time?.total_hours || 0) }))}</label>
-        <input id="tpDoneHours" class="tp-input" type="number" inputmode="decimal" min="0" step="0.25" placeholder="${esc(Number(d?.time?.total_hours || 0).toFixed(2))}" />` : `<p class="tp-muted">${esc(T("The lead technician completes the work order. This stops your time on it."))}</p>
+        <input id="tpDoneHours" class="tp-input" type="number" inputmode="decimal" min="0" step="0.25" placeholder="${esc(Number(d?.time?.total_hours || 0).toFixed(2))}" />
+        ${d?.failure && !d.failure.confirmed ? failurePickers(d.failure) : ""}` : `<p class="tp-muted">${esc(T("The lead technician completes the work order. This stops your time on it."))}</p>
         <textarea id="tpDone" class="tp-input" rows="2" placeholder="${esc(T("What you did (optional)"))}"></textarea>`}
         <div class="tp-row"><button type="button" class="tp-btn" data-act="closeSheet">${esc(T("Cancel"))}</button><button type="button" class="tp-btn ok grow" data-act="confirmComplete" data-wo="${woId}" data-lead="${lead ? 1 : 0}">${esc(T(lead ? "Complete job" : "Finish my part"))}</button></div>`);
       return;
@@ -1528,7 +1540,11 @@
         const lead = t.dataset.lead === "1";
         if (lead && !notes) return toast(T("Say what was done first."), "bad");
         const hours = Number(qs("tpDoneHours")?.value || 0);
-        const extra = lead ? { completion_notes: notes, ...(hours > 0 ? { labor_hours: hours } : {}) } : { note: notes || null };
+        const failure = {
+          ...(qs("tpFailComp")?.value ? { failure_component: qs("tpFailComp").value } : {}),
+          ...(qs("tpFailProb")?.value ? { failure_problem: qs("tpFailProb").value } : {}),
+        };
+        const extra = lead ? { completion_notes: notes, ...(hours > 0 ? { labor_hours: hours } : {}), ...failure } : { note: notes || null };
         t.disabled = true;
         await doAction(Number(t.dataset.wo), "complete", extra);
         closeSheet();

@@ -3,6 +3,7 @@ import { db } from "../db/client.js";
 import { notifyBreakdownCreated } from "../utils/pushNotify.js";
 import { closeWorkOrdersForClosedBreakdown } from "../utils/workOrderSync.js";
 import { ensureAssetSiteColumn, requestSite, requireRequestSite, siteSql } from "../utils/sites.js";
+import registerFailureCodeRoutes from "./breakdowns/failure-codes.routes.js";
 
 /** Parse YYYY-MM-DDTHH:mm (no timezone) as local wall time. */
 function parseLocalDateTime(s) {
@@ -69,6 +70,8 @@ export default async function breakdownRoutes(app) {
   tryAddColumn(`ALTER TABLE work_orders ADD COLUMN repair_progress TEXT`);
   tryAddColumn(`ALTER TABLE work_orders ADD COLUMN repair_progress_at TEXT`);
   tryAddColumn(`ALTER TABLE work_orders ADD COLUMN due_date TEXT`);
+  // Failure codes: the lists, the foreman's confirmation and the summary (routes/breakdowns/failure-codes.routes.js).
+  registerFailureCodeRoutes(app);
 
   /* =====================================================
      PREPARED STATEMENTS

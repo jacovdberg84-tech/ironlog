@@ -9,6 +9,7 @@
 - `api/routes/procurement/*.routes.js`
 - `api/routes/workorders/*.routes.js`
 - `api/routes/assets/*.routes.js`
+- `api/routes/breakdowns/*.routes.js`
 
 ## How it fits together
 
@@ -85,3 +86,7 @@ A helper only one feature file uses can simply live in that file.
 - `history.routes.js`: Asset hours and history
 - `qr-profiles.routes.js`: Asset, undercarriage and tyre QR profiles
 - `register.routes.js`: Asset register, fleet summary, hire register, cost centre export, create, archive and edit
+
+### `api/routes/breakdowns/`
+
+- `failure-codes.routes.js`: Failure codes on breakdowns (component, problem, cause, action; ISO 14224 style, EN/PT lists). Technicians suggest in the portal, foremen confirm on the Breakdowns page; lists, waiting list and summary (`api/utils/failureCodes.js`)

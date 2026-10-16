@@ -223,8 +223,11 @@ test("technician flow: today, start, finding, part, wait, resume, complete, shif
   assert.equal(view.team.helpers[0].username, "maria");
   assert.equal(view.parts.requests.length, 1);
   assert.ok(view.time.total_hours > 3, `total ${view.time.total_hours}`);
+  // A breakdown job offers what failed and how; "Hydraulics" (what failed) picks the component.
+  assert.equal(view.failure.component, "HYD");
+  assert.ok(view.failure.problems.some((p) => p.code === "BURST" && p.label_pt));
 
-  const done = await act("jose", "complete", { completion_notes: "Replaced hose and clamp, tested", client_event_id: "c1" });
+  const done = await act("jose", "complete", { completion_notes: "Replaced hose and clamp, tested", client_event_id: "c1", failure_component: "HYD", failure_problem: "BURST" });
   assert.equal(done.code, 200, JSON.stringify(done.body));
   const wo = db.prepare("SELECT status, labor_hours, completion_notes FROM work_orders WHERE id = 1").get();
   assert.equal(wo.status, "completed");
@@ -232,6 +235,8 @@ test("technician flow: today, start, finding, part, wait, resume, complete, shif
   // Jose 2.5 h (3 h minus 30 min waiting for parts) + Maria 2 h (stopped by the lead's completion).
   assert.ok(Math.abs(wo.labor_hours - 4.5) < 0.05, `labour ${wo.labor_hours}`);
   assert.equal(db.prepare("SELECT UPPER(status) AS s FROM breakdowns WHERE id = 1").get().s, "CLOSED");
+  assert.deepEqual(db.prepare("SELECT fc_component, fc_problem, fc_suggested_by, fc_confirmed_at FROM breakdowns WHERE id = 1").get(),
+    { fc_component: "HYD", fc_problem: "BURST", fc_suggested_by: "jose", fc_confirmed_at: null }, "the lead's suggestion waits for the foreman");
 
   // Shift report: timeline from activity, handover, then timesheet rows.
   const shift = (await call("jose", "PUT", "/shift", { handover: "T01AM back in service", safety: "none" })).body.shift;

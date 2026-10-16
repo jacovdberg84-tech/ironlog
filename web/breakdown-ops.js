@@ -863,11 +863,154 @@ async function closeBreakdownFromOps(breakdownId) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
-    setStatus(`Incident #${id} closed: machine back in service.`);
+    setStatus(`Incident #${id} closed: machine back in service. Add its failure codes below.`);
     refreshBreakdownOpsPanels();
+    fcFocusId = id;
+    loadFailureCodes().catch(() => {});
   } catch (e) {
     alert(e.message || String(e));
     setStatus("Close failed.");
+  }
+}
+
+// ---- Failure codes (api/routes/breakdowns/failure-codes.routes.js): the technician suggests component and
+// problem in the portal; the foreman checks them here and adds cause and action.
+const FC_KINDS = ["component", "problem", "cause", "action"];
+const FC_LIST_ROLES = ["admin", "supervisor", "workshop_admin", "plant_manager"];
+let fcLists = null;
+let fcRows = [];
+let fcFocusId = 0;
+
+async function loadFailureCodeLists(all = false) {
+  const data = await fetchJson(`${API}/breakdowns/failure-codes${all ? "?all=1" : ""}`);
+  if (!all) fcLists = data.lists;
+  return data.lists;
+}
+
+function fcSelect(kind, picked, id) {
+  const list = (fcLists?.[kind] || []).slice();
+  // A code switched off after it was used still shows on the breakdown that has it.
+  if (picked && !list.some((o) => o.code === picked)) list.push({ code: picked, label_en: `${picked} (no longer in use)` });
+  const opts = list.map((o) => `<option value="${escapeHtml(o.code)}"${o.code === picked ? " selected" : ""}>${escapeHtml(o.label_en)}</option>`).join("");
+  return `<select name="${kind}" data-id="${id}"><option value="">Choose…</option>${opts}</select>`;
+}
+
+function renderFailureCodeRows() {
+  const list = qs("boFcList");
+  if (!list) return;
+  const closedOnly = !!qs("boFcClosedOnly")?.checked;
+  const rows = fcRows.filter((r) => !closedOnly || String(r.status || "").toUpperCase() === "CLOSED" || Number(r.id) === fcFocusId);
+  list.innerHTML = "";
+  if (!rows.length) {
+    list.appendChild(item(`<small>${closedOnly ? "Every machine back in service in the last 90 days has its failure codes." : "Every breakdown of the last 90 days has its failure codes."}</small>`));
+    return;
+  }
+  rows.forEach((r) => {
+    const id = Number(r.id);
+    const component = r.fc_component || r.guess_component || "";
+    const suggested = r.fc_suggested_by
+      ? `Suggested by ${escapeHtml(r.fc_suggested_by)}${r.fc_suggested_at ? ` on ${escapeHtml(String(r.fc_suggested_at).slice(0, 10))}` : ""}`
+      : r.guess_component ? "Component taken from “what failed”" : "";
+    const row = item(
+      `<header><div><span class="wo-number">INCIDENT #${id}</span> <b>${escapeHtml(r.asset_code || "")}</b> <span class="muted">${escapeHtml(r.asset_name || "")}</span></div>` +
+      `<small class="muted">${escapeHtml(String(r.breakdown_date || ""))} · ${String(r.status || "").toUpperCase() === "CLOSED" ? "back in service" : "still down"} · ${Number(r.downtime_total_hours || 0).toFixed(1)} h down</small></header>` +
+      `<small>${escapeHtml(r.component || "")}${r.component && r.description ? " — " : ""}${escapeHtml(String(r.description || "").slice(0, 160))}</small>` +
+      `<div class="bo-fc-picks">` +
+        `<label>Component${fcSelect("component", component, id)}</label>` +
+        `<label>Problem${fcSelect("problem", r.fc_problem || "", id)}</label>` +
+        `<label>Cause${fcSelect("cause", r.fc_cause || "", id)}</label>` +
+        `<label>Action${fcSelect("action", r.fc_action || "", id)}</label>` +
+        `<button type="button" class="btn-primary bo-fc-save" data-id="${id}">Save</button>` +
+      `</div>` +
+      (suggested ? `<small class="muted">${suggested}</small>` : "")
+    );
+    row.classList.add("bo-fc-row");
+    row.setAttribute("data-id", String(id));
+    if (id === fcFocusId) row.classList.add("is-focus");
+    list.appendChild(row);
+  });
+  if (fcFocusId) list.querySelector(`.bo-fc-row[data-id="${fcFocusId}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function renderFailureSummary(sum) {
+  const box = qs("boFcSummary");
+  if (!box) return;
+  const t = sum?.totals || {};
+  const top = (title, rows) => `<div class="bo-fc-top"><h5>${title}</h5>${rows?.length
+    ? `<ol>${rows.slice(0, 5).map((r) => `<li>${escapeHtml(r.label)}: ${r.breakdowns} (${Number(r.downtime_hours || 0).toFixed(1)} h down)</li>`).join("")}</ol>`
+    : `<small class="muted">Nothing coded yet.</small>`}</div>`;
+  box.innerHTML =
+    `<div class="bo-fc-top"><h5>Last 90 days</h5><b>${t.confirmed || 0} of ${t.breakdowns || 0}</b> breakdowns have all four codes${t.coded > t.confirmed ? ` (${t.coded - t.confirmed} more have some)` : ""}.</div>` +
+    top("Top components", sum?.by_component) + top("Top causes", sum?.by_cause);
+}
+
+async function loadFailureCodes() {
+  if (!qs("boFcList")) return;
+  if (!fcLists) await loadFailureCodeLists();
+  const start = new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10);
+  const [pending, summary] = await Promise.all([
+    fetchJson(`${API}/breakdowns/failure-codes/pending`),
+    fetchJson(`${API}/breakdowns/failure-codes/summary?start=${start}`),
+  ]);
+  fcRows = Array.isArray(pending.rows) ? pending.rows : [];
+  renderFailureCodeRows();
+  renderFailureSummary(summary);
+}
+
+async function saveFailureCodeRow(btn) {
+  const id = Number(btn.getAttribute("data-id") || 0);
+  const row = btn.closest(".bo-fc-row");
+  if (!id || !row) return;
+  const body = Object.fromEntries(FC_KINDS.map((k) => [k, row.querySelector(`select[name="${k}"]`)?.value || ""]));
+  btn.disabled = true;
+  try {
+    const res = await fetchJson(`${API}/breakdowns/${id}/failure-codes`, { method: "PUT", body: JSON.stringify(body) });
+    setStatus(res.codes?.confirmed_at ? `Incident #${id}: failure codes confirmed.` : `Incident #${id}: saved. Pick all four to confirm.`);
+    if (fcFocusId === id) fcFocusId = 0;
+    await loadFailureCodes();
+  } catch (e) {
+    alert(e.message || String(e));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function fcEditRow(o = { code: "", label_en: "", label_pt: "", active: true }) {
+  const div = document.createElement("div");
+  div.className = "bo-fc-edit-row";
+  div.innerHTML = `<input class="fc-code" value="${escapeHtml(o.code)}" maxlength="16" placeholder="Code" ${o.code ? "readonly" : ""} />` +
+    `<input class="fc-en" value="${escapeHtml(o.label_en)}" maxlength="80" placeholder="English" />` +
+    `<input class="fc-pt" value="${escapeHtml(o.label_pt || "")}" maxlength="80" placeholder="Português" />` +
+    `<label class="chk"><input type="checkbox" class="fc-on" ${o.active !== false ? "checked" : ""} /> In use</label>`;
+  return div;
+}
+
+async function loadFailureCodeEditor() {
+  const box = qs("boFcEditRows");
+  if (!box) return;
+  const kind = qs("boFcEditKind")?.value || "component";
+  const lists = await loadFailureCodeLists(true);
+  box.innerHTML = "";
+  (lists[kind] || []).forEach((o) => box.appendChild(fcEditRow(o)));
+  setText("boFcEditMsg", "");
+}
+
+async function saveFailureCodeEditor() {
+  const kind = qs("boFcEditKind")?.value || "component";
+  const rows = Array.from(document.querySelectorAll("#boFcEditRows .bo-fc-edit-row")).map((r) => ({
+    code: r.querySelector(".fc-code").value.trim().toUpperCase(),
+    label_en: r.querySelector(".fc-en").value.trim(),
+    label_pt: r.querySelector(".fc-pt").value.trim(),
+    active: r.querySelector(".fc-on").checked,
+  })).filter((r) => r.code || r.label_en);
+  try {
+    await fetchJson(`${API}/breakdowns/failure-codes/${kind}`, { method: "PUT", body: JSON.stringify({ rows }) });
+    fcLists = null;
+    await loadFailureCodeEditor();
+    await loadFailureCodes();
+    setText("boFcEditMsg", "Saved.");
+  } catch (e) {
+    setText("boFcEditMsg", `Not saved: ${e.message || e}`);
   }
 }
 
@@ -1105,6 +1248,21 @@ function bindHandlers() {
     const b = ev.target?.closest?.(".bo-offsite-update");
     if (b) updateOffsiteRepairFromRow(b).catch((e) => setStatus(e.message || e));
   });
+  qs("boFcRefresh")?.addEventListener("click", () => loadFailureCodes().catch((e) => setStatus(e.message || e)));
+  qs("boFcClosedOnly")?.addEventListener("change", renderFailureCodeRows);
+  qs("boFcList")?.addEventListener("click", (ev) => {
+    const b = ev.target?.closest?.(".bo-fc-save");
+    if (b) saveFailureCodeRow(b).catch(() => {});
+  });
+  const fcEditor = qs("boFcEditor");
+  if (fcEditor) {
+    const roles = window.IronlogSession.getSessionRoles?.() || [];
+    fcEditor.hidden = !roles.some((r) => FC_LIST_ROLES.includes(r));
+    fcEditor.addEventListener("toggle", () => { if (fcEditor.open) loadFailureCodeEditor().catch((e) => setText("boFcEditMsg", e.message || String(e))); });
+  }
+  qs("boFcEditKind")?.addEventListener("change", () => loadFailureCodeEditor().catch((e) => setText("boFcEditMsg", e.message || String(e))));
+  qs("boFcAddLine")?.addEventListener("click", () => qs("boFcEditRows")?.appendChild(fcEditRow()));
+  qs("boFcSaveList")?.addEventListener("click", () => saveFailureCodeEditor());
   qs("makeBreakdown")?.addEventListener("click", () => createBreakdown().catch((e) => setStatus(e.message || e)));
   bindShortBreakdownPartsUi();
   qs("sqSubmit")?.addEventListener("click", () => submitShortBreakdown().catch((e) => setStatus(e.message || e)));
@@ -1121,5 +1279,6 @@ document.addEventListener("DOMContentLoaded", () => {
     refreshBreakdownOpsPanels();
     loadBoSlipSavedList().catch(() => {});
     loadOffsiteRepairs().catch(() => {});
+    loadFailureCodes().catch(() => {});
   }).catch(() => {});
 });
