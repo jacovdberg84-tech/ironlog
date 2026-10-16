@@ -16,7 +16,7 @@ const TABS_OVERRIDE_KEY = "ironlog_allowed_tabs";
 const SLA_OPEN_SAME_TAB_KEY = "ironlog_sla_open_same_tab";
 const LOC_DEFAULT_PREFIX = "ironlog_default_location_";
 const MAINT_CHILD_TABS = new Set(["Breakdowns", "ironmind"]);
-/** Production site nav — only tabs in active use (telematics pilot + go-live). */
+/** Production site nav — the screens people use (all opened October 2026; a screen leaves only on purpose). */
 const PRODUCTION_SITE_TABS = [
   "mywork",
   "tasks",
@@ -34,6 +34,17 @@ const PRODUCTION_SITE_TABS = [
   "parts-tracking",
   "reports",
   "finance",
+  "procurement",
+  "approvals",
+  "operations",
+  "dispatch",
+  "quality",
+  "legal",
+  "audit",
+  "docs",
+  "uploads",
+  "enterprise",
+  "exec",
   "ironmind",
   "developer",
 ];
@@ -1038,11 +1049,11 @@ function getEffectiveAllowedTabs() {
     if (!list.includes("tasks")) list = [...list, "tasks"];
     // Workshop Library is public-facing and should stay reachable even for older saved tab overrides.
     if (!list.includes("workshop")) list = [...list, "workshop"];
-    // Enterprise + executive tabs visibility guards (introduced in big-out roll)
-    if (roles.some((r) => ["admin", "supervisor", "executive"].includes(r))) {
-      if (!list.includes("enterprise")) list = [...list, "enterprise"];
-      if (!list.includes("exec")) list = [...list, "exec"];
-    }
+  }
+  // Enterprise + executive tabs visibility guards (introduced in big-out roll)
+  if (roles.some((r) => ["admin", "supervisor", "executive"].includes(r))) {
+    if (!list.includes("enterprise")) list = [...list, "enterprise"];
+    if (!list.includes("exec")) list = [...list, "exec"];
   }
   // Backward compatibility for older saved tab overrides created before Finance tab existed.
   if (roles.some((r) => ["admin", "supervisor", "procurement", "plant_manager", "site_manager", "executive"].includes(r)) && !list.includes("finance")) {
