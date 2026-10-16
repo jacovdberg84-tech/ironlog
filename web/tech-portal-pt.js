@@ -450,4 +450,10 @@ window.TechPortalPT = {
   "Details (optional, @ to tag someone)": "Detalhes (opcional, @ para marcar alguém)",
   "Create task": "Criar tarefa",
   "Write what is needed.": "Escreva o que é preciso.",
+
+  // Failure codes on breakdown jobs
+  "What failed (component)": "O que avariou (componente)",
+  "Problem seen": "Problema observado",
+  "Not sure": "Não tenho a certeza",
+  "Optional. Your foreman checks it and adds the cause.": "Opcional. O seu encarregado confirma e acrescenta a causa.",
 };

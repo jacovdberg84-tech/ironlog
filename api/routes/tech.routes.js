@@ -20,6 +20,7 @@ import { getAssetCurrentHoursInfo } from "../utils/assetMeterHours.js";
 import { normalizeUploadedPhoto } from "../utils/imagePdf.js";
 import { getDataRoot } from "../utils/storagePaths.js";
 import { writeAudit } from "../utils/audit.js";
+import { breakdownFailureCodes, componentFromText, listFailureCodes, suggestBreakdownFailureCodes } from "../utils/failureCodes.js";
 import { technicianMatchesUser } from "../utils/technicianIdentity.js";
 import { notifyWorkOrderAssigned } from "../utils/pushNotify.js";
 import {
@@ -482,6 +483,8 @@ export default async function techRoutes(app) {
       breakdown: w.source === "breakdown"
         ? { id: w.reference_id, component: w.breakdown_component, description: w.breakdown_description, critical: Boolean(w.breakdown_critical), since: w.breakdown_start || w.breakdown_date, parts_status: w.parts_status, return_date: w.ets_repair_date }
         : null,
+      // A breakdown job: the lead suggests what failed and how (component, problem) when completing it.
+      failure: w.source === "breakdown" && w.reference_id ? failureForJob(w) : null,
       service,
       team: { lead, lead_name: lead ? fullName(lead) : null, helpers: helpers.map((h) => ({ ...h, name: fullName(h.username) })), states },
       me: { username: me, role: acc.lead ? "lead" : acc.helper ? "helper" : "manager", state: myState, state_label: STATE_LABELS[myState] },
@@ -549,6 +552,10 @@ export default async function techRoutes(app) {
           db.prepare(`DELETE FROM tech_activity_events WHERE work_order_id = ? AND at = ? AND action = 'complete'`).run(woId, at);
           return statusResult;
         }
+        // The lead's suggestion of what failed and how; the foreman confirms it with cause and action.
+        if (String(acc.wo.source || "") === "breakdown" && acc.wo.reference_id && (req.body?.failure_component || req.body?.failure_problem)) {
+          suggestBreakdownFailureCodes(db, acc.wo.reference_id, { component: req.body.failure_component, problem: req.body.failure_problem }, me);
+        }
       } else {
         if (action === "start" || action === "resume") {
           pauseOtherJobs(me, woId, at);
@@ -574,6 +581,18 @@ export default async function techRoutes(app) {
     if (result?.ok === false) return reply.code(result.status || 400).send(result);
     return result;
   });
+
+  function failureForJob(w) {
+    const lists = listFailureCodes(db);
+    const codes = breakdownFailureCodes(db, w.reference_id) || {};
+    return {
+      components: lists.component,
+      problems: lists.problem,
+      component: codes.component || componentFromText(db, w.breakdown_component),
+      problem: codes.problem || null,
+      confirmed: Boolean(codes.confirmed_at),
+    };
+  }
 
   function stateMap(woId) {
     const out = {};

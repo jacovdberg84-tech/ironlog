@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:," />
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=ms-5" />
+  <link rel="stylesheet" href="./styles.css?v=ms-7" />
 </head>
 <body class="page-shell">
   <div class="page-header">
@@ -286,6 +286,32 @@
         <pre class="output" id="boSlipResult"></pre>
         </div>
       </div>
+      <div class="card bo-failure-card">
+        <div class="section-head-row">
+          <h4>Failure codes</h4>
+          <button type="button" class="sectionToggleBtn" data-section-body="boFcBody" data-storage-key="ironlog_section_bo_fc">Hide</button>
+        </div>
+        <div id="boFcBody" class="section-collapsible">
+          <p class="muted">Why each machine failed, picked from fixed lists so failures can be counted: the component, the problem seen, the cause and the action taken. Technicians suggest the component and problem when they complete the job; check them and add the cause and action. Codes are confirmed when all four are set.</p>
+          <div class="bo-fc-tools">
+            <label class="chk"><input id="boFcClosedOnly" type="checkbox" checked /> Only machines back in service</label>
+            <button type="button" id="boFcRefresh">Refresh</button>
+          </div>
+          <div id="boFcSummary" class="bo-fc-summary"></div>
+          <div class="list" id="boFcList"></div>
+          <details id="boFcEditor" class="bo-fc-editor" hidden>
+            <summary>Edit the lists (administrators and foremen)</summary>
+            <div class="bo-fc-tools">
+              <label>List <select id="boFcEditKind"><option value="component">Components</option><option value="problem">Problems</option><option value="cause">Causes</option><option value="action">Actions</option></select></label>
+              <button type="button" id="boFcAddLine">Add line</button>
+              <button type="button" id="boFcSaveList" class="btn-primary">Save list</button>
+            </div>
+            <p class="muted small">Untick “In use” to stop offering an entry; breakdowns already coded with it keep it. Codes are short (like HYD) and do not change once used.</p>
+            <div class="bo-fc-edit-rows" id="boFcEditRows"></div>
+            <p class="muted small" id="boFcEditMsg" role="status"></p>
+          </details>
+        </div>
+      </div>
       <div class="card bo-recent-card">
         <div class="section-head-row">
           <h4>Recent breakdowns</h4>
@@ -314,6 +340,6 @@
   </datalist>
 
   <script src="./session.js?v=1"></script>
-  <script src="./breakdown-ops.js?v=10"></script>
+  <script src="./breakdown-ops.js?v=11"></script>
 </body>
 </html>
