@@ -33,6 +33,7 @@ const PRODUCTION_SITE_TABS = [
   "stock",
   "parts-tracking",
   "reports",
+  "finance",
   "ironmind",
   "developer",
 ];
@@ -1037,15 +1038,15 @@ function getEffectiveAllowedTabs() {
     if (!list.includes("tasks")) list = [...list, "tasks"];
     // Workshop Library is public-facing and should stay reachable even for older saved tab overrides.
     if (!list.includes("workshop")) list = [...list, "workshop"];
-    // Backward compatibility for older saved tab overrides created before Finance tab existed.
-    if (roles.some((r) => ["admin", "supervisor", "stores", "procurement", "plant_manager", "site_manager", "executive"].includes(r)) && !list.includes("finance")) {
-      list = [...list, "finance"];
-    }
     // Enterprise + executive tabs visibility guards (introduced in big-out roll)
     if (roles.some((r) => ["admin", "supervisor", "executive"].includes(r))) {
       if (!list.includes("enterprise")) list = [...list, "enterprise"];
       if (!list.includes("exec")) list = [...list, "exec"];
     }
+  }
+  // Backward compatibility for older saved tab overrides created before Finance tab existed.
+  if (roles.some((r) => ["admin", "supervisor", "procurement", "plant_manager", "site_manager", "executive"].includes(r)) && !list.includes("finance")) {
+    list = [...list, "finance"];
   }
   // "admin" is not an assignable section in the multiselect; always allow the User admin tab for these roles
   if (roles.includes("admin") && !list.includes("admin")) list = [...list, "admin"];
