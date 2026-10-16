@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { db } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { isAuthRequired } from "../auth/hook.js";
-import { ensureMicrosoftSignInTables, setUserMicrosoftEmail } from "../utils/microsoftSignIn.js";
+import { ensureMicrosoftSignInTables, setUserMicrosoftAccess, setUserMicrosoftEmail } from "../utils/microsoftSignIn.js";
 import { checkAllowedLocations, defaultSite, knownSites, unwrapSiteList } from "../utils/sites.js";
 
 export const VALID_ROLES = [
@@ -277,7 +277,7 @@ export default async function authRoutes(app) {
 
   const getByUsername = db.prepare(`
     SELECT id, username, full_name, role, active, created_at, password_hash, department, allowed_tabs, roles_json,
-      allowed_locations, setup_code_hash, setup_code_expires_at, pin_hash, ms_email, ms_oid
+      allowed_locations, setup_code_hash, setup_code_expires_at, pin_hash, ms_email, ms_oid, ms_only, ms_roles_from_groups
     FROM users
     WHERE username = ?
   `);
@@ -355,6 +355,8 @@ export default async function authRoutes(app) {
       has_pin: Boolean(row.pin_hash && String(row.pin_hash).length > 0),
       microsoft_email: row.ms_email || null,
       microsoft_linked: Boolean(row.ms_oid),
+      microsoft_only: Number(row.ms_only) === 1,
+      roles_from_groups: Number(row.ms_roles_from_groups) === 1,
     };
   }
 
@@ -382,6 +384,12 @@ export default async function authRoutes(app) {
     const row = getByUsername.get(username);
     if (!row || Number(row.active) !== 1) {
       return reply.code(401).send({ error: "invalid username or password" });
+    }
+    if (Number(row.ms_only) === 1) {
+      return reply.code(403).send({
+        error: "microsoft_only",
+        message: "This account signs in with Microsoft. Use 'Sign in with Microsoft'.",
+      });
     }
     if (!row.password_hash) {
       return reply.code(403).send({
@@ -507,7 +515,7 @@ export default async function authRoutes(app) {
       const row = db.prepare(`
         SELECT u.id, u.username, u.full_name, u.role, u.active, u.created_at, u.password_hash, u.department,
           u.allowed_tabs, u.roles_json, u.allowed_locations, u.setup_code_hash, u.setup_code_expires_at, u.pin_hash,
-          u.ms_email, u.ms_oid
+          u.ms_email, u.ms_oid, u.ms_only, u.ms_roles_from_groups
         FROM auth_sessions s
         JOIN users u ON u.id = s.user_id
         WHERE s.token = ?
@@ -610,7 +618,7 @@ export default async function authRoutes(app) {
       .prepare(
         `
       SELECT id, username, full_name, role, active, created_at, department, allowed_tabs, roles_json,
-        allowed_locations, ms_email, ms_oid,
+        allowed_locations, ms_email, ms_oid, ms_only, ms_roles_from_groups,
         CASE WHEN password_hash IS NOT NULL AND length(trim(password_hash)) > 0 THEN 1 ELSE 0 END AS has_password,
         CASE WHEN pin_hash IS NOT NULL AND length(trim(pin_hash)) > 0 THEN 1 ELSE 0 END AS has_pin
       FROM users
@@ -633,12 +641,15 @@ export default async function authRoutes(app) {
         has_pin: Number(r.has_pin) === 1,
         microsoft_email: r.ms_email || null,
         microsoft_linked: Boolean(r.ms_oid),
+        microsoft_only: Number(r.ms_only) === 1,
+        roles_from_groups: Number(r.ms_roles_from_groups) === 1,
       }));
     return { ok: true, rows };
   });
 
   // POST /api/auth/users (admin only)
-  // Body: { username, full_name?, role?, roles?: string[], active?, password?, department?, allowed_tabs?: string[], allowed_locations?: string[]|csv, issue_setup_code?: boolean }
+  // Body: { username, full_name?, role?, roles?: string[], active?, password?, department?, allowed_tabs?: string[], allowed_locations?: string[]|csv, issue_setup_code?: boolean,
+  //   microsoft_email?, microsoft_only?: boolean, roles_from_groups?: boolean }
   app.post("/users", async (req, reply) => {
     if (!requireAdmin(req, reply)) return;
     const body = req.body || {};
@@ -652,7 +663,10 @@ export default async function authRoutes(app) {
     const role = pickPrimaryRole(roles);
     const active = body.active === 0 || body.active === false ? 0 : 1;
     const password = String(body.password || "").trim();
-    const issueSetup = body.issue_setup_code === true || !password;
+    const existingMsOnly = Number(getByUsername.get(username)?.ms_only) === 1;
+    const wantMsOnly = body.microsoft_only != null ? Boolean(body.microsoft_only) : existingMsOnly;
+    if (wantMsOnly && password) return reply.code(400).send({ error: "A Microsoft-only user has no password. Untick 'Microsoft sign-in only' to give them one." });
+    const issueSetup = !wantMsOnly && (body.issue_setup_code === true || !password);
     // Only real sites; a screen name typed here would hide every site's records from the person.
     const siteCheck = Object.prototype.hasOwnProperty.call(body, "allowed_locations")
       ? checkAllowedLocations(db, body.allowed_locations)
@@ -687,40 +701,56 @@ export default async function authRoutes(app) {
     }
 
     const existingUser = getByUsername.get(username);
-    db.prepare(
+    // A refused Microsoft or PIN setting below leaves the user exactly as it was (the transaction rolls back).
+    const refuse = (error) => {
+      throw Object.assign(new Error(error), { refused: true });
+    };
+    const saveUser = db.transaction(() => {
+      db.prepare(
+        `
+        INSERT INTO users (username, full_name, role, active, department, allowed_tabs, roles_json, allowed_locations)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(username) DO UPDATE SET
+          full_name = COALESCE(excluded.full_name, users.full_name),
+          role = excluded.role,
+          active = excluded.active,
+          department = excluded.department,
+          allowed_tabs = excluded.allowed_tabs,
+          roles_json = excluded.roles_json,
+          allowed_locations = excluded.allowed_locations
       `
-      INSERT INTO users (username, full_name, role, active, department, allowed_tabs, roles_json, allowed_locations)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(username) DO UPDATE SET
-        full_name = COALESCE(excluded.full_name, users.full_name),
-        role = excluded.role,
-        active = excluded.active,
-        department = excluded.department,
-        allowed_tabs = excluded.allowed_tabs,
-        roles_json = excluded.roles_json,
-        allowed_locations = excluded.allowed_locations
-    `
-    ).run(username, full_name, role, active, department, tabsStored, JSON.stringify(roles), allowedLocStored);
+      ).run(username, full_name, role, active, department, tabsStored, JSON.stringify(roles), allowedLocStored);
 
-    if (password) {
-      const h = hashPassword(password);
-      db.prepare(`UPDATE users SET password_hash = ?, setup_code_hash = NULL, setup_code_expires_at = NULL WHERE username = ?`).run(h, username);
-    }
-
-    if (hasMsEmail) {
-      const ms = setUserMicrosoftEmail(db, username, msEmail);
-      if (!ms.ok) return reply.code(400).send({ error: ms.error });
-    }
-
-    if (Object.prototype.hasOwnProperty.call(body, "pin")) {
-      const pinRaw = body.pin;
-      if (pinRaw == null || String(pinRaw).trim() === "") {
-        db.prepare(`UPDATE users SET pin_hash = NULL WHERE username = ?`).run(username);
-      } else if (!isValidPin(pinRaw)) {
-        return reply.code(400).send({ error: "pin must be 4–6 digits" });
-      } else {
-        db.prepare(`UPDATE users SET pin_hash = ? WHERE username = ?`).run(hashPassword(normalizePin(pinRaw)), username);
+      if (password) {
+        const h = hashPassword(password);
+        db.prepare(`UPDATE users SET password_hash = ?, setup_code_hash = NULL, setup_code_expires_at = NULL WHERE username = ?`).run(h, username);
       }
+
+      if (hasMsEmail) {
+        const ms = setUserMicrosoftEmail(db, username, msEmail);
+        if (!ms.ok) refuse(ms.error);
+      }
+      if (body.microsoft_only != null || body.roles_from_groups != null) {
+        const access = setUserMicrosoftAccess(db, username, { ms_only: body.microsoft_only, roles_from_groups: body.roles_from_groups });
+        if (!access.ok) refuse(access.error);
+      }
+
+      if (Object.prototype.hasOwnProperty.call(body, "pin")) {
+        const pinRaw = body.pin;
+        if (pinRaw == null || String(pinRaw).trim() === "") {
+          db.prepare(`UPDATE users SET pin_hash = NULL WHERE username = ?`).run(username);
+        } else if (!isValidPin(pinRaw)) {
+          refuse("pin must be 4–6 digits");
+        } else {
+          db.prepare(`UPDATE users SET pin_hash = ? WHERE username = ?`).run(hashPassword(normalizePin(pinRaw)), username);
+        }
+      }
+    });
+    try {
+      saveUser();
+    } catch (err) {
+      if (err.refused) return reply.code(400).send({ error: err.message });
+      throw err;
     }
 
     let setup_code = null;
@@ -768,6 +798,7 @@ export default async function authRoutes(app) {
 
     const row = getByUsername.get(username);
     if (!row || Number(row.active) !== 1) return reply.code(404).send({ error: "user not found" });
+    if (Number(row.ms_only) === 1) return reply.code(403).send({ error: "microsoft_only", message: "This account signs in with Microsoft and has no password." });
     if (row.password_hash) return reply.code(409).send({ error: "password already set" });
     if (!row.setup_code_hash) return reply.code(403).send({ error: "setup code not issued" });
 
@@ -810,6 +841,7 @@ export default async function authRoutes(app) {
     }
     const row = getByUsername.get(username);
     if (!row) return reply.code(404).send({ error: "user not found" });
+    if (Number(row.ms_only) === 1) return reply.code(403).send({ error: "microsoft_only", message: "This account signs in with Microsoft and has no password. Change your password with Microsoft." });
     if (row.password_hash) {
       if (!verifyPassword(oldPassword, row.password_hash)) {
         return reply.code(403).send({ error: "current password is incorrect" });

@@ -122,7 +122,7 @@ async function loadAdminUsers() {
       const tr = document.createElement("tr");
       const rolesText = Array.isArray(r.roles) && r.roles.length ? r.roles.join(", ") : String(r.role || "operator");
       const locText = Array.isArray(r.allowed_locations) && r.allowed_locations.length ? r.allowed_locations.join(", ") : "all";
-      tr.innerHTML = `<td>${escapeHtml(r.username)}</td><td>${escapeHtml(r.full_name || "")}</td><td>${escapeHtml(r.department || "")}</td><td>${escapeHtml(rolesText)}</td><td>${escapeHtml(locText)}</td><td>${r.active ? "yes" : "no"}</td><td>${r.has_password ? "yes" : "no"}</td><td>${r.has_pin ? "yes" : "no"}</td><td>${r.microsoft_email ? `${escapeHtml(r.microsoft_email)} <span class="pill ${r.microsoft_linked ? "pill-green" : "pill-gray"}">${r.microsoft_linked ? "Linked" : "Invited"}</span>` : ""}</td>`;
+      tr.innerHTML = `<td>${escapeHtml(r.username)}</td><td>${escapeHtml(r.full_name || "")}</td><td>${escapeHtml(r.department || "")}</td><td>${escapeHtml(rolesText)}</td><td>${escapeHtml(locText)}</td><td>${r.active ? "yes" : "no"}</td><td>${r.has_password ? "yes" : "no"}</td><td>${r.has_pin ? "yes" : "no"}</td><td>${r.microsoft_email ? `${escapeHtml(r.microsoft_email)} <span class="pill ${r.microsoft_linked ? "pill-green" : "pill-gray"}">${r.microsoft_linked ? "Linked" : "Invited"}</span>${r.microsoft_only ? ' <span class="pill pill-blue">Microsoft only</span>' : ""}${r.roles_from_groups ? ' <span class="pill pill-blue">Roles from groups</span>' : ""}` : ""}</td>`;
       tr.style.cursor = "pointer";
       tr.addEventListener("click", () => {
         if (qs("adminUsername")) qs("adminUsername").value = r.username;
@@ -145,6 +145,8 @@ async function loadAdminUsers() {
             ? "Linked: this person has signed in with Microsoft. Changing the email unlinks their account."
             : r.microsoft_email ? "Invited: they can sign in with Microsoft using this work email." : "Invites this person to sign in with Microsoft. Leave empty for no Microsoft sign-in.";
         }
+        if (qs("adminMsOnly")) qs("adminMsOnly").checked = Boolean(r.microsoft_only);
+        if (qs("adminMsGroups")) qs("adminMsGroups").checked = Boolean(r.roles_from_groups);
         if (qs("adminPassword")) qs("adminPassword").value = "";
         if (qs("adminPin")) qs("adminPin").value = "";
         if (qs("adminClearPin")) qs("adminClearPin").checked = false;
@@ -224,7 +226,13 @@ async function saveAdminUser() {
     allowed_locations: allowedLocationsRaw || null,
     issue_setup_code: issueSetup,
   };
-  if (qs("adminMsEmail") && !qs("adminMsEmail").closest(".hidden")) body.microsoft_email = String(qs("adminMsEmail").value || "").trim();
+  if (qs("adminMsEmail") && !qs("adminMsEmail").closest(".hidden")) {
+    body.microsoft_email = String(qs("adminMsEmail").value || "").trim();
+    body.microsoft_only = qs("adminMsOnly")?.checked === true;
+    body.roles_from_groups = qs("adminMsGroups")?.checked === true;
+    if (body.microsoft_only && password) return alert("A Microsoft-only user has no password. Clear the password, or untick 'Microsoft sign-in only'.");
+    if (body.microsoft_only) body.issue_setup_code = false;
+  }
   if (password) body.password = password;
   if (clearPin) body.pin = "";
   else if (pin) {
@@ -1431,17 +1439,53 @@ async function loadMsSignin() {
   qs("msClientSecret").placeholder = s.has_secret ? "Saved. Leave blank to keep it" : "Paste the secret's Value";
   qs("msSecretExpires").value = s.secret_expires_on || "";
   qs("msEnabled").checked = Boolean(s.enabled);
+  if (qs("msOpenToCompany")) qs("msOpenToCompany").checked = Boolean(s.open_to_company);
+  msRoleChoices = Array.isArray(data.roles) ? data.roles : msRoleChoices;
+  renderMsGroups(Array.isArray(data.groups) ? data.groups : []);
   qs("msRedirectUri").textContent = data.redirect_uri || "";
   const days = data.secret_days_left;
   const state = !s.configured
     ? ["is-off", "Not set up yet. Follow the steps below with your IT administrator."]
     : !s.enabled
       ? ["is-off", "Set up but switched off: only the Test sign-in works."]
-      : ["is-ok", `Switched on. ${data.invited} invited, ${data.linked} already signed in with Microsoft.`];
+      : ["is-ok", `Switched on${s.open_to_company ? " and open to the whole company" : ""}. ${data.invited} invited, ${data.linked} already signed in with Microsoft${data.ms_only ? `, ${data.ms_only} Microsoft-only` : ""}${data.roles_from_groups ? `, ${data.roles_from_groups} with roles from groups` : ""}.`];
   const warn = days != null && days <= 30
     ? `<div class="ms-signin-warn">${days < 0 ? "The client secret has run out: Microsoft sign-in stops working. Create a new secret in Entra and save it here." : `The client secret runs out in ${days} days. Create a new one in Entra and save it here before then.`}</div>`
     : "";
   qs("msSigninState").innerHTML = `<div class="ms-signin-pill ${state[0]}">${escapeHtml(state[1])}</div>${warn}`;
+}
+
+let msRoleChoices = [];
+
+/** One editable line per linked Microsoft group. */
+function msGroupRow(g = {}) {
+  const row = document.createElement("div");
+  row.className = "ms-group-row";
+  const roles = new Set(g.roles || []);
+  row.innerHTML = `
+    <label>Group Object ID<input class="ms-g-id w-full" value="${escapeHtml(g.group_id || "")}" placeholder="1a2b3c4d-1234-5678-9abc-1234567890ab" autocomplete="off" spellcheck="false" /></label>
+    <label>Name (for you)<input class="ms-g-label w-full" value="${escapeHtml(g.label || "")}" placeholder="e.g. Workshop technicians" maxlength="80" /></label>
+    <label>IronLog roles<select class="ms-g-roles w-full" multiple size="4">${msRoleChoices.map((r) => `<option value="${escapeHtml(r)}"${roles.has(r) ? " selected" : ""}>${escapeHtml(r)}</option>`).join("")}</select></label>
+    <label>Sites (empty = all)<input class="ms-g-sites w-full" value="${escapeHtml((g.sites || []).join(", "))}" placeholder="e.g. main" /></label>
+    <button type="button" class="btn btn-secondary btn-sm ms-g-remove" aria-label="Remove group">Remove</button>`;
+  row.querySelector(".ms-g-remove").addEventListener("click", () => row.remove());
+  return row;
+}
+
+function renderMsGroups(groups) {
+  const list = qs("msGroupsList");
+  if (!list) return;
+  list.innerHTML = "";
+  groups.forEach((g) => list.appendChild(msGroupRow(g)));
+}
+
+function collectMsGroups() {
+  return Array.from(document.querySelectorAll("#msGroupsList .ms-group-row")).map((row) => ({
+    group_id: row.querySelector(".ms-g-id").value.trim(),
+    label: row.querySelector(".ms-g-label").value.trim(),
+    roles: Array.from(row.querySelector(".ms-g-roles").selectedOptions).map((o) => o.value),
+    sites: row.querySelector(".ms-g-sites").value.split(",").map((x) => x.trim()).filter(Boolean),
+  })).filter((g) => g.group_id || g.label || g.roles.length);
 }
 
 async function saveMsSignin() {
@@ -1455,6 +1499,8 @@ async function saveMsSignin() {
         client_secret: qs("msClientSecret").value,
         secret_expires_on: qs("msSecretExpires").value,
         enabled: qs("msEnabled").checked,
+        open_to_company: qs("msOpenToCompany")?.checked === true,
+        groups: collectMsGroups(),
       }),
     });
     await loadMsSignin();
@@ -1467,6 +1513,7 @@ async function saveMsSignin() {
 function wireMsSignin() {
   qs("msSigninRefreshBtn")?.addEventListener("click", () => loadMsSignin().catch((e) => setStatus("Microsoft sign-in error: " + e.message)));
   qs("msSaveBtn")?.addEventListener("click", () => saveMsSignin());
+  qs("msAddGroupBtn")?.addEventListener("click", () => qs("msGroupsList")?.appendChild(msGroupRow()));
   // Opens Microsoft in a new tab; the result page there says whether it worked. Nobody is signed in.
   qs("msTestBtn")?.addEventListener("click", () => window.open(`${API}/api/sso/microsoft/start?test=1`, "_blank", "noopener"));
   qs("msCopyRedirectBtn")?.addEventListener("click", async () => {

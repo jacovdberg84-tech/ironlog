@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=ms-3" />
+  <link rel="stylesheet" href="./styles.css?v=ms-5" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -6519,6 +6519,8 @@
                 <label for="adminMsEmail">Microsoft account (work email)</label>
                 <input id="adminMsEmail" class="w-full" type="email" placeholder="name@company.com" autocomplete="off" />
                 <p class="muted small" id="adminMsEmailNote" style="margin-top:6px">Invites this person to sign in with Microsoft. Leave empty for no Microsoft sign-in.</p>
+                <label class="checkbox-label"><input id="adminMsOnly" type="checkbox" /> Microsoft sign-in only (no password; a PIN still works on the shared terminals)</label>
+                <label class="checkbox-label"><input id="adminMsGroups" type="checkbox" /> Roles and sites come from their Microsoft groups (reset at every sign-in)</label>
               </div>
             </div>
             <div class="form-row">
@@ -6716,7 +6718,7 @@
               </div>
               <div>
                 <h3>Microsoft sign-in</h3>
-                <p class="muted small">Lets your staff sign in with their Microsoft 365 work account. Only people you invite (their work email on their user below) can get in, and only from your own company's Microsoft directory.</p>
+                <p class="muted small">Lets your staff sign in with their Microsoft 365 work account, only from your own company's Microsoft directory. People get in when you invite them (their work email on their user below) or, if you open it to the whole company, when they are in a Microsoft group you link here.</p>
               </div>
             </div>
             <div class="action-buttons">
@@ -6736,6 +6738,7 @@
                 <li>Under <strong>Certificates &amp; secrets</strong> create a client secret valid for 24 months. Copy its <strong>Value</strong> (not the Secret ID).</li>
                 <li>Leave the permissions as they are (sign-in and read your profile). IronLog does not read mail, files or calendars.</li>
                 <li>Copy the <strong>Directory (tenant) ID</strong> and <strong>Application (client) ID</strong> from the app's overview page into the boxes below, save, then press <strong>Test sign-in</strong>.</li>
+                <li>Only if you link Microsoft groups below: under <strong>Token configuration → Add groups claim</strong> tick <em>Security groups</em>. If people are in many groups, tick <em>Groups assigned to the application</em> instead and assign the groups to IronLog under <strong>Enterprise applications → IronLog → Users and groups</strong>.</li>
               </ol>
             </details>
             <div class="form-row">
@@ -6747,6 +6750,13 @@
               <div class="form-field"><label for="msSecretExpires">Secret runs out on</label><input id="msSecretExpires" type="date" class="w-full" /></div>
             </div>
             <label class="checkbox-label"><input id="msEnabled" type="checkbox" /> Switched on: show "Sign in with Microsoft" on the sign-in page</label>
+            <div class="ms-groups">
+              <h4>Microsoft groups</h4>
+              <p class="muted small">Link a Microsoft group to IronLog roles, and to sites if the group works on some sites only. People marked "Roles and sites come from their Microsoft groups" (Admin → Users) get their roles from these at every sign-in. Find a group's Object ID in Entra under Groups → the group → Overview.</p>
+              <div id="msGroupsList" class="ms-groups-list"></div>
+              <button id="msAddGroupBtn" type="button" class="btn btn-secondary btn-sm">Add group</button>
+              <label class="checkbox-label"><input id="msOpenToCompany" type="checkbox" /> Open to the whole company: anyone in a linked group gets IronLog at their first Microsoft sign-in, without an invite (Microsoft sign-in only, roles from their groups)</label>
+            </div>
             <div class="action-buttons" style="margin-top:10px">
               <button id="msSaveBtn" class="btn btn-primary btn-sm">Save</button>
               <button id="msTestBtn" class="btn btn-secondary btn-sm">Test sign-in</button>
@@ -8336,8 +8346,8 @@
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="./store-mobile.js?v=2"></script>
   <!-- Main app, split by feature. Order matters: files share one global scope. -->
-  <script src="./app/core.js?v=99"></script>
-  <script src="./app/admin.js?v=99"></script>
+  <script src="./app/core.js?v=100"></script>
+  <script src="./app/admin.js?v=100"></script>
   <script src="./app/licence-issuer.js?v=1"></script>
   <script src="./app/inspections.js?v=90"></script>
   <script src="./app/ui-helpers.js?v=89"></script>

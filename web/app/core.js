@@ -1151,6 +1151,41 @@ function ensureDiskWarning() {
     .catch(() => {});
 }
 
+// ---- Microsoft sign-in: administrators see a banner 30 days before the client secret runs out.
+let msSecretCheckedFor = "";
+let msSecretCheckedAt = 0;
+
+function renderMsSecretBanner(warning) {
+  let el = qs("msSecretBanner");
+  if (!warning || !warning.message) {
+    if (el) el.hidden = true;
+    return;
+  }
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "msSecretBanner";
+    el.setAttribute("role", "alert");
+    qs("mainContent")?.prepend(el);
+  }
+  el.className = `licence-banner ${warning.days_left < 0 ? "is-blocked" : "is-warn"}`;
+  el.textContent = warning.message;
+  el.hidden = false;
+}
+
+/** Admins only, when the site has Microsoft sign-in; checked at sign-in and then at most every 6 hours. */
+function ensureMsSecretWarning() {
+  if (!getSessionRoles().includes("admin") || !licenceModuleOn("microsoft_signin")) return renderMsSecretBanner(null);
+  if (LOGIN_GATE_ENABLED && !getAuthToken()) return;
+  const key = getAuthToken() || "open";
+  if (msSecretCheckedFor === key && Date.now() - msSecretCheckedAt < 6 * 60 * 60 * 1000) return;
+  msSecretCheckedFor = key;
+  msSecretCheckedAt = Date.now();
+  fetch(`${API}/api/sso/microsoft/status`, { headers: new Headers(authHeaders()) })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => renderMsSecretBanner(data?.warning || null))
+    .catch(() => {});
+}
+
 /** Puts the sections a role uses most straight after Home. */
 const NAV_SECTION_PRIORITY = {
   storeman: ["stores"],
@@ -1185,6 +1220,7 @@ function applyRoleVisibility() {
   const roles = getSessionRoles();
   ensureLicenceState();
   ensureDiskWarning();
+  ensureMsSecretWarning();
   renderSessionRolesBadge();
   if (typeof syncJuneVisibility === "function") syncJuneVisibility();
   const allowedList = getEffectiveAllowedTabs();
@@ -1938,6 +1974,10 @@ async function submitLoginForm() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
+      if (data.error === "microsoft_only") {
+        if (errEl) errEl.textContent = "This account signs in with Microsoft: use 'Sign in with Microsoft'. · Esta conta entra com a Microsoft: use 'Entrar com a Microsoft'.";
+        return;
+      }
       if (data.error === "password_not_set") {
         if (!setupCode || setupPassword.length < 6) {
           if (errEl) errEl.textContent = "First-time setup: enter setup code and new password (6+ chars).";
@@ -2001,6 +2041,8 @@ const MS_SIGNIN_ERRORS = {
   not_enabled: "Microsoft sign-in is not switched on for this company. · O início de sessão Microsoft não está ativo.",
   expired: "The sign-in took too long or was already used. Please try again. · O início de sessão expirou. Tente de novo.",
   replayed: "The sign-in took too long or was already used. Please try again. · O início de sessão expirou. Tente de novo.",
+  no_group: "You are not in a Microsoft group that has access to IronLog. Ask your IronLog administrator. · Não está num grupo Microsoft com acesso ao IronLog. Fale com o administrador.",
+  too_many_groups: "You are in too many Microsoft groups for the sign-in to list them. Ask IT to send only the groups assigned to IronLog. · Está em demasiados grupos Microsoft. Peça à equipa de IT para enviar só os grupos atribuídos ao IronLog.",
 };
 const MS_SIGNIN_FALLBACK = "Microsoft sign-in did not work. Please try again, or use your IronLog username. · Não foi possível entrar com a Microsoft. Tente de novo ou use o seu utilizador IronLog.";
 
