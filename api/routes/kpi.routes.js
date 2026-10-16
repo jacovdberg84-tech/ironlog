@@ -41,13 +41,14 @@ export default async function kpiRoutes(app) {
 
     const run_hours = Number(runRow.run_hours || 0);
 
-    // Downtime for the same day, only for used assets
+    // Downtime logged for the same day (breakdown_downtime_logs), only for used assets
     let downtime_hours = 0;
     if (used_count > 0) {
       const downtimeRow = db.prepare(`
-        SELECT IFNULL(SUM(b.downtime_hours), 0) AS dt
-        FROM breakdowns b
-        WHERE b.breakdown_date = ?
+        SELECT IFNULL(SUM(l.hours_down), 0) AS dt
+        FROM breakdown_downtime_logs l
+        JOIN breakdowns b ON b.id = l.breakdown_id
+        WHERE l.log_date = ?
           AND b.asset_id IN (
             SELECT DISTINCT dh.asset_id
             FROM daily_hours dh
@@ -73,16 +74,18 @@ export default async function kpiRoutes(app) {
         b.id,
         b.breakdown_date,
         b.description,
-        b.downtime_hours,
+        SUM(l.hours_down) AS downtime_hours,
         b.critical,
         a.asset_code,
         a.asset_name
-      FROM breakdowns b
+      FROM breakdown_downtime_logs l
+      JOIN breakdowns b ON b.id = l.breakdown_id
       JOIN assets a ON a.id = b.asset_id
-      WHERE b.breakdown_date = ?${andSite("a", req)}
-      ORDER BY b.downtime_hours DESC, b.id DESC
+      WHERE l.log_date = ?${andSite("a", req)}
+      GROUP BY b.id
+      ORDER BY downtime_hours DESC, b.id DESC
       LIMIT 10
-    `).all(date).map(r => ({ ...r, critical: Boolean(r.critical) }));
+    `).all(date).map(r => ({ ...r, downtime_hours: Number(Number(r.downtime_hours || 0).toFixed(2)), critical: Boolean(r.critical) }));
 
     return {
       ok: true,
@@ -131,9 +134,10 @@ export default async function kpiRoutes(app) {
     const run_hours = usedPerDay.reduce((acc, d) => acc + Number(d.run_hours || 0), 0);
 
     const downtimeRow = db.prepare(`
-      SELECT IFNULL(SUM(b.downtime_hours), 0) AS dt
-      FROM breakdowns b
-      WHERE b.breakdown_date BETWEEN ? AND ?${andAssetSite("b.asset_id", req)}
+      SELECT IFNULL(SUM(l.hours_down), 0) AS dt
+      FROM breakdown_downtime_logs l
+      JOIN breakdowns b ON b.id = l.breakdown_id
+      WHERE l.log_date BETWEEN ? AND ?${andAssetSite("b.asset_id", req)}
     `).get(start, end);
 
     const downtime_hours = Number(downtimeRow.dt || 0);
@@ -151,16 +155,18 @@ export default async function kpiRoutes(app) {
         b.id,
         b.breakdown_date,
         b.description,
-        b.downtime_hours,
+        SUM(l.hours_down) AS downtime_hours,
         b.critical,
         a.asset_code,
         a.asset_name
-      FROM breakdowns b
+      FROM breakdown_downtime_logs l
+      JOIN breakdowns b ON b.id = l.breakdown_id
       JOIN assets a ON a.id = b.asset_id
-      WHERE b.breakdown_date BETWEEN ? AND ?${andSite("a", req)}
-      ORDER BY b.downtime_hours DESC, b.id DESC
+      WHERE l.log_date BETWEEN ? AND ?${andSite("a", req)}
+      GROUP BY b.id
+      ORDER BY downtime_hours DESC, b.id DESC
       LIMIT 20
-    `).all(start, end).map(r => ({ ...r, critical: Boolean(r.critical) }));
+    `).all(start, end).map(r => ({ ...r, downtime_hours: Number(Number(r.downtime_hours || 0).toFixed(2)), critical: Boolean(r.critical) }));
 
     return {
       ok: true,

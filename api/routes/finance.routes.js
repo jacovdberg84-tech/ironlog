@@ -1215,20 +1215,21 @@ export default async function financeRoutes(app) {
      SSOT REPORT SET (single finance KPI + cost summary)
   ============================================================ */
 
-  function computeKpiSnapshotForPeriod(period) {
+  // req: the site the report is for (utils/sites.js).
+  function computeKpiSnapshotForPeriod(period, req) {
     const start = monthStart(period);
     const end = monthEnd(period);
     const scheduled = 10;
     const dhRows = db.prepare(`
-      SELECT dh.log_date,
+      SELECT dh.work_date,
              COUNT(DISTINCT dh.asset_id) AS used_assets,
              COALESCE(SUM(dh.hours_run), 0) AS run_hours
       FROM daily_hours dh
       JOIN assets a ON a.id = dh.asset_id
-      WHERE dh.log_date BETWEEN DATE(?) AND DATE(?)
+      WHERE dh.work_date BETWEEN DATE(?) AND DATE(?)
         AND dh.hours_run > 0
         AND a.is_standby = 0${andSite("a", req)}
-      GROUP BY dh.log_date
+      GROUP BY dh.work_date
     `).all(start, end);
     const run_hours = dhRows.reduce((s, r) => s + Number(r.run_hours || 0), 0);
     const available_hours = dhRows.reduce((s, r) => s + Number(r.used_assets) * scheduled, 0);
@@ -1240,7 +1241,7 @@ export default async function financeRoutes(app) {
     const downtime_hours = Number(downtimeRow?.h || 0);
     const breakdownCountRow = db.prepare(`
       SELECT COUNT(*) AS c FROM breakdowns
-      WHERE DATE(COALESCE(reported_at, created_at, updated_at)) BETWEEN DATE(?) AND DATE(?)${andAssetSite("asset_id", req)}
+      WHERE DATE(COALESCE(breakdown_date, created_at)) BETWEEN DATE(?) AND DATE(?)${andAssetSite("asset_id", req)}
     `).get(start, end);
     const breakdowns = Number(breakdownCountRow?.c || 0);
     const availability = available_hours > 0 ? ((available_hours - downtime_hours) / available_hours) * 100 : null;
@@ -1268,7 +1269,7 @@ export default async function financeRoutes(app) {
   app.get("/reports/ssot", async (req, reply) => {
     const period = String(req.query?.period || "").trim();
     if (!/^\d{4}-\d{2}$/.test(period)) return reply.code(400).send({ error: "period (YYYY-MM) required" });
-    const snapshot = computeKpiSnapshotForPeriod(period);
+    const snapshot = computeKpiSnapshotForPeriod(period, req);
     const actualsAgg = buildMonthlyActuals(period).map((r) => ({
       ...r,
       actual_amount: Number(Number(r.actual_amount || 0).toFixed(2)),
@@ -1297,7 +1298,7 @@ export default async function financeRoutes(app) {
   app.get("/reports/ssot/export.csv", async (req, reply) => {
     const period = String(req.query?.period || "").trim();
     if (!/^\d{4}-\d{2}$/.test(period)) return reply.code(400).send({ error: "period (YYYY-MM) required" });
-    const snapshot = computeKpiSnapshotForPeriod(period);
+    const snapshot = computeKpiSnapshotForPeriod(period, req);
     const actualsAgg = buildMonthlyActuals(period);
     const esc = (v) => {
       const s = String(v ?? "");
@@ -1324,7 +1325,7 @@ export default async function financeRoutes(app) {
   app.get("/reports/ssot/export.xlsx", async (req, reply) => {
     const period = String(req.query?.period || "").trim();
     if (!/^\d{4}-\d{2}$/.test(period)) return reply.code(400).send({ error: "period (YYYY-MM) required" });
-    const snapshot = computeKpiSnapshotForPeriod(period);
+    const snapshot = computeKpiSnapshotForPeriod(period, req);
     const actualsAgg = buildMonthlyActuals(period);
     const budgets = db.prepare(`
       SELECT category, SUM(budget_amount) AS budget
