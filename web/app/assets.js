@@ -415,6 +415,7 @@ async function loadAssetDetailHeader(asset_code) {
       subtitle.textContent = [
         card?.asset_name || p.asset?.asset_name,
         card?.category || p.asset?.category,
+        assetDetailLine(card),
       ]
         .filter(Boolean)
         .join(" · ");
@@ -424,7 +425,7 @@ async function loadAssetDetailHeader(asset_code) {
     const hours = p.meter?.current_hours ?? card?.current_hours ?? 0;
     const fuel30 = p.fuel?.liters_last_30_days ?? card?.fuel_liters_30d ?? 0;
     header.innerHTML = `
-      <div class="asset-profile-status">${fleetStatusPill(p.status || card?.status)}${Number(card?.archived) ? `<span class="pill red">Archived</span>` : ""}</div>
+      <div class="asset-profile-status">${fleetStatusPill(p.status || card?.status)}${Number(card?.archived) ? `<span class="pill red">Archived</span>` : ""}${assetWarrantyPill(card)}</div>
       <div class="asset-profile-metrics">
         <div><span>Current meter</span><strong>${Number(hours).toFixed(1)} h</strong></div>
         <div><span>Fuel used · 30 days</span><strong>${Number(fuel30).toFixed(1)} L</strong></div>
@@ -442,11 +443,43 @@ async function loadAssetDetailHeader(asset_code) {
   }
 }
 
+// Machine details on the form: input id → API field (api/utils/assetDetails.js).
+const ASSET_DETAIL_INPUTS = {
+  assetDetailsMake: "make",
+  assetDetailsModel: "model",
+  assetDetailsSerial: "serial_number",
+  assetDetailsYear: "year_built",
+  assetDetailsPurchaseDate: "purchase_date",
+  assetDetailsPurchasePrice: "purchase_price_usd",
+  assetDetailsWarrantyEnd: "warranty_end",
+};
+
+/** "Caterpillar 140K · S/N CAT0140K… · 2019" (empty when nothing is known). */
+function assetDetailLine(a) {
+  if (!a) return "";
+  return [[a.make, a.model].filter(Boolean).join(" "), a.serial_number ? `S/N ${a.serial_number}` : "", a.year_built ? String(a.year_built) : ""]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** Pill for the asset header: in warranty (with days left) or ended; nothing when no date. */
+function assetWarrantyPill(a) {
+  const end = String(a?.warranty_end || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(end)) return "";
+  const days = Math.round((Date.parse(end) - Date.parse(new Date().toISOString().slice(0, 10))) / 864e5);
+  return days >= 0
+    ? `<span class="pill pill-green" title="Warranty ends ${escapeHtml(end)}">In warranty · ${days} d left</span>`
+    : `<span class="pill pill-gray" title="Warranty ended ${escapeHtml(end)}">Warranty ended</span>`;
+}
+
 function loadAssetDetailsForm(assetCode) {
   const code = String(assetCode || "").trim();
   const asset = assetsFleetCache.find((card) => String(card.asset_code || "") === code);
   if (qs("assetDetailsName")) qs("assetDetailsName").value = asset?.asset_name || "";
   if (qs("assetDetailsCategory")) qs("assetDetailsCategory").value = asset?.category || "";
+  for (const [id, field] of Object.entries(ASSET_DETAIL_INPUTS)) {
+    if (qs(id)) qs(id).value = asset?.[field] ?? "";
+  }
   if (qs("assetDetailsStatus")) {
     qs("assetDetailsStatus").textContent = asset
       ? `Editing ${code}. Leave the class blank only when the asset does not need one.`
@@ -467,7 +500,11 @@ async function saveAssetDetails() {
     await fetchJson(`${API}/api/assets/${encodeURIComponent(code)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ asset_name: description, category: category || null }),
+      body: JSON.stringify({
+        asset_name: description,
+        category: category || null,
+        ...Object.fromEntries(Object.entries(ASSET_DETAIL_INPUTS).filter(([id]) => qs(id)).map(([id, field]) => [field, String(qs(id).value || "").trim()])),
+      }),
     });
     await loadAssetsFleet();
     await selectAssetCard(code, { loadHistory: false, scroll: false });

@@ -14,6 +14,7 @@ import registerRegisterRoutes from "./assets/register.routes.js";
 import registerQrProfilesRoutes from "./assets/qr-profiles.routes.js";
 import registerHistoryRoutes from "./assets/history.routes.js";
 import { ensureAssetSiteColumn } from "../utils/sites.js";
+import { ensureAssetDetailColumns } from "../utils/assetDetails.js";
 
 function isLdvPrestartQrAsset(assetCode) {
   return /^V(0[1-9]|1[0-5])AM$/i.test(String(assetCode || "").trim());
@@ -44,6 +45,7 @@ function applyLegacyAssetCategoryCorrections() {
 
 export default async function assetRoutes(app) {
   ensureAssetSiteColumn(db);
+  ensureAssetDetailColumns(db);
   ensureMasterDataSchema();
   ensureCostAllocationSchema(db);
   ensurePlantHireSchema(db);

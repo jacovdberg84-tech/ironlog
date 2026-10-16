@@ -3,6 +3,7 @@ import { ensureFuelBenchmarkSchema } from "../utils/fuelConsumption.js";
 import multipart from "@fastify/multipart";
 import { parse } from "csv-parse/sync";
 import { db } from "../db/client.js";
+import { ASSET_DETAIL_FIELDS, ensureAssetDetailColumns, readAssetDetails } from "../utils/assetDetails.js";
 import { sqlFuelMetricModeExpr } from "../utils/fuelMetricMode.js";
 import { ensureStockCategorySchema, normalizeStockCategory } from "../utils/stockCategory.js";
 import {
@@ -69,6 +70,7 @@ export default async function uploadRoutes(app) {
   if (!hasColumn("assets", "utilization_mode")) {
     db.prepare(`ALTER TABLE assets ADD COLUMN utilization_mode TEXT DEFAULT 'hours'`).run();
   }
+  ensureAssetDetailColumns(db);
 
   // Helper prepared statements (after schema checks/column additions).
   // Machines on the site the upload is for (the second value is requestSite(req)).
@@ -104,6 +106,7 @@ export default async function uploadRoutes(app) {
   // -------------------------
   // POST /api/upload/assets
   // Columns: asset_code, asset_name, category, is_standby, active
+  //   optional: make, model, serial_number, year_built, purchase_date, purchase_price_usd, warranty_end
   // -------------------------
   app.post("/assets", async (req, reply) => {
     if (!requireUploadWrite(req, reply)) return;
@@ -125,22 +128,33 @@ export default async function uploadRoutes(app) {
         active = excluded.active
     `);
 
+    // Machine details come only from columns the file has; a blank cell clears that detail.
+    const detailCols = Object.keys(ASSET_DETAIL_FIELDS).filter((c) => rows.length && Object.prototype.hasOwnProperty.call(rows[0], c));
+    const warnings = [];
     const tx = db.transaction(() => {
-      for (const r of rows) {
+      rows.forEach((r, i) => {
         const code = String(r.asset_code).trim();
         const name = String(r.asset_name).trim();
         const cat = String(r.category).trim();
         const standby = asBool01(r.is_standby, 0);
         const active = asBool01(r.active, 1);
 
-        if (!code || !name || !cat) continue;
+        if (!code || !name || !cat) return;
         insert.run(code, name, cat, standby, active, requestSite(req));
-      }
+        if (!detailCols.length) return;
+        const details = readAssetDetails(Object.fromEntries(detailCols.map((c) => [c, r[c]])));
+        if (!details.ok) {
+          warnings.push(`Row ${i + 2} (${code}): machine details not saved: ${details.errors.join(" ")}`);
+          return;
+        }
+        const cols = Object.keys(details.values);
+        db.prepare(`UPDATE assets SET ${cols.map((c) => `${c} = ?`).join(", ")} WHERE asset_code = ?`).run(...cols.map((c) => details.values[c]), code);
+      });
     });
 
     tx();
 
-    return reply.send({ ok: true, imported: rows.length });
+    return reply.send({ ok: true, imported: rows.length, warnings });
   });
 
     // -------------------------

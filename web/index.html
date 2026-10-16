@@ -1639,7 +1639,7 @@
             <div id="assetDetailHeader" class="asset-detail-header"></div>
             <div class="info-note" style="margin: 14px 0 10px;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              <span>Edit the equipment description and class shown on fleet cards, Daily Log, reports, and QR forms.</span>
+              <span>Edit the equipment description and class shown on fleet cards, Daily Log, reports, and QR forms, and what the machine is: make, model, serial number, year, purchase and warranty.</span>
             </div>
             <div class="form-row">
               <div class="form-field">
@@ -1650,6 +1650,17 @@
                 <label>Equipment class / type</label>
                 <input id="assetDetailsCategory" class="w-full" placeholder="e.g. Grader" />
               </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field"><label for="assetDetailsMake">Make</label><input id="assetDetailsMake" class="w-full" maxlength="60" placeholder="e.g. Caterpillar" /></div>
+              <div class="form-field"><label for="assetDetailsModel">Model</label><input id="assetDetailsModel" class="w-full" maxlength="60" placeholder="e.g. 140K" /></div>
+              <div class="form-field"><label for="assetDetailsSerial">Serial number</label><input id="assetDetailsSerial" class="w-full" maxlength="60" autocomplete="off" spellcheck="false" /></div>
+              <div class="form-field"><label for="assetDetailsYear">Year built</label><input id="assetDetailsYear" type="number" class="w-full" min="1950" max="2100" step="1" placeholder="e.g. 2019" /></div>
+            </div>
+            <div class="form-row">
+              <div class="form-field"><label for="assetDetailsPurchaseDate">Purchase date</label><input id="assetDetailsPurchaseDate" type="date" class="w-full" /></div>
+              <div class="form-field"><label for="assetDetailsPurchasePrice">Purchase price (USD)</label><input id="assetDetailsPurchasePrice" type="number" class="w-full" min="0" step="0.01" placeholder="e.g. 285000" /></div>
+              <div class="form-field"><label for="assetDetailsWarrantyEnd">Warranty ends</label><input id="assetDetailsWarrantyEnd" type="date" class="w-full" /></div>
               <div class="form-field form-field-action">
                 <button id="saveAssetDetails" type="button" class="btn btn-secondary">Save equipment details</button>
               </div>
@@ -8371,7 +8382,7 @@
   <script src="./app/procurement.js?v=89"></script>
   <script src="./app/site-ops.js?v=89"></script>
   <script src="./app/daily-input.js?v=89"></script>
-  <script src="./app/assets.js?v=89"></script>
+  <script src="./app/assets.js?v=90"></script>
   <script src="./app/developer.js?v=4"></script>
   <script src="./app/init.js?v=97"></script>
   <script src="./app/documents.js?v=89"></script>

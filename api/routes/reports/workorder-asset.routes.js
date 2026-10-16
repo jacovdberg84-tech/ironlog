@@ -4,6 +4,7 @@ import path from "node:path";
 import { buildPdfBuffer, ensurePageSpace, kvGrid, sectionTitle, table, tryDrawLogo } from "../../utils/pdfGenerator.js";
 import { db } from "../../db/client.js";
 import { isDate } from "../../utils/request.js";
+import { assetDetailsOf, warrantyStatus } from "../../utils/assetDetails.js";
 
 export default function registerWorkorderAssetRoutes(app, ctx) {
   const {
@@ -430,11 +431,13 @@ export default function registerWorkorderAssetRoutes(app, ctx) {
     if (!asset_code) return reply.code(400).send({ error: "asset_code is required" });
 
     const asset = db.prepare(`
-      SELECT id, asset_code, asset_name, category
+      SELECT *
       FROM assets
       WHERE asset_code = ?
     `).get(asset_code);
     if (!asset) return reply.code(404).send({ error: "asset not found" });
+    const details = assetDetailsOf(asset);
+    const warranty = warrantyStatus(details.warranty_end);
 
     const startOk = start && isDate(start);
     const endOk = end && isDate(end);
@@ -643,6 +646,13 @@ export default function registerWorkorderAssetRoutes(app, ctx) {
           { k: "Asset Name", v: asset.asset_name || "" },
           { k: "Category", v: asset.category || "" },
           { k: "Period", v: periodText },
+          ...(details.make || details.model ? [{ k: "Make / model", v: [details.make, details.model].filter(Boolean).join(" ") }] : []),
+          ...(details.serial_number ? [{ k: "Serial number", v: details.serial_number }] : []),
+          ...(details.year_built ? [{ k: "Year built", v: details.year_built }] : []),
+          ...(details.purchase_date || details.purchase_price_usd != null
+            ? [{ k: "Purchased", v: [details.purchase_date, details.purchase_price_usd != null ? `$${fmtNum(details.purchase_price_usd, 2)}` : ""].filter(Boolean).join(" for ") }]
+            : []),
+          ...(warranty ? [{ k: "Warranty", v: warranty.text }] : []),
         ], 2);
 
         sectionTitle(doc, "Period Summary");
