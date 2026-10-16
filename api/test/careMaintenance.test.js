@@ -146,3 +146,44 @@ test("the job board and portal name a C&M job by its work, not its parts list", 
   assert.equal(jobLine({ source: "care_maintenance", job_description: "Care & maintenance: C&M Nov\nReseal boom cylinder\n\nParts planned:\n- 4 x FLT-001 Oil filter" }), "C&M: Reseal boom cylinder");
   assert.equal(jobLine({ source: "care_maintenance", job_description: "Care & maintenance: C&M Nov\n\nParts planned:\n- 1 x Seal kit" }), "Care & maintenance");
 });
+
+test("the plan prints as a PDF: summary, every machine's work and where its parts stand", async (t) => {
+  const PDFDocument = (await import("pdfkit")).default;
+  const { drawCarePlanPdf, PART_STATE_LABELS } = await import("../utils/careMaintenancePdf.js");
+  const plan = cm.listPlans(db, "main").find((p) => p.name === "C&M Nov 2026");
+  const detail = cm.planDetail(db, plan.id, "main");
+  const doc = new PDFDocument({ size: "A4", layout: "landscape", bufferPages: true });
+  const written = [];
+  const text = doc.text.bind(doc);
+  doc.text = (s, ...rest) => { written.push(String(s)); return text(s, ...rest); };
+  drawCarePlanPdf(doc, detail);
+  const pages = doc.bufferedPageRange().count;
+  doc.end();
+  const all = written.join("\n");
+  assert.match(all, /Plan summary: C&M Nov 2026/);
+  assert.match(all, /\$1,760\.00/, "the plan's estimate");
+  assert.match(all, /Reseal boom cylinder, full service/, "the machine's work to do");
+  assert.match(all, /Boom pin bush \(supplier quote\)/);
+  const states = detail.machines.flatMap((m) => m.parts.map((p) => p.state));
+  assert.ok(states.length);
+  for (const st of new Set(states)) assert.ok(written.includes(PART_STATE_LABELS[st]), `where a part stands is in plain words: ${st}`);
+  assert.match(all, /TD01AM/);
+  assert.ok(pages >= 2, "machines' details start on their own page");
+
+  const app = Fastify();
+  const requireMaintenanceRoles = (req, reply, allowed) => {
+    const roles = String(req.headers["x-user-roles"] || "").split(",");
+    if (!roles.some((r) => allowed.includes(r))) { reply.code(403).send({ ok: false }); return false; }
+    return true;
+  };
+  await app.register(async (a) => registerCareMaintenanceRoutes(a, { requireMaintenanceRoles }), { prefix: "/api/maintenance" });
+  t.after(() => app.close());
+  const as = (role, site = "main") => ({ "x-user-roles": role, "x-user-name": role, "x-site-code": site });
+  const url = `/api/maintenance/cm/plans/${plan.id}/plan.pdf`;
+  const pdf = await app.inject({ method: "GET", url, headers: as("storeman") });
+  assert.equal(pdf.statusCode, 200);
+  assert.match(pdf.headers["content-type"], /application\/pdf/);
+  assert.equal(pdf.rawPayload.subarray(0, 4).toString(), "%PDF");
+  assert.equal((await app.inject({ method: "GET", url, headers: as("artisan") })).statusCode, 403);
+  assert.equal((await app.inject({ method: "GET", url, headers: as("storeman", "other") })).statusCode, 404, "another site's plan is out of reach");
+});

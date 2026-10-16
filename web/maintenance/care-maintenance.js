@@ -277,6 +277,14 @@ function wireCareMaintenance() {
       await cmLoadPlans(cmDetail.plan.id);
     } catch (e) { cmMsg(e.message, true); }
   });
+  cmEl("cmPdfBtn")?.addEventListener("click", async () => {
+    if (!cmDetail) return;
+    try {
+      await openProtectedPdf(`${API}/maintenance/cm/plans/${cmDetail.plan.id}/plan.pdf`, {
+        filename: `care-maintenance-${cmDetail.plan.name.replace(/[^A-Za-z0-9-]+/g, "_")}.pdf`,
+      });
+    } catch (e) { cmMsg(e.message, true); }
+  });
   cmEl("cmExportBtn")?.addEventListener("click", async () => {
     if (!cmDetail) return;
     try {

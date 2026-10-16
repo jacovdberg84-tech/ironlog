@@ -5,6 +5,7 @@
 //   GET    /cm/plans/:id                     plan, machines, estimate vs used, totals
 //   PATCH  /cm/plans/:id                     plan fields, or { status: "closed" }
 //   GET    /cm/plans/:id/export.csv          one row per machine, for Excel
+//   GET    /cm/plans/:id/plan.pdf            the plan to print: summary, then work and parts per machine
 //   POST   /cm/plans/:id/machines            { asset_ids: [...] }
 //   PATCH  /cm/machines/:rowId               { scope, planned_hours, status, priority, notes }
 //   DELETE /cm/machines/:rowId
@@ -13,6 +14,8 @@
 //   POST   /cm/machines/:rowId/request-parts raise Parts to Order requests for what stores lack
 import { db } from "../../db/client.js";
 import { writeAudit } from "../../utils/audit.js";
+import { buildPdfBuffer } from "../../utils/pdfGenerator.js";
+import { drawCarePlanPdf } from "../../utils/careMaintenancePdf.js";
 import {
   addMachines,
   createMachineWorkOrder,
@@ -85,6 +88,20 @@ export default function registerCareMaintenanceRoutes(app, ctx) {
     reply.header("Content-Type", "text/csv; charset=utf-8");
     reply.header("Content-Disposition", `attachment; filename="care-maintenance-${name}.csv"`);
     return `﻿${planCsv(detail)}`;
+  });
+
+  app.get("/cm/plans/:id/plan.pdf", async (req, reply) => {
+    if (!requireMaintenanceRoles(req, reply, CM_VIEW_ROLES)) return;
+    const detail = planDetail(db, req.params.id, site(req));
+    if (!detail) return reply.code(404).send({ ok: false, error: "Plan not found." });
+    const name = detail.plan.name.replace(/[^A-Za-z0-9-]+/g, "_").replace(/^_+|_+$/g, "") || "plan";
+    const pdf = await buildPdfBuffer((doc) => drawCarePlanPdf(doc, detail), {
+      title: "Care & maintenance plan",
+      subtitle: detail.plan.name,
+    });
+    reply.header("Content-Type", "application/pdf");
+    reply.header("Content-Disposition", `inline; filename="care-maintenance-${name}.pdf"`);
+    return reply.send(pdf);
   });
 
   app.post("/cm/plans/:id/machines", async (req, reply) => {
