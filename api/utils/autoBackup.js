@@ -21,6 +21,7 @@ import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import Database from "better-sqlite3";
 import { decryptJuneConnectorSecret, encryptJuneConnectorSecret } from "./juneOutlook.js";
+import { diskHealth, ironlogUsage } from "./diskHealth.js";
 import { getDataRoot } from "./storagePaths.js";
 
 export const FILE_FOLDERS = ["uploads", "workshop-files", "branding"];
@@ -395,12 +396,8 @@ export function backupStatus(db, { now = new Date(), dbPath = "", backupDir = ""
   else if (hoursSince(lastOffsite?.finished_at, now) > 26) warnings.push("Nothing has been copied off-site in the last 26 hours.");
   if (settings.offsite_configured && (!lastRestore || hoursSince(lastRestore.finished_at, now) > 32 * 24)) warnings.push("No restore test in the last month.");
   else if (lastRestore?.status === "failed") warnings.push(`The last restore test failed: ${lastRestore.error}`);
-  let disk = null;
-  try {
-    const st = fs.statfsSync(path.dirname(dbPath || "."));
-    disk = { free_gb: Number(((st.bavail * st.bsize) / 1e9).toFixed(1)), total_gb: Number(((st.blocks * st.bsize) / 1e9).toFixed(1)) };
-    if (disk.free_gb < 2) warnings.push(`Disk space is low: ${disk.free_gb} GB free.`);
-  } catch {}
+  const disk = diskHealth(path.dirname(dbPath || "."));
+  if (disk?.message) warnings.push(disk.message);
   let dbBytes = null;
   try { dbBytes = fs.statSync(dbPath).size; } catch {}
   const parse = (r) => (r ? { ...r, check_result: r.check_result ? JSON.parse(r.check_result) : null } : null);
@@ -418,6 +415,7 @@ export function backupStatus(db, { now = new Date(), dbPath = "", backupDir = ""
       node: process.version,
       db_bytes: dbBytes,
       disk,
+      usage: ironlogUsage({ dbPath, backupDir, dataDir: getDataRoot() }),
       backup_dir: backupDir,
       files_waiting: settings.include_files ? filesToSync(db).length : 0,
     },

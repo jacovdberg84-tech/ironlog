@@ -1439,6 +1439,20 @@ const BK_KIND = { nightly: "Nightly", manual: "Manual", restore_test: "Restore t
 const bkSize = (b) => (b == null ? "—" : b > 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${(b / 1e6).toFixed(1)} MB`);
 const bkWhen = (t) => (t ? String(t).slice(0, 16) : "—");
 
+/** Server disk gauge plus the biggest things IronLog keeps on it. */
+function diskGaugeHtml(disk, usage = []) {
+  if (!disk) return `<p class="muted">Disk space could not be read on this server.</p>`;
+  const used = Math.max(0, Math.min(100, Number(disk.used_pct) || 0));
+  const state = disk.level === "critical" ? "is-critical" : disk.level === "warn" ? "is-warn" : "is-ok";
+  const rows = (usage || []).map((u) => `<li><span>${escapeHtml(u.label)}${u.files > 1 ? ` <span class="muted">(${u.files}${u.partial ? "+" : ""} files)</span>` : ""}</span><strong>${escapeHtml(bkSize(u.bytes))}</strong></li>`).join("");
+  return `<div class="disk-gauge ${state}">
+      <div class="disk-gauge-head"><strong>Server disk</strong><span>${used}% used · ${escapeHtml(String(disk.free_gb))} GB free of ${escapeHtml(String(disk.total_gb))} GB</span></div>
+      <div class="disk-gauge-bar" role="meter" aria-label="Server disk used" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${used}"><span style="width:${used}%"></span></div>
+      <p class="muted disk-gauge-note">Admins get a warning at the top of the screen when less than 10% (or 5 GB) is free.</p>
+      ${rows ? `<div class="disk-usage-h">What IronLog keeps on this server</div><ul class="disk-usage">${rows}</ul>` : ""}
+    </div>`;
+}
+
 async function loadBackupHealth() {
   const card = qs("offsiteBackupCard");
   if (!card) return;
@@ -1464,7 +1478,6 @@ async function loadBackupHealth() {
     ["Last off-site copy", lo ? `${bkWhen(lo.finished_at)} UTC` : s.offsite_configured ? "None yet" : "Storage not set up"],
     ["Last restore test", lr ? `${bkWhen(lr.finished_at)} UTC, ${lr.status === "ok" ? "passed" : "failed"}` : "None yet"],
     ["Database size", bkSize(srv.db_bytes)],
-    ["Disk free", srv.disk ? `${srv.disk.free_gb} GB of ${srv.disk.total_gb} GB` : "—"],
     ["Server running for", `${srv.uptime_hours ?? "—"} h`],
   ];
   if (srv.files_waiting) lines.push(["Files waiting to go off-site", String(srv.files_waiting)]);
@@ -1472,7 +1485,9 @@ async function loadBackupHealth() {
   qs("backupHealthSummary").innerHTML = `
     <div class="backup-health-state ${data.ok ? "is-ok" : "is-warn"}">${data.ok ? "All good: backups are running and copied off-site." : "Needs attention"}</div>
     ${warn ? `<ul class="backup-health-warnings">${warn}</ul>` : ""}
-    <dl class="backup-health-grid">${lines.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd></div>`).join("")}</dl>`;
+    <dl class="backup-health-grid">${lines.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd></div>`).join("")}</dl>
+    ${diskGaugeHtml(srv.disk, srv.usage)}`;
+  if (typeof renderDiskBanner === "function") renderDiskBanner(srv.disk);
   qs("bkRunsBody").innerHTML = (data.recent || []).map((r) => `<tr>
       <td>${escapeHtml(bkWhen(r.started_at))}</td><td>${escapeHtml(BK_KIND[r.kind] || r.kind)}</td>
       <td><span class="pill ${r.status === "ok" ? "pill-green" : r.status === "failed" ? "pill-red" : "pill-gray"}">${escapeHtml(r.status === "ok" ? "OK" : r.status === "failed" ? "Failed" : "Running")}</span></td>
