@@ -10,7 +10,13 @@ import { db } from "../../db/client.js";
 import { isDate } from "../../utils/request.js";
 import { oilPartSql } from "../../utils/stockCategory.js";
 import { buildMonthlyBudgetSpend } from "../../utils/monthlyBudgetSpend.js";
-import { buildMonthlyBudgetSpendWorkbook } from "../../utils/monthlyBudgetSpendWorkbook.js";
+import { buildMonthlyBudgetSpendBuffer } from "../../utils/monthlyBudgetSpendWorkbook.js";
+import {
+  DEPARTMENTAL_COST_INPUT_TYPES,
+  createDepartmentalCostingInput,
+  deleteDepartmentalCostingInput,
+  listDepartmentalCostingInputs,
+} from "../../utils/departmentalCostingInputs.js";
 
 export default function registerOperationsExportsRoutes(app, ctx) {
   const {
@@ -599,9 +605,10 @@ export default function registerOperationsExportsRoutes(app, ctx) {
   });
 
   // =========================
-  // MONTHLY BUDGET VS SPEND XLSX
+  // MONTHLY DEPARTMENTAL COSTING XLSX
   // =========================
   // GET /api/reports/budget-vs-spend.xlsx?month=YYYY-MM
+  // The legacy endpoint name remains so existing shortcuts continue to work.
   app.get("/budget-vs-spend.xlsx", async (req, reply) => {
     if (!requireAdmin(req, reply)) return;
     const month = String(req.query?.month || "").trim();
@@ -612,17 +619,65 @@ export default function registerOperationsExportsRoutes(app, ctx) {
     try {
       const siteCode = String(req.headers["x-site-code"] || req.query?.site_code || "main").trim().toLowerCase() || "main";
       const report = buildMonthlyBudgetSpend(db, { month, siteCode });
-      const workbook = await buildMonthlyBudgetSpendWorkbook(report);
-      const buffer = await workbook.xlsx.writeBuffer();
+      const buffer = await buildMonthlyBudgetSpendBuffer(report);
       reply
         .header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
         .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        .header("Content-Disposition", `attachment; filename="IRONLOG_Budget_vs_Spend_${month}.xlsx"`)
+        .header("Content-Disposition", `attachment; filename="IRONLOG_Departmental_Costing_${month}.xlsx"`)
         .send(Buffer.from(buffer));
     } catch (error) {
       req.log.error(error, "Monthly Budget vs Spend export failed");
       return reply.code(500).send({ ok: false, error: error?.message || "Could not generate the Budget vs Spend export" });
     }
+  });
+
+  // Manual adjustments are deliberately narrow: these are monthly entries that
+  // Ironlog cannot derive from operational logs (depreciation, duties, other
+  // operating costs, or external revenue not captured by asset hire rates).
+  app.get("/departmental-costing-inputs", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const month = String(req.query?.month || "").trim();
+    if (!isMonth(month)) return reply.code(400).send({ ok: false, error: "month (YYYY-MM) required" });
+    const siteCode = String(req.headers["x-site-code"] || req.query?.site_code || "main").trim().toLowerCase() || "main";
+    return reply.send({
+      ok: true,
+      month,
+      site_code: siteCode,
+      types: DEPARTMENTAL_COST_INPUT_TYPES,
+      rows: listDepartmentalCostingInputs(db, { period: month, siteCode }),
+    });
+  });
+
+  app.post("/departmental-costing-inputs", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const month = String(req.body?.month || "").trim();
+    if (!isMonth(month)) return reply.code(400).send({ ok: false, error: "month (YYYY-MM) required" });
+    const siteCode = String(req.headers["x-site-code"] || req.body?.site_code || "main").trim().toLowerCase() || "main";
+    try {
+      const row = createDepartmentalCostingInput(db, {
+        period: month,
+        siteCode,
+        entryType: req.body?.entry_type,
+        assetCode: req.body?.asset_code,
+        description: req.body?.description,
+        reference: req.body?.reference,
+        amount: req.body?.amount,
+        createdBy: req.headers["x-user-name"],
+      });
+      return reply.send({ ok: true, row });
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: error?.message || "Could not save departmental costing entry" });
+    }
+  });
+
+  app.delete("/departmental-costing-inputs/:id", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const id = Number(req.params?.id);
+    if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ ok: false, error: "valid input id required" });
+    const siteCode = String(req.headers["x-site-code"] || req.query?.site_code || "main").trim().toLowerCase() || "main";
+    const deleted = deleteDepartmentalCostingInput(db, { id, siteCode });
+    if (!deleted) return reply.code(404).send({ ok: false, error: "Departmental costing entry not found for this site" });
+    return reply.send({ ok: true, deleted: id });
   });
 
   // =========================

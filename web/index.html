@@ -7273,9 +7273,41 @@
               <button id="openMonthlyFleetCostPdf" class="btn btn-primary">Open Monthly Fleet Cost PDF</button>
               <button id="downloadMonthlyFleetCostPdf" class="btn btn-secondary">Download Monthly Fleet Cost PDF</button>
               <button id="downloadCostMonthlyXlsx" class="btn btn-secondary">Download Monthly Excel</button>
-              <button id="downloadBudgetSpendXlsx" class="btn btn-accent">Budget vs Spend Excel</button>
+              <button id="downloadBudgetSpendXlsx" class="btn btn-accent">Departmental Costing Excel</button>
             </div>
-            <p class="muted small" style="margin:10px 0 0;">Uses the saved monthly operating budget, mechanic labour, lube usage, parts issued, and completed service work.</p>
+            <p class="muted small" style="margin:10px 0 0;">Plant AML-3001 and Workshop AML-3002: reconciled labour and lube charges, direct parts by machine, 25% Plant margin tracking, and consolidated results without internal revenue duplication.</p>
+            <details class="report-inline-panel" style="margin-top:14px;">
+              <summary><strong>Departmental costing inputs</strong> <span class="muted small">Depreciation, duties, other costs or unrecorded hire revenue</span></summary>
+              <p class="muted small" style="margin:10px 0;">Only add a line when it is not already in Ironlog's labour, lube, stores or plant-hire records. Every manual amount is named and retained in the workbook source detail.</p>
+              <div class="report-form">
+                <label class="chk">Entry type
+                  <select id="departmentalCostType">
+                    <option value="plant_revenue">Plant: external plant hire revenue</option>
+                    <option value="plant_other_operating">Plant: other operating expense</option>
+                    <option value="plant_depreciation">Plant: depreciation</option>
+                    <option value="workshop_duties">Workshop: import / export duties</option>
+                    <option value="workshop_other_operating">Workshop: other operating expense</option>
+                  </select>
+                </label>
+                <label class="chk">Asset / plant no. <span class="muted small">optional</span>
+                  <input id="departmentalCostAsset" placeholder="e.g. A300AM" />
+                </label>
+                <label class="chk">Amount (USD)
+                  <input id="departmentalCostAmount" type="number" step="0.01" placeholder="0.00" />
+                </label>
+                <label class="chk">Reference <span class="muted small">optional</span>
+                  <input id="departmentalCostReference" placeholder="Invoice / journal reference" />
+                </label>
+                <label class="chk" style="min-width:260px;flex:1;">Description
+                  <input id="departmentalCostDescription" placeholder="What is this amount for?" />
+                </label>
+              </div>
+              <div class="report-actions" style="margin-top:10px;">
+                <button id="saveDepartmentalCostInput" type="button" class="btn btn-secondary">Add departmental entry</button>
+              </div>
+              <div id="departmentalCostInputStatus" class="muted small" style="margin-top:10px;"></div>
+              <div id="departmentalCostInputList" class="muted small" style="margin-top:8px;"></div>
+            </details>
           </div>
         </div>
 
