@@ -1,0 +1,58 @@
+name: Move database copies to the backup volume
+
+# Keeps IronLog's on-server database copies (AML and every company instance)
+# on the separate Hetzner volume instead of the main disk, so they can never
+# fill the main disk and survive a main-disk failure. The live databases stay
+# where they are. Steps: point each IronLog at <volume>/ironlog/<name>/db-copies,
+# restart it (a few seconds), then move the existing copies across, checking
+# each one before the old file is removed. Stops without changes if the
+# volume is not mounted. Run by hand and type MOVE-DB-COPIES to confirm.
+on:
+  workflow_dispatch:
+    inputs:
+      volume:
+        description: "Volume mount point"
+        required: true
+        default: "/mnt/HC_Volume_107159306"
+      confirm:
+        description: "Type MOVE-DB-COPIES to run"
+        required: true
+
+jobs:
+  move:
+    if: ${{ github.event.inputs.confirm == 'MOVE-DB-COPIES' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VOLUME: ${{ github.event.inputs.volume }}
+    steps:
+      - name: Move the copies over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
+          port: ${{ secrets.SERVER_PORT }}
+          envs: VOLUME
+          command_timeout: 15m
+          script: |
+            set -e
+            tool=/data/ironlog/deploy/db-copies-volume.cjs
+            echo "== before"; df -h / "$VOLUME"
+            plan_file="$(mktemp)"
+            node "$tool" configure "$VOLUME" > "$plan_file"
+            cat "$plan_file"
+            # New copies go to the volume from here on.
+            pm2 restart ironlog-api --update-env > /dev/null
+            for i in 1 2 3 4 5 6 7 8; do curl -fsS http://127.0.0.1:3001/health > /dev/null 2>&1 && break; sleep 4; done
+            curl -fsS http://127.0.0.1:3001/health > /dev/null && echo "AML IronLog restarted and healthy."
+            bash /data/ironlog/deploy/ironlog-instance.sh restart-all || echo "Warning: a company instance did not come back; check pm2 logs."
+            failed=0
+            while IFS="$(printf '\t')" read -r name old new; do
+              echo "== $name: $old -> $new"
+              node "$tool" move "$old" "$new" || failed=1
+            done < "$plan_file"
+            rm -f "$plan_file"
+            echo "== after"; df -h / "$VOLUME"
+            exit "$failed"

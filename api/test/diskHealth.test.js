@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { diskHealth, diskLevel, folderSize, ironlogUsage } from "../utils/diskHealth.js";
+import { diskHealth, diskLevel, folderSize, ironlogUsage, serverDisks, worstDisk } from "../utils/diskHealth.js";
 
 const GB = 1e9;
 const disk = (freeGb, totalGb) => ({ bavail: freeGb * GB / 4096, blocks: totalGb * GB / 4096, bsize: 4096 });
@@ -40,4 +40,17 @@ test("shows what IronLog keeps on the disk, largest first", () => {
   assert.equal(folderSize(path.join(root, "backups"), 2).partial, true, "very large folders stop counting early");
   assert.deepEqual(folderSize(path.join(root, "missing")), { bytes: 0, files: 0, partial: false });
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("database copies on a separate volume get their own bar and warning", () => {
+  const statfs = (dir) => (dir.includes("volume") ? disk(1, 40) : disk(50, 75));
+  const stat = (dir) => ({ dev: dir.includes("volume") ? 2 : 1 });
+  const both = serverDisks({ dbPath: "/data/ironlog/api/db/ironlog.db", backupDir: "/mnt/volume/ironlog/aml/db-copies" }, { statfs, stat });
+  assert.deepEqual(both.map((d) => [d.name, d.level]), [["Server disk", "ok"], ["Backup volume", "critical"]]);
+  assert.match(both[1].message, /^Backup volume almost full: .*New database copies will stop until space is freed; IronLog keeps working/);
+  assert.equal(worstDisk(both).name, "Backup volume");
+  const same = serverDisks({ dbPath: "/data/ironlog/api/db/ironlog.db", backupDir: "/data/ironlog/api/db/backups" }, { statfs, stat });
+  assert.deepEqual(same.map((d) => d.name), ["Server disk"], "copies on the same disk: one bar");
+  assert.equal(worstDisk(same).name, "Server disk");
+  assert.equal(worstDisk([]), null);
 });
