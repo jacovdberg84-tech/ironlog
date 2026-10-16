@@ -16,6 +16,7 @@ import registerLubeRoutes from "./dashboard/lube.routes.js";
 import registerCostSettingsRoutes from "./dashboard/cost-settings.routes.js";
 import registerFuelRoutes from "./dashboard/fuel.routes.js";
 import { holdsAnyRole } from "../utils/request.js";
+import { ensureAssetSiteColumn } from "../utils/sites.js";
 
 function todayYYYYMMDD() {
   return new Date().toISOString().slice(0, 10);
@@ -59,6 +60,7 @@ function siteCodeFromReq(req) {
 }
 
 export default async function dashboardRoutes(app) {
+  ensureAssetSiteColumn(db);
   ensureCostAllocationSchema(db);
   ensureAuditTable(db);
 

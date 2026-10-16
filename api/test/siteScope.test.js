@@ -34,7 +34,9 @@ export function unscopedHandlers() {
     heads.forEach((m, k) => {
       const body = src.slice(m.index, k + 1 < heads.length ? heads[k + 1].index : src.length);
       const touches = SITE_TABLES.some((t) => new RegExp(`\\b(FROM|JOIN|INTO|UPDATE)\\s+${t}\\b`, "i").test(body));
-      const scoped = /site_code|getSiteCode|x-site-code|siteCode|siteOf|\bsite\b/i.test(body);
+      // Scoped: names a site, uses a helper from utils/sites.js, or carries a "// site:" note saying why
+      // it needs no filter (a person's own records, or a record number the guard in utils/siteGuard.js checks).
+      const scoped = /site_code|getSiteCode|x-site-code|siteCode|siteOf|\bsite\b|andSite|andAssetSite|siteSql|requestSite|RequestSite|\/\/ site:/i.test(body);
       if (touches && !scoped) found.push(`${m[1].toUpperCase()} ${rel} ${m[2]}`);
     });
   }

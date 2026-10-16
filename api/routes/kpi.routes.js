@@ -2,8 +2,10 @@
 import { db } from "../db/client.js";
 import { andDailyHoursFleetHoursOnly } from "../utils/fleetHoursKpiScope.js";
 import { isDate } from "../utils/request.js";
+import { andAssetSite, andSite, ensureAssetSiteColumn } from "../utils/sites.js";
 
 export default async function kpiRoutes(app) {
+  ensureAssetSiteColumn(db);
   // Daily KPI for a date
   // GET /api/kpi/daily/2026-02-27?scheduled=10
   app.get("/daily/:date", async (req, reply) => {
@@ -22,7 +24,7 @@ export default async function kpiRoutes(app) {
       JOIN assets a ON a.id = dh.asset_id
       WHERE dh.work_date = ?
         AND dh.hours_run > 0
-        ${andDailyHoursFleetHoursOnly("dh", "a")}
+        ${andDailyHoursFleetHoursOnly("dh", "a")}${andSite("a", req)}
     `).all(date);
 
     const used_count = usedAssets.length;
@@ -34,7 +36,7 @@ export default async function kpiRoutes(app) {
       JOIN assets a ON a.id = dh.asset_id
       WHERE dh.work_date = ?
         AND dh.hours_run > 0
-        ${andDailyHoursFleetHoursOnly("dh", "a")}
+        ${andDailyHoursFleetHoursOnly("dh", "a")}${andSite("a", req)}
     `).get(date);
 
     const run_hours = Number(runRow.run_hours || 0);
@@ -52,7 +54,7 @@ export default async function kpiRoutes(app) {
             JOIN assets a ON a.id = dh.asset_id
             WHERE dh.work_date = ?
               AND dh.hours_run > 0
-              ${andDailyHoursFleetHoursOnly("dh", "a")}
+              ${andDailyHoursFleetHoursOnly("dh", "a")}${andSite("a", req)}
           )
       `).get(date, date);
       downtime_hours = Number(downtimeRow.dt || 0);
@@ -77,7 +79,7 @@ export default async function kpiRoutes(app) {
         a.asset_name
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
-      WHERE b.breakdown_date = ?
+      WHERE b.breakdown_date = ?${andSite("a", req)}
       ORDER BY b.downtime_hours DESC, b.id DESC
       LIMIT 10
     `).all(date).map(r => ({ ...r, critical: Boolean(r.critical) }));
@@ -120,7 +122,7 @@ export default async function kpiRoutes(app) {
       JOIN assets a ON a.id = dh.asset_id
       WHERE dh.work_date BETWEEN ? AND ?
         AND dh.hours_run > 0
-        ${andDailyHoursFleetHoursOnly("dh", "a")}
+        ${andDailyHoursFleetHoursOnly("dh", "a")}${andSite("a", req)}
       GROUP BY dh.work_date
       ORDER BY dh.work_date
     `).all(start, end);
@@ -131,7 +133,7 @@ export default async function kpiRoutes(app) {
     const downtimeRow = db.prepare(`
       SELECT IFNULL(SUM(b.downtime_hours), 0) AS dt
       FROM breakdowns b
-      WHERE b.breakdown_date BETWEEN ? AND ?
+      WHERE b.breakdown_date BETWEEN ? AND ?${andAssetSite("b.asset_id", req)}
     `).get(start, end);
 
     const downtime_hours = Number(downtimeRow.dt || 0);
@@ -155,7 +157,7 @@ export default async function kpiRoutes(app) {
         a.asset_name
       FROM breakdowns b
       JOIN assets a ON a.id = b.asset_id
-      WHERE b.breakdown_date BETWEEN ? AND ?
+      WHERE b.breakdown_date BETWEEN ? AND ?${andSite("a", req)}
       ORDER BY b.downtime_hours DESC, b.id DESC
       LIMIT 20
     `).all(start, end).map(r => ({ ...r, critical: Boolean(r.critical) }));

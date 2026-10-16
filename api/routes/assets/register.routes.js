@@ -6,6 +6,7 @@ import { getAssetCurrentHoursInfo } from "../../utils/assetMeterHours.js";
 import { listHireAssetsRegister, normalizeHireBillingMode } from "../../utils/plantHire.js";
 import { normalizeCostCenterCode, normalizeSiteCode } from "../../utils/costAllocation.js";
 import { validateAgainstMdmPolicy, validateAssetGovernanceOptional } from "../../utils/masterdataGovernance.js";
+import { andSite } from "../../utils/sites.js";
 
 export default function registerRegisterRoutes(app, ctx) {
   const { buildMachineStatus, getAssetByCode, hasTable, insertAsset, siteCodeFromReq } = ctx;
@@ -51,7 +52,7 @@ export default function registerRegisterRoutes(app, ctx) {
         active, is_standby,
         archived, archive_reason
       FROM assets
-      WHERE (? = 1 OR archived = 0)
+      WHERE (? = 1 OR archived = 0)${andSite(null, req)}
       ORDER BY asset_code ASC
     `).all(includeArchived ? 1 : 0);
 

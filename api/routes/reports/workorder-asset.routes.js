@@ -20,6 +20,7 @@ export default function registerWorkorderAssetRoutes(app, ctx) {
   // WORK ORDER PDF (manual form + sign-off)
   // =========================
   app.get("/workorder/:id.pdf", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const id = Number(req.params?.id || 0);
     const download = String(req.query?.download || "").trim() === "1";
     const minimal = String(req.query?.minimal || "").trim() === "1";

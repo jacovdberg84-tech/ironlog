@@ -734,6 +734,7 @@ export default function registerInsightsRoutes(app, ctx) {
   // POST /api/maintenance/breakdowns/:id/repair-labor
   // Body: { labor_hours, notes? } — actual technician hours (not machine downtime hours)
   app.post("/breakdowns/:id/repair-labor", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     try {
       ensureBreakdownRepairLaborSchema(db);
       const breakdownId = Number(req.params?.id || 0);

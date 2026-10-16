@@ -72,6 +72,7 @@ import {
 import { addEnglishToFaultComments } from "../utils/prestartFaults.js";
 import { aiChatText, isAiConfigured } from "../utils/ironmind.js";
 import { translateText } from "../utils/translate.js";
+import { andSite, ensureAssetSiteColumn, requireRequestSite } from "../utils/sites.js";
 
 // First line of the job card on work orders a technician opens for unplanned work.
 export const UNPLANNED_MARK = "Unplanned work (logged by technician)";
@@ -125,6 +126,7 @@ async function once(req, kind, fn) {
 }
 
 export default async function techRoutes(app) {
+  ensureAssetSiteColumn(db);
   ensureTechSchema(db);
   ensureOtherTimeSchema(db);
   ensureArtisanSchema(db);
@@ -373,6 +375,7 @@ export default async function techRoutes(app) {
   });
 
   app.post("/workorders/:id/claim", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const me = userOf(req);
     const id = Number(req.params.id);
     const wo = db.prepare(`SELECT id, status, assigned_artisan_name FROM work_orders WHERE id = ?`).get(id);
@@ -404,6 +407,7 @@ export default async function techRoutes(app) {
 
   // ---------------------------------------------------------------- Work order
   app.get("/workorders/:id", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const acc = accessTo(req, req.params.id);
     if (acc.error) return reply.code(acc.error).send({ ok: false, error: acc.error === 404 ? "Work order not found" : "This job is not assigned to you" });
     const id = acc.wo.id;
@@ -693,6 +697,7 @@ export default async function techRoutes(app) {
   });
 
   app.post("/workorders/:id/helpers", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     if (!roleOk(req, LEAD_ROLES)) return reply.code(403).send({ ok: false, error: "Only a foreman or supervisor adds helpers." });
     const wanted = String(req.body?.username || "").trim();
     if (!wanted) return reply.code(400).send({ ok: false, error: "username is required" });
@@ -713,6 +718,7 @@ export default async function techRoutes(app) {
   });
 
   app.delete("/workorders/:id/helpers/:username", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     if (!roleOk(req, LEAD_ROLES)) return reply.code(403).send({ ok: false, error: "Only a foreman or supervisor removes helpers." });
     db.prepare(`DELETE FROM work_order_technicians WHERE work_order_id = ? AND LOWER(username) = LOWER(?)`).run(Number(req.params.id), String(req.params.username));
     return { ok: true };
@@ -842,7 +848,7 @@ export default async function techRoutes(app) {
     const since = new Date(Date.now() - days * 86400000).toISOString();
     const rows = db.prepare(`
       SELECT * FROM tech_shifts WHERE status = 'submitted' AND started_at >= ?
-      ${manager ? "" : "AND LOWER(username) = LOWER(?)"}
+      ${manager ? andSite(null, req) : "AND LOWER(username) = LOWER(?)"}
       ORDER BY started_at DESC LIMIT 100
     `).all(...(manager ? [since] : [since, me]));
     return { ok: true, rows: rows.map((s) => ({ ...shiftView(s, s.username), name: fullName(s.username) })) };
@@ -882,6 +888,7 @@ export default async function techRoutes(app) {
 
   // ---------------------------------------------------------------- Asset (QR)
   app.get("/assets/:code", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const a = db.prepare(`SELECT id, asset_code, asset_name, category FROM assets WHERE UPPER(asset_code) = UPPER(?)`).get(String(req.params.code || ""));
     if (!a) return reply.code(404).send({ ok: false, error: "Machine not found" });
     const me = userOf(req);
@@ -925,8 +932,9 @@ export default async function techRoutes(app) {
   app.get("/inspections", async (req, reply) => {
     let assetId = null;
     if (req.query?.asset_code) {
-      const a = db.prepare(`SELECT id FROM assets WHERE UPPER(asset_code) = UPPER(?)`).get(String(req.query.asset_code).trim());
+      const a = db.prepare(`SELECT id, site_code FROM assets WHERE UPPER(asset_code) = UPPER(?)`).get(String(req.query.asset_code).trim());
       if (!a) return reply.code(404).send({ ok: false, error: "Machine not found" });
+      if (!requireRequestSite(req, reply, a.site_code, "Machine")) return;
       assetId = a.id;
     }
     return { ok: true, rows: recentInspections(db, { assetId, username: assetId ? null : userOf(req), limit: assetId ? 5 : 15 }) };

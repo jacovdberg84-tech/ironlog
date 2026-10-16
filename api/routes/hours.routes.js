@@ -2,6 +2,7 @@
 import { db } from "../db/client.js";
 import { ensureTelematicsTables, isTelematicsMeterLocked, syncTelematicsDailyHours } from "../utils/telematics.js";
 import { isDate } from "../utils/request.js";
+import { ensureAssetSiteColumn, requestSite, requireRequestSite, siteSql } from "../utils/sites.js";
 
 function prevDate(dateStr) {
   const d = new Date(dateStr + "T00:00:00");
@@ -24,6 +25,7 @@ function numOrNull(v) {
 }
 
 export default async function hoursRoutes(app) {
+  ensureAssetSiteColumn(db);
   ensureTelematicsTables();
   db.prepare(`
     CREATE TABLE IF NOT EXISTS asset_input_units (
@@ -183,8 +185,9 @@ export default async function hoursRoutes(app) {
       FROM daily_hours dh
       JOIN assets a ON a.id = dh.asset_id
       WHERE dh.work_date = ?
+        AND ${siteSql("a.site_code")} = ?
       ORDER BY a.asset_code
-    `).all(date);
+    `).all(date, requestSite(req));
 
     return rows.map(r => ({
       ...r,
@@ -207,8 +210,9 @@ export default async function hoursRoutes(app) {
       return reply.code(400).send({ error: "asset_code and work_date(YYYY-MM-DD) required" });
     }
 
-    const asset = db.prepare(`SELECT id FROM assets WHERE asset_code = ?`).get(asset_code);
+    const asset = db.prepare(`SELECT id, site_code FROM assets WHERE asset_code = ?`).get(asset_code);
     if (!asset) return reply.code(404).send({ error: `asset_code not found: ${asset_code}` });
+    if (!requireRequestSite(req, reply, asset.site_code, "Machine")) return;
 
     const yRow = getCarryForwardRow(asset.id, work_date);
 
@@ -253,12 +257,13 @@ export default async function hoursRoutes(app) {
     }
 
     const asset = db.prepare(`
-      SELECT id, is_standby, active
+      SELECT id, is_standby, active, site_code
       FROM assets
       WHERE asset_code = ?
     `).get(asset_code);
 
     if (!asset) return reply.code(404).send({ error: `asset_code not found: ${asset_code}` });
+    if (!requireRequestSite(req, reply, asset.site_code, "Machine")) return;
     if (Number(asset.active) === 0) return reply.code(409).send({ error: "asset is inactive" });
 
     const telematicsLocked = isTelematicsMeterLocked(asset.id);

@@ -2,8 +2,10 @@
 import { db } from "../db/client.js";
 import { isDate } from "../utils/request.js";
 import { queryLowStock } from "../utils/myWork.js";
+import { andSite, ensureAssetSiteColumn } from "../utils/sites.js";
 
 export default async function alertsRoutes(app) {
+  ensureAssetSiteColumn(db);
   // GET /api/alerts?asof=2026-02-27
   app.get("/", async (req, reply) => {
     const asof = String(req.query?.asof || "").trim();
@@ -34,7 +36,7 @@ export default async function alertsRoutes(app) {
       JOIN assets a ON a.id = w.asset_id
       WHERE REPLACE(TRIM(LOWER(COALESCE(w.status, ''))), ' ', '_') IN ('open', 'assigned', 'in_progress')
         AND (w.completed_at IS NULL OR TRIM(COALESCE(w.completed_at, '')) = '')
-        AND (w.closed_at IS NULL OR TRIM(COALESCE(w.closed_at, '')) = '')
+        AND (w.closed_at IS NULL OR TRIM(COALESCE(w.closed_at, '')) = '')${andSite("a", req)}
       ORDER BY w.id DESC
       LIMIT 100
     `).all();
@@ -59,7 +61,7 @@ export default async function alertsRoutes(app) {
       JOIN assets a ON a.id = mp.asset_id
       WHERE mp.active = 1
         AND a.active = 1
-        AND a.is_standby = 0
+        AND a.is_standby = 0${andSite("a", req)}
     `);
 
     const plans = asof ? overdueMaintenance.all(asof) : overdueMaintenance.all();

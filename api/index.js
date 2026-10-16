@@ -20,7 +20,7 @@ import { backupDirPath } from "./routes/backups.routes.js";
 import { sendPushToRoles } from "./utils/pushNotify.js";
 import { db } from "./db/client.js";
 import { bootstrapSmtpFromEnv } from "./utils/mail.js";
-import { repairSiteDataOnce } from "./utils/sites.js";
+import { ensureSiteFollowsMachine, repairSiteDataOnce } from "./utils/sites.js";
 import { ensureAuditTable, writeAudit } from "./utils/audit.js";
 
 // Settings are read by ./loadEnv.js (imported before everything else): api/.env,
@@ -123,6 +123,7 @@ try {
       audit: (entry) => writeAudit(db, system, { module: "sites", ...entry }),
       log: app.log,
     });
+    ensureSiteFollowsMachine(db);
   } catch (err) {
     app.log.warn?.(`[sites] tidy-up skipped: ${err?.message || err}`);
   }

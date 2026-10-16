@@ -3,6 +3,7 @@
 import { db } from "../../db/client.js";
 import { fetchLubeUsageLines } from "../../utils/lubeUsageLines.js";
 import { writeAudit } from "../../utils/audit.js";
+import { andAssetSite } from "../../utils/sites.js";
 
 export default function registerLubeRoutes(app, ctx) {
   const { requireRoles, todayYYYYMMDD } = ctx;
@@ -30,7 +31,7 @@ export default function registerLubeRoutes(app, ctx) {
         COUNT(*) AS entries
       FROM oil_logs ol
       JOIN assets a ON a.id = ol.asset_id
-      WHERE ol.log_date BETWEEN ? AND ?
+      WHERE ol.log_date BETWEEN ? AND ?${andAssetSite("ol.asset_id", req)}
       GROUP BY a.id
       ORDER BY qty_total DESC, a.asset_code ASC
       LIMIT 200
@@ -53,7 +54,7 @@ export default function registerLubeRoutes(app, ctx) {
         COALESCE(SUM(ol.quantity * COALESCE(ol.unit_cost, ?)), 0) AS total_lube_cost
       FROM oil_logs ol
       JOIN assets a ON a.id = ol.asset_id
-      WHERE ol.log_date BETWEEN ? AND ?
+      WHERE ol.log_date BETWEEN ? AND ?${andAssetSite("ol.asset_id", req)}
       GROUP BY a.asset_code, oil_type
       ORDER BY a.asset_code ASC, qty_total DESC, oil_type ASC
       LIMIT 1200
@@ -79,7 +80,7 @@ export default function registerLubeRoutes(app, ctx) {
         COUNT(*) AS entries,
         COUNT(DISTINCT ol.asset_id) AS assets
       FROM oil_logs ol
-      WHERE ol.log_date BETWEEN ? AND ?
+      WHERE ol.log_date BETWEEN ? AND ?${andAssetSite("ol.asset_id", req)}
     `).get(lubeUnitFallback, start, end);
 
     const lines = fetchLubeUsageLines(db, { start, end, lubeUnitFallback });
@@ -141,7 +142,7 @@ export default function registerLubeRoutes(app, ctx) {
         COALESCE(SUM(ol.quantity), 0) AS qty_total,
         COUNT(*) AS entries
       FROM oil_logs ol
-      WHERE ol.log_date BETWEEN ? AND ?
+      WHERE ol.log_date BETWEEN ? AND ?${andAssetSite("ol.asset_id", req)}
       GROUP BY oil_key
       ORDER BY qty_total DESC
       LIMIT 200
@@ -160,7 +161,7 @@ export default function registerLubeRoutes(app, ctx) {
         END AS oil_key,
         COALESCE(SUM(ol.quantity), 0) AS qty
       FROM oil_logs ol
-      WHERE ol.log_date BETWEEN ? AND ?
+      WHERE ol.log_date BETWEEN ? AND ?${andAssetSite("ol.asset_id", req)}
       GROUP BY month, oil_key
       ORDER BY month ASC, qty DESC
       LIMIT 800

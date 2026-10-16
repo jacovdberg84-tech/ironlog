@@ -2,7 +2,7 @@
 import { db } from "../db/client.js";
 export { isAuthRequired } from "./config.js";
 import { isAuthRequired, isPublicAuthRequest } from "./config.js";
-import { unwrapSiteList } from "../utils/sites.js";
+import { defaultSite, knownSitesCached, unwrapSiteList } from "../utils/sites.js";
 
 function resolveSession(token) {
   try {
@@ -163,7 +163,13 @@ export async function ironlogAuthHook(req, reply) {
     if (row && Number(row.active) === 1) {
       const roles = parseRoles(row.roles_json, row.role);
       const allowedLocations = parseAllowedLocations(row.allowed_locations);
-      const requestedSite = String(req.headers["x-site-code"] || "").trim().toLowerCase();
+      let requestedSite = String(req.headers["x-site-code"] || "").trim().toLowerCase();
+      // A site the company doesn't have (an old value kept by the browser) means the default
+      // site, so nobody is left looking at empty lists.
+      if (requestedSite && !knownSitesCached(db).includes(requestedSite)) {
+        requestedSite = "";
+        req.headers["x-site-code"] = defaultSite();
+      }
       // Main administrators have global site access even if a stale or narrow
       // location list remains on their account.
       if (!roles.includes("admin") && Array.isArray(allowedLocations) && allowedLocations.length) {
@@ -175,6 +181,8 @@ export async function ironlogAuthHook(req, reply) {
           });
         }
         req.headers["x-site-code"] = effective;
+        // The record guard (utils/siteGuard.js) keeps this person to these sites.
+        req.ironlogAllowedSites = allowedLocations;
       }
       const routeRoles = expandRouteRoles(roles, url);
       req.headers["x-user-name"] = row.username;

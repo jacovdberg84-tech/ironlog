@@ -517,6 +517,7 @@ export default function registerPlansRoutes(app, ctx) {
   // GET /api/maintenance/asset/:id/live-hours?as_of=YYYY-MM-DD (optional; meter/usage up to that date)
   // =====================================================
   app.get("/asset/:id/live-hours", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     try {
       const assetId = Number(req.params?.id || 0);
       if (!assetId) {

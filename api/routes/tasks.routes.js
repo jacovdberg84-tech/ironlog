@@ -51,6 +51,7 @@ export default async function tasksRoutes(app) {
   });
 
   app.delete("/projects/:id", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const id = req.params.id;
     const existing = db.prepare("SELECT * FROM projects WHERE id = ?").get(id);
     if (!existing) {
@@ -142,6 +143,7 @@ export default async function tasksRoutes(app) {
   });
 
   app.put("/tasks/:id", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const { title, description, status, priority, project, assigned_to, due_date, watchers } = req.body || {};
     const id = req.params.id;
     const me = requestUser(req) || "system";
@@ -200,6 +202,7 @@ export default async function tasksRoutes(app) {
   });
 
   app.delete("/tasks/:id", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const id = req.params.id;
     const existing = taskRow(id);
     if (!existing) return reply.code(404).send({ error: "Task not found" });
@@ -220,6 +223,7 @@ export default async function tasksRoutes(app) {
 
   // POST /api/tasks/:id/comments { comment } — signed by the signed-in user.
   app.post("/tasks/:id/comments", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const task = taskRow(req.params.id);
     if (!task) return reply.code(404).send({ error: "Task not found" });
     const { comment } = req.body || {};

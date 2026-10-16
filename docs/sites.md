@@ -18,6 +18,20 @@ own database, so companies never share records; sites split one company's work.
   default site; gives machines with no site the default site; and drops allowed
   locations that are not sites. Each change is in the audit log (module `sites`,
   user `system`). It runs once per database (`site_repairs` table).
-- **Guard.** `api/test/siteScope.test.js` fails when a route reads or changes site
+- **Record guard.** `api/utils/siteGuard.js` runs before every route (server.js,
+  preHandler). For a person limited to some sites it looks up any record the address
+  names (work order, breakdown, inspection, purchase order, task, machine code…) and
+  any machine, work order or breakdown named in the body, and answers 404 when that
+  record is on another site. New record-number routes: add a line to `RECORD_RULES`.
+- **Lists and totals** filter by the chosen site with `andSite(alias, req)` /
+  `andAssetSite(column, req)` (the site code is checked before it reaches SQL), or
+  `requireRequestSite(req, reply, site)` for one machine.
+- **New records follow their machine.** Database triggers (`ensureSiteFollowsMachine`,
+  run at start-up) give every new breakdown, work order, fuel/oil/hours log and
+  inspection its machine's site.
+- **Guard test.** `api/test/siteScope.test.js` fails when a route reads or changes site
   records without choosing a site. Handlers that did so when it was added are listed
-  in `api/test/siteScopeBaseline.json`; that list may only shrink.
+  in `api/test/siteScopeBaseline.json`; that list may only shrink. A handler that needs
+  no filter says why in a `// site:` comment (a person's own records, or a record
+  number the record guard checks). `api/test/siteIsolation.test.js` signs in a person
+  limited to one of two sites and checks lists, record numbers and changes.

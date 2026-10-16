@@ -14,6 +14,7 @@ import maintenanceRoutes from "./routes/maintenance.routes.js";
 import reportsRoutes from "./routes/reports.routes.js";
 import alertsRoutes from "./routes/alerts.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
+import { makeSiteGuard } from "./utils/siteGuard.js";
 import authRoutes from "./routes/auth.routes.js";
 import microsoftSigninRoutes from "./routes/microsoftSignin.routes.js";
 import companyRoutes from "./routes/company.routes.js";
@@ -72,6 +73,9 @@ export function buildServer() {
   app.addHook("onRequest", ironlogAuthHook);
   // After sign-in, so the site is known: licence modules and read-only mode.
   app.addHook("onRequest", licenceHook);
+  // People limited to some sites can't open other sites' records (utils/siteGuard.js).
+  app.decorateRequest("ironlogAllowedSites", null);
+  app.addHook("preHandler", makeSiteGuard(db));
 
   // Health check
   app.get("/health", async () => {

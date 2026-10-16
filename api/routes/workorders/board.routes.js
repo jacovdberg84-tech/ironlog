@@ -434,6 +434,7 @@ export default function registerBoardRoutes(app, ctx) {
   // Work order status transitions
   // Body: { status }
   app.post("/:id/status", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const role = getRole(req);
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return reply.code(400).send({ error: "invalid id" });
@@ -593,6 +594,7 @@ export default function registerBoardRoutes(app, ctx) {
 
   // POST /api/workorders/:id/progress  { repair_progress } — shown on daily PDF for active jobs
   app.post("/:id/progress", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const role = getRole(req);
     const id = Number(req.params.id);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
@@ -648,6 +650,7 @@ export default function registerBoardRoutes(app, ctx) {
 
   // POST /api/workorders/:id/costs — repair hours, labor rate, manual oil cost, technician
   app.post("/:id/costs", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const role = getRole(req);
     const id = Number(req.params.id);
     if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });

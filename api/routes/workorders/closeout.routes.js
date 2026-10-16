@@ -12,6 +12,7 @@ export default function registerCloseoutRoutes(app, ctx) {
     // Issue parts to a work order (creates stock movement OUT)
   // Body: { part_code, quantity }
   app.post("/:id/issue", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     if (!requireRoles(req, reply, ["admin", "supervisor", "stores"])) return;
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return reply.code(400).send({ error: "invalid id" });
@@ -76,6 +77,7 @@ export default function registerCloseoutRoutes(app, ctx) {
 
   // Request close approval for a work order
   app.post("/:id/request-close", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     if (!requirePermission(req, reply, "workorders.close.request")) return;
     if (!requireRoles(req, reply, ["admin", "supervisor", "artisan"])) return;
     const id = Number(req.params.id);
@@ -187,6 +189,7 @@ export default function registerCloseoutRoutes(app, ctx) {
   });
 
   app.post("/:id/delete-request", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     if (!requirePermission(req, reply, "workorders.delete.request")) return;
     if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
     const id = Number(req.params.id);
@@ -216,6 +219,7 @@ export default function registerCloseoutRoutes(app, ctx) {
 
   // Close a work order
   app.post("/:id/close", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     if (!requirePermission(req, reply, "workorders.close.approve")) return;
     if (!requireRoles(req, reply, ["admin", "supervisor"])) return;
     const id = Number(req.params.id);

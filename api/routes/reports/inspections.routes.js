@@ -488,6 +488,7 @@ export default function registerInspectionsRoutes(app, ctx) {
 
   // GET /api/reports/manager-inspection/:id.pdf?download=1
   app.get("/manager-inspection/:id.pdf", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const id = Number(req.params?.id || 0);
     const download = String(req.query?.download || "").trim() === "1";
     if (!Number.isFinite(id) || id <= 0) {
@@ -1109,6 +1110,7 @@ export default function registerInspectionsRoutes(app, ctx) {
 
   // GET /api/reports/damage-report/:id.pdf?download=1
   app.get("/damage-report/:id.pdf", async (req, reply) => {
+    // site: the record number is checked by the site guard (utils/siteGuard.js).
     const id = Number(req.params?.id || 0);
     const download = String(req.query?.download || "").trim() === "1";
     if (!Number.isFinite(id) || id <= 0) {

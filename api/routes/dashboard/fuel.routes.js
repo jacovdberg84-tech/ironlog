@@ -10,6 +10,7 @@ import { summarizeFuelBenchmarkRows } from "../../utils/fuelRunFromLogs.js";
 import { assetConsumption, consumptionNote, ensureFuelBenchmarkSchema, sortBenchmarkRows } from "../../utils/fuelConsumption.js";
 import { resolveLogCostCenterCode } from "../../utils/costAllocation.js";
 import { writeAudit } from "../../utils/audit.js";
+import { andAssetSite, andSite } from "../../utils/sites.js";
 
 export default function registerFuelRoutes(app, ctx) {
   const {
@@ -151,7 +152,7 @@ export default function registerFuelRoutes(app, ctx) {
       return reply.code(400).send({ error: "meter_run_value must be >= 0" });
     }
 
-    const asset = db.prepare(`SELECT id, cost_center_code FROM assets WHERE asset_code = ?`).get(asset_code);
+    const asset = db.prepare(`SELECT id, cost_center_code FROM assets WHERE asset_code = ?${andSite(null, req)}`).get(asset_code);
     if (!asset) return reply.code(404).send({ error: `asset_code not found: ${asset_code}` });
     const cost_center_code = resolveLogCostCenterCode(db, asset.id, body.cost_center_code);
 
@@ -226,7 +227,7 @@ export default function registerFuelRoutes(app, ctx) {
     let assetFilterSql = "";
     const params = [];
     if (asset_code) {
-      const asset = db.prepare(`SELECT id, asset_code FROM assets WHERE asset_code = ?`).get(asset_code);
+      const asset = db.prepare(`SELECT id, asset_code FROM assets WHERE asset_code = ?${andSite(null, req)}`).get(asset_code);
       if (!asset) return reply.code(404).send({ error: `asset not found: ${asset_code}` });
       assetFilterSql = "AND d2.asset_id = ?";
       params.push(asset.id);
@@ -250,7 +251,7 @@ export default function registerFuelRoutes(app, ctx) {
           LIMIT 1
         ) AS expected_opening_hours
       FROM daily_hours d2
-      WHERE 1 = 1
+      WHERE 1 = 1${andAssetSite("d2.asset_id", req)}
         ${assetFilterSql}
     `).all(...params).filter((r) => {
       if (r.expected_opening_hours == null) return false;
@@ -313,12 +314,13 @@ export default function registerFuelRoutes(app, ctx) {
 
     let assetId = null;
     if (assetCode) {
-      const asset = db.prepare(`SELECT id FROM assets WHERE asset_code = ?`).get(assetCode);
+      const asset = db.prepare(`SELECT id FROM assets WHERE asset_code = ?${andSite(null, req)}`).get(assetCode);
       if (!asset) return reply.code(404).send({ error: `asset not found: ${assetCode}` });
       assetId = Number(asset.id);
     }
 
-    const whereSql = assetId != null ? "WHERE log_date >= ? AND asset_id = ?" : "WHERE log_date >= ?";
+    // Only this site's machines: clearing "all machines" must never reach another site.
+    const whereSql = (assetId != null ? "WHERE log_date >= ? AND asset_id = ?" : "WHERE log_date >= ?") + andAssetSite("asset_id", req);
     const whereParams = assetId != null ? [fromDate, assetId] : [fromDate];
     const dayRows = db.prepare(`
       SELECT DISTINCT asset_id, log_date
@@ -353,12 +355,13 @@ export default function registerFuelRoutes(app, ctx) {
 
     let assetId = null;
     if (assetCode) {
-      const asset = db.prepare(`SELECT id, asset_code FROM assets WHERE asset_code = ?`).get(assetCode);
+      const asset = db.prepare(`SELECT id, asset_code FROM assets WHERE asset_code = ?${andSite(null, req)}`).get(assetCode);
       if (!asset) return reply.code(404).send({ error: `asset not found: ${assetCode}` });
       assetId = Number(asset.id);
     }
 
-    const whereSql = assetId != null ? "WHERE log_date >= ? AND asset_id = ?" : "WHERE log_date >= ?";
+    // Only this site's machines: clearing "all machines" must never reach another site.
+    const whereSql = (assetId != null ? "WHERE log_date >= ? AND asset_id = ?" : "WHERE log_date >= ?") + andAssetSite("asset_id", req);
     const whereParams = assetId != null ? [fromDate, assetId] : [fromDate];
 
     const tx = db.transaction(() => {
@@ -449,7 +452,7 @@ export default function registerFuelRoutes(app, ctx) {
       SELECT fl.id, fl.asset_id, fl.log_date, a.asset_code
       FROM fuel_logs fl
       JOIN assets a ON a.id = fl.asset_id
-      WHERE fl.id = ?
+      WHERE fl.id = ?${andSite("a", req)}
       LIMIT 1
     `).get(fuelLogId);
     if (!fuelLog) return reply.code(404).send({ error: "fuel log not found" });
@@ -535,7 +538,7 @@ export default function registerFuelRoutes(app, ctx) {
           END)
           END AS metric_mode
         FROM assets a
-        WHERE a.asset_code = ?
+        WHERE a.asset_code = ?${andSite("a", req)}
       `).get(asset_code);
       if (!row) return reply.code(404).send({ error: `asset_code not found: ${asset_code}` });
       return reply.send({ ok: true, asset: row });
@@ -564,7 +567,7 @@ export default function registerFuelRoutes(app, ctx) {
         END)
         END AS metric_mode
       FROM assets a
-      WHERE a.active = 1
+      WHERE a.active = 1${andSite("a", req)}
       ORDER BY a.asset_code ASC
       LIMIT 500
     `).all();
@@ -602,7 +605,7 @@ export default function registerFuelRoutes(app, ctx) {
           END)
         END AS metric_mode
       FROM assets
-      WHERE asset_code = ?
+      WHERE asset_code = ?${andSite(null, req)}
     `).get(asset_code);
     if (!asset) return reply.code(404).send({ error: `asset_code not found: ${asset_code}` });
 
@@ -824,7 +827,7 @@ export default function registerFuelRoutes(app, ctx) {
           END) AS metric_mode
         FROM fuel_logs fl
         JOIN assets a ON a.id = fl.asset_id
-        WHERE fl.log_date BETWEEN ? AND ?
+        WHERE fl.log_date BETWEEN ? AND ?${andSite("a", req)}
       ),
       tagged AS (
         SELECT
@@ -917,7 +920,7 @@ export default function registerFuelRoutes(app, ctx) {
         a.fuel_benchmark_set_at,
         ${sqlFuelMetricModeExpr("a")} AS metric_mode
       FROM assets a
-      WHERE a.asset_code = ?
+      WHERE a.asset_code = ?${andSite("a", req)}
     `).get(assetCode);
     if (!asset) return reply.code(404).send({ error: `asset not found: ${assetCode}` });
 
@@ -1004,7 +1007,7 @@ export default function registerFuelRoutes(app, ctx) {
       SELECT fl.id, fl.asset_id, fl.log_date, fl.liters, fl.hours_run, fl.source, a.asset_code
       FROM fuel_logs fl
       JOIN assets a ON a.id = fl.asset_id
-      WHERE fl.id = ?
+      WHERE fl.id = ?${andSite("a", req)}
     `).get(id);
     if (!row) return reply.code(404).send({ error: "fuel log not found" });
 
