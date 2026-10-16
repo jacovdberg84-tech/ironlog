@@ -6,6 +6,7 @@ import { db, dbPathResolved } from "../db/client.js";
 import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { backupBusy, backupStatus, getBackupSettings, runBackup, runRestoreTest, saveBackupSettings, startInBackground, webdavClient } from "../utils/autoBackup.js";
 import { getCompanyProfile } from "../utils/companyProfile.js";
+import { diskHealth } from "../utils/diskHealth.js";
 
 function requestRoles(req) {
   const fromMany = String(req.headers["x-user-roles"] || "")
@@ -124,6 +125,12 @@ export default async function backupsRoutes(app) {
   app.get("/status", async (req, reply) => {
     if (!requireAdmin(req, reply)) return;
     return { ok: true, running: backupBusy(), ...backupStatus(db, { dbPath: dbPathResolved, backupDir: backupDirPath() }) };
+  });
+
+  // Light check for the admin banner (no folder walk).
+  app.get("/disk", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    return { ok: true, disk: diskHealth(path.dirname(dbPathResolved)) };
   });
 
   app.put("/settings", async (req, reply) => {

@@ -1115,6 +1115,41 @@ function ensureLicenceState() {
     .finally(() => { licenceLoading = false; });
 }
 
+// ---- Server disk space: administrators see a banner when it runs low (api/utils/diskHealth.js).
+let diskCheckedFor = "";
+let diskCheckedAt = 0;
+
+function renderDiskBanner(disk) {
+  let el = qs("diskBanner");
+  if (!disk || disk.level === "ok" || !disk.message) {
+    if (el) el.hidden = true;
+    return;
+  }
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "diskBanner";
+    el.setAttribute("role", "alert");
+    qs("mainContent")?.prepend(el);
+  }
+  el.className = `licence-banner ${disk.level === "critical" ? "is-blocked" : "is-warn"}`;
+  el.textContent = disk.message;
+  el.hidden = false;
+}
+
+/** Admins only; checked at sign-in and then at most every 30 minutes. */
+function ensureDiskWarning() {
+  if (!getSessionRoles().includes("admin")) return renderDiskBanner(null);
+  if (LOGIN_GATE_ENABLED && !getAuthToken()) return;
+  const key = getAuthToken() || "open";
+  if (diskCheckedFor === key && Date.now() - diskCheckedAt < 30 * 60 * 1000) return;
+  diskCheckedFor = key;
+  diskCheckedAt = Date.now();
+  fetch(`${API}/api/admin/backups/disk`, { headers: new Headers(authHeaders()) })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => renderDiskBanner(data?.disk || null))
+    .catch(() => {});
+}
+
 /** Puts the sections a role uses most straight after Home. */
 const NAV_SECTION_PRIORITY = {
   storeman: ["stores"],
@@ -1148,6 +1183,7 @@ function applyRoleVisibility() {
   const role = getSessionRole();
   const roles = getSessionRoles();
   ensureLicenceState();
+  ensureDiskWarning();
   renderSessionRolesBadge();
   if (typeof syncJuneVisibility === "function") syncJuneVisibility();
   const allowedList = getEffectiveAllowedTabs();
