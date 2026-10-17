@@ -40,11 +40,13 @@ test("developer agent status is limited to engineering roles", async () => {
 test("the dashboard exposes an admin Developer tab for the coding agent", () => {
   const html = fs.readFileSync(new URL("../../web/index.html", import.meta.url), "utf8");
   const core = fs.readFileSync(new URL("../../web/app/core.js", import.meta.url), "utf8");
-  assert.match(html, /data-tab="developer"/);
+  // The menu and who sees which screen live in app-nav.js, shared by every desk page.
+  const nav = fs.readFileSync(new URL("../../web/app-nav.js", import.meta.url), "utf8");
+  assert.match(nav, /tab: "developer"/);
   assert.match(html, /id="tab-developer"/);
   assert.match(html, /id="devCreateBtn"/);
   assert.match(html, /app\/developer\.js/);
   assert.match(core, /"developer"/);
   assert.match(core, /opt\.value === "admin" \|\| opt\.value === "developer"/);
-  assert.match(core, /!list\.includes\("developer"\)/);
+  assert.match(nav, /roles\.includes\("admin"\) && !list\.includes\("developer"\)/);
 });

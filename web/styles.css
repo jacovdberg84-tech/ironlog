@@ -9312,3 +9312,18 @@ body.wo-popup .wo-drawer-head { display: none; }
 #webhooksCard .webhook-url { word-break: break-all; max-width: 260px; }
 #webhooksCard .webhook-actions { display: flex; flex-wrap: wrap; gap: 4px; min-width: 200px; }
 #webhookDeliveries { margin-top: 12px; }
+
+/* Shared IronLog menu (app-nav.js) on Maintenance, Work Orders, Breakdowns and the API docs */
+.ironlog-nav-page .brand { color: inherit; text-decoration: none; }
+.ironlog-nav-page .main-content > .page-header,
+.ironlog-nav-page .main-content > .page-section { margin-left: 0; margin-right: 0; }
+.sidebar .nav-item.is-page { font-weight: 700; color: var(--ink); }
+.sidebar .nav-subsections { margin: 2px 0 8px 14px; padding-left: 8px; border-left: 2px solid var(--line); }
+.sidebar .nav-subsections .nav-section { margin-bottom: 4px; }
+.sidebar .nav-subsections .nav-section-title { font-size: 10px; padding-top: 4px; }
+.sidebar .nav-subsections .nav-item { padding-top: 6px; padding-bottom: 6px; font-size: 13px; }
+/* On phones and tablets the menu slides over the page, so the page uses the full width
+   (this desktop rule used to leave a 260px gap on Maintenance). */
+@media (max-width: 1024px) {
+  .has-sidebar .main-content { margin-left: 0; }
+}

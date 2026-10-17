@@ -6,18 +6,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:," />
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=ms-13" />
+  <link rel="stylesheet" href="./styles.css?v=ms-14" />
 </head>
 <body class="page-shell">
   <div class="page-header">
     <div>
       <h2 style="margin:0;">Breakdowns</h2>
       <p class="muted small bo-page-subtitle">Report equipment downtime, follow active incidents, and hand repairs to Work Orders.</p>
-    </div>
-    <div class="page-header-actions">
-      <button type="button" onclick="location.href='index.html'">Dashboard</button>
-      <button type="button" onclick="location.href='maintenance.html'">Maintenance</button>
-      <button type="button" onclick="location.href='workorders.html'">Work Orders</button>
     </div>
   </div>
 
@@ -340,6 +335,8 @@
   </datalist>
 
   <script src="./session.js?v=1"></script>
+  <script src="./app-nav.js?v=1"></script>
+  <script>IronlogNav.mountPage({ active: "breakdowns", subtitle: "Breakdowns" });</script>
   <script src="./breakdown-ops.js?v=11"></script>
 </body>
 </html>

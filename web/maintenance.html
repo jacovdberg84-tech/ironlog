@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:," />
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=ms-13" />
+  <link rel="stylesheet" href="./styles.css?v=ms-14" />
 </head>
 <body class="page-shell has-sidebar">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -44,16 +44,6 @@
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
         </svg>
       </button>
-      <div class="quick-links">
-        <button onclick="location.href='index.html'" class="btn btn-secondary btn-sm">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-          Dashboard
-        </button>
-        <button onclick="location.href='workorders.html'" class="btn btn-secondary btn-sm">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-          Work Orders
-        </button>
-      </div>
     </div>
   </header>
 
@@ -2403,8 +2393,10 @@
   <script src="./undercarriage.js?v=5"></script>
   <script src="./tyre-inspection-qr.js?v=1"></script>
   <script src="./session.js?v=1"></script>
+  <script src="./app-nav.js?v=1"></script>
+  <script>IronlogNav.mountIntoSidebar(document.getElementById("sidebar"), { active: "maintenance" });</script>
   <!-- Maintenance page, split by feature. Order matters: files share one global scope. -->
-  <script src="./maintenance/core.js?v=64"></script>
+  <script src="./maintenance/core.js?v=65"></script>
   <script src="./maintenance/service-templates.js?v=66"></script>
   <script src="./maintenance/plans.js?v=65"></script>
   <script src="./maintenance/insights.js?v=64"></script>

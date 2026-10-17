@@ -16,39 +16,6 @@ const TABS_OVERRIDE_KEY = "ironlog_allowed_tabs";
 const SLA_OPEN_SAME_TAB_KEY = "ironlog_sla_open_same_tab";
 const LOC_DEFAULT_PREFIX = "ironlog_default_location_";
 const MAINT_CHILD_TABS = new Set(["Breakdowns", "ironmind"]);
-/** Production site nav — the screens people use (all opened October 2026; a screen leaves only on purpose). */
-const PRODUCTION_SITE_TABS = [
-  "mywork",
-  "tasks",
-  "dash",
-  "daily",
-  "maintenance",
-  "assets",
-  "telematics",
-  "cartrack",
-  "workshop",
-  "fuel",
-  "lube",
-  "vehicle",
-  "stock",
-  "parts-tracking",
-  "reports",
-  "finance",
-  "procurement",
-  "approvals",
-  "operations",
-  "dispatch",
-  "quality",
-  "legal",
-  "audit",
-  "docs",
-  "uploads",
-  "enterprise",
-  "exec",
-  "ironmind",
-  "developer",
-];
-const PRODUCTION_NAV_ENABLED = true;
 /** Dashboard cards hidden during production UI cleanup (remove class `hidden` in index.html to restore). */
 function isDashSectionVisible(id) {
   const el = qs(id);
@@ -978,96 +945,18 @@ function openAuthedReport(url, { download = false, filename = "ironlog-report.pd
   });
 }
 
+// Which screens each role sees, and the menu itself, live in app-nav.js so every page shares them.
 function getRoleAllowedTabs(role) {
-  const r = String(role || "").toLowerCase();
-  if (r === "plant_clerk") return ["dash", "daily", "assets", "fuel", "lube", "vehicle", "reports", "docs", "tasks"];
-  if (r === "workshop_admin") return ["dash", "daily", "assets", "telematics", "workshop", "maintenance", "stock", "parts-tracking", "reports", "Breakdowns", "approvals", "procurement", "ironmind", "docs", "vehicle", "tasks"];
-  if (r === "operator") return ["dash", "daily", "workshop", "fuel", "lube", "legal", "operations", "ironmind", "docs", "vehicle", "tasks", "telematics", "cartrack"];
-  if (r === "artisan") return ["workshop", "maintenance", "Breakdowns", "vehicle", "tasks"];
-  if (r === "stores" || r === "storeman") return ["dash", "stock", "parts-tracking", "workshop", "reports", "procurement", "tasks"];
-  if (r === "procurement") return ["dash", "stock", "parts-tracking", "workshop", "reports", "finance", "procurement", "operations", "quality", "docs", "tasks"];
-  if (r === "plant_manager") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "parts-tracking", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "ironmind", "docs", "vehicle", "tasks"];
-  if (r === "site_manager") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "parts-tracking", "reports", "finance", "procurement", "operations", "dispatch", "quality", "audit", "docs", "tasks"];
-  if (r === "executive") return ["dash", "workshop", "reports", "finance", "operations", "quality", "audit", "docs", "tasks"];
-  if (r === "supervisor") return ["dash", "daily", "assets", "telematics", "cartrack", "workshop", "maintenance", "fuel", "lube", "stock", "parts-tracking", "legal", "uploads", "reports", "finance", "enterprise", "exec", "Breakdowns", "approvals", "procurement", "operations", "dispatch", "quality", "audit", "ironmind", "docs", "vehicle", "tasks"];
-  return [
-    "dash",
-    "daily",
-    "assets",
-    "telematics",
-    "cartrack",
-    "workshop",
-    "maintenance",
-    "fuel",
-    "lube",
-    "stock",
-    "parts-tracking",
-    "legal",
-    "uploads",
-    "reports",
-    "finance",
-    "enterprise",
-    "exec",
-    "Breakdowns",
-    "approvals",
-    "procurement",
-    "operations",
-    "dispatch",
-    "quality",
-    "audit",
-    "ironmind",
-    "docs",
-    "vehicle",
-    "tasks",
-    "admin",
-  ];
+  return IronlogNav.roleTabs(role);
 }
 
 function getEffectiveAllowedTabs() {
-  const role = getSessionRole();
-  const roles = getSessionRoles();
-  let list;
-  const raw = localStorage.getItem(TABS_OVERRIDE_KEY);
-  if (raw) {
-    try {
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr) && arr.length) list = arr;
-    } catch {}
-  }
-  if (!list) {
-    list = Array.from(new Set(roles.flatMap((r) => getRoleAllowedTabs(r))));
-  }
-  if (PRODUCTION_NAV_ENABLED) {
-    const production = new Set(PRODUCTION_SITE_TABS);
-    list = list.filter((t) => production.has(t));
-    // Borris stays reachable even for saved per-user tab lists created before it was restored.
-    if (!list.includes("ironmind")) list = [...list, "ironmind"];
-    // Tasks back the My Work list; per-user section lists cannot assign it, so always allow it.
-    if (!list.includes("tasks")) list = [...list, "tasks"];
-  } else {
-    // Keep task workspace reachable even when older saved tab overrides exist.
-    if (!list.includes("tasks")) list = [...list, "tasks"];
-    // Workshop Library is public-facing and should stay reachable even for older saved tab overrides.
-    if (!list.includes("workshop")) list = [...list, "workshop"];
-  }
-  // Enterprise + executive tabs visibility guards (introduced in big-out roll)
-  if (roles.some((r) => ["admin", "supervisor", "executive"].includes(r))) {
-    if (!list.includes("enterprise")) list = [...list, "enterprise"];
-    if (!list.includes("exec")) list = [...list, "exec"];
-  }
-  // Backward compatibility for older saved tab overrides created before Finance tab existed.
-  if (roles.some((r) => ["admin", "supervisor", "procurement", "plant_manager", "site_manager", "executive"].includes(r)) && !list.includes("finance")) {
-    list = [...list, "finance"];
-  }
-  // "admin" is not an assignable section in the multiselect; always allow the User admin tab for these roles
-  if (roles.includes("admin") && !list.includes("admin")) list = [...list, "admin"];
-  if (roles.includes("admin") && !list.includes("developer")) list = [...list, "developer"];
-  // Screens of add-on modules outside this site's licence are hidden (the server refuses them too).
-  const unlicensed = licenceHiddenTabs();
-  if (unlicensed.size) list = list.filter((t) => !unlicensed.has(t));
-  // My Work is the home screen for every signed-in user; keep it first so it is the landing tab.
-  list = ["mywork", ...list.filter((t) => t !== "mywork")];
-  return list;
+  let override = null;
+  try {
+    const arr = JSON.parse(localStorage.getItem(TABS_OVERRIDE_KEY) || "null");
+    if (Array.isArray(arr) && arr.length) override = arr;
+  } catch {}
+  return IronlogNav.effectiveTabs({ roles: getSessionRoles(), override, unlicensed: licenceHiddenTabs() });
 }
 
 // ---- Licence: which add-on modules this site has, and warnings to show (api/routes/licence.routes.js).
@@ -1253,39 +1142,13 @@ function applyRoleVisibility() {
     });
   }
   
-  // Update sidebar nav items visibility
+  // Update sidebar nav items visibility (the rules are shared with the other pages in app-nav.js)
   const sidebar = qs("sidebar");
   if (sidebar) {
-    sidebar.querySelectorAll(".nav-item").forEach((item) => {
-      const tab = item.dataset.tab;
-      const navKey = item.dataset.nav || tab;
-      if (!navKey) return;
-      if (tab === "admin" || tab === "developer") {
-        item.style.display = roles.includes("admin") ? "" : "none";
-        return;
-      }
-      if (navKey === "maintenance") {
-        item.style.display = allowed.has("maintenance") ? "" : "none";
-        return;
-      }
-      if (!tab) return;
-      item.style.display = isAllowedDashboardTab(tab, allowed) ? "" : "none";
-    });
-    
-    const techPortal = qs("navTechPortal");
-    if (techPortal) {
-      const workshop = ["artisan", "supervisor", "workshop_admin", "admin", "plant_manager", "site_manager"];
-      techPortal.style.display = roles.some((r) => workshop.includes(String(r).toLowerCase())) ? "" : "none";
-    }
+    IronlogNav.applyVisibility(sidebar, allowed, roles);
     const taskWorkspaceHeader = sidebar.querySelector(".task-workspace-header");
     if (taskWorkspaceHeader) taskWorkspaceHeader.style.display = allowed.has("tasks") ? "" : "none";
     orderNavSectionsForRoles(sidebar, roles);
-
-    // Hide nav sections that are empty
-    sidebar.querySelectorAll(".nav-section").forEach((section) => {
-      const visibleItems = section.querySelectorAll(".nav-item:not([style*='display: none'])");
-      section.style.display = visibleItems.length === 0 ? "none" : "";
-    });
   }
 
   const reopenBtn = qs("reopenOperationsDay");
