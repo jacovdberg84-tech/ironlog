@@ -176,7 +176,12 @@
           ].filter(Boolean).join(" ");
           return `<a ${attrs}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${it.icon}</svg><span>${esc(it.label)}</span></a>`;
         }).join("")}
-      </div>`).join("");
+      </div>`).join("") + languageSwitch();
+  }
+
+  /** English / Portuguese at the foot of the menu (web/i18n.js). */
+  function languageSwitch() {
+    return global.IronlogI18n ? `<div class="nav-section nav-lang"><div class="nav-section-title">Language · Idioma</div>${global.IronlogI18n.switchHtml()}</div>` : "";
   }
 
   /** Hides items this person cannot use, and sections left empty. */

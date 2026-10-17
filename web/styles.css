@@ -9348,3 +9348,10 @@ body.wo-popup .wo-drawer-head { display: none; }
 #signInSecurityCard .sessions-locked ul { margin: 0; padding: 0; list-style: none; }
 #signInSecurityCard .sessions-locked li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 0; }
 #signInSecurityCard .sessions-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* English / Portuguese switch at the foot of the menu (web/i18n.js) */
+.sidebar .nav-lang { margin-top: 8px; }
+.lang-switch { display: inline-flex; margin: 4px 16px 12px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.lang-switch button { padding: 5px 14px; border: 0; background: var(--card); color: var(--muted); font-weight: 700; cursor: pointer; }
+.lang-switch button[aria-pressed="true"] { background: var(--tx-2563eb); color: var(--card); }
+.sidebar.collapsed .nav-lang { display: none; }

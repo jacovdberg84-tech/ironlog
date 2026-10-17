@@ -30,11 +30,15 @@ function openMyTasks(taskId) {
   }
 }
 
+// Dates follow the chosen language (web/i18n.js); phrases built from parts are translated piece by piece.
+const myWorkLocale = () => (window.IronlogI18n?.lang() === "pt" ? "pt-PT" : undefined);
+const myWorkT = (s) => (window.IronlogI18n ? IronlogI18n.t(s) : s);
+
 function myWorkDate(value) {
   const s = String(value || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "";
   const d = new Date(`${s}T00:00:00`);
-  return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return d.toLocaleDateString(myWorkLocale(), { day: "numeric", month: "short" });
 }
 
 function myWorkPill(text, tone) {
@@ -101,7 +105,7 @@ function renderMyWorkFigures(sections) {
   if (!box) return;
   const f = sections.figures;
   if (!f) { box.hidden = true; return; }
-  const month = new Date(`${f.month}-01T00:00:00`).toLocaleDateString(undefined, { month: "long" });
+  const month = new Date(`${f.month}-01T00:00:00`).toLocaleDateString(myWorkLocale(), { month: "long" });
   const tile = (value, label, tone, target) => `<button type="button" class="mywork-figure tone-${tone}" ${target ? `data-mywork-go="${escapeHtml(target)}"` : "disabled"}><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></button>`;
   const avail = f.availability_pct == null ? "—" : `${f.availability_pct}%`;
   const availTone = f.availability_pct == null ? "neutral" : f.availability_pct >= 85 ? "good" : f.availability_pct >= 75 ? "warn" : "danger";
@@ -345,7 +349,7 @@ async function loadMyWork() {
     loadCostingGapsCard(grid).catch(() => {});
     const open = cards.reduce((n, c) => n + (["services", "partsorders", "team"].includes(c.key) ? 0 : c.count), 0);
     if (subtitle) {
-      const today = new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+      const today = new Date().toLocaleDateString(myWorkLocale(), { weekday: "long", day: "numeric", month: "long" });
       subtitle.textContent = open ? `${today} · ${open} item${open === 1 ? "" : "s"} to follow up` : `${today} · You're all caught up`;
     }
   } catch (err) {
@@ -430,7 +434,7 @@ function renderCostingGapsCard(gaps) {
         <h3>Costing gaps</h3>
         <span class="mywork-count">${gaps.length ? gaps.length : "✓"}</span>
       </header>
-      <p class="mywork-meta">${escapeHtml(counts.join(" · ") || "Every upcoming service and part in use has a price.")}</p>
+      <p class="mywork-meta">${escapeHtml(counts.map(myWorkT).join(" · ") || "Every upcoming service and part in use has a price.")}</p>
       ${gaps.length ? `<ul class="mywork-list costing-gap-list">${items}</ul>` : ""}
       ${more}
     </article>`;
@@ -837,3 +841,8 @@ function onBorrisPanelClick(e) {
     }
   });
 })();
+
+// Dates and counts are drawn in the chosen language, so the list is redrawn when it changes.
+window.addEventListener("ironlog:lang", () => {
+  if (document.getElementById("myWorkGrid")?.offsetParent) loadMyWork().catch(() => {});
+});
