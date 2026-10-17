@@ -3,6 +3,10 @@
 import { db } from "../../db/client.js";
 import { getUser } from "../../utils/request.js";
 import { writeAudit } from "../../utils/audit.js";
+import { buildSageJournal, IRONLOG_ACCOUNTS, readSageSettings, SAGE_CATEGORIES, sage300Workbook, sageCsv, saveSageSettings } from "../../utils/sageJournal.js";
+
+const SAGE_SETTINGS_ROLES = ["admin", "supervisor", "finance"];
+const SAGE_EXPORT_ROLES = ["admin", "supervisor", "procurement", "finance", "plant_manager"];
 
 export default function registerJournalsRoutes(app, ctx) {
   const {
@@ -710,6 +714,67 @@ export default function registerJournalsRoutes(app, ctx) {
     const buffer = await wb.xlsx.writeBuffer();
     reply.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     reply.header("Content-Disposition", `attachment; filename="${run.run_number}.xlsx"`);
+    return reply.send(Buffer.from(buffer));
+  });
+
+  // Sage journal batches: map IronLog's accounts to Sage once, then download each run for Sage.
+  app.get("/journals/sage-settings", async () => {
+    // site: company-wide finance settings.
+    return { ok: true, settings: readSageSettings(db), accounts: IRONLOG_ACCOUNTS, categories: SAGE_CATEGORIES };
+  });
+
+  app.put("/journals/sage-settings", async (req, reply) => {
+    // site: company-wide finance settings (admin, supervisor, finance).
+    if (!requireRoles(req, reply, SAGE_SETTINGS_ROLES)) return;
+    const r = saveSageSettings(db, req.body || {}, getUser(req));
+    if (!r.ok) return reply.code(400).send({ error: r.errors.join(" "), errors: r.errors });
+    try {
+      writeAudit(db, req, { module: "finance", action: "journals.sage_settings", entity_type: "sage_export_settings", entity_id: 1, payload: { layout: r.settings.layout, cost_centre: r.settings.cost_centre } });
+    } catch {}
+    return { ok: true, settings: r.settings };
+  });
+
+  const sageJournalFor = (id) => {
+    const run = db.prepare(`SELECT * FROM finance_posting_runs WHERE id = ?`).get(id);
+    if (!run) return { run: null };
+    const lines = db.prepare(`
+      SELECT category, account_code, cost_center_code, asset_code, debit, credit
+      FROM finance_posting_run_lines WHERE run_id = ? ORDER BY id
+    `).all(id);
+    return { run, journal: buildSageJournal(run, lines, readSageSettings(db)) };
+  };
+
+  app.get("/journals/runs/:id/sage-preview", async (req, reply) => {
+    // site: company-wide finance journal.
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+    const { run, journal } = sageJournalFor(id);
+    if (!run) return reply.code(404).send({ error: "run not found" });
+    return { ok: journal.ok, run: { id: run.id, run_number: run.run_number, status: run.status }, journal };
+  });
+
+  app.get("/journals/runs/:id/export-sage", async (req, reply) => {
+    // site: company-wide finance journal (finance roles).
+    if (!requireRoles(req, reply, SAGE_EXPORT_ROLES)) return;
+    const id = Number(req.params?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "invalid id" });
+    const { run, journal } = sageJournalFor(id);
+    if (!run) return reply.code(404).send({ error: "run not found" });
+    if (!journal.ok) return reply.code(409).send({ error: journal.errors.join(" "), errors: journal.errors, missing_accounts: journal.missing_accounts });
+    try {
+      writeAudit(db, req, { module: "finance", action: "journals.export_sage", entity_type: "finance_posting_runs", entity_id: id,
+        payload: { layout: journal.layout, entries: journal.entries.length, total: journal.total_debit, rounding: journal.rounding } });
+    } catch {}
+    const name = `Sage_${run.run_number}`.replace(/[^A-Za-z0-9_-]/g, "_");
+    if (journal.layout === "csv") {
+      reply.header("Content-Type", "text/csv; charset=utf-8");
+      reply.header("Content-Disposition", `attachment; filename="${name}.csv"`);
+      return reply.send(sageCsv(journal));
+    }
+    const ExcelJS = (await import("exceljs")).default;
+    const buffer = await sage300Workbook(ExcelJS, journal).xlsx.writeBuffer();
+    reply.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    reply.header("Content-Disposition", `attachment; filename="${name}.xlsx"`);
     return reply.send(Buffer.from(buffer));
   });
 }
