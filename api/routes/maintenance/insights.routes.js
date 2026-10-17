@@ -25,6 +25,243 @@ export default function registerInsightsRoutes(app, ctx) {
     parseReliabilityAssetIds,
   } = ctx;
 
+  /**
+   * Maintenance cost per machine for a period (labour on service work orders and breakdown repairs,
+   * parts issued to work orders, lube), with downtime hours. Used by Maintenance Insights and by the
+   * reliability report (cost per operating hour), so both show the same numbers.
+   */
+  function buildMaintenanceCostByAsset(req, startDate, endDate, { laborRate, lubeDefault, insightsDowntime, breakdownLabor }) {
+    const canReadMaintenanceParts = hasTable("maintenance_records") && hasTable("maintenance_parts");
+    const smCols = hasTable("stock_movements")
+      ? db.prepare(`PRAGMA table_info(stock_movements)`).all()
+      : [];
+    const smHasCreatedAt = smCols.some((c) => String(c.name) === "created_at");
+    const smHasMovementDate = smCols.some((c) => String(c.name) === "movement_date");
+    const smDateExpr = smHasCreatedAt
+      ? "DATE(sm.created_at)"
+      : smHasMovementDate
+      ? "DATE(sm.movement_date)"
+      : "DATE('now')";
+
+    const activeAssets = db.prepare(`
+      SELECT id, asset_code, asset_name
+      FROM assets
+      WHERE COALESCE(active, 1) = 1${andSite(null, req)}
+        AND COALESCE(archived, 0) = 0
+    `).all();
+
+    const costByAsset = new Map();
+    const ensureCostRow = (assetId, assetCode, assetName) => {
+      const aid = Number(assetId || 0);
+      if (!aid) return null;
+      if (!costByAsset.has(aid)) {
+        costByAsset.set(aid, {
+          asset_id: aid,
+          asset_code: String(assetCode || ""),
+          asset_name: String(assetName || ""),
+          service_jobs: 0,
+          downtime_hours: 0,
+          repair_labor_hours: 0,
+          wo_labor_hours: 0,
+          repair_labor_cost: 0,
+          wo_labor_cost: 0,
+          labor_cost: 0,
+          parts_cost: 0,
+          lube_cost: 0,
+          outsourced_cost: 0,
+          total_cost: 0,
+        });
+      }
+      return costByAsset.get(aid);
+    };
+    for (const a of activeAssets) {
+      ensureCostRow(a.id, a.asset_code, a.asset_name);
+    }
+
+    if (hasTable("work_orders")) {
+      const woRows = db.prepare(`
+        SELECT
+          a.id AS asset_id,
+          a.asset_code,
+          a.asset_name,
+          COUNT(DISTINCT w.id) AS service_jobs,
+          COALESCE(SUM(COALESCE(w.labor_hours, 0)), 0) AS wo_labor_hours,
+          COALESCE(SUM(COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, ?)), 0) AS wo_labor_cost
+        FROM work_orders w
+        JOIN assets a ON a.id = w.asset_id
+        WHERE LOWER(COALESCE(w.source, '')) = 'service'${andSite("a", req)}
+          AND DATE(COALESCE(w.completed_at, w.closed_at, w.opened_at, w.updated_at)) BETWEEN DATE(?) AND DATE(?)
+          AND (
+            w.status IN ('completed', 'approved', 'closed')
+            OR COALESCE(w.labor_hours, 0) > 0
+          )
+        GROUP BY a.id
+      `).all(laborRate, startDate, endDate);
+      for (const r of woRows) {
+        const row = ensureCostRow(r.asset_id, r.asset_code, r.asset_name);
+        if (!row) continue;
+        row.service_jobs = Number(r.service_jobs || 0);
+        row.wo_labor_hours = Number(r.wo_labor_hours || 0);
+        row.wo_labor_cost = Number(r.wo_labor_cost || 0);
+      }
+    }
+
+    for (const [assetId, downRow] of insightsDowntime.by_asset.entries()) {
+      const asset =
+        activeAssets.find((a) => Number(a.id || 0) === Number(assetId))
+        || db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE id = ? LIMIT 1`).get(assetId)
+        || {};
+      const row = ensureCostRow(assetId, asset.asset_code, asset.asset_name);
+      if (!row) continue;
+      row.downtime_hours = Number(Number(downRow.downtime_hours || 0).toFixed(2));
+    }
+
+    for (const [assetId, labRow] of breakdownLabor.by_asset.entries()) {
+      const asset =
+        activeAssets.find((a) => Number(a.id || 0) === Number(assetId))
+        || db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE id = ? LIMIT 1`).get(assetId)
+        || {};
+      const row = ensureCostRow(assetId, asset.asset_code, asset.asset_name);
+      if (!row) continue;
+      row.repair_labor_hours = Number(Number(labRow.repair_labor_hours || 0).toFixed(2));
+      row.repair_labor_cost = Number(Number(labRow.repair_labor_cost || 0).toFixed(2));
+    }
+
+    if (hasTable("stock_movements") && hasTable("parts")) {
+      const partRows = db.prepare(`
+        SELECT
+          a.id AS asset_id,
+          a.asset_code,
+          a.asset_name,
+          COALESCE(SUM(ABS(sm.quantity) * COALESCE(p.unit_cost, 0)), 0) AS parts_cost
+        FROM stock_movements sm
+        JOIN parts p ON p.id = sm.part_id
+        LEFT JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
+        LEFT JOIN assets a ON a.id = w.asset_id
+        WHERE sm.movement_type = 'out'
+          AND ${smDateExpr} BETWEEN DATE(?) AND DATE(?)
+          AND a.id IS NOT NULL
+        GROUP BY a.id
+      `).all(startDate, endDate);
+      for (const r of partRows) {
+        const row = ensureCostRow(r.asset_id, r.asset_code, r.asset_name);
+        if (!row) continue;
+        row.parts_cost = Number(r.parts_cost || 0);
+      }
+    }
+
+    const canReadMaintenanceLubes = hasTable("maintenance_records") && hasTable("maintenance_lubes");
+    if (canReadMaintenanceParts) {
+      const legacyPartRows = db.prepare(`
+        SELECT
+          mr.asset_id,
+          COALESCE(SUM(COALESCE(mp.quantity, 0) * COALESCE(p.unit_cost, 0)), 0) AS parts_cost
+        FROM maintenance_records mr
+        JOIN maintenance_parts mp ON mp.maintenance_record_id = mr.id
+        LEFT JOIN parts p ON LOWER(TRIM(p.part_name)) = LOWER(TRIM(mp.part_name))
+        WHERE DATE(mr.maintenance_date) BETWEEN DATE(?) AND DATE(?)
+        GROUP BY mr.asset_id
+      `).all(startDate, endDate);
+      for (const r of legacyPartRows) {
+        const row = ensureCostRow(r.asset_id, null, null);
+        if (!row) continue;
+        row.parts_cost += Number(r.parts_cost || 0);
+      }
+    }
+
+    if (hasTable("oil_logs")) {
+      const hasOilUnit = hasColumn("oil_logs", "unit_cost");
+      const lubeRows = db.prepare(`
+        SELECT
+          a.id AS asset_id,
+          a.asset_code,
+          a.asset_name,
+          COALESCE(SUM(ol.quantity * COALESCE(${hasOilUnit ? "ol.unit_cost" : "NULL"}, ?)), 0) AS lube_cost
+        FROM oil_logs ol
+        JOIN assets a ON a.id = ol.asset_id
+        WHERE ol.log_date BETWEEN DATE(?) AND DATE(?)
+        GROUP BY a.id
+      `).all(lubeDefault, startDate, endDate);
+      for (const r of lubeRows) {
+        const row = ensureCostRow(r.asset_id, r.asset_code, r.asset_name);
+        if (!row) continue;
+        row.lube_cost = Number(r.lube_cost || 0);
+      }
+    }
+
+    if (canReadMaintenanceLubes) {
+      const legacyLubeRows = db.prepare(`
+        SELECT
+          mr.asset_id,
+          COALESCE(SUM(COALESCE(ml.quantity, 0) * COALESCE(p.unit_cost, 0)), 0) AS lube_cost
+        FROM maintenance_records mr
+        JOIN maintenance_lubes ml ON ml.maintenance_record_id = mr.id
+        LEFT JOIN parts p ON LOWER(TRIM(p.part_name)) LIKE '%' || LOWER(TRIM(ml.lube_type)) || '%'
+        WHERE DATE(mr.maintenance_date) BETWEEN DATE(?) AND DATE(?)
+        GROUP BY mr.asset_id
+      `).all(startDate, endDate);
+      for (const r of legacyLubeRows) {
+        const row = ensureCostRow(r.asset_id, null, null);
+        if (!row) continue;
+        row.lube_cost += Number(r.lube_cost || 0);
+      }
+    }
+
+    return Array.from(costByAsset.values())
+      .map((row) => {
+        const woLabor = Number(row.wo_labor_cost || 0);
+        const repairLabor = Number(row.repair_labor_cost || 0);
+        const labor = woLabor + repairLabor;
+        const parts = Number(row.parts_cost || 0);
+        const lube = Number(row.lube_cost || 0);
+        const outsourced = Number(row.outsourced_cost || 0);
+        const total = labor + parts + lube + outsourced;
+        return {
+          ...row,
+          labor_cost: Number(labor.toFixed(2)),
+          wo_labor_cost: Number(woLabor.toFixed(2)),
+          repair_labor_cost: Number(repairLabor.toFixed(2)),
+          repair_labor_hours: Number(Number(row.repair_labor_hours || 0).toFixed(2)),
+          parts_cost: Number(parts.toFixed(2)),
+          lube_cost: Number(lube.toFixed(2)),
+          outsourced_cost: Number(outsourced.toFixed(2)),
+          total_cost: Number(total.toFixed(2)),
+        };
+      })
+      .filter(
+        (r) =>
+          Number(r.total_cost || 0) > 0 ||
+          Number(r.service_jobs || 0) > 0 ||
+          Number(r.downtime_hours || 0) > 0
+      )
+      .sort((a, b) => Number(b.total_cost || 0) - Number(a.total_cost || 0));
+  }
+
+  /** Maintenance cost per machine for the reliability report: asset id → cost row. */
+  function reliabilityCosts(req, startDate, endDate) {
+    const { laborRate, lubeDefault } = maintenanceCostSettings();
+    const breakdownLabor = buildInsightsBreakdownLaborIncidents(db, startDate, endDate, { scheduledFallback: 10, laborRate });
+    const insightsDowntime = { by_asset: new Map() }; // downtime comes from the reliability engine itself
+    return new Map(buildMaintenanceCostByAsset(req, startDate, endDate, { laborRate, lubeDefault, insightsDowntime, breakdownLabor }).map((r) => [Number(r.asset_id), r]));
+  }
+
+  /** The labour, lube and downtime rates set under Admin → cost settings (with the usual defaults). */
+  function maintenanceCostSettings() {
+    const costSettings = {
+      fuel_cost_per_liter_default: 1.5,
+      lube_cost_per_qty_default: 4.0,
+      labor_cost_per_hour_default: 35.0,
+      downtime_cost_per_hour_default: 120.0,
+    };
+    if (hasTable("cost_settings")) {
+      for (const row of db.prepare(`SELECT key, value FROM cost_settings WHERE key IN (${Object.keys(costSettings).map(() => "?").join(", ")})`).all(...Object.keys(costSettings))) {
+        const v = Number(row.value);
+        if (Number.isFinite(v)) costSettings[String(row.key || "").trim()] = v;
+      }
+    }
+    return { laborRate: Number(costSettings.labor_cost_per_hour_default || 35), lubeDefault: Number(costSettings.lube_cost_per_qty_default || 4.0) };
+  }
+
   app.get("/reliability", async (req, reply) => {
     try {
       const endDate = String(req.query?.end || "").trim() || new Date().toISOString().slice(0, 10);
@@ -43,7 +280,7 @@ export default function registerInsightsRoutes(app, ctx) {
       const category = String(req.query?.category || "").trim();
       const scheduled = Math.max(0.5, Number(req.query?.scheduled ?? 10) || 10);
       const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
-      const data = buildMaintenanceReliabilityReport(startDate, endDate, { asset_ids, category, scheduled, site_code });
+      const data = buildMaintenanceReliabilityReport(startDate, endDate, { asset_ids, category, scheduled, site_code, costByAsset: reliabilityCosts(req, startDate, endDate) });
       return reply.send({ ok: true, ...data });
     } catch (err) {
       req.log.error(err);
@@ -66,7 +303,7 @@ export default function registerInsightsRoutes(app, ctx) {
       const category = String(req.query?.category || "").trim();
       const scheduled = Math.max(0.5, Number(req.query?.scheduled ?? 10) || 10);
       const site_code = String(req.headers?.["x-site-code"] || "main").trim().toLowerCase() || "main";
-      const data = buildMaintenanceReliabilityReport(startDate, endDate, { asset_ids, category, scheduled, site_code });
+      const data = buildMaintenanceReliabilityReport(startDate, endDate, { asset_ids, category, scheduled, site_code, costByAsset: reliabilityCosts(req, startDate, endDate) });
 
       const wb = new ExcelJS.Workbook();
       wb.creator = "IRONLOG";
@@ -87,6 +324,9 @@ export default function registerInsightsRoutes(app, ctx) {
       summary.addRow(["Recorded incident downtime (audit)", data.summary.recorded_downtime_hours]);
       summary.addRow(["MTBF (hours)", data.summary.mtbf_hours ?? ""]);
       summary.addRow(["LTTR (hours)", data.summary.lttr_hours ?? ""]);
+      summary.addRow(["Availability %", data.summary.availability_pct ?? ""]);
+      summary.addRow(["Maintenance cost (USD)", data.summary.maintenance_cost ?? ""]);
+      summary.addRow(["Cost per operating hour (USD)", data.summary.cost_per_hour ?? ""]);
 
       const assets = wb.addWorksheet("By Asset");
       assets.columns = [
@@ -99,8 +339,43 @@ export default function registerInsightsRoutes(app, ctx) {
         { header: "Recorded incident h", key: "recorded_downtime_hours", width: 18 },
         { header: "MTBF h", key: "mtbf_hours", width: 12 },
         { header: "LTTR h", key: "lttr_hours", width: 12 },
+        { header: "Availability %", key: "availability_pct", width: 14 },
+        { header: "Maintenance cost $", key: "maintenance_cost", width: 18 },
+        { header: "Cost per op. hour $", key: "cost_per_hour", width: 18 },
+        { header: "Area", key: "area", width: 14 },
+        { header: "Make", key: "make", width: 14 },
+        { header: "Model", key: "model", width: 14 },
       ];
       assets.addRows(data.by_asset || []);
+
+      // The same figures per model, area, class and failed component.
+      for (const [name, rows] of [["By Model", data.groups?.model], ["By Area", data.groups?.area], ["By Class", data.groups?.category]]) {
+        const ws = wb.addWorksheet(name);
+        ws.columns = [
+          { header: name.replace("By ", ""), key: "key", width: 24 },
+          { header: "Machines", key: "asset_count", width: 10 },
+          { header: "Failures", key: "failure_count", width: 10 },
+          { header: "Operating h", key: "operating_hours", width: 14 },
+          { header: "Downtime h", key: "downtime_hours", width: 14 },
+          { header: "MTBF h", key: "mtbf_hours", width: 12 },
+          { header: "LTTR h", key: "lttr_hours", width: 12 },
+          { header: "Availability %", key: "availability_pct", width: 14 },
+          { header: "Maintenance cost $", key: "maintenance_cost", width: 18 },
+          { header: "Cost per op. hour $", key: "cost_per_hour", width: 18 },
+        ];
+        ws.getRow(1).font = { bold: true };
+        ws.addRows(rows || []);
+      }
+      const compSheet = wb.addWorksheet("By Component");
+      compSheet.columns = [
+        { header: "Failed component", key: "label", width: 28 },
+        { header: "Failures", key: "failure_count", width: 10 },
+        { header: "Downtime h", key: "downtime_hours", width: 14 },
+        { header: "MTBF h (all machines)", key: "mtbf_hours", width: 20 },
+        { header: "LTTR h", key: "lttr_hours", width: 12 },
+      ];
+      compSheet.getRow(1).font = { bold: true };
+      compSheet.addRows(data.groups?.component || []);
 
       const incSheet = wb.addWorksheet("Incidents");
       incSheet.columns = [
@@ -442,32 +717,7 @@ export default function registerInsightsRoutes(app, ctx) {
         avg_open_to_close_hours: collectAvg(serviceWos.map((r) => hoursBetween(r.opened_at, r.closed_at))),
       };
 
-      const costSettingsDefaults = {
-        fuel_cost_per_liter_default: 1.5,
-        lube_cost_per_qty_default: 4.0,
-        labor_cost_per_hour_default: 35.0,
-        downtime_cost_per_hour_default: 120.0,
-      };
-      const costSettings = { ...costSettingsDefaults };
-      if (hasTable("cost_settings")) {
-        const settingRows = db.prepare(`
-          SELECT key, value
-          FROM cost_settings
-          WHERE key IN (
-            'fuel_cost_per_liter_default',
-            'lube_cost_per_qty_default',
-            'labor_cost_per_hour_default',
-            'downtime_cost_per_hour_default'
-          )
-        `).all();
-        for (const row of settingRows) {
-          const k = String(row.key || "").trim();
-          const v = Number(row.value);
-          if (k && Number.isFinite(v)) costSettings[k] = v;
-        }
-      }
-      const laborRate = Number(costSettings.labor_cost_per_hour_default || 35);
-      const lubeDefault = Number(costSettings.lube_cost_per_qty_default || 4.0);
+      const { laborRate, lubeDefault } = maintenanceCostSettings();
 
       const insightsDowntime = buildMaintenanceInsightsDowntime(startDate, endDate, { scheduledFallback: 10 });
       const breakdownLabor = buildInsightsBreakdownLaborIncidents(db, startDate, endDate, {
@@ -484,209 +734,7 @@ export default function registerInsightsRoutes(app, ctx) {
         },
       };
 
-      const smCols = hasTable("stock_movements")
-        ? db.prepare(`PRAGMA table_info(stock_movements)`).all()
-        : [];
-      const smHasCreatedAt = smCols.some((c) => String(c.name) === "created_at");
-      const smHasMovementDate = smCols.some((c) => String(c.name) === "movement_date");
-      const smDateExpr = smHasCreatedAt
-        ? "DATE(sm.created_at)"
-        : smHasMovementDate
-        ? "DATE(sm.movement_date)"
-        : "DATE('now')";
-
-      const activeAssets = db.prepare(`
-        SELECT id, asset_code, asset_name
-        FROM assets
-        WHERE COALESCE(active, 1) = 1${andSite(null, req)}
-          AND COALESCE(archived, 0) = 0
-      `).all();
-
-      const costByAsset = new Map();
-      const ensureCostRow = (assetId, assetCode, assetName) => {
-        const aid = Number(assetId || 0);
-        if (!aid) return null;
-        if (!costByAsset.has(aid)) {
-          costByAsset.set(aid, {
-            asset_id: aid,
-            asset_code: String(assetCode || ""),
-            asset_name: String(assetName || ""),
-            service_jobs: 0,
-            downtime_hours: 0,
-            repair_labor_hours: 0,
-            wo_labor_hours: 0,
-            repair_labor_cost: 0,
-            wo_labor_cost: 0,
-            labor_cost: 0,
-            parts_cost: 0,
-            lube_cost: 0,
-            outsourced_cost: 0,
-            total_cost: 0,
-          });
-        }
-        return costByAsset.get(aid);
-      };
-      for (const a of activeAssets) {
-        ensureCostRow(a.id, a.asset_code, a.asset_name);
-      }
-
-      if (hasTable("work_orders")) {
-        const woRows = db.prepare(`
-          SELECT
-            a.id AS asset_id,
-            a.asset_code,
-            a.asset_name,
-            COUNT(DISTINCT w.id) AS service_jobs,
-            COALESCE(SUM(COALESCE(w.labor_hours, 0)), 0) AS wo_labor_hours,
-            COALESCE(SUM(COALESCE(w.labor_hours, 0) * COALESCE(w.labor_rate_per_hour, ?)), 0) AS wo_labor_cost
-          FROM work_orders w
-          JOIN assets a ON a.id = w.asset_id
-          WHERE LOWER(COALESCE(w.source, '')) = 'service'${andSite("a", req)}
-            AND DATE(COALESCE(w.completed_at, w.closed_at, w.opened_at, w.updated_at)) BETWEEN DATE(?) AND DATE(?)
-            AND (
-              w.status IN ('completed', 'approved', 'closed')
-              OR COALESCE(w.labor_hours, 0) > 0
-            )
-          GROUP BY a.id
-        `).all(laborRate, startDate, endDate);
-        for (const r of woRows) {
-          const row = ensureCostRow(r.asset_id, r.asset_code, r.asset_name);
-          if (!row) continue;
-          row.service_jobs = Number(r.service_jobs || 0);
-          row.wo_labor_hours = Number(r.wo_labor_hours || 0);
-          row.wo_labor_cost = Number(r.wo_labor_cost || 0);
-        }
-      }
-
-      for (const [assetId, downRow] of insightsDowntime.by_asset.entries()) {
-        const asset =
-          activeAssets.find((a) => Number(a.id || 0) === Number(assetId))
-          || db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE id = ? LIMIT 1`).get(assetId)
-          || {};
-        const row = ensureCostRow(assetId, asset.asset_code, asset.asset_name);
-        if (!row) continue;
-        row.downtime_hours = Number(Number(downRow.downtime_hours || 0).toFixed(2));
-      }
-
-      for (const [assetId, labRow] of breakdownLabor.by_asset.entries()) {
-        const asset =
-          activeAssets.find((a) => Number(a.id || 0) === Number(assetId))
-          || db.prepare(`SELECT id, asset_code, asset_name FROM assets WHERE id = ? LIMIT 1`).get(assetId)
-          || {};
-        const row = ensureCostRow(assetId, asset.asset_code, asset.asset_name);
-        if (!row) continue;
-        row.repair_labor_hours = Number(Number(labRow.repair_labor_hours || 0).toFixed(2));
-        row.repair_labor_cost = Number(Number(labRow.repair_labor_cost || 0).toFixed(2));
-      }
-
-      if (hasTable("stock_movements") && hasTable("parts")) {
-        const partRows = db.prepare(`
-          SELECT
-            a.id AS asset_id,
-            a.asset_code,
-            a.asset_name,
-            COALESCE(SUM(ABS(sm.quantity) * COALESCE(p.unit_cost, 0)), 0) AS parts_cost
-          FROM stock_movements sm
-          JOIN parts p ON p.id = sm.part_id
-          LEFT JOIN work_orders w ON sm.reference = ('work_order:' || w.id)
-          LEFT JOIN assets a ON a.id = w.asset_id
-          WHERE sm.movement_type = 'out'
-            AND ${smDateExpr} BETWEEN DATE(?) AND DATE(?)
-            AND a.id IS NOT NULL
-          GROUP BY a.id
-        `).all(startDate, endDate);
-        for (const r of partRows) {
-          const row = ensureCostRow(r.asset_id, r.asset_code, r.asset_name);
-          if (!row) continue;
-          row.parts_cost = Number(r.parts_cost || 0);
-        }
-      }
-
-      const canReadMaintenanceLubes = hasTable("maintenance_records") && hasTable("maintenance_lubes");
-      if (canReadMaintenanceParts) {
-        const legacyPartRows = db.prepare(`
-          SELECT
-            mr.asset_id,
-            COALESCE(SUM(COALESCE(mp.quantity, 0) * COALESCE(p.unit_cost, 0)), 0) AS parts_cost
-          FROM maintenance_records mr
-          JOIN maintenance_parts mp ON mp.maintenance_record_id = mr.id
-          LEFT JOIN parts p ON LOWER(TRIM(p.part_name)) = LOWER(TRIM(mp.part_name))
-          WHERE DATE(mr.maintenance_date) BETWEEN DATE(?) AND DATE(?)
-          GROUP BY mr.asset_id
-        `).all(startDate, endDate);
-        for (const r of legacyPartRows) {
-          const row = ensureCostRow(r.asset_id, null, null);
-          if (!row) continue;
-          row.parts_cost += Number(r.parts_cost || 0);
-        }
-      }
-
-      if (hasTable("oil_logs")) {
-        const hasOilUnit = hasColumn("oil_logs", "unit_cost");
-        const lubeRows = db.prepare(`
-          SELECT
-            a.id AS asset_id,
-            a.asset_code,
-            a.asset_name,
-            COALESCE(SUM(ol.quantity * COALESCE(${hasOilUnit ? "ol.unit_cost" : "NULL"}, ?)), 0) AS lube_cost
-          FROM oil_logs ol
-          JOIN assets a ON a.id = ol.asset_id
-          WHERE ol.log_date BETWEEN DATE(?) AND DATE(?)
-          GROUP BY a.id
-        `).all(lubeDefault, startDate, endDate);
-        for (const r of lubeRows) {
-          const row = ensureCostRow(r.asset_id, r.asset_code, r.asset_name);
-          if (!row) continue;
-          row.lube_cost = Number(r.lube_cost || 0);
-        }
-      }
-
-      if (canReadMaintenanceLubes) {
-        const legacyLubeRows = db.prepare(`
-          SELECT
-            mr.asset_id,
-            COALESCE(SUM(COALESCE(ml.quantity, 0) * COALESCE(p.unit_cost, 0)), 0) AS lube_cost
-          FROM maintenance_records mr
-          JOIN maintenance_lubes ml ON ml.maintenance_record_id = mr.id
-          LEFT JOIN parts p ON LOWER(TRIM(p.part_name)) LIKE '%' || LOWER(TRIM(ml.lube_type)) || '%'
-          WHERE DATE(mr.maintenance_date) BETWEEN DATE(?) AND DATE(?)
-          GROUP BY mr.asset_id
-        `).all(startDate, endDate);
-        for (const r of legacyLubeRows) {
-          const row = ensureCostRow(r.asset_id, null, null);
-          if (!row) continue;
-          row.lube_cost += Number(r.lube_cost || 0);
-        }
-      }
-
-      const maintenanceCost = Array.from(costByAsset.values())
-        .map((row) => {
-          const woLabor = Number(row.wo_labor_cost || 0);
-          const repairLabor = Number(row.repair_labor_cost || 0);
-          const labor = woLabor + repairLabor;
-          const parts = Number(row.parts_cost || 0);
-          const lube = Number(row.lube_cost || 0);
-          const outsourced = Number(row.outsourced_cost || 0);
-          const total = labor + parts + lube + outsourced;
-          return {
-            ...row,
-            labor_cost: Number(labor.toFixed(2)),
-            wo_labor_cost: Number(woLabor.toFixed(2)),
-            repair_labor_cost: Number(repairLabor.toFixed(2)),
-            repair_labor_hours: Number(Number(row.repair_labor_hours || 0).toFixed(2)),
-            parts_cost: Number(parts.toFixed(2)),
-            lube_cost: Number(lube.toFixed(2)),
-            outsourced_cost: Number(outsourced.toFixed(2)),
-            total_cost: Number(total.toFixed(2)),
-          };
-        })
-        .filter(
-          (r) =>
-            Number(r.total_cost || 0) > 0 ||
-            Number(r.service_jobs || 0) > 0 ||
-            Number(r.downtime_hours || 0) > 0
-        )
-        .sort((a, b) => Number(b.total_cost || 0) - Number(a.total_cost || 0));
+      const maintenanceCost = buildMaintenanceCostByAsset(req, startDate, endDate, { laborRate, lubeDefault, insightsDowntime, breakdownLabor });
 
       const downtimeTrend = insightsDowntime.downtime_daily;
       const woLaborTrend = hasTable("work_orders")

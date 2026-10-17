@@ -1934,7 +1934,7 @@
     <div id="reliabilitySection" class="maint-section" style="display:none;">
       <div class="card stack-24">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <h3 style="margin:0;">MTBF &amp; LTTR — selected equipment</h3>
+          <h3 style="margin:0;">Reliability — MTBF, LTTR, availability and cost</h3>
         </div>
         <p class="muted" style="margin:0 0 12px 0;">
           <strong>MTBF</strong> (mean time between failures) = operating hours ÷ failure count.
@@ -1974,6 +1974,16 @@
         </div>
         <div class="row stack-10">
           <button id="loadReliabilityBtn" type="button" class="primary">Load MTBF / LTTR</button>
+          <label>
+            Group by
+            <select id="relGroupBy">
+              <option value="machine">Machine</option>
+              <option value="model">Make and model</option>
+              <option value="area">Area</option>
+              <option value="category">Class</option>
+              <option value="component">Failed component</option>
+            </select>
+          </label>
           <button id="exportReliabilityBtn" type="button">Export Excel</button>
           <button id="exportReliabilityExecutiveBtn" type="button">Executive Excel</button>
         </div>
@@ -1981,7 +1991,7 @@
         <div id="relSummary" class="kpi-hero" style="margin-top:12px;"></div>
         <div style="overflow:auto; margin-top:16px;">
           <table class="gridTable" style="min-width:880px;">
-            <thead>
+            <thead id="relAssetHead">
               <tr>
                 <th>Asset</th>
                 <th>Name</th>
@@ -1991,6 +2001,8 @@
                 <th style="text-align:right;">Downtime h</th>
                 <th style="text-align:right;">MTBF h</th>
                 <th style="text-align:right;">LTTR h</th>
+                <th style="text-align:right;">Availability</th>
+                <th style="text-align:right;">Cost per op. h</th>
               </tr>
             </thead>
             <tbody id="relAssetBody"></tbody>
@@ -2404,12 +2416,12 @@
   <script src="./maintenance/weekly-inspections.js?v=63"></script>
   <script src="./maintenance/inspections.js?v=64"></script>
   <script src="./maintenance/weekly-forum.js?v=63"></script>
-  <script src="./maintenance/asset-kpi.js?v=63"></script>
+  <script src="./maintenance/asset-kpi.js?v=64"></script>
   <script src="./maintenance/parts-to-order.js?v=63"></script>
   <script src="./maintenance/mechanics-cost.js?v=63"></script>
   <script src="./maintenance/ai-engineer.js?v=63"></script>
   <script src="./maintenance/rsg-profiles.js?v=63"></script>
   <script src="./maintenance/care-maintenance.js?v=4"></script>
-  <script src="./maintenance/init.js?v=65"></script>
+  <script src="./maintenance/init.js?v=66"></script>
 </body>
 </html>

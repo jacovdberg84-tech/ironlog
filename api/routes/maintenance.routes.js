@@ -10,7 +10,9 @@ import { getCompanyProfile } from "../utils/companyProfile.js";
 import { ensureAuditTable } from "../utils/audit.js";
 import {
   buildReliabilityIncidentsForAssets,
+  componentReliability,
   computeMtbfLttr,
+  groupReliabilityRows,
   round2,
 } from "../utils/reliabilityMetrics.js";
 import { getAssetKpiRangeBuilder } from "../utils/assetKpiRangeProvider.js";
@@ -46,7 +48,8 @@ import registerPartsRequestsRoutes from "./maintenance/parts-requests.routes.js"
 import registerMechanicLaborRoutes from "./maintenance/mechanic-labor.routes.js";
 import registerCareMaintenanceRoutes from "./maintenance/care-maintenance.routes.js";
 import { ensureStockCategorySchema, oilPartSql as oilCategorySql } from "../utils/stockCategory.js";
-import { ensureAssetSiteColumn } from "../utils/sites.js";
+import { ensureAssetSiteColumn, siteSql } from "../utils/sites.js";
+import { listFailureCodes } from "../utils/failureCodes.js";
 
 function isMonth(s) {
   return /^\d{4}-\d{2}$/.test(String(s || "").trim());
@@ -2141,26 +2144,32 @@ export default async function maintenanceRoutes(app) {
     const siteCode = String(opts.site_code || "main").trim().toLowerCase() || "main";
     let assetIds = Array.isArray(opts.asset_ids) ? opts.asset_ids.map((x) => Number(x)).filter((n) => n > 0) : [];
 
+    // Area, make and model group the report (asset structure parts 1 and 3); older databases may not have them yet.
+    const detailCols = ["area", "make", "model"].map((c) => (hasColumn("assets", c) ? c : `NULL AS ${c}`)).join(", ");
+    // Only this site's machines (the asset KPI engine below is site-scoped too).
+    const siteWhere = hasColumn("assets", "site_code") ? ` AND ${siteSql("site_code")} = ?` : "";
+    const siteArgs = siteWhere ? [siteCode] : [];
     let assetRows = [];
     if (assetIds.length) {
       const marks = assetIds.map(() => "?").join(",");
       assetRows = db.prepare(`
-        SELECT id AS asset_id, asset_code, asset_name, category
+        SELECT id AS asset_id, asset_code, asset_name, category, ${detailCols}
         FROM assets
         WHERE id IN (${marks})
           AND COALESCE(active, 1) = 1
-          AND COALESCE(archived, 0) = 0
+          AND COALESCE(archived, 0) = 0${siteWhere}
         ORDER BY asset_code ASC
-      `).all(...assetIds);
+      `).all(...assetIds, ...siteArgs);
     } else {
       const params = [];
-      let where = `COALESCE(active, 1) = 1 AND COALESCE(archived, 0) = 0`;
+      let where = `COALESCE(active, 1) = 1 AND COALESCE(archived, 0) = 0${siteWhere}`;
+      params.push(...siteArgs);
       if (categoryFilter) {
         where += ` AND TRIM(COALESCE(category, '')) = ?`;
         params.push(categoryFilter);
       }
       assetRows = db.prepare(`
-        SELECT id AS asset_id, asset_code, asset_name, category
+        SELECT id AS asset_id, asset_code, asset_name, category, ${detailCols}
         FROM assets
         WHERE ${where}
         ORDER BY asset_code ASC
@@ -2180,8 +2189,12 @@ export default async function maintenanceRoutes(app) {
           downtime_hours: 0,
           mtbf_hours: null,
           lttr_hours: null,
+          availability_pct: null,
+          maintenance_cost: null,
+          cost_per_hour: null,
         },
         by_asset: [],
+        groups: { model: [], area: [], category: [], component: [] },
       };
     }
 
@@ -2237,17 +2250,28 @@ export default async function maintenanceRoutes(app) {
       const recorded_downtime_hours = Number(rel.downtime_hours || 0);
       const downtime_hours = kpi ? Number(kpi.downtime_hours || 0) : recorded_downtime_hours;
       const { mtbf_hours, lttr_hours } = computeMtbfLttr(operating_hours, failure_count, downtime_hours);
+      // Maintenance cost (Insights' cost per machine) when the caller passes it in.
+      const cost = opts.costByAsset ? opts.costByAsset.get(aid) : undefined;
+      const maintenance_cost = opts.costByAsset ? round2(Number(cost?.total_cost || 0)) : null;
       return {
         asset_id: aid,
         asset_code: String(a.asset_code || ""),
         asset_name: String(a.asset_name || ""),
         category: String(a.category || ""),
+        area: a.area || null,
+        make: a.make || null,
+        model: a.model || null,
         failure_count,
         operating_hours: round2(operating_hours),
         downtime_hours: round2(downtime_hours),
         recorded_downtime_hours: round2(recorded_downtime_hours),
         mtbf_hours,
         lttr_hours,
+        scheduled_hours: kpi ? round2(Number(kpi.scheduled_hours || 0)) : null,
+        available_hours: kpi ? round2(Number(kpi.available_hours || 0)) : null,
+        availability_pct: kpi && kpi.availability_pct != null ? Number(kpi.availability_pct) : null,
+        maintenance_cost,
+        cost_per_hour: maintenance_cost != null && operating_hours > 0 ? round2(maintenance_cost / operating_hours) : null,
       };
     }).sort((x, y) => {
       const xm = x.mtbf_hours == null ? Infinity : Number(x.mtbf_hours);
@@ -2260,13 +2284,22 @@ export default async function maintenanceRoutes(app) {
     const downtime_hours = by_asset.reduce((s, r) => s + Number(r.downtime_hours || 0), 0);
     const recorded_downtime_hours = by_asset.reduce((s, r) => s + Number(r.recorded_downtime_hours || 0), 0);
     const { mtbf_hours, lttr_hours } = computeMtbfLttr(operating_hours, failure_count, downtime_hours);
+    const scheduled_hours = by_asset.reduce((s, r) => s + Number(r.scheduled_hours || 0), 0);
+    const available_hours = by_asset.reduce((s, r) => s + Number(r.available_hours || 0), 0);
+    const maintenance_cost = opts.costByAsset ? round2(by_asset.reduce((s, r) => s + Number(r.maintenance_cost || 0), 0)) : null;
 
+    // The failure code's component on each incident (failure codes, asset structure part 2).
+    const fcByBreakdown = hasColumn("breakdowns", "fc_component") && incidents.length
+      ? new Map(db.prepare(`SELECT id, fc_component FROM breakdowns WHERE id IN (${incidents.map(() => "?").join(",")})`)
+        .all(...incidents.map((i) => Number(i.breakdown_id || 0))).map((r) => [Number(r.id), r.fc_component]))
+      : new Map();
     const incidentsWithAsset = incidents.map((inc) => {
       const a = assetRows.find((r) => Number(r.asset_id) === Number(inc.asset_id));
       return {
         ...inc,
         asset_code: String(a?.asset_code || ""),
         asset_name: String(a?.asset_name || ""),
+        fc_component: fcByBreakdown.get(Number(inc.breakdown_id || 0)) || null,
       };
     }).sort((x, y) => {
       const c = String(x.asset_code || "").localeCompare(String(y.asset_code || ""));
@@ -2295,8 +2328,22 @@ export default async function maintenanceRoutes(app) {
         recorded_downtime_hours: round2(recorded_downtime_hours),
         mtbf_hours,
         lttr_hours,
+        availability_pct: scheduled_hours > 0 ? Number(((available_hours / scheduled_hours) * 100).toFixed(1)) : null,
+        maintenance_cost,
+        cost_per_hour: maintenance_cost != null && operating_hours > 0 ? round2(maintenance_cost / operating_hours) : null,
       },
       by_asset,
+      // The same figures added up per model, area, class, and per failed component.
+      groups: {
+        model: groupReliabilityRows(by_asset, (r) => [r.make, r.model].filter(Boolean).join(" ")),
+        area: groupReliabilityRows(by_asset, (r) => r.area),
+        category: groupReliabilityRows(by_asset, (r) => r.category),
+        component: componentReliability(
+          incidentsWithAsset, // every incident here is a failure (downtime in the period)
+          operating_hours,
+          hasTable("failure_codes") ? Object.fromEntries(listFailureCodes(db, { all: true }).component.map((c) => [c.code, c.label_en])) : {},
+        ),
+      },
       incidents: incidentsWithAsset,
     };
   }

@@ -183,3 +183,57 @@ export function computeMtbfLttr(operating_hours, failure_count, downtime_hours) 
     lttr_hours: lttr_hours == null ? null : round2(lttr_hours),
   };
 }
+
+/**
+ * Reliability rows (one per machine) added up per group: model, area, class or site.
+ * Each group gets its machine count, failures, operating and downtime hours, MTBF, LTTR (MTTR),
+ * availability (available ÷ scheduled hours) and maintenance cost per operating hour.
+ */
+export function groupReliabilityRows(rows, keyOf) {
+  const groups = new Map();
+  for (const r of rows || []) {
+    const key = String(keyOf(r) || "").trim() || "Not set";
+    const g = groups.get(key) || { key, asset_count: 0, failure_count: 0, operating_hours: 0, downtime_hours: 0, scheduled_hours: 0, available_hours: 0, maintenance_cost: 0, has_cost: false };
+    g.asset_count += 1;
+    g.failure_count += Number(r.failure_count || 0);
+    g.operating_hours += Number(r.operating_hours || 0);
+    g.downtime_hours += Number(r.downtime_hours || 0);
+    g.scheduled_hours += Number(r.scheduled_hours || 0);
+    g.available_hours += Number(r.available_hours || 0);
+    if (r.maintenance_cost != null) { g.maintenance_cost += Number(r.maintenance_cost || 0); g.has_cost = true; }
+    groups.set(key, g);
+  }
+  return [...groups.values()].map((g) => ({
+    key: g.key,
+    asset_count: g.asset_count,
+    failure_count: g.failure_count,
+    operating_hours: round2(g.operating_hours),
+    downtime_hours: round2(g.downtime_hours),
+    ...computeMtbfLttr(g.operating_hours, g.failure_count, g.downtime_hours),
+    availability_pct: g.scheduled_hours > 0 ? Number(((g.available_hours / g.scheduled_hours) * 100).toFixed(1)) : null,
+    maintenance_cost: g.has_cost ? round2(g.maintenance_cost) : null,
+    cost_per_hour: g.has_cost && g.operating_hours > 0 ? round2(g.maintenance_cost / g.operating_hours) : null,
+  })).sort((a, b) => b.failure_count - a.failure_count || String(a.key).localeCompare(String(b.key)));
+}
+
+/**
+ * Failures per failed component (failure codes): how often each component fails across the machines
+ * in scope, its downtime and MTBF (all the machines' operating hours ÷ that component's failures).
+ */
+export function componentReliability(incidents, operatingHours, labels = {}) {
+  const groups = new Map();
+  for (const inc of incidents || []) {
+    const key = inc.fc_component || "";
+    const g = groups.get(key) || { code: key || null, failure_count: 0, downtime_hours: 0 };
+    g.failure_count += 1;
+    g.downtime_hours += Number(inc.downtime_hours || 0);
+    groups.set(key, g);
+  }
+  return [...groups.values()].map((g) => ({
+    code: g.code,
+    label: g.code ? labels[g.code] || g.code : "No failure code yet",
+    failure_count: g.failure_count,
+    downtime_hours: round2(g.downtime_hours),
+    ...computeMtbfLttr(operatingHours, g.failure_count, g.downtime_hours),
+  })).sort((a, b) => (a.code ? 0 : 1) - (b.code ? 0 : 1) || b.failure_count - a.failure_count);
+}

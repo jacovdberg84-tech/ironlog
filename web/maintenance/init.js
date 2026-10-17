@@ -492,6 +492,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("loadAssetKpiBtn")?.addEventListener("click", () => loadAssetKpiWeekly());
   document.getElementById("loadReliabilityBtn")?.addEventListener("click", () => loadReliabilityMetrics());
+  document.getElementById("relGroupBy")?.addEventListener("change", () => renderReliabilityTable());
   document.getElementById("exportReliabilityBtn")?.addEventListener("click", () => exportReliabilityToExcel());
   document.getElementById("exportReliabilityExecutiveBtn")?.addEventListener("click", () => exportReliabilityExecutiveToExcel());
   document.getElementById("relCategoryFilter")?.addEventListener("change", () => {
