@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=ms-10" />
+  <link rel="stylesheet" href="./styles.css?v=ms-11" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -4365,6 +4365,71 @@
             <pre class="output" id="procurementResult"></pre>
           </div>
         </div>
+
+        <!-- SAGE X3 SITE REQUESTS -->
+        <div class="dash-card collapsible full-width x3-card" data-collapsed="false">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              </div>
+              <div>
+                <h3>Sage X3 Site Requests</h3>
+                <p class="muted small">Send requisitions to X3 as Site Requests with an import file, so buyers don't type them twice.</p>
+              </div>
+            </div>
+            <button class="report-card-toggle" aria-label="Toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </button>
+          </div>
+          <div class="report-card-body">
+            <ol class="small x3-steps">
+              <li>Fill in the X3 codes below once and save.</li>
+              <li>On a requisition press <strong>Download for X3</strong>, or download every requisition not yet sent: <button id="x3DownloadWaitingBtn" type="button">Download all waiting for X3</button></li>
+              <li>Import the file in X3 (Usage → Imports/exports → Imports) with the Site Request template.</li>
+              <li>Press <strong>X3 number</strong> on the requisition and type the Site Request number X3 gave it (e.g. VS120-00353).</li>
+            </ol>
+            <div class="x3-grid">
+              <div class="form-field"><label for="x3DeliverySite">Delivery Site *</label><input id="x3DeliverySite" class="w-full" placeholder="AML01"></div>
+              <div class="form-field"><label for="x3PurchaseSite">Purchase Site *</label><input id="x3PurchaseSite" class="w-full" placeholder="VS120"></div>
+              <div class="form-field"><label for="x3RequestType">Request type *</label><input id="x3RequestType" class="w-full" placeholder="AML-Plant"></div>
+              <div class="form-field"><label for="x3SignatureChannel">Signature Channel *</label><input id="x3SignatureChannel" class="w-full" placeholder="AML-Plant"></div>
+              <div class="form-field"><label for="x3RequestedBy">Requested By (when not in the people list)</label><input id="x3RequestedBy" class="w-full" placeholder="BER03"></div>
+              <div class="form-field"><label for="x3Buyer">Buyer *</label><input id="x3Buyer" class="w-full" placeholder="MAL01"></div>
+              <div class="form-field"><label for="x3Customer">Customer</label><input id="x3Customer" class="w-full" placeholder="AML009"></div>
+              <div class="form-field"><label for="x3BillTo">Bill-to customer</label><input id="x3BillTo" class="w-full" placeholder="AML009"></div>
+              <div class="form-field"><label for="x3DeliveryAddress">Delivery address</label><input id="x3DeliveryAddress" class="w-full" placeholder="001"></div>
+              <div class="form-field"><label for="x3Project">Project</label><input id="x3Project" class="w-full" placeholder="AML-3001"></div>
+              <div class="form-field"><label for="x3ItemCode">Product for parts *</label><input id="x3ItemCode" class="w-full" placeholder="120-00110"></div>
+              <div class="form-field"><label for="x3Unit">Unit when a line has none</label><input id="x3Unit" class="w-full" placeholder="UN"></div>
+              <div class="form-field"><label for="x3Currency">Currency</label><input id="x3Currency" class="w-full" placeholder="USD"></div>
+              <div class="form-field"><label for="x3BillCurrency">Bill Currency</label><input id="x3BillCurrency" class="w-full" placeholder="USD"></div>
+              <div class="form-field"><label for="x3Priority">Delivery priority</label><input id="x3Priority" class="w-full" placeholder="1"></div>
+              <div class="form-field"><label for="x3SourceTsa">Source from TSA? (X3 menu number)</label><input id="x3SourceTsa" class="w-full" placeholder="2"></div>
+              <div class="form-field"><label for="x3OdoUnit">ODO unit (empty = no reading)</label><input id="x3OdoUnit" class="w-full" placeholder=""></div>
+              <div class="form-field"><label for="x3RefPrefix">Manual Req no. starts with</label><input id="x3RefPrefix" class="w-full" placeholder="IL"></div>
+            </div>
+            <div class="x3-grid">
+              <div class="form-field"><label for="x3UserCodes">People: IronLog name = X3 code</label><textarea id="x3UserCodes" rows="4" placeholder="jaco = BER03"></textarea></div>
+              <div class="form-field"><label for="x3SupplierCodes">Suppliers not in the IronLog supplier list: name = X3 code</label><textarea id="x3SupplierCodes" rows="4" placeholder="BELL EQUIPMENT SALES SA LTD -P = 000028"></textarea></div>
+            </div>
+            <details style="margin-top:10px;">
+              <summary>File layout (for the X3 administrator)</summary>
+              <p class="muted small">One header line per requisition, then one line per part. Every value is in double quotes. Create an X3 import template with these fields in this order.</p>
+              <div class="x3-grid">
+                <div class="form-field"><label for="x3HeaderMarker">Header line starts with</label><input id="x3HeaderMarker" class="w-full"></div>
+                <div class="form-field"><label for="x3LineMarker">Part line starts with</label><input id="x3LineMarker" class="w-full"></div>
+                <div class="form-field"><label for="x3Separator">Separator</label><select id="x3Separator" class="w-full"><option value=";">; (semicolon)</option><option value=",">, (comma)</option><option value="|">| (bar)</option><option value="&#9;">tab</option></select></div>
+                <div class="form-field"><label for="x3DateFormat">Dates</label><select id="x3DateFormat" class="w-full"><option value="DD/MM/YYYY">12/10/2026</option><option value="DDMMYY">121026</option><option value="YYYYMMDD">20261012</option><option value="YYYY-MM-DD">2026-10-12</option></select></div>
+              </div>
+              <div id="x3Layout"><p class="muted">Loading…</p></div>
+            </details>
+            <div class="row stack-10" style="margin-top:10px;">
+              <button id="x3SaveBtn" type="button" class="btn btn-primary">Save X3 settings</button>
+              <span id="x3SettingsMsg" class="muted"></span>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -8489,7 +8554,7 @@
   <script src="./app/fuel-lube.js?v=90"></script>
   <script src="./app/stock.js?v=93"></script>
   <script src="./app/compliance.js?v=89r"></script>
-  <script src="./app/tabs.js?v=90"></script>
+  <script src="./app/tabs.js?v=91"></script>
   <script src="./app/uploads.js?v=89"></script>
   <script src="./app/reports.js?v=90"></script>
   <script src="./app/breakdowns.js?v=90"></script>
@@ -8500,7 +8565,7 @@
   <script src="./vendor/qrcode-generator-1.4.4.js"></script>
   <script src="./part-labels.js?v=1"></script>
   <script src="./app/stock-labels.js?v=1"></script>
-  <script src="./app/procurement.js?v=89"></script>
+  <script src="./app/procurement.js?v=90"></script>
   <script src="./app/site-ops.js?v=89"></script>
   <script src="./app/daily-input.js?v=89"></script>
   <script src="./app/assets.js?v=91"></script>

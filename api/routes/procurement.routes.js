@@ -5,6 +5,7 @@ import registerRequisitionsRoutes from "./procurement/requisitions.routes.js";
 import registerSuppliersRoutes from "./procurement/suppliers.routes.js";
 import registerPurchaseOrdersRoutes from "./procurement/purchase-orders.routes.js";
 import registerJournalsRoutes from "./procurement/journals.routes.js";
+import registerX3SiteRequestRoutes from "./procurement/x3-site-requests.routes.js";
 
 function getDepartment(req) {
   return String(req.headers["x-user-department"] || "").trim().toLowerCase() || null;
@@ -580,4 +581,5 @@ export default async function procurementRoutes(app) {
   registerSuppliersRoutes(app, ctx);
   registerPurchaseOrdersRoutes(app, ctx);
   registerJournalsRoutes(app, ctx);
+  registerX3SiteRequestRoutes(app, ctx);
 }
