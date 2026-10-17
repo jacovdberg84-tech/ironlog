@@ -201,6 +201,7 @@ function loadStartupData() {
       loadLicenceIssuer().catch(() => {});
       loadMsSignin().catch(() => {});
       loadApiKeys().catch(() => {});
+      loadWebhooks().catch(() => {});
     }
   }
   loadCodePickers().catch(() => {});

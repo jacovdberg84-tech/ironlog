@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:," />
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=ms-12" />
+  <link rel="stylesheet" href="./styles.css?v=ms-13" />
 </head>
 <body class="page-shell">
   <div class="page-header">
@@ -42,6 +42,46 @@
     </div>
   </section>
 
+  <section class="panel show page-section" id="webhooks">
+    <div class="card stack-12 api-docs">
+      <h3>Webhooks: IronLog tells your system when something happens</h3>
+      <p class="muted">An IronLog administrator adds your address under Admin → Webhooks and chooses the events. IronLog then sends an HTTPS <code>POST</code> with a JSON body for each event, usually within a minute.</p>
+      <h4>Events</h4>
+      <div id="apiDocsEvents"><p class="muted">Loading…</p></div>
+      <h4>The message</h4>
+      <pre class="output">POST https://your-system.example.com/ironlog
+Content-Type: application/json
+X-IronLog-Event: breakdown.created
+X-IronLog-Delivery: 3f6c…  (unique per message: use it to ignore repeats)
+X-IronLog-Signature: t=1792224000,v1=5d41…
+
+{
+  "id": "3f6c…",
+  "event": "breakdown.created",
+  "occurred_at": "2026-10-17T07:30:00.000Z",
+  "site_code": "main",
+  "data": { "breakdown_id": 412, "asset_code": "A302AM", "asset_name": "Bell B30D ADT", "description": "Hydraulic hose burst", "critical": true, … }
+}</pre>
+      <h4>Check it really came from IronLog</h4>
+      <p>Work out an HMAC-SHA256 of <code>&lt;t&gt;.&lt;body&gt;</code> with the webhook's secret (<code>whsec_…</code>, given once by the administrator) and compare it with <code>v1</code>. Refuse messages whose <code>t</code> is more than 5 minutes old.</p>
+      <pre class="output">// Node.js
+const crypto = require("crypto");
+function fromIronLog(rawBody, header, secret) {
+  const [, t, v1] = header.match(/^t=(\d+),v1=([0-9a-f]{64})$/) || [];
+  if (!t || Math.abs(Date.now() / 1000 - Number(t)) > 300) return false;
+  const expected = crypto.createHmac("sha256", secret).update(`${t}.${rawBody}`).digest("hex");
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(v1));
+}</pre>
+      <h4>Answer and retries</h4>
+      <ul>
+        <li>Answer with any <code>2xx</code> status within 10 seconds. Do slow work afterwards.</li>
+        <li>Anything else (or no answer) is tried again after 1 minute, 5 minutes, 30 minutes, 2 hours, 6 hours and 12 hours, then marked failed. The administrator can send it again from the Messages list.</li>
+        <li>Redirects are not followed: give the final address.</li>
+        <li>A message can arrive more than once; use <code>X-IronLog-Delivery</code> to ignore repeats.</li>
+      </ul>
+    </div>
+  </section>
+
   <script src="./session.js?v=1"></script>
   <script>
     (function () {
@@ -67,6 +107,15 @@
             </div>`).join("");
         })
         .catch((e) => { document.getElementById("apiDocsScopes").innerHTML = `<p class="message-error">${escapeHtml(e.message || String(e))}</p>`; });
+      fetch("/api/webhooks/catalogue", { headers: authHeaders() })
+        .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+        .then(({ ok, d }) => {
+          const box = document.getElementById("apiDocsEvents");
+          box.innerHTML = ok
+            ? `<table class="gridTable"><thead><tr><th>Event</th><th>Sent when</th></tr></thead><tbody>${(d.events || []).map((e) => `<tr><td><code>${escapeHtml(e.event)}</code></td><td>${escapeHtml(e.description)}</td></tr>`).join("")}</tbody></table>`
+            : `<p class="message-error">${escapeHtml(d.error || "Sign in to IronLog to see the events.")}</p>`;
+        })
+        .catch(() => {});
       document.getElementById("apiDocsOpenApi").addEventListener("click", async () => {
         const res = await fetch("/api/api-keys/openapi.json", { headers: authHeaders() });
         if (!res.ok) return alert("Sign in to IronLog first.");
