@@ -83,9 +83,10 @@ A helper only one feature file uses can simply live in that file.
 
 ### `api/routes/assets/`
 
+- `components.routes.js`: A machine's major components (serial, fitted date and hours, expected life), component changes with history, and the site's components near end of life (`api/utils/assetComponents.js`)
 - `history.routes.js`: Asset hours and history
 - `qr-profiles.routes.js`: Asset, undercarriage and tyre QR profiles
-- `register.routes.js`: Asset register, fleet summary, hire register, cost centre export, create, archive and edit
+- `register.routes.js`: Asset register, fleet summary, hire register, cost centre export, create, archive and edit (with machine details: area, make, model, serial, year, purchase, warranty — `api/utils/assetDetails.js`)
 
 ### `api/routes/breakdowns/`
 

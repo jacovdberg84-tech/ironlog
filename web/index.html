@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=ms-7" />
+  <link rel="stylesheet" href="./styles.css?v=ms-8" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -1522,7 +1522,7 @@
           </div>
           <div class="report-card-body">
             <div class="asset-fleet-toolbar">
-              <input id="assetsFleetFilter" class="w-full" type="search" placeholder="Search code, name, or category…" style="max-width: 320px;" />
+              <input id="assetsFleetFilter" class="w-full" type="search" placeholder="Search code, name, area, make or model…" style="max-width: 320px;" />
               <select id="assetsFleetStatus" aria-label="Filter fleet by status">
                 <option value="">All statuses</option>
                 <option value="PRODUCTION">Production</option>
@@ -1548,6 +1548,19 @@
               <div class="muted small">Loading fleet…</div>
             </div>
           </div>
+        </div>
+
+        <!-- Major components near the end of their expected life (api/routes/assets/components.routes.js) -->
+        <div id="componentLifeCard" class="dash-card full-width hidden">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div>
+                <h3>Components near end of life</h3>
+                <p class="muted small">Major components on this site that have used 80% or more of their expected hours. Plan the change before they fail.</p>
+              </div>
+            </div>
+          </div>
+          <div class="report-card-body"><div id="componentLifeList"></div></div>
         </div>
 
         <!-- Plant hire rates & monthly budget -->
@@ -1639,7 +1652,7 @@
             <div id="assetDetailHeader" class="asset-detail-header"></div>
             <div class="info-note" style="margin: 14px 0 10px;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              <span>Edit the equipment description and class shown on fleet cards, Daily Log, reports, and QR forms, and what the machine is: make, model, serial number, year, purchase and warranty.</span>
+              <span>Edit the equipment description and class shown on fleet cards, Daily Log, reports, and QR forms, and what the machine is: area, make, model, serial number, year, purchase and warranty.</span>
             </div>
             <div class="form-row">
               <div class="form-field">
@@ -1649,6 +1662,11 @@
               <div class="form-field">
                 <label>Equipment class / type</label>
                 <input id="assetDetailsCategory" class="w-full" placeholder="e.g. Grader" />
+              </div>
+              <div class="form-field">
+                <label for="assetDetailsArea">Area</label>
+                <input id="assetDetailsArea" class="w-full" maxlength="40" list="assetAreaOptions" placeholder="e.g. Pit, Plant, Workshop" />
+                <datalist id="assetAreaOptions"></datalist>
               </div>
             </div>
             <div class="form-row">
@@ -1666,6 +1684,32 @@
               </div>
             </div>
             <p class="muted small" id="assetDetailsStatus">Select a fleet card above to edit its details.</p>
+            <div class="asset-components" id="assetComponents">
+              <div class="asset-components-head">
+                <h4>Major components</h4>
+                <p class="muted small">Engine, transmission, final drives and other major components on this machine: serial number, when fitted and how much of their expected life is used.</p>
+              </div>
+              <div id="assetComponentsList"></div>
+              <details class="asset-components-add asset-edit-only">
+                <summary>Add a component</summary>
+                <div class="form-row">
+                  <div class="form-field"><label for="acComponent">Component</label><select id="acComponent" class="w-full"></select></div>
+                  <div class="form-field"><label for="acPosition">Position (optional)</label><input id="acPosition" class="w-full" maxlength="40" placeholder="e.g. Left, Front, No. 2" /></div>
+                  <div class="form-field"><label for="acSerial">Serial number</label><input id="acSerial" class="w-full" maxlength="60" autocomplete="off" spellcheck="false" /></div>
+                </div>
+                <div class="form-row">
+                  <div class="form-field"><label for="acMake">Make (optional)</label><input id="acMake" class="w-full" maxlength="60" placeholder="e.g. Cummins" /></div>
+                  <div class="form-field"><label for="acModel">Model (optional)</label><input id="acModel" class="w-full" maxlength="60" placeholder="e.g. QSK19" /></div>
+                </div>
+                <div class="form-row">
+                  <div class="form-field"><label for="acFittedDate">Fitted on</label><input id="acFittedDate" type="date" class="w-full" /></div>
+                  <div class="form-field"><label for="acFittedHours">Machine hours when fitted</label><input id="acFittedHours" type="number" min="0" step="0.1" class="w-full" placeholder="Empty = current meter" /></div>
+                  <div class="form-field"><label for="acLife">Expected life (hours)</label><input id="acLife" type="number" min="0" step="1" class="w-full" placeholder="e.g. 15000" /></div>
+                  <div class="form-field form-field-action"><button id="acAddBtn" type="button" class="btn btn-secondary">Add component</button></div>
+                </div>
+              </details>
+              <p class="muted small" id="assetComponentsMsg" role="status"></p>
+            </div>
             <div class="form-row">
               <div class="form-field">
                 <label>Start Date</label>
@@ -8382,7 +8426,7 @@
   <script src="./app/procurement.js?v=89"></script>
   <script src="./app/site-ops.js?v=89"></script>
   <script src="./app/daily-input.js?v=89"></script>
-  <script src="./app/assets.js?v=90"></script>
+  <script src="./app/assets.js?v=91"></script>
   <script src="./app/developer.js?v=4"></script>
   <script src="./app/init.js?v=97"></script>
   <script src="./app/documents.js?v=89"></script>

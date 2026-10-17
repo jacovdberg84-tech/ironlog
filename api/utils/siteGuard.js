@@ -18,6 +18,7 @@ export const RECORD_RULES = [
   [/^\/tech\/workorders\/(\d+)(?:\/|$)/, "work_orders", "id"],
   [/^\/reports\/workorder\/(\d+)\.pdf$/, "work_orders", "id"],
   [/^\/tech\/assets\/([^/]+)$/, "assets", "asset_code"],
+  [/^\/assets\/([^/]+)\/components(?:\/|$)/, "assets", "asset_code"],
   [/^\/assets\/([^/]+)\/(?:history|hours|qr-profile|tyre-qr-profile|undercarriage-qr-profile)(?:\/refresh)?$/, "assets", "asset_code"],
   [/^\/assets\/([^/]+)(?:\/archive)?$/, "assets", "asset_code"],
   [/^\/reports\/asset-history\/([^/]+)\.pdf$/, "assets", "asset_code"],

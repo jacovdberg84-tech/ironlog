@@ -148,7 +148,7 @@ function renderAssetFleetGrid(cards) {
   const filtered = (cards || []).filter((c) => {
     if (statusFilter && String(c.status || "").toUpperCase() !== statusFilter) return false;
     if (!filter) return true;
-    const hay = `${c.asset_code} ${c.asset_name} ${c.category || ""}`.toLowerCase();
+    const hay = `${c.asset_code} ${c.asset_name} ${c.category || ""} ${c.area || ""} ${c.make || ""} ${c.model || ""}`.toLowerCase();
     return hay.includes(filter);
   });
 
@@ -385,6 +385,9 @@ async function loadAssetsFleet() {
     const data = await fetchJson(url);
     assetsFleetCache = Array.isArray(data?.cards) ? data.cards : [];
     renderAssetFleetGrid(assetsFleetCache);
+    const areas = qs("assetAreaOptions");
+    if (areas) areas.innerHTML = [...new Set(assetsFleetCache.map((c) => c.area).filter(Boolean))].sort().map((a) => `<option value="${escapeHtml(a)}"></option>`).join("");
+    loadComponentLife().catch(() => {});
     await populateHistoryAssets().catch(() => {});
     await loadPlantHirePanel().catch(() => {});
     if (assetsSelectedCode && !assetsFleetCache.some((c) => c.asset_code === assetsSelectedCode)) {
@@ -415,6 +418,7 @@ async function loadAssetDetailHeader(asset_code) {
       subtitle.textContent = [
         card?.asset_name || p.asset?.asset_name,
         card?.category || p.asset?.category,
+        card?.area ? `Area: ${card.area}` : "",
         assetDetailLine(card),
       ]
         .filter(Boolean)
@@ -445,6 +449,7 @@ async function loadAssetDetailHeader(asset_code) {
 
 // Machine details on the form: input id → API field (api/utils/assetDetails.js).
 const ASSET_DETAIL_INPUTS = {
+  assetDetailsArea: "area",
   assetDetailsMake: "make",
   assetDetailsModel: "model",
   assetDetailsSerial: "serial_number",
@@ -516,6 +521,153 @@ async function saveAssetDetails() {
   }
 }
 
+// ---- Major components and component life (api/routes/assets/components.routes.js)
+const ASSET_EDIT_ROLES_UI = ["admin", "supervisor", "workshop_admin", "plant_manager", "site_manager", "plant_clerk"];
+let componentChoices = [];
+
+function canEditAssets() {
+  return getSessionRoles().some((r) => ASSET_EDIT_ROLES_UI.includes(r));
+}
+
+/** Life used: a bar coloured by how close the component is to its expected hours. */
+function componentLifeHtml(c) {
+  if (c.life_used_pct == null) return `<span class="muted small">${c.hours_since_fitted != null ? "No expected life set" : "—"}</span>`;
+  const pct = c.life_used_pct;
+  const cls = pct >= 100 ? "is-over" : pct >= 80 ? "is-due" : "";
+  return `<div class="component-life ${cls}" title="${pct}% of ${Number(c.expected_life_hours).toLocaleString()} h"><span style="width:${Math.min(100, pct)}%"></span></div>`
+    + `<small>${pct}%${c.life_left_hours != null ? ` · ${c.life_left_hours >= 0 ? `${Math.round(c.life_left_hours).toLocaleString()} h left` : `${Math.round(-c.life_left_hours).toLocaleString()} h over`}` : ""}</small>`;
+}
+
+function componentName(c) {
+  return `${escapeHtml(c.label)}${c.position ? ` <span class="muted">(${escapeHtml(c.position)})</span>` : ""}`;
+}
+
+async function loadComponentChoices() {
+  if (componentChoices.length) return componentChoices;
+  const data = await fetchJson(`${API}/api/breakdowns/failure-codes`);
+  componentChoices = data.lists?.component || [];
+  const sel = qs("acComponent");
+  if (sel) sel.innerHTML = componentChoices.map((c) => `<option value="${escapeHtml(c.code)}">${escapeHtml(c.label_en)}</option>`).join("");
+  return componentChoices;
+}
+
+async function loadAssetComponents(code) {
+  const box = qs("assetComponentsList");
+  if (!box || !code) return;
+  const edit = canEditAssets();
+  document.querySelectorAll("#assetComponents .asset-edit-only").forEach((el) => el.classList.toggle("hidden", !edit));
+  if (edit) loadComponentChoices().catch(() => {});
+  const data = await fetchJson(`${API}/api/assets/${encodeURIComponent(code)}/components`);
+  const fitted = data.fitted || [];
+  const removed = data.removed || [];
+  box.innerHTML = fitted.length
+    ? `<div class="table-wrap"><table class="gridTable asset-components-table"><thead><tr><th>Component</th><th>Serial</th><th>Make / model</th><th>Fitted</th><th style="text-align:right;">Hours since fitted</th><th>Life used</th>${edit ? "<th></th>" : ""}</tr></thead><tbody>${fitted.map((c) => `
+        <tr data-id="${c.id}" class="${c.due ? "is-due" : ""}">
+          <td>${componentName(c)}</td>
+          <td>${escapeHtml(c.serial_number || "—")}</td>
+          <td>${escapeHtml([c.make, c.model].filter(Boolean).join(" ") || "—")}</td>
+          <td>${escapeHtml(c.fitted_date || "—")}${c.fitted_hours != null ? `<br/><small class="muted">at ${Number(c.fitted_hours).toLocaleString()} h</small>` : ""}</td>
+          <td style="text-align:right;">${c.hours_since_fitted != null ? `${Number(c.hours_since_fitted).toLocaleString()} h` : "—"}</td>
+          <td>${componentLifeHtml(c)}</td>
+          ${edit ? `<td><button type="button" class="btn btn-secondary btn-sm ac-change" data-id="${c.id}">Change</button></td>` : ""}
+        </tr>
+        <tr class="ac-change-row hidden" data-for="${c.id}"><td colspan="${edit ? 7 : 6}">
+          <div class="form-row">
+            <div class="form-field"><label>Date changed</label><input type="date" class="w-full ac-date" value="${new Date().toISOString().slice(0, 10)}" /></div>
+            <div class="form-field"><label>Machine hours at change</label><input type="number" min="0" step="0.1" class="w-full ac-hours" placeholder="${Number(data.meter_hours || 0).toFixed(1)} (meter now)" /></div>
+            <div class="form-field"><label>Why changed</label><input class="w-full ac-reason" maxlength="200" placeholder="e.g. failed, end of life, upgrade" /></div>
+            <div class="form-field"><label>New serial number</label><input class="w-full ac-serial" maxlength="60" autocomplete="off" spellcheck="false" /></div>
+            <div class="form-field form-field-action"><button type="button" class="btn btn-primary btn-sm ac-change-save" data-id="${c.id}">Save change</button></div>
+          </div>
+        </td></tr>`).join("")}</tbody></table></div>`
+    : `<p class="muted small">No major components recorded for this machine yet.${edit ? " Add the engine, transmission and other major components below." : ""}</p>`;
+  if (removed.length) {
+    box.insertAdjacentHTML("beforeend", `<details class="asset-components-history"><summary>Changed components (${removed.length})</summary>
+      <div class="table-wrap"><table class="gridTable"><thead><tr><th>Component</th><th>Serial</th><th>Fitted</th><th>Changed</th><th style="text-align:right;">Hours run</th><th>Why</th></tr></thead><tbody>
+      ${removed.map((c) => `<tr><td>${componentName(c)}</td><td>${escapeHtml(c.serial_number || "—")}</td><td>${escapeHtml(c.fitted_date || "—")}</td><td>${escapeHtml(c.removed_date || "—")}</td><td style="text-align:right;">${c.hours_since_fitted != null ? `${Number(c.hours_since_fitted).toLocaleString()} h` : "—"}</td><td>${escapeHtml(c.removed_reason || "")}</td></tr>`).join("")}
+      </tbody></table></div></details>`);
+  }
+  setText("assetComponentsMsg", "");
+}
+
+async function addAssetComponentFromForm() {
+  const code = getSelectedAssetCode();
+  if (!code) return alert("Select a fleet card first.");
+  const body = {
+    component: qs("acComponent")?.value || "",
+    position: qs("acPosition")?.value || "",
+    serial_number: qs("acSerial")?.value || "",
+    make: qs("acMake")?.value || "",
+    model: qs("acModel")?.value || "",
+    fitted_date: qs("acFittedDate")?.value || "",
+    fitted_hours: qs("acFittedHours")?.value || "",
+    expected_life_hours: qs("acLife")?.value || "",
+  };
+  try {
+    await fetchJson(`${API}/api/assets/${encodeURIComponent(code)}/components`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    ["acPosition", "acSerial", "acMake", "acModel", "acFittedDate", "acFittedHours", "acLife"].forEach((id) => { if (qs(id)) qs(id).value = ""; });
+    await loadAssetComponents(code);
+    setText("assetComponentsMsg", "Component added.");
+    loadComponentLife().catch(() => {});
+  } catch (e) {
+    setText("assetComponentsMsg", e.message || String(e));
+  }
+}
+
+async function saveComponentChange(btn) {
+  const code = getSelectedAssetCode();
+  const id = btn.getAttribute("data-id");
+  const row = btn.closest(".ac-change-row");
+  if (!code || !id || !row) return;
+  const body = {
+    removed_date: row.querySelector(".ac-date").value,
+    removed_hours: row.querySelector(".ac-hours").value,
+    reason: row.querySelector(".ac-reason").value,
+    serial_number: row.querySelector(".ac-serial").value,
+  };
+  try {
+    await fetchJson(`${API}/api/assets/${encodeURIComponent(code)}/components/${id}/change`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    await loadAssetComponents(code);
+    setText("assetComponentsMsg", "Component change saved. The old one is under Changed components.");
+    loadComponentLife().catch(() => {});
+  } catch (e) {
+    setText("assetComponentsMsg", e.message || String(e));
+  }
+}
+
+/** Site-wide list of components at 80% of their expected life or more. */
+async function loadComponentLife() {
+  const card = qs("componentLifeCard");
+  const box = qs("componentLifeList");
+  if (!card || !box) return;
+  const data = await fetchJson(`${API}/api/assets/component-life`);
+  const rows = data.rows || [];
+  card.classList.toggle("hidden", !rows.length);
+  box.innerHTML = rows.length
+    ? `<div class="table-wrap"><table class="gridTable"><thead><tr><th>Machine</th><th>Component</th><th>Serial</th><th style="text-align:right;">Hours since fitted</th><th>Life used</th></tr></thead><tbody>${rows.map((c) => `
+      <tr class="${c.life_used_pct >= 100 ? "is-over" : "is-due"}"><td><button type="button" class="link-button ac-open" data-code="${escapeHtml(c.asset_code)}">${escapeHtml(c.asset_code)}</button> <span class="muted small">${escapeHtml(c.asset_name || "")}</span></td>
+      <td>${componentName(c)}</td><td>${escapeHtml(c.serial_number || "—")}</td><td style="text-align:right;">${Number(c.hours_since_fitted).toLocaleString()} h</td><td>${componentLifeHtml(c)}</td></tr>`).join("")}</tbody></table></div>`
+    : "";
+}
+
+function wireAssetComponents() {
+  qs("acAddBtn")?.addEventListener("click", () => addAssetComponentFromForm());
+  qs("assetComponentsList")?.addEventListener("click", (ev) => {
+    const ch = ev.target?.closest?.(".ac-change");
+    if (ch) {
+      const r = document.querySelector(`#assetComponentsList .ac-change-row[data-for="${ch.getAttribute("data-id")}"]`);
+      if (r) { r.classList.toggle("hidden"); r.querySelector(".ac-reason")?.focus(); }
+      return;
+    }
+    const sv = ev.target?.closest?.(".ac-change-save");
+    if (sv) saveComponentChange(sv);
+  });
+  qs("componentLifeList")?.addEventListener("click", (ev) => {
+    const b = ev.target?.closest?.(".ac-open");
+    if (b) selectAssetCard(b.getAttribute("data-code"), { loadHistory: false, scroll: true }).catch(() => {});
+  });
+}
+
 async function selectAssetCard(asset_code, opts = {}) {
   const code = String(asset_code || "").trim();
   if (!code) return;
@@ -538,6 +690,7 @@ async function selectAssetCard(asset_code, opts = {}) {
   }
   ensureAssetHistoryDateRange();
   loadAssetDetailsForm(code);
+  loadAssetComponents(code).catch((e) => setText("assetComponentsMsg", e.message || String(e)));
   await loadAssetDetailHeader(code);
   if (opts.loadHistory !== false) {
     await loadAssetHistory().catch((e) => setStatus("History error: " + (e.message || e)));
@@ -900,6 +1053,7 @@ function wireAssetControls() {
   qs("saveAssetDetails")?.addEventListener("click", () =>
     saveAssetDetails().catch((e) => setStatus("Equipment details error: " + e.message))
   );
+  wireAssetComponents();
   qs("saveContractorAsset")?.addEventListener("click", () =>
     saveContractorAsset().catch((e) => setStatus("Contractor asset save error: " + e.message))
   );
