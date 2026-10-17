@@ -29,7 +29,7 @@ test("phrases, patterns and what is left alone", () => {
   assert.equal(pt("2 parts at $0"), "2 peças a $0");
 });
 
-test("the menu and the daily-use screens have Portuguese for every phrase", () => {
+test("the menu and the desk screens have Portuguese for every phrase", () => {
   const missing = [];
   for (const sec of nav.NAV_SECTIONS) {
     for (const s of [sec.title, ...sec.items.flatMap((i) => [i.label, i.title])]) if (!known(s)) missing.push(`menu: ${s}`);
@@ -41,13 +41,15 @@ test("the menu and the daily-use screens have Portuguese for every phrase", () =
     const end = index.indexOf('\n    <section class="panel', start + 10);
     return index.slice(start, end > 0 ? end : undefined);
   };
-  const pages = { ...Object.fromEntries(["tab-mywork", "tab-daily", "tab-fuel", "tab-lube", "tab-vehicle", "tab-workshop", "tab-tasks"].map((id) => [id, sectionOf(id)])),
-    "workorders.html": fs.readFileSync(path.join(web, "workorders.html"), "utf8"), "breakdown-ops.html": fs.readFileSync(path.join(web, "breakdown-ops.html"), "utf8") };
+  const pages = { ...Object.fromEntries(["tab-mywork", "tab-daily", "tab-fuel", "tab-lube", "tab-vehicle", "tab-workshop", "tab-tasks",
+    "tab-stock", "tab-parts-tracking", "tab-procurement", "tab-operations"].map((id) => [id, sectionOf(id)])),
+    "workorders.html": fs.readFileSync(path.join(web, "workorders.html"), "utf8"), "breakdown-ops.html": fs.readFileSync(path.join(web, "breakdown-ops.html"), "utf8"),
+    "maintenance.html": fs.readFileSync(path.join(web, "maintenance.html"), "utf8") };
   for (const [where, html] of Object.entries(pages)) {
     const text = html.replace(/<(script|style|code|pre|svg|textarea)\b[\s\S]*?<\/\1>/gi, " ");
     for (const m of text.matchAll(/>([^<>]+)</g)) {
       const s = decode(m[1]).replace(/\s+/g, " ").trim();
-      if (!/[A-Za-z]{3}/.test(s) || /[ãõçáéíóúâêô]/.test(s) || /^[A-Z0-9_./-]+$/.test(s) || /^(e\.g\.|https?:)/.test(s) || /^\(.*\)$/.test(s)) continue;
+      if (!/[A-Za-z]{3}/.test(s) || /[ãõçáéíóúâêô]/.test(s) || /^[A-Z0-9_./-]+$/.test(s) || /^(e\.g\.|https?:)/.test(s) || /^\(.*\)$/.test(s) || /^\.\w+$/.test(s)) continue;
       if (/^(IRONLOG|IronLog|Borris|June|FAMS|Cartrack|Komatsu|Bell|Sergio|Microsoft Outlook|API base URL|Emma Tool Gateway|ONLINE|km|L\/hr|MTD|YTD|PT ⇄ EN|FSC Pilot|CSV format:)/.test(s)) continue;
       if (!known(s)) missing.push(`${where}: ${s}`);
     }
