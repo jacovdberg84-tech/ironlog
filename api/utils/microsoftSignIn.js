@@ -21,6 +21,7 @@
 // Plan: the "IronLog — Microsoft 365 (Entra ID) sign-in plan" doc.
 import crypto from "node:crypto";
 import { decryptJuneConnectorSecret, encryptJuneConnectorSecret } from "./juneOutlook.js";
+import { createSession } from "./signInSecurity.js";
 
 export const MS_SESSION_HOURS = 12;
 const REQUEST_MINUTES = 10;
@@ -383,9 +384,8 @@ export function matchUser(db, claims, { validRoles = [] } = {}) {
 }
 
 /** A normal IronLog session (12 hours) plus a one-time handoff code for the browser (2 minutes). */
-export function createSessionHandoff(db, userId) {
-  const token = crypto.randomBytes(32).toString("hex");
-  db.prepare(`INSERT INTO auth_sessions (token, user_id, expires_at) VALUES (?, ?, datetime('now', '+${MS_SESSION_HOURS} hours'))`).run(token, userId);
+export function createSessionHandoff(db, userId, req = null) {
+  const token = createSession(db, userId, { kind: "microsoft", lifetime: `+${MS_SESSION_HOURS} hours`, req });
   db.prepare(`DELETE FROM ms_signin_handoffs WHERE created_at < datetime('now', '-${HANDOFF_SECONDS} seconds')`).run();
   const code = random();
   db.prepare(`INSERT INTO ms_signin_handoffs (code, token) VALUES (?, ?)`).run(code, token);

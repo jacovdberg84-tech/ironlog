@@ -1578,6 +1578,64 @@ function wireApiKeys() {
   });
 }
 
+/** Admin → Who is signed in: sessions, sign-out and locked accounts. */
+const SESSION_KIND_LABEL = { password: "Password", pin: "PIN", microsoft: "Microsoft" };
+async function loadSessions() {
+  const card = qs("signInSecurityCard");
+  if (!card || card.classList.contains("hidden")) return;
+  const data = await fetchJson(`${API}/api/auth/sessions`);
+  const when = (v) => (v ? escapeHtml(String(v).slice(0, 16).replace("T", " ")) : "—");
+  const locked = data.locked || [];
+  qs("lockedAccountsList").innerHTML = locked.length
+    ? `<div class="sessions-locked"><h4>Locked accounts</h4><ul>${locked.map((l) => `
+        <li><strong>${escapeHtml(l.username)}</strong> <span class="muted small">${l.failures} wrong attempts · locked until ${when(l.locked_until)} (UTC)</span>
+        <button type="button" class="btn btn-secondary btn-sm" data-sess-act="unlock" data-user="${escapeHtml(l.username)}">Unlock</button></li>`).join("")}</ul></div>`
+    : "";
+  const rows = data.sessions || [];
+  const people = new Map();
+  rows.forEach((r) => people.set(r.username, (people.get(r.username) || 0) + 1));
+  qs("sessionsList").innerHTML = rows.length
+    ? `<p class="muted small">${rows.length} active session${rows.length === 1 ? "" : "s"} for ${people.size} ${people.size === 1 ? "person" : "people"}. Times are UTC.</p>
+      <div class="table-wrap"><table class="gridTable"><thead><tr><th>Person</th><th>Signed in with</th><th>Device</th><th>Address</th><th>Signed in</th><th>Last active</th><th></th></tr></thead><tbody>${rows.map((r) => `
+      <tr><td>${escapeHtml(r.full_name || r.username)}<br/><small class="muted">${escapeHtml(r.username)}</small></td>
+      <td>${escapeHtml(SESSION_KIND_LABEL[r.kind] || "Password (before this list)")}</td>
+      <td>${escapeHtml(r.device)}</td>
+      <td>${escapeHtml(r.ip || "—")}</td>
+      <td>${when(r.created_at)}</td>
+      <td>${when(r.last_seen_at)}</td>
+      <td class="sessions-actions">${r.current ? `<span class="pill pill-green">This device</span>` : `<button type="button" class="btn btn-secondary btn-sm" data-sess-act="end" data-id="${r.id}" data-user="${escapeHtml(r.username)}">Sign out</button>`}
+        <button type="button" class="btn btn-secondary btn-sm" data-sess-act="everywhere" data-user="${escapeHtml(r.username)}">Everywhere</button></td></tr>`).join("")}</tbody></table></div>`
+    : `<p class="muted small">Nobody is signed in.</p>`;
+}
+
+async function sessionAction(b) {
+  const user = b.dataset.user || "";
+  const msg = (t) => { if (qs("sessionsMsg")) qs("sessionsMsg").textContent = t; };
+  if (b.dataset.sessAct === "end") {
+    await fetchJson(`${API}/api/auth/sessions/${b.dataset.id}`, { method: "DELETE" });
+    msg(`Signed ${user} out on that device.`);
+  } else if (b.dataset.sessAct === "everywhere") {
+    if (!confirm(`Sign ${user} out on every device? They will need to sign in again.`)) return;
+    const r = await fetchJson(`${API}/api/auth/users/${encodeURIComponent(user)}/sign-out`, { method: "POST", body: "{}" });
+    msg(`Signed ${user} out on ${r.ended} device${r.ended === 1 ? "" : "s"}.`);
+    if (user === getSessionUser()) { logoutAuth().catch(() => {}); return; }
+  } else if (b.dataset.sessAct === "unlock") {
+    await fetchJson(`${API}/api/auth/users/${encodeURIComponent(user)}/unlock`, { method: "POST", body: "{}" });
+    msg(`${user} can sign in again.`);
+  }
+  await loadSessions();
+}
+
+function wireSessions() {
+  qs("signInSecurityRefreshBtn")?.addEventListener("click", () => loadSessions().catch((e) => setStatus("Sessions error: " + e.message)));
+  for (const id of ["sessionsList", "lockedAccountsList"]) {
+    qs(id)?.addEventListener("click", (ev) => {
+      const b = ev.target?.closest?.("[data-sess-act]");
+      if (b) sessionAction(b).catch((e) => { if (qs("sessionsMsg")) qs("sessionsMsg").textContent = e.message || String(e); });
+    });
+  }
+}
+
 /** Admin → Webhooks: messages to other systems when something happens. */
 async function loadWebhooks() {
   const card = qs("webhooksCard");
@@ -1947,6 +2005,7 @@ function wireAdminControls() {
   wireMsSignin();
   wireApiKeys();
   wireWebhooks();
+  wireSessions();
   wireLicenceCard();
   wireLicenceIssuer();
   qs("loadCompanyProfileBtn")?.addEventListener("click", () =>

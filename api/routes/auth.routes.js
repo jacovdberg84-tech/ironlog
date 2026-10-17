@@ -4,6 +4,10 @@ import { ensureAuditTable, writeAudit } from "../utils/audit.js";
 import { isAuthRequired } from "../auth/hook.js";
 import { ensureMicrosoftSignInTables, setUserMicrosoftAccess, setUserMicrosoftEmail } from "../utils/microsoftSignIn.js";
 import { checkAllowedLocations, defaultSite, knownSites, unwrapSiteList } from "../utils/sites.js";
+import {
+  clientOf, createSession, endSession, endUserSessions, ensureSignInTables, listSessions, lockedAccounts, recordFailure, recordSuccess,
+  signInAllowed, unlockAccount,
+} from "../utils/signInSecurity.js";
 
 export const VALID_ROLES = [
   "admin",
@@ -236,6 +240,8 @@ export default async function authRoutes(app) {
 
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_auth_sessions_token ON auth_sessions(token)`).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id)`).run();
+  // Wrong-password lockout and the signed-in sessions list (utils/signInSecurity.js).
+  ensureSignInTables(db);
   db.prepare(`
     CREATE TABLE IF NOT EXISTS permissions (
       key TEXT PRIMARY KEY,
@@ -282,11 +288,6 @@ export default async function authRoutes(app) {
     WHERE username = ?
   `);
 
-  const insertSession = db.prepare(`
-    INSERT INTO auth_sessions (token, user_id, expires_at)
-    VALUES (?, ?, datetime('now', ?))
-  `);
-
   const deleteSession = db.prepare(`DELETE FROM auth_sessions WHERE token = ?`);
 
   function getRequestRoles(req) {
@@ -327,6 +328,25 @@ export default async function authRoutes(app) {
 
   function getRequestUsername(req) {
     return String(req.headers["x-user-name"] || "").trim();
+  }
+
+  /** Refuses a sign-in attempt while the account or address is locked out. */
+  function lockedOut(req, reply, username, kind = "password") {
+    const allowed = signInAllowed(db, username, clientOf(req).ip, new Date(), { kind });
+    if (allowed.ok) return false;
+    reply.code(429).send({ error: "locked", message: allowed.message, minutes: allowed.minutes });
+    return true;
+  }
+
+  /** Counts a wrong password, PIN or code; a fifth in 15 minutes locks the account (and is audited). */
+  function failed(req, username, kind) {
+    const r = recordFailure(db, username, clientOf(req).ip, kind);
+    if (r.locked) {
+      try {
+        writeAudit(db, req, { module: "auth", action: "login.locked", entity_type: "user", entity_id: String(username || "").trim().toLowerCase(), payload: { kind, ip: clientOf(req).ip } });
+      } catch { /* the lock stands even if the audit write fails */ }
+    }
+    return r;
   }
 
   function requireAdmin(req, reply) {
@@ -380,9 +400,11 @@ export default async function authRoutes(app) {
     if (!username || !password) {
       return reply.code(400).send({ error: "username and password are required" });
     }
+    if (lockedOut(req, reply, username)) return;
 
     const row = getByUsername.get(username);
     if (!row || Number(row.active) !== 1) {
+      failed(req, username, "password");
       return reply.code(401).send({ error: "invalid username or password" });
     }
     if (Number(row.ms_only) === 1) {
@@ -398,12 +420,12 @@ export default async function authRoutes(app) {
       });
     }
     if (!verifyPassword(password, row.password_hash)) {
+      failed(req, username, "password");
       return reply.code(401).send({ error: "invalid username or password" });
     }
 
-    const token = crypto.randomBytes(32).toString("hex");
-    const dayMod = `+${SESSION_DAYS} days`;
-    insertSession.run(token, row.id, dayMod);
+    recordSuccess(db, username);
+    const token = createSession(db, row.id, { kind: "password", lifetime: `+${SESSION_DAYS} days`, req });
 
     const user = userPayload(row);
     user.permissions = getPermissionsForRoles(user.roles);
@@ -462,11 +484,14 @@ export default async function authRoutes(app) {
       return reply.code(400).send({ error: "pin must be 4–6 digits" });
     }
 
+    if (lockedOut(req, reply, username, "pin")) return;
     const row = getByUsername.get(username);
     if (!row || Number(row.active) !== 1) {
+      failed(req, username, "pin");
       return reply.code(401).send({ error: "invalid pin" });
     }
     if (!row.pin_hash || !verifyPassword(pin, row.pin_hash)) {
+      failed(req, username, "pin");
       return reply.code(401).send({ error: "invalid pin" });
     }
 
@@ -476,9 +501,8 @@ export default async function authRoutes(app) {
       return reply.code(403).send({ error: "pin login is not enabled for this account" });
     }
 
-    const token = crypto.randomBytes(32).toString("hex");
-    const dayMod = `+${SESSION_DAYS} days`;
-    insertSession.run(token, row.id, dayMod);
+    recordSuccess(db, username);
+    const token = createSession(db, row.id, { kind: "pin", lifetime: `+${SESSION_DAYS} days`, req });
 
     const user = userPayload(row);
     user.permissions = getPermissionsForRoles(user.roles);
@@ -796,6 +820,7 @@ export default async function authRoutes(app) {
       return reply.code(400).send({ error: "new_password must be at least 6 characters" });
     }
 
+    if (lockedOut(req, reply, username)) return;
     const row = getByUsername.get(username);
     if (!row || Number(row.active) !== 1) return reply.code(404).send({ error: "user not found" });
     if (Number(row.ms_only) === 1) return reply.code(403).send({ error: "microsoft_only", message: "This account signs in with Microsoft and has no password." });
@@ -810,8 +835,10 @@ export default async function authRoutes(app) {
       : false;
     if (!expOk) return reply.code(403).send({ error: "setup code expired" });
     if (!verifyPassword(setupCode, row.setup_code_hash)) {
+      failed(req, username, "setup_code");
       return reply.code(403).send({ error: "invalid setup code" });
     }
+    recordSuccess(db, username);
 
     db.prepare(`
       UPDATE users
@@ -843,18 +870,66 @@ export default async function authRoutes(app) {
     if (!row) return reply.code(404).send({ error: "user not found" });
     if (Number(row.ms_only) === 1) return reply.code(403).send({ error: "microsoft_only", message: "This account signs in with Microsoft and has no password. Change your password with Microsoft." });
     if (row.password_hash) {
+      if (lockedOut(req, reply, username)) return;
       if (!verifyPassword(oldPassword, row.password_hash)) {
+        failed(req, username, "password_change");
         return reply.code(403).send({ error: "current password is incorrect" });
       }
     }
     db.prepare(`UPDATE users SET password_hash = ? WHERE username = ?`).run(hashPassword(newPassword), username);
+    // A new password signs this person out on every other device.
+    const signedOut = endUserSessions(db, username, { keepToken: bearerToken(req) });
     writeAudit(db, req, {
       module: "auth",
       action: "password.change",
       entity_type: "user",
       entity_id: username,
-      payload: { self_service: true },
+      payload: { self_service: true, other_sessions_ended: signedOut },
     });
+    return { ok: true, other_sessions_ended: signedOut };
+  });
+
+  // ---- Signed-in sessions and locked accounts (Admin → Sign-in security).
+  function bearerToken(req) {
+    const auth = String(req.headers.authorization || "");
+    return auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  }
+
+  app.get("/sessions", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    return { ok: true, sessions: listSessions(db, { currentToken: bearerToken(req) }), locked: lockedAccounts(db) };
+  });
+
+  app.delete("/sessions/:id", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    if (!endSession(db, req.params.id)) return reply.code(404).send({ error: "That session has already ended." });
+    writeAudit(db, req, { module: "auth", action: "session.end", entity_type: "auth_session", entity_id: String(req.params.id) });
     return { ok: true };
+  });
+
+  app.post("/users/:username/sign-out", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const username = String(req.params.username || "").trim();
+    if (!getByUsername.get(username)) return reply.code(404).send({ error: "user not found" });
+    const ended = endUserSessions(db, username);
+    writeAudit(db, req, { module: "auth", action: "session.sign_out_everywhere", entity_type: "user", entity_id: username, payload: { ended } });
+    return { ok: true, ended };
+  });
+
+  app.post("/users/:username/unlock", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const username = String(req.params.username || "").trim();
+    const was = unlockAccount(db, username);
+    writeAudit(db, req, { module: "auth", action: "login.unlock", entity_type: "user", entity_id: username.toLowerCase(), payload: { was_locked: was } });
+    return { ok: true, was_locked: was };
+  });
+
+  // Anyone signed in: sign out on every device, this one included.
+  app.post("/logout-everywhere", async (req, reply) => {
+    const username = getRequestUsername(req);
+    if (!username || !bearerToken(req)) return reply.code(401).send({ error: "not authenticated" });
+    const ended = endUserSessions(db, username);
+    writeAudit(db, req, { module: "auth", action: "session.sign_out_everywhere", entity_type: "user", entity_id: username, payload: { ended, self_service: true } });
+    return { ok: true, ended };
   });
 }

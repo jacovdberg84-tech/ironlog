@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=ms-15" />
+  <link rel="stylesheet" href="./styles.css?v=ms-16" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -118,6 +118,7 @@
           <div class="dropdown-actions">
             <button id="applySessionRole" class="primary">Apply</button>
             <button type="button" id="logoutBtn" style="display:none">Logout</button>
+            <button type="button" id="logoutEverywhereBtn" style="display:none" title="Sign out on every phone, tablet and computer">Sign out everywhere</button>
           </div>
         </div>
       </div>
@@ -6750,6 +6751,31 @@
           </div>
         </div>
 
+        <div class="dash-card collapsible full-width" data-collapsed="false" id="signInSecurityCard">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-1d4ed8);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+              </div>
+              <div>
+                <h3>Who is signed in</h3>
+                <p class="muted small">Every signed-in phone, tablet and computer. Sign out a lost device, or a person everywhere at once. After 5 wrong passwords or PINs in 15 minutes an account is locked for 15 minutes; unlock it here if it is really them.</p>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="signInSecurityRefreshBtn" class="btn btn-secondary btn-sm">Refresh</button>
+              <button class="report-card-toggle" aria-label="Toggle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+              </button>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <div id="lockedAccountsList"></div>
+            <div id="sessionsList"><p class="muted small">Loading…</p></div>
+            <p id="sessionsMsg" class="muted small" role="status"></p>
+          </div>
+        </div>
+
         <div class="dash-card collapsible full-width" data-collapsed="false" id="apiKeysCard" data-licence-module="api_access">
           <div class="dash-card-header">
             <div class="dash-card-title">
@@ -8445,8 +8471,8 @@
   <script src="./store-mobile.js?v=2"></script>
   <!-- Main app, split by feature. Order matters: files share one global scope. -->
   <script src="./app-nav.js?v=1"></script>
-  <script src="./app/core.js?v=102"></script>
-  <script src="./app/admin.js?v=102"></script>
+  <script src="./app/core.js?v=103"></script>
+  <script src="./app/admin.js?v=103"></script>
   <script src="./app/licence-issuer.js?v=1"></script>
   <script src="./app/inspections.js?v=90"></script>
   <script src="./app/ui-helpers.js?v=89"></script>
@@ -8472,7 +8498,7 @@
   <script src="./app/daily-input.js?v=89"></script>
   <script src="./app/assets.js?v=91"></script>
   <script src="./app/developer.js?v=4"></script>
-  <script src="./app/init.js?v=99"></script>
+  <script src="./app/init.js?v=100"></script>
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=90"></script>
   <script src="./app/collab-inbox.js?v=1"></script>
