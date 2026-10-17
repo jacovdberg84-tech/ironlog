@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=ms-9" />
+  <link rel="stylesheet" href="./styles.css?v=ms-10" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -7603,7 +7603,7 @@
         </div>
 
         <!-- SUMMARIZED JOURNAL POSTING -->
-        <div class="card">
+        <div class="card" style="grid-column: 1 / -1;">
           <h4 style="margin-top:0;">Summarized Journal Runs</h4>
           <div class="row stack-10" style="margin-bottom:8px;">
             <label>Start<br><input id="finRunStart" type="date" class="w-150"></label>
@@ -7642,6 +7642,8 @@
             <button id="finLoadRunDetailBtn" type="button">Load Detail</button>
             <button id="finExportRunCsvBtn" type="button">Export CSV</button>
             <button id="finExportRunXlsxBtn" type="button">Export XLSX</button>
+            <button id="finSagePreviewBtn" type="button">Check for Sage</button>
+            <button id="finSageDownloadBtn" type="button" class="btn btn-primary">Download for Sage</button>
             <button id="finMarkExportedBtn" type="button">Mark Exported</button>
             <button id="finMarkPostedBtn" type="button" class="btn btn-primary">Mark Posted</button>
             <button id="finReverseRunBtn" type="button" class="btn btn-danger">Reverse</button>
@@ -7651,6 +7653,46 @@
             <label>Reverse Reason<br><input id="finReverseReason" class="w-240" placeholder="Reason"></label>
           </div>
           <div id="finRunDetail" class="muted">No run selected.</div>
+        </div>
+
+        <!-- SAGE JOURNAL BATCHES -->
+        <div class="card sage-card" style="grid-column: 1 / -1;">
+          <h4 style="margin-top:0;">Sage journal batches</h4>
+          <p class="muted small">Tell IronLog which Sage account each cost goes to. Then pick a run above and press <strong>Download for Sage</strong>. The batch is added up per account and cost centre, dated at the end of the run, and only downloads when debits equal credits. Do one test import with your Sage template first.</p>
+          <div class="row stack-10" style="margin-bottom:8px;">
+            <label>Layout<br><select id="sageLayout" class="w-200">
+              <option value="sage300">Sage 300 import sheet (Excel)</option>
+              <option value="csv">Journal lines (CSV, e.g. Sage Evolution)</option>
+            </select></label>
+            <label>Cost centre<br><select id="sageCostCentre" class="w-200">
+              <option value="segment">Part of the account (5200-PLANT)</option>
+              <option value="column">Own column</option>
+              <option value="none">Leave out</option>
+            </select></label>
+            <label>Separator<br><select id="sageSeparator" class="w-90">
+              <option value="-">-</option><option value="/">/</option><option value=".">.</option><option value="_">_</option><option value="">none</option>
+            </select></label>
+            <label>Cost centre when none is set<br><input id="sageDefaultCc" class="w-200" placeholder="e.g. WORKSHOP"></label>
+          </div>
+          <div class="row stack-10" style="margin-bottom:8px;">
+            <label>Lines<br><select id="sageDetail" class="w-200">
+              <option value="account">One per account</option>
+              <option value="machine">One per account and machine</option>
+            </select></label>
+            <label>Date in CSV<br><select id="sageDateFormat" class="w-140">
+              <option value="YYYY-MM-DD">2026-09-30</option><option value="DD/MM/YYYY">30/09/2026</option><option value="YYYYMMDD">20260930</option>
+            </select></label>
+            <label>Reference starts with<br><input id="sageRefPrefix" class="w-90" maxlength="12" placeholder="IL"></label>
+          </div>
+          <div class="row stack-10" style="margin-bottom:8px;" id="sageCategories"></div>
+          <table class="table">
+            <thead><tr><th>IronLog posts</th><th>IronLog account</th><th>Sage account</th></tr></thead>
+            <tbody id="sageAccountsBody"><tr><td colspan="3" class="muted">Loading…</td></tr></tbody>
+          </table>
+          <div class="row stack-10" style="margin-top:8px;">
+            <button id="sageSaveBtn" type="button" class="btn btn-primary">Save Sage settings</button>
+            <span id="sageSettingsMsg" class="muted"></span>
+          </div>
         </div>
 
         <!-- MONTH-END LOCK + CHECKLIST -->
@@ -8471,7 +8513,7 @@
   <script src="./app/june-calendar.js?v=1"></script>
   <script src="./app/wo-popup.js?v=1"></script>
   <script src="./app/june.js?v=22"></script>
-  <script src="./app/finance.js?v=89"></script>
+  <script src="./app/finance.js?v=90"></script>
   <script src="./app/enterprise.js?v=89"></script>
   <script src="./app/workshop-docs.js?v=89"></script>
   <script src="./my-work.js?v=6"></script>

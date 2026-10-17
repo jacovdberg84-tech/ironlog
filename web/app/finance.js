@@ -39,6 +39,7 @@ function initFinanceTab() {
   setIfEmpty("finRunEnd", end);
   financeSyncPeriodFields(false);
   loadFinanceSiteFilterFromEntity().catch(() => {});
+  loadSageSettings().catch(() => {});
 }
 
 async function loadFinanceSiteFilterFromEntity() {
@@ -337,6 +338,114 @@ function financeExportRunXlsx() {
   const id = Number(qs("finActiveRunId")?.value || 0);
   if (!id) { alert("Enter a run ID first."); return; }
   return downloadAuthedFile(`${API}/api/procurement/journals/runs/${id}/export.xlsx`, `IRONLOG_Journal_Run_${id}.xlsx`);
+}
+
+// Sage journal batches: account mapping and the download per run.
+let sageAccountList = {};
+async function loadSageSettings() {
+  const body = qs("sageAccountsBody");
+  if (!body) return;
+  try {
+    const res = await fetchJson(`${API}/api/procurement/journals/sage-settings`);
+    const s = res.settings || {};
+    sageAccountList = res.accounts || {};
+    const set = (id, v) => { const el = qs(id); if (el) el.value = v ?? ""; };
+    set("sageLayout", s.layout);
+    set("sageCostCentre", s.cost_centre);
+    set("sageSeparator", s.separator);
+    set("sageDefaultCc", s.default_cost_centre);
+    set("sageDetail", s.detail);
+    set("sageDateFormat", s.date_format);
+    set("sageRefPrefix", s.reference_prefix);
+    const cats = qs("sageCategories");
+    if (cats) {
+      cats.innerHTML = `<span class="muted">Send to Sage:</span> ` + Object.entries(res.categories || {}).map(([k, label]) =>
+        `<label><input type="checkbox" data-sage-cat="${escapeHtml(k)}" ${s.categories?.[k] ? "checked" : ""}> ${escapeHtml(label)}</label>`).join(" ");
+    }
+    body.innerHTML = Object.entries(sageAccountList).map(([code, a]) => `
+      <tr>
+        <td>${escapeHtml(a.label)}</td>
+        <td><code>${escapeHtml(code)}</code></td>
+        <td><input class="w-200" data-sage-acc="${escapeHtml(code)}" value="${escapeHtml(s.accounts?.[code] || "")}" placeholder="Sage account"></td>
+      </tr>`).join("");
+    const msg = qs("sageSettingsMsg");
+    if (msg) msg.textContent = s.updated_at ? `Last saved ${String(s.updated_at).slice(0, 16)}${s.updated_by ? ` by ${s.updated_by}` : ""}.` : "Not saved yet.";
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="3" class="muted">Could not load the Sage settings: ${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+async function saveSageSettings() {
+  const val = (id) => String(qs(id)?.value ?? "");
+  const accounts = {};
+  document.querySelectorAll("[data-sage-acc]").forEach((el) => { accounts[el.getAttribute("data-sage-acc")] = el.value.trim(); });
+  const categories = {};
+  document.querySelectorAll("[data-sage-cat]").forEach((el) => { categories[el.getAttribute("data-sage-cat")] = el.checked; });
+  const msg = qs("sageSettingsMsg");
+  try {
+    await fetchJson(`${API}/api/procurement/journals/sage-settings`, {
+      method: "PUT",
+      body: JSON.stringify({
+        layout: val("sageLayout"), cost_centre: val("sageCostCentre"), separator: val("sageSeparator"),
+        default_cost_centre: val("sageDefaultCc").trim(), detail: val("sageDetail"), date_format: val("sageDateFormat"),
+        reference_prefix: val("sageRefPrefix").trim(), accounts, categories,
+      }),
+    });
+    await loadSageSettings();
+    if (msg) msg.textContent = "Saved.";
+  } catch (e) {
+    if (msg) msg.textContent = e.message;
+  }
+}
+
+async function financeSagePreview() {
+  const id = Number(qs("finActiveRunId")?.value || 0);
+  if (!id) { alert("Enter a run ID first."); return; }
+  const el = qs("finRunDetail");
+  if (!el) return;
+  try {
+    const res = await fetchJson(`${API}/api/procurement/journals/runs/${id}/sage-preview`);
+    const j = res.journal || {};
+    if (!j.ok) {
+      el.innerHTML = `<div class="message-error">${(j.errors || []).map(escapeHtml).join("<br>")}</div>
+        <p class="muted small">Fill in the Sage accounts in the <strong>Sage journal batches</strong> card below, save, and check again.</p>`;
+      return;
+    }
+    const withCc = j.cost_centre === "column";
+    const withMachine = j.entries.some((e) => e.machine);
+    el.innerHTML = `
+      <div class="kpi-pills">
+        <span class="kpi-pill"><strong>Sage reference:</strong> ${escapeHtml(j.reference)}</span>
+        <span class="kpi-pill"><strong>Date:</strong> ${escapeHtml(j.date)}</span>
+        <span class="kpi-pill"><strong>Debit:</strong> ${fmtMoney(j.total_debit)}</span>
+        <span class="kpi-pill"><strong>Credit:</strong> ${fmtMoney(j.total_credit)}</span>
+        <span class="kpi-pill"><strong>Lines:</strong> ${j.entries.length}</span>
+        ${j.rounding ? `<span class="kpi-pill"><strong>Rounding:</strong> ${fmtMoney(j.rounding)}</span>` : ""}
+      </div>
+      <p class="muted small">Balanced and ready. This is what <strong>Download for Sage</strong> will contain.</p>
+      <table class="table">
+        <thead><tr><th>Sage account</th>${withCc ? "<th>Cost centre</th>" : ""}${withMachine ? "<th>Machine</th>" : ""}<th>Description</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
+        <tbody>${j.entries.map((e) => `<tr>
+          <td><code>${escapeHtml(e.account)}</code></td>
+          ${withCc ? `<td>${escapeHtml(e.cost_centre || "")}</td>` : ""}
+          ${withMachine ? `<td>${escapeHtml(e.machine || "")}</td>` : ""}
+          <td>${escapeHtml(e.description)}</td>
+          <td class="num">${e.debit ? fmtMoney(e.debit) : ""}</td>
+          <td class="num">${e.credit ? fmtMoney(e.credit) : ""}</td>
+        </tr>`).join("")}</tbody>
+      </table>`;
+  } catch (e) {
+    el.innerHTML = `<em class="muted">Check failed: ${escapeHtml(e.message)}</em>`;
+  }
+}
+
+async function financeSageDownload() {
+  const id = Number(qs("finActiveRunId")?.value || 0);
+  if (!id) { alert("Enter a run ID first."); return; }
+  // A refused batch (accounts not mapped, not balanced) is explained by the helper's alert; show why below.
+  const ok = await downloadAuthedFile(`${API}/api/procurement/journals/runs/${id}/export-sage`, `Sage_Journal_Run_${id}`);
+  if (ok) setStatus("Sage batch downloaded. Mark the run exported once Sage has taken it.");
+  else financeSagePreview().catch(() => {});
 }
 
 async function financeMarkExported() {
@@ -713,6 +822,9 @@ function bindFinanceHandlers() {
   bind("finLoadRunDetailBtn", "click", () => loadFinanceRunDetail().catch(() => {}));
   bind("finExportRunCsvBtn", "click", financeExportRunCsv);
   bind("finExportRunXlsxBtn", "click", financeExportRunXlsx);
+  bind("finSagePreviewBtn", "click", financeSagePreview);
+  bind("finSageDownloadBtn", "click", financeSageDownload);
+  bind("sageSaveBtn", "click", saveSageSettings);
   bind("finMarkExportedBtn", "click", financeMarkExported);
   bind("finMarkPostedBtn", "click", financeMarkPosted);
   bind("finReverseRunBtn", "click", financeReverseRun);
