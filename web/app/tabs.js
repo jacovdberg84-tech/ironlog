@@ -29,6 +29,9 @@ function switchTab(key) {
       loadFinanceSiteAllocation().catch(() => {});
     } catch (_) {}
   }
+  if (k === "uploads" && typeof loadGoLiveStatus === "function") {
+    loadGoLiveStatus().catch(() => {});
+  }
   if (k === "procurement" && typeof loadX3Settings === "function") {
     loadX3Settings().catch(() => {});
   }

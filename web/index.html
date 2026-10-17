@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=ms-11" />
+  <link rel="stylesheet" href="./styles.css?v=ms-12" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -3763,6 +3763,26 @@
 
     <!-- CSV UPLOADS -->
     <section class="panel" id="tab-uploads">
+      <div class="card stack-12 golive-card">
+        <h3>Go-live import</h3>
+        <p class="muted">Load a site's starting data from one Excel workbook: machines, store items, stock on hand, suppliers and major components. IronLog checks every row first and only imports a clean file.</p>
+        <ol class="golive-steps">
+          <li><strong>Download the workbook.</strong>
+            <button id="goLiveTemplateBtn" type="button">Empty workbook</button>
+            <button id="goLiveTemplateFilledBtn" type="button">Workbook with this site's data</button>
+            <span class="muted small">The "Read me" sheet explains every column.</span></li>
+          <li><strong>Fill it in</strong> and save it as .xlsx.</li>
+          <li><strong>Check it.</strong> <input id="goLiveFile" type="file" accept=".xlsx"> <button id="goLiveCheckBtn" type="button">Check file</button>
+            <span class="muted small">Nothing changes yet. Machines go to the site chosen at the top unless the Site column says otherwise.</span></li>
+          <li><strong>Import it.</strong> <button id="goLiveImportBtn" type="button" class="btn btn-primary" disabled>Import</button>
+            <span class="muted small">Only once the check finds no problems. Uploading the same file again changes nothing.</span></li>
+        </ol>
+        <div id="goLiveResult"></div>
+        <h4 style="margin-bottom:4px;">Go-live checklist for this site</h4>
+        <div id="goLiveChecklist" class="golive-checklist"><p class="muted">Loading…</p></div>
+        <div id="goLiveHistory"></div>
+      </div>
+
       <div class="card stack-12">
         <h3>CSV Uploads</h3>
         <div class="row">
@@ -8554,8 +8574,8 @@
   <script src="./app/fuel-lube.js?v=90"></script>
   <script src="./app/stock.js?v=93"></script>
   <script src="./app/compliance.js?v=89r"></script>
-  <script src="./app/tabs.js?v=91"></script>
-  <script src="./app/uploads.js?v=89"></script>
+  <script src="./app/tabs.js?v=92"></script>
+  <script src="./app/uploads.js?v=90"></script>
   <script src="./app/reports.js?v=90"></script>
   <script src="./app/breakdowns.js?v=90"></script>
   <script src="./app/inventory.js?v=92"></script>

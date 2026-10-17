@@ -9298,3 +9298,12 @@ body.wo-popup .wo-drawer-head { display: none; }
 .x3-card .x3-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px 14px; margin-top: 10px; }
 .x3-card .x3-grid textarea { width: 100%; font-family: inherit; }
 .x3-card .x3-steps { margin: 0 0 6px 18px; padding: 0; line-height: 1.7; }
+
+/* Go-live import (Uploads) */
+.golive-card .golive-steps { margin: 0 0 0 18px; padding: 0; line-height: 2.1; }
+.golive-card .golive-counts { max-width: 520px; }
+.golive-card .golive-checklist ul { list-style: none; margin: 0; padding: 0; line-height: 1.9; }
+.golive-card .golive-tick { display: inline-block; width: 1.2em; color: var(--muted); }
+.golive-card .golive-checklist li.done .golive-tick { color: var(--success); font-weight: 700; }
+.golive-card .table th, .golive-card .table td { padding: 4px 12px 4px 0; text-align: left; }
+.golive-card .table th.num, .golive-card .table td.num { text-align: right; }
