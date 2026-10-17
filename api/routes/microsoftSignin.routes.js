@@ -113,7 +113,7 @@ export default async function microsoftSigninRoutes(app) {
     } catch (err) {
       return failTo(err.code || "failed", err.message, { email });
     }
-    const code = createSessionHandoff(db, user.id);
+    const code = createSessionHandoff(db, user.id, req);
     if (user.created) audit(req, "microsoft_signin.user_created", { username: user.username, email, roles: JSON.parse(user.roles_json || "[]"), sites: user.allowed_locations || null });
     if (user.roles_changed) audit(req, "microsoft_signin.roles_from_groups", { username: user.username, email, from: user.roles_changed.from, to: user.roles_changed.to });
     audit(req, user.created || user.linked_now ? "microsoft_signin.linked" : "microsoft_signin.success", { username: user.username, email });

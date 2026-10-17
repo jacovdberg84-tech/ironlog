@@ -202,6 +202,7 @@ function loadStartupData() {
       loadMsSignin().catch(() => {});
       loadApiKeys().catch(() => {});
       loadWebhooks().catch(() => {});
+      loadSessions().catch(() => {});
     }
   }
   loadCodePickers().catch(() => {});

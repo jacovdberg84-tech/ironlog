@@ -4,6 +4,7 @@ export { isAuthRequired } from "./config.js";
 import { isAuthRequired, isPublicAuthRequest } from "./config.js";
 import { defaultSite, knownSitesCached, unwrapSiteList } from "../utils/sites.js";
 import { API_KEY_PREFIX, keyAllows, resolveApiKey, touchApiKey, underRateLimit } from "../utils/apiKeys.js";
+import { touchSession } from "../utils/signInSecurity.js";
 
 function resolveSession(token) {
   try {
@@ -177,6 +178,7 @@ export async function ironlogAuthHook(req, reply) {
   if (token) {
     const row = resolveSession(token);
     if (row && Number(row.active) === 1) {
+      touchSession(db, token);
       const roles = parseRoles(row.roles_json, row.role);
       const allowedLocations = parseAllowedLocations(row.allowed_locations);
       let requestedSite = String(req.headers["x-site-code"] || "").trim().toLowerCase();

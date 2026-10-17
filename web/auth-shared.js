@@ -153,7 +153,7 @@
       data = { raw: text };
     }
     if (!res.ok) {
-      const err = new Error(data?.error || data?.message || text || `Request failed (${res.status})`);
+      const err = new Error(data?.message || data?.error || text || `Request failed (${res.status})`);
       err.status = res.status;
       throw err;
     }

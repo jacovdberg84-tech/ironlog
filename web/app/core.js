@@ -1658,6 +1658,13 @@ function initSessionControls() {
   qs("logoutBtn")?.addEventListener("click", () =>
     logoutAuth().catch((e) => setStatus("Logout error: " + e.message))
   );
+  qs("logoutEverywhereBtn")?.addEventListener("click", async () => {
+    if (!confirm("Sign out on every phone, tablet and computer, this one included?")) return;
+    try {
+      await fetch(`${API}/api/auth/logout-everywhere`, { method: "POST", headers: new Headers(authHeaders()) });
+    } catch {}
+    logoutAuth().catch((e) => setStatus("Logout error: " + e.message));
+  });
 }
 
 /** Session gone while the page was open: show the sign-in screen with a short note. */
@@ -1697,6 +1704,8 @@ function updateAuthChrome() {
   if (roleEl) roleEl.disabled = Boolean(tok);
   if (applyBtn) applyBtn.style.display = tok ? "none" : "";
   if (logoutBtn) logoutBtn.style.display = tok ? "" : "none";
+  const everywhereBtn = qs("logoutEverywhereBtn");
+  if (everywhereBtn) everywhereBtn.style.display = tok ? "" : "none";
 }
 
 /** Reloads the My Work home screen once the session is known (defined in my-work.js). */

@@ -9341,3 +9341,10 @@ body.wo-popup .wo-drawer-head { display: none; }
 .mywork-figure.tone-good strong { color: var(--success); }
 .mywork-figure.tone-warn strong { color: var(--tx-b45309); }
 .mywork-figure.tone-danger strong { color: var(--tx-dc2626); }
+
+/* Admin → Who is signed in */
+#signInSecurityCard .sessions-locked { margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; background: var(--bg-fffbeb); border: 1px solid var(--bd-fcd34d); color: var(--tx-92400e); }
+#signInSecurityCard .sessions-locked h4 { margin: 0 0 6px; }
+#signInSecurityCard .sessions-locked ul { margin: 0; padding: 0; list-style: none; }
+#signInSecurityCard .sessions-locked li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 0; }
+#signInSecurityCard .sessions-actions { display: flex; flex-wrap: wrap; gap: 4px; }
