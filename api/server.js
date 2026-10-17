@@ -17,6 +17,7 @@ import dashboardRoutes from "./routes/dashboard.routes.js";
 import { makeSiteGuard } from "./utils/siteGuard.js";
 import authRoutes from "./routes/auth.routes.js";
 import microsoftSigninRoutes from "./routes/microsoftSignin.routes.js";
+import apiKeyRoutes from "./routes/apiKeys.routes.js";
 import companyRoutes from "./routes/company.routes.js";
 import { getCompanyProfile } from "./utils/companyProfile.js";
 import { setSiteTimeZoneProvider } from "./utils/siteTime.js";
@@ -74,6 +75,7 @@ export function buildServer() {
   app.addHook("onRequest", licenceHook);
   // People limited to some sites can't open other sites' records (utils/siteGuard.js).
   app.decorateRequest("ironlogAllowedSites", null);
+  app.decorateRequest("ironlogApiKey", null);
   app.addHook("preHandler", makeSiteGuard(db));
 
   // Health check
@@ -100,6 +102,7 @@ app.register(dashboardRoutes, { prefix: "/api/dashboard" });
   app.register(unitechRoutes, { prefix: "/api/unitech" });
 app.register(authRoutes, { prefix: "/api/auth" });
 app.register(microsoftSigninRoutes, { prefix: "/api/sso/microsoft" });
+app.register(apiKeyRoutes, { prefix: "/api/api-keys" });
 app.register(companyRoutes, { prefix: "/api/company" });
 app.register(licenceRoutes, { prefix: "/api/licence" });
 app.register(notificationsRoutes, { prefix: "/api/notifications" });

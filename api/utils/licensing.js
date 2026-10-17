@@ -32,6 +32,7 @@ export const MODULES = {
   developer: { label: "Developer Centre", api: ["/api/developer"], tabs: ["developer"] },
   aml_reports: { label: "AML customer reports", api: ["/api/reports/aml-weekly-check-sheet"], tabs: [] },
   microsoft_signin: { label: "Sign in with Microsoft 365", api: ["/api/sso/microsoft"], tabs: [] },
+  api_access: { label: "API access for other systems", api: ["/api/api-keys"], tabs: [] },
 };
 export const ALL_MODULES = Object.keys(MODULES);
 

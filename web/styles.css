@@ -9273,3 +9273,17 @@ body.wo-popup .wo-drawer-head { display: none; }
 .component-life.is-over span { background: var(--tx-991b1b); }
 .link-button { background: none; border: none; padding: 0; color: var(--tx-1d4ed8); font-weight: 600; cursor: pointer; text-decoration: underline; }
 
+/* Admin: API keys for other systems (web/app/admin.js) */
+.api-keys-new { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.api-keys-new h4 { margin: 0 0 8px; color: var(--ink); }
+.api-keys-scopes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px 14px; }
+.api-keys-scopes label { display: flex; gap: 8px; align-items: flex-start; color: var(--ink); }
+.api-keys-scopes input[type="checkbox"] { width: auto; margin-top: 3px; }
+.api-key-new { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--bg-fffbeb); color: var(--tx-92400e); border: 1px solid var(--bd-fcd34d); }
+.api-key-new #apiKeyNewValue { display: block; margin: 6px 0; padding: 6px 8px; word-break: break-all; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; }
+
+.api-docs h3 { margin: 8px 0 4px; color: var(--ink); }
+.api-docs ol, .api-docs ul { margin: 0 0 8px 18px; display: grid; gap: 4px; color: var(--ink); }
+.api-docs code { background: var(--bg-f3f4f6); padding: 1px 4px; border-radius: 4px; }
+.api-docs-scope { margin: 12px 0; }
+.api-docs-scope h4 { margin: 0 0 6px; color: var(--ink); }

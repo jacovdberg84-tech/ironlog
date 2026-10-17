@@ -1510,6 +1510,74 @@ async function saveMsSignin() {
   }
 }
 
+/** Admin → API keys for other systems (api/routes/apiKeys.routes.js). */
+async function loadApiKeys() {
+  const card = qs("apiKeysCard");
+  if (!card || card.classList.contains("hidden")) return;
+  const [data, cat] = await Promise.all([
+    fetchJson(`${API}/api/api-keys`),
+    fetchJson(`${API}/api/api-keys/catalogue`),
+  ]);
+  const labels = Object.fromEntries((cat.scopes || []).map((s) => [s.scope, s.label]));
+  const box = qs("apiKeyScopes");
+  if (box && !box.children.length) {
+    box.innerHTML = (cat.scopes || []).map((s) => `<label><input type="checkbox" value="${escapeHtml(s.scope)}" /> <span><b>${escapeHtml(s.label)}</b><br/><small class="muted">${s.endpoints.length} address${s.endpoints.length === 1 ? "" : "es"}</small></span></label>`).join("");
+  }
+  const keys = data.keys || [];
+  const statusPill = (k) => `<span class="pill ${k.status === "active" ? "pill-green" : "pill-gray"}">${k.status === "active" ? "Active" : k.status === "expired" ? "Expired" : "Cancelled"}</span>`;
+  qs("apiKeysList").innerHTML = keys.length
+    ? `<div class="table-wrap"><table class="gridTable"><thead><tr><th>Name</th><th>Key</th><th>Can read</th><th>Sites</th><th>Last used</th><th>Status</th><th></th></tr></thead><tbody>${keys.map((k) => `
+      <tr><td>${escapeHtml(k.name)}<br/><small class="muted">by ${escapeHtml(k.created_by || "—")}, ${escapeHtml(String(k.created_at || "").slice(0, 10))}${k.expires_on ? ` · until ${escapeHtml(k.expires_on)}` : ""}</small></td>
+      <td><code>${escapeHtml(k.key_prefix)}…</code></td>
+      <td>${k.scopes.map((s) => escapeHtml(labels[s] || s)).join(", ")}</td>
+      <td>${k.sites ? escapeHtml(k.sites.join(", ")) : "All"}</td>
+      <td>${k.last_used_at ? `${escapeHtml(String(k.last_used_at).slice(0, 16))}<br/><small class="muted">${Number(k.use_count || 0).toLocaleString()} calls</small>` : "Never"}</td>
+      <td>${statusPill(k)}</td>
+      <td>${k.status === "active" ? `<button type="button" class="btn btn-secondary btn-sm api-key-cancel" data-id="${k.id}" data-name="${escapeHtml(k.name)}">Cancel</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+    : `<p class="muted small">No API keys yet.</p>`;
+}
+
+async function createApiKeyFromForm() {
+  const scopes = Array.from(document.querySelectorAll("#apiKeyScopes input:checked")).map((c) => c.value);
+  const out = qs("apiKeyNew");
+  try {
+    const res = await fetchJson(`${API}/api/api-keys`, {
+      method: "POST",
+      body: JSON.stringify({ name: qs("apiKeyName").value, scopes, sites: qs("apiKeySites").value, expires_on: qs("apiKeyExpires").value }),
+    });
+    out.innerHTML = `<b>Copy this key now: it is shown only once.</b> Give it to the people setting up ${escapeHtml(res.row.name)}; they send it as <code>Authorization: Bearer &lt;key&gt;</code>.`
+      + `<code id="apiKeyNewValue">${escapeHtml(res.key)}</code><button type="button" class="btn btn-secondary btn-sm" id="apiKeyCopyBtn">Copy key</button>`;
+    out.classList.remove("hidden");
+    qs("apiKeyCopyBtn")?.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(res.key); qs("apiKeyCopyBtn").textContent = "Copied"; } catch { /* select by hand */ }
+    });
+    qs("apiKeyName").value = "";
+    document.querySelectorAll("#apiKeyScopes input:checked").forEach((c) => { c.checked = false; });
+    if (qs("apiKeysMsg")) qs("apiKeysMsg").textContent = "";
+    await loadApiKeys();
+  } catch (e) {
+    out.classList.add("hidden");
+    if (qs("apiKeysMsg")) qs("apiKeysMsg").textContent = `Not created: ${e.message || e}`;
+  }
+}
+
+function wireApiKeys() {
+  qs("apiKeysRefreshBtn")?.addEventListener("click", () => loadApiKeys().catch((e) => setStatus("API keys error: " + e.message)));
+  qs("apiKeyCreateBtn")?.addEventListener("click", () => createApiKeyFromForm());
+  qs("apiKeysList")?.addEventListener("click", async (ev) => {
+    const b = ev.target?.closest?.(".api-key-cancel");
+    if (!b) return;
+    if (!confirm(`Cancel the key "${b.dataset.name}"? The system using it stops getting data straight away. This cannot be undone.`)) return;
+    try {
+      await fetchJson(`${API}/api/api-keys/${b.dataset.id}/cancel`, { method: "POST", body: "{}" });
+      qs("apiKeyNew")?.classList.add("hidden");
+      await loadApiKeys();
+    } catch (e) {
+      if (qs("apiKeysMsg")) qs("apiKeysMsg").textContent = e.message || String(e);
+    }
+  });
+}
+
 function wireMsSignin() {
   qs("msSigninRefreshBtn")?.addEventListener("click", () => loadMsSignin().catch((e) => setStatus("Microsoft sign-in error: " + e.message)));
   qs("msSaveBtn")?.addEventListener("click", () => saveMsSignin());
@@ -1756,6 +1824,7 @@ function wireLicenceCard() {
 function wireAdminControls() {
   wireBackupHealth();
   wireMsSignin();
+  wireApiKeys();
   wireLicenceCard();
   wireLicenceIssuer();
   qs("loadCompanyProfileBtn")?.addEventListener("click", () =>

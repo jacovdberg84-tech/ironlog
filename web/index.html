@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=ms-8" />
+  <link rel="stylesheet" href="./styles.css?v=ms-9" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -6820,6 +6820,41 @@
           </div>
         </div>
 
+        <div class="dash-card collapsible full-width" data-collapsed="false" id="apiKeysCard" data-licence-module="api_access">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-1d4ed8);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="4.5"></circle><path d="M10.7 12.3 21 2"></path><path d="m16 7 3 3"></path><path d="m19 4 2 2"></path></svg>
+              </div>
+              <div>
+                <h3>API keys for other systems</h3>
+                <p class="muted small">Let another system (Sage, Power BI, a client portal) read IronLog. Each key is read-only, can read only what you tick, and can be cancelled at any time. <a href="api-docs.html" target="_blank" rel="noopener">API documentation</a></p>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="apiKeysRefreshBtn" class="btn btn-secondary btn-sm">Refresh</button>
+              <button class="report-card-toggle" aria-label="Toggle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+              </button>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <div id="apiKeysList"></div>
+            <div class="api-keys-new">
+              <h4>New key</h4>
+              <div class="form-row">
+                <div class="form-field"><label for="apiKeyName">Name (the system it is for)</label><input id="apiKeyName" class="w-full" maxlength="60" placeholder="e.g. Sage Evolution, Power BI" /></div>
+                <div class="form-field"><label for="apiKeySites">Sites (empty = all)</label><input id="apiKeySites" class="w-full" placeholder="e.g. main" /></div>
+                <div class="form-field"><label for="apiKeyExpires">Stops working on (optional)</label><input id="apiKeyExpires" type="date" class="w-full" /></div>
+              </div>
+              <div class="api-keys-scopes" id="apiKeyScopes"></div>
+              <div class="action-buttons" style="margin-top:8px"><button id="apiKeyCreateBtn" class="btn btn-primary btn-sm">Create key</button></div>
+              <div id="apiKeyNew" class="api-key-new hidden" role="status"></div>
+              <p id="apiKeysMsg" class="muted small" role="status"></p>
+            </div>
+          </div>
+        </div>
+
         <div class="dash-card collapsible full-width" data-collapsed="false" id="companyProfileCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
@@ -8402,7 +8437,7 @@
   <script src="./store-mobile.js?v=2"></script>
   <!-- Main app, split by feature. Order matters: files share one global scope. -->
   <script src="./app/core.js?v=101"></script>
-  <script src="./app/admin.js?v=100"></script>
+  <script src="./app/admin.js?v=101"></script>
   <script src="./app/licence-issuer.js?v=1"></script>
   <script src="./app/inspections.js?v=90"></script>
   <script src="./app/ui-helpers.js?v=89"></script>
@@ -8428,7 +8463,7 @@
   <script src="./app/daily-input.js?v=89"></script>
   <script src="./app/assets.js?v=91"></script>
   <script src="./app/developer.js?v=4"></script>
-  <script src="./app/init.js?v=97"></script>
+  <script src="./app/init.js?v=98"></script>
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=90"></script>
   <script src="./app/collab-inbox.js?v=1"></script>

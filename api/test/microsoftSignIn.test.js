@@ -134,7 +134,7 @@ test("Microsoft sign-in is a licensed module, in Professional and Enterprise", (
           INSERT INTO licence_packages (name, modules_json) VALUES ('Core', '[]'), ('Professional', '["stores"]'), ('Enterprise', '["stores","fleet"]');`);
   ensureIssuerTables(d);
   const mods = Object.fromEntries(d.prepare(`SELECT name, modules_json FROM licence_packages`).all().map((r) => [r.name, JSON.parse(r.modules_json)]));
-  assert.deepEqual(mods, { Core: [], Professional: ["stores", "microsoft_signin"], Enterprise: ["stores", "fleet", "microsoft_signin"] });
+  assert.deepEqual(mods, { Core: [], Professional: ["stores", "microsoft_signin"], Enterprise: ["stores", "fleet", "microsoft_signin", "api_access"] });
   d.prepare(`UPDATE licence_packages SET modules_json = '["stores"]' WHERE name = 'Professional'`).run();
   ensureIssuerTables(d);
   assert.deepEqual(JSON.parse(d.prepare(`SELECT modules_json FROM licence_packages WHERE name = 'Professional'`).get().modules_json), ["stores"], "taken out by the owner, it stays out");

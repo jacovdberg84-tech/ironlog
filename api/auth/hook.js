@@ -3,6 +3,7 @@ import { db } from "../db/client.js";
 export { isAuthRequired } from "./config.js";
 import { isAuthRequired, isPublicAuthRequest } from "./config.js";
 import { defaultSite, knownSitesCached, unwrapSiteList } from "../utils/sites.js";
+import { API_KEY_PREFIX, keyAllows, resolveApiKey, touchApiKey, underRateLimit } from "../utils/apiKeys.js";
 
 function resolveSession(token) {
   try {
@@ -132,6 +133,33 @@ function parseRoles(raw, fallbackRole = "operator") {
   return out.length ? out : ["operator"];
 }
 
+function apiKeyAccess(req, reply, presented, url) {
+  const key = resolveApiKey(db, presented);
+  if (!key) return reply.code(401).send({ error: "invalid, cancelled or expired API key" });
+  if (!keyAllows(key, req.method, url)) {
+    return reply.code(403).send({ error: `This API key may not use ${req.method} ${url}. Keys are read-only; see the API documentation for what each scope allows.` });
+  }
+  if (!underRateLimit(key.id)) return reply.code(429).send({ error: "Too many requests from this API key this minute. Try again in a minute." });
+  let requestedSite = String(req.headers["x-site-code"] || "").trim().toLowerCase();
+  if (requestedSite && !knownSitesCached(db).includes(requestedSite)) requestedSite = "";
+  if (Array.isArray(key.sites) && key.sites.length) {
+    const effective = requestedSite || key.sites[0];
+    if (!key.sites.includes(effective)) return reply.code(403).send({ error: "site access denied", allowed_locations: key.sites });
+    req.headers["x-site-code"] = effective;
+    req.ironlogAllowedSites = key.sites;
+  } else {
+    req.headers["x-site-code"] = requestedSite || defaultSite();
+  }
+  // Read access as a supervisor would have, limited above to the key's listed addresses.
+  req.headers["x-user-name"] = `api:${key.name}`;
+  req.headers["x-user-role"] = "supervisor";
+  req.headers["x-user-roles"] = "supervisor";
+  delete req.headers["x-user-permissions"];
+  delete req.headers["x-user-department"];
+  req.ironlogApiKey = key;
+  try { touchApiKey(db, key, url); } catch {}
+}
+
 export async function ironlogAuthHook(req, reply) {
   const url = req.url.split("?")[0];
   if (!url.startsWith("/api/")) return;
@@ -141,6 +169,10 @@ export async function ironlogAuthHook(req, reply) {
 
   const auth = String(req.headers.authorization || "");
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+
+  // Another system's API key (utils/apiKeys.js): read-only, its scopes and sites only.
+  const presentedKey = token.startsWith(API_KEY_PREFIX) ? token : String(req.headers["x-api-key"] || "").trim();
+  if (presentedKey) return apiKeyAccess(req, reply, presentedKey, url);
 
   if (token) {
     const row = resolveSession(token);
