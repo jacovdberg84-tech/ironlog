@@ -512,11 +512,111 @@ async function uploadDailyMatrixCsv(file) {
 }
 
 /* =========================
+   GO-LIVE IMPORT (one Excel workbook, checked before it is imported)
+========================= */
+
+const GO_LIVE_SHEET_NAMES = { machines: "Machines", parts: "Parts", stock: "Stock on hand", suppliers: "Suppliers", components: "Components" };
+let goLiveCheckedFile = null;
+
+function goLiveFileChanged() {
+  goLiveCheckedFile = null;
+  const btn = qs("goLiveImportBtn");
+  if (btn) btn.disabled = true;
+}
+
+function renderGoLiveReport(r, imported) {
+  const box = qs("goLiveResult");
+  if (!box) return;
+  const counts = Object.entries(GO_LIVE_SHEET_NAMES).map(([k, label]) => {
+    const c = r.summary?.[k] || { new: 0, changed: 0, same: 0 };
+    return `<tr><td>${escapeHtml(label)}</td><td class="num">${c.new}</td><td class="num">${c.changed}</td><td class="num">${c.same}</td></tr>`;
+  }).join("");
+  const problemRows = (list) => list.map((e) => `<tr><td>${escapeHtml(e.sheet || "")}</td><td class="num">${e.row || ""}</td><td>${escapeHtml(e.column || "")}</td><td>${escapeHtml(e.message)}</td></tr>`).join("");
+  const table = (list) => `<table class="table"><thead><tr><th>Sheet</th><th class="num">Row</th><th>Column</th><th>What to fix</th></tr></thead><tbody>${problemRows(list)}</tbody></table>`;
+  const errors = r.errors || [];
+  const warnings = r.warnings || [];
+  const head = imported
+    ? `<p class="message-success">Imported. ${escapeHtml(goLiveTotals(r.summary))}</p>`
+    : errors.length
+      ? `<p class="message-error">${errors.length} problem${errors.length === 1 ? "" : "s"} to fix before importing. Fix them in the workbook, save, and check again.</p>`
+      : `<p class="message-success">No problems found. ${escapeHtml(goLiveTotals(r.summary))} Press Import to load it.</p>`;
+  box.innerHTML = `${head}
+    <table class="table golive-counts"><thead><tr><th>Sheet</th><th class="num">New</th><th class="num">Changed</th><th class="num">Same</th></tr></thead><tbody>${counts}</tbody></table>
+    ${errors.length ? `<h4>Problems</h4>${table(errors)}` : ""}
+    ${warnings.length ? `<h4>Please check</h4>${table(warnings)}` : ""}`;
+}
+
+function goLiveTotals(summary = {}) {
+  const t = Object.values(summary).reduce((a, c) => ({ n: a.n + (c.new || 0), c: a.c + (c.changed || 0) }), { n: 0, c: 0 });
+  return `${t.n} new and ${t.c} changed record${t.n + t.c === 1 ? "" : "s"}.`;
+}
+
+async function checkGoLiveFile() {
+  const file = qs("goLiveFile")?.files?.[0];
+  if (!file) return alert("Choose the filled-in workbook (.xlsx) first.");
+  const fd = new FormData();
+  fd.append("file", file);
+  setStatus("Checking the go-live workbook...");
+  goLiveFileChanged();
+  try {
+    const r = await fetchJson(`${API}/api/upload/go-live/check`, { method: "POST", body: fd });
+    renderGoLiveReport(r, false);
+    if (r.ok) {
+      goLiveCheckedFile = file;
+      qs("goLiveImportBtn").disabled = false;
+    }
+    setStatus(r.ok ? "Go-live workbook checked: ready to import." : "Go-live workbook has problems to fix.");
+  } catch (e) {
+    qs("goLiveResult").innerHTML = `<p class="message-error">${escapeHtml(e.message || String(e))}</p>`;
+    setStatus("Go-live check failed.");
+  }
+}
+
+async function importGoLiveFile() {
+  if (!goLiveCheckedFile) return alert("Check the file first.");
+  if (!confirm(`Import ${goLiveCheckedFile.name} into ${getSessionSite()}?`)) return;
+  const fd = new FormData();
+  fd.append("file", goLiveCheckedFile);
+  setStatus("Importing the go-live workbook...");
+  try {
+    const r = await fetchJson(`${API}/api/upload/go-live/import`, { method: "POST", body: fd });
+    renderGoLiveReport(r, true);
+    goLiveFileChanged();
+    setStatus("Go-live import done.");
+    await loadGoLiveStatus();
+  } catch (e) {
+    qs("goLiveResult").innerHTML = `<p class="message-error">${escapeHtml(e.message || String(e))}</p>`;
+    setStatus("Go-live import failed.");
+  }
+}
+
+async function loadGoLiveStatus() {
+  const box = qs("goLiveChecklist");
+  if (!box) return;
+  try {
+    const r = await fetchJson(`${API}/api/upload/go-live/status`);
+    box.innerHTML = `<ul>${(r.steps || []).map((s) => `<li class="${s.done ? "done" : ""}"><span class="golive-tick" aria-hidden="true">${s.done ? "✓" : "○"}</span> ${escapeHtml(s.label)} <span class="muted small">(${escapeHtml(s.detail)})</span></li>`).join("")}</ul>`;
+    const hist = qs("goLiveHistory");
+    if (hist) {
+      hist.innerHTML = (r.history || []).length ? `<h4 style="margin-bottom:4px;">Imports done</h4><table class="table"><thead><tr><th>When</th><th>File</th><th>Site</th><th>By</th><th>Result</th></tr></thead><tbody>${r.history.map((h) =>
+        `<tr><td>${escapeHtml(String(h.imported_at || "").slice(0, 16))}</td><td>${escapeHtml(h.file_name || "")}</td><td>${escapeHtml(h.site_code || "")}</td><td>${escapeHtml(h.imported_by || "")}</td><td>${escapeHtml(goLiveTotals(h.summary))}</td></tr>`).join("")}</tbody></table>` : "";
+    }
+  } catch (e) {
+    box.innerHTML = `<p class="muted">${escapeHtml(e.message || String(e))}</p>`;
+  }
+}
+
+/* =========================
    REPORTS
 ========================= */
 
 /** Start-up: CSV upload and FAMS fuel import controls. Called once from init() in init.js. */
 function wireUploadControls() {
+  qs("goLiveTemplateBtn")?.addEventListener("click", () => downloadAuthedFile(`${API}/api/upload/go-live/template.xlsx`, "IronLog_GoLive.xlsx"));
+  qs("goLiveTemplateFilledBtn")?.addEventListener("click", () => downloadAuthedFile(`${API}/api/upload/go-live/template.xlsx?filled=1`, "IronLog_GoLive_current.xlsx"));
+  qs("goLiveCheckBtn")?.addEventListener("click", () => checkGoLiveFile().catch((e) => setStatus("Go-live check error: " + e.message)));
+  qs("goLiveImportBtn")?.addEventListener("click", () => importGoLiveFile().catch((e) => setStatus("Go-live import error: " + e.message)));
+  qs("goLiveFile")?.addEventListener("change", goLiveFileChanged);
   qs("doUpload")?.addEventListener("click", () =>
     doUpload().catch((e) => setStatus("Upload error: " + e.message))
   );

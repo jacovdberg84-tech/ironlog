@@ -16,6 +16,7 @@ import {
 } from "../utils/csvImporter.js";
 import { holdsAnyRole } from "../utils/request.js";
 import { ensureAssetSiteColumn, requestSite, siteSql } from "../utils/sites.js";
+import registerGoLiveRoutes from "./upload/go-live.routes.js";
 
 export default async function uploadRoutes(app) {
   ensureAssetSiteColumn(db);
@@ -23,6 +24,7 @@ export default async function uploadRoutes(app) {
   await app.register(multipart, {
     limits: { fileSize: 20 * 1024 * 1024 } // 20MB
   });
+  registerGoLiveRoutes(app);
 
   db.prepare(`
     CREATE TABLE IF NOT EXISTS store_allocations (
