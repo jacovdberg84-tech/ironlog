@@ -813,7 +813,7 @@ async function loadX3Settings() {
     const res = await fetchJson(`${API}/api/procurement/x3/site-requests/settings`);
     const s = res.settings || {};
     Object.entries(X3_SETTING_INPUTS).forEach(([id, key]) => { const el = qs(id); if (el) el.value = s[key] ?? ""; });
-    const row = (marker, f) => `<tr><td><code>${escapeHtml(marker)}</code></td><td><code>${escapeHtml(f.code)}</code></td><td>${escapeHtml(f.label)}</td><td class="muted">${escapeHtml(f.from)}</td></tr>`;
+    const row = (marker, f) => `<tr><td><code>${escapeHtml(marker)}</code></td><td><code>${escapeHtml(f.code)}</code></td><td data-no-translate>${escapeHtml(f.label)}</td><td class="muted">${escapeHtml(f.from)}</td></tr>`;
     layout.innerHTML = `<table class="table">
       <thead><tr><th>Line</th><th>X3 field</th><th>X3 screen name</th><th>Filled from</th></tr></thead>
       <tbody>${(res.header_fields || []).map((f) => row(s.header_marker || "E", f)).join("")}${(res.line_fields || []).map((f) => row(s.line_marker || "L", f)).join("")}</tbody>
