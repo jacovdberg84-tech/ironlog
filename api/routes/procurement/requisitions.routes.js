@@ -114,6 +114,8 @@ export default function registerRequisitionsRoutes(app, ctx) {
         pr.bill_to,
         pr.request_type,
         pr.site_request_no,
+        pr.x3_site_request_no,
+        pr.x3_exported_at,
         pr.requester,
         pr.notes,
         pr.estimated_value,

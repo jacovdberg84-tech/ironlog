@@ -375,6 +375,10 @@ async function loadRequisitions() {
       ? `<button data-pr-receive-full-id="${r.id}" data-pr-outstanding="${Number(r.qty_outstanding || 0)}" style="margin-top:8px;">Receive Full</button>`
       : "";
     const advanceBtn = supplyFlowAdvanceButton(r.id, s);
+    const x3Line = s === "draft" ? "" : `<br><small>Sage X3: ${r.x3_site_request_no
+      ? `<b>${escapeHtml(r.x3_site_request_no)}</b>`
+      : r.x3_exported_at ? `downloaded ${escapeHtml(String(r.x3_exported_at).slice(0, 10))}, X3 number not entered yet` : "not sent yet"}</small>`;
+    const x3Btns = s === "draft" ? "" : `<button data-pr-x3-download-id="${r.id}" style="margin-top:8px;">Download for X3</button> <button data-pr-x3-number-id="${r.id}" data-pr-x3-number="${escapeHtml(r.x3_site_request_no || "")}" style="margin-top:8px;">X3 number</button>`;
     const dupPayload = String(JSON.stringify({
       id: r.id,
       part_code: r.part_code,
@@ -395,7 +399,8 @@ async function loadRequisitions() {
           `<br><small>Requester: ${r.requester || "-"} | ${r.created_at || "-"}</small>` +
           (r.latest_approval_id ? `<br><small>Approval: #${r.latest_approval_id} (${r.latest_approval_status || "-"})</small>` : "") +
           (r.notes ? `<br><small>${r.notes}</small>` : "") +
-          `<br>${advanceBtn} ${finalizeBtn} ${postBtn} ${routeBtn} ${approveBtn} ${submitBtn} ${receiveBtn} ${receiveHalfBtn} ${receiveFullBtn} ${createPoBtn} <button data-pr-duplicate="${dupPayload}" style="margin-top:8px;">Duplicate</button> ${r.latest_approval_id ? `<button data-pr-open-approval-id="${r.latest_approval_id}" style="margin-top:8px;">Open Approval</button>` : ""}`
+          x3Line +
+          `<br>${advanceBtn} ${x3Btns} ${finalizeBtn} ${postBtn} ${routeBtn} ${approveBtn} ${submitBtn} ${receiveBtn} ${receiveHalfBtn} ${receiveFullBtn} ${createPoBtn} <button data-pr-duplicate="${dupPayload}" style="margin-top:8px;">Duplicate</button> ${r.latest_approval_id ? `<button data-pr-open-approval-id="${r.latest_approval_id}" style="margin-top:8px;">Open Approval</button>` : ""}`
       )
     );
   });
@@ -708,6 +713,8 @@ function exportProcurementJournalsXlsx() {
 
 /** Start-up: Requisition, purchase order and journal controls. Called once from init() in init.js. */
 function wireProcurementControls() {
+  qs("x3SaveBtn")?.addEventListener("click", saveX3Settings);
+  qs("x3DownloadWaitingBtn")?.addEventListener("click", () => downloadX3Waiting().catch((e) => alert(e.message || e)));
   qs("createRequisition")?.addEventListener("click", () =>
     createRequisition().catch((e) => setStatus("Requisition create error: " + e.message))
   );
@@ -789,6 +796,87 @@ function wireProcurementControls() {
 }
 
 /** Start-up: Requisition, purchase order and exception list actions. Called once from init() in init.js. */
+// Sage X3 Site Requests: settings, the import file and the X3 number typed back.
+const X3_SETTING_INPUTS = {
+  x3DeliverySite: "delivery_site", x3PurchaseSite: "purchase_site", x3RequestType: "request_type", x3SignatureChannel: "signature_channel",
+  x3RequestedBy: "requested_by", x3Buyer: "buyer", x3Customer: "customer", x3BillTo: "bill_to_customer", x3DeliveryAddress: "delivery_address",
+  x3Project: "project", x3ItemCode: "item_code", x3Unit: "unit", x3Currency: "currency", x3BillCurrency: "bill_currency",
+  x3Priority: "delivery_priority", x3SourceTsa: "source_tsa", x3OdoUnit: "odo_unit", x3RefPrefix: "reference_prefix",
+  x3HeaderMarker: "header_marker", x3LineMarker: "line_marker", x3Separator: "separator", x3DateFormat: "date_format",
+  x3UserCodes: "user_codes", x3SupplierCodes: "supplier_codes",
+};
+
+async function loadX3Settings() {
+  const layout = qs("x3Layout");
+  if (!layout) return;
+  try {
+    const res = await fetchJson(`${API}/api/procurement/x3/site-requests/settings`);
+    const s = res.settings || {};
+    Object.entries(X3_SETTING_INPUTS).forEach(([id, key]) => { const el = qs(id); if (el) el.value = s[key] ?? ""; });
+    const row = (marker, f) => `<tr><td><code>${escapeHtml(marker)}</code></td><td><code>${escapeHtml(f.code)}</code></td><td>${escapeHtml(f.label)}</td><td class="muted">${escapeHtml(f.from)}</td></tr>`;
+    layout.innerHTML = `<table class="table">
+      <thead><tr><th>Line</th><th>X3 field</th><th>X3 screen name</th><th>Filled from</th></tr></thead>
+      <tbody>${(res.header_fields || []).map((f) => row(s.header_marker || "E", f)).join("")}${(res.line_fields || []).map((f) => row(s.line_marker || "L", f)).join("")}</tbody>
+    </table>`;
+    const msg = qs("x3SettingsMsg");
+    if (msg) msg.textContent = s.updated_at ? `Last saved ${String(s.updated_at).slice(0, 16)}${s.updated_by ? ` by ${s.updated_by}` : ""}.` : "Not saved yet.";
+  } catch (e) {
+    layout.innerHTML = `<p class="muted">Could not load the X3 settings: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+async function saveX3Settings() {
+  const body = {};
+  Object.entries(X3_SETTING_INPUTS).forEach(([id, key]) => { const el = qs(id); if (el) body[key] = el.value; });
+  const msg = qs("x3SettingsMsg");
+  try {
+    await fetchJson(`${API}/api/procurement/x3/site-requests/settings`, { method: "PUT", body: JSON.stringify(body) });
+    await loadX3Settings();
+    if (msg) msg.textContent = "Saved.";
+  } catch (e) {
+    if (msg) msg.textContent = e.message;
+  }
+}
+
+async function downloadX3SiteRequests(ids) {
+  if (!ids.length) { alert("There are no requisitions waiting to go to X3."); return; }
+  const check = await fetchJson(`${API}/api/procurement/x3/site-requests/check`, { method: "POST", body: JSON.stringify({ ids }) });
+  if (!check.ok) { alert(`Not ready for X3 yet:\n\n${(check.errors || []).join("\n")}`); return; }
+  if ((check.warnings || []).length && !confirm(`Please check:\n\n${check.warnings.join("\n")}\n\nDownload anyway?`)) return;
+  const res = await fetch(`${API}/api/procurement/x3/site-requests/export`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error(d.error || `Download failed (${res.status})`);
+  }
+  const name = String(res.headers.get("content-disposition") || "").match(/filename="?([^";]+)"?/i)?.[1] || "X3_SiteRequests.csv";
+  const url = URL.createObjectURL(await res.blob());
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  setStatus(`${ids.length} requisition(s) downloaded for X3. Import the file in X3, then enter each X3 Site Request number.`);
+  await loadRequisitions();
+}
+
+function downloadX3Waiting() {
+  const ids = (procurementRowsCache || [])
+    .filter((r) => String(r.status || "").toLowerCase() !== "draft" && !r.x3_exported_at && !r.x3_site_request_no)
+    .map((r) => Number(r.id));
+  return downloadX3SiteRequests(ids);
+}
+
+async function enterX3SiteRequestNumber(id, current) {
+  const no = prompt(`X3 Site Request number for requisition ${id} (e.g. VS120-00353):`, current || "");
+  if (no === null) return;
+  await fetchJson(`${API}/api/procurement/requisitions/${id}/x3-number`, { method: "PUT", body: JSON.stringify({ x3_site_request_no: no.trim() }) });
+  await loadRequisitions();
+}
+
 function wireProcurementLists() {
   const procurementList = qs("procurementList");
   if (procurementList) {
@@ -809,6 +897,16 @@ function wireProcurementLists() {
       const outstanding = target.getAttribute("data-pr-outstanding");
       const duplicateJson = target.getAttribute("data-pr-duplicate");
       const openApprovalId = target.getAttribute("data-pr-open-approval-id");
+      const x3DownloadId = target.getAttribute("data-pr-x3-download-id");
+      const x3NumberId = target.getAttribute("data-pr-x3-number-id");
+      if (x3DownloadId) {
+        downloadX3SiteRequests([Number(x3DownloadId)]).catch((e) => alert(e.message || e));
+        return;
+      }
+      if (x3NumberId) {
+        enterX3SiteRequestNumber(Number(x3NumberId), target.getAttribute("data-pr-x3-number") || "").catch((e) => alert(e.message || e));
+        return;
+      }
       if (advanceId && advanceStatus) {
         advanceRequisitionStage(advanceId, advanceStatus).catch((e) => setStatus(`Advance failed: ${e.message || e}`));
         return;
