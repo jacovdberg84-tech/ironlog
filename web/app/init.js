@@ -200,6 +200,7 @@ function loadStartupData() {
       loadLicenceCard().catch(() => {});
       loadLicenceIssuer().catch(() => {});
       loadMsSignin().catch(() => {});
+      loadApiKeys().catch(() => {});
     }
   }
   loadCodePickers().catch(() => {});

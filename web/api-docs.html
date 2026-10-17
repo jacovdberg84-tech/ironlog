@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>IronLog API documentation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:," />
+  <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+  <link rel="stylesheet" href="./styles.css?v=ms-9" />
+</head>
+<body class="page-shell">
+  <div class="page-header">
+    <div>
+      <h2 style="margin:0;">IronLog API</h2>
+      <p class="muted small">Read-only access for other systems: ERP, Power BI, client portals. Keys are created by an IronLog administrator under Admin → API keys.</p>
+    </div>
+    <div class="page-header-actions">
+      <button type="button" onclick="location.href='index.html'">Dashboard</button>
+      <button type="button" id="apiDocsOpenApi">Download OpenAPI file</button>
+    </div>
+  </div>
+
+  <section class="panel show page-section">
+    <div class="card stack-12 api-docs">
+      <h3>How to connect</h3>
+      <ol>
+        <li>Ask an IronLog administrator for a key. It starts with <code>ilk_</code> and is shown only once.</li>
+        <li>Send it with every request: <code>Authorization: Bearer ilk_…</code> (or the header <code>X-API-Key: ilk_…</code>).</li>
+        <li>Choose the site with <code>X-Site-Code: main</code>. A key limited to some sites uses its first site when none is given.</li>
+        <li>Every answer is JSON. Money is US dollars, dates are <code>YYYY-MM-DD</code>, hours are machine hours.</li>
+      </ol>
+      <pre class="output" id="apiDocsExample"></pre>
+      <h3>Limits and errors</h3>
+      <ul>
+        <li>Keys only read (<code>GET</code>). They can never change records or reach settings, users or admin screens.</li>
+        <li><span id="apiDocsRate">300</span> requests a minute per key.</li>
+        <li><code>401</code>: no key, or the key is unknown, cancelled or past its end date. <code>403</code>: the key may not read this address, this site, or the licence does not include API access. <code>429</code>: too many requests this minute.</li>
+      </ul>
+      <h3>What a key can read</h3>
+      <p class="muted">The administrator ticks one or more of these when creating the key.</p>
+      <div id="apiDocsScopes"><p class="muted">Loading…</p></div>
+    </div>
+  </section>
+
+  <script src="./session.js?v=1"></script>
+  <script>
+    (function () {
+      const { authHeaders, escapeHtml } = window.IronlogSession;
+      const host = `${location.protocol}//${location.host}`;
+      document.getElementById("apiDocsExample").textContent =
+        `curl -H "Authorization: Bearer ilk_your_key" -H "X-Site-Code: main" \\\n  "${host}/api/maintenance/reliability?start=2026-10-01&end=2026-10-31"`;
+      fetch("/api/api-keys/catalogue", { headers: authHeaders() })
+        .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+        .then(({ ok, d }) => {
+          const box = document.getElementById("apiDocsScopes");
+          if (!ok) {
+            box.innerHTML = `<p class="message-error">${escapeHtml(d.error || "Sign in to IronLog to see the documentation.")}</p>`;
+            return;
+          }
+          document.getElementById("apiDocsRate").textContent = String(d.rate_per_minute || 300);
+          box.innerHTML = (d.scopes || []).map((s) => `
+            <div class="api-docs-scope">
+              <h4>${escapeHtml(s.label)} <code>${escapeHtml(s.scope)}</code></h4>
+              <table class="gridTable"><thead><tr><th>Address</th><th>What it returns</th></tr></thead><tbody>
+              ${s.endpoints.map((e) => `<tr><td><code>${escapeHtml(e.method)} ${escapeHtml(e.path)}</code></td><td>${escapeHtml(e.description)}</td></tr>`).join("")}
+              </tbody></table>
+            </div>`).join("");
+        })
+        .catch((e) => { document.getElementById("apiDocsScopes").innerHTML = `<p class="message-error">${escapeHtml(e.message || String(e))}</p>`; });
+      document.getElementById("apiDocsOpenApi").addEventListener("click", async () => {
+        const res = await fetch("/api/api-keys/openapi.json", { headers: authHeaders() });
+        if (!res.ok) return alert("Sign in to IronLog first.");
+        const url = URL.createObjectURL(new Blob([JSON.stringify(await res.json(), null, 2)], { type: "application/json" }));
+        const a = Object.assign(document.createElement("a"), { href: url, download: "ironlog-openapi.json" });
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      });
+    })();
+  </script>
+</body>
+</html>

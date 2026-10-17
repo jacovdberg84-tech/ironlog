@@ -65,6 +65,10 @@ export async function licenceHook(req, reply) {
   } catch {
     return; // A licence problem must never take the system down.
   }
+  // Another system's API key works only when the licence includes API access.
+  if (req.ironlogApiKey && !(state.modules || []).includes("api_access")) {
+    return reply.code(403).send({ ok: false, error: `${MODULES.api_access.label} is not included in this site's IronLog licence.`, licence: true, module: "api_access" });
+  }
   const d = licenceDecision(state, { method: req.method, urlPath });
   if (d) return reply.code(d.status).send({ ok: false, error: d.error, licence: true, module: d.module || null });
 }

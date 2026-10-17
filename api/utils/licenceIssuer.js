@@ -84,6 +84,14 @@ export function ensureIssuerTables(db) {
     }
     db.prepare(`INSERT INTO licence_catalogue_steps (step) VALUES ('microsoft_signin')`).run();
   }
+  // API access for other systems joins Enterprise once (the owner can take it out and it stays out).
+  if (!db.prepare(`SELECT 1 FROM licence_catalogue_steps WHERE step = 'api_access'`).get()) {
+    for (const p of db.prepare(`SELECT id, modules_json FROM licence_packages WHERE name = 'Enterprise'`).all()) {
+      const mods = JSON.parse(p.modules_json || "[]");
+      if (!mods.includes("api_access")) db.prepare(`UPDATE licence_packages SET modules_json = ? WHERE id = ?`).run(JSON.stringify([...mods, "api_access"]), p.id);
+    }
+    db.prepare(`INSERT INTO licence_catalogue_steps (step) VALUES ('api_access')`).run();
+  }
   if (!db.prepare(`SELECT 1 FROM licence_bands LIMIT 1`).get()) {
     const add = db.prepare(`INSERT INTO licence_bands (label, max_assets, sort) VALUES (?, ?, ?)`);
     [["Up to 50 machines", 50], ["Up to 150 machines", 150], ["Up to 300 machines", 300], ["Up to 600 machines", 600], ["Unlimited", null]]
