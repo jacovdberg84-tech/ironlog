@@ -1578,6 +1578,127 @@ function wireApiKeys() {
   });
 }
 
+/** Admin → Webhooks: messages to other systems when something happens. */
+async function loadWebhooks() {
+  const card = qs("webhooksCard");
+  if (!card || card.classList.contains("hidden")) return;
+  const data = await fetchJson(`${API}/api/webhooks`);
+  const labels = Object.fromEntries((data.events || []).map((e) => [e.event, e.label]));
+  const box = qs("webhookEvents");
+  if (box && !box.children.length) {
+    box.innerHTML = (data.events || []).map((e) => `<label><input type="checkbox" value="${escapeHtml(e.event)}" /> <span><b>${escapeHtml(e.label)}</b><br/><small class="muted">${escapeHtml(e.description)}</small></span></label>`).join("");
+  }
+  const hooks = data.webhooks || [];
+  const state = (h) => !h.active ? `<span class="pill pill-gray">Paused</span>`
+    : h.failures_in_row > 0 ? `<span class="pill pill-red">Failing (${h.failures_in_row})</span>`
+      : `<span class="pill pill-green">On</span>`;
+  qs("webhooksList").innerHTML = hooks.length
+    ? `<div class="table-wrap"><table class="gridTable"><thead><tr><th>Name</th><th>Address</th><th>Sends</th><th>Sites</th><th>Last sent</th><th>Status</th><th></th></tr></thead><tbody>${hooks.map((h) => `
+      <tr><td>${escapeHtml(h.name)}<br/><small class="muted">by ${escapeHtml(h.created_by || "—")}, ${escapeHtml(String(h.created_at || "").slice(0, 10))} · secret <code>${escapeHtml(h.secret_prefix)}…</code></small></td>
+      <td class="webhook-url">${escapeHtml(h.url)}</td>
+      <td>${h.events.map((e) => escapeHtml(labels[e] || e)).join(", ")}</td>
+      <td>${h.sites ? escapeHtml(h.sites.join(", ")) : "All"}</td>
+      <td>${h.last_success_at ? escapeHtml(String(h.last_success_at).slice(0, 16)) : "Never"}${h.last_failure_at ? `<br/><small class="muted">last failure ${escapeHtml(String(h.last_failure_at).slice(0, 16))}</small>` : ""}</td>
+      <td>${state(h)}</td>
+      <td class="webhook-actions">
+        <button type="button" class="btn btn-secondary btn-sm" data-wh-act="test" data-id="${h.id}">Send test</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-wh-act="log" data-id="${h.id}" data-name="${escapeHtml(h.name)}">Messages</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-wh-act="${h.active ? "pause" : "resume"}" data-id="${h.id}">${h.active ? "Pause" : "Resume"}</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-wh-act="secret" data-id="${h.id}" data-name="${escapeHtml(h.name)}">New secret</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-wh-act="delete" data-id="${h.id}" data-name="${escapeHtml(h.name)}">Delete</button>
+      </td></tr>`).join("")}</tbody></table></div>`
+    : `<p class="muted small">No webhooks yet.</p>`;
+}
+
+function showWebhookSecret(name, secret, intro) {
+  const out = qs("webhookNew");
+  out.innerHTML = `<b>Copy this secret now: it is shown only once.</b> ${escapeHtml(intro)} The people setting up ${escapeHtml(name)} use it to check each message is really from IronLog.`
+    + `<code id="webhookSecretValue">${escapeHtml(secret)}</code><button type="button" class="btn btn-secondary btn-sm" id="webhookCopyBtn">Copy secret</button>`;
+  out.classList.remove("hidden");
+  qs("webhookCopyBtn")?.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(secret); qs("webhookCopyBtn").textContent = "Copied"; } catch { /* select by hand */ }
+  });
+}
+
+async function createWebhookFromForm() {
+  const events = Array.from(document.querySelectorAll("#webhookEvents input:checked")).map((c) => c.value);
+  try {
+    const res = await fetchJson(`${API}/api/webhooks`, {
+      method: "POST",
+      body: JSON.stringify({ name: qs("webhookName").value, url: qs("webhookUrl").value, sites: qs("webhookSites").value, events }),
+    });
+    showWebhookSecret(res.webhook.name, res.secret, "Webhook added.");
+    qs("webhookName").value = "";
+    qs("webhookUrl").value = "";
+    document.querySelectorAll("#webhookEvents input:checked").forEach((c) => { c.checked = false; });
+    if (qs("webhooksMsg")) qs("webhooksMsg").textContent = "Press Send test to check the other system receives it.";
+    await loadWebhooks();
+  } catch (e) {
+    qs("webhookNew")?.classList.add("hidden");
+    if (qs("webhooksMsg")) qs("webhooksMsg").textContent = `Not added: ${e.message || e}`;
+  }
+}
+
+async function showWebhookDeliveries(id, name) {
+  const box = qs("webhookDeliveries");
+  const data = await fetchJson(`${API}/api/webhooks/${id}/deliveries`);
+  const rows = data.deliveries || [];
+  const stateOf = (d) => d.status === "delivered" ? `<span class="pill pill-green">Delivered</span>`
+    : d.status === "failed" ? `<span class="pill pill-red">Failed</span>` : `<span class="pill pill-gray">Waiting (try ${d.attempts + 1})</span>`;
+  box.innerHTML = `<h4>Messages to ${escapeHtml(name)}</h4>` + (rows.length
+    ? `<div class="table-wrap"><table class="gridTable"><thead><tr><th>When</th><th>Event</th><th>Record</th><th>Status</th><th>Answer</th><th></th></tr></thead><tbody>${rows.map((d) => `
+      <tr><td>${escapeHtml(String(d.created_at || "").slice(0, 16))}</td><td><code>${escapeHtml(d.event)}</code></td><td>${escapeHtml(d.record_key || "")}</td><td>${stateOf(d)}</td>
+      <td>${d.last_error ? escapeHtml(d.last_error) : d.last_status_code ? escapeHtml(String(d.last_status_code)) : ""}${d.status === "pending" && d.attempts ? `<br/><small class="muted">next try ${escapeHtml(String(d.next_attempt_at).slice(0, 16))}</small>` : ""}</td>
+      <td>${d.status !== "delivered" ? `<button type="button" class="btn btn-secondary btn-sm" data-wh-act="retry" data-id="${id}" data-did="${d.id}" data-name="${escapeHtml(name)}">Send again</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+    : `<p class="muted small">No messages yet.</p>`);
+  box.classList.remove("hidden");
+}
+
+async function webhookAction(b) {
+  const id = b.dataset.id;
+  const name = b.dataset.name || "";
+  const msg = (t) => { if (qs("webhooksMsg")) qs("webhooksMsg").textContent = t; };
+  const act = b.dataset.whAct;
+  if (act === "test") {
+    b.disabled = true;
+    try {
+      const r = await fetchJson(`${API}/api/webhooks/${id}/test`, { method: "POST", body: "{}" });
+      msg(r.ok ? `Test delivered (the system answered ${r.status_code}).` : `Test not delivered: ${r.error || r.status}`);
+    } finally { b.disabled = false; }
+  } else if (act === "log") {
+    await showWebhookDeliveries(id, name);
+    return;
+  } else if (act === "retry") {
+    await fetchJson(`${API}/api/webhooks/${id}/deliveries/${b.dataset.did}/retry`, { method: "POST", body: "{}" });
+    await showWebhookDeliveries(id, name);
+  } else if (act === "pause" || act === "resume") {
+    await fetchJson(`${API}/api/webhooks/${id}`, { method: "PATCH", body: JSON.stringify({ active: act === "resume" }) });
+    msg(act === "pause" ? "Paused: nothing is sent until you resume it." : "Resumed.");
+  } else if (act === "secret") {
+    if (!confirm(`Make a new secret for "${name}"? The old one stops working straight away, so the other system must be given the new one.`)) return;
+    const r = await fetchJson(`${API}/api/webhooks/${id}/secret`, { method: "POST", body: "{}" });
+    showWebhookSecret(name, r.secret, "New secret made.");
+  } else if (act === "delete") {
+    if (!confirm(`Delete the webhook "${name}"? It stops at once and its message history is removed.`)) return;
+    await fetchJson(`${API}/api/webhooks/${id}`, { method: "DELETE" });
+    qs("webhookDeliveries")?.classList.add("hidden");
+    msg("Deleted.");
+  }
+  await loadWebhooks();
+}
+
+function wireWebhooks() {
+  qs("webhooksRefreshBtn")?.addEventListener("click", () => loadWebhooks().catch((e) => setStatus("Webhooks error: " + e.message)));
+  qs("webhookCreateBtn")?.addEventListener("click", () => createWebhookFromForm());
+  for (const id of ["webhooksList", "webhookDeliveries"]) {
+    qs(id)?.addEventListener("click", (ev) => {
+      const b = ev.target?.closest?.("[data-wh-act]");
+      if (!b) return;
+      webhookAction(b).catch((e) => { if (qs("webhooksMsg")) qs("webhooksMsg").textContent = e.message || String(e); });
+    });
+  }
+}
+
 function wireMsSignin() {
   qs("msSigninRefreshBtn")?.addEventListener("click", () => loadMsSignin().catch((e) => setStatus("Microsoft sign-in error: " + e.message)));
   qs("msSaveBtn")?.addEventListener("click", () => saveMsSignin());
@@ -1825,6 +1946,7 @@ function wireAdminControls() {
   wireBackupHealth();
   wireMsSignin();
   wireApiKeys();
+  wireWebhooks();
   wireLicenceCard();
   wireLicenceIssuer();
   qs("loadCompanyProfileBtn")?.addEventListener("click", () =>

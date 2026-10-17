@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=ms-12" />
+  <link rel="stylesheet" href="./styles.css?v=ms-13" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -6940,6 +6940,42 @@
           </div>
         </div>
 
+        <div class="dash-card collapsible full-width" data-collapsed="false" id="webhooksCard" data-licence-module="api_access">
+          <div class="dash-card-header">
+            <div class="dash-card-title">
+              <div class="dash-card-icon" style="background: var(--bg-eff6ff); color: var(--tx-1d4ed8);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2"></path><path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 1 1 6.89-4.06"></path><path d="m12 6 3.13 5.73C15.66 12.7 16.9 13 18 13a4 4 0 0 1 0 8"></path></svg>
+              </div>
+              <div>
+                <h3>Webhooks: tell other systems straight away</h3>
+                <p class="muted small">IronLog sends a short signed message to another system when something happens, e.g. a breakdown is logged or a work order is completed. Messages that fail are tried again. <a href="api-docs.html#webhooks" target="_blank" rel="noopener">How to receive them</a></p>
+              </div>
+            </div>
+            <div class="action-buttons">
+              <button id="webhooksRefreshBtn" class="btn btn-secondary btn-sm">Refresh</button>
+              <button class="report-card-toggle" aria-label="Toggle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+              </button>
+            </div>
+          </div>
+          <div class="report-card-body">
+            <div id="webhooksList"></div>
+            <div id="webhookDeliveries" class="hidden"></div>
+            <div class="api-keys-new">
+              <h4>New webhook</h4>
+              <div class="form-row">
+                <div class="form-field"><label for="webhookName">Name (the system it goes to)</label><input id="webhookName" class="w-full" maxlength="60" placeholder="e.g. Sage X3, Power Automate" /></div>
+                <div class="form-field"><label for="webhookUrl">Address (https://…)</label><input id="webhookUrl" class="w-full" maxlength="500" placeholder="https://erp.example.com/ironlog-events" /></div>
+                <div class="form-field"><label for="webhookSites">Sites (empty = all)</label><input id="webhookSites" class="w-full" placeholder="e.g. main" /></div>
+              </div>
+              <div class="api-keys-scopes" id="webhookEvents"></div>
+              <div class="action-buttons" style="margin-top:8px"><button id="webhookCreateBtn" class="btn btn-primary btn-sm">Add webhook</button></div>
+              <div id="webhookNew" class="api-key-new hidden" role="status"></div>
+              <p id="webhooksMsg" class="muted small" role="status"></p>
+            </div>
+          </div>
+        </div>
+
         <div class="dash-card collapsible full-width" data-collapsed="false" id="companyProfileCard">
           <div class="dash-card-header">
             <div class="dash-card-title">
@@ -8564,7 +8600,7 @@
   <script src="./store-mobile.js?v=2"></script>
   <!-- Main app, split by feature. Order matters: files share one global scope. -->
   <script src="./app/core.js?v=101"></script>
-  <script src="./app/admin.js?v=101"></script>
+  <script src="./app/admin.js?v=102"></script>
   <script src="./app/licence-issuer.js?v=1"></script>
   <script src="./app/inspections.js?v=90"></script>
   <script src="./app/ui-helpers.js?v=89"></script>
@@ -8590,7 +8626,7 @@
   <script src="./app/daily-input.js?v=89"></script>
   <script src="./app/assets.js?v=91"></script>
   <script src="./app/developer.js?v=4"></script>
-  <script src="./app/init.js?v=98"></script>
+  <script src="./app/init.js?v=99"></script>
   <script src="./app/documents.js?v=89"></script>
   <script src="./app/tasks.js?v=90"></script>
   <script src="./app/collab-inbox.js?v=1"></script>
