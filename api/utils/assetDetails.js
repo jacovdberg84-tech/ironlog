@@ -1,10 +1,12 @@
-// IRONLOG/api/utils/assetDetails.js — what a machine is: make, model, serial number, year, purchase and warranty.
+// IRONLOG/api/utils/assetDetails.js — what a machine is: area, make, model, serial number, year, purchase and warranty.
 //
-// These feed reliability reports by model (asset structure part 4) and the
+// The area (pit, plant, workshop…) sits between the site and the machine. These
+// feed reliability reports by area and model (asset structure part 4) and the
 // repair-or-replace answers later. All are optional; a blank clears the value.
 // Money is US dollars; dates are YYYY-MM-DD.
 
 export const ASSET_DETAIL_FIELDS = {
+  area: { label: "Area", type: "text", max: 40 },
   make: { label: "Make", type: "text", max: 60 },
   model: { label: "Model", type: "text", max: 60 },
   serial_number: { label: "Serial number", type: "text", max: 60 },

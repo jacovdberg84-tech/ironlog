@@ -13,6 +13,7 @@ import { resolveNextServiceForAssetPlans, classifyServiceDue } from "../utils/se
 import registerRegisterRoutes from "./assets/register.routes.js";
 import registerQrProfilesRoutes from "./assets/qr-profiles.routes.js";
 import registerHistoryRoutes from "./assets/history.routes.js";
+import registerComponentRoutes from "./assets/components.routes.js";
 import { ensureAssetSiteColumn } from "../utils/sites.js";
 import { ensureAssetDetailColumns } from "../utils/assetDetails.js";
 
@@ -581,4 +582,5 @@ export default async function assetRoutes(app) {
   registerRegisterRoutes(app, ctx);
   registerQrProfilesRoutes(app, ctx);
   registerHistoryRoutes(app, ctx);
+  registerComponentRoutes(app, ctx);
 }
