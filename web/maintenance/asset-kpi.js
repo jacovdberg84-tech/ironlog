@@ -673,6 +673,46 @@ async function loadReliabilityAssets() {
   }
 }
 
+let relLastData = null;
+const relFmtPct = (v) => (v == null || !Number.isFinite(Number(v)) ? "—" : `${Number(v).toFixed(1)}%`);
+const relFmtMoney = (v) => (v == null || !Number.isFinite(Number(v)) ? "—" : `$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+
+/** The table under the summary: one row per machine, or per model, area, class or failed component. */
+function renderReliabilityTable() {
+  const head = document.getElementById("relAssetHead");
+  const body = document.getElementById("relAssetBody");
+  if (!head || !body) return;
+  const data = relLastData || {};
+  const by = String(document.getElementById("relGroupBy")?.value || "machine");
+  const num = (v) => `<td style="text-align:right;">${v}</td>`;
+  const th = (labels) => `<tr>${labels.map((l, i) => `<th${i >= labels.length - 7 && l ? ' style="text-align:right;"' : ""}>${esc(l)}</th>`).join("")}</tr>`;
+  if (by === "machine") {
+    head.innerHTML = th(["Asset", "Name", "Category", "Failures", "Operating h", "Downtime h", "MTBF h", "LTTR h", "Availability", "Cost per op. h"]);
+    const rows = Array.isArray(data.by_asset) ? data.by_asset : [];
+    body.innerHTML = rows.length
+      ? rows.map((r) => `<tr><td>${esc(r.asset_code || "")}</td><td>${esc(r.asset_name || "")}</td><td>${esc(r.category || "")}</td>`
+        + num(Number(r.failure_count || 0)) + num(relFmtHours(r.operating_hours)) + num(relFmtHours(r.downtime_hours))
+        + num(relFmtHours(r.mtbf_hours)) + num(relFmtHours(r.lttr_hours)) + num(relFmtPct(r.availability_pct)) + num(relFmtMoney(r.cost_per_hour)) + `</tr>`).join("")
+      : `<tr><td colspan="10" class="muted">${relLastData ? "No assets in scope for this filter." : "Load the report first."}</td></tr>`;
+    return;
+  }
+  if (by === "component") {
+    head.innerHTML = `<tr><th>Failed component</th><th style="text-align:right;">Failures</th><th style="text-align:right;">Downtime h</th><th style="text-align:right;">MTBF h (all machines)</th><th style="text-align:right;">LTTR h</th></tr>`;
+    const rows = data.groups?.component || [];
+    body.innerHTML = rows.length
+      ? rows.map((r) => `<tr><td>${esc(r.label)}</td>` + num(Number(r.failure_count || 0)) + num(relFmtHours(r.downtime_hours)) + num(relFmtHours(r.mtbf_hours)) + num(relFmtHours(r.lttr_hours)) + `</tr>`).join("")
+      : `<tr><td colspan="5" class="muted">No failures in this period.</td></tr>`;
+    return;
+  }
+  const label = { model: "Make and model", area: "Area", category: "Class" }[by] || "Group";
+  head.innerHTML = th([label, "Machines", "Failures", "Operating h", "Downtime h", "MTBF h", "LTTR h", "Availability", "Cost per op. h"]);
+  const rows = data.groups?.[by] || [];
+  body.innerHTML = rows.length
+    ? rows.map((r) => `<tr><td>${esc(r.key)}</td>` + num(Number(r.asset_count || 0)) + num(Number(r.failure_count || 0)) + num(relFmtHours(r.operating_hours))
+      + num(relFmtHours(r.downtime_hours)) + num(relFmtHours(r.mtbf_hours)) + num(relFmtHours(r.lttr_hours)) + num(relFmtPct(r.availability_pct)) + num(relFmtMoney(r.cost_per_hour)) + `</tr>`).join("")
+    : `<tr><td colspan="9" class="muted">${relLastData ? "No machines in scope for this filter." : "Load the report first."}</td></tr>`;
+}
+
 function renderReliabilityReport(data) {
   const summaryEl = document.getElementById("relSummary");
   const body = document.getElementById("relAssetBody");
@@ -708,27 +748,22 @@ function renderReliabilityReport(data) {
       <div class="kpi-card kpi-run">
         <div class="kpi-card-header"><div class="kpi-icon">L</div><div class="kpi-title">LTTR</div></div>
         <div class="kpi-big-value">${relFmtHours(s.lttr_hours)}</div>
-        <div class="kpi-meta">Lost time to repair (h)</div>
+        <div class="kpi-meta">Lost time to repair (h), also called MTTR</div>
+      </div>
+      <div class="kpi-card kpi-avail">
+        <div class="kpi-card-header"><div class="kpi-icon">A</div><div class="kpi-title">Availability</div></div>
+        <div class="kpi-big-value">${relFmtPct(s.availability_pct)}</div>
+        <div class="kpi-meta">Available ÷ scheduled hours (Asset KPI basis)</div>
+      </div>
+      <div class="kpi-card kpi-scheduled">
+        <div class="kpi-card-header"><div class="kpi-icon">$</div><div class="kpi-title">Cost per operating hour</div></div>
+        <div class="kpi-big-value">${relFmtMoney(s.cost_per_hour)}</div>
+        <div class="kpi-meta">Maintenance cost ${relFmtMoney(s.maintenance_cost)} (labour, parts, lube) ÷ operating hours</div>
       </div>
     `;
   }
-  if (body) {
-    const rows = Array.isArray(data?.by_asset) ? data.by_asset : [];
-    body.innerHTML = rows.length
-    ? rows.map((r) => `
-      <tr>
-        <td>${esc(r.asset_code || "")}</td>
-        <td>${esc(r.asset_name || "")}</td>
-        <td>${esc(r.category || "")}</td>
-        <td style="text-align:right;">${Number(r.failure_count || 0)}</td>
-        <td style="text-align:right;">${relFmtHours(r.operating_hours)}</td>
-        <td style="text-align:right;">${relFmtHours(r.downtime_hours)}</td>
-        <td style="text-align:right;">${relFmtHours(r.mtbf_hours)}</td>
-        <td style="text-align:right;">${relFmtHours(r.lttr_hours)}</td>
-      </tr>
-    `).join("")
-      : `<tr><td colspan="8" class="muted">No assets in scope for this filter.</td></tr>`;
-  }
+  relLastData = data;
+  renderReliabilityTable();
 
   if (incBody) {
     const incidents = Array.isArray(data?.incidents) ? data.incidents : [];
@@ -774,7 +809,7 @@ async function loadReliabilityMetrics() {
     msg.className = "muted";
     msg.textContent = "Loading MTBF / LTTR…";
   }
-  if (body) body.innerHTML = `<tr><td colspan="8" class="muted">Loading…</td></tr>`;
+  if (body) body.innerHTML = `<tr><td colspan="10" class="muted">Loading…</td></tr>`;
   const incBody = document.getElementById("relIncidentBody");
   if (incBody) incBody.innerHTML = `<tr><td colspan="9" class="muted">Loading…</td></tr>`;
   const q = new URLSearchParams();
@@ -804,7 +839,7 @@ async function loadReliabilityMetrics() {
       msg.className = "message-error";
       msg.textContent = `Error: ${e.message || e}`;
     }
-    if (body) body.innerHTML = `<tr><td colspan="8" class="message-error">${esc(e.message || String(e))}</td></tr>`;
+    if (body) body.innerHTML = `<tr><td colspan="10" class="message-error">${esc(e.message || String(e))}</td></tr>`;
   }
 }
 
