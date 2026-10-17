@@ -6,17 +6,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="data:," />
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=ms-13" />
+  <link rel="stylesheet" href="./styles.css?v=ms-14" />
 </head>
 <body class="page-shell">
   <div class="page-header">
     <div>
       <h2 style="margin:0;">Work Orders</h2>
       <p class="muted small wo-page-subtitle">Assign, repair and close workshop jobs from one focused queue.</p>
-    </div>
-    <div class="page-header-actions">
-      <button onclick="location.href='index.html'">Dashboard</button>
-      <button onclick="location.href='maintenance.html'">Maintenance</button>
     </div>
   </div>
 
@@ -259,6 +255,8 @@
   </div>
 
   <script src="./session.js?v=1"></script>
+  <script src="./app-nav.js?v=1"></script>
+  <script>IronlogNav.mountPage({ active: "workorders", subtitle: "Work Orders" });</script>
   <script src="./workorders.js?v=24"></script>
 </body>
 </html>

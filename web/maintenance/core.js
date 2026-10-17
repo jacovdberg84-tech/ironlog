@@ -38,8 +38,8 @@ function initMaintSidebar() {
     overlay.classList.remove("active");
   });
   
-  // Navigation item clicks
-  sidebar.querySelectorAll(".nav-item").forEach((item) => {
+  // This page's own section links (the shared IronLog menu above them are ordinary links).
+  sidebar.querySelectorAll(".nav-item[data-section]").forEach((item) => {
     item.addEventListener("click", (e) => {
       e.preventDefault();
       const section = item.dataset.section;

@@ -67,3 +67,7 @@ The main IronLog screen (`web/index.html`) used to load one 22,000-line `web/app
 | `rsg-profiles.js` | RSG service kit profiles | 274 |
 | `care-maintenance.js` | Care & maintenance plans: per-machine work, parts, hours and cost against the estimate | 386 |
 | `init.js` | Dark mode and page start-up wiring | 886 |
+
+## The menu
+
+`web/app-nav.js` holds the one IronLog menu (sections, items, icons) and the rules for which screens each role sees (`roleTabs`, `effectiveTabs`). The main screen fills its sidebar from it (`data-ironlog-nav="tabs"`). Work Orders, Breakdowns and the API documentation call `IronlogNav.mountPage(...)`, which adds the top bar and the same menu. Maintenance calls `IronlogNav.mountIntoSidebar(...)`, which puts its own sections under Workshop → Maintenance. To add or rename a screen, change `NAV_SECTIONS` once. `api/test/appNav.test.js` checks that every item opens something real and that every desk page uses the shared menu. Phone forms and shared terminals keep their own simple screens.
