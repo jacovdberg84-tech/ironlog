@@ -70,8 +70,108 @@ function renderMyWorkCard({ key, title, count, meta, items, empty, action, tone 
     </article>`;
 }
 
+// The most common jobs, one click from home; each shows only when the person can open it.
+const MY_WORK_QUICK = [
+  { label: "Log a breakdown", target: "breakdown-ops.html", tab: "maintenance" },
+  { label: "My jobs (technician portal)", target: "technician-terminal.html", roles: ["artisan", "workshop_admin", "plant_manager", "supervisor"] },
+  { label: "Work orders", target: "workorders.html", tab: "maintenance" },
+  { label: "Daily hours", target: "daily", tab: "daily" },
+  { label: "Record fuel", target: "fuel", tab: "fuel" },
+  { label: "Issue or receive parts", target: "stock", tab: "stock" },
+  { label: "Purchasing", target: "procurement", tab: "procurement" },
+  { label: "Approvals", target: "approvals", tab: "approvals" },
+  { label: "Reports", target: "reports", tab: "reports" },
+];
+
+function renderMyWorkQuick() {
+  const box = qs("myWorkQuick");
+  if (!box) return;
+  const roles = getSessionRoles();
+  const shown = MY_WORK_QUICK.filter((q) => (q.roles ? roles.some((r) => q.roles.includes(r)) || roles.includes("admin") : myWorkAllowed(q.tab)));
+  box.innerHTML = shown.map((q) => `<button type="button" class="mywork-quick-btn" data-mywork-go="${escapeHtml(q.target)}">${escapeHtml(q.label)}</button>`).join("");
+}
+
+function myWorkMoney(n) {
+  return `$${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
+/** The manager's strip: availability, machines down, work order cost this month, approvals waiting. */
+function renderMyWorkFigures(sections) {
+  const box = qs("myWorkFigures");
+  if (!box) return;
+  const f = sections.figures;
+  if (!f) { box.hidden = true; return; }
+  const month = new Date(`${f.month}-01T00:00:00`).toLocaleDateString(undefined, { month: "long" });
+  const tile = (value, label, tone, target) => `<button type="button" class="mywork-figure tone-${tone}" ${target ? `data-mywork-go="${escapeHtml(target)}"` : "disabled"}><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></button>`;
+  const avail = f.availability_pct == null ? "—" : `${f.availability_pct}%`;
+  const availTone = f.availability_pct == null ? "neutral" : f.availability_pct >= 85 ? "good" : f.availability_pct >= 75 ? "warn" : "danger";
+  const approvals = sections.approvals ? sections.approvals.count : null;
+  box.innerHTML = [
+    tile(avail, "Availability, last 7 days", availTone, myWorkAllowed("dash") ? "dash" : ""),
+    tile(String(f.machines_down), f.machines_down === 1 ? "Machine down now" : "Machines down now", f.machines_down ? "danger" : "good", myWorkAllowed("maintenance") ? "breakdown-ops.html" : ""),
+    tile(f.work_order_cost_usd == null ? "—" : myWorkMoney(f.work_order_cost_usd), `Work order parts and labour, ${month}`, "neutral", myWorkAllowed("finance") ? "finance" : ""),
+    approvals == null ? "" : tile(String(approvals), "Waiting for your approval", approvals ? "warn" : "good", ""),
+  ].join("");
+  box.hidden = false;
+}
+
 function myWorkCards(sections, due) {
   const cards = [];
+  const mj = sections.my_jobs;
+  if (mj) {
+    cards.push({
+      key: "myjobs",
+      title: "My jobs",
+      count: mj.count,
+      tone: mj.urgent ? "danger" : "info",
+      meta: mj.urgent ? `${mj.urgent} urgent` : "",
+      empty: "No open jobs assigned to you.",
+      items: mj.items.map((x) => ({
+        primary: `WO ${x.id} — ${x.asset_code}`,
+        secondary: [x.line, x.role === "helper" ? "Helping" : ""].filter(Boolean).join(" · "),
+        badge: x.critical ? myWorkPill("Machine down", "danger") : myWorkPill(String(x.status || "open").replace(/_/g, " "), "neutral"),
+      })),
+      action: { label: "Open technician portal", target: "technician-terminal.html" },
+    });
+  }
+  const ap = sections.approvals;
+  if (ap) {
+    const bits = [];
+    if (ap.work_orders) bits.push(`${ap.work_orders} work order${ap.work_orders === 1 ? "" : "s"} to approve`);
+    if (ap.requests) bits.push(`${ap.requests} request${ap.requests === 1 ? "" : "s"}`);
+    cards.push({
+      key: "approvals",
+      title: "Waiting for your approval",
+      count: ap.count,
+      tone: "warn",
+      meta: bits.join(" · "),
+      empty: "Nothing is waiting for your approval.",
+      items: ap.items.map((x) => ({
+        primary: x.what,
+        secondary: [x.by && `By ${x.by}`, myWorkDate(x.since) && `Since ${myWorkDate(x.since)}`].filter(Boolean).join(" · "),
+      })),
+      action: ap.work_orders && !ap.requests
+        ? { label: "Open work orders", target: "workorders.html" }
+        : myWorkAllowed("approvals") ? { label: "Open approvals", target: "approvals" } : { label: "Open work orders", target: "workorders.html" },
+    });
+  }
+  const tm = sections.team;
+  if (tm) {
+    cards.push({
+      key: "team",
+      title: "Technicians on shift",
+      count: tm.count,
+      tone: "info",
+      meta: tm.count ? `${tm.free} free for a job` : "",
+      empty: "Nobody has started a shift in the technician portal yet.",
+      items: tm.items.map((x) => ({
+        primary: x.name,
+        secondary: x.busy_on ? `Working on ${x.busy_on}` : `${x.jobs} job${x.jobs === 1 ? "" : "s"} assigned, none started`,
+        badge: x.busy_on ? myWorkPill("Busy", "neutral") : myWorkPill("Free", "success"),
+      })),
+      action: myWorkAllowed("maintenance") ? { label: "Assign work orders", target: "workorders.html" } : null,
+    });
+  }
   const t = sections.tasks;
   if (t) {
     const bits = [];
@@ -239,9 +339,11 @@ async function loadMyWork() {
     if (sections.tasks) sections.tasks.today = work.today;
     const due = dueRes && Array.isArray(dueRes.due) ? dueRes.due : null;
     const cards = myWorkCards(sections, due);
+    renderMyWorkQuick();
+    renderMyWorkFigures(sections);
     grid.innerHTML = cards.map(renderMyWorkCard).join("");
     loadCostingGapsCard(grid).catch(() => {});
-    const open = cards.reduce((n, c) => n + (c.key === "services" || c.key === "partsorders" ? 0 : c.count), 0);
+    const open = cards.reduce((n, c) => n + (["services", "partsorders", "team"].includes(c.key) ? 0 : c.count), 0);
     if (subtitle) {
       const today = new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
       subtitle.textContent = open ? `${today} · ${open} item${open === 1 ? "" : "s"} to follow up` : `${today} · You're all caught up`;
@@ -275,6 +377,12 @@ async function loadMyWork() {
     e.preventDefault();
     openMyTasks(Number(task.dataset.myworkTask));
   });
+  for (const id of ["myWorkQuick", "myWorkFigures"]) {
+    qs(id)?.addEventListener("click", (e) => {
+      const go = e.target.closest("[data-mywork-go]");
+      if (go) myWorkGo(go.dataset.myworkGo);
+    });
+  }
   qs("myWorkRefresh")?.addEventListener("click", () => loadMyWork());
 })();
 
