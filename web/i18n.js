@@ -32,11 +32,13 @@
         // {n}, {h}, {a} and {b} are numbers; other names take any words.
         const parts = en.split(/\{\w+\}/).map(escapeRe);
         const re = new RegExp(`^${parts.map((p, i) => (i ? (NUMERIC.has(names[i - 1]) ? "([\\d.,]+)" : "(.+?)") : "") + p).join("")}$`);
-        patterns[lang].push({ re, names, tr });
+        patterns[lang].push({ re, names, tr, fixed: en.replace(/\{\w+\}/g, "").length });
       } else {
         dicts[lang].set(norm(en), tr);
       }
     }
+    // The pattern with the most fixed words wins ("Due @ {h}h" before "Due {d}").
+    patterns[lang].sort((a, b) => b.fixed - a.fixed);
   }
 
   function lang() {

@@ -27,6 +27,8 @@ test("phrases, patterns and what is left alone", () => {
   // Costing gaps come from the server with machine and part codes inside; the codes stay.
   assert.equal(pt("WO #12 (DT03) has no labour hours"), "OT #12 (DT03) não tem horas de mão de obra");
   assert.equal(pt("2 parts at $0"), "2 peças a $0");
+  assert.equal(pt("Due @ 500.0h"), "Vence às 500.0h", "the more specific pattern wins");
+  assert.equal(pt("Due 2026-10-20"), "Prazo 2026-10-20");
 });
 
 test("the menu and the desk screens have Portuguese for every phrase", () => {
