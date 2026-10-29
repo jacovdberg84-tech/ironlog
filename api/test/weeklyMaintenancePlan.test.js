@@ -37,7 +37,7 @@ test('browser code parses as the classic script actually used by index.html',()=
 });
 test('weekly planner UI uses authenticated fetch helper and restores button on failure',async()=>{
  const source=readWebAppSource();
- const helper=source.slice(source.indexOf('async function planIronmindWeek()'),source.indexOf('async function askIronmindQuestion()'));
+ const helper=source.slice(source.indexOf('async function planIronmindWeek()'),source.indexOf('async function askIronmindQuestion('));
  const button={},out={style:{}};
  const context=vm.createContext({qs:id=>id==='ironmindWeeklyPlanBtn'?button:out,API:'',setStatus:()=>{},fetchJson:async url=>{assert.equal(url,'/api/maintenance/weekly-plan');return {ok:true,short_answer:'<part> draft'};}});
  vm.runInContext(helper,context);await context.planIronmindWeek();

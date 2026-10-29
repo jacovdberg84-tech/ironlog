@@ -5,8 +5,10 @@ import { buildPdfBuffer, pdfBodyTop, sectionTitle, table } from "../../utils/pdf
 import { buildWeeklyMaintenancePlan } from "../../utils/weeklyMaintenancePlan.js";
 import { db } from "../../db/client.js";
 import { getPdfReportBranding } from "../../utils/reportSettings.js";
-import { isDate } from "../../utils/request.js";
+import { getSiteCode, isDate, requireAnyRole } from "../../utils/request.js";
 import { andSite } from "../../utils/sites.js";
+import { OPEN_WORK_QUEUE_ROLES, buildOpenWorkQueue, describeOpenWorkQueue } from "../../utils/openWorkQueue.js";
+import { siteDay } from "../../utils/siteTime.js";
 
 export default function registerWeeklyRoutes(app, ctx) {
   const {
@@ -27,6 +29,19 @@ export default function registerWeeklyRoutes(app, ctx) {
     wiEnsureBodySpace,
     wiFormatMinutesPdf,
   } = ctx;
+
+  // Read-only open work-order queue with parts availability, for Borris'
+  // priority assessment. Only SELECTs: nothing is allocated, issued or closed.
+  app.get("/open-work-queue", async (req, reply) => {
+    if (!requireAnyRole(req, reply, OPEN_WORK_QUEUE_ROLES)) return;
+    try {
+      const queue = buildOpenWorkQueue(db, { site: getSiteCode(req), today: siteDay() });
+      return reply.send({ ...queue, short_answer: describeOpenWorkQueue(queue) });
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ ok: false, error: "Unable to load the open work-order queue" });
+    }
+  });
 
   // =====================================================
   // WEEKLY FORUM SUMMARY (cross-functional alignment)

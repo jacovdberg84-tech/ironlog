@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=ms-17" />
+  <link rel="stylesheet" href="./styles.css?v=ms-18" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -665,6 +665,11 @@
           <p id="borrisCommandHeadline" class="borris-command-headline"></p>
           <div id="borrisCommandMetrics" class="borris-command-metrics" aria-live="polite"></div>
           <div id="borrisCommandPriorities" class="borris-command-priorities"></div>
+        </section>
+        <section class="borris-command borris-queue" aria-labelledby="borrisQueueTitle">
+          <div class="borris-command-head"><div><p class="borris-eyebrow">OPEN WORK ORDERS &amp; PARTS</p><h3 id="borrisQueueTitle">Every open job and what it is waiting on</h3><p id="borrisQueueMeta" class="muted">Read-only. Nothing here changes a work order or stock.</p></div><div class="borris-queue-actions"><button id="borrisQueueLoadBtn" class="btn btn-secondary" type="button">Load open work orders</button><button id="borrisQueueAskBtn" class="btn btn-primary" type="button">Ask Borris to prioritise</button></div></div>
+          <div id="borrisQueueMetrics" class="borris-command-metrics" aria-live="polite"></div>
+          <div id="borrisQueueTable" class="borris-queue-table"></div>
         </section>
         <section class="borris-draft-studio" aria-labelledby="borrisDraftTitle">
           <div><p class="borris-eyebrow">DRAFT STUDIO</p><h3 id="borrisDraftTitle">Prepare it with Borris</h3><p class="muted">Drafts are safe to review. Nothing is created in Ironlog until you take it into the relevant module and approve it.</p></div>
@@ -8480,7 +8485,7 @@
   <script src="./app/ui-helpers.js?v=89"></script>
   <script src="./app/telematics.js?v=94"></script>
   <script src="./app/dashboard.js?v=90"></script>
-  <script src="./app/borris.js?v=91"></script>
+  <script src="./app/borris.js?v=92"></script>
   <script src="./app/fuel-lube.js?v=90"></script>
   <script src="./app/stock.js?v=93"></script>
   <script src="./app/compliance.js?v=89r"></script>

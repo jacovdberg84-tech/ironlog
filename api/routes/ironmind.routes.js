@@ -28,6 +28,15 @@ import { db } from "../db/client.js";
 import { getPlanningSnapshot, isPlanningQuestion } from "../utils/costingGaps.js";
 import { buildPdfBuffer, sectionTitle, table } from "../utils/pdfGenerator.js";
 import { andAssetSite, andSite } from "../utils/sites.js";
+import {
+  OPEN_WORK_QUEUE_ROLES,
+  buildOpenWorkQueue,
+  compactQueueForBorris,
+  describeOpenWorkQueue,
+  isWorkQueueQuestion,
+} from "../utils/openWorkQueue.js";
+import { getSiteCode, holdsAnyRole } from "../utils/request.js";
+import { siteDay } from "../utils/siteTime.js";
 
 function toBool(v) {
   const s = String(v || "").trim().toLowerCase();
@@ -752,6 +761,7 @@ export default async function ironmindRoutes(app) {
     assetCode = "",
     history = [],
     contextNotes = "",
+    workQueue = null,
   }) {
     const cfg = getAiConfig();
     if (!cfg.provider) return null;
@@ -821,6 +831,8 @@ export default async function ironmindRoutes(app) {
     // Planning and costing questions get the service forecast and costing gaps,
     // a larger context window on Ollama and room for a fuller answer.
     const planning = isPlanningQuestion(question) ? getPlanningSnapshot() : null;
+    // The open work-order queue also needs the larger window and a fuller answer.
+    const fuller = Boolean(planning || workQueue);
     const context = {
       period: { start, end },
       fleet: {
@@ -834,11 +846,15 @@ export default async function ironmindRoutes(app) {
       latest_summary: summary || null,
       context_notes: notes || null,
       ...(planning ? { planning } : {}),
+      ...(workQueue ? { work_queue: workQueue } : {}),
     };
     try {
-      const instructions = planning
+      const queueInstruction = workQueue
+        ? " For the open work-order queue: use context.work_queue (already ordered machines down, critical, parts blockers, oldest). Give a practical priority order by WO number and fleet number, name parts blockers (short and not ordered, below minimum, on order with ETA) and unassigned jobs. Up to 10 bullets."
+        : "";
+      const instructions = (planning
         ? `${system} For planning and costing: use context.planning (upcoming services with cost and cost_source, costing gaps). Name the machines, amounts and gaps; say which gaps to fill first. Up to 8 bullets.`
-        : system;
+        : system) + queueInstruction;
       const pmListInstruction = "When the question is about overdue PM or services, list each matching fleet number from context.fleet.overdue_pm_assets, with its overdue hours and service. Never answer with only a count when asset rows are available.";
       const messages = [
         ...hist,
@@ -848,15 +864,15 @@ export default async function ironmindRoutes(app) {
         instructions: `${instructions} ${pmListInstruction} The fleet context is read-only. Never claim to update records, create work orders, or take an operational action. Explain proposed actions for the user to approve.`,
         messages,
         model: cfg.model || "gpt-4o-mini",
-        maxOutputTokens: planning ? Math.max(askMaxTokens, 700) : askMaxTokens,
+        maxOutputTokens: fuller ? Math.max(askMaxTokens, 700) : askMaxTokens,
         timeoutMs: Math.min(askTimeoutMs, 60000),
       });
       const data = (directResponseText || isDirectOpenAiResponsesConfigured()) ? null : await openAiCompatibleChatCompletion({
         model: cfg.model || "gpt-4o-mini",
         temperature: 0.2,
-        max_tokens: planning ? Math.max(askMaxTokens, 700) : askMaxTokens,
+        max_tokens: fuller ? Math.max(askMaxTokens, 700) : askMaxTokens,
         timeout_ms: Math.min(askTimeoutMs, 60000),
-        ...(planning && borrisNumCtx() ? { num_ctx: borrisNumCtx() } : {}),
+        ...(fuller && borrisNumCtx() ? { num_ctx: borrisNumCtx() } : {}),
         messages: [{ role: "system", content: instructions }, ...messages],
       });
       const text = String(directResponseText || data?.choices?.[0]?.message?.content || "").trim();
@@ -1650,6 +1666,27 @@ export default async function ironmindRoutes(app) {
       const body = req.body || {};
       const question = String(body.question || "").trim();
       if (!question) return reply.code(400).send({ ok: false, error: "question is required" });
+      // The whole open work-order queue, read-only, for leads who may already see it.
+      if (body.work_queue === true || isWorkQueueQuestion(question)) {
+        if (!holdsAnyRole(req, OPEN_WORK_QUEUE_ROLES)) {
+          if (body.work_queue === true) return reply.code(403).send({ ok: false, error: "Only administrators and workshop leads can see the full open work-order queue." });
+        } else {
+          const today = siteDay();
+          const queue = buildOpenWorkQueue(db, { site: getSiteCode(req), today });
+          const live = await tryAnswerIronmindAskWithAi({
+            question,
+            start: today,
+            end: today,
+            history: Array.isArray(body.history) ? body.history : [],
+            contextNotes: String(body.context_notes || "").trim(),
+            workQueue: compactQueueForBorris(queue),
+          });
+          ironmindRuntime.last_ask_mode = live ? "live_ai" : "fallback";
+          ironmindRuntime.last_ask_error = live ? "" : String(getLastOpenAiResponsesError() || getLastLlmChatError() || "").slice(0, 500);
+          ironmindRuntime.last_ask_at = new Date().toISOString();
+          return reply.send({ ok: true, short_answer: live || describeOpenWorkQueue(queue), work_queue_summary: queue.summary });
+        }
+      }
       if (body.workshop_document_id || isManualQuestion(question)) {
         const manual=await answerWorkshop(db, question, String(body.workshop_document_id || ''));
         if (/\b(parts?|seals?|bearings?|filters?)\b/i.test(question) || isStockQuestion(question)) {

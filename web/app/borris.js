@@ -290,6 +290,91 @@ async function loadBorrisCommandBrief(options = {}) {
   }
 }
 
+const BORRIS_QUEUE_PARTS_FLAG = {
+  blocked: ["bad", "Parts short, not ordered"],
+  on_order: ["warn", "Waiting on order"],
+  ready: ["ok", "Parts in stock"],
+  none: ["", "No parts waiting"],
+};
+
+function borrisQueueFlag(kind, text) {
+  return `<span class="borris-queue-flag ${escapeHtml(kind)}">${escapeHtml(text)}</span>`;
+}
+
+function borrisQueuePartHtml(part) {
+  const name = [part?.part_code, part?.part_name].map((x) => String(x || "").trim()).filter(Boolean).join(" · ") || "Part";
+  const onHand = part?.on_hand == null ? "not in Stores" : `${Number(part.on_hand)} on hand`;
+  const flags = [
+    part?.in_stock ? borrisQueueFlag("ok", "In stock") : borrisQueueFlag("bad", "Short"),
+    part?.below_min ? borrisQueueFlag("warn", "Below minimum") : "",
+    part?.on_order ? borrisQueueFlag("info", part.expected_arrival ? `On order · ETA ${part.expected_arrival}` : "On order") : "",
+  ].join("");
+  return `<span class="borris-queue-part"><b>${escapeHtml(name)}</b> × ${escapeHtml(String(part?.qty ?? 0))} <small>${escapeHtml(onHand)}${part?.min_stock ? ` · min ${escapeHtml(String(part.min_stock))}` : ""}</small>${flags}</span>`;
+}
+
+function renderBorrisWorkQueue(queue) {
+  const meta = qs("borrisQueueMeta");
+  const metricsEl = qs("borrisQueueMetrics");
+  const tableEl = qs("borrisQueueTable");
+  const s = queue?.summary || {};
+  const rows = Array.isArray(queue?.work_orders) ? queue.work_orders : [];
+  if (meta) meta.textContent = `Read-only position as at ${String(queue?.as_of || "-")}. Down machines, critical jobs and parts blockers are listed first.`;
+  if (metricsEl) {
+    metricsEl.innerHTML = [
+      borrisCommandMetric("Open work orders", Number(s.open || 0)),
+      borrisCommandMetric("Machines down", Number(s.machines_down || 0)),
+      borrisCommandMetric("No technician", Number(s.unassigned || 0)),
+      borrisCommandMetric("Parts blocked", Number(s.parts_blocked || 0)),
+      borrisCommandMetric("Waiting on order", Number(s.parts_on_order || 0)),
+      borrisCommandMetric("Over 14 days", Number(s.older_than_14_days || 0)),
+    ].join("");
+  }
+  if (!tableEl) return;
+  if (!rows.length) {
+    tableEl.innerHTML = `<p class="muted">There are no open work orders on this site.</p>`;
+    return;
+  }
+  const body = rows.map((w) => {
+    const [kind, label] = BORRIS_QUEUE_PARTS_FLAG[w?.parts_state] || BORRIS_QUEUE_PARTS_FLAG.none;
+    const machineFlags = [w?.machine_down ? borrisQueueFlag("bad", "Down") : "", w?.critical ? borrisQueueFlag("bad", "Critical") : ""].join("");
+    const parts = Array.isArray(w?.parts) && w.parts.length ? w.parts.map(borrisQueuePartHtml).join("") : `<small>None requested</small>`;
+    return `<tr>
+      <td><b>#${escapeHtml(String(w?.id ?? ""))}</b></td>
+      <td><b>${escapeHtml(String(w?.asset_code || "-"))}</b><small>${escapeHtml(String(w?.asset_name || ""))}</small>${machineFlags}</td>
+      <td>${escapeHtml(String(w?.job || "-"))}${w?.progress ? `<small>${escapeHtml(String(w.progress))}</small>` : ""}</td>
+      <td>${escapeHtml(String(w?.age_days ?? "-"))} d<small>${escapeHtml(String(w?.opened_on || ""))}</small></td>
+      <td>${escapeHtml(String(w?.status || "open").replace(/_/g, " "))}</td>
+      <td>${w?.technician ? escapeHtml(String(w.technician)) : borrisQueueFlag("warn", "Not assigned")}</td>
+      <td>${borrisQueueFlag(kind, label)}<div>${parts}</div></td>
+    </tr>`;
+  }).join("");
+  tableEl.innerHTML = `<table><thead><tr><th>WO</th><th>Machine</th><th>Fault / job</th><th>Age</th><th>Status</th><th>Technician</th><th>Parts</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+
+async function loadBorrisWorkQueue() {
+  const button = qs("borrisQueueLoadBtn");
+  const meta = qs("borrisQueueMeta");
+  if (button) button.disabled = true;
+  if (meta) meta.textContent = "Loading open work orders and stock…";
+  try {
+    const queue = await fetchJson(`${API}/api/maintenance/open-work-queue`);
+    renderBorrisWorkQueue(queue);
+    setStatus("Open work orders loaded.");
+  } catch (err) {
+    if (meta) meta.textContent = `Could not load the open work orders: ${err.message || err}`;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function askBorrisToPrioritiseQueue() {
+  const input = qs("ironmindAskInput");
+  if (input) input.value = "Give me a practical priority assessment of all open work orders, including parts blockers.";
+  loadBorrisWorkQueue().catch(() => {});
+  await askIronmindQuestion({ workQueue: true });
+  if (input) input.value = "";
+}
+
 const BORRIS_DRAFT_COPY = {
   "work-order": {
     title: "Draft repair work order",
@@ -415,7 +500,7 @@ async function submitBorrisDraft(event) {
   }
 }
 
-async function askIronmindQuestion() {
+async function askIronmindQuestion(options = {}) {
   const input = qs("ironmindAskInput");
   const out = qs("ironmindAskResult");
   const date = qs("date")?.value || todayLocalYmd();
@@ -436,6 +521,7 @@ async function askIronmindQuestion() {
         date,
         history: window.__ironmindAskHistory.slice(-6),
         ...(contextNotes ? { context_notes: contextNotes } : {}),
+        ...(options.workQueue ? { work_queue: true } : {}),
       }),
     });
     const short = String(res?.short_answer || res?.answer || res?.message || "No answer returned.");
@@ -700,6 +786,10 @@ function wireBorrisControls() {
   qs("ironmindWeeklyPlanBtn")?.addEventListener("click", planIronmindWeek);
   qs("borrisCommandRefreshBtn")?.addEventListener("click", () =>
     loadBorrisCommandBrief().catch(() => {})
+  );
+  qs("borrisQueueLoadBtn")?.addEventListener("click", () => loadBorrisWorkQueue());
+  qs("borrisQueueAskBtn")?.addEventListener("click", () =>
+    askBorrisToPrioritiseQueue().catch((e) => setStatus("BORRIS ask error: " + (e.message || e)))
   );
   document.querySelectorAll("button[data-borris-draft-type]").forEach((button) => {
     button.addEventListener("click", () => openBorrisDraft(String(button.dataset.borrisDraftType || "")));
