@@ -44,7 +44,9 @@ test("the menu and the desk screens have Portuguese for every phrase", () => {
     return index.slice(start, end > 0 ? end : undefined);
   };
   const pages = { ...Object.fromEntries(["tab-mywork", "tab-daily", "tab-fuel", "tab-lube", "tab-vehicle", "tab-workshop", "tab-tasks",
-    "tab-stock", "tab-parts-tracking", "tab-procurement", "tab-operations"].map((id) => [id, sectionOf(id)])),
+    "tab-stock", "tab-parts-tracking", "tab-procurement", "tab-operations",
+    "tab-admin", "tab-approvals", "tab-assets", "tab-audit", "tab-cartrack", "tab-dash", "tab-developer", "tab-dispatch", "tab-docs",
+    "tab-enterprise", "tab-exec", "tab-finance", "tab-ironmind", "tab-legal", "tab-quality", "tab-reports", "tab-telematics", "tab-uploads"].map((id) => [id, sectionOf(id)])),
     "workorders.html": fs.readFileSync(path.join(web, "workorders.html"), "utf8"), "breakdown-ops.html": fs.readFileSync(path.join(web, "breakdown-ops.html"), "utf8"),
     "maintenance.html": fs.readFileSync(path.join(web, "maintenance.html"), "utf8") };
   for (const [where, html] of Object.entries(pages)) {
@@ -52,7 +54,9 @@ test("the menu and the desk screens have Portuguese for every phrase", () => {
     for (const m of text.matchAll(/>([^<>]+)</g)) {
       const s = decode(m[1]).replace(/\s+/g, " ").trim();
       if (!/[A-Za-z]{3}/.test(s) || /[ãõçáéíóúâêô]/.test(s) || /^[A-Z0-9_./-]+$/.test(s) || /^(e\.g\.|https?:)/.test(s) || /^\(.*\)$/.test(s) || /^\.\w+$/.test(s)) continue;
-      if (/^(IRONLOG|IronLog|Borris|June|FAMS|Cartrack|Komatsu|Bell|Sergio|Microsoft Outlook|API base URL|Emma Tool Gateway|ONLINE|km|L\/hr|MTD|YTD|PT ⇄ EN|FSC Pilot|CSV format:)/.test(s)) continue;
+      // Codes, field names, addresses and examples people type stay as they are (department_code, /api/upload/fuel, name@company.com).
+      if (/@|^[\w.:/-]*[_/.][\w.:/-]*$|^[a-z_]+( ?\/ ?[a-z_-]+)+$|^[0-9a-f-]{36}$/.test(s)) continue;
+      if (/^(IRONLOG|IronLog|Borris|June|FAMS|Cartrack|Komatsu|Bell|Sergio|Microsoft Outlook|API base URL|Emma Tool Gateway|ONLINE|km|L\/hr|MTD|YTD|PT ⇄ EN|FSC Pilot|CSV format:|Unitech$|Microsoft$|Opus$|Sonnet$|isiZulu$)/.test(s)) continue;
       if (!known(s)) missing.push(`${where}: ${s}`);
     }
   }
@@ -66,4 +70,28 @@ test("every desk page loads the translator before the menu", () => {
     assert.ok(a > 0 && a < b && b < c, `${page}: i18n.js, then i18n-pt.js, then app-nav.js`);
   }
   assert.match(nav.sectionsHtml({ mode: "links" }), /data-i18n-switch="pt"/, "the EN | PT switch is in the menu");
+});
+
+test("the QR phone forms have the translator and their own EN | PT switch", () => {
+  for (const page of ["asset-qr-detail.html", "workorder-qr.html", "store-mobile.html", "tyre-inspection-mobile.html", "undercarriage-mobile.html", "safety-inspection.html"]) {
+    const html = fs.readFileSync(path.join(web, page), "utf8");
+    const a = html.search(/i18n\.js\?v=\d+" data-lang-switch/), b = html.search(/i18n-pt\.js\?v=/), c = html.search(/<script src="[^"]*(?<!i18n|i18n-pt)\.js\?v=/);
+    assert.ok(a > 0 && a < b && b < c, `${page}: i18n.js (with the switch), then i18n-pt.js, then the page's own scripts`);
+  }
+  // asset-qr.html is the pre-start form, which has its own EN | PT switch.
+  assert.doesNotMatch(fs.readFileSync(path.join(web, "asset-qr.html"), "utf8"), /i18n\.js/);
+  assert.equal(pt("Showing 2 of 5 (catalogue 9)."), "A mostrar 2 de 5 (catálogo 9).");
+  assert.equal(pt("Synced 3 inspection(s). 1 still queued."), "3 inspecção(ões) sincronizada(s). 1 ainda na fila.");
+});
+
+test("pop-up messages follow the chosen language", () => {
+  const shown = [];
+  const c = { window: { alert: (m) => shown.push(m), confirm: (m) => { shown.push(m); return true; } }, localStorage: { getItem: (k) => (k === "ironlog_lang" ? "pt" : null) } };
+  c.globalThis = c.window;
+  vm.createContext(c);
+  for (const f of ["i18n.js", "i18n-pt.js"]) vm.runInContext(fs.readFileSync(path.join(web, f), "utf8").replace(/^IronlogI18n\./gm, "window.IronlogI18n."), c);
+  c.window.alert("Select a machine first.");
+  assert.equal(c.window.confirm("Pop-up blocked."), true);
+  c.window.alert("EX01");
+  assert.deepEqual(shown, ["Seleccione primeiro uma máquina.", "Janela bloqueada.", "EX01"]);
 });

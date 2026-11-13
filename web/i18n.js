@@ -11,7 +11,7 @@
 // technician portal keeps its own switch. Mark an element data-no-translate to leave it alone.
 (function (global) {
   const KEY = "ironlog_lang";
-  const SKIP = new Set(["SCRIPT", "STYLE", "CODE", "PRE", "TEXTAREA", "NOSCRIPT", "SVG"]);
+  const SKIP = new Set(["SCRIPT", "STYLE", "CODE", "PRE", "TEXTAREA", "NOSCRIPT"]);
   const ATTRS = ["placeholder", "title", "aria-label"];
   const NUMERIC = new Set(["n", "h", "a", "b"]);
   const dicts = {};
@@ -188,12 +188,36 @@
     </div>`;
   }
 
+  /** Pages without the shared menu (the QR phone forms) get the switch in a small bar at the top. */
+  function mountTopSwitch() {
+    if (document.querySelector("[data-i18n-switch]")) return;
+    const style = document.createElement("style");
+    style.textContent = `.lang-top{display:flex;justify-content:flex-end;padding:8px 12px 0}
+      .lang-top .lang-switch{display:flex;border:1px solid var(--line,GrayText);border-radius:999px;overflow:hidden;background:var(--card,Canvas)}
+      .lang-top button{border:0;background:transparent;color:var(--ink,CanvasText);font:600 13px system-ui,sans-serif;padding:6px 12px;min-width:44px;cursor:pointer}
+      .lang-top button[aria-pressed="true"]{background:var(--tx-2563eb,LinkText);color:var(--card,Canvas)}`;
+    document.head.appendChild(style);
+    const bar = document.createElement("div");
+    bar.className = "lang-top";
+    bar.innerHTML = switchHtml();
+    document.body.prepend(bar);
+  }
+
+  // Pop-up messages (alert / confirm) follow the chosen language too.
+  if (global.alert && global.confirm) {
+    const nativeAlert = global.alert.bind(global);
+    const nativeConfirm = global.confirm.bind(global);
+    global.alert = (m) => nativeAlert(m == null ? m : t(String(m)));
+    global.confirm = (m) => nativeConfirm(m == null ? m : t(String(m)));
+  }
+
   if (typeof document !== "undefined") {
+    const ownSwitch = document.currentScript?.hasAttribute("data-lang-switch");
     document.addEventListener("click", (e) => {
       const b = e.target?.closest?.("[data-i18n-switch]");
       if (b) setLang(b.dataset.i18nSwitch);
     });
-    const start = () => { watch(); if (lang() !== "en") apply(); };
+    const start = () => { if (ownSwitch) mountTopSwitch(); watch(); if (lang() !== "en") apply(); };
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
     else start();
   }
@@ -201,7 +225,8 @@
   /** Whether a phrase has a translation (some read the same in both languages, like "Stock:"). */
   function has(text, l) {
     const src = norm(text);
-    return Boolean(dicts[l]?.has(src)) || (patterns[l] || []).some((p) => p.re.test(src));
+    // A pattern counts only when it really translates the text ("{x} →" alone does not translate x).
+    return Boolean(dicts[l]?.has(src)) || ((patterns[l] || []).some((p) => p.re.test(src)) && t(src, l) !== src);
   }
 
   global.IronlogI18n = { add, t, has, apply, lang, setLang, switchHtml };
