@@ -15,7 +15,7 @@
     })();
   </script>
   <script>try{if(localStorage.getItem("ironlog-theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
-  <link rel="stylesheet" href="./styles.css?v=ms-17" />
+  <link rel="stylesheet" href="./styles.css?v=ms-18" />
 </head>
 <body class="page-shell">
   <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -1383,6 +1383,16 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                 Cost Centers XLSX
               </button>
+              <span class="asset-history-export" role="group" aria-label="All machine history download">
+                <label for="assetsHistoryFrom">From</label>
+                <input id="assetsHistoryFrom" type="date" />
+                <label for="assetsHistoryTo">To</label>
+                <input id="assetsHistoryTo" type="date" />
+                <button id="downloadAssetsHistoryXlsx" type="button" class="btn btn-secondary" title="Every machine's history (breakdowns, work orders, fuel, oils, inspections, tyres, component changes) on one Excel sheet. Leave the dates empty for everything.">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                  All machine history (Excel)
+                </button>
+              </span>
             </div>
             <div class="asset-fleet-health" aria-label="Fleet health summary">
               <button type="button" data-fleet-status=""><span id="assetsCountAll">0</span><small>Active fleet</small></button>
@@ -8471,7 +8481,7 @@
   <script src="./store-mobile.js?v=2"></script>
   <!-- Main app, split by feature. Order matters: files share one global scope. -->
   <script src="./i18n.js?v=5"></script>
-  <script src="./i18n-pt.js?v=5"></script>
+  <script src="./i18n-pt.js?v=6"></script>
   <script src="./app-nav.js?v=2"></script>
   <script src="./app/core.js?v=104"></script>
   <script src="./app/admin.js?v=103"></script>
@@ -8498,7 +8508,7 @@
   <script src="./app/procurement.js?v=91"></script>
   <script src="./app/site-ops.js?v=89"></script>
   <script src="./app/daily-input.js?v=89"></script>
-  <script src="./app/assets.js?v=91"></script>
+  <script src="./app/assets.js?v=92"></script>
   <script src="./app/developer.js?v=4"></script>
   <script src="./app/init.js?v=100"></script>
   <script src="./app/documents.js?v=89"></script>

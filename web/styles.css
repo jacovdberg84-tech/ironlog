@@ -3677,6 +3677,18 @@ body.sidebar-collapsed .main-content {
   margin-bottom: 12px;
 }
 
+.asset-history-export {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.asset-history-export label {
+  font-size: 13px;
+  color: var(--muted, var(--tx-64748b));
+}
+
 .asset-fleet-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));

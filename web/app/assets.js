@@ -190,6 +190,20 @@ function downloadAssetsCostCentersXlsx() {
   setStatus("Asset cost center register export started.");
 }
 
+// Every machine's history on one sheet; empty dates mean all of it. Archived machines follow "Show archived".
+function downloadAssetsHistoryXlsx() {
+  const from = qs("assetsHistoryFrom")?.value || "";
+  const to = qs("assetsHistoryTo")?.value || "";
+  if (from && to && from > to) {
+    setStatus("The From date is after the To date.");
+    return;
+  }
+  const includeArchived = qs("showArchived")?.checked ? 1 : 0;
+  const params = new URLSearchParams({ start: from, end: to, include_archived: String(includeArchived), _ts: String(Date.now()) });
+  void downloadAuthedFile(`${API}/api/assets/history.xlsx?${params}`, "IRONLOG_Machine_History.xlsx");
+  setStatus("Machine history download started. A big site can take a moment.");
+}
+
 let plantHireRegisterCache = [];
 
 function fillPlantHireRateFields(row) {
@@ -1004,6 +1018,7 @@ function wireAssetControls() {
   });
 
   qs("downloadAssetsCostCentersXlsx")?.addEventListener("click", () => downloadAssetsCostCentersXlsx());
+  qs("downloadAssetsHistoryXlsx")?.addEventListener("click", () => downloadAssetsHistoryXlsx());
 
   qs("saveOperatingBudget")?.addEventListener("click", () =>
     saveOperatingBudget().catch((e) => setStatus("Operating budget error: " + e.message))
